@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -50,15 +51,20 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
     expected.push_back(ROCBLAS_MATMUL_ENGINE_ID);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
-    // The exact engines and their TF32 and reduced-precision-reduction siblings, by default.
+    // The exact engines, their TF32 and reduced-precision-reduction siblings and the
+    // deterministic siblings of the exact and TF32 engines, by default.
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     expected.push_back(HIPBLASLT_CONV_ENGINE_ID);
+    expected.push_back(HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID);
     expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_ID);
+    expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID);
     expected.push_back(HIPBLASLT_CONV_RPR_ENGINE_ID);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     expected.push_back(ROCBLAS_CONV_ENGINE_ID);
+    expected.push_back(ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID);
     expected.push_back(ROCBLAS_CONV_TF32_ENGINE_ID);
+    expected.push_back(ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID);
     expected.push_back(ROCBLAS_CONV_RPR_ENGINE_ID);
 #endif
 #endif
@@ -343,9 +349,10 @@ TEST(TestGpuHipblasltEnginePluginApi, GetEngineDetailsValid)
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
 // Each convolution engine's RFC 0025 numerical notes: TENSOR_CORE for TF32 (cuDNN's TF32 note),
-// REDUCED_PRECISION_REDUCTION for the fp16 partial sums, and NONDETERMINISTIC for every hipBLASLt
-// engine. The rocBLAS engines claim determinism (TestGpuConvGemm reruns each plan and compares
-// the bits).
+// REDUCED_PRECISION_REDUCTION for the fp16 partial sums, and NONDETERMINISTIC for every engine
+// but the *_DETERMINISTIC siblings, which claim determinism (TestGpuConvGemmDeterministic reruns
+// their plans and compares the bits). Deselecting NONDETERMINISTIC therefore leaves exactly the
+// deterministic siblings.
 TEST(TestGpuHipblasltEnginePluginApi, ConvEnginesReportTheirNumericalNotes)
 {
     SKIP_IF_NO_DEVICES();
@@ -363,16 +370,52 @@ TEST(TestGpuHipblasltEnginePluginApi, ConvEnginesReportTheirNumericalNotes)
     constexpr int32_t RPR = HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION;
     constexpr int32_t NONDETERMINISTIC = HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC;
     std::vector<std::pair<int64_t, Notes>> expected;
+    std::set<int64_t> deterministic;
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     expected.emplace_back(HIPBLASLT_CONV_ENGINE_ID, Notes{NONDETERMINISTIC});
+    expected.emplace_back(HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID, Notes{});
     expected.emplace_back(HIPBLASLT_CONV_TF32_ENGINE_ID, Notes{TF32, NONDETERMINISTIC});
+    expected.emplace_back(HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID, Notes{TF32});
     expected.emplace_back(HIPBLASLT_CONV_RPR_ENGINE_ID, Notes{RPR, NONDETERMINISTIC});
+    deterministic.insert(
+        {HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID, HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID});
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
-    expected.emplace_back(ROCBLAS_CONV_ENGINE_ID, Notes{});
-    expected.emplace_back(ROCBLAS_CONV_TF32_ENGINE_ID, Notes{TF32});
-    expected.emplace_back(ROCBLAS_CONV_RPR_ENGINE_ID, Notes{RPR});
+    expected.emplace_back(ROCBLAS_CONV_ENGINE_ID, Notes{NONDETERMINISTIC});
+    expected.emplace_back(ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID, Notes{});
+    expected.emplace_back(ROCBLAS_CONV_TF32_ENGINE_ID, Notes{TF32, NONDETERMINISTIC});
+    expected.emplace_back(ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID, Notes{TF32});
+    expected.emplace_back(ROCBLAS_CONV_RPR_ENGINE_ID, Notes{RPR, NONDETERMINISTIC});
+    deterministic.insert(
+        {ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID, ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID});
 #endif
+    // Deselecting NONDETERMINISTIC (cuDNN's deterministic-only filter) over every engine the
+    // plugin lists keeps exactly the deterministic siblings.
+    uint32_t count = 0;
+    ASSERT_EQ(hipdnnEnginePluginGetAllEngineIdsImpl(nullptr, 0, &count),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    std::vector<int64_t> allIds(count, 0);
+    ASSERT_EQ(hipdnnEnginePluginGetAllEngineIdsImpl(allIds.data(), count, &count),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    std::set<int64_t> kept;
+    for(const auto engineId : allIds)
+    {
+        hipdnnPluginConstData_t details;
+        ASSERT_EQ(hipdnnEnginePluginGetEngineDetailsImpl(handle, engineId, &opGraph, &details),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(
+            details.ptr, details.size);
+        // An absent list is reported NONDETERMINISTIC (RFC 0025).
+        const auto notes = wrapper.numericalNotes();
+        if(notes.has_value()
+           && std::find(notes->begin(), notes->end(), NONDETERMINISTIC) == notes->end())
+        {
+            kept.insert(engineId);
+        }
+        EXPECT_EQ(hipdnnEnginePluginDestroyEngineDetailsImpl(handle, &details),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+    }
+    EXPECT_EQ(kept, deterministic);
     for(const auto& [engineId, notes] : expected)
     {
         SCOPED_TRACE(engineId);

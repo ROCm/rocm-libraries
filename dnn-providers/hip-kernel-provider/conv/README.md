@@ -74,12 +74,11 @@ wants none of a note's engines excludes them through the hipDNN API's cuDNN-comp
 | `hipkernel:CONV_WINOGRAD_FWD_F43`, `_BWD_F43` | `WINOGRAD`, `WINOGRAD_TILE_6x6` |
 | `hipkernel:CONV_WINOGRAD_WRW` | `WINOGRAD` |
 | Every other `hipkernel:CONV_*` engine | none |
-| `ROCBLAS_CONV_ENGINE` (hipblaslt-provider) | none |
-| `ROCBLAS_CONV_TF32_ENGINE` | `TENSOR_CORE` |
-| `ROCBLAS_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION` |
-| `HIPBLASLT_CONV_ENGINE` | `NONDETERMINISTIC` |
-| `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
-| `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` (hipblaslt-provider) | `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_ENGINE_DETERMINISTIC` | none |
+| `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | `TENSOR_CORE` |
+| `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
 
 `TENSOR_CORE` marks the TF32 engines, as in cuDNN: PyTorch's cuDNN convolution path excludes
 fp32 engines that report it when TF32 is not allowed (`aten/src/ATen/native/cudnn/Conv_v8.cpp`).
@@ -94,8 +93,10 @@ plan gives the same bits on every run on one device. A UED's `numerical_notes` l
 `nondeterministic` is that claim (a UED without the key is reported `NONDETERMINISTIC`), and RFC
 0025 admits it only with a test: each family's device suite (`TestGpuConv<Family>`) launches
 every config it runs a second time, over a re-filled workspace, and compares the output bits
-(`ConvDeterminismTestSupport.hpp`). The rocBLAS engines run with rocBLAS atomics not allowed
-and claim the same, with the same rerun in their tests; hipBLASLt has no such control. The
+(`ConvDeterminismTestSupport.hpp`). The explicit-GEMM engines
+run the libraries' defaults and report `NONDETERMINISTIC`; their `*_DETERMINISTIC` siblings (rocBLAS
+atomics not allowed, no hipBLASLt workspace) claim determinism, with a rerun in their tests
+(`hipblaslt-provider/docs/engines/EXPLICIT_GEMM.md`). The
 coverage census checks what the frontend reports for every engine a graph is offered.
 
 ### TF32

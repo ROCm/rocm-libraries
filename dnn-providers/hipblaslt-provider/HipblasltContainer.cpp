@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cstdint>
-#include <optional>
 #include <utility>
 #include <vector>
 
@@ -71,23 +70,21 @@ HipblasltContainer::HipblasltContainer()
     //   off, and every engine with DOWN_CONVERT_INPUTS always (aten/src/ATen/native/cudnn/
     //   Conv_v8.cpp, the engine-config filter), so TENSOR_CORE is the TF32 opt-out.
     // - Reduced-precision reduction: REDUCED_PRECISION_REDUCTION (fp16 partial sums).
-    // - Determinism: the rocBLAS engines run every GEMM with rocBLAS atomics not allowed
-    //   (RocblasGemmPlan::requireBitwiseReproducible) and repack by gathers, so they claim
-    //   bitwise-reproducible results (TestGpuConvGemm reruns each plan). hipBLASLt has no such
-    //   control (its solutions may split a reduction across workgroups), so its engines report
-    //   NONDETERMINISTIC.
+    // - Determinism, cuDNN's model (a per-engine note a framework deselects): the base and TF32
+    //   engines run the libraries' defaults (rocBLAS atomics allowed, hipBLASLt offered its full
+    //   workspace) and report NONDETERMINISTIC; each has a *_DETERMINISTIC sibling that runs
+    //   rocBLAS with atomics not allowed, or offers hipBLASLt no workspace (as MIOpen's
+    //   deterministic GEMMs do), and claims bitwise-reproducible results
+    //   (TestGpuConvGemmDeterministic reruns each plan). The RPR engines have one form.
     using Notes = std::vector<int32_t>;
-    [[maybe_unused]] const Notes tf32Notes{HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
-    [[maybe_unused]] const Notes rprNotes{HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION};
-    [[maybe_unused]] const auto nondeterministic = [](Notes notes) {
-        notes.push_back(HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC);
-        return notes;
-    };
+    [[maybe_unused]] constexpr int32_t NONDETERMINISTIC = HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC;
+    [[maybe_unused]] constexpr int32_t TF32 = HIPDNN_NUMERICAL_NOTE_TENSOR_CORE;
+    [[maybe_unused]] constexpr int32_t RPR = HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION;
     const auto addConvEngine = [this](int64_t engineId,
                                       ConvGemmPlanBuilder::PlanFactory factory,
                                       bool tf32,
                                       ConvGemmPlanBuilder::NarrowPartials narrowPartials,
-                                      std::optional<Notes> numericalNotes,
+                                      Notes numericalNotes,
                                       bool reducedPrecisionReduction = false) {
         auto engine
             = std::make_unique<PlanBuilderEngine>(engineId, false, std::move(numericalNotes));
@@ -101,52 +98,79 @@ HipblasltContainer::HipblasltContainer()
         _engineManager->addEngine(std::move(engine));
     };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
-    const auto hipblasltGemm = [](const HipdnnEnginePluginHandle& handle,
-                                  const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
-        return std::make_unique<HipblasltGemmPlan>(handle, calls);
+    const auto hipblasltGemm = [](bool deterministic) -> ConvGemmPlanBuilder::PlanFactory {
+        return [deterministic](const HipdnnEnginePluginHandle& handle,
+                               const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
+            return std::make_unique<HipblasltGemmPlan>(handle, calls, deterministic);
+        };
     };
     // hipBLASLt on gfx11 may round the parts of a long reduction to a 16-bit output.
     constexpr auto HIPBLASLT_NARROW = ConvGemmPlanBuilder::NarrowPartials::ON_GFX11;
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID,
-                  hipblasltGemm,
+                  hipblasltGemm(false),
                   false,
                   HIPBLASLT_NARROW,
-                  nondeterministic({}));
+                  Notes{NONDETERMINISTIC});
+    addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID,
+                  hipblasltGemm(true),
+                  false,
+                  HIPBLASLT_NARROW,
+                  Notes{});
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID,
-                  hipblasltGemm,
+                  hipblasltGemm(false),
                   true,
                   HIPBLASLT_NARROW,
-                  nondeterministic(tf32Notes));
+                  Notes{TF32, NONDETERMINISTIC});
+    addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID,
+                  hipblasltGemm(true),
+                  true,
+                  HIPBLASLT_NARROW,
+                  Notes{TF32});
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_RPR_ENGINE_ID,
-                  hipblasltGemm,
+                  hipblasltGemm(false),
                   false,
                   HIPBLASLT_NARROW,
-                  nondeterministic(rprNotes),
+                  Notes{RPR, NONDETERMINISTIC},
                   true);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
-    const auto rocblasGemm = [](const HipdnnEnginePluginHandle& /*handle*/,
-                                const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
-        auto plan = std::make_unique<RocblasGemmPlan>(calls);
-        plan->requireBitwiseReproducible();
-        return plan;
+    const auto rocblasGemm = [](bool deterministic) -> ConvGemmPlanBuilder::PlanFactory {
+        return [deterministic](const HipdnnEnginePluginHandle& /*handle*/,
+                               const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
+            auto plan = std::make_unique<RocblasGemmPlan>(calls);
+            if(deterministic)
+            {
+                plan->requireBitwiseReproducible();
+            }
+            return plan;
+        };
     };
     constexpr auto ROCBLAS_NARROW = ConvGemmPlanBuilder::NarrowPartials::NEVER;
     addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID,
-                  rocblasGemm,
+                  rocblasGemm(false),
+                  false,
+                  ROCBLAS_NARROW,
+                  Notes{NONDETERMINISTIC});
+    addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID,
+                  rocblasGemm(true),
                   false,
                   ROCBLAS_NARROW,
                   Notes{});
     addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_ID,
-                  rocblasGemm,
+                  rocblasGemm(false),
                   true,
                   ROCBLAS_NARROW,
-                  tf32Notes);
+                  Notes{TF32, NONDETERMINISTIC});
+    addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID,
+                  rocblasGemm(true),
+                  true,
+                  ROCBLAS_NARROW,
+                  Notes{TF32});
     addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_RPR_ENGINE_ID,
-                  rocblasGemm,
+                  rocblasGemm(false),
                   false,
                   ROCBLAS_NARROW,
-                  rprNotes,
+                  Notes{RPR, NONDETERMINISTIC},
                   true);
 #endif
 #endif

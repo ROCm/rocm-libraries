@@ -84,8 +84,9 @@ A stand-alone Matmul through `rocblas_gemm_strided_batched_ex`, with no fused op
 
 ### Convolution as explicit GEMM (`HIPBLASLT_CONV_ENGINE`, `ROCBLAS_CONV_ENGINE`)
 
-> **Build-time feature flag.** Built with `-DHIPBLASLTPROVIDER_ENABLE_CONV=ON` (default **OFF**), three engines per enabled
-> backend: the exact engine and its TF32 and reduced-precision-reduction siblings (table below).
+> **Build-time feature flag.** Built with `-DHIPBLASLTPROVIDER_ENABLE_CONV=ON` (default **OFF**), five engines per enabled
+> backend: the exact engine, its TF32 and reduced-precision-reduction siblings, and deterministic siblings of the exact and
+> TF32 engines (table below).
 
 Single-node convolution graphs, forward, backward data and backward weights:
 - Data types: FP32, FP16, BF16, the same for all three tensors; compute type unset or FP32,
@@ -109,12 +110,11 @@ below is registered by default; a caller excludes one by its notes through the h
 
 | Engine | Numerical notes |
 |---|---|
-| `ROCBLAS_CONV_ENGINE` | none (bitwise reproducible) |
-| `ROCBLAS_CONV_TF32_ENGINE` | `TENSOR_CORE` |
-| `ROCBLAS_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION` |
-| `HIPBLASLT_CONV_ENGINE` | `NONDETERMINISTIC` |
-| `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
-| `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` | `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_ENGINE_DETERMINISTIC` | none |
+| `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
+| `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | `TENSOR_CORE` |
+| `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
 
 - **TF32** (`*_CONV_TF32_ENGINE`): they serve only convolutions with an FP32 GEMM and permit TF32 for them: hipBLASLt is
   asked for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to FP32 when it has no algorithm; rocBLAS runs under
@@ -124,9 +124,12 @@ below is registered by default; a caller excludes one by its notes through the h
   several channels-first images, as one GEMM per image adding into the FP16 dw (beta 1, MIOpen's `GemmWrw1x1_stride1`), so
   dw is rounded to FP16 once per image instead of once (cuDNN's `REDUCED_PRECISION_REDUCTION`). No workspace. BF16 has no
   reduced form. Compute type unset, FP32 or FP16.
-- **Determinism:** the rocBLAS engines run every GEMM with rocBLAS atomics not allowed and repack by gathers (each output
-  element summed by one thread in a fixed order), so a plan gives the same bits on every run; the device tests rerun each
-  plan and compare the bits. hipBLASLt offers no such control, so its engines report `NONDETERMINISTIC`.
+- **Determinism** (`*_DETERMINISTIC`): the exact and TF32 engines run the libraries' defaults (rocBLAS atomics allowed,
+  hipBLASLt offered its workspace), which may split a reduction across workgroups, and report `NONDETERMINISTIC`. Their
+  deterministic siblings run rocBLAS with atomics not allowed (the handle's mode restored after the plan) or offer hipBLASLt
+  no workspace, as MIOpen's deterministic GEMMs do, and repack by gathers (each output element summed by one thread in a
+  fixed order), so a plan gives the same bits on every run; the device tests run each plan six times and compare the bits.
+  The reduced-precision-reduction engines have one form, `NONDETERMINISTIC`.
 
 Declined:
 - A filter whose (channel, spatial) axes nest in neither KCRS nor KRSC order

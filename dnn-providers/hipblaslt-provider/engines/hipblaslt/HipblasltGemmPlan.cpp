@@ -46,7 +46,8 @@ HipblasltMatrixLayout
 } // namespace
 
 HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
-                                     const std::vector<GemmCall>& calls)
+                                     const std::vector<GemmCall>& calls,
+                                     bool deterministic)
 {
     hipblasLtMatmulPreference_t preferenceHandle = nullptr;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&preferenceHandle));
@@ -54,7 +55,8 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
         preferenceHandle, [](hipblasLtMatmulPreference_t p) {
             LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceDestroy(p));
         });
-    const size_t maxWorkspace = MAX_WORKSPACE_BYTES;
+    // Deterministic: no hipBLASLt workspace, so no workspace split of a reduction.
+    const size_t maxWorkspace = deterministic ? 0 : MAX_WORKSPACE_BYTES;
     THROW_ON_HIPBLASLT_FAILURE(
         hipblasLtMatmulPreferenceSetAttribute(preference.get(),
                                               HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,

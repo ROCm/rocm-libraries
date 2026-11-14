@@ -73,15 +73,14 @@ Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOW
 | hip-kernel-provider `hipkernel:CONV_WINOGRAD_FWD_F43`, `_BWD_F43` | Explicit `[WINOGRAD, WINOGRAD_TILE_6x6]` |
 | hip-kernel-provider `hipkernel:CONV_WINOGRAD_WRW` | Explicit `[WINOGRAD]` |
 | Every other hip-kernel-provider `hipkernel:CONV_*` engine | Explicit `[]` |
-| hipblaslt-provider `ROCBLAS_CONV_ENGINE` | Explicit `[]` |
-| hipblaslt-provider `ROCBLAS_CONV_TF32_ENGINE` | Explicit `[TENSOR_CORE]` |
-| hipblaslt-provider `ROCBLAS_CONV_RPR_ENGINE` | Explicit `[REDUCED_PRECISION_REDUCTION]` |
-| hipblaslt-provider `HIPBLASLT_CONV_ENGINE` | Explicit `[NONDETERMINISTIC]` |
-| hipblaslt-provider `HIPBLASLT_CONV_TF32_ENGINE` | Explicit `[TENSOR_CORE, NONDETERMINISTIC]` |
-| hipblaslt-provider `HIPBLASLT_CONV_RPR_ENGINE` | Explicit `[REDUCED_PRECISION_REDUCTION, NONDETERMINISTIC]` |
+| hipblaslt-provider `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` | Explicit `[NONDETERMINISTIC]` |
+| hipblaslt-provider `ROCBLAS_CONV_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_ENGINE_DETERMINISTIC` | Explicit `[]` |
+| hipblaslt-provider `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | Explicit `[TENSOR_CORE, NONDETERMINISTIC]` |
+| hipblaslt-provider `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | Explicit `[TENSOR_CORE]` |
+| hipblaslt-provider `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | Explicit `[REDUCED_PRECISION_REDUCTION, NONDETERMINISTIC]` |
 | Every other engine | No tested claim: field absent, reported `{NONDETERMINISTIC}` |
 
-`MIOPEN_ENGINE_DETERMINISTIC` claims determinism for every graph it accepts; the claim is about the engine ID, not per-solver evidence. The hip-kernel-provider conv engines claim determinism in their UEDs; each family's device test launches every config it runs twice and compares the output bits (`dnn-providers/hip-kernel-provider/conv/README.md`, "Numerical notes"). The rocBLAS conv engines run with rocBLAS atomics not allowed and their tests rerun each plan the same way. The hipblaslt-provider's and the hip-kernel-provider's TF32 conv engines report `TENSOR_CORE` and the hipblaslt-provider's reduced-precision-reduction engines `REDUCED_PRECISION_REDUCTION`; no in-tree engine reports `DOWN_CONVERT_INPUTS`. Other precision claims, such as MIOpen's `FP16_ALT_IMPL` on gfx90a, are future work.
+`MIOPEN_ENGINE_DETERMINISTIC` claims determinism for every graph it accepts; the claim is about the engine ID, not per-solver evidence. The hip-kernel-provider conv engines claim determinism in their UEDs; each family's device test launches every config it runs twice and compares the output bits (`dnn-providers/hip-kernel-provider/conv/README.md`, "Numerical notes"). The hipblaslt-provider's `*_CONV_*_DETERMINISTIC` engines run rocBLAS with atomics not allowed or hipBLASLt with no workspace, and their tests rerun each plan the same way. The hipblaslt-provider's and the hip-kernel-provider's TF32 conv engines report `TENSOR_CORE` and the hipblaslt-provider's reduced-precision-reduction engines `REDUCED_PRECISION_REDUCTION`; no in-tree engine reports `DOWN_CONVERT_INPUTS`. Other precision claims, such as MIOpen's `FP16_ALT_IMPL` on gfx90a, are future work.
 
 ## 6. Compatibility layers
 
