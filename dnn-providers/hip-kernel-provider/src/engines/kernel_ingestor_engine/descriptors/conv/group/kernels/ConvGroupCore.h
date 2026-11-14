@@ -387,7 +387,8 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     constexpr int KC = 16 / Atom::KA; // atom k-steps per tap
     static_assert(Atom::DIM == 16 && 16 % Atom::KA == 0, "16x16 atoms with k-steps dividing 16");
     typedef typename K1Raw<16>::type Raw;
-    __shared__ __attribute__((aligned(16))) T rows[2 * HC * PITCH];
+    // Two row buffers and one 16-byte slot the idle staging threads write.
+    __shared__ __attribute__((aligned(16))) T rows[2 * HC * PITCH + VEC];
 
     const int blocks = a.c / CH;
     long long b = blockIdx.x;
@@ -422,12 +423,22 @@ __device__ void k4ConvMmaRows(const K4Args& a)
             wf[tap][q]
                 = k1Frag<Atom>(w + ((static_cast<long long>(cb) * TAPS + tap) * 16 + col) * 16
                                + q * Atom::KA + kb);
+            // The filter is in registers before the row loop: the loop's waits then count row loads only.
+#pragma unroll
+    for(int tap = 0; tap < TAPS; ++tap)
+#pragma unroll
+        for(int q = 0; q < KC; ++q)
+            asm volatile("" : "+v"(wf[tap][q]));
 
-    // This thread's staging slots: pixel p, vector v of a row segment; columns past the input
-    // load a clamped in-range address and keep zero.
-    long long srcOff[LOADS];
+    // This thread's staging slots: pixel p, vector v of a row segment, as a byte offset into the
+    // input row (buffer loads: a column past the input reads an offset past the row, which returns
+    // zero, so no load waits on a select).
+    unsigned srcOff[LOADS];
     int dstOff[LOADS];
-    bool colOk[LOADS], active[LOADS];
+    bool active[LOADS];
+    // Loads, LDS writes and stores are issued unconditionally (rows and pixels outside the tensors
+    // read and write through empty or out-of-range buffer records), so the loop has no branch
+    // around a memory operation and its waits count exactly the rows in flight.
 #pragma unroll
     for(int l = 0; l < LOADS; ++l)
     {
@@ -435,10 +446,10 @@ __device__ void k4ConvMmaRows(const K4Args& a)
         const int v = i % VP, p = i / VP;
         const int iw = ow0 - a.pw + p;
         active[l] = i < HC * VP;
-        colOk[l] = active[l] && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
-        srcOff[l] = static_cast<long long>(colOk[l] ? iw : 0) * a.c
-                    + static_cast<long long>(cbt) * CH + v * VEC;
-        dstOff[l] = p * PITCH + v * VEC;
+        srcOff[l] = active[l] && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
+                        ? static_cast<unsigned>((iw * a.c + cbt * CH + v * VEC) * sizeof(T))
+                        : K1_OUT_OF_RANGE;
+        dstOff[l] = active[l] ? p * PITCH + v * VEC : 2 * HC * PITCH;
     }
     // Step k = (t, ft) = (k / FT, k % FT): band input row t (input row oh0 - ph + t) of depth tap
     // ft's plane. Outside the input it contributes nothing and loads nothing (uniform across the
@@ -455,34 +466,44 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     // DEPTH steps in flight in registers: step k's row sits in stage[k % DEPTH] from its load
     // (DEPTH steps ahead) until it is written to LDS, one step ahead of its multiplies.
     Raw stage[DEPTH][LOADS];
-    const auto load = [&](Raw(&slot)[LOADS], long long base) {
+    // One input row (under 2 GiB, the host's gate) as a buffer resource from its 64-bit base.
+    const long long rowBytes
+        = static_cast<long long>(a.wi) * a.c * static_cast<long long>(sizeof(T));
+    const auto load = [&](Raw(&slot)[LOADS], int k) {
+        long long base = 0;
+        const bool live = stepBase(k, base);
+        const auto rsrc = k1Rsrc(in + (live ? base : 0), live ? rowBytes : 0);
 #pragma unroll
         for(int l = 0; l < LOADS; ++l)
-        {
-            Raw val = *reinterpret_cast<const Raw*>(in + base + srcOff[l]);
-            slot[l] = colOk[l] ? val : Raw{};
-        }
+            slot[l] = k1BufferLoad<Raw>(rsrc, srcOff[l]);
     };
     const auto put = [&](const Raw(&slot)[LOADS], int buf) {
 #pragma unroll
         for(int l = 0; l < LOADS; ++l)
-            if(active[l])
-                *reinterpret_cast<Raw*>(rows + buf * HC * PITCH + dstOff[l]) = slot[l];
+            *reinterpret_cast<Raw*>(rows + (active[l] ? buf * HC * PITCH : 0) + dstOff[l])
+                = slot[l];
     };
 
     const long long outPlane = img * a.outD + od * a.osd + a.ood;
+    const long long outRowBytes
+        = static_cast<long long>(a.outW) * a.c * static_cast<long long>(sizeof(T));
+    // This lane's byte offset in an output row (its pixel's channels from its first D row), past
+    // the row for a column past the output.
+    const unsigned outOff
+        = ow0 + col < a.wo
+              ? static_cast<unsigned>(((static_cast<long long>(ow0 + col) * a.osw + a.oow) * a.c
+                                       + cb * 16 + Atom::dRow(lane, 0))
+                                      * static_cast<long long>(sizeof(T)))
+              : K1_OUT_OF_RANGE;
     const auto flush = [&](const typename Atom::acc& acc, int u) {
-        const int ow = ow0 + col;
-        if(u < 0 || u >= band || ow >= a.wo)
-            return;
-        T* dst = out
-                 + ((outPlane * a.outH + static_cast<long long>(oh0 + u) * a.osh + a.ooh) * a.outW
-                    + static_cast<long long>(ow) * a.osw + a.oow)
-                       * a.c
-                 + cb * 16 + Atom::dRow(lane, 0);
+        const bool live = u >= 0 && u < band;
+        const long long rowBase
+            = (outPlane * a.outH + static_cast<long long>(oh0 + u) * a.osh + a.ooh) * a.outW * a.c;
+        const auto rsrc = k1Rsrc(out + (live ? rowBase : 0), live ? outRowBytes : 0);
         if constexpr(K4RowsVector<Atom>::value)
         {
-            typedef typename K1Raw<Atom::ACC* static_cast<int>(sizeof(T))>::type V;
+            constexpr int BYTES = Atom::ACC * static_cast<int>(sizeof(T));
+            typedef typename K1Raw<BYTES>::type V;
             union
             {
                 V raw;
@@ -491,13 +512,25 @@ __device__ void k4ConvMmaRows(const K4Args& a)
 #pragma unroll
             for(int e = 0; e < Atom::ACC; ++e)
                 val.e[e] = K1Elem<T>::store(acc[e]);
-            *reinterpret_cast<V*>(dst) = val.raw;
+            if constexpr(BYTES == 16)
+                __builtin_amdgcn_raw_buffer_store_b128(val.raw, rsrc, outOff, 0, 0);
+            else
+                __builtin_amdgcn_raw_buffer_store_b64(val.raw, rsrc, outOff, 0, 0);
         }
         else
         {
+            static_assert(sizeof(T) == 2, "per-element stores: 16-bit elements");
 #pragma unroll
             for(int e = 0; e < Atom::ACC; ++e)
-                dst[Atom::dRow(lane, e) - Atom::dRow(lane, 0)] = K1Elem<T>::store(acc[e]);
+            {
+                const unsigned d = (Atom::dRow(lane, e) - Atom::dRow(lane, 0)) * 2;
+                __builtin_amdgcn_raw_buffer_store_b16(
+                    __builtin_bit_cast(unsigned short, K1Elem<T>::store(acc[e])),
+                    rsrc,
+                    outOff == K1_OUT_OF_RANGE ? outOff : outOff + d,
+                    0,
+                    0);
+            }
         }
     };
 
@@ -510,13 +543,9 @@ __device__ void k4ConvMmaRows(const K4Args& a)
 #pragma unroll
     for(int k = 0; k <= DEPTH; ++k)
     {
-        long long base = 0;
-        if(stepBase(k, base))
-        {
-            load(stage[k % DEPTH], base);
-            if(k == 0)
-                put(stage[0], 0);
-        }
+        load(stage[k % DEPTH], k);
+        if(k == 0)
+            put(stage[0], 0);
     }
     // Rows a pass of the unrolled loop: a multiple of R (static ring slots) and of DEPTH (static
     // stage slots).
@@ -538,11 +567,9 @@ __device__ void k4ConvMmaRows(const K4Args& a)
                 // Step k + 1 to the free LDS buffer, then step k + 1 + DEPTH into its register
                 // slot (static: U is a multiple of DEPTH).
                 const int slot = (j * FT + ft + 1) % DEPTH;
+                put(stage[slot], cur ^ 1);
+                load(stage[slot], k + 1 + DEPTH);
                 long long base = 0;
-                if(stepBase(k + 1, base))
-                    put(stage[slot], cur ^ 1);
-                if(stepBase(k + 1 + DEPTH, base))
-                    load(stage[slot], base);
                 if(stepBase(k, base))
                 {
                     const T* src = rows + cur * HC * PITCH + wave * 16 + kb;

@@ -1115,8 +1115,15 @@ bool kernelMatches(const MatchContext& context,
             }
         }
     }
+    // Row streaming addresses one input row and one output row through a buffer record each.
+    const auto rowsFit = [&](const K4Args& args) {
+        constexpr long long LIMIT = std::numeric_limits<int>::max();
+        return tile->rs == 0
+               || (static_cast<long long>(args.wi) * args.c * bytes < LIMIT
+                   && static_cast<long long>(args.outW) * args.c * outBytes < LIMIT);
+    };
     return std::all_of(launches->begin(), launches->end(), [&](const auto& launch) {
-        return blocksFor(launch.args, *tile).has_value();
+        return blocksFor(launch.args, *tile).has_value() && rowsFit(launch.args);
     });
 }
 
