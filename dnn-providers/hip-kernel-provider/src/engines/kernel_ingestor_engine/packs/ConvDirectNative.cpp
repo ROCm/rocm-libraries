@@ -750,17 +750,19 @@ std::optional<Plan>
     else if(config.split != 0)
     {
         // Split only an under-filled grid: below 2 blocks per CU, 2+ chunks per split, <= 16.
+        // A grid that needs no split declines: the config's split-0 twin runs the same tile and
+        // chunk order in one launch, where this one would add the partials and the reduce.
         const long long wanted = 2 * std::max<int64_t>(1, computeUnits);
-        if(tile->blocks < wanted && chunks >= 4)
+        const long long splits
+            = tile->blocks < wanted && chunks >= 4
+                  ? std::min({MAX_SPLITS, chunks / 2, divUp(wanted, tile->blocks)})
+                  : 1;
+        if(splits < 2)
         {
-            const long long splits
-                = std::min({MAX_SPLITS, chunks / 2, divUp(wanted, tile->blocks)});
-            if(splits > 1)
-            {
-                k2.cps = static_cast<int>(divUp(chunks, splits));
-                k2.splits = static_cast<int>(divUp(chunks, k2.cps));
-            }
+            return std::nullopt;
         }
+        k2.cps = static_cast<int>(divUp(chunks, splits));
+        k2.splits = static_cast<int>(divUp(chunks, k2.cps));
     }
     plan.grid[0] = static_cast<unsigned int>(gridX);
     plan.grid[1] = static_cast<unsigned int>(columnBlocks);

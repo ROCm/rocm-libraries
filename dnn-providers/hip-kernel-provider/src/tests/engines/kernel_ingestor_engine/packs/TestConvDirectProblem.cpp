@@ -846,12 +846,22 @@ TEST(TestConvDirectPlan, SplitsOnlyAnUnderFilledGridAndSizesThePartials)
     EXPECT_GE(plan->args.cps, 2);
     EXPECT_EQ(plan->partialBytes,
               static_cast<size_t>(plan->args.splits) * 7 * 7 * 64 * sizeof(float));
+    // A grid that fills the units needs no split: the split config declines (its split-0 twin
+    // serves the graph in one launch), and so does one with too few channel chunks.
+    auto filled = shape;
+    filled.n = 64;
+    filled.input = {56, 56};
+    EXPECT_FALSE(planOf(filled, fields, "FLOAT", 304).has_value());
+    auto shallow = shape;
+    shallow.c = 48; // 3 chunks of 16
+    EXPECT_FALSE(planOf(shallow, fields, "FLOAT", 304).has_value());
     // A config without SPLIT never splits.
     fields.split = 0;
     const auto whole = planOf(shape, fields, "FLOAT", 304);
     ASSERT_TRUE(whole.has_value());
     EXPECT_EQ(whole->args.splits, 1);
     EXPECT_EQ(whole->partialBytes, size_t{0});
+    EXPECT_TRUE(planOf(filled, fields, "FLOAT", 304).has_value());
 }
 
 TEST(TestConvDirectPlan, ThreeBf16TriplesTheReductionAndStagesTheSplitInput)

@@ -78,7 +78,7 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
   - the formatted weights stay under 2^31 elements and bytes, and the grid fits one dispatch.
 - **Planner.**
   - Halo tile: picks `tw`, then the largest `th` whose halo fits the compile-time LDS bound, minimizing padded pixel slots plus halo loads. Depth is split until there are 4 (ring) or 8 blocks per dispatch unit (`DeviceUnits.hpp`: CUs on gfx9, WGPs on gfx10+).
-  - Split-C, halo tile: only below 2 blocks per unit, with at least 2 chunks per split and at most 16 splits.
+  - Split-C, halo tile: only below 2 blocks per unit, with at least 2 chunks per split and at most 16 splits. A grid that needs no split declines the split config; its split-0 twin runs the same tile in one launch.
   - `rows` tiles are fixed, and the grid is min(tiles, units). Rows split-C runs only where the tiles leave three quarters of the units idle: it measured 1.4x on n1 c640 64², but 0.7-0.9x at 128-250 tiles.
   - gfx950 16-bit rows tiles smaller than 16 x 32 x 128 decline past 8 persistent rounds, where the large tile is ahead.
 - **Workspace.** In order: staged activations, formatted weights, the three-bf16 input copy, then split partials. Each region is 256-byte aligned. Non-channels-last activations go through K1's tiled transpose (packed channels-first) or a strided copy. The weight pre-pass runs on every execution; its 16-byte form costs about 0.016 ms on a 384x384x27 bf16 filter on gfx1201.
