@@ -449,7 +449,12 @@ namespace TensileLite
 
             HIP_CHECK_EXC(hipSetDevice(deviceIdx));
 
-            return hip::GetCurrentDevice();
+            // The client runs every solution its library holds, the checked-in
+            // rocRoller kernels included.
+            auto hardware = hip::GetCurrentDevice();
+            if(auto gpu = std::dynamic_pointer_cast<AMDGPU>(hardware))
+                gpu->rocRollerCaptures = true;
+            return hardware;
         }
 
         std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>>

@@ -13,6 +13,34 @@
 #include <cstddef>
 #include <vector>
 
+// The checked-in rocRoller kernels require AMDGPU::rocRollerCaptures (their
+// RocRollerCaptures hardware predicate). A build with rocRoller serves those
+// problems through rocRoller itself, so only a build without it sets the flag,
+// and every Tensile search and support check of a rocRoller build refuses them.
+template <typename Gpu>
+void allowRocRollerCaptures(Gpu& gpu)
+{
+#ifdef HIPBLASLT_USE_ROCROLLER
+    static_cast<void>(gpu);
+#else
+    gpu.rocRollerCaptures = true;
+#endif
+}
+
+// An index lookup does not check the device, so a build with rocRoller treats
+// a checked-in rocRoller kernel's index as absent: its hardware predicate fails
+// here and passes once the flag is set. No other solution has the term, so
+// none other is ever refused.
+template <typename Solution, typename Gpu>
+bool refusedOnlyForRocRollerCaptures(Solution const& solution, Gpu const& gpu)
+{
+    if(gpu.rocRollerCaptures || (*solution.hardwarePredicate)(gpu))
+        return false;
+    Gpu allowed               = gpu;
+    allowed.rocRollerCaptures = true;
+    return (*solution.hardwarePredicate)(allowed);
+}
+
 // The kernel's own hardware and problem predicates accept the problem. These
 // carry the operand types, transposes, MX scale block and scale layout.
 template <typename Solution, typename Problem, typename Hardware>

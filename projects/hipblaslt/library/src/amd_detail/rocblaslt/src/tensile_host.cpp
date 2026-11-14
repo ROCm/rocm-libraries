@@ -315,6 +315,15 @@ namespace
         return *(reinterpret_cast<const T*>(ptr));
     }
 
+    // Every Hardware this file selects or checks solutions against comes from here.
+    std::shared_ptr<TensileLite::Hardware> getTensileDevice(int deviceId)
+    {
+        auto hardware = TensileLite::hip::GetDevice(deviceId);
+        if(auto gpu = std::dynamic_pointer_cast<TensileLite::AMDGPU>(hardware))
+            allowRocRollerCaptures(*gpu);
+        return hardware;
+    }
+
     // Classify alpha/beta via its storage type (alphaBetaType), not the matrix type.
     static TensileLite::ScalarValue get_scalar_value_from_void_ptr(const void*      ptr,
                                                                    rocisa::DataType type)
@@ -3518,7 +3527,7 @@ namespace
                         std::string deviceString
                             = deviceFullString.substr(0, deviceFullString.find(":"));
                         m_devicePropMap[deviceString] = std::make_shared<hipDeviceProp_t>(prop);
-                        m_hardwareMap[deviceString] = TensileLite::hip::GetDevice(devId);
+                        m_hardwareMap[deviceString]   = getTensileDevice(devId);
                     }
                 }
 
@@ -3530,7 +3539,7 @@ namespace
                 hipDeviceProp_t prop;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
                 m_deviceProp = std::make_shared<hipDeviceProp_t>(prop);
-                m_hardware = TensileLite::hip::GetDevice(deviceId);
+                m_hardware   = getTensileDevice(deviceId);
 
                 // Load library
                 auto lib = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
@@ -8282,7 +8291,8 @@ rocblaslt_status
 
 #endif
         auto solution = library->getSolutionByIndex(*hardware, index);
-        if(!solution)
+        auto gpu      = std::dynamic_pointer_cast<TensileLite::AMDGPU>(hardware);
+        if(!solution || (gpu && refusedOnlyForRocRollerCaptures(*solution, *gpu)))
         {
             isOutOfBound = true;
             continue;
@@ -9285,8 +9295,7 @@ rocblaslt_status rocblaslt_local_kernel_register(rocblaslt_handle  handle,
     if(auto st = getLocalKernelLibrary(handle, &localLibrary, &adapter);
        st != rocblaslt_status_success)
         return st;
-    auto gpu = std::dynamic_pointer_cast<TensileLite::AMDGPU>(
-        TensileLite::hip::GetDevice(handle->device));
+    auto gpu = std::dynamic_pointer_cast<TensileLite::AMDGPU>(getTensileDevice(handle->device));
     if(!gpu)
         return rocblaslt_status_internal_error;
 
@@ -9379,7 +9388,7 @@ rocblaslt_status rocblaslt_local_kernel_set_exact_match(
        st != rocblaslt_status_success)
         return st;
 
-    auto hardware = TensileLite::hip::GetDevice(handle->device);
+    auto hardware = getTensileDevice(handle->device);
     if(!hardware)
         return rocblaslt_status_internal_error;
     auto solution = localLibrary->lookupIndex(kernelIndex);

@@ -187,6 +187,38 @@ Pass `--check` instead to report without writing; it exits non-zero when
 provenance is still present, which suits a pre-commit or continuous-integration
 gate.
 
+### Checked-in rocRoller GEMM kernels
+
+The `RR_GEMM_*` kernels in `rocroller/` are gfx950 MX GEMMs captured from the
+rocRoller JIT path, one per configuration rocRoller picks. A build without
+rocRoller serves a rocRoller-routed GEMM with the kernel whose tile, unroll,
+workgroup mapping and Stream-K mode equal rocRoller's pick, or with nothing. Each
+kernel's `custom.config` therefore declares `unroll`, and declares
+`uniformSummationOrder: true` only when the kernel is listed in
+`Tests/unit/data/rocroller_uso_verified.txt`. They read packed E8M0 scales, so
+each declares `MXScaleFormat: NoSwizzle`. The kernels a logic file registers
+name the bare `amdgcn-amd-amdhsa--gfx950` target, so they load whatever the
+SRAMECC mode.
+
+Only a build without rocRoller selects them. A build with rocRoller serves these
+problems through rocRoller itself, and its Tensile paths (the C API with
+`HIPBLASLT_USE_ROCROLLER=0`, the `hipblaslt_ext` APIs, `getAllAlgos`, support
+checks) must return what they return without these kernels. Each one's hardware
+predicate therefore carries a `RocRollerCaptures` term, which only an `AMDGPU`
+whose `rocRollerCaptures` flag is set satisfies; hipBLASLt sets the flag only
+when built without rocRoller, and the TensileLite client always sets it.
+
+The GridBased logic files that register them are
+`library/.../Logic/asm_full/gfx950/gfx950/GridBased/*_MXAE8B32_MXBE8B32_BH_UserArgs.yaml`.
+They declare `DeviceNames: [Device 75a3, Device 75a2, Device 75a0]`, the list
+`LibraryLogic` gives a generated gfx950 library: 75a3 and 75a2 match it
+directly and every other gfx950 chip id falls back to 75a0. They give every
+kernel an ExactLogic point and set no size bound: a kernel's tile, batch and
+buffer predicates say where it is correct. Unit tests
+pin these properties (`Tests/unit/test_rocroller_*`); a change to a kernel's
+predicates shows up as a diff of `Tests/unit/data/rocroller_predicate_manifest.yaml`,
+regenerated with `HIPBLASLT_UPDATE_RR_PREDICATE_MANIFEST=1`.
+
 ## Validation
 
 Two ways to validate:

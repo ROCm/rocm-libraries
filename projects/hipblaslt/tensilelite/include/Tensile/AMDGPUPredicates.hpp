@@ -308,6 +308,36 @@ namespace TensileLite
                     return debugEvalCmp(gpu, stream, "gpu", gpu.archName(), "can run", "sol", AMDGPU::toString(value));
                 }
             };
+
+            // Carried by the checked-in rocRoller kernels. They capture what rocRoller
+            // builds at run time, so they are selectable only where hipBLASLt runs
+            // without rocRoller (AMDGPU::rocRollerCaptures).
+            struct RocRollerCaptures : public Predicate_CRTP<RocRollerCaptures, AMDGPU>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                RocRollerCaptures() = default;
+
+                static std::string Type()
+                {
+                    return "RocRollerCaptures";
+                }
+
+                virtual bool operator()(AMDGPU const& gpu) const override
+                {
+                    return gpu.rocRollerCaptures;
+                }
+
+                virtual bool debugEval(AMDGPU const& gpu, std::ostream& stream) const override
+                {
+                    return debugEvalCmp(
+                        gpu, stream, "gpu", gpu.rocRollerCaptures, "==", "sol", true);
+                }
+            };
         } // namespace GPU
 
         /**
