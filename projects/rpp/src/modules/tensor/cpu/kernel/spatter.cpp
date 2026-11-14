@@ -138,9 +138,9 @@ RppStatus spatter_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
         Rpp32f spatterValue[3];
-        spatterValue[0] = (Rpp32f)spatterColor.B;
+        spatterValue[0] = (Rpp32f)spatterColor.R;
         spatterValue[1] = (Rpp32f)spatterColor.G;
-        spatterValue[2] = (Rpp32f)spatterColor.R;
+        spatterValue[2] = (Rpp32f)spatterColor.B;
 
         Rpp8u *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
@@ -519,9 +519,9 @@ RppStatus spatter_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
         Rpp32f spatterValue[3];
-        spatterValue[0] = (Rpp32f)spatterColor.B * ONE_OVER_255;
+        spatterValue[0] = (Rpp32f)spatterColor.R * ONE_OVER_255;
         spatterValue[1] = (Rpp32f)spatterColor.G * ONE_OVER_255;
-        spatterValue[2] = (Rpp32f)spatterColor.R * ONE_OVER_255;
+        spatterValue[2] = (Rpp32f)spatterColor.B * ONE_OVER_255;
 
         Rpp32f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
@@ -902,9 +902,9 @@ RppStatus spatter_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rp
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
         Rpp32f spatterValue[3];
-        spatterValue[0] = (Rpp32f)spatterColor.B * ONE_OVER_255;
+        spatterValue[0] = (Rpp32f)spatterColor.R * ONE_OVER_255;
         spatterValue[1] = (Rpp32f)spatterColor.G * ONE_OVER_255;
-        spatterValue[2] = (Rpp32f)spatterColor.R * ONE_OVER_255;
+        spatterValue[2] = (Rpp32f)spatterColor.B * ONE_OVER_255;
 
         Rpp16f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
@@ -1331,9 +1331,9 @@ RppStatus spatter_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
 
         Rpp32f spatterValue[3];
-        spatterValue[0] = (Rpp32f)spatterColor.B;
+        spatterValue[0] = (Rpp32f)spatterColor.R;
         spatterValue[1] = (Rpp32f)spatterColor.G;
-        spatterValue[2] = (Rpp32f)spatterColor.R;
+        spatterValue[2] = (Rpp32f)spatterColor.B;
 
         Rpp8s *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
