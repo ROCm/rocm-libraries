@@ -379,6 +379,40 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
 // currently creates graphs only with FP32 input data type. We can add tests for those options
 // once we have graph builders that can create graphs with FP16/BFP16 input tensors.
 
+TEST(TestBatchnormFwdTrainingPlan, CompileLdsGcnSizeScalesWithWaveSize)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan] = createPlanFromGraph();
+    auto deviceProps = createTestDeviceProps("gfx1201");
+    deviceProps.warpSize = 32;
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    // Variant 1 launches 1024 threads, so a wave32 device has twice as many waves as wave64.
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=32"));
+}
+
 TEST(TestBatchnormFwdTrainingPlan, CompileNchwLayoutSetsCorrectDefine)
 {
     const MockKernelCompiler mockCompiler;
