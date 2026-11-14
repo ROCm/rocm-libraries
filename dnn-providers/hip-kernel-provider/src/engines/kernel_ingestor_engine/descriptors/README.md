@@ -3,7 +3,7 @@
 This root holds the descriptors the provider **ships**. Its sibling `test_descriptors/`
 stages into the build tree for the unit and integration binaries and is installed only
 under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
-`FlyDSL/<op>/` and `conv/<family>/` bundles.
+`FlyDSL/<op>/` bundles and the `conv/<family>/` bundles of the conv engine group.
 
 | Bundle | Engine | Native pack |
 |---|---|---|
@@ -14,16 +14,24 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx942_attention_dense/` | `hipkernel:Gfx942AttentionDense` | `packs/Gfx942AttentionDenseNative.cpp` (shares `packs/AttentionDenseNative.cpp` with gfx950) |
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
-| `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
+| `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
+| `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
-`gfx942_attention_unified_3d`, `gfx942_attention_dense` and `gfx950_conv_dgrad_aot` KDPs are
-stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
-and declare gfx950 or gfx942 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
+`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
+`gfx1250_conv_dgrad_aot` KDPs are stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
+and declare gfx950, gfx942 or gfx1250 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
 git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
 rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
-walk) and whose GPU targets include an arch its KDP declares; for gfx950 and gfx942 the
-DVC KDPs must also have been pulled.
+walk) and whose GPU targets include an arch its KDP declares; for gfx950, gfx942 and
+gfx1250 the DVC KDPs must also have been pulled.
+
+The two gfx1151 engines declare engine knobs in their UEDs (set in the IngestorGenerator
+configs, not by hand): the prefill bundle `rocKE/gfx1151_wmma_attention/` declares
+`head_size` and `head_size_v`, and the decode bundle `rocKE/gfx1151_wmma_attention_decode/`
+declares `head_size`. A knob value is the bucket width a kernel serves, not an exact size,
+which keeps the knob tuple of every co-admitted kernel distinct. A pin that matches no
+kernel is refused. The tile size (`block_m`) is not a knob.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
@@ -38,7 +46,9 @@ generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
 `conv/<family>/`, the conv engine group, one bundle per convolution engine family. Its
 kernels are HIP source, `kind: "embedded_source"`, stored beside their descriptors under
 `conv/<family>/kernels/`, embedded in the plugin and compiled at runtime through HIPRTC, so
-its KDPs declare no arch and pack into every shard. A bundle packs for a build that has the
+most of its KDPs declare no arch and pack into every shard; a catalog built for some
+architectures only (gfx906's FMA packs, `group_valu_wrw`'s `valu` and `mma` packs) lists
+them and packs into their shards. A bundle packs for a build that has the
 group enabled (`HIPKERNELPROVIDER_ENABLE_CONV`, OFF by default). The generated instance
 catalogs (`conv/<family>/*.kdp.json`) are in DVC, one `<catalog>.dvc` pointer each (see
 [Conv catalogs live in DVC](#conv-catalogs-live-in-dvc) below); naive's three hand-written

@@ -689,6 +689,12 @@ def _validate_ued(desc):
                 f"{where}.behavior_notes has unknown note '{note}' "
                 f"(expected one of {', '.join(_BEHAVIOR_NOTES)})"
             )
+    for note in doc.get("numerical_notes", []):
+        if note not in _NUMERICAL_NOTES:
+            raise HkpPackError(
+                f"{where}.numerical_notes has unknown note '{note}' "
+                f"(expected one of {', '.join(_NUMERICAL_NOTES)})"
+            )
     if "sdk_version" in doc:
         version = doc["sdk_version"]
         if not isinstance(version, str) or not _sdk_version_fits(version):
@@ -816,6 +822,20 @@ _UHD_ADAPTERS = (
     "custom_library",
 )
 _BEHAVIOR_NOTES = ("runtime_compilation", "supports_graph_capture")
+# DescriptorLoader.hpp numericalNoteFromString: the ten cuDNN numerical-note names, in
+# NumericalNote.h enum order.
+_NUMERICAL_NOTES = (
+    "tensor_core",
+    "down_convert_inputs",
+    "reduced_precision_reduction",
+    "fft",
+    "nondeterministic",
+    "winograd",
+    "winograd_tile_4x4",
+    "winograd_tile_6x6",
+    "winograd_tile_13x13",
+    "strict_nan_prop",
+)
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
@@ -1351,10 +1371,10 @@ def load_flat_input(
     `exclude_folders` names folders of the root that are not content in this
     build: nothing under one is read, validated or shipped. An entry is a
     top-level child (a disabled family, `rocKE`) or a `/`-separated path under
-    the root (a bundle whose large files were not fetched,
-    `rocKE/<bundle>`). It matches case-insensitively, as the reserved `kpack/`
-    folder does, and one naming no folder is ignored (a root need not carry
-    every family).
+    the root (a bundle whose large files were not fetched, `rocKE/<bundle>`, or
+    a conv family whose DVC-stored catalogs were not pulled, `conv/<family>`).
+    It matches case-insensitively, as the reserved `kpack/` folder does, and
+    one naming no folder is ignored (a root need not carry every family).
     `disabled_kinds` names `kernel_source` kinds this build has no producer
     for: those UKDs are still read and validated, then pruned like an
     arch-pruned UKD once validation passes. An unknown kind raises HkpPackError.

@@ -21,6 +21,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
+#include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/serialization/SerializableSourceKind.hpp"
@@ -140,8 +141,18 @@ const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
 {
     // Memoized: descriptor engines and opaque engines' declared L1 models read the same
     // trees; one parse keeps them from disagreeing.
-    static const hipdnn_plugin_sdk::ingestor::DescriptorCatalog s_catalog
-        = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(descriptorSearchDirectories());
+    // The conv engine group is an opt-in preview: without CONV_ENABLE_ENV its descriptors
+    // leave the catalog here, the one place every engine id this provider advertises comes
+    // from, so the provider serves exactly what a build without the group serves.
+    static const hipdnn_plugin_sdk::ingestor::DescriptorCatalog s_catalog = [] {
+        auto catalog
+            = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(descriptorSearchDirectories());
+        if(!convEngineGroupEnabled())
+        {
+            withdrawConvEngineGroup(catalog);
+        }
+        return catalog;
+    }();
 
     return s_catalog;
 }

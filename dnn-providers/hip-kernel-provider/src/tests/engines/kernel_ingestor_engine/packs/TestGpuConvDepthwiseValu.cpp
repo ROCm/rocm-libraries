@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -114,6 +116,56 @@ Config phaseConfig(const std::string& layout, int64_t k, int64_t bk)
     return config;
 }
 
+Config rowtileConfig(int64_t k, int64_t th, int64_t tw, int64_t vec, int64_t stride = 1)
+{
+    Config config{"NHWC", 2, "rowtile"};
+    config.kh = config.kw = k;
+    config.th = th;
+    config.tw = tw;
+    config.vec = vec;
+    config.stride = stride;
+    return config;
+}
+
+/// The rowtile tiles the generator ships (gen_depthwise_valu.py ROWTILE_TILES, ROWTILE_S2_TILES),
+/// each with 1 and 2 channels per lane.
+const std::vector<Config>& rowtileConfigs()
+{
+    static const std::vector<Config> s_configs = [] {
+        std::vector<Config> configs;
+        const std::vector<std::array<int64_t, 3>> tiles{{3, 2, 8},
+                                                        {3, 4, 4},
+                                                        {3, 4, 8},
+                                                        {3, 7, 7},
+                                                        {5, 4, 4},
+                                                        {5, 4, 8},
+                                                        {5, 7, 7},
+                                                        {7, 2, 14},
+                                                        {7, 4, 4},
+                                                        {7, 4, 8},
+                                                        {7, 7, 7}};
+        for(const auto& [k, th, tw] : tiles)
+        {
+            for(const int64_t vec : {1, 2})
+            {
+                configs.push_back(rowtileConfig(k, th, tw, vec));
+            }
+        }
+        // Stride 2, forward only.
+        const std::vector<std::array<int64_t, 3>> stride2{
+            {3, 2, 8}, {3, 4, 4}, {3, 4, 8}, {5, 2, 8}, {5, 4, 4}};
+        for(const auto& [k, th, tw] : stride2)
+        {
+            for(const int64_t vec : {1, 2})
+            {
+                configs.push_back(rowtileConfig(k, th, tw, vec, 2));
+            }
+        }
+        return configs;
+    }();
+    return s_configs;
+}
+
 Config planeConfig(int64_t k, int64_t bh, int64_t bw, int64_t bk, int64_t rh, int64_t rw)
 {
     Config config{"NCHW", 2, "lds"};
@@ -126,7 +178,7 @@ Config planeConfig(int64_t k, int64_t bh, int64_t bw, int64_t bk, int64_t rh, in
     return config;
 }
 
-// The catalog of descriptors/conv/depthwise_valu (~/scratch/conv-dw-gen/gen.py CONFIGS).
+// The catalog of descriptors/conv/depthwise_valu (conv/generators/gen_depthwise_valu.py).
 const std::vector<Config>& catalog()
 {
     static const std::vector<Config> s_configs = [] {
@@ -153,7 +205,7 @@ const std::vector<Config>& catalog()
         {
             for(const int64_t ndims : {2, 3})
             {
-                configs.push_back(Config{layout, ndims, "gather"});
+                configs.emplace_back(layout, ndims, "gather");
             }
         }
         // Backward data only: stride-2 phase blocks.
@@ -175,6 +227,7 @@ const std::vector<Config>& catalog()
         {
             configs.push_back(plane);
         }
+        configs.insert(configs.end(), rowtileConfigs().begin(), rowtileConfigs().end());
         return configs;
     }();
     return s_configs;
@@ -321,7 +374,7 @@ struct DeviceCase
 ConvShape depthwise(int64_t channels,
                     std::vector<int64_t> input,
                     std::vector<int64_t> filter,
-                    std::vector<int64_t> pad,
+                    const std::vector<int64_t>& pad,
                     bool channelsLast)
 {
     ConvShape shape;
@@ -362,6 +415,21 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"Nhwc5x5C72Pad1", depthwise(72, {11, 37}, {5, 5}, {1, 1}, true)});
     cases.push_back({"Nhwc7x7C136Wide", depthwise(136, {9, 70}, {7, 7}, {3, 3}, true)});
     cases.push_back({"Nhwc7x7C16Narrow", depthwise(16, {10, 5}, {7, 7}, {3, 3}, true)});
+    // Register row tiles: two channels per lane over 65 groups (a second block of one lane),
+    // padding past the filter's half (output rows and columns of padding only), one-row images.
+    cases.push_back({"Nhwc5x5C130Pad3", depthwise(130, {9, 11}, {5, 5}, {3, 3}, true)});
+    cases.push_back({"Nhwc3x3C64H1", depthwise(64, {1, 9}, {3, 3}, {1, 1}, true)});
+    auto stride5 = depthwise(40, {19, 17}, {5, 5}, {2, 2}, true);
+    stride5.stride = {2, 2};
+    cases.push_back({"Nhwc5x5Stride2C40", stride5});
+    // Stride 2 on the matrix core: a row wider than one 32-column tile (two tiles, odd widths),
+    // and 7x7 (two tap groups a side, the odd one starting two halves into its word).
+    auto stride3 = depthwise(24, {13, 71}, {3, 3}, {1, 1}, true);
+    stride3.stride = {2, 2};
+    cases.push_back({"Nhwc3x3Stride2C24Wide", stride3});
+    auto stride7 = depthwise(16, {18, 21}, {7, 7}, {3, 3}, true);
+    stride7.stride = {2, 2};
+    cases.push_back({"Nhwc7x7Stride2C16", stride7});
     cases.push_back({"Ndhwc3x3x3", depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true)});
     cases.push_back({"Ncdhw3x3x3", depthwise(7, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
     cases.push_back({"Nhwc1d", depthwise(13, {23}, {5}, {2}, true)});
@@ -506,8 +574,8 @@ void runCase(ConvShape shape, ConvDirection direction)
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -584,12 +652,18 @@ struct WrwConfig
     int64_t bpc = 0;
     /// The depth multiplier (output channels per input channel).
     int64_t mult = 1;
+    /// The hankel configs' stride (both axes); 0 for the VALU variants.
+    int64_t s = 0;
+    /// The vector tiles' channels a thread and output columns a strip; 0 otherwise.
+    int64_t cv = 0;
+    int64_t strip = 0;
 
     std::string tag() const
     {
         return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
-               + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult);
+               + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult) + "s"
+               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip);
     }
 };
 
@@ -603,7 +677,10 @@ const std::vector<std::array<int64_t, 4>>& hankelSchedules()
                                                                  {32, 1, 2, 2},
                                                                  {16, 2, 1, 2},
                                                                  {16, 2, 2, 1},
-                                                                 {16, 1, 2, 2}};
+                                                                 {16, 1, 2, 2},
+                                                                 {16, 4, 1, 2},
+                                                                 {16, 4, 1, 1},
+                                                                 {32, 4, 1, 1}};
     return s_schedules;
 }
 
@@ -626,11 +703,29 @@ const std::vector<WrwConfig>& wrwCatalog()
                 configs.push_back({layout, "tile", 1, k, k, 0, 0, 0, 0, 2});
             }
         }
-        for(const int64_t k : {3, 5, 7})
+        // Vector tiles: (filter, cv, strip).
+        for(const auto& [k, cv, strip] : std::vector<std::array<int64_t, 3>>{{3, 4, 8},
+                                                                             {3, 8, 4},
+                                                                             {3, 2, 8},
+                                                                             {5, 4, 4},
+                                                                             {5, 2, 8},
+                                                                             {7, 2, 8},
+                                                                             {7, 2, 4},
+                                                                             {7, 1, 8}})
         {
-            for(const auto& [q, g, nwg, bpc] : hankelSchedules())
+            WrwConfig config{"NHWC", "vtile", 1, k, k};
+            config.cv = cv;
+            config.strip = strip;
+            configs.push_back(config);
+        }
+        for(const int64_t stride : {1, 2})
+        {
+            for(const int64_t k : {3, 5, 7})
             {
-                configs.push_back({"NHWC", "hankel", 1, k, k, q, g, nwg, bpc});
+                for(const auto& [q, g, nwg, bpc] : hankelSchedules())
+                {
+                    configs.push_back({"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride});
+                }
             }
         }
         return configs;
@@ -670,7 +765,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"g", config.g},
            {"nwg", config.nwg},
            {"bpc", config.bpc},
-           {"mult", config.mult}};
+           {"mult", config.mult},
+           {"s", config.s},
+           {"cv", config.cv},
+           {"strip", config.strip}};
     return kernel;
 }
 
@@ -777,8 +875,8 @@ void runWrwCase(ConvShape shape)
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -824,6 +922,151 @@ INSTANTIATE_TEST_SUITE_P(Multiplier,
                          ::testing::ValuesIn(multiplierCases()),
                          [](const auto& info) { return info.param.name; });
 
+/// An inf in x that some filter taps never pair with a dy element: a column past wo of the last
+/// tile, an image's first row under its bottom filter row, or (stride 2) a row or column of the
+/// other parity. Every matrix-core (hankel) config keeps those taps finite, as the reference does.
+struct InfCase
+{
+    std::string name;
+    ConvShape shape;
+    std::vector<int64_t> at; // (n, c, y, x)
+};
+
+std::vector<InfCase> infCases()
+{
+    std::vector<InfCase> cases;
+    // wo 21: the last 32- or 16-column tile runs past it; x column 20 under tap 0 meets ox 21.
+    cases.push_back(
+        {"Stride1RaggedColumn", depthwise(16, {9, 21}, {3, 3}, {1, 1}, true), {1, 3, 4, 20}});
+    // x row 0 under filter row 2 meets dy row -1.
+    cases.push_back(
+        {"Stride1FirstRow", depthwise(16, {9, 21}, {3, 3}, {1, 1}, true), {0, 5, 0, 10}});
+    // wo 32 (whole tiles), 7x7: the first row under filter rows 4 to 6.
+    cases.push_back(
+        {"Stride1FirstRow7x7", depthwise(16, {9, 32}, {7, 7}, {3, 3}, true), {1, 9, 0, 13}});
+    auto odd = depthwise(16, {13, 21}, {3, 3}, {1, 1}, true);
+    odd.stride = {2, 2};
+    // Stride 2: x row 1 under filter row 1 meets dy row 1/2.
+    cases.push_back({"Stride2OddRow", odd, {1, 7, 1, 10}});
+    auto ragged = depthwise(16, {13, 22}, {3, 3}, {1, 1}, true);
+    ragged.stride = {2, 2};
+    // Stride 2, wo 11: x column 21 under tap 0 meets ox 11.
+    cases.push_back({"Stride2RaggedColumn", ragged, {0, 2, 6, 21}});
+    return cases;
+}
+
+template <typename T>
+void runWrwInfCase(const InfCase& infCase)
+{
+    auto shape = infCase.shape;
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const auto pack = wrwPack();
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    Tensor<T> x(spec.x.dims, spec.x.strides);
+    Tensor<T> w(spec.w.dims, spec.w.strides);
+    Tensor<T> y(spec.y.dims, spec.y.strides);
+    constexpr unsigned int SEED = 2468;
+    x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
+    y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    static_cast<T*>(x.rawHostData())[offsetOf(infCase.at, x.strides())]
+        = static_cast<T>(std::numeric_limits<float>::infinity());
+    x.markHostModified();
+    Tensor<T> reference(spec.w.dims, spec.w.strides);
+    CpuFpReferenceConvolution::wgrad(
+        x, reference, y, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
+    const auto* expected = static_cast<const T*>(reference.rawHostData());
+    int64_t finiteTaps = 0;
+    forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+        if(std::isfinite(static_cast<float>(expected[offsetOf(index, reference.strides())])))
+        {
+            ++finiteTaps;
+        }
+    });
+    // The case is only a test when the inf's channel has both finite and non-finite taps.
+    ASSERT_GT(finiteTaps, 0);
+    ASSERT_LT(finiteTaps, static_cast<int64_t>(w.elementCount()));
+
+    int64_t reduction = spec.y.dims[0];
+    for(size_t axis = 2; axis < spec.y.dims.size(); ++axis)
+    {
+        reduction *= spec.y.dims[axis];
+    }
+    const float accumulationBound = 1e-6f * static_cast<float>(reduction);
+    const auto& handler = dispatchHandler(pack);
+    int ran = 0;
+    for(const auto& config : wrwCatalog())
+    {
+        const auto kernel = wrwKernelFor(config, shape.dataType);
+        if(config.variant != "hankel" || !matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(config.tag());
+        ++ran;
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
+        void* workspace = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+        w.fillWithSentinelValue();
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+        const Handle handle;
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        ASSERT_EQ(hipFree(workspace), hipSuccess);
+        w.markDeviceModified();
+        const auto* actual = static_cast<const T*>(w.rawHostData());
+        int64_t mismatches = 0;
+        forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const bool ok = std::isfinite(want)
+                                ? std::fabs(got - want) <= accumulationBound
+                                                               + 2.0f * storageEpsilon<T>()
+                                                                     * (std::fabs(want) + 1e-3f)
+                                : !std::isfinite(got);
+            if(!ok && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
+                              << got << ", want " << want;
+            }
+        });
+        EXPECT_EQ(mismatches, 0);
+    }
+    if(ran == 0)
+    {
+        GTEST_SKIP() << "no matrix-core config serves this case on this device";
+    }
+}
+
+class TestGpuConvDepthwiseValuWrwHankelInf : public ::testing::TestWithParam<InfCase>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseValuWrwHankelInf, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwInfCase<Half>(GetParam());
+}
+
+TEST_P(TestGpuConvDepthwiseValuWrwHankelInf, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwInfCase<BFloat16>(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDepthwiseValuWrwHankelInf,
+                         ::testing::ValuesIn(infCases()),
+                         [](const auto& info) { return info.param.name; });
+
 // Host-only: the kernel's multiplier is the graph's; the graph's output channels a whole
 // multiple of its input channels; no matrix-core (hankel) config takes a multiplier.
 TEST(TestConvDepthwiseValuWrwMultiplier, KernelsServeTheirOwnMultiplier)
@@ -855,7 +1098,7 @@ TEST(TestConvDepthwiseValuWrwMultiplier, KernelsServeTheirOwnMultiplier)
                                countedDevice(64, "gfx942"));
     EXPECT_FALSE(matchesGraph(pack, fixture.context()).has_value());
     // The matrix-core kernel walks input channels: never with a multiplier.
-    const WrwConfig hankel1{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2};
+    const WrwConfig hankel1{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2, 1, 1};
     WrwConfig hankel2 = hankel1;
     hankel2.mult = 2;
     EXPECT_TRUE(admits(one, hankel1, "gfx942"));
@@ -1088,6 +1331,290 @@ TEST(TestConvDepthwiseValuCatalog, EveryConfigServesADeviceCase)
     }
 }
 
+// Host-only: what a forward rowtile config admits, one refusal per field it gates.
+bool rowtileAdmits(const Config& config, ConvShape shape, DataType dataType = DataType::HALF)
+{
+    shape.dataType = dataType;
+    const auto pack = packFor(ConvDirection::FORWARD);
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto bound = matchesGraph(pack, fixture.context());
+    return bound.has_value()
+           && matchesKernel(pack,
+                            fixture.context(),
+                            kernelFor(config, dataType, ConvDirection::FORWARD),
+                            *bound);
+}
+
+TEST(TestConvDepthwiseValuRowtile, RefusesOneFieldAtATime)
+{
+    const auto base = rowtileConfig(3, 4, 4, 2);
+    const auto shape = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
+    ASSERT_TRUE(rowtileAdmits(base, shape));
+    ASSERT_TRUE(rowtileAdmits(base, shape, DataType::FLOAT));
+    ASSERT_TRUE(rowtileAdmits(base, shape, DataType::BFLOAT16));
+    // Layout and rank.
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {13, 11}, {3, 3}, {1, 1}, false)));
+    auto threeD = base;
+    threeD.ndims = 3;
+    EXPECT_FALSE(rowtileAdmits(threeD, depthwise(40, {5, 13, 11}, {3, 3, 3}, {1, 1, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {5, 13, 11}, {3, 3, 3}, {1, 1, 1}, true)));
+    // Stride and dilation, either axis; a stride-2 tile only stride 2 on both axes.
+    auto strided = shape;
+    strided.stride = {1, 2};
+    EXPECT_FALSE(rowtileAdmits(base, strided));
+    const auto base2 = rowtileConfig(3, 4, 4, 2, 2);
+    auto stride2 = shape;
+    stride2.stride = {2, 2};
+    EXPECT_TRUE(rowtileAdmits(base2, stride2));
+    EXPECT_FALSE(rowtileAdmits(base, stride2));
+    EXPECT_FALSE(rowtileAdmits(base2, shape));
+    EXPECT_FALSE(rowtileAdmits(base2, strided));
+    auto stride21 = shape;
+    stride21.stride = {2, 1};
+    EXPECT_FALSE(rowtileAdmits(base2, stride21));
+    for(const int64_t stride : {0, -1})
+    {
+        auto other = base;
+        other.stride = stride;
+        EXPECT_FALSE(rowtileAdmits(other, shape)) << stride;
+    }
+    auto dilated = shape;
+    dilated.dilation = {2, 1};
+    dilated.prePadding = dilated.postPadding = {2, 1};
+    EXPECT_FALSE(rowtileAdmits(base, dilated));
+    // Filter height and width.
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {13, 11}, {5, 3}, {2, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(40, {13, 11}, {3, 5}, {1, 2}, true)));
+    // Channels per lane: 1 or 2, dividing the channels.
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(37, {13, 11}, {3, 3}, {1, 1}, true)));
+    EXPECT_TRUE(
+        rowtileAdmits(rowtileConfig(3, 4, 4, 1), depthwise(37, {13, 11}, {3, 3}, {1, 1}, true)));
+    for(const int64_t vec : {0, 3, 4})
+    {
+        auto other = base;
+        other.vec = vec;
+        EXPECT_FALSE(rowtileAdmits(other, shape)) << vec;
+    }
+    // A positive output tile.
+    auto noHeight = base;
+    noHeight.th = 0;
+    EXPECT_FALSE(rowtileAdmits(noHeight, shape));
+    auto noWidth = base;
+    noWidth.tw = 0;
+    EXPECT_FALSE(rowtileAdmits(noWidth, shape));
+    // Every field the variant does not use is 0.
+    for(auto field : {&Config::kd,
+                      &Config::wstrip,
+                      &Config::bd,
+                      &Config::bh,
+                      &Config::bw,
+                      &Config::bk,
+                      &Config::rd,
+                      &Config::rh,
+                      &Config::rw})
+    {
+        auto other = base;
+        other.*field = 2;
+        EXPECT_FALSE(rowtileAdmits(other, shape)) << other.tag();
+    }
+    // x and y rows below 2^31 bytes (fp16: 2^30 elements), at the limit and one past it.
+    const int64_t rowElements = (int64_t{1} << 30) - 1;
+    const int64_t c = 64;
+    const int64_t widest = (rowElements - 1) / c;
+    EXPECT_TRUE(rowtileAdmits(base, depthwise(c, {1, widest}, {3, 3}, {1, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(base, depthwise(c, {1, widest + 1}, {3, 3}, {1, 1}, true)));
+    // The grid's channel-block and N x H-tile extents below 2^16.
+    auto rows = depthwise(40, {int64_t{4} * 32767, 3}, {3, 3}, {1, 1}, true);
+    EXPECT_TRUE(rowtileAdmits(base, rows));
+    rows.input = {int64_t{4} * 32768, 3};
+    EXPECT_FALSE(rowtileAdmits(base, rows));
+    const auto one = rowtileConfig(3, 4, 4, 1);
+    EXPECT_TRUE(rowtileAdmits(one, depthwise(int64_t{64} * 65535, {3, 3}, {3, 3}, {1, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(one, depthwise(int64_t{64} * 65536, {3, 3}, {3, 3}, {1, 1}, true)));
+}
+
+// The rowtile cores keep f16 operands packed and let the FMA widen them (v_fma_mix_f32). This
+// must compute exactly what converting both operands to fp32 and calling fmaf computes: the f16
+// output of every rowtile config, bit for bit, against that sequence on the host (taps in (ky, kx)
+// order, one fp32 rounding per tap, a padding tap adding w * 0, one rounding to f16 at the end).
+// sampleStride 1 checks every output; a larger one checks every sampleStride-th output (in
+// logical (n, c, h, w) order) and every output of the last image row.
+void runRowtileBitwise(ConvShape shape,
+                       const std::vector<Config>& configs = rowtileConfigs(),
+                       int64_t sampleStride = 1)
+{
+    shape.dataType = DataType::HALF;
+    const auto direction = ConvDirection::FORWARD;
+    const auto spec = specFor(shape, direction);
+    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const auto pack = packFor(direction);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    Tensor<Half> x(spec.x.dims, spec.x.strides);
+    Tensor<Half> w(spec.w.dims, spec.w.strides);
+    Tensor<Half> y(spec.y.dims, spec.y.strides);
+    if(sampleStride == 1)
+    {
+        x.fillTensorWithRandomValues(-1.0f, 1.0f, 97);
+        w.fillTensorWithRandomValues(-1.0f, 1.0f, 98);
+    }
+    else
+    {
+        // Hashed f16 bit patterns of magnitude below 1 (biased exponent 0-14, either sign): as
+        // varied as random values, and quick for 2^30 elements.
+        for(auto* tensor : {&x, &w})
+        {
+            auto* data = static_cast<Half*>(tensor->rawHostData());
+            const auto count = tensor->elementCount();
+            const uint32_t salt = tensor == &x ? 0x9e3779b9u : 0x85ebca6bu;
+            for(size_t i = 0; i < count; ++i)
+            {
+                const uint32_t h = (static_cast<uint32_t>(i) ^ salt) * 0x27d4eb2fu;
+                data[i].data = static_cast<uint16_t>(((h >> 16) & 0x8000u)
+                                                     | (((h >> 11) % 15u) << 10) | (h & 0x3ffu));
+            }
+            tensor->markHostModified();
+        }
+    }
+    const auto* xs = static_cast<const Half*>(x.rawHostData());
+    const auto* ws = static_cast<const Half*>(w.rawHostData());
+    const int64_t kh = shape.filter[0];
+    const int64_t kw = shape.filter[1];
+    const bool flip = shape.mode == ConvMode::CONVOLUTION;
+    const auto expected = [&](const std::vector<int64_t>& o) {
+        float acc = 0.0f;
+        for(int64_t ky = 0; ky < kh; ++ky)
+        {
+            for(int64_t kx = 0; kx < kw; ++kx)
+            {
+                const int64_t ih = o[2] * shape.stride[0] - shape.prePadding[0] + ky;
+                const int64_t iw = o[3] * shape.stride[1] - shape.prePadding[1] + kx;
+                const bool inside
+                    = ih >= 0 && ih < shape.input[0] && iw >= 0 && iw < shape.input[1];
+                const float a
+                    = inside ? static_cast<float>(xs[offsetOf({o[0], o[1], ih, iw}, x.strides())])
+                             : 0.0f;
+                const float b = static_cast<float>(ws[offsetOf(
+                    {o[1], 0, flip ? kh - 1 - ky : ky, flip ? kw - 1 - kx : kx}, w.strides())]);
+                acc = std::fma(b, a, acc);
+            }
+        }
+        return Half(acc).data;
+    };
+    // The outputs checked, in logical (n, c, h, w) order.
+    const auto& dims = y.dims();
+    std::vector<std::vector<int64_t>> checked;
+    if(sampleStride == 1)
+    {
+        forEachIndex(dims, [&](const std::vector<int64_t>& o) { checked.push_back(o); });
+    }
+    else
+    {
+        const int64_t total = dims[0] * dims[1] * dims[2] * dims[3];
+        const auto at = [&](int64_t i) {
+            return std::vector<int64_t>{i / (dims[1] * dims[2] * dims[3]),
+                                        i / (dims[2] * dims[3]) % dims[1],
+                                        i / dims[3] % dims[2],
+                                        i % dims[3]};
+        };
+        for(int64_t i = 0; i < total; i += sampleStride)
+        {
+            checked.push_back(at(i));
+        }
+        for(int64_t c = 0; c < dims[1]; ++c)
+        {
+            for(int64_t q = 0; q < dims[3]; ++q)
+            {
+                checked.push_back({dims[0] - 1, c, dims[2] - 1, q});
+            }
+        }
+    }
+    std::vector<uint16_t> want;
+    want.reserve(checked.size());
+    for(const auto& o : checked)
+    {
+        want.push_back(expected(o));
+    }
+
+    const auto& handler = dispatchHandler(pack);
+    int ran = 0;
+    for(const auto& config : configs)
+    {
+        const auto kernel = kernelFor(config, DataType::HALF, direction);
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(config.tag());
+        ++ran;
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        ASSERT_NE(prepared, nullptr);
+        y.fillWithSentinelValue();
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+        const Handle handle;
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        y.markDeviceModified();
+        const auto* actual = static_cast<const Half*>(y.rawHostData());
+        int64_t mismatches = 0;
+        for(size_t i = 0; i < checked.size(); ++i)
+        {
+            const auto& o = checked[i];
+            const uint16_t got = actual[offsetOf(o, y.strides())].data;
+            if(got != want[i] && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << "at output (" << o[0] << ", " << o[1] << ", " << o[2] << ", "
+                              << o[3] << "): bits " << got << ", single-rounding fmaf " << want[i];
+            }
+        }
+        EXPECT_EQ(mismatches, 0);
+    }
+    EXPECT_GE(ran, 1) << "no rowtile config serves this case";
+}
+
+TEST(TestGpuConvDepthwiseValuRowtile, HalfIsBitwiseTheFmafOfConvertedOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    // Even and odd channel counts (1 and 2 channels per lane, partial channel blocks), planes
+    // that no tile divides, padding past the filter's half, a narrow row, true convolution.
+    runRowtileBitwise(depthwise(130, {9, 11}, {5, 5}, {3, 3}, true));
+    runRowtileBitwise(depthwise(37, {13, 11}, {3, 3}, {1, 1}, true));
+    runRowtileBitwise(depthwise(136, {9, 21}, {7, 7}, {3, 3}, true));
+    runRowtileBitwise(depthwise(16, {10, 5}, {7, 7}, {3, 3}, true));
+    auto convolution = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
+    convolution.mode = ConvMode::CONVOLUTION;
+    runRowtileBitwise(convolution);
+    auto stride3 = depthwise(40, {13, 11}, {3, 3}, {1, 1}, true);
+    stride3.stride = {2, 2};
+    runRowtileBitwise(stride3);
+    auto stride5 = depthwise(37, {19, 17}, {5, 5}, {2, 2}, true);
+    stride5.stride = {2, 2};
+    runRowtileBitwise(stride5);
+}
+
+// The rowtile core has one body for every tensor size: x and y of 2^30 + 2^18 f16 elements (past
+// 2 GiB), rows rebased past 2^31 bytes, checked at sampled outputs and the whole last row.
+TEST(TestGpuConvDepthwiseValuRowtile, HalfServesTensorsPastTwoGiB)
+{
+    SKIP_IF_NO_DEVICES();
+    size_t freeBytes = 0;
+    size_t totalBytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
+    if(freeBytes < (size_t{6} << 30))
+    {
+        GTEST_SKIP() << "needs 6 GiB of free device memory";
+    }
+    // 4097 rows of 4096 columns of 64 channels (512 KiB rows).
+    auto shape = depthwise(64, {4097, 4096}, {3, 3}, {1, 1}, true);
+    shape.n = 1;
+    runRowtileBitwise(shape, {rowtileConfig(3, 4, 4, 2)}, 4099);
+}
+
 // Host-only: the matrix-core (hankel) backward-weights gates, one field at a time from an
 // admitted base (fp16 channels-last 3x3, 40 channels, on gfx942).
 TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
@@ -1124,6 +1651,42 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
          },
          false},
         {"Stride2", [](ConvShape& s, WrwConfig&, std::string&) { s.stride = {2, 2}; }, false},
+        {"Stride2OfAStride2Config",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {2, 2};
+             c.s = 2;
+         },
+         true},
+        {"UnitStrideOfAStride2Config",
+         [](ConvShape&, WrwConfig& c, std::string&) { c.s = 2; },
+         false},
+        {"WidthStride2OfAStride2Config",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {1, 2};
+             c.s = 2;
+         },
+         false},
+        {"HeightStride2OfAStride2Config",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {2, 1};
+             c.s = 2;
+         },
+         false},
+        {"Stride3",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {3, 3};
+             c.s = 3;
+         },
+         false},
+        {"StrideZero", [](ConvShape&, WrwConfig& c, std::string&) { c.s = 0; }, false},
+        {"Stride2Dilation2",
+         [](ConvShape& s, WrwConfig& c, std::string&) {
+             s.stride = {2, 2};
+             s.dilation = {2, 2};
+             s.prePadding = s.postPadding = {2, 2};
+             c.s = 2;
+         },
+         false},
         {"WidthStride2", [](ConvShape& s, WrwConfig&, std::string&) { s.stride = {1, 2}; }, false},
         {"HeightStride2", [](ConvShape& s, WrwConfig&, std::string&) { s.stride = {2, 1}; }, false},
         {"HeightDilation2",
@@ -1198,7 +1761,7 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
              arch = "gfx950";
          },
          false},
-        // 256 channels a block: 108672 bytes of LDS, gfx950's.
+        // 256 channels a block: 97664 bytes of LDS, gfx950's.
         {"NwgFour",
          [](ConvShape&, WrwConfig& c, std::string& arch) {
              c.nwg = 4;
@@ -1208,19 +1771,19 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         {"NwgFourPastGfx942", [](ConvShape&, WrwConfig& c, std::string&) { c.nwg = 4; }, false},
         {"BpcThree", [](ConvShape&, WrwConfig& c, std::string&) { c.bpc = 3; }, false},
         {"BpcSixteen", [](ConvShape&, WrwConfig& c, std::string&) { c.bpc = 16; }, false},
-        // 7x7, 16 columns, 2 rows a step, 2 groups a wave: 101664 bytes of LDS.
+        // 7x7, 16 columns, 4 rows a step, 2 groups a wave: 87264 bytes of LDS.
         {"LdsPastGfx942",
          [](ConvShape& s, WrwConfig& c, std::string&) {
              s.filter = {7, 7};
              s.prePadding = s.postPadding = {3, 3};
-             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1};
+             c = {"NHWC", "hankel", 1, 7, 7, 16, 4, 2, 1, 1, 1};
          },
          false},
         {"LdsWithinGfx950",
          [](ConvShape& s, WrwConfig& c, std::string& arch) {
              s.filter = {7, 7};
              s.prePadding = s.postPadding = {3, 3};
-             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1};
+             c = {"NHWC", "hankel", 1, 7, 7, 16, 4, 2, 1, 1, 1};
              arch = "gfx950";
          },
          true},
@@ -1230,6 +1793,12 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         {"ValuTileWithoutThem",
          [](ConvShape&, WrwConfig& c, std::string&) { c = {"NHWC", "tile", 1, 3, 3}; },
          true},
+        {"ValuTileWithAStride",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.s = 1;
+         },
+         false},
     };
     const auto pack = wrwPack();
     for(const auto& c : cases)
@@ -1237,11 +1806,151 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         SCOPED_TRACE(c.name);
         auto shape = base();
         shape.dataType = DataType::HALF;
-        WrwConfig config{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2};
+        WrwConfig config{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2, 1, 1};
         std::string arch = "gfx942";
         c.mutate(shape, config, arch);
         const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
                                    countedDevice(64, arch));
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(
+            matchesKernel(pack, fixture.context(), wrwKernelFor(config, shape.dataType), *bound),
+            c.admitted);
+    }
+}
+
+// Host-only: the matrix-core configs load x and dy 16 bytes at a time, so each pointer must be
+// declared 16-byte aligned; an 8-byte one declines (to the VALU variants).
+TEST(TestConvDepthwiseValuWrwHankel, DeclinesPointersBelowSixteenBytes)
+{
+    const auto pack = wrwPack();
+    const WrwConfig config{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2, 1, 1};
+    const auto admits = [&](int64_t xAlign, int64_t yAlign) {
+        auto shape = depthwise(40, {13, 21}, {3, 3}, {1, 1}, true);
+        shape.dataType = DataType::HALF;
+        auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+        spec.x.alignment = xAlign;
+        spec.y.alignment = yAlign;
+        const GraphFixture fixture(buildGraph(spec), countedDevice(64, "gfx942"));
+        const auto bound = matchesGraph(pack, fixture.context());
+        return bound.has_value()
+               && matchesKernel(
+                   pack, fixture.context(), wrwKernelFor(config, DataType::HALF), *bound);
+    };
+    EXPECT_TRUE(admits(16, 16));
+    EXPECT_TRUE(admits(32, 64));
+    EXPECT_FALSE(admits(8, 16));
+    EXPECT_FALSE(admits(16, 8));
+    EXPECT_FALSE(admits(2, 2));
+}
+
+// Host-only: the vector-tile backward-weights gates, one field at a time from an admitted base
+// (fp16 channels-last 3x3, 40 channels, 4 channels a thread, strips of 8; 16-byte pointers).
+TEST(TestConvDepthwiseValuWrwVtile, RefusesOneFieldAtATime)
+{
+    struct Align
+    {
+        int64_t x = 16;
+        int64_t y = 16;
+    };
+    struct Case
+    {
+        std::string name;
+        std::function<void(ConvShape&, WrwConfig&, Align&)> mutate;
+        bool admitted;
+    };
+    const auto base = [] { return depthwise(40, {13, 21}, {3, 3}, {1, 1}, true); };
+    const std::vector<Case> cases{
+        {"Base", [](ConvShape&, WrwConfig&, Align&) {}, true},
+        {"Float", [](ConvShape& s, WrwConfig&, Align&) { s.dataType = DataType::FLOAT; }, true},
+        {"Bf16", [](ConvShape& s, WrwConfig&, Align&) { s.dataType = DataType::BFLOAT16; }, true},
+        {"ChannelsFirst",
+         [](ConvShape& s, WrwConfig& c, Align&) {
+             s.channelsLast = false;
+             c.layout = "NCHW";
+         },
+         false},
+        {"HeightStride2", [](ConvShape& s, WrwConfig&, Align&) { s.stride = {2, 1}; }, true},
+        {"WidthStride2", [](ConvShape& s, WrwConfig&, Align&) { s.stride = {1, 2}; }, false},
+        {"HeightDilation2",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.dilation = {2, 1};
+             s.prePadding = s.postPadding = {2, 1};
+         },
+         true},
+        {"WidthDilation2",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.dilation = {1, 2};
+             s.prePadding = s.postPadding = {1, 2};
+         },
+         false},
+        {"ChannelsNotVectors",
+         [](ConvShape& s, WrwConfig&, Align&) { s.c = s.k = s.groups = 42; },
+         false},
+        {"ChannelsOfTwoVectors",
+         [](ConvShape& s, WrwConfig& c, Align&) {
+             s.c = s.k = s.groups = 42;
+             c.cv = 2;
+         },
+         true},
+        {"FilterNotTheConfigs",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.filter = {5, 5};
+             s.prePadding = s.postPadding = {2, 2};
+         },
+         false},
+        {"FilterWidthNotTheConfigs",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.filter = {3, 5};
+             s.prePadding = s.postPadding = {1, 2};
+         },
+         false},
+        {"ConfigDepthNotOne", [](ConvShape&, WrwConfig& c, Align&) { c.kd = 3; }, false},
+        {"ThreeD",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s = depthwise(40, {4, 13, 21}, {1, 3, 3}, {0, 1, 1}, true);
+         },
+         false},
+        {"Multiplier",
+         [](ConvShape& s, WrwConfig& c, Align&) {
+             s.k = 80;
+             c.mult = 2;
+         },
+         false},
+        {"CvThree", [](ConvShape&, WrwConfig& c, Align&) { c.cv = 3; }, false},
+        {"CvZero", [](ConvShape&, WrwConfig& c, Align&) { c.cv = 0; }, false},
+        {"CvSixteen", [](ConvShape&, WrwConfig& c, Align&) { c.cv = 16; }, false},
+        {"StripThree", [](ConvShape&, WrwConfig& c, Align&) { c.strip = 3; }, false},
+        {"StripZero", [](ConvShape&, WrwConfig& c, Align&) { c.strip = 0; }, false},
+        {"XAlignedToFourBytes", [](ConvShape&, WrwConfig&, Align& a) { a.x = 4; }, false},
+        {"DyAlignedToFourBytes", [](ConvShape&, WrwConfig&, Align& a) { a.y = 4; }, false},
+        {"FourBytesFitTwoHalves",
+         [](ConvShape&, WrwConfig& c, Align& a) {
+             a.x = a.y = 4;
+             c.cv = 2;
+         },
+         true},
+        {"WithMatrixFields", [](ConvShape&, WrwConfig& c, Align&) { c.q = 32; }, false},
+        {"WithAStride", [](ConvShape&, WrwConfig& c, Align&) { c.s = 1; }, false},
+        {"TileWithVectorFields",
+         [](ConvShape&, WrwConfig& c, Align&) { c.variant = "tile"; },
+         false},
+    };
+    const auto pack = wrwPack();
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        auto shape = base();
+        shape.dataType = DataType::HALF;
+        WrwConfig config{"NHWC", "vtile", 1, 3, 3};
+        config.cv = 4;
+        config.strip = 8;
+        Align align;
+        c.mutate(shape, config, align);
+        auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+        spec.x.alignment = align.x;
+        spec.y.alignment = align.y;
+        const GraphFixture fixture(buildGraph(spec), countedDevice(64, "gfx942"));
         const auto bound = matchesGraph(pack, fixture.context());
         ASSERT_TRUE(bound.has_value());
         EXPECT_EQ(

@@ -18,6 +18,10 @@
 
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,modernize-macro-to-enum)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 #define CONV_NAIVE_SPATIAL_DIMS 3
 #define CONV_NAIVE_TENSOR_DIMS 5
 
@@ -53,3 +57,5 @@ struct ConvNaiveArgs
     int flipFilter;
     int padding0; // keeps the struct size a multiple of 8 on host and device alike
 };
+
+// NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

@@ -61,7 +61,7 @@ constexpr int64_t MAX_GEMM_EXTENT = int64_t{1} << 30;
  * Applied by the GEMM plans, so an image over 8 GiB of fp32, or a GEMM over 2^31 positions,
  * runs instead of reaching a library that cannot address it.
  */
-std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls);
+std::vector<GemmCall> fitLibraryLimits(const std::vector<GemmCall>& calls);
 
 /// The bytes of the operand a reduction walks past which rocBLAS's Tensile path splits the
 /// reduction itself (k times the leading dimension k walks, times a's element size): it keeps

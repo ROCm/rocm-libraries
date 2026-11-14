@@ -6,6 +6,10 @@
 // with this file as an embedded include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// The convolution: x (n, c, d, h, w) and y (n, k, d, h, w) through their element strides, the
 /// weights pre-formatted by ConvSmallcFormat. Extents and padding are runtime; the filter,
 /// stride, dilation and tile are compile-time.
@@ -38,3 +42,5 @@ struct SmallcFormatArgs
     int flip;
     int bn; ///< 0: wf[n][kp] (MMA); else wf[n / bn][kp][n % bn] (FMA: a block's rows by k)
 };
+
+// NOLINTEND(modernize-avoid-c-arrays)

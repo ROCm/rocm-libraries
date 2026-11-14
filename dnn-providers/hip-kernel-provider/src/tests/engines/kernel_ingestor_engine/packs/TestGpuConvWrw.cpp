@@ -102,7 +102,8 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
         // Packs per dtype and kernel family (conv_wrw_<dtype>_<family>.kdp.json), all in the
         // first root that has any.
         const auto isPack = [](const std::string& name) {
-            const std::string prefix = "conv_wrw_", suffix = ".kdp.json";
+            const std::string prefix = "conv_wrw_";
+            const std::string suffix = ".kdp.json";
             return name.size() > prefix.size() + suffix.size()
                    && name.compare(0, prefix.size(), prefix) == 0
                    && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
@@ -304,8 +305,10 @@ struct DeviceCase
     /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
     /// and gfx12: skipped on gfx906 and gfx11.
     bool genericOnly = false;
-    /// x's element strides (the generic loop's strided operands); empty: packed.
-    std::vector<int64_t> xStrides{};
+    /// x's element strides (the generic loop's strided operands); empty: packed. The default
+    /// initializer lets the cases' aggregate initializations omit it without
+    /// -Wmissing-field-initializers.
+    std::vector<int64_t> xStrides{}; // NOLINT(readability-redundant-member-init)
 };
 
 ConvShape conv(int64_t c,
@@ -374,6 +377,14 @@ std::vector<DeviceCase> deviceCases()
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, false, 1, 1)},
         {"Deeplab3x3Dilation12Nhwc",
          conv(16, 16, {30, 30}, {3, 3}, {12, 12}, {12, 12}, {1, 1}, {12, 12}, true, 1, 1)},
+        // Ring tracks of two lengths (ringTrackOf): dilation 24 on 41 rows (classes below 17
+        // one step longer) over three images, so splits start in long and short tracks and in
+        // a later image; and dilation 36 on a 65 x 65 map (2 dy rows below class 29, else 1)
+        // with partial channel tiles.
+        {"Deeplab3x3Dilation24ThreeImages",
+         conv(24, 40, {41, 45}, {3, 3}, {24, 24}, {24, 24}, {1, 1}, {24, 24}, false, 1, 3)},
+        {"Deeplab65Dilation36PartialTiles",
+         conv(24, 40, {65, 65}, {3, 3}, {36, 36}, {36, 36}, {1, 1}, {36, 36}, false, 1, 2)},
         {"Stride2", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1})},
         {"Stride2Nhwc", conv(24, 40, {13, 15}, {3, 3}, {1, 1}, {1, 1}, {2, 2}, {1, 1}, true)},
         {"Stride2Pad0OddChannels", conv(5, 7, {9, 10}, {3, 3}, {0, 0}, {0, 0}, {2, 2}, {1, 1})},
@@ -396,6 +407,12 @@ std::vector<DeviceCase> deviceCases()
          conv(16, 32, {9, 11}, {1, 1}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, true)},
         {"Pointwise1x1Nhwc", conv(64, 136, {6, 9}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, true)},
         {"Pointwise1x1OddChannels", conv(70, 33, {6, 7}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1})},
+        // Channels-first planes read as one row (9 x 13 = 117 positions: chunks run across row
+        // ends, the last partial), three images, partial channel tiles; and a 3-D plane.
+        {"Pointwise1x1PlaneAsOneRow",
+         conv(40, 72, {9, 13}, {1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, false, 1, 3)},
+        {"Pointwise1x1x1PlaneAsOneRow",
+         conv(24, 40, {3, 5, 7}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1})},
         {"Pad0OddChannels", conv(5, 7, {7, 9}, {3, 3}, {0, 0}, {0, 0}, {1, 1}, {1, 1})},
         // The row reduce: channel runs of 64, 64 and 8 (K C R S).
         {"Nchw3x3ThreeChannelRuns", conv(136, 24, {6, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})},
@@ -528,11 +545,11 @@ std::vector<DeviceCase> deviceCases()
     // 24 channels of 10 x 12, rows 16 apart (channels-first elements).
     generic("GenericPaddedRowsNchw",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}),
-            {24 * 10 * 16, 10 * 16, 16, 1});
+            {int64_t{24} * 10 * 16, int64_t{10} * 16, 16, 1});
     // Channels-last, positions 32 channels apart (24 used): channel vectors.
     generic("GenericPaddedChannelsNhwc",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
-            {10 * 12 * 32, 1, 12 * 32, 32});
+            {int64_t{10} * 12 * 32, 1, int64_t{12} * 32, 32});
     // One channels-last x image of 2^30 elements (2 GiB in 16-bit, 4 GiB in fp32): the generic
     // loop's block-based buffers (pb 1), rebased each step. 1x1 stride 4 keeps the CPU
     // reference short.
@@ -546,7 +563,7 @@ std::vector<DeviceCase> deviceCases()
     // Positions 26 apart: not whole vectors, channels-last elements.
     generic("GenericPaddedChannelsNhwcElements",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
-            {10 * 12 * 26, 1, 12 * 26, 26});
+            {int64_t{10} * 12 * 26, 1, int64_t{12} * 26, 26});
     return cases;
 }
 
@@ -638,9 +655,15 @@ bool matches(float got, float want, float tolerance)
     return std::fabs(got - want) <= tolerance;
 }
 
+/// Runs every config of @p kernels (default: the shipped catalog) the kernel match admits on
+/// the case, against the CPU reference.
 template <typename T>
-void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infinities = false)
+void runCase(const DeviceCase& deviceCase,
+             Math math = Math::NATIVE,
+             bool infinities = false,
+             const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>* kernels = nullptr)
 {
+    const auto& configs = kernels != nullptr ? *kernels : catalog();
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
     auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
@@ -658,7 +681,7 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
     // Cases only a few configs serve skip before building their (large) tensors.
     if(deviceCase.someArchs
-       && std::none_of(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+       && std::none_of(configs.begin(), configs.end(), [&](const auto& kernel) {
               return matchesKernel(PACK, fixture.context(), kernel, *bound);
           }))
     {
@@ -705,7 +728,7 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
     const auto& handler = dispatchHandler(PACK);
     int ran = 0;
     int wroteDw = 0;
-    for(const auto& kernel : catalog())
+    for(const auto& kernel : configs)
     {
         if(!matchesKernel(PACK, fixture.context(), kernel, *bound)
            || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
@@ -780,8 +803,8 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!matches(got, want, tolerance) && ++mismatches <= 5)
@@ -846,6 +869,59 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
 
+/// gfx950's channels-last ring kept channels-last (loop 1, layout 2) at 128 x 128 tiles, a
+/// geometry the kernel match admits but the catalog does not ship: two k-fragments a wave (w2x4,
+/// 288 accumulators a lane, so it spills) and one (w4x4), 64 positions a step, on 320 channels
+/// (partial k and c tiles: the last tile's second k-wave and last two c-waves hold no channel).
+/// A FlyDSL port of this loop computed wrong dw here; the HIP kernel must not.
+template <typename T>
+void runWideTilesPartialChannels()
+{
+    const std::string atom = std::is_same_v<T, Half> ? "mfma32x16_f16" : "mfma32x16_bf16";
+    const auto base = std::find_if(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+        return kernel.getStringMetadata("atom") == atom
+               && kernel.getIntMetadata("loop") == conv_wrw::LOOP_RING
+               && kernel.getIntMetadata("layout") == conv_wrw::LAYOUT_CHANNELS_LAST_TR
+               && kernel.getIntMetadata("fr") == 3 && kernel.getIntMetadata("s") == 3
+               && kernel.getIntMetadata("dw") == 1 && kernel.getIntMetadata("pb") == 0
+               && kernel.getIntMetadata("math") == 0;
+    });
+    ASSERT_NE(base, catalog().end()) << "no channels-last ring config of " << atom;
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    // (bk, bc, bq, wk, wc)
+    for(const auto& [bk, bc, bq, wk, wc] :
+        std::vector<std::array<int64_t, 5>>{{128, 128, 64, 2, 4}, {128, 128, 64, 4, 4}})
+    {
+        auto kernel = *base;
+        kernel.metadata["bk"] = bk;
+        kernel.metadata["bc"] = bc;
+        kernel.metadata["bq"] = bq;
+        kernel.metadata["wk"] = wk;
+        kernel.metadata["wc"] = wc;
+        kernel.metadata["bpu"] = int64_t{1};
+        kernel.name = "wide." + std::to_string(bk) + "x" + std::to_string(bc) + "x"
+                      + std::to_string(bq) + ".w" + std::to_string(wk) + "x" + std::to_string(wc);
+        kernels.push_back(std::move(kernel));
+    }
+    DeviceCase deviceCase{"WideTiles320",
+                          conv(320, 320, {16, 18}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)};
+    // Admitted on gfx950 only (transpose reads, LDS past 64 KiB): skipped elsewhere.
+    deviceCase.someArchs = true;
+    runCase<T>(deviceCase, Math::NATIVE, false, &kernels);
+}
+
+TEST(TestGpuConvWrwWideTiles, HalfPartialChannelTiles)
+{
+    SKIP_IF_NO_DEVICES();
+    runWideTilesPartialChannels<Half>();
+}
+
+TEST(TestGpuConvWrwWideTiles, BFloat16PartialChannelTiles)
+{
+    SKIP_IF_NO_DEVICES();
+    runWideTilesPartialChannels<BFloat16>();
+}
+
 /// The three-bf16 fp32 configs (TF32 permission): devices with bf16 matrix cores where three
 /// bf16 products beat exact fp32 (gfx90a, gfx942, gfx950, gfx11, gfx12; not gfx908).
 class TestGpuConvWrwThreeBf16 : public ::testing::TestWithParam<DeviceCase>
@@ -889,33 +965,33 @@ TEST_P(TestGpuConvWrwThreeBf16, FloatInfinities)
 /// convolution, padding past the filter, and many reduction steps (several splits).
 std::vector<DeviceCase> threeBf16Cases()
 {
-    static const std::set<std::string> NAMES{"Nchw3x3",
-                                             "Nhwc3x3",
-                                             "Nhwc3x3Wide",
-                                             "ThreeD3x3x3",
-                                             "ThreeDNhwc3x3x3",
-                                             "OneD1x7",
-                                             "Stride2",
-                                             "Stride2Nhwc",
-                                             "Dilation2",
-                                             "GroupedNhwc3x3",
-                                             "Stem7x7Stride2",
-                                             "Stem7x7Stride2Nhwc",
-                                             "Pointwise1x1Nhwc",
-                                             "Pointwise1x1OddChannels",
-                                             "PaddingPastTheFilter",
-                                             "ManySteps",
-                                             "TrueConvolutionNhwc",
-                                             "FilterKrscUnderNchw"};
+    static const std::set<std::string> s_names{"Nchw3x3",
+                                               "Nhwc3x3",
+                                               "Nhwc3x3Wide",
+                                               "ThreeD3x3x3",
+                                               "ThreeDNhwc3x3x3",
+                                               "OneD1x7",
+                                               "Stride2",
+                                               "Stride2Nhwc",
+                                               "Dilation2",
+                                               "GroupedNhwc3x3",
+                                               "Stem7x7Stride2",
+                                               "Stem7x7Stride2Nhwc",
+                                               "Pointwise1x1Nhwc",
+                                               "Pointwise1x1OddChannels",
+                                               "PaddingPastTheFilter",
+                                               "ManySteps",
+                                               "TrueConvolutionNhwc",
+                                               "FilterKrscUnderNchw"};
     std::vector<DeviceCase> cases;
     for(const auto& deviceCase : deviceCases())
     {
-        if(NAMES.count(deviceCase.name) != 0)
+        if(s_names.count(deviceCase.name) != 0)
         {
             cases.push_back(deviceCase);
         }
     }
-    if(cases.size() != NAMES.size())
+    if(cases.size() != s_names.size())
     {
         throw std::logic_error("a three-bf16 case names no device case");
     }
@@ -968,13 +1044,22 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
     static constexpr std::array<const char*, 23> KNOBS{
         "atom_id", "loop", "layout", "bk",  "bc", "bq",    "fr",  "s",  "sw",  "dw", "wk",  "wc",
         "tk",      "tc",   "vec",    "xcd", "ns", "align", "bpu", "wq", "dws", "pb", "math"};
-    std::set<std::vector<int64_t>> seen[3];
+    std::array<std::set<std::vector<int64_t>>, 3> seen;
     for(const auto& kernel : catalog())
     {
         SCOPED_TRACE(kernel.name);
         const auto dtype = stringOf(kernel, "dtype");
-        const int slot = dtype == "FLOAT" ? 0 : dtype == "HALF" ? 1 : 2;
+        size_t slot = 2;
+        if(dtype == "FLOAT")
+        {
+            slot = 0;
+        }
+        else if(dtype == "HALF")
+        {
+            slot = 1;
+        }
         std::vector<int64_t> tuple;
+        tuple.reserve(KNOBS.size());
         for(const char* knob : KNOBS)
         {
             tuple.push_back(kernel.getIntMetadata(knob));

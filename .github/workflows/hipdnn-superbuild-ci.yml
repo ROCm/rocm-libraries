@@ -258,6 +258,8 @@ jobs:
 
       - name: Configure superbuild
         run: |
+          # The preset builds the hip-kernel-provider conv engine group; it is not yet built on
+          # Windows (conv/README.md, opt-in preview), so this lane turns it off.
           cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
@@ -265,6 +267,7 @@ jobs:
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON \
+            -DHIPKERNELPROVIDER_ENABLE_CONV=OFF \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
             -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \

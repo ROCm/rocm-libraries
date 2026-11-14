@@ -594,9 +594,9 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         decode divides through host-computed fast-division params
         (:attr:`fastdiv_divisors`), so the grid-stride loop stays multiply-and-shift.
         Sliding-window is on the runtime path: its KV-loop prune reads only the query
-        block, the window and the runtime trip count, and its zero-trip guard and
-        empty-row rule in :func:`supports_attention_dense` run per launch, ahead of the
-        cache lookup.
+        block, the window and the runtime trip count, and the epilogue zeroes the rows
+        that see no key from the runtime ``seqlen_kv``, so a window needs no
+        window-specific per-shape guard ahead of the cache lookup.
         ``ragged``/``varlen``/``paged`` never reach the builder
         (:func:`supports_attention_dense` rejects them) but stay in the predicate,
         identical to the gfx950 twin, so a later admit lands already excluded.
@@ -1387,47 +1387,6 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
-    # Sliding-window + causal: the last query block's window can start past
-    # seqlen_kv (start_tile >= n_up), giving a zero-trip KV loop -> l == 0 ->
-    # rcp(0) -> NaN. Same class as the block_m % block_n gate above; reject.
-    # Sinks make the zero-trip loop well-defined: l stays at the l0 = 1 seed and
-    # o at zero, so the output is 0, which is softmax([sink]) applied to no values.
-    if spec.sliding_window and spec.causal and not spec.use_sinks:
-        _n_q = spec.seqlen_q // spec.block_m
-        # Floor division, so the guard reads the same tile count the KV loop uses
-        # (n_ktiles = Skv // BN). The shared spec enforces seqlen_kv % block_n == 0,
-        # so floor and ceil coincide for every spec that reaches here.
-        _n_ktiles = spec.seqlen_kv // spec.block_n
-        _n_per = spec.block_m // spec.block_n
-        _swt = spec.sliding_window // spec.block_n
-        if (_n_q - 1) * _n_per - _swt >= _n_ktiles:
-            return False, (
-                f"sliding_window={spec.sliding_window}: last query block's window "
-                f"starts at tile {(_n_q - 1) * _n_per - _swt}, past seqlen_kv tile "
-                f"count {_n_ktiles} -> zero-trip KV loop -> NaN (well-defined "
-                f"with use_sinks)"
-            )
-    # The same window, row by row: row q keeps keys (q - W, q], so once
-    # seqlen_q - seqlen_kv >= W the last rows keep none even where their block
-    # visits tiles. Every score of such a row is the mask value, so the softmax
-    # averages V instead of yielding nothing. Sinks seed the softmax (the row is 0,
-    # softmax([sink]) over no values) and the LSE path zeroes key-less rows
-    # (row_has_key), so both are exempt. The zero-trip guard above still applies with
-    # emit_lse (it exempts sinks only); on tile-divisible shapes every shape it rejects
-    # is also one of these. The hipDNN gfx942 dense pack restates this rule
-    # (packs/AttentionDenseNative.cpp maskFor).
-    if (
-        spec.sliding_window
-        and spec.causal
-        and not spec.use_sinks
-        and not spec.emit_lse
-        and spec.seqlen_q - spec.seqlen_kv >= spec.sliding_window
-    ):
-        return False, (
-            f"sliding_window={spec.sliding_window} over seqlen_q={spec.seqlen_q}, "
-            f"seqlen_kv={spec.seqlen_kv}: rows from {spec.seqlen_kv + spec.sliding_window - 1} "
-            f"see no key and would average V (well-defined with use_sinks or emit_lse)"
-        )
     return True, ""
 
 
@@ -1476,8 +1435,8 @@ def _emit_o_store(
 ):
     """O = acc / l, ``width`` contiguous head-dim elements per global store.
 
-    ``row_has_key`` (LSE path only) zeroes rows that see no key; ``None`` emits the
-    unchanged store sequence.
+    ``row_has_key`` zeroes rows that see no key (the LSE path and sliding-window specs
+    without sinks); ``None`` emits the unchanged store sequence.
     """
     for dt in range(d_tiles):
         for g in range(4):
@@ -2171,11 +2130,11 @@ def _build_attention_dense_single_buffer(
             # KV loop runs at least once. With the runtime trip count it cannot see
             # that on its own, and it then clones the epilogue and the grid-stride
             # latch for a zero-trip edge, which costs the outer loop its schedule.
-            # A no-op on every supported shape: the sliding-window guard in
-            # supports_attention_dense keeps the last (latest-starting) query
-            # block's start_tile below n_ktiles, every start_tile is below its own
-            # diagonal, and n_up >= 1 since seqlen_kv >= BN. The default grid runs
-            # one item per CTA, so it keeps its IR unchanged.
+            # A query block whose window starts past the KV extent gets one fully
+            # masked tile from this clamp (n_up >= 1 since seqlen_kv >= BN); its rows
+            # are zeroed in the epilogue via row_has_key. Every other start_tile is
+            # already below its own diagonal. The default grid runs one item per CTA,
+            # so it keeps its (possibly zero-trip) loop and its IR unchanged.
             if spec.persistent:
                 _last = b.sub(n_up, b.const_i32(1))
                 start_tile = b.select(b.cmp_lt(start_tile, _last), start_tile, _last)
@@ -2678,7 +2637,14 @@ def _build_attention_dense_single_buffer(
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
-        if spec.emit_lse:
+        # A sliding window can leave the last query rows (seqlen_q - seqlen_kv >= SW)
+        # with no key at all. Their running max never leaves the finite mask sentinel,
+        # so every masked score exps to 1 and O is mean(V); a zero-trip KV loop leaves
+        # l == 0 and 0 * rcp(0) is NaN. Those rows are zeroed in the O store with the
+        # same predicate and integer AND the LSE path uses. Sinks seed l = 1 and P = 0,
+        # so their keyless rows are already 0. Specs without a window emit no new IR.
+        row_has_key = None
+        if spec.emit_lse or (SW and not spec.use_sinks):
             row_has_key = dense_row_has_key(
                 b,
                 qtok,
@@ -2687,6 +2653,7 @@ def _build_attention_dense_single_buffer(
                 diagonal=0,
                 window=SW,
             )
+        if spec.emit_lse:
             lse_index = b.add(
                 b.mul(
                     b.add(
@@ -2720,7 +2687,7 @@ def _build_attention_dense_single_buffer(
             dtype,
             D_TILES,
             spec.o_store_width,
-            row_has_key=row_has_key if spec.emit_lse else None,
+            row_has_key=row_has_key,
         )
 
     # ---- grid dispatch: default (one CTA per work item) vs persistent (P4) ----

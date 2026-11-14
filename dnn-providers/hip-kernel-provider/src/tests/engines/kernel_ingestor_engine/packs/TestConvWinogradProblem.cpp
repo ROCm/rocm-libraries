@@ -3,6 +3,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -33,15 +34,18 @@ using conv_winograd::parseWinogradProblem;
 using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
-constexpr ConvDirection DIRECTIONS[] = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA};
-constexpr ConvDirection ALL_DIRECTIONS[]
+constexpr std::array<ConvDirection, 2> DIRECTIONS
+    = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA};
+constexpr std::array<ConvDirection, 3> ALL_DIRECTIONS
     = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS};
 
 std::string directionName(ConvDirection direction)
 {
-    return direction == ConvDirection::FORWARD         ? "Fwd"
-           : direction == ConvDirection::BACKWARD_DATA ? "Bwd"
-                                                       : "Wrw";
+    if(direction == ConvDirection::FORWARD)
+    {
+        return "Fwd";
+    }
+    return direction == ConvDirection::BACKWARD_DATA ? "Bwd" : "Wrw";
 }
 
 /// The base problem every refusal mutates: 3x3, stride 1, padding 1, NCHW.
@@ -302,9 +306,11 @@ TEST(TestConvWinogradForm, StrideTwoBackwardScattersPhasesAsChannels)
 
 TensorSpec& written(ConvGraphSpec& spec)
 {
-    return spec.direction == ConvDirection::FORWARD         ? spec.y
-           : spec.direction == ConvDirection::BACKWARD_DATA ? spec.x
-                                                            : spec.w;
+    if(spec.direction == ConvDirection::FORWARD)
+    {
+        return spec.y;
+    }
+    return spec.direction == ConvDirection::BACKWARD_DATA ? spec.x : spec.w;
 }
 
 /// Rebuilds the operands of @p spec from @p shape (a consistent change of several fields).
@@ -581,6 +587,19 @@ ConfigFields coop(const std::string& arch, int64_t f16math)
     return f;
 }
 
+/// Cooperative 16-bin layout (RDNA): 4 K waves of 16 out channels by 16 tiles each, one tile wave.
+ConfigFields coop16(const std::string& arch)
+{
+    ConfigFields f = coop(arch, 1);
+    f.bk = 64;
+    f.bt = 16;
+    f.waves = 4;
+    f.tm = 1;
+    f.tn = 1;
+    f.bins = 16;
+    return f;
+}
+
 /// Register-operand VALU (wave64 gfx9): 16-wide K block, 64 tiles, 4 waves.
 ConfigFields sreg(int64_t f16math)
 {
@@ -626,7 +645,7 @@ TEST(TestConvWinogradKernelMatch, F43IsDeclinedUnlessPermitted)
 {
     ConfigFields f4;
     f4.m = 4;
-    ConfigFields f2;
+    ConfigFields const f2;
     for(const auto direction : DIRECTIONS)
     {
         const auto pack = direction == ConvDirection::FORWARD ? PACK_FWD : PACK_BWD;
@@ -634,7 +653,7 @@ TEST(TestConvWinogradKernelMatch, F43IsDeclinedUnlessPermitted)
                                    testDeviceProperties());
         const auto bound = matchesGraph(pack, fixture.context());
         ASSERT_TRUE(bound.has_value());
-        const auto kernelFor = [&](ConfigFields fields) {
+        const auto kernelFor = [&](const ConfigFields& fields) {
             auto kernel = kernelOf(fields, "FLOAT");
             kernel.metadata["direction"]
                 = std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD");
@@ -658,9 +677,18 @@ bool admits(const ConfigFields& fields,
             ConvShape shape = baseShape(),
             const std::string& dtype = "FLOAT")
 {
-    shape.dataType = dtype == "FLOAT"  ? DataType::FLOAT
-                     : dtype == "HALF" ? DataType::HALF
-                                       : DataType::BFLOAT16;
+    if(dtype == "FLOAT")
+    {
+        shape.dataType = DataType::FLOAT;
+    }
+    else if(dtype == "HALF")
+    {
+        shape.dataType = DataType::HALF;
+    }
+    else
+    {
+        shape.dataType = DataType::BFLOAT16;
+    }
     // bf16 graphs and F(4,3) configs are admitted only with their opt-ins (bf16Permitted,
     // f43Permitted); the configs' own rules are what these cases test.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter bf16(
@@ -678,7 +706,7 @@ bool admits(const ConfigFields& fields,
 
 TEST(TestConvWinogradKernelMatch, MultipassServesItsOwnLayoutAndStagesOthersToNchw)
 {
-    ConfigFields nchw;
+    ConfigFields const nchw;
     ConfigFields nhwc;
     nhwc.layout = "NHWC";
     auto channelsLast = baseShape();
@@ -709,6 +737,18 @@ TEST(TestConvWinogradKernelMatch, FusedRunsEverywhereAndStagesNhwc)
     prefetch.pf = 1;
     EXPECT_TRUE(admits(prefetch, "gfx1201"));
     EXPECT_TRUE(admits(prefetch, "gfx906"));
+    // 8 x 16 micro-tiles are tagged with their RDNA family and run only there.
+    auto wide = fused();
+    wide.arch = "gfx12";
+    wide.bt = 64;
+    wide.ccv = 2;
+    wide.tn = 16;
+    EXPECT_TRUE(admits(wide, "gfx1201"));
+    EXPECT_FALSE(admits(wide, "gfx1100"));
+    EXPECT_FALSE(admits(wide, "gfx906"));
+    wide.arch = "gfx11";
+    EXPECT_TRUE(admits(wide, "gfx1100"));
+    EXPECT_FALSE(admits(wide, "gfx1201"));
 }
 
 TEST(TestConvWinogradKernelMatch, WmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
@@ -743,7 +783,7 @@ ConvShape strideTwo()
 
 TEST(TestConvWinogradKernelMatch, ThreeByTwoTilesExactlyForStrideTwo)
 {
-    ConfigFields f2;
+    ConfigFields const f2;
     ConfigFields f3;
     f3.m = 3;
     ConfigFields f4;
@@ -813,6 +853,67 @@ TEST(TestConvWinogradKernelMatch, CooperativeWmmaOnlyOnItsFamilyAndOnlyForSixtee
     f32Bf16.m = 3;
     EXPECT_TRUE(admits(f32Bf16, "gfx1201", strideTwo(), "BFLOAT16"));
     EXPECT_FALSE(admits(f32Bf16, "gfx1100", strideTwo(), "BFLOAT16"));
+}
+
+TEST(TestConvWinogradKernelMatch, CooperativeSixteenBinLayoutOnRdnaForStrideOne)
+{
+    EXPECT_TRUE(admits(coop16("gfx12"), "gfx1201", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(coop16("gfx11"), "gfx1100", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(coop16("gfx11"), "gfx1201", baseShape(), "HALF"));
+    // F(2,3) only: no stride 2.
+    EXPECT_FALSE(admits(coop16("gfx12"), "gfx1201", strideTwo(), "HALF"));
+    // Two tile waves (32 tiles), and 8 K waves (128 out channels).
+    auto twoTileWaves = coop16("gfx12");
+    twoTileWaves.bt = 32;
+    twoTileWaves.waves = 8;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(twoTileWaves, "HALF")).has_value());
+    auto eightKWaves = coop16("gfx12");
+    eightKWaves.bk = 128;
+    eightKWaves.waves = 8;
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(eightKWaves, "HALF")).has_value());
+    // Every field the layout reads is gated: one decline each.
+    struct Case
+    {
+        const char* name;
+        std::function<void(ConfigFields&)> edit;
+    };
+    const std::vector<Case> cases{
+        {"Cdna", [](ConfigFields& f) { f.arch = "gfx9"; }},
+        {"FThreeTwo", [](ConfigFields& f) { f.m = 3; }},
+        {"Nhwc", [](ConfigFields& f) { f.layout = "NHWC"; }},
+        {"Bins8", [](ConfigFields& f) { f.bins = 8; }},
+        {"TwoKTiles", [](ConfigFields& f) { f.tm = 2; }},
+        {"TwoTileGroups", [](ConfigFields& f) { f.tn = 2; }},
+        {"KBlock48",
+         [](ConfigFields& f) {
+             f.bk = 48;
+             f.waves = 3;
+         }},
+        {"KBlock16",
+         [](ConfigFields& f) {
+             f.bk = 16;
+             f.waves = 1;
+         }},
+        {"TileBlock64",
+         [](ConfigFields& f) {
+             f.bt = 64;
+             f.waves = 16;
+         }},
+        {"WavesNotKwTimesTw", [](ConfigFields& f) { f.waves = 8; }},
+        {"Prefetch", [](ConfigFields& f) { f.pf = 1; }},
+        {"Llc", [](ConfigFields& f) { f.llc = 1; }},
+    };
+    for(const auto& [name, edit] : cases)
+    {
+        SCOPED_TRACE(name);
+        auto f = coop16("gfx12");
+        edit(f);
+        EXPECT_FALSE(conv_winograd::configOf(kernelOf(f, "HALF")).has_value());
+    }
+    // The transform-row layout reads no micro-tile fields.
+    auto rowLayout = coop("gfx12", 1);
+    rowLayout.tm = 1;
+    EXPECT_FALSE(conv_winograd::configOf(kernelOf(rowLayout, "HALF")).has_value());
 }
 
 TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16FromGfx90a)
@@ -1070,6 +1171,12 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
              f.f16math = 1;
              return f;
          }},
+        {"FusedArchGfx9",
+         [] {
+             auto f = fused();
+             f.arch = "gfx9";
+             return f;
+         }},
         {"WmmaF16Math",
          [] {
              auto f = wmma("gfx11");
@@ -1137,10 +1244,10 @@ TEST(TestConvWinogradPlan, SlicesTheBatchUnderTheCacheAndSizesTheWorkspace)
     ASSERT_TRUE(whole.has_value());
     EXPECT_EQ(whole->slices, 1);
     // U, V and M of F(2,3): 16 positions x (K x C, C x tiles, K x tiles fp32).
-    const size_t tiles = 8 * 4 * 3;
-    EXPECT_EQ(whole->uBytes, size_t{16 * 6 * 4 * 4});
-    EXPECT_EQ(whole->vBytes, size_t{16 * 4 * 4} * tiles);
-    EXPECT_EQ(whole->mBytes, size_t{16 * 6 * 4} * tiles);
+    const size_t tiles = size_t{8} * 4 * 3;
+    EXPECT_EQ(whole->uBytes, size_t{16} * 6 * 4 * 4);
+    EXPECT_EQ(whole->vBytes, size_t{16} * 4 * 4 * tiles);
+    EXPECT_EQ(whole->mBytes, size_t{16} * 6 * 4 * tiles);
     EXPECT_GE(whole->workspaceBytes, whole->uBytes + whole->vBytes + whole->mBytes);
 
     auto llcFields = ConfigFields{};
@@ -1180,6 +1287,80 @@ TEST(TestConvWinogradPlan, PersistentVariantsDeclineADeviceWithoutUnits)
     const auto multipass = conv_winograd::configOf(kernelOf(ConfigFields{}, "FLOAT"));
     ASSERT_TRUE(multipass.has_value());
     EXPECT_TRUE(conv_winograd::planFor(*problem, *multipass, countedDevice(0)).has_value());
+}
+
+TEST(TestConvWinogradPlan, CooperativeSixteenBinGridIsWhatTheUnitsHold)
+{
+    // 16 x 128 x 128 images, 64 -> 128 channels: 65536 tiles, far more items than blocks.
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 16;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {128, 128};
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto gridOn = [&](const ConfigFields& fields, const char* arch) {
+        auto device = countedDevice(32);
+        device.gcnArchName = arch;
+        const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
+        EXPECT_TRUE(config.has_value());
+        const auto plan = conv_winograd::planFor(*problem, *config, device);
+        EXPECT_TRUE(plan.has_value());
+        return plan ? plan->mainBlocks : 0U;
+    };
+    // 4 waves of up to 256 registers: 6 per SIMD on the 1536-register parts (24 per unit), 4 on
+    // the others.
+    EXPECT_EQ(gridOn(coop16("gfx12"), "gfx1201"), 32U * 6);
+    EXPECT_EQ(gridOn(coop16("gfx11"), "gfx1100"), 32U * 6);
+    EXPECT_EQ(gridOn(coop16("gfx11"), "gfx1102"), 32U * 4);
+    auto eightWaves = coop16("gfx11");
+    eightWaves.bk = 128;
+    eightWaves.waves = 8;
+    EXPECT_EQ(gridOn(eightWaves, "gfx1100"), 32U * 3);
+    // The transform-row layout keeps 1024 threads per unit: 16 waves of 32, two blocks.
+    EXPECT_EQ(gridOn(coop("gfx11", 1), "gfx1100"), 32U * 2);
+}
+
+TEST(TestConvWinogradPlan, CooperativeCdnaGridIsWhatTheUnitsHold)
+{
+    // 16 x 128 x 128 images, 64 -> 128 channels: far more items than blocks.
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 16;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {128, 128};
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto gridOn = [&](int64_t bk, int64_t bt, int64_t waves, const char* arch) {
+        auto device = countedDevice(32);
+        device.gcnArchName = arch;
+        auto fields = coop("gfx9", 1);
+        fields.bk = bk;
+        fields.bt = bt;
+        fields.waves = waves;
+        const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
+        EXPECT_TRUE(config.has_value());
+        const auto plan = conv_winograd::planFor(*problem, *config, device);
+        EXPECT_TRUE(plan.has_value());
+        return plan ? plan->mainBlocks : 0U;
+    };
+    // 2 x 2 tiles, 4 waves (k5CoopCdnaWpe: 168 registers, 3 waves a SIMD), 32 KiB of LDS:
+    // 3 blocks a CU on gfx950 (160 KiB of LDS), 2 on the 64 KiB parts; gfx908 keeps its
+    // register bound (4) and takes the LDS one.
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx950"), 32U * 3);
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx942"), 32U * 2);
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx908"), 32U * 2);
+    // 2 x 4 tiles, 8 waves (2 a SIMD): one block.
+    EXPECT_EQ(gridOn(64, 64, 8, "gfx950"), 32U);
+    // 1 x 4 tiles, 4 waves, two transform jobs a lane (2 waves a SIMD), 64 KiB of LDS.
+    EXPECT_EQ(gridOn(16, 64, 4, "gfx950"), 32U * 2);
+    EXPECT_EQ(gridOn(16, 64, 4, "gfx942"), 32U);
+    // 16 waves (4 a SIMD): one block.
+    EXPECT_EQ(gridOn(64, 64, 16, "gfx950"), 32U);
 }
 
 TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)
@@ -1277,7 +1458,7 @@ TEST(TestConvWinogradPlan, CooperativeFilterBufferHoldsWholeSixteenChannelUnits)
     ASSERT_TRUE(config.has_value());
     const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
     ASSERT_TRUE(plan.has_value());
-    EXPECT_EQ(plan->uBytes, size_t{16 * 16 * 16 * 2});
+    EXPECT_EQ(plan->uBytes, size_t{16} * 16 * 16 * 2);
 }
 
 TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositions)
@@ -1298,8 +1479,9 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
         const auto native = conv_winograd::planFor(*problem, *multipass, testDeviceProperties());
         ASSERT_TRUE(native.has_value());
         const auto& a = problem->args;
-        const auto cgi = static_cast<size_t>(a.ci), cgo = static_cast<size_t>(a.co),
-                   tiles = static_cast<size_t>(native->args.tiles);
+        const auto cgi = static_cast<size_t>(a.ci);
+        const auto cgo = static_cast<size_t>(a.co);
+        const auto tiles = static_cast<size_t>(native->args.tiles);
         EXPECT_EQ(native->slices, 1);
         EXPECT_FALSE(native->in.needed);
         EXPECT_EQ(native->uBytes, 16 * cgo * cgi * 4);
@@ -1312,7 +1494,8 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
             *problem, *conv_winograd::configOf(kernelOf(fused3, "FLOAT")), countedDevice());
         ASSERT_TRUE(staged.has_value());
         // NHWC staged to NCHW: x is 2 x 4 x 7 x 6, y 2 x 6 x 4 x 3, in their graph extents.
-        const size_t xBytes = 2 * 4 * 7 * 6 * 4, yBytes = 2 * 6 * 4 * 3 * 4;
+        const size_t xBytes = size_t{2} * 4 * 7 * 6 * 4;
+        const size_t yBytes = size_t{2} * 6 * 4 * 3 * 4;
         ASSERT_TRUE(staged->in.needed);
         EXPECT_EQ(staged->in.bytes, direction == ConvDirection::FORWARD ? xBytes : yBytes);
         EXPECT_EQ(staged->out.bytes, direction == ConvDirection::FORWARD ? yBytes : xBytes);
@@ -1366,9 +1549,11 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelOf(const ConfigFields& f,
 
 DataType dataTypeNamed(const std::string& dtype)
 {
-    return dtype == "FLOAT"  ? DataType::FLOAT
-           : dtype == "HALF" ? DataType::HALF
-                             : DataType::BFLOAT16;
+    if(dtype == "FLOAT")
+    {
+        return DataType::FLOAT;
+    }
+    return dtype == "HALF" ? DataType::HALF : DataType::BFLOAT16;
 }
 
 bool admitsWrw(const ConfigFields& fields,
@@ -1486,9 +1671,15 @@ TEST(TestConvWinogradWrwKernelMatch, LargerTilesRunOnFp32Operands)
         {
             auto sixteen = wrwAtom(arch);
             sixteen.m = r;
-            const std::string device = std::string(arch) == "gfx950"  ? "gfx950"
-                                       : std::string(arch) == "gfx11" ? "gfx1100"
-                                                                      : "gfx1201";
+            std::string device = "gfx1201";
+            if(std::string(arch) == "gfx950")
+            {
+                device = "gfx950";
+            }
+            else if(std::string(arch) == "gfx11")
+            {
+                device = "gfx1100";
+            }
             EXPECT_FALSE(admitsWrw(sixteen, device, baseShape(), "HALF"));
             EXPECT_FALSE(admitsWrw(sixteen, device, baseShape(), "BFLOAT16"));
         }
@@ -1701,16 +1892,16 @@ TEST(TestConvWinogradWrwPlan, SizesTransformsAndPartialsAndPadsTheTiles)
     EXPECT_EQ(plan->wrw.ldt, 64);
     EXPECT_EQ(plan->slices, 1);
     EXPECT_EQ(plan->wrw.splits, 1);
-    EXPECT_EQ(plan->uBytes, size_t{16 * 6 * 64 * 4});
-    EXPECT_EQ(plan->vBytes, size_t{16 * 4 * 64 * 4});
-    EXPECT_EQ(plan->partBytes, size_t{16 * 6 * 4 * 4});
+    EXPECT_EQ(plan->uBytes, size_t{16} * 6 * 64 * 4);
+    EXPECT_EQ(plan->vBytes, size_t{16} * 4 * 64 * 4);
+    EXPECT_EQ(plan->partBytes, size_t{16} * 6 * 4 * 4);
     EXPECT_GE(plan->workspaceBytes, plan->uBytes + plan->vBytes + plan->partBytes);
     // F(3,4): 36 positions, 2 x 2 tiles per image.
     f.m = 4;
     const auto big = wrwPlan(baseShape(), f, 1);
     ASSERT_TRUE(big.has_value());
     EXPECT_EQ(big->wrw.tiles, 8);
-    EXPECT_EQ(big->uBytes, size_t{36 * 6 * 64 * 4});
+    EXPECT_EQ(big->uBytes, size_t{36} * 6 * 64 * 4);
 }
 
 TEST(TestConvWinogradWrwPlan, SplitsTheTilesUntilTheBlocksFillTheDevice)
@@ -1725,7 +1916,7 @@ TEST(TestConvWinogradWrwPlan, SplitsTheTilesUntilTheBlocksFillTheDevice)
     EXPECT_EQ(plan->wrw.splitTiles % 64, 0);
     EXPECT_GE(static_cast<long long>(plan->wrw.splits) * plan->wrw.splitTiles, plan->wrw.ldt);
     EXPECT_LT(static_cast<long long>(plan->wrw.splits - 1) * plan->wrw.splitTiles, plan->wrw.ldt);
-    EXPECT_EQ(plan->partBytes, size_t{16 * 6 * 4 * 4} * static_cast<size_t>(plan->wrw.splits));
+    EXPECT_EQ(plan->partBytes, size_t{16} * 6 * 4 * 4 * static_cast<size_t>(plan->wrw.splits));
     // A device reporting no units: one split.
     const auto unknown = wrwPlan(shape, wrwFma(), 0);
     ASSERT_TRUE(unknown.has_value());
@@ -1786,7 +1977,7 @@ TEST(TestConvWinogradWrwPlan, StagesChannelsLastByTransposeAndMixedByCopy)
     EXPECT_EQ(nhwc->in.transposeBlocks[0], 1u);
     EXPECT_EQ(nhwc->in.transposeBlocks[1], 1u);
     EXPECT_EQ(nhwc->in.transposeBlocks[2], 2u);
-    EXPECT_EQ(nhwc->in.bytes, size_t{2 * 4 * 7 * 6 * 4});
+    EXPECT_EQ(nhwc->in.bytes, size_t{2} * 4 * 7 * 6 * 4);
     // Mixed layouts: the element-wise copy.
     auto spec = specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS);
     spec.y.strides = packedStrides(spec.y.dims, true);
@@ -1794,7 +1985,7 @@ TEST(TestConvWinogradWrwPlan, StagesChannelsLastByTransposeAndMixedByCopy)
     ASSERT_TRUE(mixed.has_value());
     EXPECT_TRUE(mixed->in.needed && !mixed->in.transpose);
     EXPECT_TRUE(mixed->out.needed && !mixed->out.transpose);
-    EXPECT_EQ(mixed->out.bytes, size_t{2 * 6 * 7 * 6 * 4});
+    EXPECT_EQ(mixed->out.bytes, size_t{2} * 6 * 7 * 6 * 4);
 }
 
 TEST(TestConvWinogradComputeType, ServesCudnnsComputeTypesPerElementType)

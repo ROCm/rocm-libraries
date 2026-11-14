@@ -21,10 +21,11 @@
 //   register WMMA: CONV_WINO_BK, _TG, _BINS, _F16MATH, _GFX12   K-block, 16-tile groups, bins per
 //                  wave, fp16 packed input-transform math, gfx12 operand layout
 //   register VALU: CONV_WINO_BK, _F16MATH                       K-block, fp16 packed math
-//   cooperative: CONV_WINO_MT, _NT, _KW, _F16MATH, _GFX12, _MFMA, _PF  16-channel K tiles per
-//                  wave, 16-tile groups, K waves per row, fp16 packed math, gfx12 operand layout,
-//                  CDNA MFMA (wave64) instead of RDNA WMMA, prefetch (1: the next item's chunk 0
-//                  behind the epilogue)
+//   cooperative: CONV_WINO_MT, _NT, _KW, _F16MATH, _GFX12, _MFMA, _PF, _TW  16-channel K tiles
+//                  per wave, 16-tile groups, K waves per row, fp16 packed math, gfx12 operand
+//                  layout, CDNA MFMA (wave64) instead of RDNA WMMA, prefetch (1: the next item's
+//                  chunk 0 behind the epilogue), tile waves of the 16-bin layout (0: the
+//                  transform-row layout)
 
 #include "ConvWinogradSreg.h"
 #include "ConvWinogradWmmaCoop.h"
@@ -97,7 +98,17 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradFusedFilter(K5Args
     k5FusedFilterTransform<CONV_WINO_T, CONV_WINO_M, K5_NCHW, CONV_WINO_DIR, CONV_WINO_DOT2>(a);
 }
 
-extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) ConvWinogradFused(K5Args a)
+// Waves per SIMD the fused kernel is built for: the 8 x 16 micro-tile with prefetch depth 2 holds
+// 8 (192 registers on RDNA: two blocks per WGP; gfx1100 maskrcnn c256 200² 25.9 -> 23.0 ms);
+// otherwise no bound.
+#if CONV_WINO_TM * CONV_WINO_TN > 64 && CONV_WINO_PFD == 2
+#define CONV_WINO_FUSED_WPE __attribute__((amdgpu_waves_per_eu(8)))
+#else
+#define CONV_WINO_FUSED_WPE
+#endif
+
+extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) CONV_WINO_FUSED_WPE
+    ConvWinogradFused(K5Args a)
 {
     k5FusedConv2<CONV_WINO_T,
                  CONV_WINO_M,
@@ -163,6 +174,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
 #ifndef CONV_WINO_PF
 #define CONV_WINO_PF 0
 #endif
+#ifndef CONV_WINO_TW
+#define CONV_WINO_TW 0
+#endif
 
 #if CONV_WINO_MFMA
 #define CONV_WINO_COOP_ATOM K5CoopMfma<CONV_WINO_T>
@@ -175,7 +189,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
               CONV_WINO_MT,        \
               CONV_WINO_NT,        \
               CONV_WINO_KW,        \
-              CONV_WINO_M>
+              CONV_WINO_M,         \
+              CONV_WINO_TW,        \
+              CONV_WINO_DIR>
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
@@ -197,7 +213,8 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
                 CONV_WINO_F16MATH != 0,
                 CONV_WINO_M,
                 CONV_WINO_DIR,
-                CONV_WINO_PF>(a);
+                CONV_WINO_PF,
+                CONV_WINO_TW>(a);
 }
 
 #elif CONV_WINO_VARIANT == 6

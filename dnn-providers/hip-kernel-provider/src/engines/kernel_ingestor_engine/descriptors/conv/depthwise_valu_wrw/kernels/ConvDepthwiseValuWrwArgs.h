@@ -37,7 +37,7 @@ struct ConvDepthwiseValuWrwArgs
     int sw;
     int dd;
     int dh;
-    int dw_;
+    int dilW;
     int rows;
     int partitions;
     int rowsPerPartition;

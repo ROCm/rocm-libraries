@@ -6,6 +6,10 @@
 // embedded include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,readability-use-std-min-max)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// The convolution in its forward form: x (forward x, backward data dy) channels-last
 /// N D H W c, y (forward y, backward data dx) channels-last N D H W k, and the weights
 /// pre-formatted by ConvDirectFormat. Shapes are runtime; only the filter extent and the tile
@@ -45,6 +49,12 @@ struct K2FormatArgs
     int backward;
     int flip;
 };
+
+/// Most tiles of 16 fn x ka formatted elements one block of the rows weight pre-pass formats per
+/// step (k2rFormatWeights, which takes fewer when the grid has more blocks).
+constexpr int K2R_FORMAT_TILES = 4;
+/// The rows pre-pass grid keeps at least this many blocks (one tile each) before batching tiles.
+constexpr int K2R_FORMAT_MIN_BLOCKS = 256;
 
 /// Three-bf16 input pre-pass: channels-last fp32 x (pixels x c) to bf16 (pixels x 3c), [hi | hi | lo].
 struct K2SplitArgs
@@ -87,3 +97,5 @@ constexpr int k2HaloMax(int bm, int r, int s)
     }
     return best;
 }
+
+// NOLINTEND(modernize-avoid-c-arrays,readability-use-std-min-max)

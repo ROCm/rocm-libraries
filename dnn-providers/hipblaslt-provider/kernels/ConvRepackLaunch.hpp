@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -34,16 +35,18 @@ constexpr int BLOCK = 256;
 constexpr long long MAX_GENERIC_BLOCKS = 1LL << 20;
 constexpr long long INT_LIMIT = std::numeric_limits<int>::max();
 /// LDS one tile may stage: within every target's 64 KiB.
-constexpr long long MAX_TILE_LDS_BYTES = 64 * 1024;
+constexpr long long MAX_TILE_LDS_BYTES = 64LL * 1024;
 /// Grouped col2im stages groups under this many channels; wider groups read whole vectors.
 constexpr long long MAX_STAGED_GROUP_CHANNELS = 64;
 /// Rows the staged per-tap im2col builds in LDS per block: at most 64 and 32 KiB, at least 4.
 constexpr long long MAX_STAGED_ROWS = 64;
 constexpr long long MIN_STAGED_ROWS = 4;
-constexpr long long MAX_STAGED_BYTES = 32 * 1024;
+constexpr long long MAX_STAGED_BYTES = 32LL * 1024;
 /// Threads per dx position the grouped col2im aims for, so a block spans 16+ positions.
 constexpr int STAGED_LANES = 16;
 
+// The argument blocks' extents are C arrays (ConvRepackArgs.h is compiled by HIPRTC too).
+// NOLINTNEXTLINE(modernize-avoid-c-arrays)
 inline long long product3(const long long (&values)[CONV_REPACK_SPATIAL_DIMS])
 {
     return values[0] * values[1] * values[2];
@@ -251,11 +254,11 @@ inline RepackLaunch
                                 && g.xStrides[2] % vec == 0 && g.xStrides[3] % vec == 0
                                 && g.xStrides[4] % vec == 0 && aligned(args.x, 16)
                                 && aligned(args.col, 16);
-        const int width_ = vectorized ? vec : 1;
-        args.launch.lanes = lanesFor(g.cPerGroup / width_);
+        const int vecWidth = vectorized ? vec : 1;
+        args.launch.lanes = lanesFor(g.cPerGroup / vecWidth);
         args.launch.rows = BLOCK / args.launch.lanes;
         const long long rows = g.n * product3(g.output);
-        launch.entry = "Im2ColRows" + width + "V" + std::to_string(width_);
+        launch.entry = "Im2ColRows" + width + "V" + std::to_string(vecWidth);
         launch.grid = static_cast<unsigned int>((rows + args.launch.rows - 1) / args.launch.rows);
         return launch;
     }
@@ -422,15 +425,22 @@ inline RepackLaunch col2imLaunch(Col2ImArgs& args,
             // dx packs them.
             const bool fused = byChannels ? g.xStrides[4] == channels : g.xStrides[3] == g.input[2];
             // The axes whose strides place a run's start: all but the run's own.
-            long long starts[5]
+            std::array<long long, 5> starts
                 = {g.xStrides[0], g.xStrides[1], g.xStrides[2], g.xStrides[3], g.xStrides[4]};
             starts[byChannels ? 1 : 4] = 0;
             if(fused)
             {
                 starts[byChannels ? 4 : 3] = 0;
             }
-            const long long length = byChannels ? (fused ? channels * g.input[2] : channels)
-                                                : (fused ? g.input[1] * g.input[2] : g.input[2]);
+            long long length = 0;
+            if(byChannels)
+            {
+                length = fused ? channels * g.input[2] : channels;
+            }
+            else
+            {
+                length = fused ? g.input[1] * g.input[2] : g.input[2];
+            }
             const long long lines = byChannels
                                         ? g.n * g.input[0] * g.input[1] * (fused ? 1 : g.input[2])
                                         : g.n * channels * g.input[0] * (fused ? 1 : g.input[1]);

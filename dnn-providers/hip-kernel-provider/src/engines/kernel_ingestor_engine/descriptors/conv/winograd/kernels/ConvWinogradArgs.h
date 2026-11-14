@@ -18,11 +18,41 @@
 
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,modernize-macro-to-enum,readability-avoid-nested-conditional-operator,readability-isolate-declaration)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 #define K5_NCHW 0
 #define K5_NHWC 1
 #define K5_FORWARD 0
 #define K5_BACKWARD_DATA 1
 #define K5_COPY_RANK 4
+
+// The cooperative kernel on CDNA (wave64 MFMA, transform-row layout: 4 x kw waves, bt = 16 x nt
+// tiles), shared by the kernel and the host plan so the persistent grid matches what is resident.
+// Waves per SIMD (amdgpu_waves_per_eu) on the unified 512-register file (gfx90a and later): a
+// lane needs about 16 x mt x nt accumulators (4 bins of mt x nt 16 x 16 atoms) plus 104 others
+// (120 for bf16's fp32 transform, except the F(3,2) forward phase gather, @p phases, whose jobs
+// need fewer), and 56 more per transform job past the first; a block of 4 x kw waves needs kw per
+// SIMD. The compiler holds the registers to 512 / that, so the occupancy is at least that.
+constexpr int k5CoopCdnaWpe(int mt, int nt, int kw, bool packed, bool phases)
+{
+    const int jt = 2 * nt > 4 * kw ? 2 * nt / (4 * kw) : 1;
+    const int regs = 16 * mt * nt + (packed || phases ? 104 : 120) + 56 * (jt - 1);
+    const int wpe = 512 / regs < 1 ? 1 : 512 / regs > 8 ? 8 : 512 / regs;
+    return wpe < kw ? kw : wpe;
+}
+
+// LDS bytes of a transform-row-layout block (K5CoopCfg::LDSB): two V buffers of 16 bins x bt
+// tiles x 16 halves, or the epilogue's Z passes where those are larger.
+constexpr int k5CoopLdsBytes(int nt, int kw, int m, bool wave64)
+{
+    const int bt = 16 * nt, vb = 16 * bt * 16;
+    const int kwp = kw < 2 ? kw : m == 2 ? 2 : 1;
+    const int zs = wave64 && 4 * m * 16 * kwp * (bt + 4) * 4 <= 2 * vb * 2 ? bt + 4 : bt;
+    const int zb = 4 * m * 16 * kwp * zs;
+    return 2 * vb * 2 > zb * 4 ? 2 * vb * 2 : zb * 4;
+}
 
 struct K5Args
 {
@@ -99,3 +129,5 @@ struct K5CopyArgs
     int rank;
     int elementBytes;
 };
+
+// NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum,readability-avoid-nested-conditional-operator,readability-isolate-declaration)

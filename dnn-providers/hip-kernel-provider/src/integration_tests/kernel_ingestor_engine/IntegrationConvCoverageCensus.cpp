@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -21,6 +22,10 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <nlohmann/json.hpp>
+
+#include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvNaiveProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 
 /**
  * @file IntegrationConvCoverageCensus.cpp
@@ -51,6 +56,13 @@
  *       structural floor);
  *   (d) each gated engine serves the graph just below its limit on the architectures the
  *       map records.
+ * The naive engines' workload budget counts the device's SIMD lanes, so parts of one
+ * architecture with fewer compute units decline graphs a larger part's map records as naive
+ * (s053w: 4750 multiply-accumulates a lane on a 64-CU gfx906, 5067 on a 60-CU one, against a
+ * budget of 5000). Checks (a), (c) and (d) therefore excuse a graph the map records as served
+ * by naive alone, or a naive gate, wherever the budget's own arithmetic (naiveOverBudget)
+ * declines it on this device, and count it in a note. A map recorded on any part of an
+ * architecture holds on its other parts.
  * Engine names come from the backend, so every engine a provider loads is classified.
  * A build without the explicit-GEMM conv engines (HIPBLASLTPROVIDER_ENABLE_CONV=OFF, the
  * default) cannot check b rows or wrw twins only those engines serve; the test says so and
@@ -178,6 +190,94 @@ std::string deviceArch()
     return name.substr(0, name.find(':'));
 }
 
+/// The physical compute units of the current device as the naive engines count them (two a
+/// WGP where HIP reports WGPs, device_units::computeUnits), 0 when it reports none.
+int64_t deviceComputeUnits(const std::string& arch)
+{
+    int device = 0;
+    hipDeviceProp_t properties{};
+    if(hipGetDevice(&device) != hipSuccess
+       || hipGetDeviceProperties(&properties, device) != hipSuccess
+       || properties.multiProcessorCount <= 0)
+    {
+        return 0;
+    }
+    const int64_t units = properties.multiProcessorCount;
+    return hip_kernel_provider::kernel_ingestor_engine::device_units::reportsWorkgroupProcessors(
+               arch)
+               ? 2 * units
+               : units;
+}
+
+/// The product of @p factors, or nothing when one is not positive or the product overflows
+/// (the naive pack declines such a problem).
+std::optional<int64_t> checkedProduct(const std::vector<int64_t>& factors)
+{
+    int64_t result = 1;
+    for(const auto factor : factors)
+    {
+        if(factor <= 0 || result > std::numeric_limits<int64_t>::max() / factor)
+        {
+            return std::nullopt;
+        }
+        result *= factor;
+    }
+    return result;
+}
+
+/// Whether the naive engines' workload budget declines @p row on a device of
+/// @p computeUnits compute units: conv_naive::withinWorkloadBudget's arithmetic
+/// (ConvNaiveProblem.cpp) on the row's extents, with the pack's own constants.
+bool naiveOverBudget(const nlohmann::json& row, int64_t computeUnits)
+{
+    namespace naive = hip_kernel_provider::kernel_ingestor_engine::conv_naive;
+    const auto x = row.at("x").get<std::vector<int64_t>>();
+    const auto w = row.at("w").get<std::vector<int64_t>>();
+    const auto y = row.at("y").get<std::vector<int64_t>>();
+    const std::vector<int64_t> inSpatial(x.begin() + 2, x.end());
+    const std::vector<int64_t> outSpatial(y.begin() + 2, y.end());
+    const std::vector<int64_t> filter(w.begin() + 2, w.end());
+    const auto inElements = checkedProduct(inSpatial);
+    const auto outElements = checkedProduct(outSpatial);
+    const auto filterElements = checkedProduct(filter);
+    if(!inElements || !outElements || !filterElements)
+    {
+        return true;
+    }
+    const int64_t n = x[0];
+    const int64_t c = x[1];
+    const int64_t k = w[0];
+    const int64_t cPerGroup = w[1];
+    const auto direction = row.at("dir").get<std::string>();
+    const bool weights = direction == "wrw";
+    std::optional<int64_t> total;
+    if(direction == "fwd")
+    {
+        total = checkedProduct({n, k, *outElements});
+    }
+    else if(direction == "bwd")
+    {
+        total = checkedProduct({n, c, *inElements});
+    }
+    else
+    {
+        total = checkedProduct({k, cPerGroup, *filterElements});
+    }
+    const auto macs = checkedProduct({n, k, *outElements, cPerGroup, *filterElements});
+    if(!total || !macs)
+    {
+        return true;
+    }
+    const int64_t units = computeUnits > 0 ? computeUnits : naive::FALLBACK_COMPUTE_UNITS;
+    const int64_t deviceLanes = units * naive::LANES_PER_COMPUTE_UNIT;
+    const auto outputLanes
+        = checkedProduct({*total, weights ? naive::NAIVE_WRW_LANES_PER_ELEMENT : int64_t{1}});
+    const int64_t occupied
+        = std::max<int64_t>(1, outputLanes ? std::min(deviceLanes, *outputLanes) : deviceLanes);
+    const int64_t perLane = *macs / occupied + (*macs % occupied != 0 ? 1 : 0);
+    return perLane > naive::NAIVE_MACS_PER_LANE_BUDGET;
+}
+
 std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool channelsLast)
 {
     std::vector<size_t> order = {0};
@@ -276,6 +376,7 @@ struct Census
 {
     std::string skip;
     std::string arch;
+    int64_t computeUnits = 0;
     nlohmann::json map;
     std::map<std::string, Observed> observed;
     bool blasLoaded = false;
@@ -346,7 +447,7 @@ Observed discover(hipdnnHandle_t handle,
 
 const Census& census()
 {
-    static const Census RESULT = [] {
+    static const Census s_result = [] {
         Census c;
         c.arch = deviceArch();
         if(c.arch.empty())
@@ -354,6 +455,14 @@ const Census& census()
             c.skip = "no device";
             return c;
         }
+        namespace gate = hip_kernel_provider::kernel_ingestor_engine;
+        if(!gate::convEngineGroupEnabled())
+        {
+            c.skip = std::string("the conv engine group is not enabled (set ")
+                     + gate::CONV_ENABLE_ENV + "=1)";
+            return c;
+        }
+        c.computeUnits = deviceComputeUnits(c.arch);
         const auto mapPath = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / MAP_FILE;
         std::ifstream stream(mapPath);
         c.map = nlohmann::json::parse(stream, nullptr, false);
@@ -518,7 +627,7 @@ const Census& census()
         }
         return c;
     }();
-    return RESULT;
+    return s_result;
 }
 
 /// The tier a row is mapped to on this architecture, or nothing when the map has none.
@@ -534,6 +643,23 @@ std::optional<Tier>
         return std::nullopt;
     }
     return parseTier(tiers[slot]);
+}
+
+/// Whether the map records @p row as served by naive alone on this architecture and naive's
+/// budget declines it on this device: a smaller part than the map's, not a regression.
+bool naiveSizedOut(const Census& c, const nlohmann::json& row)
+{
+    return mappedTier(c.map, row, c.arch) == Tier::NAIVE && naiveOverBudget(row, c.computeUnits);
+}
+
+void noteSizedOut(const Census& c, int sizedOut)
+{
+    if(sizedOut > 0)
+    {
+        std::cout << "Note: " << sizedOut << " graphs the map expects naive to serve on " << c.arch
+                  << " are over naive's workload budget on this " << c.computeUnits
+                  << "-CU device (a smaller part than the map's) and were not checked\n";
+    }
 }
 
 /// Whether the twin row is a recorded known gap on this architecture: listed for it, or, on
@@ -582,6 +708,21 @@ constexpr const char* NO_BLAS_NOTE
       "map's b rows and the wrw twins only those engines serve are not checked. Build with "
       "HIPBLASLTPROVIDER_ENABLE_CONV=ON to check them.";
 
+// The budget arithmetic the checks excuse by, pinned on the graph that showed the need: s053w
+// (wrw, 2048 output channels of one input channel, 4x5 filter, 19x25 output) runs 19.46M
+// multiply-accumulates over every lane of the device: 4750 a lane on 64 CUs, 5067 on 60.
+TEST(IntegrationConvCoverageCensus, NaiveBudgetArithmeticFollowsComputeUnits)
+{
+    const auto row = nlohmann::json::parse(
+        R"({"dir":"wrw","x":[1,1024,1,1],"w":[2048,1,4,5],"y":[1,2048,19,25]})");
+    EXPECT_FALSE(naiveOverBudget(row, 64));
+    EXPECT_TRUE(naiveOverBudget(row, 60));
+    // A forward graph occupies at most one lane an output element.
+    const auto small
+        = nlohmann::json::parse(R"({"dir":"fwd","x":[1,4,8,8],"w":[4,4,3,3],"y":[1,4,8,8]})");
+    EXPECT_FALSE(naiveOverBudget(small, 1));
+}
+
 #define SKIP_WITHOUT_CENSUS()              \
     do                                     \
     {                                      \
@@ -601,6 +742,7 @@ TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
     int better = 0;
     int checked = 0;
     int unchecked = 0;
+    int sizedOut = 0;
     for(const auto& row : c.map.at("rows"))
     {
         const auto expected = mappedTier(c.map, row, c.arch);
@@ -615,6 +757,11 @@ TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
         if(*expected == Tier::BLAS && !c.blasLoaded && seen.tier != Tier::HIP)
         {
             ++unchecked;
+            continue;
+        }
+        if(seen.tier == Tier::NONE && naiveSizedOut(c, row))
+        {
+            ++sizedOut;
             continue;
         }
         ++checked;
@@ -636,6 +783,7 @@ TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
     {
         std::cout << "Note: " << NO_BLAS_NOTE << "\n";
     }
+    noteSizedOut(c, sizedOut);
     if(better > 0)
     {
         std::cout << better << " graphs are served above their mapped tier on " << c.arch
@@ -688,6 +836,7 @@ TEST(IntegrationConvCoverageCensus, EveryServedFwdBwdGraphHasAServedWrwTwin)
     int failures = 0;
     int pairs = 0;
     int unchecked = 0;
+    int sizedOut = 0;
     for(const auto& row : c.map.at("rows"))
     {
         if(row.value("pair_kind", std::string()) != "twin")
@@ -705,6 +854,11 @@ TEST(IntegrationConvCoverageCensus, EveryServedFwdBwdGraphHasAServedWrwTwin)
         {
             continue;
         }
+        if(naiveSizedOut(c, row))
+        {
+            ++sizedOut;
+            continue;
+        }
         if(!c.blasLoaded && mayNeedBlas(c.map, row, c.arch))
         {
             ++unchecked;
@@ -717,6 +871,7 @@ TEST(IntegrationConvCoverageCensus, EveryServedFwdBwdGraphHasAServedWrwTwin)
     {
         std::cout << "Note: " << NO_BLAS_NOTE << " (" << unchecked << " twins unchecked)\n";
     }
+    noteSizedOut(c, sizedOut);
     EXPECT_EQ(failures, 0) << failures << " of " << pairs << " served fwd/bwd graphs on " << c.arch
                            << " have a wrw twin no engine serves:" << holes.str();
 }
@@ -757,6 +912,7 @@ TEST(IntegrationConvCoverageCensus, GatedEnginesServeTheGraphJustBelowTheirLimit
     const auto& c = census();
     std::ostringstream declined;
     int failures = 0;
+    int sizedOut = 0;
     for(const auto& row : c.map.at("rows"))
     {
         if(!row.contains("gate"))
@@ -769,6 +925,12 @@ TEST(IntegrationConvCoverageCensus, GatedEnginesServeTheGraphJustBelowTheirLimit
             continue;
         }
         const auto prefix = row["gate"]["prefix"].get<std::string>();
+        // Naive's limit is its workload budget, which moves with the device's compute units.
+        if(prefix.rfind(NAIVE_PREFIX, 0) == 0 && naiveOverBudget(row, c.computeUnits))
+        {
+            ++sizedOut;
+            continue;
+        }
         const auto& id = row.at("id").get_ref<const std::string&>();
         const auto& engines = c.observed.at(id).engines;
         if(std::none_of(engines.begin(), engines.end(), [&](const std::string& engine) {
@@ -779,6 +941,7 @@ TEST(IntegrationConvCoverageCensus, GatedEnginesServeTheGraphJustBelowTheirLimit
             declined << "\n  " << describe(row) << ": no " << prefix << "* engine";
         }
     }
+    noteSizedOut(c, sizedOut);
     EXPECT_EQ(failures, 0) << "gated engines decline the graph just below their limit on " << c.arch
                            << ":" << declined.str();
 }

@@ -236,6 +236,7 @@ std::unique_ptr<IPlan> ConvGemmPlanBuilder::planFor(const HipdnnEnginePluginHand
         return _factory(handle, std::move(calls.stages.front().calls));
     }
     std::vector<std::unique_ptr<IPlan>> gemmPlans;
+    gemmPlans.reserve(calls.stages.size());
     for(auto& stage : calls.stages)
     {
         gemmPlans.push_back(stage.calls.empty() ? nullptr : _factory(handle, stage.calls));

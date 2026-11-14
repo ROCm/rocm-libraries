@@ -6,6 +6,10 @@
 // types and constexpr functions only: HIPRTC compiles it as an embedded include.
 #pragma once
 
+// NOLINTBEGIN(modernize-use-auto,readability-avoid-nested-conditional-operator,readability-braces-around-statements,readability-implicit-bool-conversion,readability-isolate-declaration)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// A [position][channel] row pitch (16-bit elements) at least n + 8 whose transpose reads do not
 /// conflict in LDS banks (gfx950, measured: a pitch % 128 of 0, 8, 32 or 96 halves the rate).
 constexpr int k3TrPitch(int n)
@@ -19,6 +23,19 @@ constexpr int k3TrPitch(int n)
 constexpr int k3DivUp(int a, int b)
 {
     return (a + b - 1) / b;
+}
+
+/// The x tile's row pitch (elements) for rows of ph positions plus two of slack: whole 16-byte
+/// units (skew elements). Channels-first at unit width stride: an odd number of them, so the
+/// rows a fragment read takes (one per lane) start in different bank groups; an even count put
+/// every other row (12 units: dilation 24 at 32 positions) or every row (16 units) on the same
+/// banks. Strided tiles keep the even counts (the bump would push some past the LDS), and so do
+/// the channels-last tiles, whose transposing stores ran up to 1.5x slower with the bump
+/// (output channel counts below a vector: VAE k3 / k4 heads).
+constexpr int k3CfPitch(int ph, int skew, int sw, bool channelsFirst)
+{
+    const int units = k3DivUp(ph + 2, skew) + 1;
+    return (sw == 1 && channelsFirst ? units | 1 : units) * skew;
 }
 
 /// The generic loop's window row pitch (elements of eb bytes) for wpos positions (a whole number
@@ -210,8 +227,10 @@ constexpr long long k3LdsBytes(int loop,
     const int ph = k3DivUp(phRaw, kv) * kv;
     const int skew = 16 / eb;
     const int lda = tr ? k3TrPitch(bk) : bq + skew;
-    const int ldb = tr ? k3TrPitch(bc) : k3DivUp(ph + 2, skew) * skew + skew;
+    const int ldb = tr ? k3TrPitch(bc) : k3CfPitch(ph, skew, sw, layout == 0);
     const long long aElems = static_cast<long long>(tr ? bq : bk) * lda + (align == 1 ? vec : 0);
     const long long bElems = static_cast<long long>(rows) * sw * (tr ? ph : bc) * ldb;
     return 2 * (aElems + bElems) * eb;
 }
+
+// NOLINTEND(modernize-use-auto,readability-avoid-nested-conditional-operator,readability-braces-around-statements,readability-implicit-bool-conversion,readability-isolate-declaration)

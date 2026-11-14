@@ -23,7 +23,7 @@ namespace hipblaslt_plugin
 class HipblasltGemmPlan : public IPlan
 {
 public:
-    HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle, std::vector<GemmCall> calls);
+    HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle, const std::vector<GemmCall>& calls);
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 

@@ -6,6 +6,10 @@
 // embedded include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,modernize-macro-to-enum)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// Backward weights: dw[g][k][c][t][r][s] = sum over images and output positions of
 /// dy[n][g k][od][oh][ow] * x[n][g c][od sd + t dd - pd][oh sh + r dh - ph][ow sw + s dw - pw].
 /// x and dy are read in place through their element strides (one of the two packed layouts
@@ -31,8 +35,10 @@ struct K3Args
     int splits;
     long long steps; ///< rows * chunks
     long long stepsPerSplit;
-    /// Row-ring kernel: steps per track (ceil(ho / dh) + fr - 1).
+    /// Row-ring kernels: steps per track of the height classes rho < trackLong; the other
+    /// classes' tracks have trackLen - 1 (at most ceil(ho / dh) + fr - 1; K3Track).
     int trackLen;
+    int trackLong;
     /// Direct loop: row segments per image and rows per segment. Packed rows (loop 7): the
     /// virtual row width (columns a step row takes) and the output rows a step packs.
     int segs;
@@ -99,3 +105,5 @@ struct K3SplitArgs
 /// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
 #define K3_REDUCE_ROW_CHANNELS 64
 #define K3_REDUCE_ROW_MAX_TAPS 64
+
+// NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

@@ -1054,9 +1054,15 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     }
     // Split: chunks by the output's tiles (fewer than SPLIT_TARGET_TILES), whatever its size.
     const int64_t tiles = groups * ((first.m + 127) / 128) * ((first.n + 127) / 128);
-    const int64_t chunks = splitReduction
-                               ? (tiles < SPLIT_TARGET_TILES ? splitChunksFor(first.k, tiles) : 1)
-                               : (groupedElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1);
+    int64_t chunks = 1;
+    if(splitReduction)
+    {
+        chunks = tiles < SPLIT_TARGET_TILES ? splitChunksFor(first.k, tiles) : 1;
+    }
+    else
+    {
+        chunks = groupedElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1;
+    }
     if(images < 2 && chunks < 2)
     {
         return plan;

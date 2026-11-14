@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -55,13 +56,13 @@ ConvColumnGeometry geometry(long long n, long long c, long long h, long long w, 
     return g;
 }
 
-alignas(16) unsigned char g_buffer[64];
+alignas(16) std::array<unsigned char, 64> gBuffer{};
 
 Im2ColArgs im2col(const ConvColumnGeometry& g)
 {
     Im2ColArgs args{};
-    args.x = g_buffer;
-    args.col = g_buffer;
+    args.x = gBuffer.data();
+    args.col = gBuffer.data();
     args.geometry = g;
     args.total = g.n * g.output[1] * g.output[2] * g.cPerGroup * 9;
     return args;
@@ -70,8 +71,8 @@ Im2ColArgs im2col(const ConvColumnGeometry& g)
 Col2ImArgs col2im(const ConvColumnGeometry& g)
 {
     Col2ImArgs args{};
-    args.col = reinterpret_cast<const float*>(g_buffer);
-    args.x = g_buffer;
+    args.col = reinterpret_cast<const float*>(gBuffer.data());
+    args.x = gBuffer.data();
     args.geometry = g;
     args.total = g.n * g.cPerGroup * g.input[1] * g.input[2];
     return args;
@@ -92,7 +93,7 @@ TEST(TestConvRepackLaunch, MisalignedChannelsFallBackToScalarRows)
     auto args = im2col(geometry(8, 20, 14, 14, true)); // 20 % 8 != 0
     EXPECT_EQ(im2colLaunch(args, 2).entry, "Im2ColRows2V1");
     args = im2col(geometry(8, 256, 14, 14, true));
-    args.x = g_buffer + 2; // not 16-byte aligned
+    args.x = gBuffer.data() + 2; // not 16-byte aligned
     EXPECT_EQ(im2colLaunch(args, 2).entry, "Im2ColRows2V1");
 }
 
@@ -107,7 +108,7 @@ TEST(TestConvRepackLaunch, FewChannelsPerTapTakeOneThreadPerTap)
 
     // Unaligned column storage keeps the direct per-tap stores.
     auto misaligned = im2col(geometry(8, 3, 112, 112, true));
-    misaligned.col = g_buffer + 2;
+    misaligned.col = gBuffer.data() + 2;
     EXPECT_EQ(im2colLaunch(misaligned, 2).entry, "Im2ColTaps2");
 }
 
@@ -294,8 +295,8 @@ TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
     // (4 bytes).
     auto padded = g;
     padded.xStrides[3] = 30;
-    padded.xStrides[1] = 28 * 30;
-    padded.xStrides[0] = 64 * 28 * 30;
+    padded.xStrides[1] = 28LL * 30;
+    padded.xStrides[0] = 64LL * 28 * 30;
     auto paddedArgs = col2im(padded);
     launch = col2imLaunch(paddedArgs, "Half", 2, 0);
     EXPECT_EQ(launch.entry, "Col2ImDisjointWidth2V2");
@@ -318,12 +319,12 @@ TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
     auto rgb = last;
     rgb.cPerGroup = 3;
     rgb.xStrides[4] = 3;
-    rgb.xStrides[3] = 3 * 32;
+    rgb.xStrides[3] = 3LL * 32;
     rgb.input[2] = 32;
     auto rgbArgs = col2im(rgb);
     EXPECT_EQ(col2imLaunch(rgbArgs, "Half", 2, 0).entry, "Col2ImDisjointChannels2V8");
     rgb.xStrides[4] = 4;
-    rgb.xStrides[3] = 4 * 32;
+    rgb.xStrides[3] = 4LL * 32;
     rgbArgs = col2im(rgb);
     EXPECT_EQ(col2imLaunch(rgbArgs, "Half", 2, 0).entry, "Col2ImDisjointChannels2V2");
     EXPECT_EQ(rgbArgs.launch.rows, 0);
@@ -339,8 +340,8 @@ TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
     auto strided = g;
     strided.xStrides[4] = 2;
     strided.xStrides[3] = 56;
-    strided.xStrides[1] = 56 * 28;
-    strided.xStrides[0] = 64 * 56 * 28;
+    strided.xStrides[1] = 56LL * 28;
+    strided.xStrides[0] = 64LL * 56 * 28;
     auto stridedArgs = col2im(strided);
     EXPECT_EQ(col2imLaunch(stridedArgs, "Float", 4, 0).entry, "Col2ImDisjoint4");
 
@@ -368,16 +369,16 @@ TEST(TestConvRepackLaunch, ChannelsFirstToLastCopyIsATiledTranspose)
     // along pixels, dst along c.
     StridedCopyArgs args{};
     args.rank = 4;
-    const long long dims[] = {2, 8, 7, 7};
-    const long long src[] = {392, 49, 7, 1};
-    const long long dst[] = {392, 1, 56, 8};
-    for(int axis = 0; axis < 4; ++axis)
+    const std::array<long long, 4> dims = {2, 8, 7, 7};
+    const std::array<long long, 4> src = {392, 49, 7, 1};
+    const std::array<long long, 4> dst = {392, 1, 56, 8};
+    for(size_t axis = 0; axis < 4; ++axis)
     {
         args.dims[axis] = dims[axis];
         args.srcStrides[axis] = src[axis];
         args.dstStrides[axis] = dst[axis];
     }
-    args.total = 2 * 8 * 49;
+    args.total = 2LL * 8 * 49;
     auto copy = args;
     const auto launch = stridedCopyLaunch(copy, 2);
     // Offsets in 32 bits: the narrow transpose, 64 x 64 tiles of 16-bit pairs.
@@ -405,9 +406,9 @@ TEST(TestConvRepackLaunch, ContiguousCopyCollapsesToOneAxis)
 {
     StridedCopyArgs args{};
     args.rank = 3;
-    const long long dims[] = {4, 1, 10};
-    const long long strides[] = {10, 10, 1};
-    for(int axis = 0; axis < 3; ++axis)
+    const std::array<long long, 3> dims = {4, 1, 10};
+    const std::array<long long, 3> strides = {10, 10, 1};
+    for(size_t axis = 0; axis < 3; ++axis)
     {
         args.dims[axis] = dims[axis];
         args.srcStrides[axis] = args.dstStrides[axis] = strides[axis];

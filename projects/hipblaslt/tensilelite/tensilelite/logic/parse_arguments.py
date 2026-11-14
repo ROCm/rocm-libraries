@@ -56,8 +56,9 @@ def parseArguments():
         "-j",
         dest="Jobs",
         action="store",
-        default=48,
-        help="number of worker processes to use during validation checks",
+        default=0,
+        help="number of worker processes to use during validation checks; "
+        "0 (the default) uses every available CPU",
     )
     argParser.add_argument(
         "--cxx-compiler",

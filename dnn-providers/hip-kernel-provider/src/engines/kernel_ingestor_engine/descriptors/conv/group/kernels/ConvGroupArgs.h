@@ -6,6 +6,10 @@
 // include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,readability-braces-around-statements)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// One small-group convolution as a gather over channels-last activations:
 ///   out[n][od osd + ood][oh osh + ooh][ow osw + oow][g cg + o]
 ///     = sum over taps (t, r, s) < (T, R, S) and the group's cg channels i of
@@ -125,3 +129,5 @@ K4_HD inline int k4WrwReduceGroups(int slots)
         g *= 2;
     return g;
 }
+
+// NOLINTEND(modernize-avoid-c-arrays,readability-braces-around-statements)

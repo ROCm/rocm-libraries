@@ -169,6 +169,36 @@ def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0):
     ]
 
 
+# The 16-bin layout (RDNA, F(2,3)): a wave owns all 16 bins of 16 out channels by 16 tiles, so the
+# output transform runs in registers (no Z round trip through LDS, no epilogue barriers): kw K
+# waves by tw tile waves. Wins where the output side dominates (backward data with few dy
+# channels: realesrgan, unet).
+def coop16(blocks, archs=("gfx11", "gfx12")):
+    return [
+        C(
+            "coop",
+            2,
+            arch=a,
+            bk=16 * kw,
+            bt=16 * tw,
+            waves=kw * tw,
+            tm=1,
+            tn=1,
+            bins=16,
+            f16math=h,
+        )
+        for kw, tw, h in blocks
+        for a in archs
+    ]
+
+
+# (kw, tw, f16math): 4 K waves by 1 tile wave on both families (gfx1201 unet c128 k64 512² bwd
+# 9.07 -> 7.76 ms, esrgan c192 k64 bwd 0.654 -> 0.613); gfx11 also 8 x 1 and 4 x 2 (gfx1100
+# c128 k128 128² 1.05 -> 0.90, unet bwd 9.83 -> 8.66).
+COOP16_F16 = [(4, 1, 1)]
+COOP16_F16_GFX11 = [(8, 1, 1), (4, 2, 1)]
+
+
 # 16- and 32-wide K blocks for K <= 16 (to-RGB, K = 3) and K = 32 layers: the transform is shared
 # by the out channels the layer has, not by 64 that are mostly padding.
 COOP_F16 = [
@@ -208,9 +238,10 @@ def sreg(variants):
 
 # m = 3 is F(3,2): stride 2 by phases (2x2 sub-filters over 4x the channels); the others stride 1.
 # pf = 1 loads input chunks two ahead (two register sets).
-def fused(blocks, ms=(2, 3), pf=0):
+def fused(blocks, ms=(2, 3), pf=0, archs=("any",)):
     return [
-        C("fused", m, bk=bk, bt=bt, ccv=ccv, tm=tm, tn=tn, pf=pf)
+        C("fused", m, arch=a, bk=bk, bt=bt, ccv=ccv, tm=tm, tn=tn, pf=pf)
+        for a in archs
         for m in ms
         for bk, bt, ccv, tm, tn in blocks
     ]
@@ -229,15 +260,25 @@ F32_BLOCKS = [
 # Prefetch depth 2 (RDNA fp32: maskrcnn c256 200² / 14², ssd300 c128 150², stride-2 c128 200²:
 # 5-13% on gfx1201, 2-10% on gfx1101).
 F32_PF_BLOCKS = [(64, 32, 4, 8, 8)]
+# RDNA fp32: 8 x 16 micro-tiles read 0.75 LDS bytes per FMA instead of 1 (the Hadamard is
+# LDS-bound there; maskrcnn c256 200² 14% faster on gfx1201). More than gfx9's 128 registers at two
+# waves per SIMD: RDNA families only. gfx11 runs it with prefetch depth 2 at 8 waves per SIMD
+# (192 registers; maskrcnn c256 200² 29.9 -> 23.0 ms on gfx1100), gfx12 without (the cap costs
+# 5% there).
+F32_RDNA_BLOCKS = [(64, 64, 2, 8, 16)]
 F16_BLOCKS = [(64, 32, 2, 8, 8), (32, 32, 8, 8, 4), (16, 32, 2, 8, 4)]
 BF16_BLOCKS = [(64, 32, 4, 8, 8), (32, 32, 8, 8, 4), (16, 32, 4, 8, 4)]
 CATALOG = {
     "FLOAT": sreg([0])
     + fused(F32_BLOCKS)
     + fused(F32_PF_BLOCKS, pf=1)
+    + fused(F32_RDNA_BLOCKS, (2,), archs=("gfx12",))
+    + fused(F32_RDNA_BLOCKS, (2,), pf=1, archs=("gfx11",))
     + multipass((4, 2, 3), "none")
     + multipass((4, 2, 3), "llc"),
     "HALF": coop(COOP_F16)
+    + coop16(COOP16_F16)
+    + coop16(COOP16_F16_GFX11, ("gfx11",))
     + coop(COOP3_F16, m=3)
     + coop(COOP_CDNA_F16, ("gfx9",))
     + coop(COOP3_CDNA_F16, ("gfx9",), m=3)
@@ -322,9 +363,12 @@ def label(c):
     if c["variant"] == "multipass":
         return f"multipass.f{c['m']}.{c['layout'].lower()}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}.{'llc' if c['llc'] else 'none'}"
     if c["variant"] == "fused":
-        return f"fused.f{c['m']}.nchw.{c['bk']}x{c['bt']}c{c['ccv']}t{c['tm']}{c['tn']}{'.pf1' if c['pf'] else ''}"
+        arch = "" if c["arch"] == "any" else f".{c['arch']}"
+        return f"fused.f{c['m']}.nchw{arch}.{c['bk']}x{c['bt']}c{c['ccv']}t{c['tm']}{c['tn']}{'.pf1' if c['pf'] else ''}"
     if c["variant"] == "wreg":
         return f"wreg.f2.nchw.{c['arch']}.{c['bk']}g{c['bt'] // 16}b{c['bins']}{'h' if c['f16math'] else 'f'}"
+    if c["variant"] == "coop" and c["bins"] == 16:
+        return f"coop.f2.nchw.{c['arch']}.k{c['bk'] // 16}t{c['bt'] // 16}b16{'h' if c['f16math'] else 'f'}"
     if c["variant"] == "coop":
         kw = c["waves"] // 4
         return f"coop.f{c['m']}.nchw.{c['arch']}.m{c['bk'] // (16 * kw)}n{c['bt'] // 16}k{kw}{'h' if c['f16math'] else 'f'}{'.pf1' if c['pf'] else ''}"
@@ -377,8 +421,9 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
             "metadata": kmd,
             "knobs": KNOBS,
             "behavior_notes": ["runtime_compilation"],
-            # RFC 0020 4.2 numerical notes: held as authored, not yet surfaced by hipDNN.
-            "numerical_notes": ["WINOGRAD"],
+            # RFC 0020 4.2 numerical notes, by their cuDNN names (lowercase), reported through
+            # the engine's details.
+            "numerical_notes": ["winograd"],
         },
     )
     kernels = []

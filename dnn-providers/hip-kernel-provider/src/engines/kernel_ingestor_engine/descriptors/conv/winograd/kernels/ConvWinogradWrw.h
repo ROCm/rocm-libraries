@@ -45,7 +45,7 @@ struct K5WrwX
 
 // F(4,3) on points 0, 1, -1, 1/2, -2, infinity (not the forward's Lavin set 0, +-1, +-2): the
 // wrw F(3,4) built on it measured about 3.7x less fp32 summation error (dynamic-tolerance c 1.4
-// against 5.2 in the fp32 simulation, ~/scratch/ww/points.py).
+// against 5.2 in an fp32 simulation of the transforms).
 template <>
 struct K5WrwX<4>
 {

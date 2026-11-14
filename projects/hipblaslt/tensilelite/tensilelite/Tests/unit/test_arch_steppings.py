@@ -757,7 +757,7 @@ _STREAMK_CONFIG = os.path.join(
 _XCNT_DRAIN_MARKER = "drain xnacks before volatile VMEM"
 
 
-def _emit_streamk_srcs(stepping):
+def _emit_streamk_srcs(stepping, *, caps_from_map=False):
     """Emit the gfx1250 StreamK config's kernels, optionally under a v0 stepping.
 
     Mirrors ``config_harness.emit_kernels_from_config`` but sets
@@ -779,13 +779,15 @@ def _emit_streamk_srcs(stepping):
     )
 
     assembler, iim = cfgh._toolchain_for(GFX1250)
+    iim = copy_isa_info_map(iim)
+    if caps_from_map:
+        applyArchCapOverrides(iim, [stepping or GFX1250])
     if not iim[ISA_GFX1250].asmCaps["SupportedISA"]:
         pytest.skip("amdclang++ in this environment does not support gfx1250")
 
     srcs = []
     with cfgh._isolated_globals_with_isa(iim):
-        if stepping:
-            globalParameters["StinkyTofuArchName"] = stepping
+        globalParameters["StinkyTofuArchName"] = "" if caps_from_map else (stepping or "")
         sols = cfgh._solutions_from_config_unguarded(
             _STREAMK_CONFIG, assembler, iim, limit_solutions=8
         )
@@ -808,8 +810,12 @@ def test_gfx1250_strict_streamk_keeps_the_xcnt_drain(gfx1250_cxx):
     drain. Emitting the *same* StreamK kernel under v1 vs v0 and counting the
     drain marker isolates exactly the drain: v1 must keep it (the ``> 0`` check
     guards against a vacuous pass) and v0 must keep every one too."""
-    v1_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in _emit_streamk_srcs(stepping=None))
+    v1_srcs = _emit_streamk_srcs(stepping=None)
+    v1_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in v1_srcs)
     v0_drains = sum(s.count(_XCNT_DRAIN_MARKER) for s in _emit_streamk_srcs(stepping=GFX1250_STRICT))
+    # A strict build must not leave its MTypeNC or other target overrides in
+    # the backend cache and change a later ordinary build in this process.
+    assert _emit_streamk_srcs(stepping=None) == v1_srcs
     assert v1_drains > 0, (
         "gfx1250 (gfx1250) StreamK should emit the XNACK-replay drain; without it "
         "the gfx1250-strict assertion below would pass vacuously"
@@ -3785,7 +3791,7 @@ class _SharedCacheIsa:
     """A backend that hands back its live cap dicts, as the StinkyTofu adaptor does."""
 
     def __init__(self):
-        self.archCaps = {"EnableXnackReplay": True, CAP_MULTICAST: True}
+        self.archCaps = {"EnableXnackReplay": True, CAP_MULTICAST: True, "MTypeNC": False}
         self.asmCaps = {"SupportedISA": True, CAP_FP4_32X16: True}
         self.regCaps = {}
         self.asmBugs = {}
@@ -3820,17 +3826,20 @@ def test_the_capability_map_does_not_alias_the_backend_cache(monkeypatch):
     assert iim[ISA_GFX1250].asmCaps is not backend.asmCaps
 
 
-def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch):
+@pytest.mark.parametrize("target", ["gfx1250:xnack-", "gfx1250-strict:xnack-"])
+def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch, target):
     backend = _withSharedCacheBackend(monkeypatch)
     from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 
     first = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
-    applyArchCapOverrides(first, ["gfx1250:xnack-"])
+    applyArchCapOverrides(first, [target])
     assert first[ISA_GFX1250].archCaps["EnableXnackReplay"] is False
+    assert first[ISA_GFX1250].archCaps["MTypeNC"] is ("strict" in target)
 
     # A second build in the same process must see the probed values again.
     second = makeIsaInfoMap([ISA_GFX1250], "/stand-in/amdclang++")
     assert second[ISA_GFX1250].archCaps["EnableXnackReplay"] is True
+    assert second[ISA_GFX1250].archCaps["MTypeNC"] is False
     assert second[ISA_GFX1250].archCaps[CAP_MULTICAST] is True
     assert second[ISA_GFX1250].asmCaps[CAP_FP4_32X16] is True
 
@@ -4140,3 +4149,55 @@ def test_config_allows_two_entries_with_the_same_effective_capabilities():
     assert archNamesFromConfig(
         "gfx942:xnack+;gfx942:xnack+[cu=64]", isa942, ["gfx942"]
     ) == ["gfx942:xnack+[cu=64]"]
+
+
+@pytest.mark.parametrize("caps_from_map", [False, True], ids=["writer-target", "solution-caps"])
+@pytest.mark.parametrize("target,mtype_nc", [
+    ("gfx1250", False),
+    ("gfx1250:xnack-", False),
+    ("gfx1250-strict", True),
+    ("gfx1250-strict:xnack-:sramecc+[cu=64]", True),
+])
+def test_streamk_fences_follow_target_memory_types(gfx1250_cxx, target, mtype_nc, caps_from_map):
+    """Exercise both channels that carry a shared-ISA target into the real writer."""
+    srcs = _emit_streamk_srcs(target, caps_from_map=caps_from_map)
+    assert srcs
+    for src in srcs:
+        invalidations = re.findall(r"global_inv scope:(SCOPE_\w+)", src)
+        assert len(invalidations) >= 2  # polling and successful-acquire sites remain
+        assert set(invalidations) == {"SCOPE_DEV" if mtype_nc else "SCOPE_SE"}
+        assert ("global_wb scope:SCOPE_DEV" in src) is mtype_nc
+        # Flags stay device-scoped VMEM operations; changing cache invalidation
+        # scope must not select the SMEM flag policy or narrow the memory accesses.
+        assert re.search(r"buffer_load\w* .*scope:SCOPE_DEV.*get flag", src)
+        assert re.search(r"buffer_store\w* .*scope:SCOPE_DEV.*flag", src)
+        assert _XCNT_DRAIN_MARKER in src
+        producer = src[:src.index("// store all data before setting flag")]
+        assert re.search(r"s_wait_loadcnt 0.*s_wait_storecnt 0.*s_barrier_signal -1.*s_barrier_wait -1\s*$",
+                         producer, re.DOTALL)
+        assert src.count("// wait for data store") == 3
+        assert src.count("// acquire: wait for global_inv") == len(invalidations)
+
+
+@pytest.mark.parametrize("mtype_nc", [None, True, False], ids=["missing", "nc", "coherent"])
+def test_streamk_fence_policy_keeps_completion_waits(gfx1250_cxx, mtype_nc):
+    from types import SimpleNamespace
+    import rocisa
+    from tensilelite.Components.StreamK import StreamKMemoryOrderingDevScopeFences
+
+    caps = {} if mtype_nc is None else {"MTypeNC": mtype_nc}
+    writer = SimpleNamespace(states=SimpleNamespace(archCaps=caps))
+    rocisa.rocIsa.getInstance().init(ISA_GFX1250, str(gfx1250_cxx), False)
+    rocisa.rocIsa.getInstance().setKernel(ISA_GFX1250, 32)
+    ordering = StreamKMemoryOrderingDevScopeFences()
+    release = str(ordering.releaseFence(writer))
+    acquire = str(ordering.acquireFence(writer))
+    instructions = [line.split("//")[0].strip() for line in release.splitlines() if line.strip()]
+    if mtype_nc is False:
+        assert instructions == ["s_wait_loadcnt 0", "s_wait_storecnt 0"]
+        assert "global_inv scope:SCOPE_SE" in acquire
+    else:
+        assert instructions == ["s_wait_loadcnt 0", "s_wait_storecnt 0",
+                                "global_wb scope:SCOPE_DEV", "s_wait_loadcnt 0", "s_wait_storecnt 0"]
+        assert "global_inv scope:SCOPE_DEV" in acquire
+    assert acquire.index("global_inv") < acquire.index("s_wait_loadcnt 0")

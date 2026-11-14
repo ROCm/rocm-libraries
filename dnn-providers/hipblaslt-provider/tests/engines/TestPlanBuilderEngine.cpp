@@ -170,9 +170,9 @@ TEST(TestPlanBuilderEngine, GetDetailsReturnsSerializedEngineDetails)
     EXPECT_EQ(engineDetails.engineId(), hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
 }
 
-TEST(TestPlanBuilderEngine, GetDetailsReportsGraphCaptureSupport)
+TEST(TestPlanBuilderEngine, GetDetailsReportsGraphCaptureSupportWhenConstructedWithIt)
 {
-    PlanBuilderEngine const engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+    PlanBuilderEngine const engine(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID, true);
     HipdnnEnginePluginHandle dummyHandle;
 
     hipdnnPluginConstData_t result;
@@ -183,6 +183,21 @@ TEST(TestPlanBuilderEngine, GetDetailsReportsGraphCaptureSupport)
     EXPECT_THAT(
         engineDetails.behaviorNotes(),
         ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
+}
+
+TEST(TestPlanBuilderEngine, GetDetailsOmitsGraphCaptureSupportByDefault)
+{
+    PlanBuilderEngine const engine(hipdnn_data_sdk::utilities::ROCBLAS_MATMUL_ENGINE_ID);
+    HipdnnEnginePluginHandle dummyHandle;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, result);
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper const engineDetails(
+        result.ptr, result.size);
+    EXPECT_THAT(engineDetails.behaviorNotes(),
+                ::testing::Not(::testing::Contains(
+                    static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE))));
 }
 
 TEST(TestPlanBuilderEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuilder)

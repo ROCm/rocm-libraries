@@ -249,7 +249,7 @@ ConvShape dense(int64_t c,
                 int64_t k,
                 std::vector<int64_t> input,
                 std::vector<int64_t> filter,
-                std::vector<int64_t> pad,
+                const std::vector<int64_t>& pad,
                 bool channelsLast)
 {
     ConvShape shape;
@@ -465,10 +465,16 @@ void runCase(ConvShape shape,
         }
         // xf32 rounds each operand to 10 mantissa bits (about 2^-11 of a product each);
         // three-bf16 drops lo x lo (about 2^-16).
-        const float accumulationBound = (xf32    ? 1e-3f
-                                         : split ? 3e-5f
-                                                 : 2e-6f)
-                                        * static_cast<float>(reductionLength);
+        float perTermBound = 2e-6f;
+        if(xf32)
+        {
+            perTermBound = 1e-3f;
+        }
+        else if(split)
+        {
+            perTermBound = 3e-5f;
+        }
+        const float accumulationBound = perTermBound * static_cast<float>(reductionLength);
         SCOPED_TRACE(kernel.name);
         ++ran;
         const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
@@ -499,8 +505,8 @@ void runCase(ConvShape shape,
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!matches(got, want, tolerance) && ++mismatches <= 5)
@@ -1445,7 +1451,7 @@ TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)
         auto many = dense(64, 64, {64, 64}, {3, 3}, {3, 3}, true);
         many.n = 20000;
         const auto large = parsedProblem(many, direction);
-        const int64_t imageBytes = 64 * 64 * 64 * 2;
+        const int64_t imageBytes = int64_t{64} * 64 * 64 * 2;
         EXPECT_GE(large.blockSpanBytes, imageBytes);
         EXPECT_LE(large.blockSpanBytes, 3 * imageBytes);
         // One 64 x 4096 x 4096 fp16 image is 2^31 bytes: past the 32-bit offsets.

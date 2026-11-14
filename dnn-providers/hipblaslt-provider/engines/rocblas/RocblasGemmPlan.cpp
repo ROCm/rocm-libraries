@@ -18,8 +18,8 @@
 namespace hipblaslt_plugin
 {
 
-RocblasGemmPlan::RocblasGemmPlan(std::vector<GemmCall> calls, const std::string& gcnArchName)
-    : _calls(fitLibraryLimits(std::move(calls)))
+RocblasGemmPlan::RocblasGemmPlan(const std::vector<GemmCall>& calls, const std::string& gcnArchName)
+    : _calls(fitLibraryLimits(calls))
 {
     // A reduction rocBLAS would chunk into a half or bf16 output rounds once per chunk:
     // declined, so the result is summed in fp32 and rounded once, or not computed here.
@@ -52,7 +52,7 @@ void RocblasGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
                               uint32_t numDeviceBuffers,
                               void* /*workspace*/) const
 {
-    const rocblas_handle rocblasHandle = handle.rocblasHandle();
+    rocblas_handle rocblasHandle = handle.rocblasHandle();
     if(rocblas_set_stream(rocblasHandle, handle.getStream()) != rocblas_status_success)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

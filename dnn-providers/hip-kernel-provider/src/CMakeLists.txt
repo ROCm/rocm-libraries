@@ -188,6 +188,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # output Gfx942AttentionDense serves.
     set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
         "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_bshd_*_stats_*")
+    # Plus the BSHD stats bundles the gfx950 unified engines' LSE-on twins serve. The
+    # gfx950 rows share one categories YAML, so they share this filter.
+    set(HKP_GFX950_ATTENTION_GTEST_FILTER
+        "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_BshdStats.*")
 
     # The engine-pinned attention engines, each with an external integration check below,
     # a GPU-reference target in integration_tests/ and a census in tests/. Six fields per
@@ -195,13 +199,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # TOML under ../config/ and its categories YAML variable from ../CMakeLists.txt.
     # test_attention_bundle_filters.py reads the rows to pair each filter with its YAML.
     set(HKP_PINNED_ATTENTION_ENGINES
-        gfx950 dense Gfx950AttentionDense HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        gfx950 dense Gfx950AttentionDense HKP_GFX950_ATTENTION_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
             HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
-        gfx950 unified_2d Gfx950AttentionUnified2D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        gfx950 unified_2d Gfx950AttentionUnified2D HKP_GFX950_ATTENTION_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
             HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
-        gfx950 unified_3d Gfx950AttentionUnified3D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        gfx950 unified_3d Gfx950AttentionUnified3D HKP_GFX950_ATTENTION_GTEST_FILTER
             hipkernel_Gfx950Attention.toml
             HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
         gfx942 unified_3d Gfx942AttentionUnified3d HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
@@ -603,6 +607,19 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                         "\n[[test_skips]]\narchs = [${_others_toml}]\nfilters = [\"*\"]\n"
                         "reason = \"${_engine}: this entry runs on ${_arch} only\"\n")
                 endif()
+                # A padded or fully masked query row has LSE = -inf in the engine and in the
+                # reference alike (SEM-008), which plain allclose fails. Only the SDPA stats
+                # output is graded with matching infinities; O keeps the default. That
+                # validator is host-only, so these entries also run with
+                # HIPDNN_TEST_VALIDATOR=cpu (below).
+                set(_lane_environment ${TEST_ENVIRONMENT})
+                if(_op MATCHES "^sdpa_")
+                    string(APPEND _toml_text
+                        "\n[[validator_overrides]]\nfilters = [\"*_SdpaFwd*\"]\n"
+                        "tensors = [\"LSE\", \"*::Stats\"]\n"
+                        "validator = \"allclose_matching_infinities\"\n")
+                    list(APPEND _lane_environment "HIPDNN_TEST_VALIDATOR=cpu")
+                endif()
                 file(WRITE "${_toml}" "${_toml_text}")
 
                 _hkp_census_external_test_file(_shard_ctest ${_arch})
@@ -627,7 +644,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     TEST_CONFIG    "${_toml}"
                     REFERENCE_EXECUTOR gpu
                     GTEST_FILTER   "quick_${_bundle}_*.*:standard_${_bundle}_*.*:comprehensive_${_bundle}_*.*:full_${_bundle}_*.*"
-                    ENVIRONMENT    ${TEST_ENVIRONMENT}
+                    ENVIRONMENT    ${_lane_environment}
                     ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                     ${_category_args}
                 )
@@ -675,6 +692,14 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             if(COMMAND apply_ctest_category_labels)
                 apply_ctest_category_labels(
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
+                # If the cross-provider target was absent, this is the first drain
+                # and therefore the first chance to categorize rocKE's staged
+                # CTests. When the first drain already ran, reapplying the same
+                # categories after late registration is harmless.
+                apply_ctest_category_labels(
+                    "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
                     "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 )
             endif()

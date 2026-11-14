@@ -76,7 +76,7 @@ option(HIPKERNELPROVIDER_ENABLE_FLYDSL
 # pipeline's engine images register the group; with HIPDNN_ENABLE_KERNEL_INGESTOR OFF it
 # builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_CONV
-       "Build the conv engine group (naive convolution) for the kernel ingestor" ON)
+       "Build the conv engine group for the kernel ingestor" ON)
 # Off by default: compiles a sample of conv configs for RDNA chips and their LLVM generic
 # targets with the ROCm clang (minutes, no GPU). Run with `ctest -L conv_generic_compile`.
 option(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST
@@ -296,6 +296,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     fetch_gtest_dependency()
 endif()
 include(Tests)
+include(LongPathManifest)
 
 if(NOT HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR)
     message(FATAL_ERROR
@@ -616,8 +617,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # it OFF the hip producer packs alone, rocKE descriptors prune, and the rocKE
     # wheel toolchain is never asserted. The rocKE block above must still precede
     # this one, since that assertion reads cache variables rocke/ sets.
-    # The conv families whose catalogs were not pulled are withdrawn from every pack
-    # (HKP_WITHDRAWN_FOLDERS), so this must run before hkp_add_packaging() wires them.
+    # The conv families whose catalogs were not pulled join HKP_PRODUCT_EXCLUDED_BUNDLES,
+    # so this must run before hkp_add_packaging() wires the product root.
     if(HIPKERNELPROVIDER_ENABLE_CONV)
         include("${CMAKE_CURRENT_SOURCE_DIR}/conv/ConvContent.cmake")
     endif()
@@ -826,3 +827,4 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 REGEX "/census/[^/]+/Testing$" EXCLUDE)
     endif()
 endif()
+hipdnn_apply_long_path_manifest()

@@ -180,7 +180,11 @@ enum class SplitAxis
 
 int64_t& extentOf(GemmCall& call, SplitAxis axis)
 {
-    return axis == SplitAxis::N ? call.n : axis == SplitAxis::K ? call.k : call.batchCount;
+    if(axis == SplitAxis::N)
+    {
+        return call.n;
+    }
+    return axis == SplitAxis::K ? call.k : call.batchCount;
 }
 
 /// @p call's operands advanced by @p count matrices, columns (n) or reduction elements (k).
@@ -218,7 +222,7 @@ std::vector<GemmCall> splitAlong(std::vector<GemmCall> calls, SplitAxis axis, in
         const int64_t whole = extentOf(call, axis);
         if(whole <= limit)
         {
-            split.push_back(std::move(call));
+            split.push_back(call);
             continue;
         }
         for(int64_t first = 0; first < whole; first += limit)
@@ -276,15 +280,17 @@ bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArc
     const bool nt = !call.transposeA && call.transposeB;
     const bool tn = call.transposeA && !call.transposeB;
     bool gemv = false;
-    if(gfx11 && !(call.m == 1 && call.n == 1))
+    if(gfx11 && (call.m != 1 || call.n != 1))
     {
         gemv = true;
     }
     else if(gfx11 || gfx10 || cdnaGemv)
     {
-        gemv = !((call.n == 1 && (nn || tn))
-                 || (call.n == 1 && nt && (arch == "gfx908" || arch == "gfx90a"))
-                 || (call.n == 1 && call.b.leadingDimension > 8) || (call.m == 1 && (nn || tn)));
+        const bool cdna12 = arch == "gfx908" || arch == "gfx90a";
+        const bool gemmPath = (call.n == 1 && (nn || tn)) || (call.n == 1 && nt && cdna12)
+                              || (call.n == 1 && call.b.leadingDimension > 8)
+                              || (call.m == 1 && (nn || tn));
+        gemv = !gemmPath;
     }
     if(!gemv)
     {
@@ -297,11 +303,11 @@ bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArc
     return transposedGemv && call.k <= 64 && call.batchCount > 8;
 }
 
-std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls)
+std::vector<GemmCall> fitLibraryLimits(const std::vector<GemmCall>& calls)
 {
     std::vector<GemmCall> fitted;
     fitted.reserve(calls.size());
-    for(auto& call : calls)
+    for(const auto& call : calls)
     {
         // One call per matrix when a batch stride is too wide (a batch of 1 passes none), then
         // n and k in chunks the libraries' 32-bit sizes hold, in order, so a later chunk
@@ -310,7 +316,7 @@ std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls)
             = call.batchCount > 1
               && std::max({call.a.batchStride, call.b.batchStride, call.d.batchStride})
                      > MAX_BATCH_STRIDE;
-        std::vector<GemmCall> pieces{std::move(call)};
+        std::vector<GemmCall> pieces{call};
         if(wideBatch)
         {
             pieces = splitAlong(std::move(pieces), SplitAxis::BATCH, 1);
@@ -319,10 +325,7 @@ std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls)
         {
             pieces = splitAlong(std::move(pieces), axis, MAX_GEMM_EXTENT);
         }
-        for(auto& piece : pieces)
-        {
-            fitted.push_back(std::move(piece));
-        }
+        fitted.insert(fitted.end(), pieces.begin(), pieces.end());
     }
     return fitted;
 }

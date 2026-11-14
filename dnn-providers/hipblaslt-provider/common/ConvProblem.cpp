@@ -249,7 +249,7 @@ std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection d
     // FLOAT. The GEMMs accumulate in f32, at least the precision either asks for.
     const auto computeType = graph.getNodeWrapper(0).computeDataType();
     if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
-       && !(computeType == data_objects::DataType::HALF && xType == data_objects::DataType::HALF))
+       && (computeType != data_objects::DataType::HALF || xType != data_objects::DataType::HALF))
     {
         return std::nullopt;
     }
@@ -259,8 +259,16 @@ std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection d
     {
         return std::nullopt;
     }
-    const ConvOperand& written
-        = fields->written == fields->x ? *x : (fields->written == fields->w ? *w : *y);
+    const ConvOperand* writtenOperand = &*y;
+    if(fields->written == fields->x)
+    {
+        writtenOperand = &*x;
+    }
+    else if(fields->written == fields->w)
+    {
+        writtenOperand = &*w;
+    }
+    const ConvOperand& written = *writtenOperand;
     if(!hasDistinctElements(written))
     {
         return std::nullopt;

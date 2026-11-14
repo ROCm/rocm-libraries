@@ -37,6 +37,7 @@ int64_t divUp(int64_t value, int64_t divisor)
 
 /// True when @p strides (n, c, d, h, w) are packed channels-first for @p extents; extent-1 axes
 /// may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsFirst(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -127,8 +128,10 @@ std::optional<NchwProblem>
     {
         return std::nullopt;
     }
-    const long long d = a.inSpatial[0], h = a.inSpatial[1];
-    const long long dyD = a.outSpatial[0], dyH = a.outSpatial[1];
+    const long long d = a.inSpatial[0];
+    const long long h = a.inSpatial[1];
+    const long long dyD = a.outSpatial[0];
+    const long long dyH = a.outSpatial[1];
     if(!channelsFirst(a.xStrides, {a.n, a.c, d, h, a.inSpatial[2]})
        || !channelsFirst(a.yStrides, {a.n, a.k, dyD, dyH, a.outSpatial[2]})
        || !channelsFirst(a.wStrides, {a.k, a.c, a.filter[0], a.filter[1], a.filter[2]}))
@@ -216,7 +219,7 @@ std::optional<NchwProblem>
     k7.dh = static_cast<int>(a.dilation[1]);
     k7.dyImage = *dyImage;
     k7.dxImage = *dxImage;
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -279,7 +282,7 @@ std::optional<NchwProblem> threeBf16ProblemOf(const NchwProblem& problem)
 
 bool threeBf16Pays(const NchwProblem& problem, std::string_view gcnArchName)
 {
-    // Timed against the best exact config on 12 top fp32 K7 shapes (PLAN.md): 0.05-0.74x on
+    // Timed against the best exact config on 12 top fp32 K7 shapes: 0.05-0.74x on
     // gfx950, gfx942 and gfx90a; on gfx1201 (exact on FMA) 1.07x and 1.46x for 3-D 3x3x3 at
     // stride 2 and 0.15-0.79x elsewhere. Admitted only there.
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);

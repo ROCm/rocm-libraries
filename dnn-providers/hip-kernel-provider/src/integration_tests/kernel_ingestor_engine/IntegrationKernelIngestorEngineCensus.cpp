@@ -25,6 +25,9 @@
 
 #include "ScopedPluginLogCapture.hpp"
 #include "TestDescriptorRoot.hpp"
+#ifdef HIPDNN_ENGINE_CONV
+#include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
+#endif
 
 /**
  * @file IntegrationKernelIngestorEngineCensus.cpp
@@ -152,13 +155,32 @@ TEST(IntegrationKernelIngestorEngineCensus, EveryEngineOfTheDeviceShardLoads)
         GTEST_SKIP() << "no production descriptor shard for " << arch << " under " << root;
     }
     std::map<std::string, std::filesystem::path> expected;
+#ifdef HIPDNN_ENGINE_CONV
+    int withdrawn = 0;
+#endif
     for(const auto& [name, file] : enginesNamedIn(shard))
     {
+#ifdef HIPDNN_ENGINE_CONV
+        // The conv engine group loads only when its opt-in is set (ConvEngineGroupGate.hpp).
+        namespace gate = hip_kernel_provider::kernel_ingestor_engine;
+        if(!gate::convEngineGroupEnabled() && name.rfind(gate::CONV_ENGINE_PREFIX, 0) == 0)
+        {
+            ++withdrawn;
+            continue;
+        }
+#endif
         if(name.rfind(PROVIDER_ENGINE_PREFIX, 0) == 0)
         {
             expected.emplace(name, file);
         }
     }
+#ifdef HIPDNN_ENGINE_CONV
+    if(expected.empty() && withdrawn > 0)
+    {
+        GTEST_SKIP() << "every engine the " << arch
+                     << " shard names is in the conv engine group, which is not enabled";
+    }
+#endif
     ASSERT_FALSE(expected.empty()) << "the " << arch << " shard names no engine";
 
     // The plugin reports its engines when asked; the loader logs each drop with its reason.

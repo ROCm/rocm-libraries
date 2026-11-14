@@ -250,7 +250,7 @@ ConvShape dense(int64_t c,
                 int64_t k,
                 std::vector<int64_t> input,
                 std::vector<int64_t> filter,
-                std::vector<int64_t> pad,
+                const std::vector<int64_t>& pad,
                 bool channelsLast)
 {
     ConvShape shape;
@@ -326,6 +326,17 @@ std::vector<DeviceCase> deviceCases()
     auto manyTiles = dense(136, 8, {160, 160}, {3, 3}, {1, 1}, true);
     manyTiles.n = 6;
     cases.push_back({"Nhwc3x3ManyTiles", manyTiles});
+    // Batch-unfold rows tiles (two images per MFMA column group): an odd batch leaves the last
+    // group one image short; 24 columns fill 8-column halves exactly, 21 do not.
+    auto oddBatch = dense(64, 136, {11, 24}, {3, 3}, {1, 1}, true);
+    oddBatch.n = 3;
+    cases.push_back({"Nhwc3x3OddBatch", oddBatch});
+    auto oddBatchRagged = dense(72, 40, {9, 21}, {3, 3}, {2, 2}, true);
+    oddBatchRagged.n = 5;
+    cases.push_back({"Nhwc3x3OddBatchRagged", oddBatchRagged});
+    // A grid of a few tiles over 4+ channel chunks: the rows split-C configs (fp32 partials and
+    // the in-order reduce) serve it; 200 channels leave the last split a short chunk.
+    cases.push_back({"Nhwc3x3SplitC", dense(200, 72, {9, 11}, {3, 3}, {1, 1}, true)});
     return cases;
 }
 
@@ -469,8 +480,8 @@ void runCase(ConvShape shape,
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!matches(got, want, tolerance) && ++mismatches <= 5)

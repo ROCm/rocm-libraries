@@ -175,7 +175,11 @@ DisjointCase randomDisjointCase(std::mt19937& random, int trial)
         g.stride[axis] = used ? extent + pick(0, 2) : 1;
         g.prePadding[axis] = used ? pick(0, 2) : 0;
         const long long post = used ? pick(0, 2) : 0;
-        g.input[axis] = used ? (axis == 2 && trial % 2 == 0 ? 8 * pick(2, 5) : pick(3, 37)) : 1;
+        g.input[axis] = 1;
+        if(used)
+        {
+            g.input[axis] = axis == 2 && trial % 2 == 0 ? 8 * pick(2, 5) : pick(3, 37);
+        }
         g.output[axis] = (g.input[axis] + g.prePadding[axis] + post - extent) / g.stride[axis] + 1;
         if(g.output[axis] < 1)
         {
@@ -236,10 +240,10 @@ void disjointReference(const DisjointCase& caseData,
     for(long long index = 0; index < total; ++index)
     {
         long long rest = index;
-        long long position[3];
+        std::array<long long, 3> position{};
         for(int axis = 2; axis >= 0; --axis)
         {
-            position[axis] = rest % g.input[axis];
+            position[static_cast<size_t>(axis)] = rest % g.input[axis];
             rest /= g.input[axis];
         }
         const long long c = rest % channels;
@@ -249,7 +253,7 @@ void disjointReference(const DisjointCase& caseData,
         bool read = true;
         for(int axis = 0; axis < 3; ++axis)
         {
-            const long long s = position[axis] + g.prePadding[axis];
+            const long long s = position[static_cast<size_t>(axis)] + g.prePadding[axis];
             const long long coordinate = s >= 0 ? s / g.stride[axis] : 0;
             const long long offset = s - coordinate * g.stride[axis];
             const long long tap = offset / g.dilation[axis];
@@ -262,7 +266,7 @@ void disjointReference(const DisjointCase& caseData,
         long long target = n * g.xStrides[0] + c * g.xStrides[1];
         for(int axis = 0; axis < 3; ++axis)
         {
-            target += position[axis] * g.xStrides[2 + axis];
+            target += position[static_cast<size_t>(axis)] * g.xStrides[2 + axis];
         }
         const long long group = c / g.cPerGroup;
         const long long column = g.channelsInner != 0 ? (group * taps + element) * g.cPerGroup
@@ -481,7 +485,10 @@ TEST(TestGpuRepackKernels, WideCastSumsManyPartialsInAFixedTree)
     // follows the same order, so fp32 output matches it exactly.
     SKIP_IF_NO_DEVICES();
     const RepackProgram program;
-    constexpr int64_t ROWS = 12, COLS = 25, BATCHES = 200, PITCH = 32;
+    constexpr int64_t ROWS = 12;
+    constexpr int64_t COLS = 25;
+    constexpr int64_t BATCHES = 200;
+    constexpr int64_t PITCH = 32;
     std::mt19937 random(7);
     std::uniform_real_distribution<float> value(-1.0f, 1.0f);
     std::vector<float> src(static_cast<size_t>(ROWS * COLS * BATCHES));

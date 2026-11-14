@@ -214,8 +214,9 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
     // One input image within the kernel's 32-bit buffer offsets (its window loads); the span
     // covers every element an image's strides reach.
     long long span = 1;
-    const long long extents[5] = {a.n, inChannels, inExtents[0], inExtents[1], inExtents[2]};
-    for(int i = 1; i < 5; ++i)
+    const std::array<long long, 5> extents
+        = {a.n, inChannels, inExtents[0], inExtents[1], inExtents[2]};
+    for(size_t i = 1; i < 5; ++i)
     {
         if(inStrides[i] < 0)
         {
@@ -241,8 +242,8 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
     args.dout = static_cast<int>(outExtents[0]);
     args.ho = static_cast<int>(outExtents[1]);
     args.wo = static_cast<int>(outExtents[2]);
-    int pads[3];
-    for(int axis = 0; axis < 3; ++axis)
+    std::array<int, 3> pads{};
+    for(size_t axis = 0; axis < 3; ++axis)
     {
         // Backward: dx row i reads dy rows i + pre - f dil, i.e. the forward window from
         // i - ((filter - 1) dil - pre) over the reflected filter.
@@ -263,7 +264,7 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
         args.xs[i] = inStrides[i];
         args.ys[i] = outStrides[i];
     }
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -316,7 +317,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                                                              {"wave", &config.wave},
                                                              {"ka", &config.ka},
                                                              {"ep", &config.ep}}};
-    const int atomWave = config.wave, atomKa = config.ka;
+    const int atomWave = config.wave;
+    const int atomKa = config.ka;
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -360,7 +362,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     if(config.fma)
     {
         // 256 threads cover the tile exactly: NG = BN / FN channel groups x FM-column runs.
-        const int bn = config.blockColumns(), tw = config.wq * 16;
+        const int bn = config.blockColumns();
+        const int tw = config.wq * 16;
         if(bn % config.fn != 0 || FMA_THREADS % (bn / config.fn) != 0 || tw % config.fm != 0
            || FMA_THREADS / (bn / config.fn) * config.fm != config.wm * tw)
         {
@@ -537,7 +540,7 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    return Admitted{std::move(*problem), *config, *plan};
+    return Admitted{*problem, *config, *plan};
 }
 
 /// Kernel-scoped applicability: the config's direction, dtype, channel bound, filter, stride and

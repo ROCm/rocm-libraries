@@ -14,8 +14,9 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
     # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
     # lane points the production source root. Gfx950AttentionDense, Gfx950AttentionUnified2D,
-    # Gfx950AttentionUnified3D, Gfx942AttentionDense and Gfx950ConvDgradAot ship from
-    # descriptors/; the two dense attention engines share AttentionDenseNative.cpp.
+    # Gfx950AttentionUnified3D, Gfx942AttentionDense, Gfx950ConvDgradAot and
+    # Gfx1250ConvDgradAot ship from descriptors/; the two dense attention engines share
+    # AttentionDenseNative.cpp, the two dgrad engines ConvDgradAotNative.cpp.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/AttentionDenseNative.cpp
@@ -25,7 +26,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionUnified3DNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx1151WmmaAttentionNative.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvDgradNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDgradAotNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/IngestorPlanCodec.cpp
 )
@@ -225,6 +226,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDualwaveNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaCdnaDecodeNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaDropoutMaskNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaHeadPadNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()
@@ -258,6 +261,10 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvFftNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvFftProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuWrwNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuWrwProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupValuProblem.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
     # One definition per served family (conv/ConvContent.cmake): IngestorPacks.cpp
@@ -330,6 +337,10 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${_hkp_conv_root}/fft/kernels/ConvFftArgs.h"
         "${_hkp_conv_root}/fft/kernels/ConvFftCore.h"
         "${_hkp_conv_root}/fft/kernels/ConvFftTwiddles.h"
+        "${_hkp_conv_root}/group_valu_wrw/kernels/ConvGroupValuWrw.cpp"
+        "${_hkp_conv_root}/group_valu_wrw/kernels/ConvGroupValuWrwArgs.h"
+        "${_hkp_conv_root}/group_valu/kernels/ConvGroupValu.cpp"
+        "${_hkp_conv_root}/group_valu/kernels/ConvGroupValuArgs.h"
         CACHE INTERNAL "Kernel sources of the conv engine group, embedded for HIPRTC")
     set(HKP_CONV_KERNEL_KEYS
         kernels/ConvNaive.cpp
@@ -382,6 +393,10 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvFftArgs.h
         ConvFftCore.h
         ConvFftTwiddles.h
+        kernels/ConvGroupValuWrw.cpp
+        ConvGroupValuWrwArgs.h
+        kernels/ConvGroupValu.cpp
+        ConvGroupValuArgs.h
         CACHE INTERNAL "Embedding keys of HKP_CONV_KERNEL_SOURCES, in the same order")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_impl

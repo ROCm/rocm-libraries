@@ -78,16 +78,16 @@ ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend)
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     if(backend == Backend::HIPBLASLT)
     {
-        return [](const HipdnnEnginePluginHandle& handle, std::vector<GemmCall> calls) {
-            return std::make_unique<HipblasltGemmPlan>(handle, std::move(calls));
+        return [](const HipdnnEnginePluginHandle& handle, const std::vector<GemmCall>& calls) {
+            return std::make_unique<HipblasltGemmPlan>(handle, calls);
         };
     }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     if(backend == Backend::ROCBLAS)
     {
-        return [](const HipdnnEnginePluginHandle& /*handle*/, std::vector<GemmCall> calls) {
-            return std::make_unique<RocblasGemmPlan>(std::move(calls));
+        return [](const HipdnnEnginePluginHandle& /*handle*/, const std::vector<GemmCall>& calls) {
+            return std::make_unique<RocblasGemmPlan>(calls);
         };
     }
 #endif
@@ -275,7 +275,7 @@ std::vector<ConvCase> convCases()
     add("Conv3dNcdhw", threeD);
     add("Conv3dNdhwc", channelsLast(threeD));
 
-    ConvGemmShape pointGroupedNhwc = channelsLast(pointGrouped);
+    ConvGemmShape const pointGroupedNhwc = channelsLast(pointGrouped);
     add("PointOutputNhwcGrouped", pointGroupedNhwc);
 
     // Images that do not nest into one stride: y is staged channels-last for the GEMM.
@@ -332,13 +332,13 @@ int64_t offsetOf(const std::vector<int64_t>& index, const std::vector<int64_t>& 
 
 std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims);
 
-/// @p filter's elements reflected along every spatial axis, into @p reflected.
+/// @p input's elements reflected along every spatial axis, into @p output.
 template <typename T>
-void reflectFilter(Tensor<T>& filter, Tensor<T>& reflected)
+void reflectFilter(Tensor<T>& input, Tensor<T>& output)
 {
-    const auto& dims = filter.dims();
-    const auto* source = static_cast<const T*>(filter.rawHostData());
-    auto* target = static_cast<T*>(reflected.rawHostData());
+    const auto& dims = input.dims();
+    const auto* source = static_cast<const T*>(input.rawHostData());
+    auto* target = static_cast<T*>(output.rawHostData());
     for(const auto& index : allIndices(dims))
     {
         auto mirror = index;
@@ -346,9 +346,9 @@ void reflectFilter(Tensor<T>& filter, Tensor<T>& reflected)
         {
             mirror[axis] = dims[axis] - 1 - index[axis];
         }
-        target[offsetOf(mirror, reflected.strides())] = source[offsetOf(index, filter.strides())];
+        target[offsetOf(mirror, output.strides())] = source[offsetOf(index, input.strides())];
     }
-    reflected.markHostModified();
+    output.markHostModified();
 }
 
 std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims)
@@ -653,7 +653,7 @@ void runCase(ConvCase convCase,
     {
         reflectFilter(w, reflectedW);
     }
-    Tensor<T>& referenceW = reflect ? reflectedW : w;
+    Tensor<T> const& referenceW = reflect ? reflectedW : w;
     Tensor<T> reference(written->dims(), written->strides());
     switch(convCase.direction)
     {
@@ -711,8 +711,8 @@ void runCase(ConvCase convCase,
     float maxError = 0.0f;
     for(const auto& index : allIndices(written->dims()))
     {
-        const float got = static_cast<float>(written->getHostValue(index));
-        const float want = static_cast<float>(reference.getHostValue(index));
+        const auto got = static_cast<float>(written->getHostValue(index));
+        const auto want = static_cast<float>(reference.getHostValue(index));
         const float tolerance = bound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
         maxError = std::max(maxError, std::fabs(got - want));
         if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -1350,7 +1350,7 @@ void runRprCase(ConvCase convCase, Backend backend)
         static_cast<void>(tensor->rawHostData());
     }
 
-    std::vector<int64_t> spatial(shape.input.begin(), shape.input.end());
+    std::vector<int64_t> const spatial(shape.input.begin(), shape.input.end());
     const auto positions = allIndices(spatial);
     const int64_t cg = shape.c / shape.groups;
     const int64_t kg = shape.k / shape.groups;
@@ -1609,10 +1609,18 @@ TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
         std::array<int64_t, 4> at{};
         for(size_t axis = 0; axis < 4; ++axis)
         {
-            at[axis] = sample == 0 ? 0
-                       : sample == 1
-                           ? outDims[axis] - 1
-                           : static_cast<int64_t>(random() % static_cast<uint64_t>(outDims[axis]));
+            if(sample == 0)
+            {
+                at[axis] = 0;
+            }
+            else if(sample == 1)
+            {
+                at[axis] = outDims[axis] - 1;
+            }
+            else
+            {
+                at[axis] = static_cast<int64_t>(random() % static_cast<uint64_t>(outDims[axis]));
+            }
         }
         double want = 0.0;
         for(int64_t inner = 0; inner < (forward ? shape.c : shape.k); ++inner)
@@ -1654,7 +1662,7 @@ TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
                             sizeof(Half),
                             hipMemcpyDeviceToHost),
                   hipSuccess);
-        const double got = static_cast<double>(static_cast<float>(gotBits));
+        const auto got = static_cast<double>(static_cast<float>(gotBits));
         const double tolerance
             = 1e-6 * static_cast<double>(reduction)
               + 2.0 * static_cast<double>(storageEpsilon<Half>()) * (std::fabs(want) + 1e-3);

@@ -25,6 +25,9 @@ python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/i
 | `gen_depthwise_rows.py` | `depthwise_rows` | `CONV_DEPTHWISE_ROWS_FWD`, `CONV_DEPTHWISE_ROWS_BWD` |
 | `gen_depthwise_mfma.py` | `depthwise_mfma` | `CONV_DEPTHWISE_MFMA_FWD`, `CONV_DEPTHWISE_MFMA_BWD` |
 | `gen_group.py` | `group` | `CONV_GROUP_FWD`, `CONV_GROUP_BWD`, `CONV_GROUP_WRW` |
+| `gen_group_valu.py` | `group_valu` | `CONV_GROUP_VALU_FWD`, `CONV_GROUP_VALU_BWD` |
+| `gen_group_valu_wrw.py` | `group_valu_wrw` | `CONV_GROUP_VALU_WRW` |
+| `gen_fft.py` | `fft` | `CONV_FFT_FWD`, `CONV_FFT_BWD`, `CONV_FFT_WRW` |
 
 The naive engines (`descriptors/conv/naive`, 9 configs) are maintained by hand.
 
@@ -34,6 +37,6 @@ Rules the generators follow, which the engine packs and tests rely on:
 - **Ids are stable.** Every id is a `uuid5` of the config's content, so regenerating doesn't churn the files.
 - **Configs are told apart only by integer knobs.** Candidate enumeration and the winner cache distinguish configs only by their integer knob fields. A config field that changes the compiled kernel must therefore be an int knob. The engines' catalog tests fail if two configs share a knob tuple, and some generators also assert it.
 - **Each config is admitted on its own gates.** A config is a candidate for a graph only if its pack's gates accept both the graph and the config. The packs (`src/engines/kernel_ingestor_engine/packs/Conv*Problem.*`) decline every field they don't support, and each gate has a test.
-- **Packs stay under 500 KB per file,** the repo's pre-commit limit. Large catalogs (`wrw`, `stem_bwd`) are split per dtype and kernel family, and their generators assert the limit.
+- **Catalog files are split where a generator asserts a size.** The catalogs are DVC outputs, so the repository's 500 KB pre-commit file limit does not apply to them; `gen_conv_wrw.py` and `gen_conv_stem_bwd.py` still split their catalogs per dtype and kernel family and assert each file stays under 500 KB, and `gen_group.py` splits its backward-weights catalog the same way. The single-file catalogs (for example `igemm_nchw`, `group` bwd) run to about 1.4 MB.
 
 After regenerating, run the engine's tests; see the conv section of `../README.md` for the filters.

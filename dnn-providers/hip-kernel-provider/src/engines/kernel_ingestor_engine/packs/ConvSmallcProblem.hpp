@@ -89,7 +89,7 @@ std::optional<Config> configOf(const hipdnn_plugin_sdk::ingestor::KernelDefiniti
 struct Plan
 {
     SmallcArgs args{};
-    unsigned int grid[2] = {1, 1};
+    std::array<unsigned int, 2> grid = {1, 1};
     long long weightElems = 0;
     size_t weightBytes = 0;
 };

@@ -159,9 +159,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
     # The production descriptor tree, as the same binary-relative offset the integration
-    # binary uses. Only TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad
-    # catalog's metadata through the real state manager; it skips when this configuration
-    # packs no production tree, so no dependency on hkp_packaging_product is added here.
+    # binary uses. TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad catalog's
+    # metadata through the real state manager, and TestConvEngineGroupGate, to withdraw the
+    # conv group from the shipped catalog; both skip when this configuration packs no
+    # production tree, so no dependency on hkp_packaging_product is added here.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
 
@@ -371,7 +372,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
+                ShipsTheF32Objects
                 RanksTheNarrowerBucketFirst
+                ShipsTheWideAndPairBuckets
+                StagesTheHeadDim256KeysInChunksOn64KiBParts
                 EveryKernelDeclaresItsFamilysSignature
         )
     endif()
@@ -385,6 +389,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
                 EveryKernelDeclaresItsFamilysSignature
+                ServesHeadDim256OnFourWaves
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode)
@@ -410,7 +415,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheThirtyEightSlotSignature
+                EveryKernelDeclaresTheFortySevenSlotSignature
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
@@ -435,7 +440,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryDecodeVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheFortySlotSignature
+                EveryKernelDeclaresTheFortyFourSlotSignature
         )
     endif()
 
@@ -495,6 +500,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -625,6 +631,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # ... and its gfx1250 sibling, hipkernel:Gfx1250ConvDgradAot.
+    hkp_product_ships_engine_for_arch(_hkp_gfx1250_conv_dgrad_aot
+                                      "hipkernel:Gfx1250ConvDgradAot" gfx1250)
+    if(_hkp_gfx1250_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+        # Its trained ranker, as the ModelBinding companion above checks the attention
+        # engine's: the bound model loads and scores every shipped kernel.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL2KernelRankerScoresEveryShippedKernel
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1250ConvDgradAot for "
+            "gfx1250, so its census is not registered.")
+    endif()
+
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
@@ -633,7 +667,14 @@ clang_tidy_check(hip_kernel_provider_tests)
 # runs standalone and nothing machine-specific reaches the generated CTest files. The
 # install-time file is written from this same list, where a build-tree path would name a
 # directory that does not exist on the machine running the installed suite.
-add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+# The conv engine group is opt-in at runtime (HIP_KERNEL_PROVIDER_ENABLE_CONV); its suites run
+# with it enabled (main() also defaults it on, so the binary runs standalone).
+set(_hkp_unit_environment "")
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_ENABLE_CONV)
+    list(APPEND _hkp_unit_environment "HIP_KERNEL_PROVIDER_ENABLE_CONV=1")
+endif()
+add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR}
+                     ENVIRONMENT ${_hkp_unit_environment})
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     clang_tidy_check(hip_kernel_provider_census_tests)

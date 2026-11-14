@@ -15,8 +15,8 @@
 #
 # A family that is not served ships nothing: an engine descriptor without its catalog
 # would load as an engine with no kernels, which the loader drops with an error at every
-# provider load. So this file withdraws `conv/<family>` from every pack
-# (HKP_WITHDRAWN_FOLDERS, read by hkp_add_packaging), and src/ neither registers the
+# provider load. So this file withdraws `conv/<family>` from the product pack (it joins
+# HKP_PRODUCT_EXCLUDED_BUNDLES, read by hkp_add_packaging), and src/ neither registers the
 # family's native pack (HIPDNN_ENGINE_CONV_<FAMILY>, IngestorPacks.cpp) nor builds its
 # device tests. The packs' host code still compiles: families share it (the implicit-GEMM
 # core in ConvIgemmNative.cpp serves direct, wrw and stem_bwd too), and none of it is
@@ -79,8 +79,9 @@ foreach(_family IN LISTS _conv_families)
     if(_reason)
         list(APPEND _conv_unserved "${_family}")
         message(STATUS "conv: family ${_family} not served -- ${_reason}")
-        # Withdraw it from every pack, so its engine descriptors do not ship without kernels.
-        set_property(GLOBAL APPEND PROPERTY HKP_WITHDRAWN_FOLDERS "conv/${_family}")
+        # Withdraw it from the product pack, so its engine descriptors do not ship without
+        # kernels.
+        list(APPEND HKP_PRODUCT_EXCLUDED_BUNDLES "conv/${_family}")
     else()
         list(APPEND _conv_served "${_family}")
     endif()

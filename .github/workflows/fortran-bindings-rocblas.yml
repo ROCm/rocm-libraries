@@ -1,0 +1,30 @@
+# Fortran binding of rocblas: see fortran-bindings.yml.
+name: Fortran bindings (rocblas)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rocblas/library/include/**.h'
+      - 'bindings/fortran/rocblas/metadata/**'
+      - '.github/workflows/fortran-bindings-rocblas.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      project: rocblas
+      libs: rocblas
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

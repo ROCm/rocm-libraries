@@ -272,9 +272,11 @@ std::optional<int64_t> outputExtent(
 
 /// Copies an operand's (n, c, spatial...) strides into the kernel's 5-slot form, padding the
 /// missing leading spatial axes with stride 0.
-void fillStrides(const Operand& operand,
-                 int64_t spatialRank,
-                 long long (&strides)[CONV_NAIVE_TENSOR_DIMS])
+void fillStrides(
+    const Operand& operand,
+    int64_t spatialRank,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    long long (&strides)[CONV_NAIVE_TENSOR_DIMS])
 {
     strides[0] = operand.strides[0];
     strides[1] = operand.strides[1];
@@ -287,6 +289,7 @@ void fillStrides(const Operand& operand,
 }
 
 /// Product of @p values, or nullopt on overflow.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 std::optional<int64_t> product(const long long (&values)[CONV_NAIVE_SPATIAL_DIMS])
 {
     std::optional<int64_t> result = 1;
@@ -365,8 +368,13 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
     }
     const auto spatialRank = static_cast<int64_t>(rank - 2);
 
-    const Operand& written
-        = fields->writtenUid == uids.x ? *x : (fields->writtenUid == uids.w ? *w : *y);
+    const Operand& written = [&]() -> const Operand& {
+        if(fields->writtenUid == uids.x)
+        {
+            return *x;
+        }
+        return fields->writtenUid == uids.w ? *w : *y;
+    }();
     if(!hasDistinctElements(written))
     {
         return std::nullopt;

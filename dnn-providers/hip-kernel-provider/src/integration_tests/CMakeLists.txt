@@ -51,6 +51,9 @@ if(ENABLE_ASM_SDPA_ENGINE)
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
+            # Group mode against the CPU reference (compiles empty without the ingestor,
+            # whose frontend-built lane it uses).
+            asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
@@ -123,6 +126,37 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
         )
     endif()
+    hkp_product_offers_engine(_hkp_gfx1250_conv_dgrad_aot_bundle "hipkernel:Gfx1250ConvDgradAot")
+    if(_hkp_gfx1250_conv_dgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx1250ConvDgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX1250_CONV_DGRAD_AOT=1
+        )
+    endif()
+    # The FlyDSL SDPA engines end to end through the frontend Graph API (Graph::sdpa needs
+    # HIPDNN_ENABLE_SDPA; the source compiles empty without it).
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPDNN_ENABLE_SDPA)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontend.cpp
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontendFeatures.cpp
+        )
+    endif()
+    # The architectures the FlyDSL SDPA forward engines have objects for: the content list,
+    # not GPU_TARGETS, so the frontend lane skips exactly the architectures FlyDSL ships no
+    # SDPA objects for (FlydslSdpaFrontendGraphs.hpp, flydslSdpaServes). Empty without content.
+    set(_flydsl_sdpa_archs "")
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        foreach(_flydsl_op sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_cdna sdpa_cdna_decode)
+            list(APPEND _flydsl_sdpa_archs ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}})
+        endforeach()
+        list(REMOVE_DUPLICATES _flydsl_sdpa_archs)
+    endif()
+    string(REPLACE ";" "," _flydsl_sdpa_archs "${_flydsl_sdpa_archs}")
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS="${_flydsl_sdpa_archs}"
+    )
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationKernelIngestorEngineCensus.cpp
@@ -150,6 +184,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                            "served (${HIPKERNELPROVIDER_CONV_UNSERVED_FAMILIES})")
         endif()
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE HIPDNN_ENGINE_CONV=1)
+        # The suites read the conv group's opt-in (ConvEngineGroupGate.hpp) and the naive pack's
+        # budget constants: headers only, nothing linked.
+        target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/..)
         # The coverage census reads its map beside the binary, in the build tree and the
         # install tree alike.
         set(_hkp_conv_coverage_map
@@ -233,8 +271,25 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 # descriptor tree relative to the loaded module -- the staged copy in a build tree, the
 # installed copy in an install tree. Naming one explicitly would pin the build path into
 # the install-time CTest file and stop the installed descriptors from ever being read.
+# The conv engine group is opt-in at runtime (HIP_KERNEL_PROVIDER_ENABLE_CONV); a build that
+# ships it runs its suites with the group enabled.
+set(_hkp_integration_environment "")
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_ENABLE_CONV)
+    list(APPEND _hkp_integration_environment "HIP_KERNEL_PROVIDER_ENABLE_CONV=1")
+endif()
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
-    LABELS slow)
+    LABELS slow ENVIRONMENT ${_hkp_integration_environment})
+
+# The same binary with the conv group not enabled: none of its engines is offered.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPKERNELPROVIDER_ENABLE_CONV
+   AND "naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+    add_test(NAME hip_kernel_provider_conv_opt_in_off
+             COMMAND hip_kernel_provider_integration_tests
+                     --gtest_filter=*IntegrationGpuConvNaive.IsOfferedOnlyWhenTheConvGroupIsEnabled*
+             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(hip_kernel_provider_conv_opt_in_off PROPERTIES
+        LABELS "slow" ENVIRONMENT "HIP_KERNEL_PROVIDER_ENABLE_CONV=0")
+endif()
 
 # Forward the merged raw-test environment (published by add_integration_test_target)
 # to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can

@@ -648,6 +648,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
+        "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx942_attention_unified3d.dispatch",
         "hipkernel.gfx950_attention_unified_2d.dispatch",
@@ -665,6 +666,8 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna.dispatch",
         "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
+        "hipkernel.flydsl_sdpa_head_pad.dispatch",
 #endif
 #ifdef HIPDNN_ENGINE_CONV
 #ifdef HIPDNN_ENGINE_CONV_NAIVE
@@ -710,6 +713,12 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 #endif
 #ifdef HIPDNN_ENGINE_CONV_FFT
         "hipkernel.conv_fft.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU
+        "hipkernel.conv_group_valu.dispatch",
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
+        "hipkernel.conv_group_valu_wrw.dispatch",
 #endif
 #endif
     };

@@ -12,7 +12,8 @@
 //                       0 for the matrix-core kernels: CONV_DIRECT_ATOM, _BC, _VEC, and
 //   CONV_DIRECT_ROWS    0: the halo-tile kernel, _BM, _BN, _WM, _WN, _RING, _BL, _SPLIT
 //                       1: the filter-row reuse kernel (ConvDirectRows.h, 2-D and 3-D), _PW,
-//                       _FN, _WP, _WQ, _WK, _PP, _EPI
+//                       _FN, _WP, _WQ, _WK, _PP, _EPI, and (2-D) _UN, images per MFMA column
+//                       group (default 1)
 
 #include "ConvDirectCore.h"
 #ifndef CONV_DIRECT_ROWS
@@ -20,6 +21,9 @@
 #endif
 #if CONV_DIRECT_ROWS
 #include "ConvDirectRows.h"
+#ifndef CONV_DIRECT_UN
+#define CONV_DIRECT_UN 1
+#endif
 #endif
 
 #if CONV_DIRECT_FMA
@@ -73,7 +77,9 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                CONV_DIRECT_BC,
                CONV_DIRECT_PP,
                CONV_DIRECT_EPI,
-               CONV_DIRECT_TO>(a);
+               CONV_DIRECT_TO,
+               CONV_DIRECT_UN,
+               CONV_DIRECT_SPLIT>(a);
 #else
     k2ConvMma<CONV_DIRECT_T,
               CONV_DIRECT_ATOM,

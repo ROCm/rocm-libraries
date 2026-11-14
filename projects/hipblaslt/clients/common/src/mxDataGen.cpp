@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "mxDataGen.hpp"
+#include "mx_tile128x4.hpp"
 #include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
 #include <mxDataGenerator/dataTypeInfo.hpp>
@@ -497,6 +498,19 @@ std::vector<float> generateData(T                           dgen,
                                                     elementsPerMXBlock));
         }
         break;
+    case MXScaleLayout::Tile128x4:
+    {
+        bool const kIsRows = (isMatrixA && isTranspose) || (!isMatrixA && !isTranspose);
+        if(!kIsRows || elementsPerMXBlock <= 0
+           || static_cast<size_t>(sizes[0]) % static_cast<size_t>(elementsPerMXBlock) != 0)
+            throw std::runtime_error("128x4 scales require K along the stored rows, in whole "
+                                     "blocks");
+        size_t const kBlocks
+            = static_cast<size_t>(sizes[0]) / static_cast<size_t>(elementsPerMXBlock);
+        swizzledScaleBytes = mx_tile128x4::shuffleScales(
+            scaleBytes, /*rows=*/static_cast<size_t>(sizes[1]), kBlocks);
+        break;
+    }
     case MXScaleLayout::None:
         break;
     }
@@ -766,6 +780,9 @@ void applyMXScaleLayoutInPlace(uint8_t*      scale,
         if(mxBlock > 0)
             scaleBytes = DGen::preSwizzleScalesGFX1250(scaleBytes, slowDim, fastDim, mxBlock);
         break;
+    case MXScaleLayout::Tile128x4:
+        // The 128x4 shuffle needs K along the stored rows, which only generateData checks.
+        throw std::runtime_error("MXScaleLayout::Tile128x4 is produced only by generateData");
     case MXScaleLayout::None:
         break;
     }
@@ -786,6 +803,8 @@ MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
 {
     if(scalingFormat == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
         return MXScaleLayout::GFX950;
+    if(scalingFormat == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT)
+        return MXScaleLayout::Tile128x4;
     if(mxScaleLayoutForArchName(archName) == MXScaleLayout::GFX1250)
         return MXScaleLayout::GFX1250;
     return MXScaleLayout::None;

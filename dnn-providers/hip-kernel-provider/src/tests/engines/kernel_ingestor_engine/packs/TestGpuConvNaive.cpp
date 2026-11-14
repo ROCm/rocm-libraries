@@ -85,11 +85,16 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition naiveKernel(DataType dataType,
     kernel.name = "conv_naive_test";
     kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
     kernel.source.sourceFile = "kernels/ConvNaive.cpp";
-    kernel.source.entryPoint
-        = "ConvNaive"
-          + std::string(direction == ConvDirection::FORWARD
-                            ? "Fwd"
-                            : (direction == ConvDirection::BACKWARD_DATA ? "Bwd" : "Wrw"));
+    std::string suffix = "Wrw";
+    if(direction == ConvDirection::FORWARD)
+    {
+        suffix = "Fwd";
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        suffix = "Bwd";
+    }
+    kernel.source.entryPoint = "ConvNaive" + suffix;
     kernel.metadata
         = {{"dtype", std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType))},
            {"direction", directionTag(direction)}};
@@ -401,19 +406,23 @@ void runCase(ConvShape shape, ConvDirection direction)
         filterElements *= shape.filter[axis];
         outElements *= output[axis];
     }
-    const int64_t reduction = direction == ConvDirection::FORWARD
-                                  ? (shape.c / shape.groups) * filterElements
-                                  : (direction == ConvDirection::BACKWARD_DATA
-                                         ? (shape.k / shape.groups) * filterElements
-                                         : shape.n * outElements);
+    int64_t reduction = shape.n * outElements;
+    if(direction == ConvDirection::FORWARD)
+    {
+        reduction = (shape.c / shape.groups) * filterElements;
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        reduction = (shape.k / shape.groups) * filterElements;
+    }
     const float accumulationBound = 1e-6f * static_cast<float>(reduction);
 
     const auto* actual = static_cast<const T*>(writtenTensor->rawHostData());
     const auto* expected = static_cast<const T*>(expectedTensor.rawHostData());
     int64_t mismatches = 0;
     forEachIndex(writtenTensor->dims(), [&](const std::vector<int64_t>& index) {
-        const float got = static_cast<float>(actual[offsetOf(index, writtenTensor->strides())]);
-        const float want = static_cast<float>(expected[offsetOf(index, expectedTensor.strides())]);
+        const auto got = static_cast<float>(actual[offsetOf(index, writtenTensor->strides())]);
+        const auto want = static_cast<float>(expected[offsetOf(index, expectedTensor.strides())]);
         const float tolerance
             = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
         if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)

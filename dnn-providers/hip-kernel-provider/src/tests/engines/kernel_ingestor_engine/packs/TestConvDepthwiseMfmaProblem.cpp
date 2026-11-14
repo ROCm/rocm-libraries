@@ -78,7 +78,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const Fields& f)
 /// NHWC depthwise, unit stride, padding filter / 2.
 ConvShape depthwise(int64_t channels,
                     std::vector<int64_t> input,
-                    std::vector<int64_t> filter,
+                    const std::vector<int64_t>& filter,
                     DataType dataType = DataType::HALF)
 {
     ConvShape shape;
@@ -283,7 +283,7 @@ TEST(TestConvDepthwiseMfmaKernelMatch, ChannelsFirstFoldsUpToEightImages)
 
 TEST(TestConvDepthwiseMfmaKernelMatch, AtomGatesTheDevice)
 {
-    Fields x32;
+    Fields const x32;
     Fields x16;
     x16.config.atom = 16;
     EXPECT_TRUE(admits(x32, baseShape(), "gfx950"));

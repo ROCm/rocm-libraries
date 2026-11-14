@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -120,6 +121,7 @@ bool fitsInt(long long value)
 
 /// True when @p strides (in n, c, d, h, w slots) are packed in @p order (slowest axis first,
 /// as slot indices) for @p extents (in the same slots); extent-1 axes may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool packedIn(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
               const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
               const std::array<int, 4>& order)
@@ -140,6 +142,7 @@ bool packedIn(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 constexpr std::array<int, 4> NCHW_ORDER{0, 1, 3, 4};
 constexpr std::array<int, 4> NHWC_ORDER{0, 3, 4, 1};
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 Layout layoutOf(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                 const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -411,7 +414,7 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     problem.activations = x == y ? x : Layout::OTHER;
     // Filter (k, c/g, r, s): KCRS packed is the channels-first order, KRSC the channels-last.
     problem.filter = layoutOf(a.wStrides, {a.k, a.c / a.groups, 1, 3, 3});
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -489,7 +492,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         const bool registerVariant = config.variant == Variant::WREG
                                      || config.variant == Variant::SREG
                                      || config.variant == Variant::COOP;
-        if((config.variant != Variant::WREG && config.bins != 0)
+        // bins: the register WMMA's bins per wave, or 16 for the cooperative 16-bin layout.
+        const bool coop16 = config.variant == Variant::COOP && config.bins == 16;
+        if((config.variant != Variant::WREG && !coop16 && config.bins != 0)
+           || (config.variant != Variant::FUSED && !coop16 && config.variant != Variant::WRW
+               && (config.tm != 0 || config.tn != 0))
            || (!registerVariant && config.variant != Variant::WRW && config.f16Math)
            || (config.variant != Variant::COOP && config.variant != Variant::FUSED
                && config.pf != 0))
@@ -505,7 +512,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             const bool fma = config.arch == "any";
             const bool atom = config.arch == "gfx9" || config.arch == "gfx950"
                               || config.arch == "gfx11" || config.arch == "gfx12";
-            const int bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
+            const int bm = config.gemmBm;
+            const int bn = config.gemmBn;
+            const int bk = config.gemmBk;
             // The transforms read packed channels-first operands (channels-last ones are transposed
             // in): NCHW configs only.
             if((config.m != 2 && config.m != 4 && config.m != 6) || config.layout != Layout::NCHW
@@ -551,10 +560,13 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             break;
         case Variant::FUSED:
         {
+            // "any", or an RDNA family for the micro-tiles that need more than gfx9's 128
+            // registers at two waves per SIMD (8 x 16).
             if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
-               || config.arch != "any" || config.tm < 4 || config.tn < 4 || config.tm % 4 != 0
-               || config.tn % 4 != 0 || config.bk < config.tm || config.bt < config.tn
-               || config.bk % config.tm != 0 || config.bt % config.tn != 0 || config.ccv < 1)
+               || (config.arch != "any" && config.arch != "gfx11" && config.arch != "gfx12")
+               || config.tm < 4 || config.tn < 4 || config.tm % 4 != 0 || config.tn % 4 != 0
+               || config.bk < config.tm || config.bt < config.tn || config.bk % config.tm != 0
+               || config.bt % config.tn != 0 || config.ccv < 1)
             {
                 return std::nullopt;
             }
@@ -577,7 +589,15 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         {
             // 4 x (4 / bins) waves per 16-tile group; the epilogue's LDS (8 x 4 / bins x bk x bt
             // fp32) within 64 KiB.
-            const int perRow = config.bins == 4 ? 1 : config.bins == 2 ? 2 : 0;
+            int perRow = 0;
+            if(config.bins == 4)
+            {
+                perRow = 1;
+            }
+            else if(config.bins == 2)
+            {
+                perRow = 2;
+            }
             if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
                || (config.arch != "gfx11" && config.arch != "gfx12")
                || (config.bk != 32 && config.bk != 64) || perRow == 0
@@ -595,6 +615,23 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             // bk = 16 x mt x waves / 4 with mt 1, 2 or 4, and the double-buffered transformed
             // input (bt KiB) within 64 KiB of LDS. Accumulator tiles per bin (mt x bt / 16): at
             // most 4 on RDNA (8 registers each), 16 on CDNA (4 each; mt and nt cap it).
+            if(coop16)
+            {
+                // 16-bin layout (RDNA, F(2,3)): a wave owns all 16 bins of 16 x tm out channels
+                // by 16 x tn tiles (accumulators 128 x tm x tn registers: tm = tn = 1); kw K
+                // waves by tw tile waves.
+                const int kw = config.bk / 16;
+                const int tw = config.bt / 16;
+                if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
+                   || (config.arch != "gfx11" && config.arch != "gfx12") || config.tm != 1
+                   || config.tn != 1 || config.bk % 16 != 0 || (kw != 2 && kw != 4 && kw != 8)
+                   || config.bt % 16 != 0 || (tw != 1 && tw != 2) || config.waves != kw * tw
+                   || config.pf != 0)
+                {
+                    return std::nullopt;
+                }
+                break;
+            }
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
             // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block. F(2,3), or
@@ -659,6 +696,8 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
                    || arch == "gfx942" || arch == "gfx950";
         }
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+    case Variant::FUSED:
+        return config.arch == "any" || (arch.size() > 5 && arch.substr(0, 5) == config.arch);
     case Variant::WMMA:
     case Variant::WREG:
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
@@ -694,24 +733,46 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
     // dtype's error band).
     plan.wrwOpt = config.f16Math || (!fma && !fp32 && config.m == 2) ? 1 : 0;
     plan.operandBytes = plan.wrwOpt == 0 ? 4 : 2;
-    plan.wrwAtom = fma                      ? 0
-                   : config.arch == "gfx9"  ? 1
-                   : config.arch == "gfx11" ? 3
-                   : config.arch == "gfx12" ? 4
-                                            : 5;
+    if(fma)
+    {
+        plan.wrwAtom = 0;
+    }
+    else if(config.arch == "gfx9")
+    {
+        plan.wrwAtom = 1;
+    }
+    else if(config.arch == "gfx11")
+    {
+        plan.wrwAtom = 3;
+    }
+    else if(config.arch == "gfx12")
+    {
+        plan.wrwAtom = 4;
+    }
+    else
+    {
+        plan.wrwAtom = 5;
+    }
     const long long ob = plan.operandBytes;
-    const long long bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
+    const long long bm = config.gemmBm;
+    const long long bn = config.gemmBn;
+    const long long bk = config.gemmBk;
     plan.gemmThreads = static_cast<unsigned int>(
         fma ? (bm / config.tm) * (bn / config.tn)
-            : config.waves * (config.arch == "gfx11" || config.arch == "gfx12" ? 32 : 64));
+            : static_cast<long long>(config.waves)
+                  * (config.arch == "gfx11" || config.arch == "gfx12" ? 32 : 64));
     // Both LDS tiles, rows of bk tiles plus one 16-byte unit.
     if((bm + bn) * (bk + 16 / ob) * ob > 65536)
     {
         return std::nullopt;
     }
 
-    const long long r = config.m, positions = (r + 2) * (r + 2);
-    const long long n = w.n, groups = w.groups, cg = w.c / groups, kg = w.k / groups;
+    const long long r = config.m;
+    const long long positions = (r + 2) * (r + 2);
+    const long long n = w.n;
+    const long long groups = w.groups;
+    const long long cg = w.c / groups;
+    const long long kg = w.k / groups;
     const long long perImage = divUp(w.ho, r) * divUp(w.wo, r);
     const long long eb = problem.elementBytes;
     const long long xImage = static_cast<long long>(w.c) * w.hi * w.wi;
@@ -754,7 +815,8 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
 
     // Splits over the tiles: enough blocks for about 2048 threads per unit (one split where
     // the device reports no units).
-    const long long nbk = divUp(kg, bm), nbc = divUp(cg, bn);
+    const long long nbk = divUp(kg, bm);
+    const long long nbc = divUp(cg, bn);
     const long long blocks = nbk * nbc * groups * positions;
     const long long units = std::max<long long>(1, device_units::dispatchUnits(device));
     const long long target = units * std::max<long long>(1, 2048 / plan.gemmThreads);
@@ -818,18 +880,20 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
     offset = alignUp(offset + plan.partBytes);
     plan.workspaceBytes = offset;
 
-    const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
-        if(x < 1 || x > INT_LIMIT || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
-        {
-            return false;
-        }
-        blocks[0] = static_cast<unsigned int>(x);
-        blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
-        blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
-        return true;
-    };
+    const auto grid
+        = [](std::array<unsigned int, 3>& blocks, long long x, long long y, long long z) {
+              if(x < 1 || x > INT_LIMIT || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
+              {
+                  return false;
+              }
+              blocks[0] = static_cast<unsigned int>(x);
+              blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
+              blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
+              return true;
+          };
     // k5wTransform: 64 tiles x 4 channels.
-    const long long tb = 64, cb = 4;
+    const long long tb = 64;
+    const long long cb = 4;
     if(!grid(plan.inputBlocks, ldt / tb, divUp(cg, cb), groups)
        || !grid(plan.filterBlocks, ldt / tb, divUp(kg, cb), groups)
        || !grid(plan.gemmBlocks, blocks * splits, 1, 1)
@@ -862,20 +926,28 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     // A multipass config reads its own layout natively; anything but the other packed layout
     // is staged to channels-first. The fused kernels read channels-first and stage the rest.
     if(multipass && problem.activations != kernelLayout
-       && !(problem.activations == Layout::OTHER && kernelLayout == Layout::NCHW))
+       && (problem.activations != Layout::OTHER || kernelLayout != Layout::NCHW))
     {
         return std::nullopt;
     }
     const long long eb = problem.elementBytes;
-    const long long n = a.n, groups = a.groups, cgi = a.ci / groups, cgo = a.co / groups;
+    const long long n = a.n;
+    const long long groups = a.groups;
+    const long long cgi = a.ci / groups;
+    const long long cgo = a.co / groups;
     // F(m,3) has (m + 2)^2 positions, F(3,2) 16.
-    const long long m = config.m, positions = m == 3 ? 16 : (m + 2) * (m + 2);
-    const long long th = divUp(a.ho, m), tw = divUp(a.wo, m), tilesPerImage = th * tw;
+    const long long m = config.m;
+    const long long positions = m == 3 ? 16 : (m + 2) * (m + 2);
+    const long long th = divUp(a.ho, m);
+    const long long tw = divUp(a.wo, m);
+    const long long tilesPerImage = th * tw;
     // The operands as the graph holds them (stride 2 phases x or dx through 4x the channels).
-    const long long inC = a.mode == 1 ? a.ci / 4 : a.ci, inH = a.mode == 1 ? a.xh : a.hi,
-                    inW = a.mode == 1 ? a.xw : a.wi;
-    const long long outC = a.mode == 2 ? a.co / 4 : a.co, outH = a.mode == 2 ? a.xh : a.ho,
-                    outW = a.mode == 2 ? a.xw : a.wo;
+    const long long inC = a.mode == 1 ? a.ci / 4 : a.ci;
+    const long long inH = a.mode == 1 ? a.xh : a.hi;
+    const long long inW = a.mode == 1 ? a.xw : a.wi;
+    const long long outC = a.mode == 2 ? a.co / 4 : a.co;
+    const long long outH = a.mode == 2 ? a.xh : a.ho;
+    const long long outW = a.mode == 2 ? a.xw : a.wo;
     const long long inImage = inC * inH * inW;
     const long long outImage = outC * outH * outW;
     if(tilesPerImage < 1 || tilesPerImage > INT_LIMIT)
@@ -910,7 +982,8 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     if(problem.filter != kernelLayout)
     {
         // The graph's filter (k, c/g, r, s) to packed KCRS or KRSC.
-        const long long k = base.k, cg = base.c / base.groups;
+        const long long k = base.k;
+        const long long cg = base.c / base.groups;
         const std::array<long long, 4> graph{
             base.wStrides[0], base.wStrides[1], base.wStrides[3], base.wStrides[4]};
         plan.filter.needed = true;
@@ -954,7 +1027,7 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     {
         // The fused layout, plus one K block the wave-uniform loads of a partial block may read.
         const long long vw = problem.base.dataType == data_objects::DataType::HALF ? 2 : 1;
-        uBytes = groups * 16 * divUp(cgi, vw) * cgo * 4 + config.bk * 4;
+        uBytes = groups * 16 * divUp(cgi, vw) * cgo * 4 + static_cast<long long>(config.bk) * 4;
         break;
     }
     default:
@@ -1017,17 +1090,18 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
 
     // Every grid built here runs 256-thread blocks; one dispatch addresses at most 2^32 - 1
     // work items along x.
-    const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
-        if(x < 1 || x > INT_LIMIT || x * 256 > static_cast<long long>(UINT32_MAX)
-           || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
-        {
-            return false;
-        }
-        blocks[0] = static_cast<unsigned int>(x);
-        blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
-        blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
-        return true;
-    };
+    const auto grid
+        = [](std::array<unsigned int, 3>& blocks, long long x, long long y, long long z) {
+              if(x < 1 || x > INT_LIMIT || x * 256 > static_cast<long long>(UINT32_MAX)
+                 || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
+              {
+                  return false;
+              }
+              blocks[0] = static_cast<unsigned int>(x);
+              blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
+              blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
+              return true;
+          };
     // The persistent (fused) kernels size their grid from the device's units: a device that
     // reports none is declined rather than guessed at.
     const long long computeUnits = device_units::dispatchUnits(device);
@@ -1057,7 +1131,8 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     case Variant::FUSED:
     {
         const long long vw = problem.base.dataType == data_objects::DataType::HALF ? 2 : 1;
-        const long long lanesPerBin = (config.bk / config.tm) * (config.bt / config.tn);
+        const long long lanesPerBin
+            = static_cast<long long>(config.bk / config.tm) * (config.bt / config.tn);
         plan.mainThreads = static_cast<unsigned int>(16 / (64 / lanesPerBin) * 64);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
         if(!grid(plan.filterBlocks, divUp(groups * divUp(cgi, vw) * cgo, 256), 1, 1))
@@ -1098,6 +1173,11 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         plan.mainThreads
             = static_cast<unsigned int>((config.arch == "gfx9" ? 64 : 32) * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
+        // The kernel counts items in 32 bits (and steps past the last by the grid size).
+        if(items > (INT_LIMIT >> 1))
+        {
+            return std::nullopt;
+        }
         // RDNA: tile blocks fastest where a group's transformed filter is past cache size (4 MiB
         // and up: large C x K; re-reading it per tile block dominates), else K blocks fastest.
         // CDNA's caches hold it either way (measured neutral to 7% slower): K blocks fastest.
@@ -1106,7 +1186,35 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         {
             return std::nullopt;
         }
-        const long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
+        long long perUnit = std::max<long long>(1, 1024 / plan.mainThreads);
+        if(config.bins == 16)
+        {
+            // The 16-bin layout's waves take up to 256 registers: a SIMD holds 6 of them on the
+            // 1536-register RDNA parts, 4 on the others. A grid past what is resident runs a
+            // second, partly empty round of persistent blocks (gfx1201 unet bwd: 1.26x slower).
+            const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+            const bool largeFile = arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1151"
+                                   || arch == "gfx1200" || arch == "gfx1201";
+            perUnit = std::max<long long>(1, 4 * (largeFile ? 6 : 4) / config.waves);
+        }
+        else if(config.arch == "gfx9")
+        {
+            // CDNA: the blocks a CU holds, by registers (the kernel's k5CoopCdnaWpe waves per
+            // SIMD; gfx908 keeps 2 and the 1024-thread grid) and by LDS (160 KiB a CU on gfx950,
+            // 64 KiB before). A grid past that ran a second, partly empty round of persistent
+            // blocks: gfx950 hrnet c32 k32 56² n128 and yolo c32 160² 15-20% slower.
+            const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+            const int kw = std::max(1, config.waves / 4);
+            const int mt = std::max(1, config.bk / (16 * kw));
+            const int nt = std::max(1, config.bt / 16);
+            const long long ldsPerUnit = arch == "gfx950" ? 160LL << 10 : 64LL << 10;
+            const long long byLds = ldsPerUnit / k5CoopLdsBytes(nt, kw, config.m, true);
+            const bool half = problem.base.dataType == data_objects::DataType::HALF;
+            const long long byRegs
+                = arch == "gfx908" ? perUnit
+                                   : k5CoopCdnaWpe(mt, nt, kw, half, config.m == 3 && forward) / kw;
+            perUnit = std::max<long long>(1, std::min(byLds, byRegs));
+        }
         plan.mainBlocks
             = static_cast<unsigned int>(std::clamp<long long>(items, 1, computeUnits * perUnit));
         break;
@@ -1139,6 +1247,35 @@ using conv_winograd::Config;
 using conv_winograd::Plan;
 using conv_winograd::Variant;
 using conv_winograd::WinogradProblem;
+
+/// The direction token the heuristic features bind.
+std::string_view directionToken(ConvDirection direction)
+{
+    if(direction == ConvDirection::FORWARD)
+    {
+        return "FWD";
+    }
+    return direction == ConvDirection::BACKWARD_DATA ? "BWD" : "WRW";
+}
+
+/// CONV_WINO_VARIANT: the kernel source's code for each variant.
+int variantCodeOf(Variant variant)
+{
+    constexpr std::array<Variant, 6> CODED = {Variant::MULTIPASS,
+                                              Variant::FUSED,
+                                              Variant::WMMA,
+                                              Variant::WREG,
+                                              Variant::SREG,
+                                              Variant::COOP};
+    for(size_t code = 0; code < CODED.size(); ++code)
+    {
+        if(CODED[code] == variant)
+        {
+            return static_cast<int>(code);
+        }
+    }
+    return static_cast<int>(CODED.size()); // WRW
+}
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view FWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_winograd_fwd.graph_match";
@@ -1198,10 +1335,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirecti
     bound[std::string(Y_TOKEN)] = problem->yUid;
     bound[std::string(DTYPE_TOKEN)]
         = std::string(data_objects::EnumNameDataType(problem->base.dataType));
-    bound[std::string(DIRECTION_TOKEN)]
-        = std::string(direction == ConvDirection::FORWARD         ? "FWD"
-                      : direction == ConvDirection::BACKWARD_DATA ? "BWD"
-                                                                  : "WRW");
+    bound[std::string(DIRECTION_TOKEN)] = std::string(directionToken(direction));
     const auto flops = pack_features::checkedMultiply(2, problem->base.multiplyAccumulates);
     if(flops.has_value())
     {
@@ -1290,7 +1424,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
         {
             return std::nullopt;
         }
-        return Resolved{std::move(*problem), *config, *plan};
+        return Resolved{*problem, *config, *plan};
     }
     const bool wmmaFamily = config->variant == Variant::WMMA || config->variant == Variant::WREG
                             || config->variant == Variant::COOP;
@@ -1321,7 +1455,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
-    return Resolved{std::move(*problem), *config, *plan};
+    return Resolved{*problem, *config, *plan};
 }
 
 bool kernelMatches(const MatchContext& context,
@@ -1361,10 +1495,10 @@ class PreparedConvWinograd : public IngestorPreparedDispatch
 public:
     PreparedConvWinograd(std::vector<IngestorKernelCode> kernels,
                          std::optional<IngestorKernelCode> copy,
-                         const Resolved& resolved)
+                         Resolved resolved)
         : _kernels(std::move(kernels))
         , _copy(std::move(copy))
-        , _resolved(resolved)
+        , _resolved(std::move(resolved))
     {
     }
 
@@ -1437,13 +1571,7 @@ public:
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_WINO_T", elementTypeFor(resolved->problem.base.dataType));
-        const int variantCode = config.variant == Variant::MULTIPASS ? 0
-                                : config.variant == Variant::FUSED   ? 1
-                                : config.variant == Variant::WMMA    ? 2
-                                : config.variant == Variant::WREG    ? 3
-                                : config.variant == Variant::SREG    ? 4
-                                : config.variant == Variant::COOP    ? 5
-                                                                     : 6;
+        const int variantCode = variantCodeOf(config.variant);
         options.add("CONV_WINO_VARIANT", std::to_string(variantCode));
         options.add("CONV_WINO_DIR",
                     std::string(resolved->problem.direction == ConvDirection::FORWARD ? "0" : "1"));
@@ -1464,11 +1592,19 @@ public:
         options.add("CONV_WINO_TG", std::to_string(std::max(1, config.bt / 16)));
         options.add("CONV_WINO_BINS", std::to_string(config.bins));
         options.add("CONV_WINO_F16MATH", std::string(config.f16Math ? "1" : "0"));
-        // Cooperative WMMA: K wave groups, 16-channel K tiles per wave, 16-tile groups.
-        const int coopKw = std::max(1, config.waves / 4);
+        // Cooperative WMMA: K wave groups, 16-channel K tiles per wave, 16-tile groups; the
+        // 16-bin layout (bins 16): K waves, 16 x tm channels by 16 x tn tiles, tile waves.
+        const bool coop16 = config.variant == Variant::COOP && config.bins == 16;
+        const int coopMt = coop16 ? std::max(1, config.tm) : 0;
+        const int coopNt = coop16 ? std::max(1, config.tn) : 0;
+        const int coopKw
+            = coop16 ? std::max(1, config.bk / (16 * coopMt)) : std::max(1, config.waves / 4);
         options.add("CONV_WINO_KW", std::to_string(coopKw));
-        options.add("CONV_WINO_MT", std::to_string(std::max(1, config.bk / (16 * coopKw))));
-        options.add("CONV_WINO_NT", std::to_string(std::max(1, config.bt / 16)));
+        options.add("CONV_WINO_MT",
+                    std::to_string(coop16 ? coopMt : std::max(1, config.bk / (16 * coopKw))));
+        options.add("CONV_WINO_NT", std::to_string(coop16 ? coopNt : std::max(1, config.bt / 16)));
+        options.add("CONV_WINO_TW",
+                    std::to_string(coop16 ? std::max(1, config.bt / (16 * coopNt)) : 0));
         options.add("CONV_WINO_PF", std::to_string(config.pf));
         // Fused VALU: pf 1 prefetches two chunks ahead (depth 2).
         options.add("CONV_WINO_PFD", std::to_string(config.pf + 1));
@@ -1484,7 +1620,7 @@ public:
         const auto build = [&](std::string_view entryPoint,
                                const std::vector<KernelArgument>& signature,
                                unsigned int threads,
-                               const unsigned int(&blocks)[3]) {
+                               const std::array<unsigned int, 3>& blocks) {
             KernelDefinition definition = kernel;
             definition.source.entryPoint = std::string(entryPoint);
             auto code = buildIngestorKernelCode(
@@ -1494,7 +1630,7 @@ public:
             return code;
         };
         std::vector<IngestorKernelCode> kernels;
-        const unsigned int mainGrid[3] = {plan.mainBlocks, 1, 1};
+        const std::array<unsigned int, 3> mainGrid = {plan.mainBlocks, 1, 1};
         switch(config.variant)
         {
         case Variant::MULTIPASS:
@@ -1577,7 +1713,7 @@ public:
                     total = std::max(total, staging->copy.total);
                 }
             }
-            const unsigned int copyGrid[3]
+            const std::array<unsigned int, 3> copyGrid
                 = {static_cast<unsigned int>(std::clamp<long long>(
                        (total + COPY_BLOCK - 1) / COPY_BLOCK, 1, COPY_MAX_BLOCKS)),
                    1,
@@ -1723,7 +1859,8 @@ public:
             slice.out = static_cast<char*>(out) + n0 * outImage * eb;
             if(multipass)
             {
-                const int cgi = slice.ci / slice.groups, cgo = slice.co / slice.groups;
+                const int cgi = slice.ci / slice.groups;
+                const int cgo = slice.co / slice.groups;
                 K5GemmArgs gemm{};
                 gemm.a = slice.u;
                 gemm.b = slice.v;

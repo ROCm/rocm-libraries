@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -18,6 +19,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -188,7 +190,11 @@ float toleranceEpsilons(Direction direction, const Problem& problem)
     case Direction::FWD:
         return static_cast<float>(problem.w[1] * filter);
     case Direction::BWD:
-        return static_cast<float>((problem.w[0] / (problem.x[1] / problem.w[1])) * filter);
+    {
+        // K / G output channels a group, exact: G = C / (C / G).
+        const int64_t outputChannelsPerGroup = problem.w[0] / (problem.x[1] / problem.w[1]);
+        return static_cast<float>(outputChannelsPerGroup * filter);
+    }
     case Direction::WRW:
         return static_cast<float>(problem.y[0] * problem.y[2] * problem.y[3]);
     default:
@@ -217,6 +223,10 @@ protected:
 
 TEST_P(IntegrationGpuConvNaive, IsOfferedPinnedAndMatchesTheReference)
 {
+    if(!convEngineGroupEnabled())
+    {
+        GTEST_SKIP() << "the conv engine group is not enabled (set " << CONV_ENABLE_ENV << "=1)";
+    }
     const auto& param = GetParam();
     const Problem problem;
     auto graph = buildGraph(param.direction, param.channelsLast, problem);
@@ -263,6 +273,10 @@ TEST_P(IntegrationGpuConvNaive, IsOfferedPinnedAndMatchesTheReference)
 
 TEST_P(IntegrationGpuConvNaive, IsNotOfferedOverItsWorkloadBudget)
 {
+    if(!convEngineGroupEnabled())
+    {
+        GTEST_SKIP() << "the conv engine group is not enabled (set " << CONV_ENABLE_ENV << "=1)";
+    }
     const auto& param = GetParam();
     // 3x3, C = K = 128, 56x56, padded: 462 M multiply-accumulates.
     Problem problem;
@@ -287,6 +301,45 @@ TEST_P(IntegrationGpuConvNaive, IsNotOfferedOverItsWorkloadBudget)
     }
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     EXPECT_EQ(std::find(engines.begin(), engines.end(), engineFor(param.direction)), engines.end());
+}
+
+// The opt-in (CONV_ENABLE_ENV): enabled, the direction's naive engine is offered; not
+// enabled, no engine of the conv group is offered at all, as in a build without it.
+TEST_P(IntegrationGpuConvNaive, IsOfferedOnlyWhenTheConvGroupIsEnabled)
+{
+    const auto& param = GetParam();
+    const Problem problem;
+    auto graph = buildGraph(param.direction, param.channelsLast, problem);
+    auto result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    std::vector<int64_t> engines;
+    result = graph->get_ranked_engine_ids(engines);
+    if(convEngineGroupEnabled())
+    {
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_NE(std::find(engines.begin(), engines.end(), engineFor(param.direction)),
+                  engines.end());
+        return;
+    }
+    // This binary loads only this provider: with the group withdrawn the graph may have no
+    // engine at all.
+    if(result.code == ErrorCode::GRAPH_NOT_SUPPORTED)
+    {
+        return;
+    }
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    for(const auto id : engines)
+    {
+        size_t length = 0;
+        ASSERT_EQ(hipdnnGetEngineNameById_ext(_handle, id, nullptr, &length),
+                  HIPDNN_STATUS_SUCCESS);
+        std::vector<char> name(length);
+        ASSERT_EQ(hipdnnGetEngineNameById_ext(_handle, id, name.data(), &length),
+                  HIPDNN_STATUS_SUCCESS);
+        EXPECT_NE(std::string_view(name.data()).substr(0, CONV_ENGINE_PREFIX.size()),
+                  CONV_ENGINE_PREFIX)
+            << name.data() << " is offered without " << CONV_ENABLE_ENV;
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(,

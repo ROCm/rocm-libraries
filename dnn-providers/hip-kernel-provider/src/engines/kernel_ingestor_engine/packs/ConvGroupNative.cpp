@@ -130,8 +130,9 @@ std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int tw, int cb)
 size_t expandedElements(const GroupProblem& problem)
 {
     const auto& a = problem.igemm.args;
-    const size_t taps = static_cast<size_t>(problem.kernelT * problem.kernelR * problem.kernelS);
-    const size_t nbi = static_cast<size_t>(problem.nbi);
+    const auto taps = static_cast<size_t>(problem.kernelT) * static_cast<size_t>(problem.kernelR)
+                      * static_cast<size_t>(problem.kernelS);
+    const auto nbi = static_cast<size_t>(problem.nbi);
     return problem.nbi > 0 ? static_cast<size_t>(a.groups) * nbi * nbi * taps * 256
                            : static_cast<size_t>(a.c / 16) * taps * 256;
 }
@@ -336,7 +337,7 @@ std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvD
     }
     // The implicit-GEMM filter staging is not used.
     igemm->w = conv_igemm::Staging{};
-    problem.igemm = std::move(*igemm);
+    problem.igemm = *igemm;
     for(const auto& phase : problem.phases)
     {
         // The smallest tile's grid within the launch limits.
@@ -368,7 +369,7 @@ std::optional<std::vector<GroupLaunch>> groupLaunches(const GroupProblem& proble
     {
         return std::nullopt;
     }
-    const size_t elementBytes = static_cast<size_t>(problem.igemm.elementBytes);
+    const auto elementBytes = static_cast<size_t>(problem.igemm.elementBytes);
     for(size_t i = 0; i < phases.size(); i += 4)
     {
         // Phases run depth, row, column: the four of a depth phase are (0,0) (0,1) (1,0) (1,1).
@@ -456,7 +457,7 @@ std::optional<GroupWrwProblem> parseGroupWrwProblem(const MatchContext& context)
     problem.filterR = static_cast<int>(a.filter[1]);
     problem.filterS = static_cast<int>(a.filter[2]);
     problem.stride = static_cast<int>(a.stride[1]);
-    problem.wrw = std::move(*wrw);
+    problem.wrw = *wrw;
     return problem;
 }
 
@@ -476,7 +477,7 @@ long long
     // least, more taps a round as the staging's LDS holds them.
     const long long stage
         = ((rows * cols + 1) * (16LL * nbi + vec) + dy * (16LL * cb + vec)) * elementBytes;
-    const long long red = nbi == 2 ? nbi * cb * 256LL * 4 : 0;
+    const long long red = nbi == 2 ? static_cast<long long>(nbi) * cb * 256 * 4 : 0;
     return std::max(stage, red);
 }
 
@@ -618,7 +619,7 @@ constexpr std::string_view WRW_REDUCE_ENTRY_POINT = "ConvGroupWrwReduce";
 constexpr unsigned int COPY_BLOCK = 256;
 constexpr long long COPY_MAX_BLOCKS = 1LL << 20;
 /// LDS a workgroup may take (every target arch has at least 64 KB).
-constexpr long long LDS_LIMIT = 64 * 1024;
+constexpr long long LDS_LIMIT = 64LL * 1024;
 
 constexpr std::string_view X_TOKEN = "conv_group.x.uid";
 constexpr std::string_view W_TOKEN = "conv_group.w.uid";
@@ -818,7 +819,7 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
             }
         }
         else if(!wrwAtom(tile.atom) || tile.cg != 0 || tile.px != 0
-                || !(tile.cb == 1 || tile.cb == 2 || (tile.cb % 4 == 0 && tile.cb <= 16)))
+                || (tile.cb != 1 && tile.cb != 2 && (tile.cb % 4 != 0 || tile.cb > 16)))
         {
             return std::nullopt;
         }
@@ -887,7 +888,8 @@ long long blockThreads(const Tile& tile)
 /// A launch's workgroups for a config's tile.
 std::optional<unsigned int> blocksFor(const K4Args& args, const Tile& tile)
 {
-    const auto th = static_cast<int>(tile.th), tw = static_cast<int>(tile.tw);
+    const auto th = static_cast<int>(tile.th);
+    const auto tw = static_cast<int>(tile.tw);
     const auto blocks
         = tile.nbi != 0 ? conv_group::phaseBlocksWide(
                               args, th, tw, static_cast<int>(tile.nbi), static_cast<int>(tile.nbo))
@@ -948,7 +950,8 @@ std::optional<std::pair<conv_group::GroupWrwProblem, conv_group::GroupWrwLaunch>
     {
         return std::nullopt;
     }
-    const auto th = static_cast<int>(tile.th), tw = static_cast<int>(tile.tw);
+    const auto th = static_cast<int>(tile.th);
+    const auto tw = static_cast<int>(tile.tw);
     // Channel blocks a workgroup: cb, or a wide group's nbo dy blocks.
     const auto blocks = static_cast<int>(tile.nbi != 0 ? tile.nbo : tile.cb);
     if(tile.th > 4096 || tile.tw > 4096
@@ -970,7 +973,7 @@ std::optional<std::pair<conv_group::GroupWrwProblem, conv_group::GroupWrwLaunch>
     {
         return std::nullopt;
     }
-    return std::make_pair(std::move(*problem), std::move(*launch));
+    return std::make_pair(*problem, *launch);
 }
 
 bool kernelMatches(const MatchContext& context,
@@ -1035,7 +1038,8 @@ bool kernelMatches(const MatchContext& context,
     // Three-bf16 stages bf16 and writes fp32.
     const int bytes = x3 ? 2 : problem->igemm.elementBytes;
     const int outBytes = x3 ? 4 : bytes;
-    const auto th = static_cast<int>(tile->th), tw = static_cast<int>(tile->tw);
+    const auto th = static_cast<int>(tile->th);
+    const auto tw = static_cast<int>(tile->tw);
     // Wide groups stage nbi blocks of a group's channels (cb's role).
     const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
     const long long lds
@@ -1202,7 +1206,7 @@ public:
                          conv_group::GroupWrwLaunch launch)
         : _conv(std::move(conv))
         , _reduce(std::move(reduce))
-        , _problem(std::move(problem))
+        , _problem(problem)
         , _launch(launch)
     {
     }
@@ -1370,7 +1374,9 @@ public:
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());
         conv.setBlockSize(
-            static_cast<unsigned int>(tile->fma ? FMA_THREADS : 4 * tile->info.wave), 1, 1);
+            static_cast<unsigned int>(tile->fma ? FMA_THREADS : int64_t{4} * tile->info.wave),
+            1,
+            1);
         conv.setGridSize(blocks.front(), 1, 1);
 
         KernelDefinition expandKernel = kernel;
@@ -1609,7 +1615,7 @@ private:
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4WrwArgs>());
         conv.setBlockSize(
-            static_cast<unsigned int>(tile.fma ? FMA_THREADS : 4 * tile.info.wave), 1, 1);
+            static_cast<unsigned int>(tile.fma ? FMA_THREADS : int64_t{4} * tile.info.wave), 1, 1);
         conv.setGridSize(wrw->second.grid, 1, 1);
         KernelDefinition reduceKernel = kernel;
         reduceKernel.source.entryPoint = std::string(WRW_REDUCE_ENTRY_POINT);
@@ -1622,7 +1628,7 @@ private:
         reduce.setBlockSize(COPY_BLOCK, 1, 1);
         reduce.setGridSize(wrw->second.reduceGrid, 1, 1);
         return std::make_unique<PreparedConvGroupWrw>(
-            std::move(conv), std::move(reduce), std::move(wrw->first), wrw->second);
+            std::move(conv), std::move(reduce), wrw->first, wrw->second);
     }
 
     static void launchWrw(const Handle& handle,

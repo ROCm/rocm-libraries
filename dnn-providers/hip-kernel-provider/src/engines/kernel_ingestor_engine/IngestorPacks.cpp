@@ -73,6 +73,16 @@ const std::vector<IngestorPack>& ingestorPacks()
 #ifdef HIPDNN_ENGINE_CONV_FFT
         {"hipkernel:CONV_FFT", &registerConvFftSymbols, &resetConvFftModuleCache},
 #endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU
+        {"hipkernel:CONV_GROUP_VALU",
+         &registerConvGroupValuSymbols,
+         &resetConvGroupValuModuleCache},
+#endif
+#ifdef HIPDNN_ENGINE_CONV_GROUP_VALU_WRW
+        {"hipkernel:CONV_GROUP_VALU_WRW",
+         &registerConvGroupValuWrwSymbols,
+         &resetConvGroupValuWrwModuleCache},
+#endif
 #endif
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's
@@ -97,6 +107,12 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:FlydslSdpaCdnaDecode",
          &registerFlydslSdpaCdnaDecodeSymbols,
          &resetFlydslSdpaCdnaDecodeModuleCache},
+        {"hipkernel:FlydslSdpaDropoutMask",
+         &registerFlydslSdpaDropoutMaskSymbols,
+         &resetFlydslSdpaDropoutMaskModuleCache},
+        {"hipkernel:FlydslSdpaHeadPad",
+         &registerFlydslSdpaHeadPadSymbols,
+         &resetFlydslSdpaHeadPadModuleCache},
 #endif
         {GFX950_ATTENTION_DENSE_ENGINE_NAME,
          &registerGfx950AttentionDenseSymbols,
@@ -122,6 +138,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:Gfx950ConvDgradAot",
          &registerGfx950ConvDgradAotSymbols,
          &resetGfx950ConvDgradAotModuleCache},
+        {"hipkernel:Gfx1250ConvDgradAot",
+         &registerGfx1250ConvDgradAotSymbols,
+         &resetGfx1250ConvDgradAotModuleCache},
     };
     return s_packs;
 }

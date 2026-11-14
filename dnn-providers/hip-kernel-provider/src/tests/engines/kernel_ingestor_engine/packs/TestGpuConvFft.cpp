@@ -69,10 +69,17 @@ using BFloat16 = hipdnn_data_sdk::types::bfloat16;
 
 PackSymbols packFor(ConvDirection direction)
 {
+    const char* graphMatch = "hipkernel.conv_fft_wrw.graph_match";
+    if(direction == ConvDirection::FORWARD)
+    {
+        graphMatch = "hipkernel.conv_fft_fwd.graph_match";
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        graphMatch = "hipkernel.conv_fft_bwd.graph_match";
+    }
     return {"",
-            direction == ConvDirection::FORWARD         ? "hipkernel.conv_fft_fwd.graph_match"
-            : direction == ConvDirection::BACKWARD_DATA ? "hipkernel.conv_fft_bwd.graph_match"
-                                                        : "hipkernel.conv_fft_wrw.graph_match",
+            graphMatch,
             "",
             "hipkernel.conv_fft.kernel_match",
             "",
@@ -84,9 +91,11 @@ PackSymbols packFor(ConvDirection direction)
 
 int directionIndex(ConvDirection direction)
 {
-    return direction == ConvDirection::FORWARD         ? 0
-           : direction == ConvDirection::BACKWARD_DATA ? 1
-                                                       : 2;
+    if(direction == ConvDirection::FORWARD)
+    {
+        return 0;
+    }
+    return direction == ConvDirection::BACKWARD_DATA ? 1 : 2;
 }
 
 /// The shipped catalog of @p direction, read from the production descriptor tree beside the
@@ -268,7 +277,7 @@ ConvShape conv(int64_t n,
                int64_t groups,
                std::vector<int64_t> input,
                std::vector<int64_t> filter,
-               std::vector<int64_t> pad,
+               const std::vector<int64_t>& pad,
                std::vector<int64_t> dilation,
                bool channelsLast)
 {
@@ -465,8 +474,8 @@ void runCase(ConvShape shape, ConvDirection direction, long long workspaceCap)
         const auto* actual = static_cast<const T*>(out->rawHostData());
         int64_t mismatches = 0;
         forEachIndex(out->dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, out->strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference->strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, out->strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference->strides())]);
             const float tolerance = fftBound + 2.0f * storageEpsilon<T>() * std::fabs(want);
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
             {

@@ -48,9 +48,11 @@ struct FftProblem
     int padH = 0, padW = 0; ///< pre-padding
     int dilH = 1, dilW = 1;
     int flip = 0; ///< convolution mode: the filter is reflected
+    // NOLINTBEGIN(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     long long xStr[4] = {}; ///< n, c, h, w element strides
     long long wStr[4] = {}; ///< k, c, r, s
     long long yStr[4] = {}; ///< n, k, h, w
+    // NOLINTEND(modernize-avoid-c-arrays)
 
     int spanH() const
     {

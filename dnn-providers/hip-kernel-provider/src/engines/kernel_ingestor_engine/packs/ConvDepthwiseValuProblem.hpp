@@ -35,6 +35,9 @@ enum class DepthwiseVariant
     /// Backward data by stride phase blocks (v6_phase_block_*): 2-D, the tile's filter and
     /// stride, unit dilation.
     PHASE = 5,
+    /// Channels-last 2-D register tile with the input rows streamed (v7_rowtile_core_nhwc):
+    /// the tile's filter and stride, unit dilation, vec channels per lane.
+    ROWTILE = 6,
 };
 
 /**
@@ -110,17 +113,20 @@ struct DepthwiseTile
     int64_t rd = 0;
     int64_t rh = 0;
     int64_t rw = 0;
-    /// Phase: the stride (height and width) the tile bakes, and channels per thread
-    /// (channels-last; 0 channels-first).
+    /// Phase and rowtile: the stride (height and width) the tile bakes. Phase: channels per
+    /// thread (channels-last; 0 channels-first); rowtile: channels per lane (1 or 2).
     int64_t stride = 0;
     int64_t vec = 0;
 };
 
-/// The launch of @p tile on @p problem: threads per block and blocks.
+/// The launch of @p tile on @p problem: threads per block and blocks (grid, gridY, gridZ; only
+/// the rowtile variant uses the second and third axes).
 struct DepthwiseLaunch
 {
     int64_t block = 0;
     int64_t grid = 0;
+    int64_t gridY = 1;
+    int64_t gridZ = 1;
 };
 
 /// The launch @p tile needs for @p problem, or nullopt when it exceeds a 32-bit grid. The cores

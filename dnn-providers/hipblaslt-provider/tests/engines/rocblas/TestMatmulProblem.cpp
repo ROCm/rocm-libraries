@@ -283,7 +283,7 @@ TEST(TestMatmulProblem, RocblasChunkedReductionsIntoNarrowOutputsAreFlagged)
     {
         operand->dataType = data_objects::DataType::BFLOAT16;
     }
-    const int64_t lda = 8193 * 8193;
+    const int64_t lda = int64_t{8193} * 8193;
     call.a.leadingDimension = lda;
     const int64_t chunk = ROCBLAS_REDUCTION_BYTES / (lda * 2);
     ASSERT_EQ(chunk, 15);

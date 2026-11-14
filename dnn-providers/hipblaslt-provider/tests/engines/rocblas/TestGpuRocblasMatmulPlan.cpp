@@ -185,8 +185,8 @@ void runCase(const MatmulCase& matmul)
     int64_t mismatches = 0;
     for(const auto& index : allIndices(spec.c.dims))
     {
-        const float got = static_cast<float>(c.getHostValue(index));
-        const float want = static_cast<float>(reference.getHostValue(index));
+        const auto got = static_cast<float>(c.getHostValue(index));
+        const auto want = static_cast<float>(reference.getHostValue(index));
         const float tolerance = bound + 2.0f * storageEpsilon<TOut>() * (std::fabs(want) + 1e-3f);
         if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
         {
@@ -208,7 +208,7 @@ TEST(TestRocblasMatmulLimits, DeclinesAReductionRocblasWouldRoundBetweenChunks)
 {
     const int64_t rows = int64_t{8193} * 8193;
     const RocblasMatmulPlanBuilder builder;
-    HipdnnEnginePluginHandle handle;
+    HipdnnEnginePluginHandle const handle;
     for(const bool aColumnMajor : {true, false})
     {
         for(const auto outType : {hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,

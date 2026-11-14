@@ -65,10 +65,17 @@ using BFloat16 = hipdnn_data_sdk::types::bfloat16;
 
 PackSymbols packFor(ConvDirection direction)
 {
+    const char* graphMatch = "hipkernel.conv_group_wrw.graph_match";
+    if(direction == ConvDirection::FORWARD)
+    {
+        graphMatch = "hipkernel.conv_group_fwd.graph_match";
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        graphMatch = "hipkernel.conv_group_bwd.graph_match";
+    }
     return {"",
-            direction == ConvDirection::FORWARD         ? "hipkernel.conv_group_fwd.graph_match"
-            : direction == ConvDirection::BACKWARD_DATA ? "hipkernel.conv_group_bwd.graph_match"
-                                                        : "hipkernel.conv_group_wrw.graph_match",
+            graphMatch,
             "",
             "hipkernel.conv_group.kernel_match",
             "",
@@ -105,7 +112,15 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
         {
             // A direction's packs: conv_group_<tag>.kdp.json, or (backward weights, split by
             // element type and atom family) conv_group_wrw_<suffix>.kdp.json.
-            const std::string tag = i == 0 ? "fwd" : i == 1 ? "bwd" : "wrw";
+            std::string tag = "wrw";
+            if(i == 0)
+            {
+                tag = "fwd";
+            }
+            else if(i == 1)
+            {
+                tag = "bwd";
+            }
             const auto isPack = [&](const std::string& name) {
                 return name == "conv_group_" + tag + ".kdp.json"
                        || (name.rfind("conv_group_" + tag + "_", 0) == 0 && name.size() > 9
@@ -167,9 +182,16 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
         }
         return catalogs;
     }();
-    return s_catalogs[direction == ConvDirection::FORWARD         ? 0
-                      : direction == ConvDirection::BACKWARD_DATA ? 1
-                                                                  : 2];
+    size_t index = 2;
+    if(direction == ConvDirection::FORWARD)
+    {
+        index = 0;
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        index = 1;
+    }
+    return s_catalogs[index];
 }
 
 void forEachIndex(const std::vector<int64_t>& dims,
@@ -267,7 +289,7 @@ ConvShape dense(int64_t c,
                 int64_t k,
                 std::vector<int64_t> input,
                 std::vector<int64_t> filter,
-                std::vector<int64_t> pad,
+                const std::vector<int64_t>& pad,
                 bool channelsLast)
 {
     ConvShape shape;
@@ -378,19 +400,32 @@ bool served(const ConvShape& shape, ConvDirection direction)
     {
         // Small groups: a matrix-core atom for the element type, and fp32 also on FMA everywhere.
         // Wide groups (17 to 32 channels): the MFMA atoms.
-        const auto element = shape.dataType == DataType::FLOAT  ? "f32"
-                             : shape.dataType == DataType::HALF ? "f16"
-                                                                : "bf16";
+        const char* element = "bf16";
+        if(shape.dataType == DataType::FLOAT)
+        {
+            element = "f32";
+        }
+        else if(shape.dataType == DataType::HALF)
+        {
+            element = "f16";
+        }
         const int64_t cg = shape.c / shape.groups;
         if(cg > 16)
         {
-            return cg <= 32
-                   && (shape.dataType == DataType::FLOAT
-                           ? conv_igemm::atomRunsOn("mfma16_f32", arch)
-                       : shape.dataType == DataType::HALF
-                           ? conv_igemm::atomRunsOn("mfma16_f16", arch)
-                           : conv_igemm::atomRunsOn("mfma16_bf16", arch)
-                                 || conv_igemm::atomRunsOn("mfma16_bf16_908", arch));
+            if(cg > 32)
+            {
+                return false;
+            }
+            if(shape.dataType == DataType::FLOAT)
+            {
+                return conv_igemm::atomRunsOn("mfma16_f32", arch);
+            }
+            if(shape.dataType == DataType::HALF)
+            {
+                return conv_igemm::atomRunsOn("mfma16_f16", arch);
+            }
+            return conv_igemm::atomRunsOn("mfma16_bf16", arch)
+                   || conv_igemm::atomRunsOn("mfma16_bf16_908", arch);
         }
         return shape.dataType == DataType::FLOAT || conv_wrw::runsMatrixAtomFor(element, arch);
     }
@@ -459,7 +494,13 @@ void runCase(ConvShape shape,
     {
         conv_tf32_test::plantInfinities(forward || weights ? x : y);
     }
-    Tensor<T>& written = forward ? y : weights ? w : x;
+    Tensor<T>& written = [&]() -> Tensor<T>& {
+        if(forward)
+        {
+            return y;
+        }
+        return weights ? w : x;
+    }();
 
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
     Tensor<T> reflectedW(spec.w.dims, spec.w.strides);
@@ -563,8 +604,8 @@ void runCase(ConvShape shape,
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!conv_tf32_test::matches(got, want, tolerance) && ++mismatches <= 5)
@@ -1295,9 +1336,10 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 EXPECT_EQ(nbi % kernel.getIntMetadata("nbo"), 0);
             }
             const bool fma = kernel.getStringMetadata("atom") == "fma";
-            const int tw = fma ? static_cast<int>(256 * kernel.getIntMetadata("oc") / (16 * cb) / th
-                                                  * kernel.getIntMetadata("px"))
-                               : static_cast<int>(16 * kernel.getIntMetadata("wp"));
+            const int tw
+                = fma ? static_cast<int>(256 * kernel.getIntMetadata("oc") / (int64_t{16} * cb) / th
+                                         * kernel.getIntMetadata("px"))
+                      : static_cast<int>(16 * kernel.getIntMetadata("wp"));
             if(kernel.getIntMetadata("pf") != 0)
             {
                 // Phase-fused: backward data at stride 2 only, its output tile in LDS too.

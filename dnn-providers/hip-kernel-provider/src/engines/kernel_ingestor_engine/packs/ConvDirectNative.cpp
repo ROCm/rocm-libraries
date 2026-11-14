@@ -73,6 +73,10 @@ constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
 constexpr size_t WORKSPACE_ALIGNMENT = 256;
 constexpr long long MAX_GRID_YZ = 65535;
 constexpr long long MAX_SPLITS = 16;
+/// Pixels x output channels of the rows reference tile (16 rows x 32 columns x 128 channels).
+constexpr long long ROWS_LARGE_TILE = 16LL * 32 * 128;
+/// Persistent rounds past which a smaller rows tile declines.
+constexpr long long ROWS_SMALL_TILE_ROUNDS = 8;
 constexpr int SPATIAL = CONV_NAIVE_SPATIAL_DIMS;
 
 long long divUp(long long value, long long divisor)
@@ -92,6 +96,7 @@ bool fitsInt(long long value)
 
 /// True when @p strides (n, c, d, h, w) are packed channels-last for @p extents; extent-1 axes
 /// may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsLast(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                   const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -108,6 +113,7 @@ bool channelsLast(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 }
 
 /// True when @p strides (n, c, d, h, w) are packed channels-first for @p extents.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsFirst(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -145,16 +151,21 @@ ConvIgemmCopyArgs copyOf5(const std::array<long long, 5>& dims,
 /// The activation @p strides (n, c, d, h, w) staged into (in) or out of (out) the workspace's
 /// packed channels-last copy: by a tiled transpose when packed channels-first, else by the
 /// strided copy.
-Staging activationStaging(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
-                          long long n,
-                          long long c,
-                          const long long (&spatial)[SPATIAL],
-                          bool in,
-                          int elementBytes)
+Staging activationStaging(
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
+    long long n,
+    long long c,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    const long long (&spatial)[SPATIAL],
+    bool in,
+    int elementBytes)
 {
     Staging staging;
     staging.needed = true;
-    const long long d = spatial[0], h = spatial[1], w = spatial[2];
+    const long long d = spatial[0];
+    const long long h = spatial[1];
+    const long long w = spatial[2];
     staging.bytes = static_cast<size_t>(n * d * h * w * c) * static_cast<size_t>(elementBytes);
     if(channelsFirst(strides, {n, c, d, h, w}))
     {
@@ -387,7 +398,7 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
     problem.xUid = base->operands.x;
     problem.wUid = base->operands.w;
     problem.yUid = base->operands.y;
-    for(int i = 0; i < 5; ++i)
+    for(size_t i = 0; i < 5; ++i)
     {
         problem.wStrides[i] = a.wStrides[i];
     }
@@ -409,9 +420,10 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
     k2.dout = static_cast<int>(outExt[0]);
     k2.ho = static_cast<int>(outExt[1]);
     k2.wo = static_cast<int>(outExt[2]);
-    const long long pads[3] = {forward ? a.prePadding[0] : a.filter[0] - 1 - a.prePadding[0],
-                               forward ? a.prePadding[1] : a.filter[1] - 1 - a.prePadding[1],
-                               forward ? a.prePadding[2] : a.filter[2] - 1 - a.prePadding[2]};
+    const std::array<long long, 3> pads
+        = {forward ? a.prePadding[0] : a.filter[0] - 1 - a.prePadding[0],
+           forward ? a.prePadding[1] : a.filter[1] - 1 - a.prePadding[1],
+           forward ? a.prePadding[2] : a.filter[2] - 1 - a.prePadding[2]};
     k2.pd = static_cast<int>(pads[0]);
     k2.ph = static_cast<int>(pads[1]);
     k2.pw = static_cast<int>(pads[2]);
@@ -445,7 +457,7 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
         }
     }
     problem.stagingBytes = offset;
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -474,7 +486,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 27> ints{
+    const std::array<std::pair<const char*, int*>, 28> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -483,7 +495,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"tn", &config.tn},     {"nt", &config.nt},       {"threads", &config.threads},
          {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
-         {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi}}};
+         {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
+         {"un", &config.un}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -499,14 +512,18 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     }
     // The rows knobs belong to rows configs only; the halo-tile knobs to the others.
     const bool rowsFields = config.pw != 0 || config.fn != 0 || config.wp != 0 || config.wq != 0
-                            || config.wk != 0 || config.pp != 0 || config.epi != 0;
+                            || config.wk != 0 || config.pp != 0 || config.epi != 0
+                            || config.un != 0;
     if(config.rows)
     {
         if(config.pw < 1 || config.fn < 1 || config.wp < 1 || config.wq < 1 || config.wk < 1
            || (config.pp != 0 && config.pp != 1) || (config.pp == 1 && config.wk != 2)
            || (config.epi != 0 && config.epi != 1) || config.ring != 0 || config.bl != 0
-           || config.split != 0 || config.wm != 0 || config.wn != 0
-           || config.bm != config.wp * config.pw || config.bn != config.wk * config.fn * 16)
+           || (config.split != 0 && (config.kd != 1 || config.pp != 0)) || config.wm != 0
+           || config.wn != 0 || config.bm != config.wp * config.pw
+           || config.bn != config.wk * config.fn * 16
+           || (config.un != 1 && config.un != 2 && config.un != 4)
+           || (config.un > 1 && config.kd != 1))
         {
             return std::nullopt;
         }
@@ -587,7 +604,9 @@ int64_t rowsLdsBytes(const Config& config)
     // The operand is the atom's element (three-bf16 runs on bf16 atoms).
     const int64_t operandBytes = conv_igemm::atomElement(config.atom) == "f32" ? 4 : 2;
     const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw + config.r - 1;
-    const int64_t haloColumns = static_cast<int64_t>(config.wq) * 16 + config.s - 1;
+    // un images' halo rows side by side, (16 wq / un + s - 1) pixels each.
+    const int64_t haloColumns
+        = static_cast<int64_t>(config.un) * (config.wq * 16 / config.un + config.s - 1);
     return 2 * haloRows * haloColumns * config.bc * operandBytes;
 }
 
@@ -629,20 +648,35 @@ std::optional<Plan>
         // Fixed tile of one output plane; each block walks tiles, one block per compute unit at
         // most. A 2-D config (kd 1) takes 2-D problems; a 3-D one walks every output plane.
         Tile t;
+        // Batch unfold (un > 1): a tile is 16 wq / un columns of un consecutive images.
         t.th = config.wp * config.pw;
-        t.tw = config.wq * 16;
+        t.tw = config.wq * 16 / config.un;
         t.ds = 1;
         t.tilesW = static_cast<int>(divUp(a.wo, t.tw));
         t.tilesH = static_cast<int>(divUp(a.ho, t.th));
         t.tilesD = 1;
-        t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * a.n * a.dout * columnBlocks;
+        t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * divUp(a.n, config.un) * a.dout
+                   * columnBlocks;
         // The halo moves in 16-byte granules of whole channels; 32-bit offsets within one input
         // image; the tile count fits an int.
         const int operandBytes = config.math ? 2 : problem.elementBytes;
         const long long imageBytes
             = static_cast<long long>(a.di) * a.hi * a.wi * reduction * operandBytes;
+        // An unfold tile's images share one 32-bit-offset buffer.
         if(config.vec * operandBytes != 16 || (config.kd == 1 && (a.dout != 1 || a.di != 1))
-           || imageBytes >= BUFFER_LIMIT || t.blocks > INT_LIMIT)
+           || imageBytes * config.un >= BUFFER_LIMIT || t.blocks > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        // gfx950 16-bit rows tiles smaller than the 16 x 32 x 128 tile serve tail-bound grids:
+        // past ROWS_SMALL_TILE_ROUNDS persistent rounds the tail is a small share and the large
+        // tile is ahead (MI355X, 384^2-1024^2 VAE layers), so they decline instead of near-tying
+        // it under autotune.
+        const long long tilePixelChannels
+            = static_cast<long long>(t.th) * config.wq * 16 * config.blockColumns();
+        if(config.split == 0 && !config.math && config.atom.rfind("mfma16x32_", 0) == 0
+           && tilePixelChannels < ROWS_LARGE_TILE
+           && t.blocks > ROWS_SMALL_TILE_ROUNDS * std::max<int64_t>(1, computeUnits))
         {
             return std::nullopt;
         }
@@ -694,7 +728,26 @@ std::optional<Plan>
     k2.splits = 1;
     k2.cps = static_cast<int>(chunks);
     plan.outElems = static_cast<long long>(a.n) * a.dout * a.ho * a.wo * a.k;
-    if(config.split != 0)
+    if(config.split != 0 && config.rows)
+    {
+        // Rows (one persistent block per unit): split-C serves only a grid whose tiles leave at
+        // least three quarters of the units idle (MI355X: 1.4x on n1 c640 64^2 at 40 tiles, 0.7-0.9x
+        // at 128-250 tiles, where the fp32 partials cost more than the fill gains), so larger
+        // layers keep the single-pass configs; 2+ chunks per split, <= 16 splits.
+        if(tile->blocks * 4 > computeUnits)
+        {
+            return std::nullopt;
+        }
+        const long long splits
+            = std::min({MAX_SPLITS, chunks / 2, divUp(computeUnits, tile->blocks)});
+        if(splits < 2)
+        {
+            return std::nullopt;
+        }
+        k2.cps = static_cast<int>(divUp(chunks, splits));
+        k2.splits = static_cast<int>(divUp(chunks, k2.cps));
+    }
+    else if(config.split != 0)
     {
         // Split only an under-filled grid: below 2 blocks per CU, 2+ chunks per split, <= 16.
         const long long wanted = 2 * std::max<int64_t>(1, computeUnits);
@@ -715,7 +768,8 @@ std::optional<Plan>
     if(config.rows)
     {
         // One 1-D grid of at most one block per unit; the kernel walks the tiles.
-        plan.grid[0] = static_cast<unsigned int>(std::min<long long>(tile->blocks, computeUnits));
+        plan.grid[0] = static_cast<unsigned int>(
+            std::min<long long>(tile->blocks * k2.splits, computeUnits));
         plan.grid[1] = 1;
         plan.grid[2] = 1;
     }
@@ -882,7 +936,7 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    return Admitted{std::move(*problem), *config, *plan};
+    return Admitted{*problem, *config, *plan};
 }
 
 /// Kernel-scoped applicability: the config's direction, dtype and filter are the graph's; its
@@ -1050,6 +1104,8 @@ public:
             options.add("CONV_DIRECT_WP", std::to_string(config.wp));
             options.add("CONV_DIRECT_WQ", std::to_string(config.wq));
             options.add("CONV_DIRECT_WK", std::to_string(config.wk));
+            options.add("CONV_DIRECT_UN", std::to_string(config.un));
+            options.add("CONV_DIRECT_SPLIT", std::to_string(config.split));
             options.add("CONV_DIRECT_PP", std::to_string(config.pp));
             options.add("CONV_DIRECT_EPI", std::to_string(config.epi));
         }
@@ -1077,12 +1133,24 @@ public:
 
         auto format = build(FORMAT_ENTRY_POINT, signatureOf<K2FormatArgs>());
         format.setBlockSize(AUX_BLOCK, 1, 1);
-        // The halo-tile format (k2FormatWeights) takes a run of ka elements per thread; the rows
-        // and three-bf16 formats one element per thread.
-        format.setGridSize(
-            auxBlocks(config.rows || config.math ? plan.weightElems : plan.weightElems / config.ka),
-            1,
-            1);
+        // The halo-tile format (k2FormatWeights) takes a run of ka elements per thread; the
+        // three-bf16 formats one element per thread; the rows format one block per
+        // K2R_FORMAT_TILES tiles of 16 fn x ka elements (k2rFormatWeights), but at least
+        // K2R_FORMAT_MIN_BLOCKS blocks (one tile each) while there are tiles for them.
+        long long formatThreads = plan.weightElems / config.ka;
+        if(config.math)
+        {
+            formatThreads = plan.weightElems;
+        }
+        else if(config.rows)
+        {
+            const long long tileElems = 16LL * config.fn * config.ka;
+            const long long tiles = (plan.weightElems + tileElems - 1) / tileElems;
+            formatThreads = std::max((tiles + K2R_FORMAT_TILES - 1) / K2R_FORMAT_TILES,
+                                     std::min<long long>(tiles, K2R_FORMAT_MIN_BLOCKS))
+                            * AUX_BLOCK;
+        }
+        format.setGridSize(auxBlocks(formatThreads), 1, 1);
 
         std::optional<IngestorKernelCode> splitInput;
         if(config.math)
@@ -1206,7 +1274,7 @@ public:
         K2FormatArgs fmt{};
         fmt.w = w;
         fmt.wf = base + plan.weightOffset;
-        for(int i = 0; i < 5; ++i)
+        for(size_t i = 0; i < 5; ++i)
         {
             fmt.wStrides[i] = problem.wStrides[i];
         }

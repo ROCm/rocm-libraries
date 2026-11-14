@@ -70,10 +70,17 @@ using BFloat16 = hipdnn_data_sdk::types::bfloat16;
 
 PackSymbols packFor(ConvDirection direction)
 {
+    const char* graphMatch = "hipkernel.conv_winograd_wrw.graph_match";
+    if(direction == ConvDirection::FORWARD)
+    {
+        graphMatch = "hipkernel.conv_winograd_fwd.graph_match";
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        graphMatch = "hipkernel.conv_winograd_bwd.graph_match";
+    }
     return {"",
-            direction == ConvDirection::FORWARD         ? "hipkernel.conv_winograd_fwd.graph_match"
-            : direction == ConvDirection::BACKWARD_DATA ? "hipkernel.conv_winograd_bwd.graph_match"
-                                                        : "hipkernel.conv_winograd_wrw.graph_match",
+            graphMatch,
             "",
             "hipkernel.conv_winograd.kernel_match",
             "",
@@ -108,9 +115,15 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
         std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 3> catalogs;
         for(size_t i = 0; i < catalogs.size(); ++i)
         {
-            const std::string file = i == 0   ? "conv_winograd_fwd.kdp.json"
-                                     : i == 1 ? "conv_winograd_bwd.kdp.json"
-                                              : "conv_winograd_wrw.kdp.json";
+            std::string file = "conv_winograd_wrw.kdp.json";
+            if(i == 0)
+            {
+                file = "conv_winograd_fwd.kdp.json";
+            }
+            else if(i == 1)
+            {
+                file = "conv_winograd_bwd.kdp.json";
+            }
             std::filesystem::path found;
             for(const auto& root : roots)
             {
@@ -162,9 +175,16 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
         }
         return catalogs;
     }();
-    return s_catalogs[direction == ConvDirection::FORWARD         ? 0
-                      : direction == ConvDirection::BACKWARD_DATA ? 1
-                                                                  : 2];
+    size_t index = 2;
+    if(direction == ConvDirection::FORWARD)
+    {
+        index = 0;
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        index = 1;
+    }
+    return s_catalogs[index];
 }
 
 void forEachIndex(const std::vector<int64_t>& dims,
@@ -513,8 +533,8 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
         int64_t mismatches = 0;
         size_t visited = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance = relative * scale[visited++]
                                     + 2.0f * storageEpsilon<T>() * std::fabs(want) + 1e-6f;
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -670,13 +690,21 @@ void runWrwCase(const WrwCase& wrwCase)
         });
         return sum / static_cast<double>(count);
     };
-    const double reductions = static_cast<double>(spec.y.dims[0] * spec.y.dims[2] * spec.y.dims[3]);
+    const auto reductions = static_cast<double>(spec.y.dims[0] * spec.y.dims[2] * spec.y.dims[3]);
     const double sigma = std::sqrt(reductions * meanSquare(x) * meanSquare(y));
     constexpr bool FP32 = std::is_same_v<T, float>;
-    const double eps = FP32
-                           ? std::ldexp(1.0, -23)
-                           : (std::is_same_v<T, Half> ? std::ldexp(1.0, -10) : std::ldexp(1.0, -7));
-    const double lambda = std::is_same_v<T, Half> ? 12.0 : (FP32 ? 0.0 : 1.5);
+    double eps = std::ldexp(1.0, -7);
+    double lambda = 1.5;
+    if constexpr(FP32)
+    {
+        eps = std::ldexp(1.0, -23);
+        lambda = 0.0;
+    }
+    else if constexpr(std::is_same_v<T, Half>)
+    {
+        eps = std::ldexp(1.0, -10);
+        lambda = 12.0;
+    }
     const double summation = (FP32 ? 4.0 : 1.0) * std::sqrt(reductions) * std::ldexp(1.0, -24);
     const double minNormal = std::is_same_v<T, Half> ? std::ldexp(1.0, -14) : std::ldexp(1.0, -126);
 
@@ -715,7 +743,8 @@ void runWrwCase(const WrwCase& wrwCase)
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
         // Deterministic: a second run over a re-poisoned workspace gives the same bits.
         const size_t dwBytes = static_cast<size_t>(w.elementCount()) * sizeof(T);
-        std::vector<unsigned char> first(dwBytes), second(dwBytes);
+        std::vector<unsigned char> first(dwBytes);
+        std::vector<unsigned char> second(dwBytes);
         ASSERT_EQ(hipMemcpy(first.data(), w.rawDeviceData(), dwBytes, hipMemcpyDeviceToHost),
                   hipSuccess);
         if(workspace != nullptr)
