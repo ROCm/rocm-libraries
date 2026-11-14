@@ -846,4 +846,12 @@ def validateCustomKernelMetadata(name, directory=None):
         kind = "External" if is_external else "TensileLite"
         return False, _missingMetadataMessage(kind, name, filepath, missing)
 
+    # Post kernels are checked by the same validators getCustomKernelConfig runs.
+    if isinstance(config.get("CustomKernel"), dict) and (
+            config["CustomKernel"].get("postKernels") or "reductions" in config["CustomKernel"]):
+        try:
+            getCustomKernelConfig(name, {}, directory)
+        except (RuntimeError, ValueError) as e:
+            return False, f"Kernel '{name}' post kernel config is invalid ({filepath}): {e}"
+
     return True, f"Kernel '{name}' metadata is valid"
