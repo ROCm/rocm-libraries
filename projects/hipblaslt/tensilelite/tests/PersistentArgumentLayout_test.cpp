@@ -1166,6 +1166,34 @@ TEST(PersistentArgumentLayout, HandwrittenClampReservesNoTreeWorkspace)
     EXPECT_EQ(both.requiredWorkspaceSize(problem, device), tree.workspaceBytes);
 }
 
+// The clamp splits no tile, so uniform summation order admits it for a kernel
+// that declares it, at query and at launch.
+TEST(PersistentArgumentLayout, HandwrittenClampKeepsUniformSummationOrder)
+{
+    auto device                  = kSplitAwareDevice();
+    device.persistentDynamicGrid = 0;
+    auto problem                 = clusterProblem(257, 385, 65537, 2);
+    problem.setParams().setUniformSummationOrder(true);
+
+    ContractionSolution solution;
+    configureHandwrittenStreamK(solution, {CustomReductionMode::Parallel});
+    solution.customKernel.uniformSummationOrder = true;
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    ASSERT_EQ(launch.reduction, origami::reduction_t::none);
+    ASSERT_EQ(launch.grid, 3u * 4 * 2);
+    EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, device));
+    EXPECT_EQ(quietSolve(solution, problem, solveInputs(), device).size(), 1u);
+
+    // A tree-capable kernel never clamps, and an undeclared kernel stays refused.
+    ContractionSolution tree;
+    configureHandwrittenStreamK(tree, {CustomReductionMode::Tree, CustomReductionMode::Parallel});
+    tree.customKernel.uniformSummationOrder = true;
+    EXPECT_EQ(tree.resolvePersistentSettings(problem, device).reduction,
+              origami::reduction_t::tree);
+    solution.customKernel.uniformSummationOrder = false;
+    EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, device));
+}
+
 // Parallel needs two workgroups per tile and a K unit per workgroup; a grid
 // short of either demotes, which clamps a kernel without tree support.
 TEST(PersistentArgumentLayout, HandwrittenParallelOnlyClampsUnusableSplits)
