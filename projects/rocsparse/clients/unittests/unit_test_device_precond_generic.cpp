@@ -78,7 +78,7 @@ TYPED_TEST(PrecondIluIc, csr_types_policies_batches_and_index_base)
 }
 
 // IC(0) inner sums with several non-zero terms (rows that share columns below the
-// diagonal) through the hash and the binary-search kernel, with real-valued entries.
+// diagonal) through the hash and the binary-search kernel.
 TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
 {
     run_options opt;
@@ -87,8 +87,7 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
     {
         for_all_types([&](auto tag) {
             using T = decltype(tag);
-            check_csr_matrix<Kind::ic, T>(
-                handle, make_lower_band_matrix<T>(60, w, false), opt, "band");
+            check_csr_matrix<Kind::ic, T>(handle, make_lower_band_matrix<T>(60, w), opt, "band");
         });
     }
     // A dense last row over narrow band rows: table sizes 32 .. 512 (lengths below
@@ -759,8 +758,6 @@ namespace
     void check_all_row_shapes(rocsparse_handle handle, const std::string& what)
     {
         const run_options opt;
-        // spic0 gets no imaginary parts (AISPARSE-903).
-        constexpr bool real_only = (K == Kind::ic);
         // ILU(0) gets the upper triangle as well, or its update would have nothing to do.
         const auto shape = [](const csr_matrix<T>& lower) {
             return (K == Kind::ilu) ? with_upper_triangle(lower) : lower;
@@ -768,19 +765,17 @@ namespace
 
         // Short rows: hash kernel with the smallest table.
         check_csr_matrix<K, T, I, J>(
-            handle, shape(make_lower_band_matrix<T>(12, 3, !real_only)), opt, what + " short rows");
+            handle, shape(make_lower_band_matrix<T>(12, 3)), opt, what + " short rows");
         // A row of 100 entries: hash kernel with a table of 128.
         check_csr_matrix<K, T, I, J>(
-            handle, shape(make_fat_row_matrix<T>(100, !real_only, 3)), opt, what + " fat row 100");
+            handle, shape(make_fat_row_matrix<T>(100, true, 3)), opt, what + " fat row 100");
         // A row of 520 entries: binary-search kernel.
         // Not for spildlt0 i32 rows / i64 cols: find_csrildlt0_kernel_binsearch_launch
         // dispatches <int32_t, int32_t> whenever row_type is i32 without looking at
         // col_type, so 64-bit column indices are read as 32-bit (AISPARSE-920).
         if constexpr(!(K == Kind::ildlt && sizeof(I) == 4 && sizeof(J) == 8))
-            check_csr_matrix<K, T, I, J>(handle,
-                                         shape(make_fat_row_matrix<T>(520, !real_only, 3)),
-                                         opt,
-                                         what + " fat row 520");
+            check_csr_matrix<K, T, I, J>(
+                handle, shape(make_fat_row_matrix<T>(520, true, 3)), opt, what + " fat row 520");
     }
 
     template <Kind K, typename T>
