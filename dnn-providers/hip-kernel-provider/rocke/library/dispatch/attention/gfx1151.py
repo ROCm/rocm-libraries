@@ -79,6 +79,7 @@ from .common import (
     AttentionMaskType,
     AttentionRequest,
     FAMILY,
+    QUERY_SIDE_OPTIONS,
     _device_num_cus,
     _request_errors,
     _selector_matches,
@@ -94,8 +95,10 @@ from .wmma_rules import (
 # v7 retires the single-wave forward kernel: the prefill takes ``batch`` and a
 # flat 1-D grid, head widths are multiples of 8 inside a bucket, and decode-
 # shaped requests run the split-KV decode with its workspace and merge kernel.
-# Callers compiled against any earlier header must be rebuilt.
-ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v7"
+# Callers compiled against any earlier header must be rebuilt. v8 adds the
+# paged prefill's separate V page table (``block_table_v``) after
+# ``block_table``, which moves every later paged argument.
+ATTENTION_GFX1151_ABI = "rocke-attention-gfx1151/v8"
 
 # Compute units of the reference gfx1151 part. Used only when the request names
 # no count and device 0 cannot run the requested object (cross-compiles and AOT
@@ -165,6 +168,8 @@ _RDNA_FEATURES = frozenset(
         # Every object takes its head widths (multiples of 8 within the bucket)
         # and its V head count at launch.
         "runtime_head_dims",
+        # The prefill's packed query-side options (the decode refuses them).
+        *QUERY_SIDE_OPTIONS,
     }
 )
 
@@ -338,6 +343,8 @@ def _prefill_spec(req: AttentionRequest) -> WmmaFmhaFwdV2Spec:
         use_qq_bias=bool(req.use_qq_bias),
         layout=layout,
         page_block_size=int(req.kv_block_size) if layout == "paged" else 0,
+        dense_q=req.dense_q,
+        seqused_q=req.seqused_q,
         kv_dtype="fp8e4m3" if bool(req.use_fp8) else "",
         block_m=64 if pair else 128,
         wave_pair=pair,
@@ -558,6 +565,8 @@ def _prefill_refusal(req: AttentionRequest) -> Optional[str]:
 
 
 def _decode_refusal(req: AttentionRequest) -> Optional[str]:
+    if req.dense_q or req.seqused_q:
+        return "dense_q / seqused_q requests run on the prefill kernel"
     try:
         spec = _decode_spec(req)
     except ValueError as error:

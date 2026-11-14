@@ -141,6 +141,17 @@ bool v2_post_init_ok(const rocke_wmma_fmha_fwd_v2_spec_t* spec, char* reason, si
         rocke_spec_set_reason(reason, cap, "page_block_size is only valid for the paged layout");
         return false;
     }
+    if(spec->dense_q && strcmp(spec->layout, "paged") != 0)
+    {
+        rocke_spec_set_reason(reason, cap, "dense_q is only valid for the paged layout");
+        return false;
+    }
+    if(spec->seqused_q && strcmp(spec->layout, "dense") == 0)
+    {
+        rocke_spec_set_reason(
+            reason, cap, "seqused_q is only valid for a packed (ragged / paged) layout");
+        return false;
+    }
     if(spec->kv_dtype == NULL
        || (strcmp(spec->kv_dtype, "") != 0 && strcmp(spec->kv_dtype, "fp8e4m3") != 0))
     {
@@ -265,7 +276,10 @@ void v2_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd_v2_spec_
     if(spec->use_softcap)
         scalar("softcap", rocke_f32());
     if(spec->use_sinks)
+    {
         ptr("sink_ptr", elem, 2);
+        scalar("sink_is_f32", rocke_i32());
+    }
     if(spec->use_alibi)
         ptr("alibi_slopes_ptr", rocke_f32(), 4);
     if(spec->use_qq_bias)
@@ -277,13 +291,17 @@ void v2_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd_v2_spec_
     }
     if(!v2_layout_is(spec, "dense"))
     {
-        ptr("cu_seqlens_q", rocke_i32(), 4);
+        if(!spec->dense_q)
+            ptr("cu_seqlens_q", rocke_i32(), 4);
+        if(spec->seqused_q)
+            ptr("seqused_q", rocke_i32(), 4);
         if(v2_layout_is(spec, "ragged"))
             ptr("cu_seqlens_k", rocke_i32(), 4);
         else
         {
             ptr("seqused_k", rocke_i32(), 4);
             ptr("block_table", rocke_i32(), 4);
+            ptr("block_table_v", rocke_i32(), 4);
             scalar("block_table_stride", rocke_i32());
             scalar("stride_k_block", rocke_i32());
             scalar("stride_v_block", rocke_i32());
@@ -382,19 +400,46 @@ rocke_status_t
         v_head = rocke_b_div(b, head, g);
     }
 
-    /* ---- packed layouts: this sequence's rows and lengths ---- */
+    /* ---- packed layouts: this sequence's rows and lengths ----
+     * `span` is the rows the sequence owns in O / LSE, `sq` its live rows.
+     * They differ only for a dense_q with seqused_q, whose rows past `sq` are
+     * padding. A cu_seqlens_q sequence with seqused_q owns only its live rows:
+     * cu_seqlens_q[b + 1] is not read, so origins may come in any order. */
     rocke_value_t* q_row0 = NULL;
     rocke_value_t* k_row0 = NULL;
+    rocke_value_t* live_rows = NULL;
+    rocke_value_t* span = sq;
     if(!v2_layout_is(spec, "dense"))
     {
-        rocke_value_t* nxt = rocke_b_add(b, batch, c1);
-        q_row0 = rocke_b_global_load_i32(b, param("cu_seqlens_q"), batch, 4);
-        rocke_value_t* q_end = rocke_b_global_load_i32(b, param("cu_seqlens_q"), nxt, 4);
-        sq = rocke_b_sub(b, q_end, q_row0);
-        rocke_value_t* past = rocke_b_cmp_ge(b, q_start, sq);
+        const bool ragged_rows = !spec->dense_q && !spec->seqused_q;
+        rocke_value_t* nxt
+            = ragged_rows || v2_layout_is(spec, "ragged") ? rocke_b_add(b, batch, c1) : NULL;
+        if(!spec->dense_q)
+        {
+            q_row0 = rocke_b_global_load_i32(b, param("cu_seqlens_q"), batch, 4);
+        }
+        if(ragged_rows)
+        {
+            rocke_value_t* q_end = rocke_b_global_load_i32(b, param("cu_seqlens_q"), nxt, 4);
+            sq = span = rocke_b_sub(b, q_end, q_row0);
+        }
+        if(spec->seqused_q)
+        {
+            rocke_value_t* used = rocke_b_global_load_i32(b, param("seqused_q"), batch, 4);
+            sq = rocke_b_smin(b, used, sq);
+            if(spec->dense_q)
+            {
+                live_rows = sq;
+            }
+            else
+            {
+                span = sq;
+            }
+        }
+        rocke_value_t* past = rocke_b_cmp_ge(b, q_start, span);
         rocke_if_t guard = rocke_b_scf_if(b, past);
         rocke_b_region_enter(b, guard.then_region);
-        rocke_b_ret(b); /* past this sequence's queries */
+        rocke_b_ret(b); /* past this sequence's rows */
         rocke_b_region_leave(b);
         if(v2_layout_is(spec, "ragged"))
         {
@@ -403,12 +448,20 @@ rocke_status_t
             sk = rocke_b_sub(b, k_end, k_row0);
         }
         else
-            sk = rocke_b_global_load_i32(b, param("seqused_k"), batch, 4);
+        {
+            /* seqlen_k bounds the keys a block_table row maps (the caller passes
+             * a bound <= its width * page); a longer seqused_k is clamped so
+             * the page lookup stays within this sequence's row. */
+            rocke_value_t* used = rocke_b_global_load_i32(b, param("seqused_k"), batch, 4);
+            sk = rocke_b_smin(b, used, sk);
+        }
     }
 
     /* Resource over one (batch, head) slice: (rows - 1) * token stride +
      * width elements, empty when there are no rows (or not enabled). A
-     * packed sequence starts at token `row0` instead of at its batch. */
+     * packed sequence starts at token `row0` instead of at its batch; its
+     * base is 64-bit, as a packed buffer may pass 2 GiB while each slice
+     * stays I32-addressable. */
     auto slice_rsrc = [&](const char* ptr,
                           const char* tensor,
                           rocke_value_t* head_idx,
@@ -422,12 +475,26 @@ rocke_status_t
         snprintf(sb, sizeof(sb), "stride_%s_batch", tensor);
         snprintf(st, sizeof(st), "stride_%s_token", tensor);
         snprintf(sh, sizeof(sh), "stride_%s_head", tensor);
-        rocke_value_t* first
-            = row0 == NULL ? rocke_b_mul(b, batch, param(sb)) : rocke_b_mul(b, row0, param(st));
-        rocke_value_t* mh = rocke_b_mul(b, head_idx, param(sh));
-        rocke_value_t* base = rocke_b_add(b, first, mh);
-        rocke_value_t* te = ci(elem_bytes);
-        rocke_value_t* bo = rocke_b_mul(b, base, te);
+        rocke_value_t* bo;
+        if(row0 == NULL)
+        {
+            rocke_value_t* first = rocke_b_mul(b, batch, param(sb));
+            rocke_value_t* mh = rocke_b_mul(b, head_idx, param(sh));
+            rocke_value_t* base = rocke_b_add(b, first, mh);
+            rocke_value_t* te = ci(elem_bytes);
+            bo = rocke_b_mul(b, base, te);
+        }
+        else
+        {
+            rocke_value_t* r64 = rocke_b_zext(b, row0, rocke_i64());
+            rocke_value_t* st64 = rocke_b_zext(b, param(st), rocke_i64());
+            rocke_value_t* first = rocke_b_mul(b, r64, st64);
+            rocke_value_t* mh = rocke_b_mul(b, head_idx, param(sh));
+            rocke_value_t* mh64 = rocke_b_zext(b, mh, rocke_i64());
+            rocke_value_t* base = rocke_b_add(b, first, mh64);
+            rocke_value_t* te = rocke_b_const_i64(b, elem_bytes);
+            bo = rocke_b_mul(b, base, te);
+        }
         rocke_value_t* sliced = rocke_b_global_ptr_add(b, param(ptr), bo);
         rocke_value_t* r1 = rocke_b_sub(b, rows, c1);
         rocke_value_t* rs = rocke_b_mul(b, r1, param(st));
@@ -444,17 +511,12 @@ rocke_status_t
     };
 
     const int kv_eb = v2_fp8(spec) ? 1 : 2;
-    /* Paged K / V: the whole cache at this head (the binding bounds the cache
-     * to I32 bytes; dead rows are masked per load). */
-    auto page_rsrc = [&](const char* ptr, const char* tensor, rocke_value_t* head_idx) {
+    /* Paged K / V: the cache at this head, 64-bit; the body addresses each
+     * page from it in 64 bits too, so the cache may pass 4 GiB. */
+    auto page_head = [&](const char* ptr, const char* tensor, rocke_value_t* head_idx) {
         char sh[32];
         snprintf(sh, sizeof(sh), "stride_%s_head", tensor);
-        rocke_value_t* mh = rocke_b_mul(b, head_idx, param(sh));
-        rocke_value_t* te = ci(kv_eb);
-        rocke_value_t* off = rocke_b_mul(b, mh, te);
-        rocke_value_t* sliced = rocke_b_global_ptr_add(b, param(ptr), off);
-        rocke_value_t* all = ci(0x7FFFFFFF);
-        return rocke_b_buffer_rsrc(b, sliced, all);
+        return rocke_rdna_attention_scaled_ptr(b, param(ptr), head_idx, param(sh), kv_eb);
     };
 
     rocke_value_t* hdq = param("head_dim_q");
@@ -464,18 +526,18 @@ rocke_status_t
     p.q_rsrc = slice_rsrc("Q", "q", head, sq, hdq, 2, NULL, q_row0, NULL);
     if(v2_layout_is(spec, "paged"))
     {
-        p.k_rsrc = page_rsrc("K", "k", kv_head);
-        p.v_rsrc = page_rsrc("V", "v", v_head);
+        p.k_ptr = page_head("K", "k", kv_head);
+        p.v_ptr = page_head("V", "v", v_head);
     }
     else
     {
         p.k_rsrc = slice_rsrc("K", "k", kv_head, sk, hdq, kv_eb, NULL, k_row0, &p.k_bytes);
         p.v_rsrc = slice_rsrc("V", "v", v_head, sk, hdv, kv_eb, NULL, k_row0, &p.v_bytes);
     }
-    p.o_rsrc = slice_rsrc("O", "o", head, sq, hdv, 2, NULL, q_row0, NULL);
+    p.o_rsrc = slice_rsrc("O", "o", head, span, hdv, 2, NULL, q_row0, NULL);
     {
         rocke_value_t* enabled = rocke_b_cmp_ne(b, param("write_lse"), c0);
-        p.lse_rsrc = slice_rsrc("LSE", "lse", head, sq, c1, 4, enabled, q_row0, NULL);
+        p.lse_rsrc = slice_rsrc("LSE", "lse", head, span, c1, 4, enabled, q_row0, NULL);
     }
     if(spec->bias != NULL)
     {
@@ -544,9 +606,25 @@ rocke_status_t
         log2e = rocke_b_const_f32(b, 1.4426950408889634);
     if(spec->use_sinks)
     {
+        // One logit per query head, f32 (sink_is_f32 != 0) or the Q dtype: two 16-bit
+        // loads that stay inside either form's [Hq] extent, combined into the f32 word or
+        // widened from the low half.
         const rocke_type_t* elem = v2_is_bf16(spec) ? rocke_bf16() : rocke_f16();
-        rocke_value_t* raw = rocke_b_global_load(b, param("sink_ptr"), head, elem, 2);
-        rocke_value_t* f = rocke_b_cast_to_f32(b, raw);
+        rocke_value_t* is_f32 = rocke_b_cmp_ne(b, param("sink_is_f32"), c0);
+        rocke_value_t* word_lo = rocke_b_mul(b, head, ci(2));
+        rocke_value_t* lo_idx = rocke_b_select(b, is_f32, word_lo, head);
+        rocke_value_t* word_hi = rocke_b_add(b, word_lo, c1);
+        rocke_value_t* hi_idx = rocke_b_select(b, is_f32, word_hi, head);
+        rocke_value_t* lo = rocke_b_global_load(b, param("sink_ptr"), lo_idx, rocke_i16(), 2);
+        rocke_value_t* hi = rocke_b_global_load(b, param("sink_ptr"), hi_idx, rocke_i16(), 2);
+        rocke_value_t* hi32 = rocke_b_zext(b, hi, rocke_i32());
+        rocke_value_t* hi_sh = rocke_b_shl(b, hi32, ci(16));
+        rocke_value_t* lo32 = rocke_b_zext(b, lo, rocke_i32());
+        rocke_value_t* word = rocke_b_lor(b, hi_sh, lo32);
+        rocke_value_t* as_f32 = rocke_b_bitcast(b, word, rocke_f32());
+        rocke_value_t* lo_q = rocke_b_bitcast(b, lo, elem);
+        rocke_value_t* q_f32 = rocke_b_cast_to_f32(b, lo_q);
+        rocke_value_t* f = rocke_b_select(b, is_f32, as_f32, q_f32);
         p.sink_log2 = rocke_b_fmul(b, f, log2e);
     }
     if(spec->use_alibi)
@@ -559,6 +637,7 @@ rocke_status_t
     {
         p.table_row = rocke_b_mul(b, batch, param("block_table_stride"));
         p.block_table = param("block_table");
+        p.block_table_v = param("block_table_v");
         p.stride_k_block = param("stride_k_block");
         p.stride_v_block = param("stride_v_block");
         p.num_blocks = param("num_blocks");
@@ -598,6 +677,7 @@ rocke_status_t
     p.seqlen_k = sk;
     p.q_start = q_start;
     p.scale_log2 = param("scale_log2");
+    p.live_rows = live_rows;
     if(rocke_rdna_attention_fwd_body(b, &cfg, &p) != ROCKE_OK)
         return rocke_ir_builder_status(b);
     rocke_b_ret(b);
@@ -672,6 +752,8 @@ rocke_wmma_fmha_fwd_v2_spec_t rocke_wmma_fmha_fwd_v2_spec_default(void)
     s.use_qq_bias = false;
     s.layout = "dense";
     s.page_block_size = 0;
+    s.dense_q = false;
+    s.seqused_q = false;
     s.kv_dtype = "";
     s.block_m = 0;
     s.block_n = 32;
@@ -719,6 +801,10 @@ rocke_status_t rocke_wmma_fmha_fwd_v2_kernel_name(const rocke_wmma_fmha_fwd_v2_s
         name += "_ragged";
     if(v2_layout_is(spec, "paged"))
         name += "_paged" + std::to_string(spec->page_block_size);
+    if(spec->dense_q)
+        name += "_denseq";
+    if(spec->seqused_q)
+        name += "_sequsedq";
     if(v2_fp8(spec))
         name += "_kvfp8";
     name += "_m" + std::to_string(v2_bm(spec)) + "n" + std::to_string(spec->block_n);

@@ -220,8 +220,13 @@ class TestComboSweepLifecycle(unittest.TestCase):
         import json
 
         req = next(sweep._requests(_args()))
+        # dense_q is the packed query layout option, not a dense-kernel knob.
         self.assertFalse(
-            [f.name for f in dataclasses.fields(req) if f.name.startswith("dense_")]
+            [
+                f.name
+                for f in dataclasses.fields(req)
+                if f.name.startswith("dense_") and f.name != "dense_q"
+            ]
         )
         result = _result(knobs=(("pv_priority", 2),))
         argv = sweep._child_argv(_args(), req, result)

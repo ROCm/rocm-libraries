@@ -489,7 +489,22 @@ their prefix sums or paged metadata. Rows load as 16-byte vectors (8-byte for
 FP8 K/V), so data pointers and every outer stride must keep that alignment.
 Paged launches pass the caches' page count as `num_blocks`; the kernels treat a
 `block_table` entry outside `[0, num_blocks)` as a page of zeros (no read
-outside the caches, no host-side value check).
+outside the caches, no host-side value check). The binding rejects a `seqlen_k`
+past the table's capacity (its width times the page size), since the kernels
+clamp each `seqused_k` to `seqlen_k`, and a prefill cache with no pages.
+The prefill kernel takes a K
+table (`block_table`) and a V table (`block_table_v`) that share one row
+stride; the binding passes its one `block_table` as both. The prefill kernel
+steps to a K / V head and page in 64 bits, so a paged cache may pass 2 GiB as
+long as one page of one head is I32-addressable in bytes (the decode kernel
+still needs the whole cache I32-addressable). A paged prefill spec with
+`dense_q` takes a batch-strided `[B, Sq, Hq, D]` Q / O and no `cu_seqlens_q`;
+one with `seqused_q` takes an INT32 `[B]` `seqused_q` of live query rows. With
+`dense_q` it writes the rows past it as O = 0, LSE = `-inf`; with `cu_seqlens_q`
+those rows belong to no sequence and are neither read nor written, and
+`cu_seqlens_q[B]` is not read, so origins may come in any order. The request's
+`dense_q` / `seqused_q` fields select these options (the `dense_q` / `seqused_q`
+features; the decode refuses them, so such a request always runs the prefill).
 Runtime kwargs are `softmax_scale`, positive `softcap` when selected, and
 explicit FP32 `k_scale`/`v_scale` for FP8 storage. The decode binding takes
 its split count from the shape, the visible key range and the CU count
@@ -507,12 +522,16 @@ synchronization and graph-destruction boundary.
 The shipped catalog packages the same two kernels per RDNA family (generic
 targets) as two hipDNN engines: `hipkernel:Gfx1151WmmaAttention` is the prefill
 in the causal class (runtime no-mask/causal/window bounds) for Q/V buckets
-64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, and
+64/64, 96/96, 128/128, 192/128, 256/128 and 256/256 x bias none/f32/q, plus
+paged prefill objects for the cuDNN paged-K/V graph (buckets 64/96/128/256 x
+page size 16/32/64 x query form), each with and without attention sinks
+(`use_sinks`, catalog field `sinks`), and
 `hipkernel:Gfx1151WmmaAttentionDecode` is the split-KV decode (buckets
 64/128/256 x bias), a two-launch kernel whose `merge` launch is a companion
-kernel of the same code object (RFC 0017 §15.1 `sources`). Both native
-matchers apply `rdna_attention_use_decode`, so exactly one serves a problem,
-and the decode engine uses the split count of `decode_launch_plan`, with one
+kernel of the same code object (RFC 0017 §15.1 `sources`). On dense graphs
+both native matchers apply `rdna_attention_use_decode`, so exactly one serves
+a problem (paged graphs always go to the prefill engine), and the decode
+engine uses the split count of `decode_launch_plan`, with one
 difference: more than one split always merges in the `merge` launch, never in
 the kernel's fused merge (whose arrival counters hipDNN's stateless workspace
 would need zeroed every launch), so the hipDNN workspace holds only the split
@@ -520,10 +539,12 @@ partials. Kernel design, ABI and
 generic-target requirements are in the
 [RDNA WMMA SDPA guide](../../builders/gfx1151/attention/README.md). The
 dispatch ABI string is `gfx1151.ATTENTION_GFX1151_ABI`
-(`rocke-attention-gfx1151/v7`): v7 retires the single-wave forward kernel from
-dispatch, gives the prefill a `batch` argument and a flat 1-D grid, and routes
+(`rocke-attention-gfx1151/v8`): v7 retired the single-wave forward kernel from
+dispatch, gave the prefill a `batch` argument and a flat 1-D grid, and routed
 decode-shaped requests to the split-KV decode with its workspace and merge
-kernel. Callers built against an earlier header must be rebuilt.
+kernel; v8 adds the paged prefill's separate V page table (`block_table_v`)
+after `block_table`, which moves every later paged argument. Callers built
+against an earlier header must be rebuilt.
 
 ### Tuned RDNA WMMA candidates
 

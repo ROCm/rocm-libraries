@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from dispatch.attention import AttentionRequest
 from dispatch.attention.bindings import (
     _check_byte_extent_i32,
+    _check_page_extent_i32,
     _rdna_scalars,
     _rdna_validate_and_collect,
 )
@@ -115,13 +116,62 @@ class TestRdnaBindingI32Guard(unittest.TestCase):
                 values = _rdna_validate_and_collect(request, spec, tensors)
                 self.assertIs(values["K"], tensors["k"])
 
-    def test_oversized_kv_cache_is_rejected_before_launch(self):
-        # 2**20 pages * 16 tokens * 4 heads * 64 dims = 2**32 elements.
-        for kind in _KINDS:
-            with self.subTest(kind=kind):
-                request, spec, tensors = _paged_case(kind, pages=1 << 20)
-                with self.assertRaisesRegex(ValueError, "k spans .* bytes"):
-                    _rdna_validate_and_collect(request, spec, tensors)
+    def test_paged_prefill_cache_past_2_gib_is_accepted(self):
+        # 2**20 pages * 16 tokens * 4 heads * 64 dims = 2**32 elements (8 GiB):
+        # the prefill kernel steps to a head and a page in 64 bits.
+        request, spec, tensors = _paged_case("prefill", pages=1 << 20)
+        values = _rdna_validate_and_collect(request, spec, tensors)
+        self.assertEqual(values["num_blocks"], 1 << 20)
+
+    def test_paged_decode_cache_past_2_gib_is_rejected_before_launch(self):
+        # The decode kernel forms its head and per-row page offsets in I32.
+        request, spec, tensors = _paged_case("decode", pages=1 << 20)
+        with self.assertRaisesRegex(ValueError, "k spans .* bytes"):
+            _rdna_validate_and_collect(request, spec, tensors)
+
+    def test_paged_prefill_page_of_a_head_past_i32_is_rejected(self):
+        # One page of one head spans 15 token strides of 2**27 elements
+        # (~4 GiB of fp16); the block stride still fits an I32 argument.
+        request, spec, tensors = _paged_case("prefill", pages=2)
+        token = 1 << 27
+        cache = _FakeTensor((2, 16, 4, 64), stride=(15 * token + 256, token, 64, 1))
+        tensors.update(k=cache, v=cache)
+        with self.assertRaisesRegex(
+            ValueError, "k spans .* bytes in one page of one head"
+        ):
+            _rdna_validate_and_collect(request, spec, tensors)
+
+
+class TestRdnaPagedPageExtent(unittest.TestCase):
+    """``_check_page_extent_i32`` bounds one page of one head of a
+    ``[num_blocks, page, H, D]`` cache, as the native pack's ``pageFitsI32``."""
+
+    def test_accepts_up_to_the_i32_byte_limit(self):
+        # Two rows 0x3FFF_FFFE elements apart: (0x3FFF_FFFE + 1) * 2 bytes.
+        _check_page_extent_i32(
+            _FakeTensor((2, 2, 1, 1), stride=(1 << 31, 0x3FFF_FFFE, 1, 1)), "k", 2
+        )
+
+    def test_rejects_one_element_past_the_i32_byte_limit(self):
+        with self.assertRaisesRegex(ValueError, "does not fit"):
+            _check_page_extent_i32(
+                _FakeTensor((2, 2, 1, 1), stride=(1 << 31, 0x3FFF_FFFF, 1, 1)), "k", 2
+            )
+
+    def test_counts_the_head_dim_and_skips_the_block_and_head_axes(self):
+        # Block and head steps are 64-bit; only the page and head-dim axes count.
+        _check_page_extent_i32(
+            _FakeTensor((1 << 20, 1, 1 << 10, 64), stride=(1 << 40, 1, 1 << 30, 1)),
+            "k",
+            2,
+        )
+        with self.assertRaises(ValueError):
+            _check_page_extent_i32(
+                _FakeTensor((1, 1, 1, 2), stride=(1, 1, 1, 1 << 30)), "k", 2
+            )
+
+    def test_ignores_empty_tensors(self):
+        _check_page_extent_i32(_FakeTensor((0, 16, 1, 1 << 40)), "k", 2)
 
 
 def _dense_case(kind, **spec_kw):
@@ -323,6 +373,36 @@ class TestRdnaSoftmaxScale(unittest.TestCase):
                 ValueError, "softmax_scale must be finite and positive"
             ):
                 resolve({}, {"softmax_scale": scale})
+
+
+class TestRdnaPagedTableCapacity(unittest.TestCase):
+    """A paged seqlen_k must fit the page table: the kernels bound each
+    sequence's keys by seqlen_k, so a larger one reads past the table row."""
+
+    def test_seqlen_k_up_to_the_table_capacity_is_accepted(self):
+        for kind in _KINDS:
+            with self.subTest(kind=kind):
+                request, spec, tensors = _paged_case(kind, pages=8)
+                _rdna_validate_and_collect(request, spec, tensors)
+
+    def test_seqlen_k_past_the_table_capacity_is_rejected(self):
+        for kind in _KINDS:
+            with self.subTest(kind=kind):
+                request, spec, tensors = _paged_case(kind, pages=8)
+                request = dataclasses.replace(request, seqlen_k=65)
+                with self.assertRaisesRegex(
+                    ValueError, "seqlen_k=65 exceeds the page table's capacity of 64"
+                ):
+                    _rdna_validate_and_collect(request, spec, tensors)
+
+    def test_prefill_cache_without_pages_is_rejected(self):
+        # A dead row of the prefill's row-paged path loads from page 0, which an
+        # empty cache does not have; the decode reads through buffer resources.
+        request, spec, tensors = _paged_case("prefill", pages=0)
+        with self.assertRaisesRegex(ValueError, "at least one page"):
+            _rdna_validate_and_collect(request, spec, tensors)
+        request, spec, tensors = _paged_case("decode", pages=0)
+        _rdna_validate_and_collect(request, spec, tensors)
 
 
 if __name__ == "__main__":

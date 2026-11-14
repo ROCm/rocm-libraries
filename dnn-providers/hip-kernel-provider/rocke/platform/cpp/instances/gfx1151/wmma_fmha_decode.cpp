@@ -24,6 +24,7 @@
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_rocke.core.arch.h"
+#include "rocke/helper_rocke.helpers.rdna_attention.h"
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -969,7 +970,13 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
             Sk_b = e.sub(l, k_start);
         }
         else
-            Sk_b = rocke_b_global_load_i32(b, P("seqused_k"), batch, 4);
+        {
+            /* seqlen_k bounds the keys a block_table row maps (the binding
+             * checks it against the table width * page); a longer seqused_k is
+             * clamped so the page lookup stays within this sequence's row. */
+            Val used = rocke_b_global_load_i32(b, P("seqused_k"), batch, 4);
+            Sk_b = rocke_b_smin(b, used, Sk);
+        }
         rows_b = e.mul(g, Sq_b);
         Sq_d = rocke_b_smax(b, Sq_b, c1);
     }
@@ -1097,12 +1104,7 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
     const int kv_eb = fp8 ? 1 : 2;
     auto kv_bytes = [&](Val x) { return kv_eb == 1 ? x : e.mul(x, c2); };
     auto scaled_ptr = [&](Val ptr, Val idx, Val stride, int elem_bytes) {
-        Val z1 = rocke_b_zext(b, idx, rocke_i64());
-        Val z2 = rocke_b_zext(b, stride, rocke_i64());
-        Val m = e.mul(z1, z2);
-        Val c = rocke_b_const_i64(b, elem_bytes);
-        Val off = e.mul(m, c);
-        return rocke_b_global_ptr_add(b, ptr, off);
+        return rocke_rdna_attention_scaled_ptr(b, ptr, idx, stride, elem_bytes);
     };
     Val Qb, Ob;
     if(packed)
@@ -1226,6 +1228,9 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
                   phys = rocke_b_readfirstlane(b, po);
               }
               Val in_cache = page_ok(phys);
+              // A page id outside [0, num_blocks) is based at page 0 instead (its
+              // resource has no records), so no out-of-cache pointer is formed.
+              phys = e.sel(in_cache, phys, c0);
               Val page_off;
               {
                   Val z1 = rocke_b_zext(b, phys, rocke_i64());
@@ -1540,15 +1545,7 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
     Val bias_par = NULL, bias_sel = NULL;
     if(has_bias)
     {
-        Val bias_base;
-        {
-            Val z1 = rocke_b_zext(b, batch, rocke_i64());
-            Val z2 = rocke_b_zext(b, P("bias_stride_b"), rocke_i64());
-            Val m = e.mul(z1, z2);
-            Val c = rocke_b_const_i64(b, bias_bytes);
-            Val m2 = e.mul(m, c);
-            bias_base = rocke_b_global_ptr_add(b, P("attn_bias_ptr"), m2);
-        }
+        Val bias_base = scaled_ptr(P("attn_bias_ptr"), batch, P("bias_stride_b"), bias_bytes);
         Val ext;
         {
             Val s1 = e.sub(Hq, c1);

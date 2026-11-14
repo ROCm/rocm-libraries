@@ -422,7 +422,9 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
 // The provider's schema guard's opt-in list (GraphSchema.hpp): the built-in engines claim graph
 // schema 1.4.0 (each of them gates ragged tensors, declared alignments and offset multipliers),
 // and the six FlyDSL SDPA engines claim 1.4.0 too, the SDK's newest (their UEDs' sdk_version,
-// their matchers reviewed against every field up to it). The gfx950 rocKE conv dgrad engine
+// their matchers reviewed against every field up to it). So does the RDNA WMMA prefill engine,
+// whose matcher gates paged K/V, ragged Q / O and their offset multipliers, and every declared
+// alignment. The gfx950 rocKE conv dgrad engine
 // claims 1.3.0: its graph matcher gates alignment (multiples of 16 bytes) and declines ragged
 // tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged, aligned and
 // multiplier graphs never reach it. Opting an engine in is an edit here, reviewed with that
@@ -431,6 +433,7 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
 {
     const std::map<std::string, std::string> optedIn{
         {"hipkernel:Gfx950ConvDgradAot", "1.3.0"},
+        {"hipkernel:Gfx1151WmmaAttention", "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME), "1.4.0"},

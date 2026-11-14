@@ -78,6 +78,9 @@ FAMILY = "attention_unified"
 # v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
 # window as kernargs.
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
+# The query-side options of a packed request: each is an ``AttentionRequest``
+# field, the feature it reports, and the RDNA WMMA prefill spec field it sets.
+QUERY_SIDE_OPTIONS = ("dense_q", "seqused_q")
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
@@ -202,6 +205,16 @@ class AttentionRequest(OperatorRequest):
     # count. Reported as the ``runtime_head_dims`` feature, so only candidates
     # whose kernels implement it (RDNA WMMA) admit it.
     runtime_head_dims: bool = False
+    # Query-side options of a packed request (hipDNN's paged SDPA graphs).
+    # ``dense_q`` (paged only): Q / O (and LSE) are batch-strided
+    # ``[B, seqlen_q, Hq, D]`` with no ``cu_seqlens_q``. ``seqused_q`` (ragged
+    # or paged): an INT32 ``tensors["seqused_q"]`` gives each sequence's live
+    # query rows; with ``dense_q`` the rows past it are padding (O = 0, LSE =
+    # -inf), otherwise they belong to no sequence. Reported as the ``dense_q``
+    # / ``seqused_q`` features, so only candidates whose kernels implement them
+    # (the RDNA WMMA prefill) admit them.
+    dense_q: bool = False
+    seqused_q: bool = False
 
     def __post_init__(self) -> None:
         # ONE ``__post_init__``, normalizing both fields. Two of them is not two
@@ -219,6 +232,11 @@ class AttentionRequest(OperatorRequest):
 
     def normalized(self) -> dict:
         d = asdict(self)
+        # The query-side options join the identity only when set, so every
+        # request without them keeps the request_hash it had before they existed.
+        for name in QUERY_SIDE_OPTIONS:
+            if d[name] is False:
+                del d[name]
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
@@ -305,6 +323,9 @@ class AttentionRequest(OperatorRequest):
             active.add("lse")
         if self.runtime_head_dims:
             active.add("runtime_head_dims")
+        active.update(
+            name for name in QUERY_SIDE_OPTIONS if getattr(self, name) is True
+        )
         if bool(self.use_sinks):
             active.add("sinks")
         if bool(self.use_fp8):
@@ -411,6 +432,10 @@ def _request_errors(
             "runtime_head_dims must be a bool, got "
             f"{type(req.runtime_head_dims).__name__}"
         )
+    for field in QUERY_SIDE_OPTIONS:
+        value = getattr(req, field)
+        if type(value) is not bool:
+            errors.append(f"{field} must be a bool, got {type(value).__name__}")
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
@@ -431,6 +456,10 @@ def _request_errors(
         errors.append(f"unsupported dense tensor layout {req.tensor_layout!r}")
     if layout in ("ragged", "paged") and tensor_layout != "auto":
         errors.append("tensor_layout is only valid for dense attention")
+    if req.dense_q is True and layout != "paged":
+        errors.append("dense_q requires layout='paged'")
+    if req.seqused_q is True and layout not in ("ragged", "paged"):
+        errors.append("seqused_q requires layout='ragged' or 'paged'")
     try:
         mask_type = _parse_attention_mask_type(req.mask_type)
     except ValueError as exc:
@@ -1006,11 +1035,16 @@ class AttentionTuningSpec:
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
             # LSE fields at their defaults are left out (emit_lse off, lse_layout
             # token-major), so those keys and the spec_hash taken over them are the
-            # ones stored before the fields existed.
+            # ones stored before the fields existed. The RDNA WMMA prefill
+            # ``dense_q`` / ``seqused_q`` layout options (from the request's fields
+            # of the same names) are left out the same way while they are off.
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
-                if not (f.name == "emit_lse" and not spec.emit_lse)
+                if not (
+                    f.name in ("emit_lse", *QUERY_SIDE_OPTIONS)
+                    and not getattr(spec, f.name)
+                )
                 and not (f.name == "lse_layout" and spec.lse_layout == "token_major")
             )
 

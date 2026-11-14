@@ -19,8 +19,9 @@
  *
  * The spec carries only compile-time facts (dtype, head-width buckets, mask
  * class, bias kind, feature flags -- softcap, sinks, ALiBi, QQ-bias, packed
- * layout / page size, FP8 K/V -- and the tuning knobs). Batch, lengths, head
- * counts, head widths, strides, alignment, window bounds, the LSE gate, the
+ * layout / page size / dense Q / seqused_q, FP8 K/V -- and the tuning
+ * knobs). Batch, lengths, head counts, head widths, strides, alignment,
+ * window bounds, the LSE gate, the
  * bias strides and every feature operand are kernel arguments. The QK ->
  * softmax -> PV body is rocke_rdna_attention_fwd_body
  * (rocke/helper_rocke.helpers.rdna_attention.h).
@@ -59,6 +60,8 @@ typedef struct rocke_wmma_fmha_fwd_v2_spec
     bool use_qq_bias; /* default false */
     const char* layout; /* "dense" (default) | "ragged" | "paged" */
     int page_block_size; /* paged only: tokens per page (power of two); default 0 */
+    bool dense_q; /* paged only: batch-strided Q / O / LSE, no cu_seqlens_q; default false */
+    bool seqused_q; /* packed only: live query rows from seqused_q[batch]; default false */
     const char* kv_dtype; /* "" (default) | "fp8e4m3" */
     int block_m; /* query rows per CTA; 0 => 128, or 64 with the wave pair */
     int block_n; /* keys per tile; default 32 */
