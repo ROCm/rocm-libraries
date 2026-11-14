@@ -35,16 +35,29 @@ function(hipblaslt_resolve_build_rocm_root output)
 endfunction()
 
 # Sets ${output} to the ROCm identity stamped into the tensilelite wheel, or to
-# an empty string for a development build (version +g<commit>). Only TheRock
-# builds pass one: THEROCK_PACKAGE_VERSION, when it is set and is not the
-# local-build placeholder "git". Standalone builds never stamp an identity;
-# the ROCm the client is compiled against is recorded on the client instead
-# (tensilelite-client --build-rocm).
+# an empty string for a development build (version +g<commit>).
+#
+# TheRock builds must pass THEROCK_PACKAGE_VERSION: a real version is stamped
+# (+rocm/+devrocm) and checked strictly; "git", the placeholder of local
+# TheRock builds, gives a development build. A missing value is an error: once
+# TheRock always passes one, a missing value means it was lost on the way, and
+# a nightly, CI or release build would otherwise silently produce an unchecked
+# development wheel.
+#
+# Standalone builds never stamp an identity; the ROCm the client is compiled
+# against is recorded on the client instead (tensilelite-client --build-rocm).
 function(hipblaslt_resolve_build_rocm_version output)
     set(_version "")
-    if(HIPBLASLT_ENABLE_THEROCK AND THEROCK_PACKAGE_VERSION
-            AND NOT THEROCK_PACKAGE_VERSION STREQUAL "git")
-        set(_version "${THEROCK_PACKAGE_VERSION}")
+    if(HIPBLASLT_ENABLE_THEROCK)
+        if(NOT THEROCK_PACKAGE_VERSION)
+            message(FATAL_ERROR
+                "HIPBLASLT_ENABLE_THEROCK requires THEROCK_PACKAGE_VERSION: TheRock did "
+                "not pass a package version. Pass the build's version, or \"git\" for a "
+                "local development build.")
+        endif()
+        if(NOT THEROCK_PACKAGE_VERSION STREQUAL "git")
+            set(_version "${THEROCK_PACKAGE_VERSION}")
+        endif()
     endif()
     set(${output} "${_version}" PARENT_SCOPE)
 endfunction()
