@@ -36,6 +36,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/GpuGenericTargets.hpp>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
@@ -607,6 +608,33 @@ inline int32_t behaviorNoteFromString(const std::string& text, const std::string
     fail("unknown behavior note '" + text + "' in " + where);
 }
 
+/// Numerical notes are authored as names and mapped here to their transport values.
+/// A descriptor may declare any of the ten cuDNN numerical-note names, lowercase and
+/// exact-match; an unknown name is a parse error.
+inline int32_t numericalNoteFromString(const std::string& text, const std::string& where)
+{
+    static constexpr std::array<std::pair<std::string_view, int32_t>, 10> NOTES = {{
+        {"tensor_core", HIPDNN_NUMERICAL_NOTE_TENSOR_CORE},
+        {"down_convert_inputs", HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS},
+        {"reduced_precision_reduction", HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION},
+        {"fft", HIPDNN_NUMERICAL_NOTE_FFT},
+        {"nondeterministic", HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC},
+        {"winograd", HIPDNN_NUMERICAL_NOTE_WINOGRAD},
+        {"winograd_tile_4x4", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4},
+        {"winograd_tile_6x6", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6},
+        {"winograd_tile_13x13", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13},
+        {"strict_nan_prop", HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP},
+    }};
+    for(const auto& [name, value] : NOTES)
+    {
+        if(text == name)
+        {
+            return value;
+        }
+    }
+    fail("unknown numerical note '" + text + "' in " + where);
+}
+
 /// nlohmann reports an unsigned literal above INT64_MAX as an integer, and get<int64_t>()
 /// would static_cast it to a negative value. Every integer the format carries is an
 /// int64_t, so one that does not fit is rejected rather than silently reinterpreted.
@@ -1145,12 +1173,20 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
         engine.behaviorNotes.push_back(behaviorNoteFromString(note, where));
     }
 
-    // Carried as authored text, not mapped to an enum like the behavior notes above:
-    // hipDNN has no numerical-note vocabulary yet, so there is nothing to map onto and
-    // nothing reads these. They are parsed because RFC 0020 §4.2 makes them a legal field
-    // and rejecting a conforming UED is worse than holding a string nobody asks for.
-    engine.numericalNotes = optionalStringArray(root, "numerical_notes", where);
-    requireNoDuplicates(engine.numericalNotes, "numerical note", where);
+    // An absent key leaves numericalNotes unset (no claim); an authored list, even an
+    // empty one, is the engine's explicit claim.
+    if(root.find("numerical_notes") != root.end())
+    {
+        const auto numericalNotes = optionalStringArray(root, "numerical_notes", where);
+        requireNoDuplicates(numericalNotes, "numerical note", where);
+        std::vector<int32_t> mapped;
+        mapped.reserve(numericalNotes.size());
+        for(const auto& note : numericalNotes)
+        {
+            mapped.push_back(numericalNoteFromString(note, where));
+        }
+        engine.numericalNotes = std::move(mapped);
+    }
 
     // The graph schema this engine's descriptors were authored against. Absent leaves
     // the struct's baseline default, so an engine declaring nothing behaves as it did
