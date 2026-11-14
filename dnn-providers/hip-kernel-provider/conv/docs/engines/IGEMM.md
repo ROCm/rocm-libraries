@@ -78,7 +78,7 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 
 ## Strengths and weaknesses
 
-Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes from 31 models; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode. Counted over the graphs where K1 is our autotuned best; W/L = faster / slower by more than 5%; factor = call-weighted MIOpen time / K1 time.
+Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. Counted over the graphs where K1 is our autotuned best; W/L = faster / slower by more than 5%; factor = call-weighted MIOpen time / K1 time.
 
 | GPU | fwd best on | fwd W/L | fwd factor | bwd best on | bwd W/L | bwd factor |
 |---|---|---|---|---|---|---|
@@ -93,8 +93,8 @@ Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes from 31 models
 - **Largest wins** (weighted time saved): NCHW fp16 dense bwd vs CK grouped bwd (1.2-1.6x, every GPU), NCHW fp16 dense fwd vs CK grouped fwd (1.3-1.4x on gfx950/942/RDNA), 3-D NCHW fp32 fwd/bwd vs CK 3-D or `GemmFwdRest` (1.15-2.5x), and gfx906 bf16, NHWC and NCHW fp16 bwd layers vs `GemmFwdRest`/`GemmBwdRest` (1.5-5x).
 - **Largest losses:** gfx90a NCHW fp16 fwd vs `ConvHipImplicitGemmForwardV4R4/V4R5Xdlops` (1.2-1.4x); gfx908 Wan-VAE 3-D NHWC bf16 fwd vs CK 3-D (1.08x, but the heaviest weighted loss of any engine there) and NCHW fp16 vs the asm `ConvAsmImplicitGemmGTCDynamicFwdXdlops` (1.18x); gfx906 NCHW fp16 fwd vs `ConvHipImplicitGemmV4R1Fwd` (1.55x over 65 graphs).
 - Call-weighted excess over MIOpen on K1's losing graphs (per run of every captured model): 1.4 ms gfx950, 3.4 ms gfx942, 14-19 ms RDNA, 54 ms gfx90a, about 630 ms each on gfx908 (mostly the Wan-VAE 3-D layers) and gfx906 (NCHW fp16 fwd). Against that, K1's wins save 48 ms (gfx950, gfx942) to 660 ms (gfx1100).
-- **Compile cost:** a graph admits many K1 configs; the worst measured graph (ResNeXt-50 grouped NCHW bwd) admits 91-131, and compiling them all for autotune took 134 s on gfx942 and 224 s on gfx950. Median cold compile is 0.3-0.8 s per config on CDNA, 0.4-1.5 s on RDNA.
-- Against straight ports of the same configs to rocKE and FlyDSL (12 forward NHWC shapes, gfx950/gfx942/gfx1201), K1 after its port-back is within about 1% of rocKE on gfx950, at parity on gfx942 and 2-4% behind on gfx1201; the C=3 stem (1.4x) and BK-64 fragment scheduling on gfx1201 remain.
+- **Compile cost:** a graph admits many K1 configs; the worst measured graph (ResNeXt-50 grouped NCHW bwd) admits 91-131, and compiling them all for autotune takes 134 s on gfx942 and 224 s on gfx950. Median cold compile is 0.3-0.8 s per config on CDNA, 0.4-1.5 s on RDNA.
+- Against straight ports of the same configs to rocKE and FlyDSL (12 forward NHWC shapes, gfx950/gfx942/gfx1201), K1 is within about 1% of rocKE on gfx950, at parity on gfx942 and 2-4% behind on gfx1201; the C=3 stem (1.4x) and BK-64 fragment scheduling on gfx1201 remain.
 
 ## Numerical precision
 
@@ -120,13 +120,13 @@ K1 differs in kind: one source compiled at first use for the device in hand, run
 - **rocKE's implicit GEMM:** same main loop as K1; its dgrad techniques were taken: decode once per tap, halo rows staged once per channel chunk (`halo`), XCD-contiguous block order (`xcd`), occupancy-driven 4x1 tiles, no two-stage LDS on 64 KiB parts.
 - **hipconv:** its swizzled LDS tiles and its merging of small groups suggested `swz` and `fuse`.
 - **CK:** studied as the reference for tile shapes and pipelining; not linked, ported or used.
-- **rocKE and FlyDSL straight ports of K1** (a three-language comparison): their ISA showed the waterfall descriptor, the gfx12 barrier invalidate, branchy predicates and the stem cursor as HIP-side costs; K1 carries the fixes. No code was copied.
+- **rocKE and FlyDSL straight ports of K1**: comparing their ISA with K1's identified the waterfall descriptor, the gfx12 barrier invalidate, branchy predicates and the stem cursor as HIP-side costs; K1 avoids all four (see Notable codegen choices). No code was copied.
 
 ## Next steps and deferred ideas
 
 1. **Fragment read-ahead for BK-64 tiles** (load a k-step's fragments before its MMA loop): the largest same-config residual to the rocKE port (1.20x on gfx1201 BK-64). Gain bounded by that residual on the BK-64 picks.
-2. **gfx90a/gfx908 forward pipeline** (more work per barrier, deeper load/LDS/MMA overlap) for NCHW fp16 and the Wan-VAE 3-D bf16 layers, the heaviest K1 losses on those GPUs; earlier time-boxed RDNA pipelining (ring, register prefetch) gave no gain, so this needs a structural change.
-3. **gfx906 FMA forward for NCHW fp16** (1.55x behind V4R1 on 65 graphs, the largest K1 weighted loss anywhere); `v_dot2` already gave 1.29x.
+2. **gfx90a/gfx908 forward pipeline** (more work per barrier, deeper load/LDS/MMA overlap) for NCHW fp16 and the Wan-VAE 3-D bf16 layers, the heaviest K1 losses on those GPUs. RDNA pipelining of the same kind (ring, register prefetch) measured no gain, so this needs a structural change.
+3. **gfx906 FMA forward for NCHW fp16** (1.55x behind V4R1 on 65 graphs, the largest K1 weighted loss anywhere), beyond the `v_dot2` fp16 path the FMA kernel has.
 4. **Out-of-the-box selection and compile cost:** the declared order takes the first admitted config; a native per-config scorer from tile fit, waves, split plan and occupancy, plus a precompiled code-object store, would avoid compiling 90-130 candidates on grouped graphs.
 5. **Group-fusion inf parity:** mask the structural zeros of the expanded filter, A/B'd against the compiled-out build.
 6. **Split knob:** expose the split count so autotune can override the analytic plan on shapes where it guesses wrong.

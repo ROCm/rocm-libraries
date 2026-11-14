@@ -20,9 +20,9 @@ SPDX-License-Identifier:  MIT
 
 ## Why it exists
 
-- With K1 alone, NCHW backward data was the largest group of remaining losses on RDNA (55 graphs on gfx1100, 42 on gfx1201 in the rdna_av tier): K1 reads channels-last, so NCHW dy and dx go through staging transposes, and for strided problems its per-phase GEMMs are thin.
+- K1 reads channels-last, so NCHW dy and dx go through staging transposes, and for strided problems its per-phase GEMMs are thin. With K1 alone, NCHW backward data is the largest group of losses on RDNA (55 graphs on gfx1100 and 42 on gfx1201 in a 414-shape audio/video set).
 - Vocoders and 3-D segmentation networks run NCHW ConvTranspose at strides 2-8 with long, narrow rows; MIOpen serves them with a GEMM into a column buffer plus a col2im pass that sums the overlapping columns into dx.
-- A separate kernel that fuses col2im by stride phase removes the staging, the workspace and the scatter. It was built as a narrow specialist; K1 keeps compute-bound NCHW.
+- A separate kernel that fuses col2im by stride phase removes the staging, the workspace and the scatter. It is a narrow specialist; K1 keeps compute-bound NCHW.
 
 ## How it works
 
@@ -65,7 +65,7 @@ Counts: 1845 exact configs (WMMA 1020, MFMA 16x16 684, FMA 141) and 84 three-bf1
 
 ## Strengths and weaknesses
 
-Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode, over the graphs where K7 is our autotuned best (it is admitted on 258 of the 634 bwd graphs; 205 on gfx906):
+Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. Counted over the graphs where K7 is our autotuned best (it is admitted on 258 of the 634 bwd graphs; 205 on gfx906):
 
 | GPU | best on | W/L | call-weighted factor | weighted time saved |
 |---|---|---|---|---|
@@ -113,7 +113,7 @@ K7 wins by never materializing columns or staged layouts: one pass reads dy and 
 2. **A high-throughput NCHW matrix-core loop** (no transposing stores, more blocks per CU, A fragments reused across taps, 32x32 atoms) would let K7 compete on compute-bound NCHW; as measured it would be a new kernel, so K1 stays the owner there.
 3. **Lift the images x rows <= 65535 grid gate** by folding rows into grid x: graphs past it fall to K1 today. Payoff unmeasured.
 4. **Groups and true convolution:** declined today (K1 serves them); both are filter-indexing changes.
-5. **fp16 wide-halo FMA configs:** dropped because HIPRTC fails to compile the `_Float16` form on gfx942 (bf16 compiles). Restore when the compiler is fixed; it matters only where fp16 has no matrix core (gfx906).
+5. **fp16 wide-halo FMA configs:** not shipped, because HIPRTC fails to compile the `_Float16` form on gfx942 (bf16 compiles). Add them once the compiler handles it; it matters only where fp16 has no matrix core (gfx906).
 6. **Catalog balance:** retune or gate the spilling WMMA `t11` configs and the 10-20 s fp32 FMA stride-8 compiles.
 
 ## Tests

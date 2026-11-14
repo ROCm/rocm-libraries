@@ -23,7 +23,7 @@ SPDX-License-Identifier:  MIT
 ## Why it exists
 - In a grouped convolution with C/g of 2 to 16, an implicit GEMM per group has a reduction of C/g x taps and an N of K/g. The 16x16 or 32x32 matrix tile is mostly empty, and each load reads a 4- to 32-byte channel slice.
 - Expanding a 16-channel block's filters into a block-diagonal 16x16 matrix turns 16 / cg groups into one dense-shaped multiply. The wasted MACs (the off-diagonal zeros) cost less than the wasted tile and the narrow loads.
-- The engine began as forward and backward data. Later additions were 3-D (ResNeXt3D), in-place channels-first, RDNA fp32 on FMA, 16-channel tiles, stride-2 phase fusion, and wide groups. Backward weights was added as a third direction, because K3's per-group GEMM was 2-5x behind MIOpen on ResNeXt g32 wrw.
+- Backward weights uses the same block-diagonal products, because K3's per-group GEMM runs 2-5x behind MIOpen on ResNeXt g32 wrw.
 
 ## How it works
 Forward, per output plane and per depth tap:
@@ -46,7 +46,7 @@ store acc (fp32 -> T)
 ## Implementation design
 - **Matrix-core kernel (`k4ConvMma`).** 4 waves own TH output rows x 16·WP columns x CB channel blocks of one output plane. The halo is a static LDS array; each pixel is padded by 16 bytes so that a fragment's 16 lanes hit different banks. At stride 2, each halo row stores its even columns and then its odd ones, so a fragment's lanes (columns 2 apart) read consecutive pixels. The halo is staged once per depth tap, behind a barrier, and is single-buffered. B fragments come from the expanded filter in global memory, read through cache.
 - **Wide kernel (`k4ConvMmaWide`).** A workgroup owns `nbo` of a group's output blocks and stages the group's `nbi` input blocks. Channels need not be a multiple of 16, only of the 16-byte vector.
-- **Channels-first in place (`cf`).** The halo is gathered one channel per thread-load along rows, which makes the loads coalesced. The output tile is parked in the halo's LDS as [row][channel][column] and written one row of columns at a time. Configs without `cf` read NHWC staged by the implicit-GEMM engine's staging kernels; on NCHW graphs that costs a transpose each way. In-place `cf` measured 1.5-2.5x over staged when it landed.
+- **Channels-first in place (`cf`).** The halo is gathered one channel per thread-load along rows, which makes the loads coalesced. The output tile is parked in the halo's LDS as [row][channel][column] and written one row of columns at a time. Configs without `cf` read NHWC staged by the implicit-GEMM engine's staging kernels; on NCHW graphs that costs a transpose each way. In-place `cf` measures 1.5-2.5x faster than staged (indicative).
 - **Host gates (`parseGroupProblem`):**
   - everything `parseIgemmProblem` gates (types, layouts, packing);
   - groups ≥ 2, with C == K and the group sizes as above (depthwise, where cg = 1, is declined);
@@ -87,42 +87,42 @@ store acc (fp32 -> T)
 - **Codegen.** `readfirstlane` on the FMA kernel's chunk index makes the filter loads scalar. Per-tap B offsets are compile-time. Out-of-plane depth taps are skipped uniformly across the workgroup.
 
 ## Strengths and weaknesses
-- **Best-engine counts.** On the full 9471-shape corpus (NO_MIOPEN, autotuned), K4 is the best non-MIOpen engine on:
+- **Best-engine counts.** On the full 9,471-shape internal corpus (autotuned, our engines only), K4 is the best non-MIOpen engine on:
 
-  | GPU | NCHW tier fwd / bwd / wrw | NHWC tier fwd / bwd / wrw |
+  | GPU | NCHW fwd / bwd / wrw | NHWC fwd / bwd / wrw |
   |---|---|---|
   | gfx950 | 73 / 38 / 53 | 58 / 62 / 46 |
   | MI325X | 69 / 43 / 51 | 64 / 56 / 62 |
   | gfx1201 | 41 / 23 / 23 | 75 / 62 / 42 |
   | gfx1100 | 37 / 29 / 14 | 110 / 65 / 42 |
 
-- **Measured gains.** These figures were measured on kernel time when each feature landed:
+- **Kernel-time measurements per feature** (indicative):
   - ResNeXt3D kernels run 1.1-18x MIOpen search on gfx950, gfx942, gfx1201 and gfx1101.
   - RDNA fp32 grouped runs 1.4-5.5x MIOpen.
   - fp16 forward runs 2.7-6.7x MIOpen.
   - Stride-2 forward with LDS de-interleave runs 1.6-2.7x MIOpen.
   - Phase-fused stride-2 backward data runs 1.3-4.7x over the per-phase launches.
-  - Wide-group phase fusion took RegNet cg56 stride 2 from 18.5 ms to 16.3 ms on gfx1101.
-- **Wrw.** It is 1.3-14.5x over K3 on small groups. Weighted excess against MIOpen on the 18 grouped wrw graphs fell from 8.7 to 0.37 ms on gfx950, 20.2 to 0.09 ms on gfx90a, 21.1 to 5.3 ms on gfx1201, and 9.9 to 0.09 ms on gfx1100. In the full corpus, though, `CONV_GROUP_VALU_WRW` wins far more wrw graphs (about 290-360 per GPU).
+  - Wide-group phase fusion runs RegNet cg56 stride 2 in 16.3 ms against 18.5 ms per phase on gfx1101.
+- **Wrw.** It is 1.3-14.5x over K3 on small groups. Weighted excess against MIOpen on the 18 grouped wrw graphs is 0.37 ms on gfx950, 0.09 ms on gfx90a, 5.3 ms on gfx1201 and 0.09 ms on gfx1100 (indicative). In the full corpus, though, `CONV_GROUP_VALU_WRW` wins far more wrw graphs (about 290-360 per GPU).
 - **Weaknesses:**
-  - gfx950 NHWC ResNeXt g32 at 16 channels a group (c512, 14x14 and 28x28) is 2.4-2.5x behind MIOpen's `ConvHipConv` in fwd and bwd (full-corpus tip5 sweep). On MI325X, NHWC ResNeXt3D cg32 wrw is about 3.3-3.4x behind MIOpen's 3-D grouped wrw.
-  - Mid-width groups (cg 32-64) are compute-bound, and Winograd F(2,3) does 2.25x fewer MACs. Wide-group configs won mainly on gfx950.
+  - gfx950 NHWC ResNeXt g32 at 16 channels a group (c512, 14x14 and 28x28) is 2.4-2.5x behind MIOpen's `ConvHipConv` in fwd and bwd (full corpus). On MI325X, NHWC ResNeXt3D cg32 wrw is about 3.3-3.4x behind MIOpen's 3-D grouped wrw.
+  - Mid-width groups (cg 32-64) are compute-bound, and Winograd F(2,3) does 2.25x fewer MACs. Wide-group configs win mainly on gfx950.
   - Wide wrw on WMMA, and wrw at cg 56/64, measured behind K3 on every graph, so they are not shipped.
   - Only 3x3 / 3x3x3 filters and unit dilation are covered.
-- **First-run cost.** At an earlier catalog size, a median of 11 configs (maximum 16) was admitted per grouped graph, at about 0.5-0.8 s cold compile per config. The catalog has grown since, so the current count is not re-measured.
+- **First-run cost.** Each admitted config costs about 0.5-0.8 s of cold compile; the number admitted per grouped graph is not measured for the current catalog.
 
 ## Numerical precision
 - **Accumulation.** Every atom accumulates in fp32, and fp32 graphs on MFMA use the exact 16x16x4 f32 atom. The FMA kernel accumulates in fp32. Each output rounds once to the element type. Wrw partials are fp32, and the reduce rounds once into dw.
 - **Determinism.** No atomics; the sums run in a fixed order. The wrw association depends only on the split count, which depends on the shape and the device's dispatch units. The UED therefore carries no `nondeterministic` note, and the device test asserts bitwise equality on relaunch for every admitted config.
 - **Tolerance.** Results are compared with a CPU reference at 2e-6 x reduction length + 2 x storage epsilon x (|ref| + 1e-3). The reduction length is (C/g) x taps for fwd/bwd and N x output positions for wrw. This is not yet the #15481 fp64 form.
-- **Three-bf16 (`math` 1).** It runs only under `HIP_KERNEL_PROVIDER_CONV_TF32`, for wide-group fp32 fwd/bwd. x (or dy) and the expanded filter are split into hi/lo bf16 parts, and three part products accumulate in fp32. The error is about 2^-16 per product, and infinities propagate as in fp32 (tested). It measured 1.4-2.4x over exact on gfx950 and 1.1-1.8x on gfx90a. Small groups and wrw had the form built; it ran at 0.28-0.77x of exact, so they have none.
+- **Three-bf16 (`math` 1).** It runs only under `HIP_KERNEL_PROVIDER_CONV_TF32`, for wide-group fp32 fwd/bwd. x (or dy) and the expanded filter are split into hi/lo bf16 parts, and three part products accumulate in fp32. The error is about 2^-16 per product, and infinities propagate as in fp32 (tested). It measured 1.4-2.4x over exact on gfx950 and 1.1-1.8x on gfx90a. For small groups and wrw the form measures 0.28-0.77x of exact, so they have none.
 - **inf/NaN parity (open).** On exact matrix-core small-group configs, an inf input times a structural zero of the block-diagonal expansion gives NaN where cuDNN and PyTorch give inf. Wide-group padding channels and the FMA kernel do not multiply structural zeros of real data the same way (unverified for wide-group padding).
 
 ## Comparison with MIOpen
 - **`ConvHipImplicitGemmGroup{Fwd,Bwd,Wrw}Xdlops` and the `3DGroup` forms.** These are CK grouped implicit GEMMs, one GEMM per group, so their tiles are mostly empty at small cg. K4 replaces the per-group GEMM with block-diagonal 16x16 tiles, or with the FMA kernel for fp32 where there is no matrix core.
 - **`ConvHipConv`.** hipconv's grouped direct kernel, the strongest MIOpen competitor on gfx950/gfx942 NHWC cg16. It wins those graphs by 2.4-2.5x (see weaknesses).
 - **Grouped Winograd (`ConvBinWinogradRxSf2x3/3x2`, transposed variants).** These win the wide compute-bound groups. In hipDNN they belong to `CONV_WINOGRAD`.
-- **Headline.** The grouped class with every hipDNN engine runs 1.41x (gfx950), 2.06x (MI325X), 1.44x (gfx1201) and 1.77x (gfx1100) against MIOpen search (full corpus). On the 1998-shape subset at the latest tip it runs 2.00x (gfx90a), 1.52x (gfx1201) and 1.80x (gfx1100). These factors are not K4 alone.
+- **Headline.** The grouped class with every hipDNN engine runs 1.41x (gfx950), 2.06x (MI325X), 1.44x (gfx1201) and 1.77x (gfx1100) against MIOpen search (full corpus). On the 1,998-shape subset it runs 2.00x (gfx90a), 1.52x (gfx1201) and 1.80x (gfx1100). These factors are not K4 alone.
 
 ## Prior art considered
 - MIOpen's CK grouped solvers, as the baseline whose tile under-use motivated the design.
@@ -133,7 +133,7 @@ store acc (fp32 -> T)
 K4 reuses K1's atoms and staging. No CK or hipconv code was copied.
 
 ## Next steps and deferred ideas
-1. **inf/NaN parity for small groups.** Add a select on structural zeros, a data test with inf inputs, and an A/B against the compiled-out build to log its cost. This is required by the kernel-parity rule.
+1. **inf/NaN parity for small groups.** Add a select on structural zeros, a data test with inf inputs, and an A/B against the compiled-out build to log its cost. This is required for behaviour parity with cuDNN and PyTorch.
 2. **gfx950/gfx942 NHWC cg16 gap to `ConvHipConv`.** The gap is about 2.4x on ResNeXt g32 c512. Candidates: double-buffered halo staging across depth taps and tiles (the halo is single-buffered today), LDS DMA on gfx950, and larger CB tiles.
 3. **Coverage.** Add C/g not dividing 16 and not a multiple of 8 (3, 6, 12), non-unit dilation, and filters other than 3x3 / 3x3x3. Demand for these is not measured; they are served by K1 and `CONV_GROUP_VALU` today.
 4. **Mid-width groups.** Leave these to grouped Winograd (K5) rather than K4.

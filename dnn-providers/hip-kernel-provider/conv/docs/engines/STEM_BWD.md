@@ -21,7 +21,7 @@ SPDX-License-Identifier:  MIT
 ## Why it exists
 
 - With C <= 4, dx has 1-4 channels: any GEMM whose N axis is the input channels leaves 12-15 of 16 matrix-core columns idle, and MIOpen's col2im path materializes a column buffer and sums the overlapping columns into dx.
-- Stem backward data runs at full input resolution once per training step; before this engine it was most of MIOpen's remaining backward-data lead on some GPUs (in an earlier sweep, 86 of the 106 ms by which `GemmBwdRest` led on gfx1101).
+- Stem backward data runs at full input resolution once per training step; without this engine it is most of MIOpen's backward-data lead over our engines on some GPUs (on gfx1101, 86 of the 106 ms by which `GemmBwdRest` leads; indicative).
 - Folding the stride phases into N fills the matrix columns (12 of 16 for an RGB stem at stride 2) and makes every dx element a single accumulator.
 
 ## How it works
@@ -44,11 +44,11 @@ D[(i, j)][(c, p, q)] = sum over (u, v, k) of  dy[k][i + OH - u][j + OW - v] * B[
 - **Gates** (`parseStemBwdProblem`, `stemBwdLaunchFor`, every field): everything the naive parser gates; fp32/fp16/bf16; groups 1; C <= 4; a trivial depth axis or unit depth stride and dilation with 1-8 taps and depth padding <= 64; unit H/W dilation; H/W strides, filters and padding <= 64; dy packed channels-first or channels-last, dx and the filter packed either way; extents and K within 32 bits; images x dx depth <= 65535; one dy image under 2^31 bytes. Per config: atom and `atom_id` (FMA takes fp32, or 16-bit only where no matrix atom exists for the type); layout and `vec` (NHWC: 16 bytes with K whole vectors; NCHW: scalar or 16 bytes with whole-vector dy rows, space-to-depth scalars only for partial rows); `u`, `v`, `sh`, `sw`, `ft`, `sd` equal to the problem's; `nb` >= C x phases, <= 64, whole fragments; `kc` whole atom steps and 16-byte units; block <= 1024 threads; LDS within the device's (160 KiB on gfx950, 64 KiB elsewhere, with the kernel's own arithmetic); grid within one dispatch; the transformed filter within 2^31 bytes.
 - **Workspace:** the transformed filter only.
 - **Codegen:** shares K1's `readfirstlane` buffer descriptors (without it the current HIPRTC emits waterfall loops around the dy loads).
-- **Catalog selection:** every universe config a graph admits was timed (transform plus main kernel, best of 8 launches) on gfx950, gfx942, gfx90a, gfx908, gfx1201, gfx1101 and gfx906 over the 82 corpus stems and stems of every covered geometry in three dtypes and two layouts; configs were visited best first and dropped when a kept config was within 2% on every (architecture, graph) they serve. Every graph the universe serves is still served, and no measured graph slowed by more than 2%. The method is in the kept list's header; re-run it after kernel changes.
+- **Catalog selection:** every universe config a graph admits is timed (transform plus main kernel, best of 8 launches) on gfx950, gfx942, gfx90a, gfx908, gfx1201, gfx1101 and gfx906 over the 82 corpus stems and stems of every covered geometry in three dtypes and two layouts; configs are visited best first and dropped when a kept config is within 2% on every (architecture, graph) they serve. Every graph the universe serves is served, and no measured graph's best time grows by more than 2%. The method is in the kept list's header; re-run it after kernel changes.
 
 ## Strengths and weaknesses
 
-Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode. STEM_BWD is admitted on 33 graphs per GPU; counted over those where it is our best:
+Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. STEM_BWD is admitted on 33 graphs per GPU; counted over those where it is our best:
 
 | GPU | best on | W/L | call-weighted factor | weighted time saved | weighted excess |
 |---|---|---|---|---|---|
@@ -67,7 +67,7 @@ Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90
 
 - fp32 accumulation (fp16/bf16 products exact on the 16-bit atoms; fp32 on fp32 MFMA or FMA); the whole reduction over (window, output channels, depth taps) runs inside one block in a fixed order; one rounding at the store; no split, no atomics. The device suite relaunches every config and compares bits.
 - Window offsets a phase does not use hold zero filter entries and are multiplied: an infinite dy value can meet those zeros and give NaN where an exact reference gives ±inf. This is an open parity item.
-- TF32 permission is ignored: a three-bf16 form (3K) was built and measured 0.25-0.70x of exact on every architecture, so it was dropped.
+- TF32 permission is ignored: a three-bf16 form (3K) measures 0.25-0.70x of exact on every architecture, so none ships.
 
 ## Comparison with MIOpen
 
@@ -82,7 +82,7 @@ Speedup = MIOpen time / STEM_BWD time, call-weighted over the graphs where STEM_
 | `ConvWinoRageRxS`, `ConvWinoFuryRxS` | asm Winograd, stride 1 (Rage on gfx942/gfx950/gfx12, Fury on gfx11) | 0.8-0.9x (U-Net 3x3 s1, gfx942 and RDNA) |
 | `ConvAsm3x3U` | asm 3x3 direct, fp32 | 0.4-0.6x (one graph per CDNA GPU) |
 
-MIOpen's GEMM path writes columns and scatters them; its CK path runs a GEMM whose N axis is the 3-4 input channels. STEM_BWD's phase folding fills the matrix columns and writes dx once, which is where the 4-8x NHWC wins come from. Winograd still wins stride-1 3x3 where its multiply count is lower.
+MIOpen's GEMM path writes columns and scatters them; its CK path runs a GEMM whose N axis is the 3-4 input channels. STEM_BWD's phase folding fills the matrix columns and writes dx once, which is where the 4-8x NHWC wins come from. Winograd wins stride-1 3x3 where its multiply count is lower.
 
 ## Prior art considered
 
@@ -91,7 +91,7 @@ MIOpen's GEMM path writes columns and scatters them; its CK path runs a GEMM who
 
 ## Next steps and deferred ideas
 
-1. **Stride-1 3x3 RGB stems vs RDNA Winograd** (0.8-0.9x on U-Net 512²): the remaining losses with weight; a Winograd-domain or larger space-to-depth (`sd` 3, 4) variant would cut multiplies.
+1. **Stride-1 3x3 RGB stems vs RDNA Winograd** (0.8-0.9x on U-Net 512²): the losses with weight; a Winograd-domain or larger space-to-depth (`sd` 3, 4) variant would cut multiplies.
 2. **inf/NaN parity:** skip or mask the zero window entries instead of multiplying, A/B'd against the compiled-out build.
 3. **Spilling configs:** the fp32 FMA 4x4-window configs spill; retune or gate them (spills alone are not a reason to prune).
 4. **3-D at depth stride 2** (3x3x3 s2 stems) is declined today; K1 serves it. Folding depth phases into N like the H/W phases would extend the engine.

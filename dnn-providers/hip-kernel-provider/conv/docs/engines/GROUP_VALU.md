@@ -20,10 +20,10 @@ SPDX-License-Identifier:  MIT
 - **vs MIOpen:** WRW replaces `ConvAsmBwdWrW3x3`, which is limited to gfx8/gfx90x, 2-D NCHW 3x3 pad 1, fp32/fp16, even N for fp16, and one code object per shape. On gfx906 it is 5.5x faster on ResNeXt-50 g32 56² n128 fp16 wrw and 17.6x on its stride-2 layer. On ResNeXt3D grouped wrw it is about 33x faster than MIOpen's best solver.
 
 ## Why it exists
-- On gfx906 (no matrix cores) the only fast grouped wrw was MIOpen's per-shape assembly kernel. The implicit-GEMM engines left their tiles mostly empty at 4 to 32 channels a group: one ResNeXt-50 wrw took 20 ms against MIOpen's 2 ms.
+- On gfx906 (no matrix cores) MIOpen's only fast grouped wrw is a per-shape assembly kernel, and an implicit GEMM leaves its tiles mostly empty at 4 to 32 channels a group: one ResNeXt-50 wrw layer takes about 20 ms on our implicit-GEMM engine against MIOpen's 2 ms.
 - The asm kernel's limits are too narrow to keep: 2-D, NCHW, 3x3, pad 1, no bf16, even batch for fp16, no 3-D, no large tensors, and one code object per shape. The engine keeps its schedule and drops those limits.
-- 3-D grouped layers (ResNeXt3D, ir-CSN) had no good engine on any arch: the best was a BLAS fallback at 2-17 ms per layer. The same lane-along-row design reaches 0.1-0.3 ms.
-- FWD/BWD followed as the forward counterpart once WRW showed the layout works. They close gfx906 grouped forward and backward-data losses and the 3-D grouped gap.
+- Without this engine, 3-D grouped layers (ResNeXt3D, ir-CSN) fall to a BLAS fallback at 2-17 ms per layer on every arch. The lane-along-row design runs them in 0.1-0.3 ms.
+- FWD/BWD apply the same layout to forward and backward data, for gfx906 grouped layers and 3-D grouped layers.
 
 ## How it works
 **WRW** (`ConvGroupValuWrw.cpp`), for a tile of `cb` input by `kb` output channels of one group:
@@ -95,7 +95,7 @@ end: butterfly-reduce acc over the lanes -> LDS sum over the waves in wave order
   - FWD/BWD have no dedicated depthwise set. Their `kb = cb = 1` fallback tiles also match depthwise (gfx906/gfx908 only), so autotune can also pick them for depthwise.
 
 ## Strengths and weaknesses
-All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen's search-mode baseline, or with the previous hipDNN tip where stated.
+All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen in search mode, or with our other engines where stated. They are indicative.
 - **gfx906 wrw, ResNeXt (fp16, NCHW):**
 
   | Layer | hipDNN | MIOpen | Speedup |
@@ -105,22 +105,18 @@ All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen's
   | g32 c256 56² stride 2 | 0.66 ms | 11.7 ms | 17.6x |
   | ResNeXt-101 g32 c512 64² | 3.4 ms | 32.7 ms | 9.7x |
   | ResNeXt-101 g32 c1024 16² n128 | 1.65 ms | 1.90 ms | 1.15x |
-
-  Over the gfx906 target set, grouped wrw improved 2.4x against the previous hipDNN tip.
 - **gfx906 3-D grouped:**
-  - A 705-graph A/B of the FWD/BWD and 3-D WRW change against the previous tip gave grouped3d wrw 17.9x, bwd 5.3x and fwd 2.9x. The new engine was the best on 14-16 of 18-26 graphs per direction.
-  - 2-D grouped improved 1.30x for bwd and 1.09x for fwd.
-  - One ResNeXt3D wrw layer went from 17 ms to 0.28 ms, against MIOpen's 9.3 ms.
-  - 3-D depthwise wrw (ir-CSN) ran 6.5-10x faster than `CONV_DEPTHWISE_VALU_WRW`.
+  - On a 705-graph gfx906 set, the engine is our best on 14-16 of the 18-26 3-D grouped graphs per direction.
+  - One ResNeXt3D wrw layer runs in 0.28 ms, against 17 ms on our other engines and MIOpen's 9.3 ms.
+  - 3-D depthwise wrw (ir-CSN) runs 6.5-10x faster than `CONV_DEPTHWISE_VALU_WRW`.
 - **Matrix-core arches:**
-  - Adding WRW improved grouped wrw over 125 graphs by 1.18x on MI325X, 1.23x on gfx1201 and 1.22x on gfx90a, cutting losses against MIOpen by 7-8 graphs per arch.
-  - FWD/BWD spot checks: 1.02x on gfx90a, 1.06x on MI325X, 1.02x on gfx1201. These are small, as expected, since the matrix-core engines (K4, K1 `fuse`) cover most of the space.
+  - Over 125 grouped wrw graphs, our engines with this WRW run 1.18x faster than without it on MI325X, 1.23x on gfx1201 and 1.22x on gfx90a, with 7-8 fewer losses against MIOpen per arch.
+  - FWD/BWD spot checks, against our engines without it: 1.02x on gfx90a, 1.06x on MI325X, 1.02x on gfx1201. These are small, as expected, since the matrix-core engines (K4, K1 `fuse`) cover most of the space.
 - **Weaknesses:**
-  - Dense 3x3 wrw on gfx906 is still about 1.3x behind MIOpen's asm.
-  - HRNet c64 28² n128 wrw on gfx906 is 1.33x behind MIOpen. Which hipDNN engine won that shape was not recorded.
+  - Dense 3x3 wrw on gfx906 is about 1.3x behind MIOpen's asm.
+  - HRNet c64 28² n128 wrw on gfx906 is 1.33x behind MIOpen. The hipDNN engine that serves that shape best is not recorded.
   - Large 1x1 wrw on gfx906 needs a GEMM-shaped kernel. The 1x1 tiles serve only narrow pointwise layers.
   - Rows wider than one wave are declined.
-  - In the same gfx906 A/B, a few small depthwise fp16 wrw layers ran 1.1-2.3x slower on this engine than in the previous tip, with the same engine on both sides. The cause was not diagnosed (unsure whether it is noise or a tile change).
 
 ## Numerical precision
 - **Accumulation:**
@@ -154,7 +150,7 @@ All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen's
     - takes shapes at runtime;
     - adds bf16, NHWC, 1x1/5x5/7x7, strided and dilated height, 3-D, ragged widths, deterministic splits and large tensors.
   - Measured ratios are under Strengths.
-- **FWD/BWD:** MIOpen has no VALU grouped counterpart of this design. On gfx906, grouped fwd/bwd go to its direct, Winograd or GEMM solvers. The per-shape MIOpen winner was not recorded here (unsure which solver dominates).
+- **FWD/BWD:** MIOpen has no VALU grouped counterpart of this design. On gfx906, grouped fwd/bwd go to its direct, Winograd or GEMM solvers. The per-shape MIOpen winner is not recorded here (unsure which solver dominates).
 - **3-D:** MIOpen's asm wrw is 2-D only. 3-D grouped layers run on MIOpen's generic solvers, which this engine beats by about 33x on the ResNeXt3D layer cited above.
 
 ## Prior art considered
@@ -166,10 +162,10 @@ All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen's
 
 ## Next steps and deferred ideas
 1. **Dense 3x3 wrw on gfx906** (about 1.3x behind MIOpen's asm): deeper ring pipelining (more than one row in flight). The asm kernel's `pipe_lines_depth` up to 16 is the evidence that it pays.
-2. **Large 1x1 wrw on gfx906:** a GEMM-shaped VALU/`dot2` kernel. This was the largest remaining gfx906 wrw excess in the old-CDNA round, though it may belong in another engine.
+2. **Large 1x1 wrw on gfx906:** a GEMM-shaped VALU/`dot2` kernel. This is the largest measured gfx906 wrw excess, though it may belong in another engine.
 3. **Rows wider than a wave:** split a row across passes, or let a lane own more columns. This would widen coverage for high-resolution grouped layers that are declined today.
 4. **Workspace cap:** WRW's fixed 256 MiB cap does not yet consult a user workspace limit. An investigation of fixed caps across engines is open.
-5. **Depthwise fp16 wrw regressions on gfx906** (the A/B above): re-measure and bisect the tile-set change.
+5. **Small depthwise fp16 wrw on gfx906:** re-measure this engine's tiles on small depthwise fp16 wrw layers, where measured timings are inconsistent.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvGroupValuWrwProblem.cpp` and `TestConvGroupValuProblem.cpp`, host-only:

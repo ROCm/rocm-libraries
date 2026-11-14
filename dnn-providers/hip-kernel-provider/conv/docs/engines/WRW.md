@@ -45,7 +45,7 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
 | 7 | packed rows | several narrow output rows of one plane in one step, each padded to the taps' reach | narrow channels-first outputs (7², 14² s2, 35² s2) |
 | 8 | generic taps | runtime filter, strides and dilations; dy chunk once, then the x positions each tap reads | the long tail; strided views |
 
-**Ring tracks.** The ring walks tracks: (image, output depth, height class ρ mod dh, width chunk). A track ends at its last step that has both an x row in the image and a dy row for some tap. Trailing pad-only steps are trimmed: at dilation 36 on 128 rows they were a third of the steps.
+**Ring tracks.** The ring walks tracks: (image, output depth, height class ρ mod dh, width chunk). A track ends at its last step that has both an x row in the image and a dy row for some tap. Trailing pad-only steps are trimmed: at dilation 36 on 128 rows they are a third of the steps.
 
 **Split and reduce.** Steps split evenly over grid z to fill the dispatch units. The count comes from `splitsWanted`: units x `bpu` blocks per unit, at most steps / 4, workspace ≤ 1 GiB, then the count that best fills the last round.
 - Each split writes fp32 partials [split][g][tap][k][c].
@@ -64,7 +64,7 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
   - 8-wave ping-pong whose memory phase is transpose reads plus DMA issue.
   - A persistent grid of one workgroup per CU, walking (tile, item) units in XCD-contiguous order, optionally `wq` items side by side.
   - `directPlanFor` picks the walk (cells or equal runs), the row segments (1-64, minimizing modelled busiest-workgroup time plus partial traffic) and the splits.
-  - Ablation on Flux n8 c256 k128 768², in µs: ring 2317 → direct structure 2204 → +swizzle/DMA/transpose reads 1927 → +ping-pong 1874 → +XCD order 1833.
+  - What each piece is worth on Flux n8 c256 k128 768², in µs, each line adding one piece to the one before: ring loop 2317; direct structure 2204; swizzle, DMA and transpose reads 1927; ping-pong 1874; XCD order 1833.
 - **Host gates.**
   - Problem gates, everything the naive parser gates, plus: fp32/fp16/bf16; x/dy layouts as above; dW packed; batch and taps within 32 bits; per axis the reach of the 32-bit position math, (out + 512)·stride + filter·dilation + padding, within 32 bits.
   - Config gates: `wrwLaunchFor` reads and gates every config field — atom on device and type, loop rules, layout, tile against atom, vector, s/sw/dw equal to the filter's, fr, xcd, align, ns, wq, dws, pb, bpu. LDS is gated by the kernels' own `k3LdsBytes`, and load passes must fit their 32-bit mask.
@@ -74,7 +74,7 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
   - gfx942 and gfx950: unit stride, ≥ 9 taps, ≥ 128 input and ≥ 64 output channels a group;
   - gfx11 and gfx12: stems (≤ 4 input channels), or ≥ 256 channels with ≥ 9 taps;
   - never on gfx90a.
-- **Catalog.** Families × filters: atoms per dtype × tiles × loops × layouts, crossed with a measured FILTERS list. That list covers 3x3 (all dilations up to 36), 1x1, 1-D 1x3-1x11 at dilations 1/3/5, stride-2 and 1x16 stride-8 rows, 7x1/3x1/5x5, packed rows, 32-channel-group rings and 5x5x5. Extra tiles are added where a family's list lacked a measured winner.
+- **Catalog.** Families × filters: atoms per dtype × tiles × loops × layouts, crossed with a measured FILTERS list. That list covers 3x3 (all dilations up to 36), 1x1, 1-D 1x3-1x11 at dilations 1/3/5, stride-2 and 1x16 stride-8 rows, 7x1/3x1/5x5, packed rows, 32-channel-group rings and 5x5x5. Extra tiles cover measured winners a family's list lacks.
   - Catalog breadth: neighbouring geometries of the top configs (halved or doubled blocks, 32/64 positions, `bpu`), found by a sweep around the shipped winners. They measured +10% on gfx950 and +17% on gfx1201 on a 12-shape set.
   - Wide pointwise tiles: 256x128 on gfx950, and RDNA ring tiles for long reductions.
   - `bpu` 1/2/4/8 variants exist so autotune can override the split model.
@@ -86,7 +86,7 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
   - The ring, DMA-ring and direct loops fit 256 VGPRs only with the current (nightly) LLVM. Older compilers spill the same source heavily.
 
 ## Strengths and weaknesses
-Measured: an autotuned sweep of the 1,998-shape model-corpus subset, our engines only, against MIOpen in search mode. W/L counts shapes faster or slower by more than 5%.
+Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts shapes faster or slower by more than 5%.
 
 | GPU | graphs K3 is our best | W/L vs MIOpen | weighted speedup | MIOpen solver it mostly meets |
 |---|---|---|---|---|
@@ -131,22 +131,21 @@ Measured: an autotuned sweep of the 1,998-shape model-corpus subset, our engines
 - **hipconv `direct_wgrad`:** all taps in registers, a kh-deep dy ring, 16-byte swizzled DMA, transpose reads, ping-pong, √H row segments, fp32 partials with a fixed-order reduce. Reimplemented as the ring (every arch) and loop 5 (gfx950).
 - **CK grouped wrw:** studied for mapping and split policy. Its atomic split-K was rejected for determinism.
 - **rocKE wgrad PRs:** an AOT implicit GEMM; a direct wgrad with all taps in registers and a dy ring; atomics or slab folds. Their "per-slice slabs, no atomics" note is K3's scheme.
-- **Language comparison** (K3 ported to rocKE and FlyDSL; 12 corpus shapes, fp16 / bf16, gfx950 / gfx1201 / gfx942):
-  - The best rocKE and FlyDSL flavours ran 1.09-1.25x faster than the K3 that was shipped before the comparison.
-  - The HIP iteration that followed ran 1.25x (gfx950) and 1.29x (gfx1201) faster than that same baseline, ahead of both.
-  - Each gap came from catalog breadth or an ISA-level idiom (128-bit edge shift, predicate form). Both are ported back.
-  - Spills depend on the compiler vintage, not the language.
+- **rocKE and FlyDSL ports of K3** (12 corpus shapes, fp16 / bf16, gfx950 / gfx1201 / gfx942):
+  - K3 runs ahead of the best rocKE and FlyDSL flavours on gfx950 and gfx1201 (indicative).
+  - The gaps the ports exposed come from catalog breadth or an ISA-level idiom (128-bit edge shift, predicate form); K3 has both.
+  - Spills depend on the compiler version, not the language.
 
 No code was copied.
 
 ## Next steps and deferred ideas
-1. **Remaining language-comparison gaps:**
+1. **Same-config gaps against the rocKE / FlyDSL ports:**
    - loop 6 register pins and explicit waits cost 1.19x on gfx1201 stems;
    - loop 7 live ranges allow one block per CU instead of two (1.20x on gfx950);
    - a single branch-free ring multiply path (1.05-1.11x on gfx1201 NHWC).
 
    Each is a measured, same-config gap.
-2. **65² at large dilation:** needs a tap-split / flattened-position loop. A tap-split prototype lost (5.5 against 4.2 ms), so the flattened form is next.
+2. **65² at large dilation:** needs a tap-split / flattened-position loop. A tap-split form measured slower (5.5 against 4.2 ms), so the flattened form is the candidate.
 3. **gfx90a NHWC bf16 VAE 3x3:** a ring ping-pong `pp` knob for CDNA2, whose long MFMA phase suits it (a projection only; needs a probe). Also: d24/d36 there run at 61% of MFMA peak against asm igemm's 70%.
 4. **Strided 3x3 on small maps:** a flattened-position variant of loop 1 phases, as K4 wrw does.
 5. **inf parity in loop 5:** a select for structural zeros, A/B-checked against the compiled-out build.

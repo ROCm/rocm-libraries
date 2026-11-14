@@ -90,7 +90,7 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
   - gfx950 rounds bf16 pairs with the hardware convert, which is bit-identical to the software round for every non-NaN input (checked exhaustively).
 
 ## Strengths and weaknesses
-Measured: an autotuned sweep of the 1,998-shape model-corpus subset, our engines only, against MIOpen in search mode. W/L counts shapes faster or slower by more than 5%.
+Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts shapes faster or slower by more than 5%.
 
 | GPU | graphs K2 is our best | W/L vs MIOpen | weighted speedup | MIOpen solver it mostly meets |
 |---|---|---|---|---|
@@ -112,7 +112,7 @@ Measured: an autotuned sweep of the 1,998-shape model-corpus subset, our engines
   - 40² c1280 tiles that fill a persistent round badly (the 4-image unfold brings them to 1.13-1.18x behind `ConvHipConv`);
   - gfx90a/gfx942 384-channel 3x3x3 forward against CK (1.09-1.16x);
   - gfx908, where bf16 runs on half-rate atoms and fp32 is mixed.
-  - On gfx942, the 16-bit `rows` tiles (no ping-pong) take most 2-D 3x3 layers from the halo tile in a kernel-only sweep, but for only about 7% of the weighted time. 3x3x3 `rows` tiles lost there and do not ship.
+  - On gfx942, the 16-bit `rows` tiles (no ping-pong) take most 2-D 3x3 layers from the halo tile in a kernel-only sweep, but for only about 7% of the weighted time. 3x3x3 `rows` tiles measure slower there and do not ship.
 - **Coverage gaps:** no 1-D, no generic tier for other filter sizes, and images past 2 GiB are declined. `CONV_IGEMM` is the floor for all of these.
 
 ## Numerical precision
@@ -129,16 +129,16 @@ Measured: an autotuned sweep of the 1,998-shape model-corpus subset, our engines
 - **GEMM / naive fallbacks** (`GemmFwdRest`, `ConvDirectNaiveConv*`): exact fp32 3-D on RDNA has no optimized MIOpen solver. K2's FMA kernels are 50-100x faster there.
 
 ## Prior art considered
-- **hipconv `direct` / `direct_l1`** (gfx950, plain HIP): weights as the M operand via L1, input-row reuse across filter rows, swizzled 16-byte DMA, 8-wave ping-pong with priority, K-fill tiles, batch-packed tiles for narrow maps, an analytic split plan. These were studied and reimplemented as K2 `rows`, then generalized to dword DMA (gfx90a, gfx942), exact fp32 on the 16x16x4 atom, and 3x3x3. hipconv has no exact fp32.
+- **hipconv `direct` / `direct_l1`** (gfx950, plain HIP): weights as the M operand via L1, input-row reuse across filter rows, swizzled 16-byte DMA, 8-wave ping-pong with priority, K-fill tiles, batch-packed tiles for narrow maps, an analytic split plan. K2 `rows` reimplements these and generalizes them to dword DMA (gfx90a, gfx942), exact fp32 on the 16x16x4 atom, and 3x3x3. hipconv has no exact fp32.
 - **CK grouped forward**: studied as MIOpen's main competitor on CDNA, not as a design source.
 - **K1 (`CONV_IGEMM`)**: K2 reuses its MMA atoms, element conversion, buffer-load helpers and staging kernels.
-- **RDNA WMMA ping-pong** was built in K1 and measured -3 to -30%, so the rows ping-pong stays CDNA-only.
+- **RDNA WMMA ping-pong**: measured in K1 at 3-30% slower, so the rows ping-pong stays CDNA-only.
 
 No code was copied.
 
 ## Next steps and deferred ideas
-1. **gfx950 large-map VAE gap vs `ConvHipConv`** (1.08-1.14x, the top gfx950 K2 loss): wider tile and walk options, and the unported hipconv pieces (kernarg preload, csplit, dynamic XCD claiming). The expected payoff is small, under about 20 ms weighted, by the hipconv audit.
-2. **3x3x3 on gfx90a/gfx942 against CK at 384 channels.** On gfx90a, rows3d measured 1.07-1.14x over the halo tile on 96-channel Wan VAE layers and 1.08x on one 384-channel layer. Wider rows3d tiles, or K-fill tiles for 384, are the lead. Dense 3x3x3 is the largest single block of our CDNA time.
+1. **gfx950 large-map VAE gap vs `ConvHipConv`** (1.08-1.14x, the top gfx950 K2 loss): wider tile and walk options, and the unported hipconv pieces (kernarg preload, csplit, dynamic XCD claiming). The expected payoff is small: under about 20 ms weighted, by estimate.
+2. **3x3x3 on gfx90a/gfx942 against CK at 384 channels.** On gfx90a, rows3d measured 1.07-1.14x over the halo tile on 96-channel Wan VAE layers and 1.08x on one 384-channel layer. Wider rows3d tiles, or K-fill tiles for 384, are the candidates. Dense 3x3x3 is the largest single block of our CDNA time.
 3. **Generic tier** (runtime filter for other sizes, 1-D): low priority, because `CONV_IGEMM` already serves those graphs.
 4. **Images past 2 GiB:** a block-based-buffer variant on the generic tier only, so normal graphs gain no candidates. `CONV_IGEMM` serves these today.
 5. **RDNA `rows`**: needs a wave32 lane map and a register-staged fill (no LDS DMA). Low payoff: RDNA losses in this class are Winograd-served NCHW shapes.

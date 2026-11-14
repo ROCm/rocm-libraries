@@ -45,9 +45,9 @@
  * every case, in fp32, fp16 and bf16. The cases cover every shipped stride (2, 3, 4, 5, 6, 8),
  * filters that fill their last tap row and filters that do not, padding below, at and past the
  * stride (every pad mod stride class the tiles distinguish), 1-D, 2-D and 3-D graphs with
- * height and depth rows (identity, or strided with filters no longer than the stride, padded or
- * not, so some dx rows take no dy row), channel counts no tile divides, and widths spanning
- * several tiles.
+ * height and depth rows (identity, or strided with filters at most as long as the stride,
+ * padded or not, so some dx rows take no dy row), channel counts no tile divides, and widths
+ * spanning several tiles.
  */
 namespace
 {
@@ -301,7 +301,7 @@ std::vector<DeviceCase> deviceCases()
         // dx 9 from a K8 S4 filter, its last row reached by no tap.
         {"K8S4OutputOne", upsample(24, 16, {1}, 9, 8, 4, 0, 0)},
         {"RowsK4S2OutputOne", upsample(16, 24, {3}, 5, 4, 2, 0, 0)},
-        // Depth and height filters no longer than their strides: rows with no dy row are zero.
+        // Depth and height filters at most as long as their strides: rows with no dy row are zero.
         {"Pointwise1x1S2", strideRows(upsample(24, 40, {19}, 37, 1, 2, 0, 0), {1}, {2}, {0})},
         {"Pointwise1x1S2Padded", strideRows(upsample(13, 9, {11}, 23, 1, 2, 1, 1), {1}, {3}, {2})},
         {"Pointwise1x1S4", strideRows(upsample(16, 32, {13}, 50, 1, 4, 0, 0), {1}, {4}, {0})},

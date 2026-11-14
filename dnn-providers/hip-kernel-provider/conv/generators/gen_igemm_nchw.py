@@ -174,8 +174,8 @@ def valid_fma(c, dtype):
 
 
 # The catalog, per stride: the tiles that won (or came within 3% of the winner on) a measured
-# shape on any GPU of the family (k7_bench over the rdna_av vocoder shapes with MIOpen >= 200 us
-# plus small ones). A tile is (bmq, bn, bk, wm, wn, wp) for
+# shape on any GPU of the family (a kernel benchmark over the audio/video set's vocoder shapes
+# where MIOpen takes at least 200 us, plus small ones). A tile is (bmq, bn, bk, wm, wn, wp) for
 # matrix cores and (bmq, bn, bk, tq, tc, stages) for FMA.
 TAPS = {2: 2, 3: 3, 4: 2, 5: 2, 6: 2, 8: 2}
 WMMA = {  # fp16 and bf16, gfx11 and gfx12

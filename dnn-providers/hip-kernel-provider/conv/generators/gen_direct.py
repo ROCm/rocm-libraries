@@ -264,7 +264,7 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F33, 8, 4, 1, 3, 2, 64, 8),
             # Tile counts and image extents the 32-wide x 16-row tile fits badly (SD/SDXL UNet
             # and VAE, 24^2 to 192^2, 320-2560 channels, fwd and bwd), each the best of a
-            # 15-tile sweep on some of them (MI355X, same-node vs ConvHipConv): 20-row
+            # 15-tile sweep on some of them (MI355X, same GPU as ConvHipConv): 20-row
             # (40^2: 1.2x), 256-wide K at 16 or 32 columns (hipconv direct_l1's K256 tile;
             # 80^2 / 24^2: 1.1-1.3x), 24- and 12-row (48^2 / 96^2), 8-row 16-column (80^2).
             RW(f"mfma16x32_{e}", F33, 5, 4, 4, 1, 2, 64, 8),

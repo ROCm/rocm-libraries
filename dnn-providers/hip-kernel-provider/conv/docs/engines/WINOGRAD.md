@@ -73,7 +73,7 @@ SPDX-License-Identifier:  MIT
   - The next chunk's patches and U are loaded during the current Hadamard. Bᵀ d B goes to double-buffered LDS, one barrier per chunk.
   - The per-bin Hadamard is a register-blocked BK x BT GEMM: fp32 FMA, or `v_dot2_f32_f16` on fp16 channel pairs.
   - `pf 1` prefetches two chunks ahead: 5-13% on RDNA fp32.
-  - RDNA has an 8x16 micro-tile that reads 0.75 LDS bytes per FMA instead of 1, because the Hadamard is LDS-bound there (Mask R-CNN c256 200²: 14% on gfx1201; gfx1100 29.9 → 23.0 ms with depth-2 prefetch).
+  - RDNA has an 8x16 micro-tile that reads 0.75 LDS bytes per FMA instead of 1, because the Hadamard is LDS-bound there (Mask R-CNN c256 200²: 14% faster on gfx1201, and about 23% faster on gfx1100 together with depth-2 prefetch).
   - 16- and 24-wide K blocks serve small groups and K = 24 / 48 layers.
 - **coop (cooperative matrix core):**
   - The whole block transforms each 16-channel input chunk once into LDS, so one transformed value feeds all of the block's output channels.
@@ -82,18 +82,18 @@ SPDX-License-Identifier:  MIT
   - RDNA and CDNA share one body over the atom traits (wave32 WMMA, wave64 MFMA 16x16x16).
 - **16-bin layout** (`bins 16`, RDNA F(2,3)):
   - A wave owns all 16 bins of 16 channels x 16 tiles, so the output transform runs in registers: no LDS round trip and no epilogue barriers.
-  - It wins where the output side dominates: backward data with few dy channels. Measured on UNet c128 k64 512² backward data: gfx1201 9.07 → 7.76 ms, gfx1100 9.83 → 8.66 ms.
+  - It wins where the output side dominates: backward data with few dy channels. Measured on UNet c128 k64 512² backward data against the 4-bin layout: 7.76 against 9.07 ms on gfx1201, 8.66 against 9.83 ms on gfx1100.
   - Its grid follows the residency of its 256-VGPR waves: 6 a SIMD on the 1536-register RDNA parts, 4 elsewhere.
 - **wreg / sreg:** register-operand variants.
   - In `wreg` (gfx11/gfx12), each wave owns one transform row and builds its WMMA B fragments from the loaded input rows in registers: no LDS for V, and no barrier in the channel loop. gfx11's half-waves exchange channels with `v_permlanex16`.
   - In `sreg` (wave64 gfx9), lane = tile, and the transformed filter is a wave-uniform operand through the scalar cache.
-- **Grids and order.** Fused / sreg use 2 blocks per dispatch unit. Coop uses about 1024 resident threads per unit, capped on CDNA by a shared occupancy model (`k5CoopCdnaWpe`, `k5CoopLdsBytes`) for registers and LDS (160 KiB a CU on gfx950, 64 KiB before). Items run K blocks fastest, or tile blocks fastest on RDNA when a group's U is ≥ 4 MiB.
+- **Grids and order.** Fused / sreg use 2 blocks per dispatch unit. Coop uses about 1024 resident threads per unit, capped on CDNA by a shared occupancy model (`k5CoopCdnaWpe`, `k5CoopLdsBytes`) for registers and LDS (160 KiB a CU on gfx950, 64 KiB on earlier CDNA). Items run K blocks fastest, or tile blocks fastest on RDNA when a group's U is ≥ 4 MiB.
 - **Codegen.**
   - Branch-free 32-bit transform offsets with an out-of-range sentinel for padding: the fused input slice is kept under about 1 GiB.
   - Chunk loads use the chunk as a scalar offset, so a load needs no VALU.
   - The fp16 first chunk is peeled so MFMAs start from zero.
   - A `readfirstlane` on the U offset avoids waterfall loops.
-  - A V swizzle spreads LDS banks: CDNA conflict cycles fell 2.7x on gfx950 UNet.
+  - A V swizzle spreads LDS banks: it cuts CDNA conflict cycles 2.7x on gfx950 UNet.
 - **Gates.**
   - Problem gates, everything the naive parser gates, plus: 2-D; 3x3 filter; dilation 1; equal stride 1 or 2 (wrw 1); n, c·stride², k and groups within 32 bits; extents and padding within 32 bits.
   - fwd/bwd bf16 only with the switch.
@@ -104,10 +104,10 @@ SPDX-License-Identifier:  MIT
   - GEMM on MFMA (gfx9 16x16, gfx950 16x16x32), WMMA, or FMA thread tiles.
   - Tile splits are chosen for about 2048 threads per unit; batch slices stay under the workspace limit.
 - **Large tensors.** Fused slices are capped so one slice's input is under about 1 GiB. Multipass and wrw slice the batch under the workspace limit. A single image past those limits is declined, and other engines serve it.
-- **Catalog.** Variants x tiles per dtype and arch family. The knobs are `m`, `llc`, the GEMM tile, `bk`, `bt`, `ccv`, `tm`, `tn`, `waves`, `bins`, `f16math` and `pf`. Configs were kept where they won measured layers (realesrgan, UNet, Mask R-CNN, HRNet, Inception, IGM).
+- **Catalog.** Variants x tiles per dtype and arch family. The knobs are `m`, `llc`, the GEMM tile, `bk`, `bt`, `ccv`, `tm`, `tn`, `waves`, `bins`, `f16math` and `pf`. Configs ship where they win measured layers (realesrgan, UNet, Mask R-CNN, HRNet, Inception, IGM).
 
 ## Strengths and weaknesses
-Measured: an autotuned sweep of the 1,998-shape model-corpus subset against MIOpen in search mode. W/L counts our-best graphs that are more than 5% faster or slower. Losses are counted against MIOpen's best, which is often its own Winograd.
+Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts our-best graphs that are more than 5% faster or slower. Losses are counted against MIOpen's best, which is often its own Winograd.
 
 | GPU | fwd graphs (W/L) | bwd graphs (W/L) | wrw graphs (W/L) |
 |---|---|---|---|
@@ -127,7 +127,7 @@ Measured: an autotuned sweep of the 1,998-shape model-corpus subset against MIOp
   - RDNA fp16 small-C (c32-c192, k32-k64) against Rage / Fury: the cost is per-item overhead (load latency, barriers, the Z round trip), not the MMAs.
   - RDNA fp32 large layers, where F(4,3) is declined.
   - gfx906 fused, where the Hadamard runs near peak but staging, loads and barriers cost as much again.
-  - CDNA small-C: Inception c32 and EfficientNet c24 still trail Rage by 1.5-1.7x, HRNet c32 by about 1.15-1.2x.
+  - CDNA small-C: Inception c32 and EfficientNet c24 trail Rage by 1.5-1.7x, HRNet c32 by about 1.15-1.2x.
 
 ## Numerical precision
 - **Error model.** Winograd's rounding error scales with the magnitude of the whole tile it shares, Σ|products| over the neighbourhood, not with the output alone. An infinity in a tile poisons its neighbours (inf x structural zero gives NaN). Both are what the `WINOGRAD` note declares; the non-finite behaviour is documented, not fixed.
@@ -140,8 +140,8 @@ Measured: an autotuned sweep of the 1,998-shape model-corpus subset against MIOp
   - fp32: F(3,2), plus F(3,4) from 512 products per dW element. F(3,6) is not admitted; it measured past MIOpen's Winograd error.
   - F(3,4) uses points 0, ±1, 1/2, -2: about 3.7x less fp32 summation error than Lavin's set.
 - **Declined forms** (env-gated; no sibling engine exists yet):
-  - **bf16 fwd/bwd** (`HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16`): matrix-core operands round the transformed tiles to bf16, about a third of bf16's unit roundoff of each tile's Σ|products|. That is past the convolution's precision model, and MIOpen has no bf16 Winograd. Deferred cost, full NCHW tier: fastest on 284 graphs on gfx1201 (503 ms call-weighted lost of 4,498 ms) and 73 on gfx1100 (440 ms); none in the NHWC tier.
-  - **fp32 F(4,3)** (`HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43`): transforms with entries up to 8 and 1/24 put about 27 fp32 ulps of Σ|products| into a c128 layer, against about 1 for F(2,3) and the 5.7 coefficient MIOpen's fp32 Winograd needs. Deferred cost: F(4,3) was 25-36% faster on fp32 Mask R-CNN c256 on gfx1201 (200²: 19.1 against 24.4 ms), bounding the loss at about 300 ms call-weighted on gfx1201 NCHW.
+  - **bf16 fwd/bwd** (`HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16`): matrix-core operands round the transformed tiles to bf16, about a third of bf16's unit roundoff of each tile's Σ|products|. That is past the convolution's precision model, and MIOpen has no bf16 Winograd. Cost of the decline on the full corpus in NCHW: fastest on 284 graphs on gfx1201 (503 ms call-weighted lost of 4,498 ms) and 73 on gfx1100 (440 ms); in NHWC, fastest on none.
+  - **fp32 F(4,3)** (`HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43`): transforms with entries up to 8 and 1/24 put about 27 fp32 ulps of Σ|products| into a c128 layer, against about 1 for F(2,3) and the 5.7 coefficient MIOpen's fp32 Winograd needs. Cost of the decline: F(4,3) is 25-36% faster on fp32 Mask R-CNN c256 on gfx1201 (200²: 19.1 against 24.4 ms), bounding the loss at about 300 ms call-weighted on gfx1201 NCHW.
   - Both become tagged plans or sibling engines once callers can deselect by numerical note. Engines report notes per engine, so a tag cannot sit on individual configs.
 - **TF32:** none. A three-bf16 multipass form measured 0.21-0.58x of the exact configs. A paying form needs the split inside the fused cooperative kernel.
 - **Determinism:** fixed-order sums, no atomics. Every config is relaunched over a re-filled workspace and must reproduce its bits.

@@ -51,7 +51,7 @@ Backward data at unit stride is the forward convolution over dy that writes dx: 
 
 ## Strengths and weaknesses
 
-Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode, over the graphs where the engine is our autotuned best (W/L: faster / slower by more than 5%):
+Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. Counted over the graphs where the engine is our autotuned best (W/L: faster / slower by more than 5%):
 
 | GPU | FWD best on (of admitted) | FWD W/L | FWD factor | BWD best on (of admitted) | BWD W/L | BWD factor |
 |---|---|---|---|---|---|---|
@@ -64,7 +64,7 @@ Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90
 | gfx1100 | 27 (46) | 12/10 | 1.54x | 7 (11) | 7/0 | 1.86x |
 
 - **Wins:** nnU-Net 3-D single-channel 3x3x3 fp32 fwd (3-5x vs `GemmFwdRest` / CK 3-D), ResNet and DeepLab 7x7 s2 fp16 stems (1.2-2.2x), R(2+1)D / CSN 3-D stems (2.2-2.5x), SD/Flux VAE and Wan-VAE output layers in bwd (1.6-2.2x).
-- **Losses:** gfx90a and gfx908 stems are the only material ones (about 11 ms call-weighted excess each; elsewhere at most 2 ms): 7x7 s2 fp16/fp32 against `ConvBinWinogradRxSf3x2` and CK (1.6-1.9x) and against MIOpen's direct and asm kernels (2x). The kernel is LDS-bound there; added tiles did not close it.
+- **Losses:** gfx90a and gfx908 stems are the only material ones (about 11 ms call-weighted excess each; elsewhere at most 2 ms): 7x7 s2 fp16/fp32 against `ConvBinWinogradRxSf3x2` and CK (1.6-1.9x) and against MIOpen's direct and asm kernels (2x). The kernel is LDS-bound there; extra tiles do not close it.
 - 3x3 s1 fp16 NCHW stems trail `ConvWinoRageRxS` on gfx942 (1.3x, three graphs) and marginally on gfx950; NHWC bf16 c4 stems (sdxl) trail CK by 1.1-1.4x on gfx950, gfx942 and RDNA.
 - gfx906 and gfx103x get only the fp32 FMA path; their 16-bit stems fall to K1.
 
@@ -72,7 +72,7 @@ Latest autotuned 2K-shape model-corpus subset sweeps (1998 shapes; tip6 on gfx90
 
 - fp32 accumulation (fp16/bf16 products exact in fp32 on the 16x16 atoms, fp32 on the 16x16x4 atom or FMA); the whole reduction runs inside one block in a fixed order; one rounding at the store. No split, no atomics. The device suite relaunches every config and compares bits.
 - Channel padding (c >= C) and tap padding (s >= S) are stored as zeros and multiplied: an infinite input or weight can meet those zeros and give NaN where an exact reference gives ±inf. This is an open parity item.
-- TF32 permission is ignored: a three-bf16 form (3C channels) was built and measured 0.27-0.75x of exact on every architecture, so it was dropped.
+- TF32 permission is ignored: a three-bf16 form (3C channels) measures 0.27-0.75x of exact on every architecture, so none ships.
 
 ## Comparison with MIOpen
 
@@ -99,7 +99,7 @@ MIOpen's stride-2 Winograd computes fewer multiplies on 7x7 s2 stems; SMALLC doe
 
 ## Next steps and deferred ideas
 
-1. **gfx90a/gfx908 stems** (about 11 ms call-weighted each): the kernel is LDS-bound; a register-staged window or a Winograd-style stride-2 form would be needed. Measured tile additions on gfx90a gained 5-11% and stopped there.
+1. **gfx90a/gfx908 stems** (about 11 ms call-weighted each): the kernel is LDS-bound; a register-staged window or a Winograd-style stride-2 form would be needed. Extra tiles on gfx90a gain 5-11% and no more.
 2. **Large-K NHWC 16-bit stems** (sdxl c4 to k320; 0.76-0.97 of MIOpen on gfx950, gfx90a, gfx1201): more output channels per block or a wider register epilogue.
 3. **inf/NaN parity:** mask channel and tap padding instead of multiplying zeros, A/B'd against the compiled-out build.
 4. **Long-tail geometries:** every filter, stride and dilation is compile-time, so a stem outside the list (5x5, 11x11 s4, dilated) goes to K1. A runtime-geometry generic tier would cover them; the stem corpus shows little demand so far.

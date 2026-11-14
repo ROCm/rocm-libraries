@@ -315,8 +315,8 @@ __device__ inline float k1Tf32(float v)
     }
     return __builtin_bit_cast(float, u & 0xffffe000u);
 }
-// Element by element into a new vector: a loop writing a vector's elements was miscompiled
-// (every element took element 0's result).
+// Element by element into a new vector: a loop writing a vector's elements miscompiles
+// (every element takes element 0's result).
 __device__ inline k1f<2> k1Tf32(k1f<2> v)
 {
     return k1f<2>{k1Tf32(v[0]), k1Tf32(v[1])};
@@ -592,7 +592,7 @@ __device__ inline typename Atom::frag k1FiniteFrag(typename Atom::frag f)
     }
     else
     {
-        // On whole dwords (two bf16 each): a per-element 16-bit select was miscompiled on gfx12
+        // On whole dwords (two bf16 each): a per-element 16-bit select miscompiles on gfx12
         // (fragments rebuilt from the wrong halves).
         constexpr int N = Atom::KPL / 2;
         typedef unsigned W __attribute__((ext_vector_type(N)));

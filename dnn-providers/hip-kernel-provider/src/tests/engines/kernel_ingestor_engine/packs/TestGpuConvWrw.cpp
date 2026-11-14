@@ -490,7 +490,7 @@ std::vector<DeviceCase> deviceCases()
     auto packedConvolution = conv(32, 48, {6, 7}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2);
     packedConvolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"PackedRowsGroupedConvolution", packedConvolution});
-    // 5x5x5 volumes (AIPYTORCH-1356): unit stride on the ring / fp32 rows, stride 2 on the
+    // 5x5x5 volumes: unit stride on the ring / fp32 rows, stride 2 on the
     // output rows, and few input channels on the small-C rows (16-bit). No gfx906 configs.
     cases.push_back(
         {"ThreeD5x5x5",
@@ -736,7 +736,7 @@ void runCase(const DeviceCase& deviceCase,
         {
             continue;
         }
-        // Known, reported to the wrw lead: gfx950's direct loop (5) turns an infinity in x into
+        // Known open parity item: gfx950's direct loop (5) turns an infinity in x into
         // NaN in other dw elements (0 x inf from positions outside the window), on 16-bit graphs
         // too; left out of the infinity runs until that is fixed.
         if(infinities && kernel.getIntMetadata("loop") == conv_wrw::LOOP_DIRECT)

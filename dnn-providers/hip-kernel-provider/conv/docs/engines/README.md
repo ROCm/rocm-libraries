@@ -24,6 +24,13 @@ One document per engine family. Each opens with an **At a glance** summary and t
 
 The explicit-GEMM engines (`ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` and their siblings) live in the hipblaslt-provider: [EXPLICIT_GEMM](../../../../hipblaslt-provider/docs/engines/EXPLICIT_GEMM.md).
 
+The short names K1 to K5 and K7 in the table are the engine families' names in code: kernel and
+host identifiers (`k1ConvMma`, `K3Tiles`, `K5Args`, `K7Block`) and compile-time defines
+(`K1_BUFFER`, `CONV_K3_LOOP`) use them, and the docs use them as shorthand. K1 is the implicit
+GEMM (`CONV_IGEMM`), K2 the halo-tile direct (`CONV_DIRECT`), K3 backward weights (`CONV_WRW`),
+K4 small-group convolution (`CONV_GROUP`), K5 Winograd (`CONV_WINOGRAD`) and K7 channels-first
+backward data (`CONV_IGEMM_NCHW_BWD`). The other engines have no short name.
+
 Instance counts per engine are in [HEURISTICS.md](../../HEURISTICS.md). For regenerating catalogs, see [REGEN.md](../../REGEN.md).
 
-Performance figures in these docs come from sweeps over an internal real-model convolution corpus (9,471 shapes) and a 1,998-shape subset of it: autotuned, with only our engines running, compared against MIOpen. Each doc names the MIOpen mode it compares against (search or exhaustive) and the build the figures come from.
+Performance figures in these docs come from sweeps over an internal real-model convolution corpus (9,471 shapes) and a 1,998-shape subset of it: autotuned, with only our engines running, compared against MIOpen. Each doc names the MIOpen mode it compares against (search or exhaustive). Figures marked indicative may not match the current catalog.

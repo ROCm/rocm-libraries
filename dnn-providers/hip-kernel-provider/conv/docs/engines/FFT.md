@@ -14,8 +14,8 @@
 - **vs MIOpen:** MIOpen's `fft` solver is a fixed-size fp32 NCHW 5x5 special case. CONV_FFT beats it on 27x27 and 28x28 images and loses on 14x14 and 7x7. Against MIOpen's Find winner on gfx950, CONV_FFT is 2-17x faster in fp32 and 1.1-3.3x faster in fp16 from 11x11.
 
 ## Why it exists
-- MIOpen's FFT solver bakes the image size, batch, channel and filter counts into hand-written code. It covers 5x5 filters, pad 2, fp32 NCHW on four image sizes, and no corpus graph meets those conditions. It is kept only as a test reference, and porting it was rejected.
-- No other engine in the catalog gets cheaper as the filter grows. Before this engine, large-kernel depthwise wrw on our engines took 55-440 ms, and MIOpen did the same work in 10-35 ms. Dense fp32 filters of 7x7 and up ran at the FMA rate.
+- MIOpen's FFT solver bakes the image size, batch, channel and filter counts into hand-written code. It covers 5x5 filters, pad 2, fp32 NCHW on four image sizes, and no corpus graph meets those conditions. hipDNN uses it only as a test reference and does not port it.
+- No other engine in the catalog gets cheaper as the filter grows. Without this engine, large-kernel depthwise wrw on our other engines takes 55-440 ms, where MIOpen takes 10-35 ms, and dense fp32 filters of 7x7 and up run at the FMA rate.
 - Arithmetic advantage: direct convolution costs r·s MACs per output and channel. The frequency-domain product costs 4·F/(oh·ow), where F = th·(tw/2+1) bins. The ratio is 4.5 at most for 3x3 on any tile, 25 for 11x11 on 32x32, and 116 for 31x31 on 64x64.
 - Corpus value is small. Under 1% of usage-weighted corpus work lies above the floor. The engine's value lies outside the corpus: large-kernel CNNs, long 1-D filters, and any fp32 filter of 7x7 and up.
 
@@ -51,7 +51,7 @@ wrw:      per chunk: X_f, DY_f(zero-padded dy tile); DW_f[g][bin][k][c] (+)= Σ_
 - **Admission floor** (`fftAdvantage`, calibrated on gfx950 by benching every config of every engine). Direct MACs divided by product MACs must reach 4 for fp32, 16 for fp16/bf16 (the direct engines run 16-bit matrix cores), and 1 for depthwise, where the transforms are counted (2.5·n·log2 n each). The problem also needs at least 2^26 MACs. `HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR=0` disables the floor, for tests and calibration.
 - **Workspace:** fixed spectra (g·F·ca·cb complex fp32) plus per-chunk data and product spectra, 256-byte aligned, all under `WORKSPACE_CAP_BYTES` = 1 GiB. Tests lower the cap with `HIP_KERNEL_PROVIDER_CONV_FFT_WORKSPACE_CAP` to force several chunks.
 - **Catalog:** 22 transform configs: 16x16 (pb 8, 16), 32x32 (pb 2, 4, 8), 64x64 (pb 1, 2), 1x32 (pb 64, 128) and 1x64 (pb 32, 64), each at the least `tb` that covers the row pairs and at 256. These are crossed with 3 product tiles and 3 dtypes, giving 198 fwd and 198 bwd configs. wrw's product has no `tm`, so it has 132 configs. The only compile-time geometry is the transform size, so there is no per-shape specialized tier to add.
-- **Codegen choices:** element offsets are 64-bit (`long long` strides) while per-tile index math is 32-bit. Filter taps are scattered tap by tap (r·s writes, not th·tw), and dw is gathered the same way. LDS is limited to 64 KiB on every target, so one module compiles everywhere. Before that limit, the depthwise wrw spectra overflowed LDS on 64 KiB parts.
+- **Codegen choices:** element offsets are 64-bit (`long long` strides) while per-tile index math is 32-bit. Filter taps are scattered tap by tap (r·s writes, not th·tw), and dw is gathered the same way. LDS is limited to 64 KiB on every target, so one module compiles everywhere and the depthwise wrw spectra fit 64 KiB parts.
 
 ## Strengths and weaknesses
 Engine bench: every admitted config of every hip-kernel-provider engine, autotune-equivalent, with the FFT floor off and NCHW layout. Ratios are baseline time / CONV_FFT time, and above 1 CONV_FFT is faster. "Ours" means the best non-FFT hip-kernel-provider engine; BLAS engines are not included.
@@ -74,12 +74,12 @@ Engine bench: every admitted config of every hip-kernel-provider engine, autotun
   - **Small images.** Power-of-two tiles waste bins: a 7x7 image in a 16x16 tile uses about half of them, and a 14x14 image needs 4 tiles.
   - **Short 1-D filters in 16-bit.** k7 and k11 run at 0.2-0.5x.
   - **64x64 tiles** are limited by VGPRs at 256 threads.
-  - **MI325X perf** has not been measured. The gfx942 numbers above come from an MI300X correctness node and are indicative only.
+  - **MI325X perf** has not been measured. The gfx942 numbers above come from an MI300X and are indicative only.
 
 ## Numerical precision
 - **Arithmetic:** transforms and products run in fp32 for every tensor type. Inputs are converted once on load and outputs are rounded once on store. There is no reduced-precision product, so no TF32 or RPR sibling exists.
 - **Error model:** FFT error is absolute, about c·log2(n)·ε times the transform's rms. It is not relative to each output. An output much smaller than its neighbours therefore carries a large relative error, which is why the engine reports the `FFT` note.
-- **Measured:** an fp32 prototype with the same transform math was checked against an fp64 CPU reference on gfx950 for 16x16 to 64x64 and 1x64 tiles in all three directions. Max |err| / rms(ref) was 15.6-22.8 units of fp32 rounding. Every case passes the #15481 model with c = 4; the largest c needed was 0.78. MIOpen's own FFT, on its own shapes, needs c = 0.12-0.60 with 12-42 units.
+- **Measured:** an fp32 model of the same transform math, checked against an fp64 CPU reference on gfx950 for 16x16 to 64x64 and 1x64 tiles in all three directions: max |err| / rms(ref) is 15.6-22.8 units of fp32 rounding. Every case passes the #15481 model with c = 4; the largest c needed is 0.78. MIOpen's own FFT, on its own shapes, needs c = 0.12-0.60 with 12-42 units.
 - **Gtest bound:** 8·log2(th·tw) u32 of the largest reference magnitude, plus 2 storage ε relative. The #15481 atol term is relative to σ, which is the right shape for this error. An rtol-only check would flag near-zero outputs.
 - **Determinism:** no atomics. Every sum has one owner and a fixed order: chunks in stream order, and depthwise partitions folded in order. The device suite relaunches each config over a re-filled workspace and compares bits.
 - **inf/NaN:** a non-finite input enters every bin of its tile's transform, so every output of every tile that reads it becomes non-finite. A direct engine affects only the outputs whose windows touch that input. This divergence is inherent to FFT and has no dedicated test.
@@ -126,7 +126,7 @@ Engine bench: every admitted config of every hip-kernel-provider engine, autotun
   - Accepts per direction, layout, dtype, rank, groups, dilation, mode and compute type.
   - One decline per gated field: 3-D, stride, compute type, extents, dtype, direction, fit, 1-D tile against filter height, the floor and its switch, and each malformed config field (th, tw, pb, LDS, tb, gn, tm).
   - Plans: tiles per direction, flip mapping, chunking under the cap, filter spectra over the cap, and depthwise fusion, partitions and floor.
-  - A gate mutation run caught every gate with its own test.
+  - Each gate's test fails when that gate is removed (mutation-checked).
 - **`TestGpuConvFft` (device):** 17 shape families x fwd/bwd/wrw x fp32/fp16/bf16, run against the CPU double reference. fp32 covers every fitting catalog config.
   - The families include MIOpen's three 5x5 shapes, odd extents in NCHW and NHWC, an asymmetric dilated grouped shape with post-padding, 31x31, 1-D rows (dilated and grouped), 1 x s on 2-D, conv mode, depthwise, and forced multi-chunk.
   - Every config gets a bitwise relaunch check.

@@ -295,7 +295,7 @@ def wmma(atom):
         # 4-wide vectors: channel counts that 8 does not divide.
         C(atom, 128, 32, 32, 4, 2, vec=4),
         C(atom, 64, 64, 32, 2, 2, vec=4),
-        # Backward data from the K T R S C filter directly (the per-call transposed copy was a third
+        # Backward data from the K T R S C filter directly (the per-call transposed copy is a third
         # to a half of the time on RDNA).
         C(atom, 128, 64, 32, 2, 4, vec=8, wdirect=1),
         C(atom, 64, 64, 32, 2, 2, vec=8, wdirect=1),

@@ -755,11 +755,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
 
     if(TARGET hkp_packaging_product)
         # The tree installs wholesale, and install(DIRECTORY) only adds files. A reinstall
-        # into a prefix holding an earlier tree would keep any descriptor this build no
-        # longer produces. A pack that was renamed or split leaves its old file behind, which
-        # declares the same kernel ids as its successor, and the loader then drops the whole
-        # engine. That is how CONV_WRW vanished from a gfx1101 prefix updated across the
-        # wrw pack split.
+        # into a prefix holding another tree would keep any descriptor this build does not
+        # produce. A pack renamed or split between the two trees leaves its old file behind,
+        # which declares the same kernel ids as its successor, and the loader then drops the
+        # whole engine.
         #
         # So clear, first, exactly the folders this tree is about to install: each
         # <arch>/<family> directory the build staged (conv/, kpack/, ...). These are

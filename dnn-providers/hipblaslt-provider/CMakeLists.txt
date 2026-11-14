@@ -26,8 +26,8 @@ project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 # (typically OFF) and the injected value is silently ignored, leaving the
 # feature compiled out despite the flag being set.
 # ----------------------------------------------------------------------------
-# rocBLAS engines: ROCBLAS_MATMUL_ENGINE now, explicit-GEMM convolution later. OFF while the
-# provider grows from a hipBLASLt wrapper into a BLAS provider.
+# rocBLAS engines: ROCBLAS_MATMUL_ENGINE, and with HIPBLASLTPROVIDER_ENABLE_CONV the rocBLAS
+# explicit-GEMM convolution engines. OFF by default.
 option(HIPBLASLTPROVIDER_ENABLE_ROCBLAS "Build the rocBLAS engines" OFF)
 # hipBLASLt is not built for every target (TheRock excludes it for gfx906 and gfx103X), so a
 # rocBLAS-only provider must build without it.

@@ -40,9 +40,9 @@ Autotune picks among every admitted config. This table says which engine serves 
 
 ## Why it exists
 - Depthwise layers (MobileNet, EfficientNet, ConvNeXt, Conformer, Mamba conv1d, vocoder resamplers) are memory-bound. A per-group implicit GEMM has a 1x1 channel tile per group and wastes almost all of it. Dedicated kernels are the only route to a bandwidth-limited time.
-- The VALU forward/backward-data cores began as hipconv's hand-written VALU depthwise kernels (the same code that MIOpen's direct depthwise solver harvested). They were rehomed here with the filter reflection added and then reworked for code generation. ROWS reimplements techniques from open MIOpen RDNA pull requests (channel-row blocks, scalar filters, stride-phase ConvTranspose1d).
-- On gfx950 a VALU 7x7 kernel cannot keep up with matrix-core depthwise: in the measurement that led to this decision, it took 0.31 ms against MIOpen's 0.050 ms. So `MFMA` exists, and the Hankel wgrad configs were added to `VALU_WRW` for the same reason.
-- No other engine served depthwise wrw at speed. GEMM and naive were 1.1-4.3x behind MIOpen, and the Mamba conv1d wrw ran at a small fraction of its bandwidth floor.
+- The VALU forward/backward-data cores are based on hipconv's hand-written VALU depthwise kernels (the same code MIOpen's direct depthwise solver uses), with the filter reflection for backward data and reworked code generation. ROWS reimplements techniques from open MIOpen RDNA pull requests (channel-row blocks, scalar filters, stride-phase ConvTranspose1d).
+- On gfx950 a VALU 7x7 kernel cannot keep up with matrix-core depthwise: it takes 0.31 ms against MIOpen's 0.050 ms. So `MFMA` exists, and `VALU_WRW` carries the Hankel wgrad configs for the same reason.
+- No other engine serves depthwise wrw at speed: GEMM and naive are 1.1-4.3x behind MIOpen, and run the Mamba conv1d wrw at a small fraction of its bandwidth floor.
 
 ## How it works
 
@@ -107,7 +107,7 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - Gates: forward is channels-first, 1-D (as height 1) or 2-D. Bwd-data takes either layout but not 3-D. `phase`/`lanes` need a row-separable problem: the height axis is the identity, the width has unit dilation, and the stride is the config's. The dy window holds `mmax` taps a phase, so a runtime-filter config admits up to 32 taps a phase. The LDS halo must fit 64 KiB (as fp32 elements).
 - The filter is compile-time (1x3, 1x7, 1x9, 1x31, 3x3, 5x5, 9x9; ConvTranspose 12/29/43 taps) or read at runtime (`kh = kw = 0`).
 - On gfx9, fp16 5x5 band taps are kept as opaque fp32 VGPRs to avoid an LLVM instruction-selection crash in the mixed-precision FMA combine.
-- Catalog: 25 forward-form configs (tile and band, also used for unit-stride bwd) and 24 phase/lanes configs, x 3 dtypes; 222 kernels. Each config won at least one target shape in a gfx1100/gfx1201/gfx942 prototype sweep.
+- Catalog: 25 forward-form configs (tile and band, also used for unit-stride bwd) and 24 phase/lanes configs, x 3 dtypes; 222 kernels. Each config is the fastest on at least one target shape on gfx1100, gfx1201 or gfx942.
 
 ### MFMA fwd/bwd
 - Gates (every config field): layout matches the problem; 2-D (1-D as height 1); not gather-only; the config's stride (1 or 2) on both axes; unit dilation; atom 16 or 32 and runnable on the device (`mfmaRunsOn`); filter equals the config's; waves a power of two up to 16 (channels-last also needs `C % (8 x waves) == 0`, while channels-first takes any C); depth 1-4; fold a power of two up to 4 (NHWC) or 8 (NCHW); rows positive; LDS within 64 KiB; folded image bytes within 32-bit buffer offsets.
@@ -123,18 +123,18 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - **Usage-weighted, depthwise class, all engines, against MIOpen search** (model corpus; the class is served almost entirely by these engines and FFT):
   - Full corpus, native layouts: gfx942 MI325X 16.0x, gfx1201 12.3x, gfx1100 17.9x, gfx950 1.31x.
   - 2K-shape subset: gfx90a 24.4x; usage-weighted MIOpen/ours about 13x on MI325X, 16x on gfx90a, 8x on gfx1201, 12x on gfx1100 and 8x on gfx906.
-- **gfx950:** a dedicated depthwise tier after the Hankel stride-2 and operand rework measured 1.28x overall. Wrw rose from 0.64x to about 1.13x; NCHW fp16 wrw is about 1.67x, while NHWC 16-bit wrw remains 0.84-0.88x. MFMA forward and backward data are about at parity with hipconv (1.02x tier ratio). MFMA was the best engine on about 110 graphs.
-- **gfx942:** at an earlier snapshot the depthwise tier summed 2.65 ms forward against MIOpen's 18.0 ms, 3.54 against 45.1 ms backward data and 8.92 against 78.3 ms wrw. Hankel later brought ConvNeXt c128 wrw to 0.187 ms against MIOpen's 17.3 ms.
-- **VALU rowtile + `v_fma_mix`:** measured against the earlier VALU form in a 60-cell, three-dtype bench (cold, L2 flushed):
+- **gfx950:** on a dedicated depthwise set the class runs 1.28x overall: wrw about 1.13x, NCHW fp16 wrw about 1.67x, NHWC 16-bit wrw 0.84-0.88x. MFMA forward and backward data are about at parity with hipconv (1.02x). MFMA is the best engine on about 110 graphs.
+- **gfx942:** Hankel runs ConvNeXt c128 wrw in 0.187 ms against MIOpen's 17.3 ms.
+- **VALU rowtile + `v_fma_mix`:** measured against the VALU cores without `rowtile` in a 60-cell, three-dtype bench (cold, L2 flushed; indicative):
   - gfx950: 1.16x over all cells, 1.35x on the 18 NHWC 16-bit cells.
   - gfx942: 1.15x and 1.33x.
-  - gfx1201: 1.08x and 1.19x; the lead 7x7 shape runs at 79% of DRAM bandwidth there.
-- **Strided bwd-data:** the `phase` variant measured 8.5-9.1x MIOpen on gfx1201. Strided depthwise on an RDNA3 part was about 4x faster than MIOpen's Winograd fallback on a bigger GPU.
-- **ROWS:** on the 90 targeted RDNA graphs (resampler ConvTranspose1d, dilated DeepLab, Conformer k31/k9, 9x9), it moved our-time/MIOpen-time from about 1.0 to about 0.23 (gfx1100) and 0.24 (gfx1201). These are estimates scaled from bench ratios; the dnnb suite was not re-run. Three near-parity cells remain on gfx1201.
+  - gfx1201: 1.08x and 1.19x; the top 7x7 shape runs at 79% of DRAM bandwidth there.
+- **Strided bwd-data:** the `phase` variant measured 8.5-9.1x MIOpen on gfx1201. Strided depthwise on an RDNA3 part is about 4x faster than MIOpen's Winograd fallback on a bigger GPU.
+- **ROWS:** on the 90 targeted RDNA graphs (resampler ConvTranspose1d, dilated DeepLab, Conformer k31/k9, 9x9), our-time/MIOpen-time is about 0.23 (gfx1100) and 0.24 (gfx1201), estimated from kernel benchmark ratios (indicative). Three near-parity cells remain on gfx1201.
 - **Weak spots:**
   - gfx950 NHWC 16-bit wrw, where the VALU and scalar issue rate binds.
-  - NCHW 7x7 forward on RDNA, the largest remaining depthwise excess in the full corpus.
-  - The gfx942 NHWC 3-D 16-bit LDS core (0.87x of its pre-rework form, cause unknown).
+  - NCHW 7x7 forward on RDNA, the largest depthwise excess in the full corpus.
+  - The gfx942 NHWC 3-D 16-bit LDS core, about 13% slower than an alternative staging form measured for it (cause unknown).
   - Depth multiplier above 1 in fwd/bwd, which no depthwise engine serves.
   - Large-kernel depthwise, which goes to FFT.
   - RDNA has no matrix-core path by design: the diagonal channel block keeps about 3/32 of a WMMA useful, which is below VALU fp32 throughput.
@@ -155,28 +155,28 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
   - `MFMA` adopts the one-hot channel-diagonal idea but applies it to 2-D rows with an accumulator ring, plus a separate channels-first Toeplitz core. It also brings the sparse atom to gfx94x.
   - `hankel` reimplements the wgrad construction and adds stride 2 (phase split), the parity masks, an LDS ring with conflict-free pitches, and a deterministic fold instead of any cross-block accumulation.
   - On gfx950 forward and backward data are at parity, and NHWC 16-bit wrw is about 0.85x.
-- **MIOpen's direct depthwise forward solvers** (2-D and 3-D; the hipconv VALU kernels harvested into MIOpen) and the **CK grouped depthwise forward:** the `VALU` cores start from the same validated kernels and reach 1.10-1.21x over that starting point (cold geomean) through the codegen changes listed above. They add bwd-data (reflected forward, gather, phase), true convolution and every architecture.
+- **MIOpen's direct depthwise forward solvers** (2-D and 3-D; the hipconv VALU kernels harvested into MIOpen) and the **CK grouped depthwise forward:** the `VALU` cores start from the same validated kernels and run 1.10-1.21x faster than them (cold geomean) through the codegen choices listed above. They add bwd-data (reflected forward, gather, phase), true convolution and every architecture.
 - **`ConvHipDirectFwd`:** bakes every shape into compile-time macros and accumulates fp16 in fp16. Only its phase-blocked strided idea was taken, and it accumulates in fp32 here.
 - **GEMM / Winograd / `ConvDirectNaive`:** these serve depthwise in MIOpen where nothing better applies, notably strided bwd-data via zero-upsampled dy and all wrw on older arches. That is the source of the 8-24x class ratios on gfx906-gfx942 and RDNA.
 - Comparisons above use MIOpen search mode (5 timed iterations) unless stated.
 
 ## Prior art considered
-- hipconv v0.5 depthwise (1-D Toeplitz fwd/dgrad on MFMA, Hankel wgrad, 2-D Toeplitz) was studied. The 2-D Toeplitz was skipped (upstream marks it opt-in and never better than 1-D); the 1-D MFMA Toeplitz was deferred.
+- hipconv v0.5 depthwise (1-D Toeplitz fwd/dgrad on MFMA, Hankel wgrad, 2-D Toeplitz) was studied. The 2-D Toeplitz is not used (upstream marks it opt-in and never better than 1-D); the 1-D MFMA Toeplitz is deferred.
 - hipconv's VALU depthwise kernels (rocm-libraries PR #10945) are the base of the `VALU` cores.
 - Open MIOpen RDNA PRs (#15100, #15130, #15233) supplied the channel-row, scalar-filter, dilation-grid and ConvTranspose1d phase techniques, reimplemented in `ROWS`.
 - MIOpen `ConvHipDirectFwd` contributed phase blocking for strided backward data. hipconv's zero-upsampled dy was rejected, because it wastes 3/4 of the MACs at stride 2.
-- rocKE and FlyDSL: the depthwise VALU forward was ported to both and compared cell by cell.
-  - The framework leads traced to HIP-expressible codegen: buffer loads with hardware-zero bounds, branch-free predicates, wave-uniform values made scalar, and keeping guarded stores from swallowing FMA chains.
-  - rocKE's own register-tiled kernel with `v_fma_mix_f32` led on NHWC 16-bit 5x5/7x7. That algorithm became `rowtile`, now ahead of it on gfx950 and gfx942 and level on gfx1201.
+- rocKE and FlyDSL: ports of the depthwise VALU forward to both, compared cell by cell.
+  - Where the ports were faster, the cause was HIP-expressible codegen: buffer loads with hardware-zero bounds, branch-free predicates, wave-uniform values made scalar, and keeping guarded stores from swallowing FMA chains. The `VALU` cores use all four.
+  - `rowtile` reimplements rocKE's register-tiled kernel with `v_fma_mix_f32` (NHWC 16-bit 5x5/7x7) and runs ahead of it on gfx950 and gfx942, level on gfx1201.
 - No code was copied from CK, rocKE or FlyDSL.
 
 ## Next steps and deferred ideas
-1. **gfx950 NHWC 16-bit wrw (0.84-0.88x).** The Hankel inner loop is VALU/SALU issue-bound. Next is further operand-staging work (transpose-read staging was tried during the rework). This is the only class where the family trails MIOpen.
-2. **inf/NaN parity for VALU `tile`/`vtile` wrw and dy-side padding.** This is required by the kernel-behaviour parity rule. The Hankel masks cost about 4-8% before the operand rework recovered it, so measure the cost.
-3. **NCHW 7x7 forward on RDNA.** This is the largest remaining depthwise excess in the full corpus (on the order of 60 ms over about 165 shapes on one RDNA GPU).
+1. **gfx950 NHWC 16-bit wrw (0.84-0.88x).** The Hankel inner loop is VALU/SALU issue-bound. The candidate is operand staging beyond transpose-read staging, which is already measured. This is the only class where the family trails MIOpen.
+2. **inf/NaN parity for VALU `tile`/`vtile` wrw and dy-side padding.** This is required for behaviour parity with cuDNN and PyTorch. Masks can cost several percent of kernel time, so measure the cost against the compiled-out build.
+3. **NCHW 7x7 forward on RDNA.** This is the largest depthwise excess in the full corpus (on the order of 60 ms over about 165 shapes on one RDNA GPU).
 4. **Host-computed magic numbers for the thread decode.** These measured +8-10% on gfx1201 NCHW floors. They need an argument-block change.
 5. **Depth multiplier above 1 for fwd/bwd.** wrw already carries `mult` 2. The forward cores would need the same channel mapping.
-6. **gfx942 NHWC 3-D 16-bit LDS core**, which runs at 0.87x of its pre-rework form (unexplained).
+6. **gfx942 NHWC 3-D 16-bit LDS core**, about 13% slower than an alternative staging form (unexplained).
 7. **Deferred:** 1-D MFMA Toeplitz for long 1-D filters on gfx942/gfx950 (pays only where VALU becomes compute-bound); MFMA strided backward data and 3-D.
 
 ## Tests

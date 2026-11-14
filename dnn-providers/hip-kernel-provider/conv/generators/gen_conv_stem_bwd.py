@@ -103,8 +103,9 @@ SPACE_TO_DEPTH = 2
 SD_WINDOWS = [2, 3, 4]
 # Space-to-depth only pays where it fills idle matrix-core columns, so no FMA configs (their
 # columns are exact: measured 1.3-1.5x slower on ssd300 3x3 fp32, gfx1101 / gfx1201). Per layout,
-# the chunk / tile pairs that won or came within 5% on the RDNA A/B (unet, realesrgan, superres
-# NCHW fp16; sd15 / sdxl NHWC bf16); the rest never did there and each adds a candidate per graph.
+# the chunk / tile pairs that won or came within 5% in the RDNA measurements (unet,
+# realesrgan, superres NCHW fp16; sd15 / sdxl NHWC bf16); the rest never did there and each adds
+# a candidate per graph.
 # Keyed by (layout, vector loads); channels-first column vectors read both sub-columns at once.
 SD_KC_TILES = {
     (0, False): [(16, (4, 2)), (16, (8, 2)), (32, (8, 2))],
@@ -309,7 +310,7 @@ def emit(catalog):
         stale = sorted(kept - universe)
         if stale:
             sys.exit(
-                f"{KEPT_FILE.name} lists configs the generator no longer makes: {stale[:5]}"
+                f"{KEPT_FILE.name} lists configs the generator does not make: {stale[:5]}"
             )
     for dtype, cfgs in catalog.items():
         dt = DT[dtype]

@@ -114,7 +114,7 @@ std::vector<AcceptCase> acceptCases()
     oddChannels.c = 3;
     oddChannels.k = 5;
     cases.push_back({"OddChannels", oddChannels});
-    // Depth and height filters no longer than their strides: strided 1x1, patchify, 2x2x2.
+    // Depth and height filters at most as long as their strides: strided 1x1, patchify, 2x2x2.
     auto pointwise = baseShape();
     pointwise.input = {9, 37};
     pointwise.filter = {1, 1};

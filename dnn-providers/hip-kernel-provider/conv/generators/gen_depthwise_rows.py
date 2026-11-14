@@ -1,7 +1,7 @@
 # Generates the CONV_DEPTHWISE_ROWS descriptors (FWD, BWD) for the HKP conv group.
 #   python3 gen_depthwise_rows.py <descriptors/conv/depthwise_rows>
 # Every config is a catalog entry admitted on correctness alone; autotune (UHD later) picks.
-# Configs come from the K6 prototype sweep on gfx1100 / gfx1201 / gfx942: each one won at
+# Configs come from a sweep on gfx1100 / gfx1201 / gfx942: each one is the fastest on at
 # least one target shape somewhere.
 import json, uuid, pathlib, sys
 

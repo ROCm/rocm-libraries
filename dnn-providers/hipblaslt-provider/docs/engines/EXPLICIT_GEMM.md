@@ -20,7 +20,7 @@
   - `*_TF32`: permits TF32 on fp32 GEMMs. On rocBLAS this is xf32, gfx942 only. On hipBLASLt it is FAST_TF32: native on gfx942, bf16x3 on gfx950, fp32 fallback elsewhere.
   - `*_RPR`: MIOpen-style per-image fp16 1x1 wrw.
   - Both are registered only under the switches below.
-- **vs MIOpen:** competes with `GemmFwd1x1_0_1/_0_2`, `GemmFwdRest`, `GemmBwd1x1_stride1/2`, `GemmBwdRest`, `GemmWrw1x1_stride1` and `GemmWrwUniversal`. On the early rapid tier, MIOpen Gemm* time / ours was 1.06x to 2.2x geomean per GPU.
+- **vs MIOpen:** competes with `GemmFwd1x1_0_1/_0_2`, `GemmFwdRest`, `GemmBwd1x1_stride1/2`, `GemmBwdRest`, `GemmWrw1x1_stride1` and `GemmWrwUniversal`. On an 86-shape test set, MIOpen Gemm* time / ours is 1.06x to 2.2x geomean per GPU (indicative).
 
 ## Why it exists
 - **Every-arch floor.** The engines give every arch, gfx906 included, a correct and reasonably fast path for any convolution shape without CK. MIOpen's GEMM solvers fill this role today, but they are tied to MIOpen and to rocBLAS.
@@ -74,7 +74,7 @@
 - **Narrow partials** (`NarrowPartials`): hipBLASLt on gfx11 rounds the parts of its own long-k split to a 16-bit output. So on gfx11, `HIPBLASLT_CONV_ENGINE` runs fwd and bwd-data GEMMs with k ≥ 2^16 into 16-bit outputs as fp32 partials. rocBLAS never needs this, because its chunking is declined instead.
 
 ## Strengths and weaknesses
-- **Wins and coverage.** The full 9,471-shape corpus was run in NCHW and NHWC with autotune, comparing our engines only with MIOpen excluded. One of the two engines was fastest on 3,493-4,918 graphs per GPU and layout (gfx950, MI325X, gfx1201, gfx1100):
+- **Wins and coverage.** Measured with autotune (fresh cache), our engines only, on the full 9,471-shape internal real-model corpus in NCHW and NHWC: one of the two engines is our fastest on 3,493-4,918 graphs per GPU and layout (gfx950, MI325X, gfx1201, gfx1100):
   - pointwise fwd 1,095-1,806 of 1,838 and pointwise bwd 695-920 of 932;
   - a large share of 3-D in every direction, and of patchify fwd;
   - dense 3x3 fwd only 114-459 of 1,357.
@@ -82,10 +82,10 @@
 - **rocBLAS or hipBLASLt.** Neither backend dominates. hipBLASLt wins more often on CDNA and gfx1201; rocBLAS wins more on gfx1100.
 - **Known losses to MIOpen's GEMM solvers.**
   - *NCHW 1x1 fp16 wrw:* MIOpen accumulates per image into the fp16 dw. That trades precision for speed and is offered here only as the RPR sibling.
-  - *1x1 stride-2 fwd/bwd:* about 1.5x on gfx942 fp32 before the staged channels-last form existed; not re-measured.
+  - *1x1 stride-2 fwd/bwd:* about 1.5x on gfx942 fp32 (indicative: not measured with the staged channels-last plan).
   - *Tiny shapes:* our extra launches cost time.
-  - *Some long 1-D and small-channel 16-bit wrw against `GemmWrwUniversal`:* HiFi-GAN 1x16 NCHW fp16 and EfficientNetV2 c24 NHWC fp16 run about 4x slower on MI325X. The cause has not been diagnosed.
-- **OOTB ranking.** hipDNN's candidate enumeration is alphabetical, so the BLAS engines rank ahead of every `hipkernel:CONV_*` engine without autotune. That is a naming accident, not a measured choice. Measured without autotune on gfx950 ConvTranspose ticket graphs, this ranking ran at 0.36-0.40x of MIOpen. It is a heuristics issue, not an engine one.
+  - *Some long 1-D and small-channel 16-bit wrw against `GemmWrwUniversal`:* HiFi-GAN 1x16 NCHW fp16 and EfficientNetV2 c24 NHWC fp16 run about 4x slower on MI325X. The cause is not diagnosed.
+- **OOTB ranking.** hipDNN's candidate enumeration is alphabetical, so the BLAS engines rank ahead of every `hipkernel:CONV_*` engine without autotune. That is a naming accident, not a measured choice. Measured without autotune on a set of gfx950 ConvTranspose graphs, this ranking runs at 0.36-0.40x of MIOpen. It is a heuristics issue, not an engine one.
 
 ## Numerical precision
 - **Default engines:**
@@ -98,19 +98,19 @@
   - hipBLASLt asks for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to fp32 when no algorithm exists: native TF32 on gfx942, bf16x3 emulation on gfx950, silent fp32 elsewhere.
   - rocBLAS sets `rocblas_xf32_xdl_math_op`, which takes effect only on gfx942.
   - TF32 here is a permission and is never reported. The gtest bound is 2^-9 × reduction length.
-  - MIOpen's own rocBLAS xf32 path measured net-negative on gfx942 (geomean 0.88x), and MIOpen removed it. These siblings have not yet been compared in an autotuned sweep.
+  - MIOpen's own rocBLAS xf32 path measures net-negative on gfx942 (geomean 0.88x), and MIOpen does not use it. These siblings are not yet compared in an autotuned sweep.
 - **RPR siblings** (`HIPDNN_CONV_ALLOW_REDUCED_PRECISION_REDUCTION=1`):
   - One form: 1x1, unit-stride, unpadded fp16 wrw over several channels-first images, run as one GEMM per image adding into the fp16 dw. This is MIOpen's `GemmWrw1x1_stride1` and cuDNN's `REDUCED_PRECISION_REDUCTION`.
   - bf16 has no reduced form. The plan builder re-checks the switch on every call.
-  - Measured deviation from exact was 1-4 fp16 ulps of max |dw|.
-  - It wins on gfx1100 (DeepLab c1024 k2048 128²: 23.8 → 16.0 ms, MIOpen 36.0) and on gfx1201 (1.32-1.42x on three graphs). It is neutral on CDNA.
+  - Measured deviation from exact is 1-4 fp16 ulps of max |dw|.
+  - It wins on gfx1100 (DeepLab c1024 k2048 128²: 16.0 ms against 23.8 ms for the exact engines and MIOpen's 36.0) and on gfx1201 (1.32-1.42x on three graphs). It is neutral on CDNA.
 - **Notes:** none of these engines authors numerical notes, so hipDNN reports all six as `NONDETERMINISTIC`. A caller cannot yet exclude TF32 or RPR by note, which is why the switches exist. The provider's own repack and cast steps are deterministic. Bitwise repeatability of the BLAS calls is not asserted and has no relaunch test.
-- **Error model:** correctness runs use the #15481 reduction-length-aware tolerance, including large tensors past 2 GiB on gfx950. Those runs exposed three cases of 16-bit partial rounding, and each now has a fix:
-  - rocBLAS k-chunking into bf16, which is now declined;
-  - rocBLAS gfx11 bf16 GEMV, which is now declined;
-  - hipBLASLt long-k split on gfx11, which now runs as narrow partials.
+- **Error model:** correctness runs use the #15481 reduction-length-aware tolerance, including large tensors past 2 GiB on gfx950. Three library behaviours would round partials to 16 bits, and each is handled:
+  - rocBLAS k-chunking into bf16 is declined;
+  - rocBLAS gfx11 bf16 GEMV is declined;
+  - hipBLASLt long-k split on gfx11 runs as narrow partials.
 
-  No index-overflow defect was found.
+  The correctness runs show no index overflow.
 
 ## Comparison with MIOpen
 - **Same family:** MIOpen's GEMM solvers are the same family.
@@ -124,7 +124,7 @@
   - A capped workspace with image slicing and row bands.
   - fp32 partials instead of per-image output-type accumulation.
   - Two BLAS backends, with candidate layouts timed under autotune.
-- **Measured** on the early 86-graph rapid tier, autotuned, with MIOpen in search mode, as MIOpen Gemm* time / our best BLAS time (geomean):
+- **Measured** on an 86-shape test set covering every conv class, direction, dtype and layout, autotuned, with MIOpen in search mode, as MIOpen Gemm* time / our best BLAS time (geomean; indicative):
 
   | GPU | MIOpen Gemm* / ours |
   |---|---|
@@ -133,7 +133,7 @@
   | gfx90a | 1.45x |
   | gfx942 | 2.2x |
 
-  Per GPU, ours was more than 1.2x faster on 18-50 graphs and more than 1.2x slower on 13-30. The formulation has gained the layout candidates, split reductions and staged forms since; the full-corpus runs above did not isolate MIOpen's GEMM solvers.
+  Per GPU, ours is more than 1.2x faster on 18-50 graphs and more than 1.2x slower on 13-30. These figures do not cover the current layout candidates, split reductions and staged forms, and the full-corpus runs above do not isolate MIOpen's GEMM solvers.
 
 ## Prior art considered
 - **MIOpen GEMM solvers:** the per-image loop structure, the 1x1 stride-2 staging and the per-image fp16 wrw. That last one is kept only as the RPR sibling.
@@ -147,7 +147,7 @@
 2. **Long 1-D and small-channel 16-bit wrw against `GemmWrwUniversal`** (about 4x on MI325X). This needs diagnosis: a layout candidate, the reduction split threshold, or library algorithm choice.
 3. **Templated summing col2im on 16-bit columns.** This would keep 16-bit-output GEMMs for overlapping taps. On RDNA3, the libraries' 16-bit-output GEMMs run 4-5x faster than fp32-output ones on a vocoder upsampler.
 4. **Report notes and drop the switches** once a caller can deselect by note: `TENSOR_CORE` for TF32 and `REDUCED_PRECISION_REDUCTION` for RPR. Then offer RPR under FLOAT or HALF compute as cuDNN does. Further RPR forms (rocBLAS 16-bit k-chunks, hipBLASLt fp16 split-K) are measurement-led.
-5. **Calibrate the 1 GiB repack cap** against exit-suite data.
+5. **Calibrate the 1 GiB repack cap** against measured workloads.
 
 ## Tests
 `tests/engines/conv/`:
