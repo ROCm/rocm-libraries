@@ -2162,17 +2162,22 @@ private:
 
 // --partitions N: one GEMM run as slices on devices 0..N-1 with hipblaslt_ext::PartitionedGemm.
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
-// workspace, events). A, B, C and D stay in the caller's device 0 buffers (Placement::Shared) and
-// the other partitions reach them over peer access, so the copy-back, the check and the
-// reporting of testing_matmul see one full D. run() joins every partition's stream back into the
-// caller's stream, so a timer or an event on that stream covers the whole span.
+// workspace, events). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
+// is read (or written) by the other partitions over peer access; a Replicated one gets a full
+// copy on every partition device (inputs copied from device 0 in initialize(), the slices of a
+// replicated D gathered back into the device 0 D by gatherD()), so the copy-back, the check and
+// the reporting of testing_matmul still see one full D. run() joins every partition's stream back
+// into the caller's stream, so a timer or an event on that stream covers the whole span.
 class PartitionedRun
 {
 public:
     PartitionedRun(const Arguments& arg, hipblasLtHandle_t handle0, hipStream_t stream0,
                    hipblasOperation_t transA, hipblasOperation_t transB)
         : m_dim(arg.split_dim == 'M' ? hipblaslt_ext::SplitDim::M : hipblaslt_ext::SplitDim::N)
+        , m_dElem(realDataTypeSize(arg.d_type))
     {
+        for(int t = 0; t < 4; t++)
+            m_replicated[t] = arg.part_place[t] == 'R';
         int previous = 0;
         check(hipGetDevice(&previous), "hipGetDevice");
         std::vector<hipblasLtHandle_t> handles{handle0};
@@ -2219,6 +2224,9 @@ public:
             static_cast<void>(hipEventDestroy(m_stops[i - 1]));
             if(i - 1 < m_workspaces.size())
                 static_cast<void>(hipFree(m_workspaces[i - 1]));
+            for(auto& replica : m_replica)
+                if(i - 1 < replica.size())
+                    static_cast<void>(hipFree(replica[i - 1]));
         }
         static_cast<void>(hipSetDevice(previous));
         static_cast<void>(hipEventDestroy(m_start));
@@ -2226,7 +2234,8 @@ public:
     PartitionedRun(const PartitionedRun&)            = delete;
     PartitionedRun& operator=(const PartitionedRun&) = delete;
 
-    // The full problem; A, B, C and D are the device 0 buffers.
+    // The full problem; A, B, C and D are the device 0 buffers (`*Bytes` is their size, which a
+    // replica copies).
     hipblasStatus_t setProblem(int64_t     m,
                                int64_t     n,
                                int64_t     k,
@@ -2243,19 +2252,101 @@ public:
                                const void* b,
                                const void* c,
                                void*       d,
+                               size_t      aBytes,
+                               size_t      bBytes,
+                               size_t      cBytes,
+                               size_t      dBytes,
                                const void* alpha,
                                const void* beta)
     {
+        const void*  src[4]   = {a, b, c, d};
+        const size_t bytes[4] = {aBytes, bBytes, cBytes, dBytes};
+        int          previous = 0;
+        check(hipGetDevice(&previous), "hipGetDevice");
+        for(int t = 0; t < 4; t++)
+        {
+            m_src[t]   = src[t];
+            m_bytes[t] = bytes[t];
+            if(!m_replicated[t] || !m_replica[t].empty())
+                continue;
+            for(size_t i = 1; i < m_streams.size(); i++)
+            {
+                check(hipSetDevice(int(i)), "hipSetDevice");
+                void* ptr = nullptr;
+                check(hipMalloc(&ptr, std::max<size_t>(bytes[t], 1)), "hipMalloc");
+                m_replica[t].push_back(ptr);
+            }
+        }
+        check(hipSetDevice(previous), "hipSetDevice");
+
+        auto pointers = [&](int t) {
+            std::vector<const void*> v{src[t]};
+            if(m_replicated[t])
+                v.insert(v.end(), m_replica[t].begin(), m_replica[t].end());
+            return v;
+        };
         hipblaslt_ext::PartitionedGemmInputs in;
-        in.a     = {a};
-        in.b     = {b};
-        in.c     = {c};
-        in.d     = {d};
+        in.a = pointers(0);
+        in.b = pointers(1);
+        in.c = pointers(2);
+        in.d = {d};
+        if(m_replicated[3])
+            in.d.insert(in.d.end(), m_replica[3].begin(), m_replica[3].end());
         in.alpha = alpha;
         in.beta  = beta;
-        using P  = hipblaslt_ext::Placement;
+        m_m = m;
+        m_n = n;
+        m_batch   = batch;
+        m_ldd     = ldd;
+        m_strideD = strideD;
+        using P   = hipblaslt_ext::Placement;
+        auto place = [&](int t) { return m_replicated[t] ? P::Replicated : P::Shared; };
         return m_gemm->setProblem(m, n, k, batch, lda, ldb, ldc, ldd, strideA, strideB, strideC,
-                                  strideD, m_dim, P::Shared, P::Shared, P::Shared, P::Shared, in);
+                                  strideD, m_dim, place(0), place(1), place(2), place(3), in);
+    }
+
+    // Copies the replicated inputs from the device 0 buffers to the partition devices.
+    void syncReplicas()
+    {
+        check(hipStreamSynchronize(m_streams[0]), "hipStreamSynchronize");
+        for(int t = 0; t < 3; t++)
+            for(size_t i = 1; i < m_streams.size() && m_replicated[t]; i++)
+                check(hipMemcpy(m_replica[t][i - 1], m_src[t], m_bytes[t], hipMemcpyDefault),
+                      "hipMemcpy");
+    }
+
+    // After a run with a replicated D: copies each partition's slice from its D into the device 0
+    // D, where the copy-back and the check read it. Not part of a timed run.
+    void gatherD()
+    {
+        if(!m_replicated[3])
+            return;
+        check(hipStreamSynchronize(m_streams[0]), "hipStreamSynchronize");
+        const bool   splitM = m_dim == hipblaslt_ext::SplitDim::M;
+        const size_t pitch  = size_t(m_ldd) * m_dElem;
+        for(size_t i = 1; i < m_streams.size(); i++)
+        {
+            int64_t offset = 0, size = 0;
+            if(m_gemm->getSlice(i, offset, size) != HIPBLAS_STATUS_SUCCESS)
+                throw std::runtime_error("getSlice failed");
+            // A column-major D: an M slice is `size` rows of every column, an N slice is `size`
+            // whole columns.
+            const size_t elemOffset = splitM ? size_t(offset) : size_t(offset) * size_t(m_ldd);
+            const size_t width      = (splitM ? size_t(size) : size_t(m_m)) * m_dElem;
+            const size_t height     = splitM ? size_t(m_n) : size_t(size);
+            for(int64_t b = 0; b < m_batch; b++)
+            {
+                const size_t at = (size_t(b) * size_t(m_strideD) + elemOffset) * m_dElem;
+                check(hipMemcpy2D(static_cast<char*>(const_cast<void*>(m_src[3])) + at,
+                                  pitch,
+                                  static_cast<char*>(m_replica[3][i - 1]) + at,
+                                  pitch,
+                                  width,
+                                  height,
+                                  hipMemcpyDefault),
+                      "hipMemcpy2D");
+            }
+        }
     }
 
     hipblasStatus_t algoGetHeuristic(int                                            requestCount,
@@ -2277,6 +2368,7 @@ public:
     // `workspace0` is partition 0's workspace (the caller's); the others are allocated here.
     hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t& algo, void* workspace0, size_t bytes)
     {
+        syncReplicas();
         std::vector<void*> workspaces{workspace0};
         if(m_workspaces.empty())
             for(size_t i = 1; i < m_streams.size(); i++)
@@ -2322,6 +2414,12 @@ private:
     }
 
     hipblaslt_ext::SplitDim                                m_dim;
+    size_t                                                 m_dElem = 0;
+    bool                                                   m_replicated[4] = {};
+    std::vector<void*>                                     m_replica[4]; // partitions 1..N-1
+    const void*                                            m_src[4]   = {};
+    size_t                                                 m_bytes[4] = {};
+    int64_t m_m = 0, m_n = 0, m_batch = 1, m_ldd = 0, m_strideD = 0;
     std::vector<std::unique_ptr<hipblaslt_local_handle>>   m_handleOwners;
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<hipEvent_t>                                m_stops;
@@ -5666,6 +5764,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                  dB[0].buf(),
                                                                  dC[0].buf(),
                                                                  (*dDp)[0].buf(),
+                                                                 dA[0].getNumBytes(),
+                                                                 dB[0].getNumBytes(),
+                                                                 dC[0].getNumBytes(),
+                                                                 (*dDp)[0].getNumBytes(),
                                                                  descriptorAlphaForBlock(0),
                                                                  &h_beta[0]));
                 CHECK_HIPBLASLT_ERROR(
@@ -6496,6 +6598,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     // later launch can change them: under c_equal_d each launch reads the previous launch's D as
     // C. dCount is the number of D buffers (batch_count in pointer-array mode).
     auto copyOutputsToHost = [&](uint32_t dCount) {
+        // A replicated D of --partitions holds each slice on its own device: bring them to D.
+        if(partitioned)
+            partitionedRun->gatherD();
         copy_gemm_to_host(stream, dCount, hD_1, (*dDp));
         if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             return;

@@ -319,6 +319,7 @@ try
 
     int         partitions_opt = 1;
     std::string split_dim_str  = "N";
+    std::string part_place_str[4] = {"shared", "shared", "shared", "shared"};
 
     bool verify = 0;
     bool ulp    = 0;
@@ -724,6 +725,25 @@ try
          "With --partitions: the dimension to split, M or N. The first partitions take size/partitions "
          "and the last takes the rest.")
 
+        ("part_place_a",
+         value<std::string>(&part_place_str[0])->default_value("shared"),
+         "With --partitions: shared (one copy of A in the device 0 buffer, read by every "
+         "partition over peer access) or replicated (a copy on each partition device).")
+
+        ("part_place_b",
+         value<std::string>(&part_place_str[1])->default_value("shared"),
+         "With --partitions: shared or replicated B, as --part_place_a.")
+
+        ("part_place_c",
+         value<std::string>(&part_place_str[2])->default_value("shared"),
+         "With --partitions: shared or replicated C, as --part_place_a.")
+
+        ("part_place_d",
+         value<std::string>(&part_place_str[3])->default_value("shared"),
+         "With --partitions: shared (every partition writes its slice into the device 0 D) or "
+         "replicated (a D on each partition device; the slices are gathered into the device 0 D "
+         "after a verified run, outside the timing).")
+
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
          "Print solution, kernel name and solution index.")
@@ -907,6 +927,17 @@ try
         hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M or N)" << std::endl;
         return 1;
     }
+    for(int t = 0; t < 4; t++)
+    {
+        if(part_place_str[t] != "shared" && part_place_str[t] != "replicated")
+        {
+            hipblaslt_cerr << "Invalid --part_place_" << char('a' + t) << ": " << part_place_str[t]
+                           << " (shared or replicated)" << std::endl;
+            return 1;
+        }
+        arg.part_place[t] = part_place_str[t] == "replicated" ? 'R' : 'S';
+    }
+    arg.part_place[4] = 0;
     arg.partitions = static_cast<uint8_t>(partitions_opt);
     arg.split_dim  = split_dim_str[0] == 'm' || split_dim_str[0] == 'M' ? 'M' : 'N';
 

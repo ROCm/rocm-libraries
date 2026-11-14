@@ -1122,19 +1122,17 @@ namespace hipblaslt_ext
      *  |------------|----------|------------------------------------------------|
      *  | Shared     | 1        | ``ptr + offset_i`` (the whole matrix, reachable from every partition) |
      *  | Replicated | N        | ``ptr[i] + offset_i`` (a whole copy per partition) |
-     *  | Sliced     | N        | ``ptr[i]`` (already points at partition i's slice) |
      *
-     *  The leading dimension and batch stride passed to PartitionedGemm::setProblem apply
-     * to the matrix as laid out for the hint: the whole matrix for ``Shared`` and
-     * ``Replicated``, and each partition's slice buffer for ``Sliced``. A matrix that is not
-     * split by the chosen SplitDim (for example B when splitting M) is used whole by every
-     * partition, so its hint only decides whether 1 or N pointers are passed.
+     *  The leading dimension and batch stride passed to PartitionedGemm::setProblem describe
+     * the whole matrix, and every partition reads its slice through them. A caller that keeps
+     * only a slice per partition passes pointers to the slice start with the same strides. A
+     * matrix that is not split by the chosen SplitDim (for example B when splitting M) is used
+     * whole by every partition, so its hint only decides whether 1 or N pointers are passed.
      */
     enum class Placement
     {
         Shared,
         Replicated,
-        Sliced,
     };
 
     /*! \ingroup types_module
@@ -1211,7 +1209,7 @@ namespace hipblaslt_ext
         *  \brief Sets up the full GEMM problem and its partitioning.
         *
         *  \details ``m``, ``n``, ``k``, the leading dimensions and the strides describe the
-        * full matrices (see Placement for ``Sliced``). The pointers come from ``inputs``.
+        * full matrices. The pointers come from ``inputs``.
         *
         *  @param[in]
         *  m,n,k                            The size of the full problem.

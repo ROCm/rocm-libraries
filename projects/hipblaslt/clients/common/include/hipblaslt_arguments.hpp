@@ -172,6 +172,9 @@ struct Arguments
     uint8_t partitions;
     // Dimension the slices split: M or N.
     char split_dim;
+    // Placement of A, B, C, D with --partitions, one letter each: S = shared (one copy in the
+    // device 0 buffers), R = replicated (a copy per partition device).
+    char part_place[8];
 
     int8_t norm_check;
     int8_t allclose_check;
@@ -330,6 +333,7 @@ struct Arguments
     OPER(a2a_world) SEP              \
     OPER(partitions) SEP             \
     OPER(split_dim) SEP              \
+    OPER(part_place) SEP             \
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \

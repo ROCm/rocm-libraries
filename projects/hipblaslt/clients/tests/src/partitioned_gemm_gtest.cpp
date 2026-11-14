@@ -520,31 +520,8 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
         in.a = {sharedCopy(op.a)};
     if(cs.b == Placement::Shared)
         in.b = {sharedCopy(op.b)};
-    // A or B Sliced: each partition holds only its slice (contiguous columns of the K x X matrix).
-    const SplitDim dim    = cs.dim;
-    const int64_t  total  = dim == SplitDim::M ? kM : kN;
-    int64_t        off[2] = {0, total / 2}, sz[2] = {total / 2, total - total / 2};
-    auto           sliceOf = [&](std::vector<half_t> const& host, int i) {
-        std::vector<half_t> s(host.begin() + off[i] * kK, host.begin() + (off[i] + sz[i]) * kK);
-        bufs.push_back(std::make_unique<DeviceBuf>(i, s.size() * 2, s.data()));
-        return bufs.back()->get();
-    };
-    if(cs.a == Placement::Sliced)
-        in.a = {sliceOf(op.a, 0), sliceOf(op.a, 1)};
-    if(cs.b == Placement::Sliced)
-        in.b = {sliceOf(op.b, 0), sliceOf(op.b, 1)};
-    // D Sliced: each partition's own buffer holds just its slice, with a tight leading dimension.
-    int64_t lddUse = kLdd;
-    if(cs.d == Placement::Sliced)
-    {
-        lddUse = dim == SplitDim::M ? std::max(sz[0], sz[1]) : kM;
-        for(int i = 0; i < 2; i++)
-        {
-            bufs.push_back(std::make_unique<DeviceBuf>(
-                i, size_t(lddUse) * (dim == SplitDim::M ? kN : sz[i]) * 2));
-            in.d[i] = bufs.back()->get();
-        }
-    }
+    const SplitDim dim = cs.dim;
+    int64_t        lddUse = kLdd;
 
     ASSERT_EQ(gemm.setProblem(kM,
                               kN,
@@ -585,9 +562,8 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
     {
         int64_t offset = 0, size = 0;
         ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
-        const int64_t       rows = cs.d == Placement::Sliced ? lddUse : kLdd;
-        std::vector<half_t> got(size_t(rows)
-                                * (cs.d == Placement::Sliced && dim == SplitDim::N ? size : kN));
+        const int64_t       rows = kLdd;
+        std::vector<half_t> got(size_t(rows) * kN);
         ASSERT_EQ(hipSetDevice(i), hipSuccess);
         ASSERT_EQ(hipMemcpy(got.data(), in.d[i], got.size() * 2, hipMemcpyDeviceToHost),
                   hipSuccess);
@@ -598,8 +574,7 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
                 const int64_t r    = dim == SplitDim::M ? offset + row : row;
                 const int64_t c    = dim == SplitDim::N ? offset + col : col;
                 const float   want = float(ref[r + c * kLdd]);
-                const float   have = cs.d == Placement::Sliced ? float(got[row + col * rows])
-                                                               : float(got[r + c * rows]);
+                const float   have = float(got[r + c * rows]);
                 if(std::fabs(want - have) > 2e-3f * std::max(1.f, std::fabs(want)))
                     bad++;
             }
@@ -625,15 +600,5 @@ INSTANTIATE_TEST_SUITE_P(
         Combo{
             "M_SharedAB", SplitDim::M, Placement::Shared, Placement::Shared, Placement::Replicated},
         Combo{
-            "N_SharedAB", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Replicated},
-        Combo{"M_SlicedAandD",
-              SplitDim::M,
-              Placement::Sliced,
-              Placement::Replicated,
-              Placement::Sliced},
-        Combo{"N_SlicedBandD",
-              SplitDim::N,
-              Placement::Replicated,
-              Placement::Sliced,
-              Placement::Sliced}),
+            "N_SharedAB", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Replicated}),
     [](::testing::TestParamInfo<Combo> const& info) { return std::string(info.param.name); });

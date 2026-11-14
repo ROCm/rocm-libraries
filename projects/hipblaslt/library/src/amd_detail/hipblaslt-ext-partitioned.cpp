@@ -240,7 +240,7 @@ namespace hipblaslt_ext
                 const void* p = lists[t][place[t] == Placement::Shared ? 0 : i];
                 if(p == nullptr)
                     return HIPBLAS_STATUS_INVALID_VALUE;
-                ptr[t] = place[t] == Placement::Sliced ? p : advance(p, elems[t], bytes[t]);
+                ptr[t] = advance(p, elems[t], bytes[t]);
             }
 
             GemmInputs slice;
