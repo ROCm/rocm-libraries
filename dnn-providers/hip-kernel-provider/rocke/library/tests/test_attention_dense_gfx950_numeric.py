@@ -2612,5 +2612,53 @@ class TestDenseBandIndexTruthTable:
         assert err < 1e-2, f"max_abs={err:.3e}"
 
 
+class TestDenseRowIndependence:
+    """A row's output depends only on the keys that row sees.
+
+    Causal (top-left), Sq = Skv = S: key S-1 is visible to row S-1 only, which shares
+    a 32-row wave with rows S-32..S-2. K at that key is 1e4 * sign(Q of row S-1), so
+    row S-1's running max jumps far past the lazy-rescale threshold, and V there is
+    +-1e4. Every other row masks the key, so its output must not change by a single
+    bit. A wave-wide lazy-rescale decision breaks this: the jump makes every row of
+    the wave move its max and round differently.
+    """
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("window", [0, 128], ids=["causal", "causal_w128"])
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    def test_rows_independent_of_wave_neighbours(self, dtype, d, persistent, window):
+        import torch
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        B, S, H = 1, 512, 16
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k_hot, v_hot = k.clone(), v.clone()
+        k_hot[:, S - 1] = 1e4 * torch.sign(q[:, S - 1])
+        v_hot[:, S - 1] = 1e4 * torch.sign(torch.randn_like(v[:, S - 1]))
+
+        spec = _spec(dtype, d, H, H, persistent, sq=S, sliding_window=window)
+        outs = []
+        for kk, vv in ((k, v), (k_hot, v_hot)):
+            out = torch.empty_like(q)
+            run_attention_dense_torch(spec=spec, q=q, k=kk, v=vv, out=out, scale=scale)
+            torch.cuda.synchronize()
+            outs.append(out)
+        base, hot = outs
+        assert torch.isfinite(hot).all(), "non-finite output"
+        assert not torch.equal(base[:, S - 1], hot[:, S - 1]), "key S-1 had no effect"
+        changed = (base[:, : S - 1] != hot[:, : S - 1]).any(dim=-1).nonzero()
+        assert changed.numel() == 0, (
+            f"{len(changed)} (row, head) pairs that mask key {S - 1} changed, rows "
+            f"{sorted(set(changed[:, 1].tolist()))}"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

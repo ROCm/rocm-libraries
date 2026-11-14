@@ -1351,18 +1351,22 @@ def build_attention_dense(
         # Into the log2 domain the running max, threshold, and sinks use.
         tile_max = b.fmul(tile_max_raw, qk_scale)
         if LAZY_RESCALE:
+            # Each row keeps or moves its max on its own scores only (rows stay
+            # independent of the wave's other rows); the wave skips the O/l
+            # rescale when every row keeps it.
             m_diff = b.fsub(tile_max, m_i)
-            below_i32 = b.select(
-                b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD)),
-                b.const_i32(1),
-                b.const_i32(0),
-            )
+            within = b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD))
+            below_i32 = b.select(within, b.const_i32(1), b.const_i32(0))
             skip = b.cmp_ne(b.wave_all(below_i32), b.const_i32(0))
-            m_new = b.select(skip, m_i, b.fmax(m_i, tile_max))
+            m_new = b.select(within, m_i, b.fmax(m_i, tile_max))
         else:
-            skip = None
+            within = skip = None
             m_new = b.fmax(m_i, tile_max)
         alpha = _exp2(b.fsub(m_i, m_new))
+        if within is not None:
+            # Exactly 1 for a row that kept its max, so the wave's rescale
+            # leaves it unchanged.
+            alpha = b.select(within, b.const_f32(1.0), alpha)
         return m_new, alpha, skip
 
     def relayout_p(p):
@@ -2500,20 +2504,23 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 # max of the scaled scores up to one rounding.
                 tile_max = b.fmul(tile_max, qk_scale)
             if LAZY_RESCALE:
-                # Lazy max: only re-anchor when some lane's tile_max exceeds the
-                # running max by > threshold; else keep m_i (skip the rescale).
+                # Lazy max, per row: a row re-anchors only when its own tile_max
+                # exceeds its running max by > threshold, else keeps m_i (rows
+                # stay independent of the wave's other rows). The wave skips the
+                # O/l rescale when every row keeps its max.
                 m_diff = b.fsub(tile_max, m_i)
-                below_i32 = b.select(
-                    b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD)),
-                    b.const_i32(1),
-                    b.const_i32(0),
-                )
+                within = b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD))
+                below_i32 = b.select(within, b.const_i32(1), b.const_i32(0))
                 skip = b.cmp_ne(b.wave_all(below_i32), b.const_i32(0))
-                m_new = b.select(skip, m_i, b.fmax(m_i, tile_max))
+                m_new = b.select(within, m_i, b.fmax(m_i, tile_max))
             else:
-                skip = None
+                within = skip = None
                 m_new = b.fmax(m_i, tile_max)
             alpha = _exp2(b.fsub(m_i, m_new))
+            if within is not None:
+                # Exactly 1 for a row that kept its max, so the wave's rescale
+                # leaves it unchanged.
+                alpha = b.select(within, b.const_f32(1.0), alpha)
             return m_new, alpha, skip
 
         def exp_arg(s_val, m_new, neg_m):
