@@ -13,14 +13,15 @@
 //   C[s][r] += sum_k A[s][k] B[k][r]        = dw[c][r][s] over this row and step
 // Filters wider or taller than 4 tile into 4 x 4 tap groups (each its own accumulator).
 //
-// Non-finite x (parity with the reference): a product whose dy operand is not one of the
-// convolution's is never accumulated, so an inf / NaN in x never meets a (row, column) pairing the
-// convolution does not have. The staging marks a step whose x rows hold a non-finite element (an
-// LDS flag of three rotating slots, set between the step's two barriers and cleared two steps
-// ahead); only such a step multiplies carefully, so finite data runs the plain loop. Careful columns: past wo the lane's A halves are zeroed (CONV_DW_COLMASK, set
-// by the host when wo is not whole tiles; otherwise the tiles never pass wo). Careful rows: a lane
-// whose filter row r has no dy row here (outside the image or partition, or at stride 2 the other
-// parity) keeps its accumulator instead of the product's.
+// Non-finite x (parity with the reference): no product whose dy operand is not one of the
+// convolution's is kept, so an inf / NaN in x never meets a (row, column) pairing the convolution
+// does not have. Columns: where wo is not whole tiles (CONV_DW_COLMASK, set by the host) every
+// step ANDs the lane's A with a block-uniform mask of the columns before wo (all ones but in the
+// last tile; a branch there would split the step's block and cost more). Rows: an input row
+// with a real filter row that has no dy row here (outside the image or the partition, or at
+// stride 2 the other parity; a block-uniform test) saves the accumulators before its products
+// and restores them after, in the lanes of those filter rows: a few moves a row, not a select a
+// product.
 //
 // At stride 2 the x row is staged in two phase rows (its even and its odd columns), so A[s][k]
 // = phase (s % 2) at k + s / 2: again a shift along one row, and the operand read stays one
@@ -95,12 +96,6 @@ __device__ inline int swz(int row, int word)
     return word ^ ((row >> 3) & 7);
 }
 
-template <bool B>
-struct Flag
-{
-    static constexpr bool value = B;
-};
-
 template <bool BF16>
 __device__ inline f4 mma(u64 a, u64 b, f4 c)
 {
@@ -148,27 +143,6 @@ struct Stage
                               : u4{0, 0, 0, 0};
             }
         }
-    }
-
-    /// Whether a staged element is inf or NaN: the largest magnitude's bits (sign cleared, a
-    /// packed 16-bit max a dword) reach the all-ones exponent.
-    template <bool BF16>
-    __device__ int nonFinite() const
-    {
-        typedef unsigned short us2 __attribute__((ext_vector_type(2)));
-        us2 most = {0, 0};
-#pragma unroll
-        for(int u = 0; u < N; ++u)
-#pragma unroll
-            for(int j = 0; j < 4; ++j)
-#pragma unroll
-                for(int e = 0; e < 4; ++e)
-                {
-                    most = __builtin_elementwise_max(
-                        most, __builtin_bit_cast(us2, v[u][j][e] & 0x7fff7fffu));
-                }
-        constexpr unsigned short EXP = BF16 ? 0x7f80 : 0x7c00;
-        return (most.x >= EXP) | (most.y >= EXP);
     }
 
     /// Writes channel-major rows dst[gr][ch * pitch + column]: per channel one 64-bit word of
@@ -253,14 +227,6 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
     {
         ring[SLOTS * SS + e] = 0;
     }
-    // Per staged step, whether its x rows hold an inf / NaN: slot stores % 3.
-    __shared__ int nonFiniteStep[3];
-    if(tid < 3)
-    {
-        nonFiniteStep[tid] = 0;
-    }
-    int stores = 0;
-    int cur = 0;
     f4 acc[NWG][RG][SG];
 #pragma unroll
     for(int cg = 0; cg < NWG; ++cg)
@@ -329,12 +295,6 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     sx.storePhases(xd, XP, CB * XP, tid);
                 }
                 sd.store(dd, DP, tid);
-                cur = stores % 3;
-                if(sx.template nonFinite<BF16>() != 0)
-                {
-                    nonFiniteStep[cur] = 1;
-                }
-                ++stores;
             };
             __syncthreads(); // the previous tile's reads are done
             loadStep(y0);
@@ -342,11 +302,6 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
             __syncthreads();
             for(int y = y0; y < y1; y += G)
             {
-                const bool careful = nonFiniteStep[cur] != 0;
-                if(tid == 0)
-                {
-                    nonFiniteStep[stores % 3] = 0; // the next store's slot, read two steps ago
-                }
                 if(y + G < y1)
                 {
                     loadStep(y + G);
@@ -361,7 +316,8 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     }
                     // The lane's B rows r = 4 rg + i: dy row (yy + ph - r) / S, or the zero slot.
                     // A lane whose real filter row has no dy row keeps its sums (rows past KH
-                    // are never written out).
+                    // are never written out): the row is careful when any filter row of it has
+                    // none (block-uniform; at stride 2 every row, by parity).
                     const u16* bSlot[RG];
                     bool keep[RG];
 #pragma unroll
@@ -372,80 +328,91 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                         bSlot[rg] = ring + (ok ? oy % SLOTS : SLOTS) * SS + b * DP;
                         keep[rg] = ok || r >= KH;
                     }
-                    auto multiply = [&](auto tag) {
-                        constexpr bool CAREFUL = decltype(tag)::value;
+                    const bool careful
+                        = S != 1 || yy + a.ph - (KH - 1) < o0 * S || yy + a.ph >= o1 * S;
+                    f4 saved[NWG][RG][SG];
+                    if(careful)
+                    {
 #pragma unroll
                         for(int cg = 0; cg < NWG; ++cg)
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    saved[cg][rg][sg] = acc[cg][rg][sg];
+                    }
+#pragma unroll
+                    for(int cg = 0; cg < NWG; ++cg)
+                    {
+                        const u16* aRow
+                            = xs[g] + (S == 1 ? 0 : (i & 1) * CB * XP) + (b + 64 * cg) * XP;
+#pragma unroll
+                        for(int qq = 0; qq < Q; qq += 4)
                         {
-                            const u16* aRow
-                                = xs[g] + (S == 1 ? 0 : (i & 1) * CB * XP) + (b + 64 * cg) * XP;
+                            // The words the tap groups' windows start in, and the next.
+                            constexpr int WORDS = S == 1 ? SG + 1 : (SG - 1) / 2 + 2;
+                            unsigned d[2 * WORDS];
 #pragma unroll
-                            for(int qq = 0; qq < Q; qq += 4)
+                            for(int k = 0; k < WORDS; ++k)
                             {
-                                // The words the tap groups' windows start in, and the next.
-                                constexpr int WORDS = S == 1 ? SG + 1 : (SG - 1) / 2 + 2;
-                                unsigned d[2 * WORDS];
+                                const u64 w
+                                    = *reinterpret_cast<const u64*>(aRow + offW[qq / 4 + k]);
+                                d[2 * k] = static_cast<unsigned>(w);
+                                d[2 * k + 1] = static_cast<unsigned>(w >> 32);
+                            }
+                            u64 av[SG], bv[RG];
+                            // A: the 4 halves from the lane's shift: whole dwords, then a 2-byte
+                            // align. Stride 1: word sg, i halves in. Stride 2: word sg / 2,
+                            // 2 (sg % 2) + i / 2 halves in.
 #pragma unroll
-                                for(int k = 0; k < WORDS; ++k)
-                                {
-                                    const u64 w
-                                        = *reinterpret_cast<const u64*>(aRow + offW[qq / 4 + k]);
-                                    d[2 * k] = static_cast<unsigned>(w);
-                                    d[2 * k + 1] = static_cast<unsigned>(w >> 32);
-                                }
-                                u64 av[SG], bv[RG];
-                                // A: the 4 halves from the lane's shift: whole dwords, then a 2-byte
-                                // align. Stride 1: word sg, i halves in. Stride 2: word sg / 2,
-                                // 2 (sg % 2) + i / 2 halves in.
+                            for(int sg = 0; sg < SG; ++sg)
+                            {
+                                const int w0 = S == 1 ? sg : sg / 2;
+                                const bool hi = S == 1 ? hi2 : sg % 2 == 1;
+                                const unsigned e0 = hi ? d[2 * w0 + 1] : d[2 * w0];
+                                const unsigned e1 = hi ? d[2 * w0 + 2] : d[2 * w0 + 1];
+                                const unsigned e2 = hi ? d[2 * w0 + 3] : d[2 * w0 + 2];
+                                av[sg] = (u64)__builtin_amdgcn_alignbyte(e1, e0, ab)
+                                         | ((u64)__builtin_amdgcn_alignbyte(e2, e1, ab) << 32);
+                            }
+                            if constexpr(COLMASK)
+                            {
+                                // A's k is output column q0 + qq + k: in a step past wo (the last
+                                // tile's), zero the halves past it.
+                                // (A block-uniform mask, no branch: the step stays one block.)
+                                const int live = a.wo - (q0 + qq);
+                                const u64 mask = live >= 4   ? ~0ull
+                                                 : live <= 0 ? 0ull
+                                                             : (1ull << (16 * live)) - 1;
 #pragma unroll
                                 for(int sg = 0; sg < SG; ++sg)
                                 {
-                                    const int w0 = S == 1 ? sg : sg / 2;
-                                    const bool hi = S == 1 ? hi2 : sg % 2 == 1;
-                                    const unsigned e0 = hi ? d[2 * w0 + 1] : d[2 * w0];
-                                    const unsigned e1 = hi ? d[2 * w0 + 2] : d[2 * w0 + 1];
-                                    const unsigned e2 = hi ? d[2 * w0 + 3] : d[2 * w0 + 2];
-                                    av[sg] = (u64)__builtin_amdgcn_alignbyte(e1, e0, ab)
-                                             | ((u64)__builtin_amdgcn_alignbyte(e2, e1, ab) << 32);
+                                    av[sg] &= mask;
                                 }
-                                if constexpr(COLMASK && CAREFUL)
-                                {
-                                    // A's k is output column q0 + qq + k: zero the halves past wo.
-                                    const int live = a.wo - (q0 + qq);
-                                    const u64 mask = live >= 4   ? ~0ull
-                                                     : live <= 0 ? 0ull
-                                                                 : (1ull << (16 * live)) - 1;
-#pragma unroll
-                                    for(int sg = 0; sg < SG; ++sg)
-                                    {
-                                        av[sg] &= mask;
-                                    }
-                                }
-#pragma unroll
-                                for(int rg = 0; rg < RG; ++rg)
-                                {
-                                    bv[rg] = *reinterpret_cast<const u64*>(bSlot[rg] + 64 * cg * DP
-                                                                           + offW[qq / 4]);
-                                }
-#pragma unroll
-                                for(int rg = 0; rg < RG; ++rg)
-#pragma unroll
-                                    for(int sg = 0; sg < SG; ++sg)
-                                    {
-                                        const f4 sum = mma<BF16>(av[sg], bv[rg], acc[cg][rg][sg]);
-                                        acc[cg][rg][sg]
-                                            = !CAREFUL || keep[rg] ? sum : acc[cg][rg][sg];
-                                    }
                             }
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+                            {
+                                bv[rg] = *reinterpret_cast<const u64*>(bSlot[rg] + 64 * cg * DP
+                                                                       + offW[qq / 4]);
+                            }
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    acc[cg][rg][sg] = mma<BF16>(av[sg], bv[rg], acc[cg][rg][sg]);
                         }
-                    };
+                    }
                     if(careful)
                     {
-                        multiply(Flag<true>{});
-                    }
-                    else
-                    {
-                        multiply(Flag<false>{});
+#pragma unroll
+                        for(int cg = 0; cg < NWG; ++cg)
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    acc[cg][rg][sg]
+                                        = keep[rg] ? acc[cg][rg][sg] : saved[cg][rg][sg];
                     }
                 }
                 __syncthreads();
