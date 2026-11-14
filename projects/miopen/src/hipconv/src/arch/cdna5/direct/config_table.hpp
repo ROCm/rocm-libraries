@@ -51,19 +51,32 @@ constexpr auto tile_configs = std::array{
            .elem_bytes  = 4},
 };
 constexpr auto directions   = std::array{hipconv::Direction::Fprop, hipconv::Direction::Dgrad};
-constexpr auto filter_sizes = std::array{1, 2, 3, 4, 5};
+constexpr auto filter_sizes = std::array{
+    std::array{1, 1},
+    std::array{2, 2},
+    std::array{3, 3},
+    std::array{4, 4},
+    std::array{5, 5},
+    std::array{3, 1},
+    std::array{1, 3},
+    std::array{5, 1},
+    std::array{1, 5},
+    std::array{7, 1},
+};
 constexpr auto make_configs()
 {
-    // The batch-folded tiles stop at filter size 3, so each contributes that many configs fewer.
-    constexpr std::size_t num_folded = [] {
+    constexpr auto serves = [](const Config& tc, const std::array<int, 2>& f) -> bool {
+        return tc.tile_size_n != 4 || f[1] < 4;
+    };
+    constexpr std::size_t valid_tc_filter_pairs = [&serves] {
         std::size_t n = 0;
         for(auto& tc : tile_configs)
-            n += tc.tile_size_n == 4;
+            for(auto& f : filter_sizes)
+                if(serves(tc, f))
+                    ++n;
         return n;
     }();
-    constexpr std::size_t num_configs =
-        tile_configs.size() * directions.size() * filter_sizes.size() -
-        num_folded * (filter_sizes.size() - 3) * directions.size();
+    constexpr std::size_t num_configs = valid_tc_filter_pairs * directions.size();
 
     std::array<Config, num_configs> configs;
     std::size_t cfg = 0;
@@ -73,13 +86,13 @@ constexpr auto make_configs()
         {
             for(auto& f : filter_sizes)
             {
-                if(tc.tile_size_n == 4 && f >= 4)
+                if(!serves(tc, f))
                     continue;
                 auto& c     = configs[cfg++];
                 c           = tc;
                 c.direction = dir;
-                c.kh        = f;
-                c.kw        = f;
+                c.kh        = f[0];
+                c.kw        = f[1];
                 // Need to limit max padding due to LDS shortage
                 if(tc.tile_size_n == 4)
                     c.max_px = 4;

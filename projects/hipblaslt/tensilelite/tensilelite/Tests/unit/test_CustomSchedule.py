@@ -598,7 +598,6 @@ class TestCustomScheduleBF16:
         (  True,  False,       False,       1),
         ( False,   True,        True,       0),
         (  True,  False,        True,       1),
-        ( False,   True,       False,       0),
         ( False,  False,        True,       1)
         # fmt: on
         ])
@@ -627,6 +626,24 @@ class TestCustomScheduleBF16:
         assert schedule_info.numMfma == 120
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
+
+    def test_schedule_240x256x64_16bit_NT_requires_lds_tr_inst(self):
+        """NT/TLDS=0 240x256x64 schedule is only defined for LDSTrInst=True."""
+        kernel = create_base_kernel()
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": False, "TransposeB": True,
+            },
+            "MacroTile0": 240, "MacroTile1": 256, "DepthU": 64,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [1,4],
+            "LDSTrInst": False, "TransposeLDS": 0, "MIWaveTileA": 15, "MIWaveTileB": 4,
+        })
+        has_schedule, _ = hasCustomSchedule(kernel)
+        assert not has_schedule
 
     @pytest.mark.parametrize(
         # fmt: off

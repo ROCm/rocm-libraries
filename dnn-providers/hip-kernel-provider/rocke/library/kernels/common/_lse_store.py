@@ -68,6 +68,8 @@ __all__ = [
     "make_lse_epilogue",
     "make_mfma_lse_epilogue",
     "make_wmma_lse_epilogue",
+    "UNIFIED_LSE_LAYOUTS",
+    "unified_lse_offset",
     "validate_dense_lse",
     "validate_varlen_keys",
     "zero_keyless_row",
@@ -75,6 +77,41 @@ __all__ = [
 
 # Row slots a lane holds per accumulator tile.
 LSE_ROWS_PER_LANE = {"mfma": 4, "wmma": 8}
+
+# Element orders of the unified-attention LSE buffer; the first is the default.
+UNIFIED_LSE_LAYOUTS = ("token_major", "head_major")
+
+
+def unified_lse_offset(
+    b: IRBuilder,
+    layout: str,
+    *,
+    cu_q_start: Value,
+    q_len: Value,
+    pos: Value,
+    head: Value,
+    num_heads: Union[int, Value],
+) -> Value:
+    """Element index of (sequence-local row ``pos``, query head ``head``).
+
+    token_major: ``(cu_q_start + pos) * num_heads + head``, i.e. [total_q, Hq, 1].
+    head_major: ``cu_q_start * num_heads + head * q_len + pos``, each sequence a
+    [Hq, q_len] block, i.e. [B, Hq, S, 1] when every sequence has length S.
+    ``num_heads`` is a baked int or the kernel's runtime head-count kernarg.
+    """
+
+    def heads() -> Value:
+        return b.const_i32(num_heads) if isinstance(num_heads, int) else num_heads
+
+    # Op order is the C++ twin's (rocke_unified_lse_offset): it names the SSA values.
+    if layout == "token_major":
+        tok = b.add(cu_q_start, pos)
+        return b.add(b.mul(tok, heads()), head)
+    if layout == "head_major":
+        seq_base = b.mul(cu_q_start, heads())
+        head_base = b.mul(head, q_len)
+        return b.add(b.add(seq_base, head_base), pos)
+    raise ValueError(f"lse layout must be one of {UNIFIED_LSE_LAYOUTS}, got {layout!r}")
 
 
 def lse_store(
@@ -414,21 +451,36 @@ def validate_unified_lse(
     alibi_slopes=None,
     qq_bias=None,
     additive_bias=None,
+    lse_layout="token_major",
 ):
     """Caller-owned LSE contract for unified attention: FP32 [total_q, Hq, 1].
 
     The row extent is ``problem.total_q`` -- the reduce grid's x extent -- so the
-    buffer is tied to the rows the kernel writes, not to the caller's q view."""
+    buffer is tied to the rows the kernel writes, not to the caller's q view.
+    ``lse_layout="head_major"`` (see ``unified_lse_offset``) takes any contiguous
+    view of ``total_q * Hq`` elements, e.g. [B, Hq, S, 1]."""
+    if lse_layout not in UNIFIED_LSE_LAYOUTS:
+        raise ValueError(
+            f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, got {lse_layout!r}"
+        )
     if not problem.emit_lse:
         if lse is not None:
             raise ValueError("lse requires problem.emit_lse=True")
         return
     if lse is None:
         raise ValueError("emit_lse=True requires a caller-owned lse buffer")
+    expected = (problem.total_q, problem.num_query_heads, 1)
+    if lse_layout == "head_major":
+        # Any contiguous view of the elements; _check_lse_buffer rejects a non-tensor.
+        if hasattr(lse, "is_contiguous"):
+            if not lse.is_contiguous():
+                raise ValueError("lse must be contiguous")
+            lse = lse.reshape(-1)
+        expected = (problem.total_q * problem.num_query_heads,)
     _check_lse_buffer(
         lse,
         q,
-        (problem.total_q, problem.num_query_heads, 1),
+        expected,
         {
             "q": q,
             "k": k,

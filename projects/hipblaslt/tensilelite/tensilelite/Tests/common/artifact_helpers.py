@@ -27,12 +27,55 @@
 These utilities are pytest-independent and can be used from standalone scripts.
 """
 
+import ast
 import os
 import tarfile
 import warnings
+from contextlib import contextmanager
 
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+
+
+def timing_requested(tensile_args):
+    """Whether ``tensile_args`` turn on ``TimingInstrumentation``.
+
+    Follows Tensile's rule: every ``--global-parameters`` takes the ``key=value`` words up to the
+    next option, they are applied in order, and the last value of a key wins.
+    """
+    enabled = False
+    in_global = False
+    for arg in tensile_args:
+        if arg.startswith("-"):
+            in_global = arg == "--global-parameters"
+        elif in_global and "=" in arg:
+            key, value = arg.split("=", 1)
+            if key == "TimingInstrumentation":
+                try:
+                    # Tensile parses each value with ast.literal_eval and uses it as a flag.
+                    enabled = bool(ast.literal_eval(value.strip()))
+                except (ValueError, SyntaxError):
+                    enabled = False  # Tensile rejects a value that is not a literal.
+    return enabled
+
+
+@contextmanager
+def artifact_timing(category, tensile_args):
+    """Time the block as ``category`` when ``tensile_args`` turn on TimingInstrumentation.
+
+    The block runs outside the Tensile invocation (packing after it, extraction before it), so
+    the record is printed right away in the TIMING:<category>:<ms> format analyze_timing.py reads.
+    """
+    enabled = timing_requested(tensile_args)
+    if not enabled:
+        yield
+        return
+    from tensilelite.Common.TimingInstrumentation import flush_timing_buffer, timing_context
+    try:
+        with timing_context(category, enabled=True):
+            yield
+    finally:
+        flush_timing_buffer()
 
 
 def artifact_name_for_config(config_path):
