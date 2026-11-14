@@ -500,7 +500,7 @@ namespace rocalution
         {
             hip_cast_mat->set_backend(this->local_backend_);
 
-            if(this->nnz_ == 0)
+            if(hip_cast_mat->nnz_ == 0)
             {
                 hip_cast_mat->AllocateELL(this->nnz_, this->nrow_, this->ncol_, this->mat_.max_row);
             }

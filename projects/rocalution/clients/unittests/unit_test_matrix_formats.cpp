@@ -90,12 +90,6 @@ namespace
 
 TEST_P(matrix_formats, apply_add)
 {
-    if(backend() == Backend::Accelerator
-       && (format().id == rocalution::HYB || format().id == rocalution::DENSE))
-    {
-        KNOWN_BUG("ellmv and gemv get beta 0, so the output is overwritten");
-    }
-
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
         for(const auto& matrix : matrices<T>(format()))
@@ -153,23 +147,10 @@ TEST_P(matrix_formats, copies_within_the_backend)
             rocalution::_rocalution_sync();
             expect_matrix(*C, ref);
 
-            auto into_empty = [&] {
-                auto B = empty<T>();
-                copy.second(*B);
-                rocalution::_rocalution_sync();
-                expect_matrix(*B, ref);
-            };
-
-            // CopyToAsync comes last, as the skip ends the current value type
-            if(copy.first == "CopyToAsync" && backend() == Backend::Accelerator
-               && (format().id == rocalution::ELL || format().id == rocalution::BCSR))
-            {
-                KNOWN_BUG("into an empty matrix it tests the source for being empty and copies "
-                          "into an unallocated matrix, which exits the process");
-                expect_in_child(into_empty);
-                continue;
-            }
-            into_empty();
+            auto B = empty<T>();
+            copy.second(*B);
+            rocalution::_rocalution_sync();
+            expect_matrix(*B, ref);
         }
     });
 }
@@ -379,14 +360,40 @@ namespace
             });
     }
 
-    // Permute and PermuteBackward of a COO matrix, compared on the entries
-    // because the conversion to CSR requires them to be sorted
+    // Permute and PermuteBackward of a COO matrix, compared on the entries in
+    // their stored order, which is sorted by row and column
     template <typename T>
     void expect_permuted(const BaseMatrix<T>& A, const Csr<T>& ref)
     {
-        std::vector<Entry<T>> entries = coo_entries(A);
-        std::sort(entries.begin(), entries.end());
-        EXPECT_EQ(entries, entries_of(ref));
+        EXPECT_EQ(coo_entries(A), entries_of(ref));
+    }
+
+    // A COO matrix of the backend that stores the entries in the given order
+    template <typename T>
+    std::unique_ptr<BaseMatrix<T>>
+        coo_with_entries(Backend b, int nrow, int ncol, const std::vector<Entry<T>>& entries)
+    {
+        std::vector<int> row, col;
+        std::vector<T>   val;
+        for(const auto& e : entries)
+        {
+            row.push_back(std::get<0>(e));
+            col.push_back(std::get<1>(e));
+            val.push_back(std::get<2>(e));
+        }
+
+        auto host = std::make_unique<rocalution::HostMatrixCOO<T>>(descriptor());
+        host->AllocateCOO(static_cast<int64_t>(entries.size()), nrow, ncol);
+        host->CopyFromCOO(row.data(), col.data(), val.data());
+        if(b == Backend::Host)
+        {
+            return host;
+        }
+
+        std::unique_ptr<rocalution::AcceleratorMatrix<T>> accel(
+            rocalution::_rocalution_init_base_backend_matrix<T>(descriptor(), rocalution::COO, 1));
+        accel->CopyFromHost(*host);
+        return accel;
     }
 }
 
@@ -428,31 +435,33 @@ TEST_P(matrix_coo, permute_keeps_the_coo_entries_sorted)
         const Csr<T> ref = banded_with_gaps<T>(12);
         auto         A   = make(ref);
         ASSERT_NE(A, nullptr);
-        ASSERT_TRUE(A->Permute(
-            *make_vector(backend(), std::vector<int>{3, 0, 11, 6, 1, 9, 7, 2, 10, 5, 8, 4})));
-
-        KNOWN_BUG("Permute leaves the entries in their old order");
-
+        const auto p
+            = make_vector(backend(), std::vector<int>{3, 0, 11, 6, 1, 9, 7, 2, 10, 5, 8, 4});
+        ASSERT_TRUE(A->Permute(*p));
         EXPECT_TRUE(sorted_by_row_and_column(coo_entries(*A)));
+
+        auto B = make(ref);
+        ASSERT_NE(B, nullptr);
+        ASSERT_TRUE(B->PermuteBackward(*p));
+        EXPECT_TRUE(sorted_by_row_and_column(coo_entries(*B)));
     });
 }
 
-TEST_P(matrix_formats, sort)
+// Built from reversed entries with CopyFromCOO, as Permute and PermuteBackward sort them
+TEST_P(matrix_coo, sort)
 {
-    REQUIRE_NATIVE(backend(), format().id, "Permute");
-    REQUIRE_NATIVE(backend(), format().id, "Sort");
-
     for_each_type<RealTypes>([&](auto type) {
-        using T                     = typename decltype(type)::type;
-        const Csr<T>           ref  = banded_with_gaps<T>(12);
-        const std::vector<int> perm = {3, 0, 11, 6, 1, 9, 7, 2, 10, 5, 8, 4};
+        using T          = typename decltype(type)::type;
+        const Csr<T> ref = banded_with_gaps<T>(12);
 
-        auto A = make(ref);
+        // In reverse order, the rows and the columns of each row are out of order
+        std::vector<Entry<T>> entries = entries_of(ref);
+        std::reverse(entries.begin(), entries.end());
+
+        auto A = coo_with_entries(backend(), ref.n, ref.m, entries);
         ASSERT_NE(A, nullptr);
-        ASSERT_TRUE(A->Permute(*make_vector(backend(), perm)));
         ASSERT_TRUE(A->Sort());
-        EXPECT_TRUE(sorted_by_row_and_column(coo_entries(*A)));
-        expect_matrix(*A, permuted(ref, perm));
+        EXPECT_EQ(coo_entries(*A), entries_of(ref));
     });
 }
 

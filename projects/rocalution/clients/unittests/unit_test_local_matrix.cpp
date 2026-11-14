@@ -1066,8 +1066,6 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
 
 TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
 {
-    const bool apply_add_bug = backend() == Backend::Accelerator && (is(HYB) || is(DENSE));
-
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
@@ -1093,18 +1091,9 @@ TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
             vy = vector_of(y0);
             A->ApplyAdd(*vx, 3.0, vy.get());
             expect_kept(*A, ref);
-            if(apply_add_bug && !run_known_bugs())
-            {
-                continue;
-            }
             expect_vector(*vy, expected, backend(), scaled_tol<T>(1e-14));
         }
     });
-
-    if(apply_add_bug)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-    }
 }
 
 TEST_P(local_matrix_formats, apply_of_a_rectangular_matrix)
@@ -1815,19 +1804,7 @@ TEST_P(local_matrix_formats, permute_moves_rows_and_columns)
         auto        A   = make(ref);
         std::string log = logged([&] { A->Permute(*vector_of(perm)); });
         expect_fallback_warning(log, "Permute", native("Permute"));
-        if(!is(COO))
-        {
-            expect_kept(*A, permuted(ref, perm));
-            return;
-        }
-
-        // The check converts the unsorted entries to CSR, where an assert ends the process
-        KNOWN_BUG("COO Permute leaves the entries unsorted");
-        expect_in_child([&] {
-            auto M = make(ref);
-            M->Permute(*vector_of(perm));
-            expect_kept(*M, permuted(ref, perm));
-        });
+        expect_kept(*A, permuted(ref, perm));
     });
 }
 
@@ -1839,22 +1816,13 @@ TEST_P(local_matrix_formats, permute_backward_undoes_permute)
         const Csr<T>           ref  = banded<T>();
         const std::vector<int> perm = scrambled(ref.n);
 
-        // PermuteBackward only exists for COO, so every format goes through it, and the unsorted
-        // entries break the conversion back: an assert ends the process
-        auto permute_backward = [&] {
-            auto        B   = make(permuted(ref, perm));
-            std::string log = logged([&] { B->PermuteBackward(*vector_of(perm)); });
-            expect_fallback_warning(log, "PermuteBackward", is(COO));
-            EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()], format_name(format()));
-            EXPECT_EQ(backend_of(*B), backend_name(backend()));
-            return B;
-        };
-        if(is(COO))
-        {
-            permute_backward();
-        }
-        KNOWN_BUG("COO PermuteBackward leaves the entries unsorted");
-        expect_in_child([&] { expect_kept(*permute_backward(), ref); });
+        // PermuteBackward only exists for COO, so every format goes through it
+        auto        B   = make(permuted(ref, perm));
+        std::string log = logged([&] { B->PermuteBackward(*vector_of(perm)); });
+        expect_fallback_warning(log, "PermuteBackward", is(COO));
+        EXPECT_EQ(rocalution::_matrix_format_names[B->GetFormat()], format_name(format()));
+        EXPECT_EQ(backend_of(*B), backend_name(backend()));
+        expect_kept(*B, ref);
     });
 }
 

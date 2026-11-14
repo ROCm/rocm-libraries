@@ -815,16 +815,16 @@ namespace
     }
 
     // Exact solvers for the blocks of the block preconditioners
-    template <typename T>
+    template <typename T, template <typename, typename, typename> class Exact = rocalution::LU>
     struct ExactSolvers
     {
         explicit ExactSolvers(int count)
         {
             for(int i = 0; i < count; ++i)
             {
-                lu.push_back(std::make_unique<rocalution::LU<Matrix<T>, Vector<T>, T>>());
-                lu.back()->Verbose(0);
-                pointers.push_back(lu.back().get());
+                solvers.push_back(std::make_unique<Exact<Matrix<T>, Vector<T>, T>>());
+                solvers.back()->Verbose(0);
+                pointers.push_back(solvers.back().get());
             }
         }
 
@@ -833,8 +833,8 @@ namespace
             return pointers.data();
         }
 
-        std::vector<std::unique_ptr<rocalution::LU<Matrix<T>, Vector<T>, T>>> lu;
-        std::vector<Solver<T>*>                                               pointers;
+        std::vector<std::unique_ptr<Exact<Matrix<T>, Vector<T>, T>>> solvers;
+        std::vector<Solver<T>*>                                      pointers;
     };
 
     // The colors of the multicolored preconditioners, from the matrix on the
@@ -1105,9 +1105,9 @@ namespace
             return P::backend;
         }
 
-        std::unique_ptr<Matrix<T>> make(const Csr<T>& ref) const
+        std::unique_ptr<Matrix<T>> make(const Csr<T>& ref, Format f = {rocalution::CSR, 1}) const
         {
-            return make_local_matrix(P::backend, ref);
+            return make_local_matrix(P::backend, ref, f);
         }
     };
 }
@@ -2200,6 +2200,20 @@ TYPED_TEST(preconditioners, multicolored_sgs_is_the_sgs_of_the_color_ordering)
                     permuted_solve(ref, colors.perm, r, symmetric_gauss_seidel<T>),
                     scaled_tol<T>(1e-14));
     }
+
+    // A copy of a COO operator is permuted in COO. Without the decomposition, the triangular
+    // solves need LAnalyse and UAnalyse, which COO does not implement
+    {
+        SCOPED_TRACE("decomposition of a COO operator");
+        auto coo = this->make(ref, {rocalution::COO, 1});
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+        p.SetDecomposition(true);
+        p.SetOperator(*coo);
+        p.Build();
+        expect_near(apply(p, *coo, r),
+                    permuted_solve(ref, colors.perm, r, symmetric_gauss_seidel<T>),
+                    scaled_tol<T>(1e-14));
+    }
 }
 
 TYPED_TEST(preconditioners, multicolored_gs_is_the_backward_sweep_of_the_color_ordering)
@@ -2432,18 +2446,9 @@ TYPED_TEST(preconditioners, multicolored_blocks_apply_in_every_format)
         }
     };
 
-    const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        const bool ignores_output = hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE);
-        check(f, !ignores_output, !ignores_output && f.id != rocalution::DIA);
-    }
-
-    if(hip)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1}, true, true);
-        check(Format{rocalution::DENSE, 1}, true, true);
+        check(f, true, f.id != rocalution::DIA);
     }
 
     KNOWN_BUG("csr_to_dia writes past the values of a matrix with more rows than columns; on the "
@@ -2491,9 +2496,8 @@ TYPED_TEST(preconditioners, multicolored_preconditioners_rebuild_from_new_values
                     scaled_tol<T>(1e-14));
     }
 
-    KNOWN_BUG("ReBuildNumeric without decomposition calls PermuteBackward, which leaves the COO "
-              "entries unsorted, so the conversion back to CSR fails an assert");
-    expect_in_child([&] {
+    // ReBuildNumeric without decomposition goes through PermuteBackward
+    {
         auto                                                 A = this->make(ref);
         rocalution::MultiColoredILU<Matrix<T>, Vector<T>, T> ilu;
         ilu.Set(1);
@@ -2503,12 +2507,13 @@ TYPED_TEST(preconditioners, multicolored_preconditioners_rebuild_from_new_values
         A->CopyFromCSR(changed.row_offset.data(), changed.col.data(), changed.val.data());
         ilu.ReBuildNumeric();
         expect_near(apply(ilu, *A, r), permuted_solve(changed, colors2.perm, r, ilu1), tol<T>());
-    });
+    }
 }
 
 // Nodes 0 to 3 and nodes 4 to 7 are independent sets, so the greedy coloring keeps the
-// order: the permutation is the identity, and the PermuteBackward of ReBuildNumeric
-// leaves the COO entries sorted, which a known bug of Permute breaks otherwise
+// order and the permutation is the identity: the result is the ILU(0) solve of the matrix
+// itself, before and after ReBuildNumeric. PermuteBackward then moves no entries, so
+// multicolored_preconditioners_rebuild_from_new_values tests it with a real permutation
 TYPED_TEST(preconditioners, multicolored_ilu_without_decomposition_rebuilds_from_new_values)
 {
     using T          = typename TypeParam::value_type;
@@ -2683,6 +2688,23 @@ TYPED_TEST(preconditioners, multielimination_with_an_exact_schur_solve_is_exact)
         EXPECT_EQ(p.GetLevel(), level);
         expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
     }
+
+    // A copy of a COO operator is permuted in COO. Its Schur complement stays in COO, and LU
+    // needs LUAnalyse, which COO does not implement, so the Schur complement is inverted
+    auto coo = this->make(ref, {rocalution::COO, 1});
+    for(int level : {0, 1, 2, 3})
+    {
+        SCOPED_TRACE("COO operator, level " + std::to_string(level));
+        rocalution::Inversion<Matrix<T>, Vector<T>, T> inversion;
+        inversion.Verbose(0);
+        rocalution::MultiElimination<Matrix<T>, Vector<T>, T> p;
+        p.Set(inversion, level);
+        p.SetOperator(*coo);
+        p.Build();
+        EXPECT_EQ(p.GetSizeDiagBlock(), size);
+        EXPECT_EQ(p.GetLevel(), level);
+        expect_near(apply(p, *coo, r), exact_solve(ref, r), tol<T>());
+    }
 }
 
 // The Schur complement keeps the entries above the drop-off and its diagonal
@@ -2776,13 +2798,9 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
         expect_near(apply(p, *A, r), exact_solve(ref, r), tol<T>());
     };
 
-    const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        if(!(hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE)))
-        {
-            check(f);
-        }
+        check(f);
     }
 
     {
@@ -2798,13 +2816,6 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
         expect_near(apply(p, *B, r), exact_solve(ref, r), tol<T>());
         move(this->backend(), p, *B);
         expect_near(apply(p, *B, r), exact_solve(ref, r), tol<T>());
-    }
-
-    if(hip)
-    {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1});
-        check(Format{rocalution::DENSE, 1});
     }
 }
 
@@ -2926,6 +2937,27 @@ TYPED_TEST(preconditioners, saddle_point_solves_the_two_diagonal_blocks)
     expect_near(apply(p, *A, r), expected, scaled_tol<T>(1e-13));
     move(this->backend(), p, *A);
     expect_near(apply(p, *A, r), expected, scaled_tol<T>(1e-13));
+
+    // A copy of a COO operator is permuted in COO. K and S stay in COO, and LU needs
+    // LUAnalyse, which COO does not implement, so they are inverted
+    {
+        SCOPED_TRACE("COO operator");
+        auto                                           coo = this->make(ref, {rocalution::COO, 1});
+        rocalution::Inversion<Matrix<T>, Vector<T>, T> k_inversion;
+        rocalution::Inversion<Matrix<T>, Vector<T>, T> s_inversion;
+        k_inversion.Verbose(0);
+        s_inversion.Verbose(0);
+        rocalution::DiagJacobiSaddlePointPrecond<Matrix<T>, Vector<T>, T> q;
+        q.Set(k_inversion, s_inversion);
+        q.SetOperator(*coo);
+        q.Build();
+        expect_near(apply(q, *coo, r), expected, scaled_tol<T>(1e-13));
+
+        move(other(this->backend()), q, *coo);
+        expect_near(apply(q, *coo, r), expected, scaled_tol<T>(1e-13));
+        move(this->backend(), q, *coo);
+        expect_near(apply(q, *coo, r), expected, scaled_tol<T>(1e-13));
+    }
 }
 
 TYPED_TEST(preconditioners, multielimination_and_saddle_point_rebuild)
@@ -3016,15 +3048,14 @@ TYPED_TEST(preconditioners, block_preconditioner_takes_a_permutation_and_a_last_
     const std::vector<int> perm  = {5, 0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10};
 
     // The permuted matrix, P A P^T, is split into the blocks
-    {
-        ExactSolvers<T>                                          local(3);
+    auto expect_permuted_blocks = [&](Matrix<T>& op, Solver<T>** local) {
         rocalution::BlockPreconditioner<Matrix<T>, Vector<T>, T> p;
-        auto                                                     P = make_local_vector(*A, perm);
-        p.Set(3, sizes.data(), local.get());
+        auto                                                     P = make_local_vector(op, perm);
+        p.Set(3, sizes.data(), local);
         p.SetPermutation(*P);
-        p.SetOperator(*A);
+        p.SetOperator(op);
         p.Build();
-        expect_near(apply(p, *A, r),
+        expect_near(apply(p, op, r),
                     permuted_solve(ref,
                                    perm,
                                    r,
@@ -3036,8 +3067,8 @@ TYPED_TEST(preconditioners, block_preconditioner_takes_a_permutation_and_a_last_
         for(Backend to : {other(this->backend()), this->backend()})
         {
             SCOPED_TRACE("moved to the " + backend_name(to));
-            move(to, p, *A);
-            expect_near(apply(p, *A, r),
+            move(to, p, op);
+            expect_near(apply(p, op, r),
                         permuted_solve(ref,
                                        perm,
                                        r,
@@ -3046,6 +3077,19 @@ TYPED_TEST(preconditioners, block_preconditioner_takes_a_permutation_and_a_last_
                                        }),
                         scaled_tol<T>(1e-13));
         }
+    };
+    {
+        ExactSolvers<T> local(3);
+        expect_permuted_blocks(*A, local.get());
+    }
+
+    // A copy of a COO operator is permuted in COO, and its blocks stay in COO. LU needs
+    // LUAnalyse, which COO does not implement, so the blocks are inverted
+    {
+        SCOPED_TRACE("COO operator");
+        auto                                   coo = this->make(ref, {rocalution::COO, 1});
+        ExactSolvers<T, rocalution::Inversion> local(3);
+        expect_permuted_blocks(*coo, local.get());
     }
 
     // The last diagonal block is replaced by an external matrix

@@ -43,6 +43,8 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `ApplyAdd()` of HYB and DENSE matrices on the accelerator overwriting the output instead of adding to it. This also affected preconditioners that build their blocks in these formats, such as the multicolored preconditioners and `MultiElimination`.
+* Fixed `Permute()` and `PermuteBackward()` of COO matrices leaving the entries unsorted, which made a later conversion assert on the host and give wrong results on the accelerator. This also affected `LocalMatrix::PermuteBackward()` of the other formats (it goes through COO), `ReBuildNumeric()` of the multicolored ILU without decomposition, the multicolored preconditioners, `MultiElimination` and `DiagJacobiSaddlePointPrecond` with a COO operator, and `BlockPreconditioner` with a COO operator and a permutation.
 
 ## (Unreleased) rocALUTION 4.1.1
 

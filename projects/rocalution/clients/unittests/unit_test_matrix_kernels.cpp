@@ -952,8 +952,8 @@ namespace
         return {{"wide", full<T>(5, 7)}, {"tall", full<T>(7, 5)}};
     }
 
-    // The accelerator HYB and DENSE ApplyAdd overwrite the output (a known bug), which
-    // does not show when it starts out zero
+    // An ApplyAdd that overwrites the output only shows when the output does not start
+    // out zero
     template <typename T>
     void test_apply_add(Backend b, Format f)
     {
@@ -980,11 +980,6 @@ namespace
             A->ApplyAdd(*make_vector(b, x), half, out.get());
             EXPECT_EQ(values_of(*out),
                       apply_add(ref, x, half, std::vector<T>(ref.n, static_cast<T>(0))));
-        }
-
-        if(b == Backend::Accelerator)
-        {
-            KNOWN_BUG("ellmv and gemv get beta 0, so the output is overwritten");
         }
 
         for(const auto& matrix : apply_add_cases<T>(f))
@@ -1026,10 +1021,9 @@ namespace
     template <typename T>
     using Entry = std::tuple<int, int, T>;
 
-    // The entries of a COO matrix of any backend, sorted, because Permute leaves
-    // them in their old order (a known bug)
+    // The entries of a COO matrix of any backend, in their stored order
     template <typename T>
-    std::vector<Entry<T>> sorted_coo_entries(const BaseMatrix<T>& A)
+    std::vector<Entry<T>> coo_entries_of(const BaseMatrix<T>& A)
     {
         auto host = host_copy(A);
         auto coo  = dynamic_cast<rocalution::HostMatrixCOO<T>*>(host.get());
@@ -1049,7 +1043,6 @@ namespace
         {
             entries.emplace_back(row[k], col[k], val[k]);
         }
-        std::sort(entries.begin(), entries.end());
         return entries;
     }
 
@@ -1146,7 +1139,7 @@ TYPED_TEST(matrix_kernels_hip_coo, permute_with_a_capped_grid_moves_every_entry)
         A->CopyFromHost(*host);
 
         ASSERT_IN_LOOP(std::get<1>(permutation)(*A));
-        EXPECT_EQ(sorted_coo_entries(*A), entries_of(permuted(ref, std::get<2>(permutation))));
+        EXPECT_EQ(coo_entries_of(*A), entries_of(permuted(ref, std::get<2>(permutation))));
     }
 }
 
