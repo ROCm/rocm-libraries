@@ -325,6 +325,22 @@ def conv_direct_dw_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_dw_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DwWgradWmmaSpec` -> flat dict (problem nested, dtype and pad_w
+    included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        wave_size=spec.wave_size,
+        waves=spec.waves,
+        tile_q=spec.tile_q,
+        rows=spec.rows,
+        target_blocks=spec.target_blocks,
+        ws_replicas=spec.ws_replicas,
+        prefetch=spec.prefetch,
+    )
+
+
 def conv_direct_fwd_gstream_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`FwdGstreamWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -471,6 +487,41 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
         pack_groups=spec.pack_groups,
         split_barrier=spec.split_barrier,
         wave_epilogue=spec.wave_epilogue,
+    )
+
+
+def conv_direct_grouped_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`GroupedWgradWmmaSpec` -> flat dict (problem nested, dtype and
+    ``pad_w`` included: the column padding sets ``Wo``, hence the grid)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_c=spec.waves_c,
+        q_steps=spec.q_steps,
+        rows_per_chunk=spec.rows_per_chunk,
+        target_blocks=spec.target_blocks,
+        stages=spec.stages,
+    )
+
+
+def conv_direct_wgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DirectWgradWmmaSpec` -> flat dict (problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_c=spec.waves_c,
+        tiles_k=spec.tiles_k,
+        tiles_c=spec.tiles_c,
+        q_steps=spec.q_steps,
+        stages=spec.stages,
+        target_blocks=spec.target_blocks,
+        prefetch=spec.prefetch,
+        pad=spec.pad,
+        sched=spec.sched,
+        xcd=spec.xcd,
+        tdm=spec.tdm,
+        rows=spec.rows,
     )
 
 
@@ -924,6 +975,42 @@ def lower_conv_direct_dw_fwd_wmma(
     )
 
 
+def lower_conv_direct_dw_wgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`DwWgradWmmaSpec` (the gfx1250 Toeplitz WMMA depthwise wgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dw_wgrad_wmma import build_dw_wgrad_wmma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_dw_wgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = import_engine(ENGINE_MODULE)
+    sd = conv_direct_dw_wgrad_wmma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_dw_wgrad_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_dw_wgrad_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_dw_wgrad_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
 def lower_conv_direct_fwd_gstream_wmma(
     spec: Any,
     *,
@@ -1107,6 +1194,83 @@ def lower_conv_direct_dgrad_wmma(
         py_fn=py_fn,
         cpp_ll_fn=lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         cpp_ir_fn=lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_grouped_wgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`GroupedWgradWmmaSpec` (the gfx1250 WMMA grouped direct
+    wgrad into partial slots)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_grouped_wgrad_wmma import (
+            build_grouped_wgrad_wmma,
+        )
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_grouped_wgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = import_engine(ENGINE_MODULE)
+    sd = conv_direct_grouped_wgrad_wmma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_grouped_wgrad_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_grouped_wgrad_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_grouped_wgrad_wmma_serialize_ir(
+            sd, arch=arch
+        ),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_wgrad_wmma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`DirectWgradWmmaSpec` (the gfx1250 dense WMMA direct wgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_wgrad_wmma import build_direct_wgrad_wmma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_direct_wgrad_wmma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = import_engine(ENGINE_MODULE)
+    sd = conv_direct_wgrad_wmma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_wgrad_wmma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng.conv_direct_wgrad_wmma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng.conv_direct_wgrad_wmma_serialize_ir(sd, arch=arch),
         spec_name=name_of(spec),
     )
 

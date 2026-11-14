@@ -3708,6 +3708,57 @@ def cases():
             build_dw_fwd_wmma_case(_dtype, _K, _PAD, **_over),
         )
 
+    # --- conv_direct_dw_wgrad_wmma: Toeplitz WMMA depthwise wgrad (gfx1250) ---
+    # One-hot dY operands, buffer loads staged in LDS, wave32 16x16x32 WMMA,
+    # cascade atomics into a replicated scratch. The C++ twin is gated by
+    # library/tests/parity/conv_direct_dw_wgrad_wmma_emit.*.
+    def build_dw_wgrad_wmma_case(dtype, KH, KW, PAD, pad_w, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_dw_wgrad_wmma import (
+                DwWgradWmmaSpec,
+                build_dw_wgrad_wmma,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=37,
+                groups=64,
+                cpg=1,
+                kpg=1,
+                KH=KH,
+                KW=KW,
+                PAD=PAD,
+                pad_w=pad_w,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_dw_wgrad_wmma(
+                DwWgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _KH, _KW, _PAD, _pad_w, _over in (
+        ("bf16_k7_default", "bf16", 7, 7, 3, -1, {}),
+        (
+            "fp16_1x31_pw15_wv2_q16_nopf",
+            "fp16",
+            1,
+            31,
+            0,
+            15,
+            dict(waves=2, tile_q=16, rows=2, target_blocks=512, prefetch=False),
+        ),
+    ):
+        add(
+            "conv_direct_dw_wgrad_wmma",
+            f"conv_direct_dw_wgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_dw_wgrad_wmma_case(_dtype, _KH, _KW, _PAD, _pad_w, **_over),
+        )
+
     # --- conv_direct_dgrad_wmma: wave32 WMMA direct dgrad (gfx1250) ---
     # 3-D TDM halo and weight staging, transpose-on-read weights, TDM epilogue.
     # Every case needs llvm23 (TDM), so the other flavors record them as
@@ -3761,6 +3812,123 @@ def cases():
             f"conv_direct_dgrad_wmma/gfx1250/{_case_id}",
             "gfx1250",
             build_direct_dgrad_wmma_case(_dtype, **_over),
+        )
+
+    # --- conv_direct_grouped_wgrad_wmma: wave32 WMMA grouped wgrad (gfx1250) ---
+    # 4/8-channel groups packed block-diagonally into the 16x16x32 WMMA,
+    # [column][channel] rows staged by global_load_async_to_lds, read by
+    # ds_load_tr16_b128, a dY register ring, diagonal blocks stored into
+    # partial slots. The C++ twin is gated by
+    # library/tests/parity/conv_direct_grouped_wgrad_wmma_emit.*.
+    def build_grouped_wgrad_wmma_case(dtype, cpg, PAD, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+            from kernels.common.conv_direct_grouped_wgrad_wmma import (
+                GroupedWgradWmmaSpec,
+                build_grouped_wgrad_wmma,
+            )
+
+            p = DirectConvProblem(
+                N=2,
+                H=19,
+                W=45,
+                groups=64 // cpg,
+                cpg=cpg,
+                kpg=cpg,
+                KH=3,
+                KW=3,
+                PAD=PAD,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_grouped_wgrad_wmma(
+                GroupedWgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _cpg, _pad, _over in (
+        ("bf16_c4_p1_default", "bf16", 4, 1, {}),
+        (
+            "fp16_c8_p0_wc8_st4",
+            "fp16",
+            8,
+            0,
+            dict(waves_c=8, q_steps=2, rows_per_chunk=16, stages=4),
+        ),
+        (
+            "bf16_c8_p1_qs1_st3",
+            "bf16",
+            8,
+            1,
+            dict(q_steps=1, rows_per_chunk=8, target_blocks=2048, stages=3),
+        ),
+    ):
+        add(
+            "conv_direct_grouped_wgrad_wmma",
+            f"conv_direct_grouped_wgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_grouped_wgrad_wmma_case(_dtype, _cpg, _pad, **_over),
+        )
+
+    # --- conv_direct_wgrad_wmma: wave32 WMMA dense direct wgrad (gfx1250) ---
+    # Row-streamed X / dY rows in an LDS ring (per-lane async copies or TDM),
+    # transpose-on-read fragments, a dY register ring, cascade atomics into
+    # dW. The TDM case needs llvm23, so the older flavors record it as an
+    # expected failure. The C++ twin is gated (every knob) by
+    # library/tests/parity/conv_direct_wgrad_wmma_emit.*.
+    def build_direct_wgrad_wmma_case(dtype, **spec_kw):
+        def _build():
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+            from kernels.common.conv_direct_wgrad_wmma import (
+                DirectWgradWmmaSpec,
+                build_direct_wgrad_wmma,
+            )
+
+            p = DirectConvProblem(
+                N=2,
+                H=12,
+                W=40,
+                groups=1,
+                cpg=64,
+                kpg=96,
+                KH=3,
+                KW=3,
+                PAD=1,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_direct_wgrad_wmma(
+                DirectWgradWmmaSpec(problem=p, **spec_kw), arch="gfx1250"
+            )
+
+        return _build
+
+    for _case_id, _dtype, _over in (
+        (
+            "bf16_aot_w4x2_tdm",
+            "bf16",
+            dict(
+                waves_k=4,
+                waves_c=2,
+                tiles_k=2,
+                tiles_c=2,
+                stages=4,
+                rows=2,
+                prefetch=True,
+                sched=True,
+                pad=16,
+                xcd=8,
+                tdm=True,
+            ),
+        ),
+        ("fp16_default_copies", "fp16", {}),
+    ):
+        add(
+            "conv_direct_wgrad_wmma",
+            f"conv_direct_wgrad_wmma/gfx1250/{_case_id}",
+            "gfx1250",
+            build_direct_wgrad_wmma_case(_dtype, **_over),
         )
 
     # --- conv_direct_fwd_wmma: wave32 WMMA direct forward (gfx1250) ---
@@ -4255,6 +4423,12 @@ def cases():
             dict(unfold_n=4, rows_per_seg=15, row_unroll=3),
         ),
         ("fold_t9", "fold", {}, dict(taps=9)),
+        (
+            "fold_t36_c32s32u8",
+            "fold",
+            {},
+            dict(taps=36, cols=32, slices=32, unroll=8),
+        ),
         (
             "dw_cols_c3_7x7_s2",
             "dw_cols",

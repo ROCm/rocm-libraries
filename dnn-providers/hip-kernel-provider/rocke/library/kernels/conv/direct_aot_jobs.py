@@ -1012,6 +1012,19 @@ DW_WGRAD_CONFIGS = (
     (2, 8, 8, 16, 4, 16, False, True),
     (2, 8, 4, 8, 2, 16, False, True),
 )
+# Depthwise wgrad on WMMA through one-hot Toeplitz operands (wave32, stride
+# 1): many channels over large images (ConvNeXt 7x7). Waves (channel groups
+# of 8), dY columns and rows per work item, workgroups, register prefetch.
+DW_WGRAD_WMMA_WAVES = (4, 8)
+DW_WGRAD_WMMA_TILE_Q = (8, 16, 32)
+DW_WGRAD_WMMA_ROWS = (4, 8)
+# Single-row filters (1xK) take one output row per item, two per staged pair.
+DW_WGRAD_WMMA_ROWS_1XK = (2,)
+DW_WGRAD_WMMA_WAVES_1XK = (2, 4)
+DW_WGRAD_WMMA_TARGET_BLOCKS = (512, 1024)
+DW_WGRAD_WMMA_PREFETCH = (True, False)
+# Scratch replicas its atomics spread over (folded by the wgrad reduce).
+DW_WGRAD_WMMA_WS_REPLICAS = 64
 
 # Tiled direct wgrad (DirectWgradTiledSpec): (wave_k16, wave_c16, waves_k,
 # waves_c) arrangements, (prefetch, row_unroll) pipelines, rows per segment,
@@ -1061,6 +1074,21 @@ WGRAD_GROUPED_MFMA_WAVES = ((4, 2), (4, 1), (2, 1), (2, 2))
 WGRAD_GROUPED_MFMA_RPC = (28, 56)
 WGRAD_GROUPED_MFMA_PREFETCH = (2, 3)
 WGRAD_GROUPED_MFMA_BLOCKS = (1024, 2048)
+# The same layers on wave32 WMMA, groups packed block-diagonally
+# (GroupedWgradWmmaSpec, gfx1250): waves along the channels (16 each),
+# 32-column WMMA steps per block, input rows per unit, workgroups, LDS row
+# buffers. Measured on the ResNeXt g32 layers: 8 waves and short units lead.
+WGRAD_GROUPED_WMMA_WAVES_C = (4, 8)
+WGRAD_GROUPED_WMMA_Q_STEPS = (1, 2)
+WGRAD_GROUPED_WMMA_RPC = (8, 16, 32)
+WGRAD_GROUPED_WMMA_BLOCKS = (1024, 2048)
+WGRAD_GROUPED_WMMA_STAGES = (2, 3, 4)
+# Dense direct wgrad on wave32 WMMA (DirectWgradWmmaSpec, gfx1250), streamed
+# row by row: 8 waves of 2x2 tiles per tap, 4 row buffers of 2 rows, TDM
+# copies spread over the waves, next-row fragment prefetch, runs grouped per
+# XCD. (waves_k, waves_c), target blocks.
+WGRAD_WMMA_WAVES = ((4, 2), (2, 4))
+WGRAD_WMMA_BLOCKS = (256, 512)
 
 # Runtime-channel MFMA dgrad (direct_dgrad_mfma_rtc). Its compute pass is the
 # forward kernel on the transposed problem, whose K reduction runs over the
@@ -1364,6 +1392,10 @@ _SMALL_C_STEMS = (
 _SMALL_C4_STEMS = ((3, 1, 1, (320, 512)),)
 # Depthwise wgrad filters (VALU kernel), stride 1 and 2.
 _DW_WGRAD_FILTERS = (3, 5, 7)
+# Depthwise filters of the Toeplitz WMMA wgrad kernel, stride 1.
+_DW_WGRAD_WMMA_FILTERS = (7,)
+# Its 1xK filters with "same" column padding (Conformer convolution module).
+_DW_WGRAD_WMMA_1XK = (31,)
 # Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
 # kernel bounds its rows and columns by the runtime output extents, so any
 # padding works; the rows bake the "same" padding of the symmetric dilations
@@ -1710,6 +1742,22 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _col_pads(3)
         ),
     ),
+    # Dense direct wgrad on wave32 WMMA (gfx1250): channel counts runtime.
+    "direct_wgrad_wmma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0) for pad in _col_pads(3)
+        ),
+    ),
+    # The same grouped wgrad on wave32 WMMA (gfx1250).
+    "direct_wgrad_grouped_wmma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=3, PAD=pad, stride=1, cpg=c, kpg=c)
+            for c in _GROUPED_MFMA_CHANNELS
+            for pad in _col_pads(3)
+        ),
+    ),
     # Dense small-C wgrad, any stride: C is baked, K runtime.
     "direct_wgrad_gather": (
         "wgrad",
@@ -1812,6 +1860,20 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=s, cpg=1, kpg=1)
             for k, s in itertools.product(_DW_WGRAD_FILTERS, _STRIDES)
             for pad in _col_pads(k)
+        ),
+    ),
+    # Depthwise wgrad, Toeplitz WMMA kernel (wave32): stride 1, the channel
+    # count runtime; 7x7 "valid" and "same", 1xK with per-axis padding.
+    "direct_depthwise_wgrad_wmma": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=1, kpg=1)
+            for k in _DW_WGRAD_WMMA_FILTERS
+            for pad in _col_pads(k)
+        )
+        + tuple(
+            DirectCaps(KH=1, kw=k, PAD=0, pad_w=_same_pad(k), stride=1, cpg=1, kpg=1)
+            for k in _DW_WGRAD_WMMA_1XK
         ),
     ),
     # Forward of tiny channel counts on wave32 WMMA, ungrouped: the small
@@ -2344,6 +2406,45 @@ def _knob_grid(
                 prefetch=pf,
                 target_blocks=tb,
             )
+    elif variant == "direct_wgrad_wmma":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        for (wk, wc), tb in itertools.product(WGRAD_WMMA_WAVES, WGRAD_WMMA_BLOCKS):
+            yield dict(
+                waves_k=wk,
+                waves_c=wc,
+                tiles_k=2,
+                tiles_c=2,
+                stages=4,
+                rows=2,
+                target_blocks=tb,
+                prefetch=True,
+                sched=True,
+                pad=16,
+                xcd=8,
+                tdm=True,
+            )
+    elif variant == "direct_wgrad_grouped_wmma":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        for wc, qs, rpc, tb, st in itertools.product(
+            WGRAD_GROUPED_WMMA_WAVES_C,
+            WGRAD_GROUPED_WMMA_Q_STEPS,
+            WGRAD_GROUPED_WMMA_RPC,
+            WGRAD_GROUPED_WMMA_BLOCKS,
+            WGRAD_GROUPED_WMMA_STAGES,
+        ):
+            yield dict(
+                waves_c=wc,
+                q_steps=qs,
+                rows_per_chunk=rpc,
+                target_blocks=tb,
+                stages=st,
+            )
     elif variant == "direct_wgrad_gather":
         for (wk16, wk), pf, rps, tb in itertools.product(
             WGRAD_GATHER_WAVES,
@@ -2596,6 +2697,28 @@ def _knob_grid(
                 ws_replicas=wsr,
                 prefetch=pf,
                 carry=cy,
+            )
+    elif variant == "direct_depthwise_wgrad_wmma":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return  # a wave32 kernel: no tuning for this arch at all
+        one_row = caps is not None and caps.KH == 1
+        for waves, tq, rows, tb, pf in itertools.product(
+            DW_WGRAD_WMMA_WAVES_1XK if one_row else DW_WGRAD_WMMA_WAVES,
+            DW_WGRAD_WMMA_TILE_Q,
+            DW_WGRAD_WMMA_ROWS_1XK if one_row else DW_WGRAD_WMMA_ROWS,
+            DW_WGRAD_WMMA_TARGET_BLOCKS,
+            DW_WGRAD_WMMA_PREFETCH,
+        ):
+            yield dict(
+                wave_size=32,
+                waves=waves,
+                tile_q=tq,
+                rows=rows,
+                target_blocks=tb,
+                ws_replicas=DW_WGRAD_WMMA_WS_REPLICAS,
+                prefetch=pf,
             )
     else:
         raise ValueError(f"unknown direct conv variant {variant!r}")

@@ -3809,11 +3809,11 @@ def _run_aot_wgrad_one(arch: str, variant: str, problem, knobs: dict) -> float:
 
     p = problem
     folded = variant in DIRECT_WGRAD_FOLDED
-    if variant == "direct_wgrad_tiled":
+    if variant in ("direct_wgrad_tiled", "direct_wgrad_wmma"):
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=0, kpg=0)
     elif variant == "direct_wgrad_gather":
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=0)
-    elif variant == "direct_wgrad_grouped_mfma":
+    elif variant in ("direct_wgrad_grouped_mfma", "direct_wgrad_grouped_wmma"):
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=p.cpg, kpg=p.kpg)
     else:
         caps = DirectCaps(KH=p.KH, PAD=p.PAD, stride=p.stride, cpg=1, kpg=1)
@@ -3943,6 +3943,244 @@ class TestDirectWgradAotKernelsCorrectness(unittest.TestCase):
         self._check("fp16")
 
     def test_aot_wgrad_bf16(self):
+        self._check("bf16")
+
+
+# Grouped wgrad on wave32 WMMA (gfx1250): groups packed block-diagonally.
+_AOT_WGRAD_W32_CASES = [
+    # 4 channels per group, odd extents, several partitions per channel tile.
+    (
+        "grouped_wmma_c4",
+        "direct_wgrad_grouped_wmma",
+        dict(N=3, H=13, W=37, groups=32, cpg=4, kpg=4),
+        dict(waves_c=4, q_steps=1, rows_per_chunk=8, target_blocks=1024, stages=3),
+    ),
+    # 8 channels per group, a partial channel tile, a 2-step column tile.
+    (
+        "grouped_wmma_c8",
+        "direct_wgrad_grouped_wmma",
+        dict(N=2, H=9, W=70, groups=6, cpg=8, kpg=8),
+        dict(waves_c=4, q_steps=2, rows_per_chunk=16, target_blocks=2048, stages=2),
+    ),
+    # Valid padding, the deepest copy ring.
+    (
+        "grouped_wmma_c4_pad0",
+        "direct_wgrad_grouped_wmma",
+        dict(N=2, H=12, W=40, groups=16, cpg=4, kpg=4, PAD=0),
+        dict(waves_c=8, q_steps=2, rows_per_chunk=8, target_blocks=1024, stages=4),
+    ),
+    # Dense WMMA wgrad, streamed rows: TDM copies, 2 rows per barrier, a run
+    # split that starts runs mid-image, partial channel tiles in C and K.
+    (
+        "dense_wmma_tdm",
+        "direct_wgrad_wmma",
+        dict(N=3, H=13, W=37, groups=1, cpg=96, kpg=136),
+        dict(
+            waves_k=4,
+            waves_c=2,
+            tiles_k=2,
+            tiles_c=2,
+            stages=4,
+            rows=2,
+            target_blocks=37,
+            prefetch=True,
+            sched=True,
+            pad=16,
+            xcd=8,
+            tdm=True,
+        ),
+    ),
+    # Per-lane copies, two column chunks, valid padding.
+    (
+        "dense_wmma_copy_pad0",
+        "direct_wgrad_wmma",
+        dict(N=2, H=11, W=70, groups=1, cpg=128, kpg=64, PAD=0),
+        dict(
+            waves_k=2,
+            waves_c=4,
+            tiles_k=2,
+            tiles_c=2,
+            stages=4,
+            rows=2,
+            target_blocks=16,
+            prefetch=True,
+            sched=True,
+            pad=16,
+        ),
+    ),
+]
+
+
+@unittest.skipUnless(
+    not _WGRAD_SKIP_REASON and GPU_ARCH == "gfx1250",
+    _WGRAD_SKIP_REASON or "the grouped WMMA wgrad is wave32 (gfx1250) only",
+)
+class TestDirectWgradAotWave32Correctness(unittest.TestCase):
+    """The wave32-only direct wgrad kernels of the AOT sweep (grouped and dense WMMA)."""
+
+    def _check(self, dtype: str) -> None:
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        tol = _TOL_BF16 if dtype == "bf16" else _TOL
+        for case_id, variant, shape, knobs in _AOT_WGRAD_W32_CASES:
+            problem = DirectConvProblem(dtype=dtype, **shape)
+            with self.subTest(case=case_id, dtype=dtype):
+                rel_err = _run_aot_wgrad_one(GPU_ARCH, variant, problem, knobs)
+                print(f"  {case_id:24s} {dtype}  rel_err={rel_err:.2e}", flush=True)
+                self.assertLess(rel_err, tol, f"{case_id} {problem.short()} {dtype}")
+
+    def test_aot_wgrad_w32_fp16(self):
+        self._check("fp16")
+
+    def test_aot_wgrad_w32_bf16(self):
+        self._check("bf16")
+
+
+# Toeplitz WMMA depthwise wgrad (gfx1250): (id, problem fields, knobs).
+_DW_WGRAD_WMMA_CASES = [
+    # 7x7 "same", the AOT default item, a partial last row tile and column tile.
+    (
+        "dw7_same",
+        dict(N=2, H=13, W=19, groups=64, KH=7, KW=7, PAD=3),
+        dict(waves=4, tile_q=16, rows=8, target_blocks=512, prefetch=True),
+    ),
+    # 7x7 "valid", a channel count past the last whole channel group, no
+    # register prefetch, 8 waves.
+    (
+        "dw7_valid_c40",
+        dict(N=3, H=12, W=21, groups=40, KH=7, KW=7, PAD=0),
+        dict(waves=8, tile_q=8, rows=4, target_blocks=1024, prefetch=False),
+    ),
+    # 7x7 with 32-column items over more blocks than items (n_split clamps).
+    (
+        "dw7_q32",
+        dict(N=1, H=9, W=40, groups=96, KH=7, KW=7, PAD=3),
+        dict(waves=4, tile_q=32, rows=4, target_blocks=1024, prefetch=True),
+    ),
+    # 1x31 with "same" column padding only (per-axis padding).
+    (
+        "dw1x31_pw15",
+        dict(N=2, H=5, W=45, groups=48, KH=1, KW=31, PAD=0, pad_w=15),
+        dict(waves=2, tile_q=16, rows=2, target_blocks=512, prefetch=True),
+    ),
+    (
+        "dw1x31_pw15_w4",
+        dict(N=1, H=3, W=70, groups=128, KH=1, KW=31, PAD=0, pad_w=15),
+        dict(waves=4, tile_q=32, rows=2, target_blocks=1024, prefetch=False),
+    ),
+]
+
+
+def _run_dw_wgrad_wmma_one(arch: str, problem, knobs: dict) -> float:
+    """Build the Toeplitz WMMA depthwise wgrad on its cache probe, launch it
+    on ``problem``, fold the replica scratch on the host and return the max
+    error relative to the largest reference dW entry."""
+    import torch
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.conv.direct_aot_jobs import DirectCaps, probe_problem
+    from kernels.conv.direct_variants import (
+        make_direct_spec,
+        select_direct_kernel_builder,
+        validate_direct_spec,
+    )
+    from rocke import compile_kernel
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    variant = "direct_depthwise_wgrad_wmma"
+    p = problem
+    caps = DirectCaps(
+        KH=p.KH,
+        kw=0 if p.KW == p.KH else p.KW,
+        PAD=p.PAD,
+        pad_w=p.pad_w,
+        stride=1,
+        cpg=1,
+        kpg=1,
+    )
+    knobs = dict(knobs, wave_size=32, ws_replicas=64)
+    probe = probe_problem(caps, p.dtype, variant, knobs)
+    build_spec = make_direct_spec(variant, probe, knobs)
+    spec = make_direct_spec(variant, p, knobs)
+    for s, what in ((build_spec, "probe"), (spec, "problem")):
+        ok, why = validate_direct_spec(variant, s, arch)
+        assert ok, f"{variant} rejects its {what}: {why}"
+    art = compile_kernel(
+        select_direct_kernel_builder(variant, build_spec, arch), arch=arch
+    )
+
+    C = p.groups
+    torch.manual_seed(11)
+    td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
+    X = torch.empty(p.N, p.H, p.W, C, dtype=td).uniform_(-0.5, 0.5)
+    dY = torch.empty(p.N, p.Ho, p.Wo, C, dtype=td).uniform_(-0.5, 0.5)
+    ref = torch.nn.grad.conv2d_weight(
+        X.float().cuda().permute(0, 3, 1, 2),
+        (C, 1, p.KH, p.KW),
+        dY.float().cuda().permute(0, 3, 1, 2),
+        padding=(p.PAD, p.PAD_W),
+        groups=C,
+    )
+    ref = ref.reshape(C, p.KH * p.KW).cpu()
+
+    R = spec.ws_replicas
+    ws_nbytes = R * C * p.KH * p.KW * 4
+    rt = Runtime()
+    X_dev = rt.alloc(X.nbytes)
+    dY_dev = rt.alloc(dY.nbytes)
+    ws_dev = rt.alloc(ws_nbytes)
+    try:
+        rt.memcpy_h2d(X_dev, _u8(X), X.nbytes)
+        rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
+        rt.memset(ws_dev, 0, ws_nbytes)
+        launcher = KernelLauncher(
+            hsaco=art.hsaco,
+            kernel_name=art.kernel_name,
+            signature=conv_direct_args_signature(p.dtype, direction="wgrad"),
+        )
+        grid, block = spec.launch_geometry()
+        values = ConvArgs.from_problem(p, direction="wgrad").to_launch_values(
+            int(dY_dev), int(X_dev), int(ws_dev), dY.nbytes, X.nbytes, ws_nbytes
+        )
+        launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        ws_cpu = torch.empty(ws_nbytes // 4, dtype=torch.float32)
+        rt.memcpy_d2h(_u8(ws_cpu), ws_dev, ws_nbytes)
+    finally:
+        for d in (X_dev, dY_dev, ws_dev):
+            rt.free(d)
+        synchronize_and_release(0)
+    out = ws_cpu.view(R, C, p.KH * p.KW).sum(dim=0)
+    return float((out - ref).abs().max() / ref.abs().max().clamp(min=1.0))
+
+
+@unittest.skipUnless(
+    not _WGRAD_SKIP_REASON and GPU_ARCH == "gfx1250",
+    _WGRAD_SKIP_REASON or "the Toeplitz WMMA depthwise wgrad is gfx1250 only",
+)
+class TestDirectDepthwiseWgradWmmaCorrectness(unittest.TestCase):
+    """The Toeplitz WMMA depthwise wgrad (7x7, and 1x31 with its own column
+    padding) against torch, through the replicated scratch."""
+
+    def _check(self, dtype: str) -> None:
+        from kernels.common.conv_direct_grouped import DirectConvProblem
+
+        tol = _TOL_BF16 if dtype == "bf16" else _TOL
+        for case_id, shape, knobs in _DW_WGRAD_WMMA_CASES:
+            problem = DirectConvProblem(dtype=dtype, cpg=1, kpg=1, **shape)
+            with self.subTest(case=case_id, dtype=dtype):
+                rel_err = _run_dw_wgrad_wmma_one(GPU_ARCH, problem, knobs)
+                print(f"  {case_id:24s} {dtype}  rel_err={rel_err:.2e}", flush=True)
+                # `not <` so a NaN rel_err (non-finite output) fails too.
+                self.assertFalse(
+                    not rel_err < tol, f"{case_id} {problem.short()} {dtype}"
+                )
+
+    def test_dw_wgrad_wmma_fp16(self):
+        self._check("fp16")
+
+    def test_dw_wgrad_wmma_bf16(self):
         self._check("bf16")
 
 

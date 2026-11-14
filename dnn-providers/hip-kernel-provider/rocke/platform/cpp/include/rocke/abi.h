@@ -126,8 +126,11 @@ extern "C" {
  * 17: rocke_attention_tiled_2d_spec_t gained lse_head_major and
  *     rocke_unified_attention_3d_tiled_spec_t gained emit_lse, each a bool in
  *     its old tail padding: sizes unchanged, but an old caller leaves that byte
- *     unset. */
-#define ROCKE_ABI_VERSION 17
+ *     unset.
+ * 18: rocke_dw_wgrad_fold_spec_t gained cols, slices and unroll at its end,
+ *     which changes its size (16 -> 32 bytes on a 64-bit host) and the
+ *     struct-return of rocke_dw_wgrad_fold_spec_default(). */
+#define ROCKE_ABI_VERSION 18
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

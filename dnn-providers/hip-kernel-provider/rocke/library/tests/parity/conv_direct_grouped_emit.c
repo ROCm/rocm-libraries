@@ -27,8 +27,8 @@
  * non-grouped spec; from index 218 the fp32-storage configs of the grouped
  * kernels, see make_f32_cfg; from index 318 the gfx1250 wave32 and
  * image-per-block wgrad spec, from index 349 the depthwise wgrad spec and
- * from index 356 the small-C wgrad stems of the AOT grid) identically to the
- * Python emitter
+ * from index 356 the small-C wgrad stems of the AOT grid, from index 359 the
+ * rocke_dw_wgrad_fold_spec_t block shapes) identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -171,6 +171,8 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 /* gfx1250 small-C wgrad stems of the AOT grid follow the 7 depthwise wgrad
  * ones. */
 #define WGRAD_STEM_CFG_BASE 356
+/* DwWgradFoldSpec block shapes (cols / slices / unroll) follow the 3 stems. */
+#define FOLD_KNOB_CFG_BASE 359
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -3356,6 +3358,39 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
     return -1;
 }
 
+/* DwWgradFoldSpec block shapes, emitted as FOLD_KNOB_CFG_BASE + idx (see
+ * _fold_knob_spec in the Python emitter). Returns 0 on success, -1 if unknown. */
+static int make_fold_knob_cfg(int idx, rocke_dw_wgrad_fold_spec_t* f, const char** arch)
+{
+    /* (taps, cols, slices, unroll, gfx1250) per index; name set below. */
+    static const int table[11][5] = {
+        {36, 32, 32, 8, 1},
+        {72, 32, 32, 8, 0},
+        {9, 64, 8, 2, 0},
+        {27, 16, 16, 4, 1},
+        {9, 64, 16, 4, 0},
+        {9, 128, 4, 1, 0},
+        {9, 64, 16, 0, 0},
+        {9, 64, 0, 4, 0},
+        {9, 0, 16, 4, 0},
+        {9, -32, 16, 4, 0},
+        {9, 64, 32, 4, 0},
+    };
+    if(idx < 0 || idx >= 11)
+        return -1;
+    *f = rocke_dw_wgrad_fold_spec_default();
+    f->taps = table[idx][0];
+    f->cols = table[idx][1];
+    f->slices = table[idx][2];
+    f->unroll = table[idx][3];
+    *arch = table[idx][4] ? "gfx1250" : "gfx950";
+    if(idx == 0)
+        f->name = "rocke_direct_wgrad_fold";
+    else if(idx == 3)
+        f->name = "fold27";
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -3387,7 +3422,16 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= WGRAD_STEM_CFG_BASE)
+    if(idx >= FOLD_KNOB_CFG_BASE)
+    {
+        if(make_fold_knob_cfg(idx - FOLD_KNOB_CFG_BASE, &swd.fold, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_DW_WGRAD_FOLD;
+    }
+    else if(idx >= WGRAD_STEM_CFG_BASE)
     {
         if(make_wgrad_stem_cfg(idx - WGRAD_STEM_CFG_BASE, &swg, &arch) != 0)
         {

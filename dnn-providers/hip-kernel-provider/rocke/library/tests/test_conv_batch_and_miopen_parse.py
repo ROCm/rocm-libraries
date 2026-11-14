@@ -123,6 +123,72 @@ def test_direct_parse_rejects_per_axis_stride_or_padding(geom, what):
         )
 
 
+# A 1x31 depthwise conv with "same" column padding (the Conformer conv module).
+_DW_1X31 = (
+    "MIOpenDriver convbfp16 -n 2 -c 64 -H 6 -W 80 -k 64 -y 1 -x 31 "
+    "-p 0 -q 15 -u {u} -v {u} -g 64 -F {f}"
+)
+
+
+# -F 6 (dgrad + wgrad) runs wgrad, as -F 4 does.
+@pytest.mark.parametrize("forw", [4, 6])
+def test_direct_parse_takes_column_padding_for_depthwise_wgrad(forw):
+    """A stride-1 depthwise wgrad keeps its column padding (the Toeplitz WMMA
+    kernel computes it)."""
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    problem, dtype, forw = parse_miopen_cmd_direct(_DW_1X31.format(u=1, f=forw))
+    assert dtype == "bf16"
+    assert (problem.KH, problem.KW, problem.PAD, problem.stride) == (1, 31, 0, 1)
+    assert (problem.pad_w, problem.PAD_W) == (15, 15)
+
+
+def test_direct_parse_refuses_column_padding_for_strided_depthwise_wgrad():
+    from benchmarks.common.benchmark_direct_conv import parse_miopen_cmd_direct
+
+    with pytest.raises(ValueError, match="one padding for both axes"):
+        parse_miopen_cmd_direct(_DW_1X31.format(u=2, f=4))
+
+
+def test_per_axis_pad_variants_name_every_per_axis_variant():
+    """The parser's per-axis padding rule comes from per_axis_pad_variants,
+    which states a shape for each PER_AXIS_PAD_VARIANTS entry."""
+    from kernels.conv.direct_variants import (
+        PER_AXIS_PAD_VARIANTS,
+        per_axis_pad_variants,
+    )
+
+    def variants(direction, groups=1, cpg=64, kpg=64, stride=1, KH=3, PAD=1, **kw):
+        return per_axis_pad_variants(
+            direction,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            stride=stride,
+            KH=KH,
+            PAD=PAD,
+            dil_h=kw.get("dil_h", 1),
+            dil_w=kw.get("dil_w", 1),
+            one_d=kw.get("one_d", False),
+        )
+
+    dw = dict(groups=64, cpg=1, kpg=1)
+    assert variants("dgrad", **dw) == ("direct_depthwise_tiled_dgrad",)
+    assert variants("wgrad", **dw) == ("direct_depthwise_wgrad_wmma",)
+    assert variants("wgrad", stride=2, **dw) == ()
+    assert variants("fwd", KH=1, PAD=0) == (
+        "direct_fwd_smallk_wmma",
+        "direct_fwd_smallk_mfma",
+        "direct_fwd_wmma",
+    )
+    assert variants("fwd", stride=2, KH=1, PAD=0, one_d=True) == ("direct_fwd_wmma",)
+    assert variants("fwd", groups=2, cpg=32, kpg=32) == ()
+    assert variants("wgrad") == ()
+    named = set(variants("dgrad", **dw) + variants("wgrad", **dw))
+    named |= set(variants("fwd", KH=1, PAD=0))
+    assert named == set(PER_AXIS_PAD_VARIANTS)
+
+
 # ---------------------------------------------------------------------------
 # _batch_chunks (AOT launches)
 # ---------------------------------------------------------------------------

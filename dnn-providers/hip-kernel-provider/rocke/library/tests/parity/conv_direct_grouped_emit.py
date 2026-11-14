@@ -2424,8 +2424,49 @@ def _wgrad_stem_spec(idx: int):
     return ("wgrad", sel, "gfx1250")
 
 
+# ---------------------------------------------------------------------------
+# DwWgradFoldSpec block shapes, indices 359..369: the narrow, deep fold the
+# gfx1250 grouped WMMA wgrad runs with (cols 32, slices 32, unroll 8) on
+# gfx1250 and gfx950, wide / shallow and narrow shapes, the defaults spelled
+# out (the original kernel name), a one-load unroll; then no unroll, no
+# slices, no cols, negative cols and a 2048-thread block (slices * cols past
+# 1024), which both engines must reject. Follows the 3 wgrad stems.
+# ---------------------------------------------------------------------------
+_FOLD_KNOB_CFG_BASE = 359
+
+
+def _fold_knob_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_FOLD_KNOB_CFG_BASE + idx``, or None."""
+    F = DwWgradFoldSpec
+    table = {
+        0: (
+            F(taps=36, name="rocke_direct_wgrad_fold", cols=32, slices=32, unroll=8),
+            "gfx1250",
+        ),
+        1: (F(taps=72, cols=32, slices=32, unroll=8), "gfx950"),
+        2: (F(taps=9, cols=64, slices=8, unroll=2), "gfx950"),
+        3: (F(taps=27, name="fold27", cols=16, slices=16, unroll=4), "gfx1250"),
+        4: (F(taps=9, cols=64, slices=16, unroll=4), "gfx950"),
+        5: (F(taps=9, cols=128, slices=4, unroll=1), "gfx950"),
+        6: (F(taps=9, unroll=0), "gfx950"),
+        7: (F(taps=9, slices=0), "gfx950"),
+        8: (F(taps=9, cols=0), "gfx950"),
+        9: (F(taps=9, cols=-32), "gfx950"),
+        10: (F(taps=9, cols=64, slices=32), "gfx950"),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("dw_wgrad_fold", sel[0], sel[1])
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _FOLD_KNOB_CFG_BASE:
+        sel = _fold_knob_spec(idx - _FOLD_KNOB_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_STEM_CFG_BASE:
         sel = _wgrad_stem_spec(idx - _WGRAD_STEM_CFG_BASE)
         if sel is not None:

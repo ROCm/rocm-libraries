@@ -9,7 +9,10 @@ This page covers:
   `library/kernels/common/conv_direct_dw_wgrad.py`,
   `library/kernels/common/conv_direct_wgrad_gather.py`,
   `library/kernels/common/conv_direct_dw_wgrad_mfma.py`,
-  `library/kernels/common/conv_direct_grouped_wgrad_mfma.py` (direct wgrad)
+  `library/kernels/common/conv_direct_grouped_wgrad_mfma.py`,
+  `library/kernels/common/conv_direct_wgrad_wmma.py`,
+  `library/kernels/common/conv_direct_grouped_wgrad_wmma.py`,
+  `library/kernels/common/conv_direct_dw_wgrad_wmma.py` (direct wgrad)
 - `library/kernels/common/img2col.py`
 
 Pooling (`platform/python/rocke/instances/common/pooling.py`) is a platform
@@ -1749,6 +1752,59 @@ direct-conv AOT cache (`--directions wgrad`), not the dispatcher.
 On-GPU numeric coverage: `TestDirectConvWgradCorrectness` (gfx950, gfx1250) and
 `TestDirectDepthwiseWgradCorrectness` (every arch the AOT grid caches the
 depthwise kernel for, by `grid_caches_variant`, plus gfx950) in
+`library/tests/test_direct_conv_correctness.py`; the launch plans:
+`library/tests/test_direct_kernel_cache.py`.
+
+### gfx1250 wave32 WMMA direct wgrad: dense, grouped, Toeplitz depthwise
+
+Sources: `library/kernels/common/conv_direct_wgrad_wmma.py`,
+`conv_direct_grouped_wgrad_wmma.py`, `conv_direct_dw_wgrad_wmma.py`. Three
+weight-gradient kernels of the direct-conv AOT sweep (`--directions wgrad`) on
+WMMA 16x16x32, gfx1250 only (the validators refuse every other arch). All take
+the `conv_direct_arg_names("wgrad")` kernargs (dY on A, X on B) and accumulate
+in fp32.
+
+| Spec / variant | Serves | AOT cache carries | Output |
+|---|---|---|---|
+| `DirectWgradWmmaSpec` / `direct_wgrad_wmma` | dense (`groups = 1`), stride 1, `PAD <= K - 1`, one padding for both axes, `C`, `K` multiples of 8 (runtime) | 3x3, `PAD` 0 and 1, TDM copies | cascade `buffer_atomic_fadd_f32` into the zeroed fp32 `dW` |
+| `GroupedWgradWmmaSpec` / `direct_wgrad_grouped_wmma` | grouped, `cpg = kpg` in (4, 8), 3x3, stride 1, one padding for both axes | 3x3, `PAD` 0 and 1 | partial slots, folded by `DwWgradFoldSpec` |
+| `DwWgradWmmaSpec` / `direct_depthwise_wgrad_wmma` | depthwise (`cpg = kpg = 1`, `C % 8 == 0`), stride 1, any filter; the column padding may differ from the row padding (`PAD_W`) | 7x7 `PAD` 0 and 3; 1x31 `PAD` 0, `PAD_W` 15 | `ws_replicas` fp32 scratch slabs, folded by `direct_wgrad_reduce` |
+
+- **Dense, streamed rows.** A block owns a `block_k x block_c` dW tile for all
+  taps and walks a flat list of input-row steps (column chunk, image, row), cut
+  into `n_split` runs so the block count does not depend on the image count; a
+  run that starts inside an image first replays `KH - 1` steps with masked X
+  rows to refill its register ring of dY fragments. Rows move into an LDS ring
+  of `stages` buffers of `rows` rows, by TDM (`tdm`, issued by the first `2 *
+  rows` waves) or by per-lane `global_load_async_to_lds`, and are read back with
+  `ds_load_tr16_b128`; the tap shift is a whole-pixel read offset. `prefetch`
+  reads the next row's fragments during the current WMMAs, `sched` fences the
+  copies and reads ahead of them, `xcd` renumbers a 1-D grid so each XCD gets
+  contiguous runs. The run-from-cache plan zeroes `dW` (`DirectPlan.zeroed`).
+- **Grouped, block-diagonal.** 4 or 8 channels per group packed
+  block-diagonally into the 16-wide WMMA operands; each partition stores a
+  partial slot, and `DwWgradFoldSpec` sums them with the fold shape
+  `direct_wgrad_fold_knobs` picks (`cols`, `slices`, `unroll`: narrower blocks
+  and deeper unrolling for few outputs over many partitions; the defaults keep
+  the original fold and its name). `is_valid_dw_wgrad_fold_spec` requires each
+  knob to be at least 1 and `slices * cols <= 1024` threads.
+- **Toeplitz depthwise.** One WMMA contracts 4 dY pixels of 8 channels: A is
+  one-hot dY (row `8 t + c'`), B the 8 channels of X at row `y + rb + j` and
+  column `q + s0 + s`, so D lands on `dW[c'][rb + j - t][s0 + s]`. Items of
+  `rows` dY rows by `tile_q` columns are staged in LDS (NHWC, padded channel
+  pitch); `prefetch` carries the next item's global loads in registers. The
+  atomics go to replica `block % ws_replicas` of the scratch. It is the one
+  wgrad variant in `PER_AXIS_PAD_VARIANTS`; every other wgrad variant refuses a
+  problem whose column padding differs.
+
+C++ engine twins: `instance_conv_direct_wgrad_wmma.h`,
+`instance_conv_direct_grouped_wgrad_wmma.h`, `instance_conv_direct_dw_wgrad_wmma.h`
+(`cpp/instances/common/conv_direct_{wgrad,grouped_wgrad,dw_wgrad}_wmma.cpp`),
+the fold knobs in `conv_direct_dw_wgrad.cpp`; byte-identity gated by
+`library/tests/parity/conv_direct_{wgrad,grouped_wgrad,dw_wgrad}_wmma_emit.{c,py}`.
+Served by the direct-conv AOT cache, not the dispatcher.
+On-GPU numeric coverage: `TestDirectWgradAotWave32Correctness` (dense and
+grouped) and `TestDirectDepthwiseWgradWmmaCorrectness` (7x7, 1x31) in
 `library/tests/test_direct_conv_correctness.py`; the launch plans:
 `library/tests/test_direct_kernel_cache.py`.
 

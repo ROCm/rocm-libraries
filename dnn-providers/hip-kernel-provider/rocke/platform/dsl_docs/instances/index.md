@@ -67,6 +67,9 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 | `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dw_wgrad_mfma.py` | `DwWgradMfmaSpec` (depthwise wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_grouped_wgrad_mfma.py` | `GroupedWgradMfmaSpec` (4/8-channel grouped wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_wgrad_wmma.py` | `DirectWgradWmmaSpec` (gfx1250 dense wgrad, WMMA) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_grouped_wgrad_wmma.py` | `GroupedWgradWmmaSpec` (gfx1250 4/8-channel grouped wgrad, WMMA) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dw_wgrad_wmma.py` | `DwWgradWmmaSpec` (gfx1250 Toeplitz WMMA depthwise wgrad) | `library/kernels/conv/docs/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `library/kernels/conv/docs/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/small_ops.md` |
 
@@ -256,6 +259,9 @@ From `helpers/README.md`:
 | conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
 | conv_fwd_small_mfma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads with sentinel offsets |
 | conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | the windowed depthwise Toeplitz builder of `conv_direct_grouped` (wave32 `fwd` form): `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
+| conv_direct_wgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds`, `global_load_async_to_lds`, `ds_read_tr16_b128` |
+| conv_direct_grouped_wgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), `global_load_async_to_lds`, `ds_read_tr16_b128` |
+| conv_direct_dw_wgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads with sentinel offsets |
 | conv_direct_fwd_gstream_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` halo ring, `s_setprio` |
 | conv_direct_fwd_tapouter_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `s_setprio` |
 | conv_winograd (fwd / fwd_rt / gemm_wmma / gen / fused_1d_wmma) | yes (buffer) | - | - | - | - | yes | - | TDM `tensor_load_to_lds` / `tensor_store_from_lds` (K3), `chiplet_transform_chunked_runtime` (`helpers.grid`), `global_load_async_to_lds`, `ds_read_tr16_b128` (fused 1-D) |

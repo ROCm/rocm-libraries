@@ -59,6 +59,14 @@
           "sha256": "356d3b1384970b2b52311e4953c93e33cda1635b7f50d4d5a39de671481e77ed",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/fold_t36_c32s32u8": {
+          "arch": "gfx950",
+          "bytes": 22525,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_fold_t36_c32s32u8_t36_c32_s32_u8",
+          "sha256": "83a62fe0e17c2dba8b17052460236526318df1ccae03cab8d9ac1f0c1df85d8b",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/fold_t9": {
           "arch": "gfx950",
           "bytes": 11967,
@@ -187,6 +195,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_dw_mfma_7x7_unfold3_f7x7p3s1_qt8_rpc14_pf2_un3_tb2048_bf16",
           "sha256": "8c189d730b4e243d2eb546516f94d49cac19e172dde997da1779ff43d2f7caaa",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/fold_t36_c32s32u8": {
+          "arch": "gfx950",
+          "bytes": 22532,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_fold_t36_c32s32u8_t36_c32_s32_u8",
+          "sha256": "5db96f04cacd96a8e144db86bccd5c3058a7383b8c7b5c93332803b35bb44ceb",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/fold_t9": {
@@ -327,6 +343,14 @@
           "sha256": "1ab085a89838c6fb4b43c2d484aad358309bf8a903b18c755e4b1dde25003d94",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/fold_t36_c32s32u8": {
+          "arch": "gfx950",
+          "bytes": 22596,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_fold_t36_c32s32u8_t36_c32_s32_u8",
+          "sha256": "f1b32f34438d673a5e4dbdf25daad24cb602c35ac4abbf18745b9945195e9fb8",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/fold_t9": {
           "arch": "gfx950",
           "bytes": 12038,
@@ -458,6 +482,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_dw_mfma_7x7_unfold3_f7x7p3s1_qt8_rpc14_pf2_un3_tb2048_bf16",
           "sha256": "1ab085a89838c6fb4b43c2d484aad358309bf8a903b18c755e4b1dde25003d94",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/fold_t36_c32s32u8": {
+          "arch": "gfx950",
+          "bytes": 22596,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_fold_t36_c32s32u8_t36_c32_s32_u8",
+          "sha256": "f1b32f34438d673a5e4dbdf25daad24cb602c35ac4abbf18745b9945195e9fb8",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/fold_t9": {

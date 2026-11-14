@@ -50,6 +50,9 @@ extern "C" rocke_dw_wgrad_fold_spec_t rocke_dw_wgrad_fold_spec_default(void)
     rocke_dw_wgrad_fold_spec_t s;
     memset(&s, 0, sizeof(s));
     s.name = "dw_wgrad_fold";
+    s.cols = kFoldCols;
+    s.slices = kFoldSlices;
+    s.unroll = kFoldUnroll;
     return s;
 }
 
@@ -60,10 +63,15 @@ extern "C" rocke_status_t
     {
         return ROCKE_ERR_VALUE;
     }
-    char t_buf[24];
+    char t_buf[24], c_buf[24], s_buf[24], u_buf[24];
     snprintf(t_buf, sizeof t_buf, "t%d", s->taps);
-    const char* parts[1] = {t_buf};
-    return rocke_kernel_name_join(s->name, parts, 1, NULL, NULL, 0, out, out_cap, NULL);
+    snprintf(c_buf, sizeof c_buf, "c%d", s->cols);
+    snprintf(s_buf, sizeof s_buf, "s%d", s->slices);
+    snprintf(u_buf, sizeof u_buf, "u%d", s->unroll);
+    const char* parts[4] = {t_buf, c_buf, s_buf, u_buf};
+    /* The default block shape keeps the original name. */
+    const bool dflt = s->cols == kFoldCols && s->slices == kFoldSlices && s->unroll == kFoldUnroll;
+    return rocke_kernel_name_join(s->name, parts, dflt ? 1 : 4, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 extern "C" void rocke_dw_wgrad_fold_launch_geometry(const rocke_dw_wgrad_fold_spec_t* s,
@@ -71,22 +79,61 @@ extern "C" void rocke_dw_wgrad_fold_launch_geometry(const rocke_dw_wgrad_fold_sp
                                                     int grid[3],
                                                     int block[3])
 {
-    grid[0] = cdiv(channels * s->taps, kFoldCols);
+    /* A non-positive cols has no geometry (Python divides by zero). */
+    grid[0] = s->cols > 0 ? cdiv(channels * s->taps, s->cols) : 0;
     grid[1] = 1;
     grid[2] = 1;
-    block[0] = kFoldSlices * kWave;
+    block[0] = s->slices * s->cols;
     block[1] = 1;
     block[2] = 1;
+}
+
+/* is_valid_dw_wgrad_fold_spec: at least one output, slice and load per
+ * block, and no more than 1024 threads (slices * cols). */
+extern "C" bool rocke_dw_wgrad_fold_is_valid_spec(const rocke_dw_wgrad_fold_spec_t* s,
+                                                  char* reason,
+                                                  size_t reason_cap)
+{
+    char msg[ROCKE_ERR_MSG_CAP];
+    if(s == NULL)
+    {
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
+        return false;
+    }
+    const long long threads = (long long)s->slices * s->cols;
+    if(s->cols < 1)
+        snprintf(msg, sizeof msg, "cols %d < 1", s->cols);
+    else if(s->slices < 1)
+        snprintf(msg, sizeof msg, "slices %d < 1", s->slices);
+    else if(s->unroll < 1)
+        snprintf(msg, sizeof msg, "unroll %d < 1", s->unroll);
+    else if(threads > 1024)
+        snprintf(msg, sizeof msg, "slices * cols = %lld threads > 1024", threads);
+    else
+    {
+        rocke_spec_set_reason(reason, reason_cap, "ok");
+        return true;
+    }
+    rocke_spec_set_reason(reason, reason_cap, msg);
+    return false;
 }
 
 namespace
 {
 
-/* Each block owns 64 outputs; 16 waves split the partition axis, meet in LDS. */
+/* Each block owns `cols` outputs; `slices` rows of threads split the
+ * partition axis and meet in LDS. */
 rocke_kernel_def_t* build_fold(rocke_ir_builder_t* b, const rocke_dw_wgrad_fold_spec_t* spec)
 {
     Em e{b};
-    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", kFoldSlices * kWave);
+    char reason[ROCKE_ERR_MSG_CAP];
+    if(!rocke_dw_wgrad_fold_is_valid_spec(spec, reason, sizeof reason))
+    {
+        fail_invalid(b, "invalid DwWgradFoldSpec", reason);
+        return NULL;
+    }
+    const int COLS = spec->cols, S = spec->slices, U = spec->unroll;
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", S * COLS);
     rocke_param_opts_t ro;
     memset(&ro, 0, sizeof(ro));
     ro.noalias = ro.noalias_set = true;
@@ -111,17 +158,16 @@ rocke_kernel_def_t* build_fold(rocke_ir_builder_t* b, const rocke_dw_wgrad_fold_
     }
 
     V tid = rocke_b_thread_id_x(b);
-    V lane = e.modi(tid, kWave);
-    V slc = e.divi(tid, kWave);
+    V lane = e.modi(tid, COLS);
+    V slc = e.divi(tid, COLS);
     V n_out = e.muli(chans, spec->taps);
     V bx = rocke_b_block_id_x(b);
-    V o = e.add(e.muli(bx, kFoldCols), lane);
+    V o = e.add(e.muli(bx, COLS), lane);
     V o_ok = e.lt(o, n_out);
     V o_safe = e.select(o_ok, o, e.ci(0));
     V zero = rocke_b_const_f32(b, 0.0);
-    const int U = kFoldUnroll;
     /* Partition p = slc + SLICES * (U * it + j). */
-    V n_it = e.cdivi(parts, kFoldSlices * U);
+    V n_it = e.cdivi(parts, S * U);
     V lo = e.ci(0);
     V step = e.ci(1);
     std::vector<std::string> names;
@@ -134,7 +180,7 @@ rocke_kernel_def_t* build_fold(rocke_ir_builder_t* b, const rocke_dw_wgrad_fold_
             for(int j = 0; j < U; ++j)
             {
                 V pidx = e.addi(e.muli(it, U), j);
-                pidx = e.add(slc, e.muli(pidx, kFoldSlices));
+                pidx = e.add(slc, e.muli(pidx, S));
                 V ok = e.lt(pidx, parts);
                 V sel = e.select(ok, pidx, e.ci(0));
                 V idx = e.add(e.mul(sel, n_out), o_safe);
@@ -152,16 +198,16 @@ rocke_kernel_def_t* build_fold(rocke_ir_builder_t* b, const rocke_dw_wgrad_fold_
     {
         tot = rocke_b_fadd(b, tot, res[j]);
     }
-    V red = e.smem_alloc_1d(rocke_f32(), kFoldSlices * kWave, "fold");
+    V red = e.smem_alloc_1d(rocke_f32(), S * COLS, "fold");
     e.smem_store_f32(red, e.ci(0), tid, tot, 1);
     rocke_b_sync(b);
     V cond = e.land(e.eqi(slc, 0), o_ok);
     e.if_(cond, [&]() {
         V t = NULL;
-        for(int q = 0; q < kFoldSlices; ++q)
+        for(int q = 0; q < S; ++q)
         {
             V c0 = e.ci(0);
-            V v = e.smem_load_f32(red, c0, e.addi(lane, q * kWave), 1);
+            V v = e.smem_load_f32(red, c0, e.addi(lane, q * COLS), 1);
             v = rocke_b_vec_extract(b, v, 0);
             t = (t == NULL) ? v : rocke_b_fadd(b, t, v);
         }

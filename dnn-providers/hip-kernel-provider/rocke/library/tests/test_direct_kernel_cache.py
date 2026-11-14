@@ -2118,6 +2118,7 @@ _W32_WGRAD = (
     "direct_wgrad",
     "direct_wgrad_small_c",
     "direct_depthwise_wgrad",
+    "direct_depthwise_wgrad_wmma",
 )
 
 
@@ -2417,3 +2418,40 @@ def test_per_axis_pad_variants_drive_both_gates():
         assert one_padding == (variant not in dv.PER_AXIS_PAD_VARIANTS), (variant, why)
         checked += 1
     assert checked > len(dv.PER_AXIS_PAD_VARIANTS)
+
+
+def test_wgrad_wmma_validators_take_a_column_padding_iff_per_axis():
+    """Each WMMA wgrad kernel's own validator, not just the cache's outer
+    gate, accepts a column padding of its own exactly when its variant is in
+    PER_AXIS_PAD_VARIANTS: a variant added to the tuple whose validator still
+    calls one_padding_reason (or the reverse) fails here."""
+    from kernels.conv import direct_aot_jobs as daj
+    from kernels.conv import direct_variants as dv
+
+    shapes = (  # dense, grouped (4 and 8 channels per group), depthwise
+        dict(groups=1, cpg=64, kpg=64),
+        dict(groups=16, cpg=8, kpg=8),
+        dict(groups=16, cpg=4, kpg=4),
+        dict(groups=64, cpg=1, kpg=1),
+    )
+    variants = [
+        v
+        for v, (d, _) in daj.DIRECT_CAPABILITIES.items()
+        if d == "wgrad" and "wmma" in v
+    ]
+    assert len(variants) >= 3, variants
+    for variant in variants:
+        rows = daj.DIRECT_CAPABILITIES[variant][1]
+        knobs = next(iter(_knob_grid(variant, "gfx1250", "fp16", rows[0])))
+        checked = False
+        for shape in shapes:
+            same = _problem(**shape, dtype="fp16")
+            spec = dv.make_direct_spec(variant, same, knobs, 32)
+            if not dv.validate_direct_spec(variant, spec, "gfx1250")[0]:
+                continue  # not this variant's shape
+            own = replace(same, pad_w=0)
+            spec = dv.make_direct_spec(variant, own, knobs, 32)
+            ok, why = dv.validate_direct_spec(variant, spec, "gfx1250")
+            assert ok == (variant in dv.PER_AXIS_PAD_VARIANTS), (variant, why)
+            checked = True
+        assert checked, variant

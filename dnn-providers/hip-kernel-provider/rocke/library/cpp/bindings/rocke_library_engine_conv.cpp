@@ -37,11 +37,14 @@ extern "C" {
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
 #include "rocke/instance_conv_direct_dw_fwd_wmma.h"
+#include "rocke/instance_conv_direct_dw_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_grouped_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_nongrouped.h"
+#include "rocke/instance_conv_direct_wgrad_wmma.h"
 #include "rocke/instance_conv_fwd_small_mfma.h"
 #include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/instance_conv_fwd_split_k_reduce.h"
@@ -876,6 +879,77 @@ py::tuple conv_direct_dw_fwd_wmma_describe(const py::dict& d, const std::string&
                           rocke_direct_dw_fwd_wmma_lds_bytes(&s));
 }
 
+/* ======================= conv_direct_dw_wgrad_wmma ======================= */
+
+/* Toeplitz WMMA depthwise wgrad (gfx1250). The dict mirrors DwWgradWmmaSpec
+ * with the problem nested (pad_w included). */
+rocke_direct_dw_wgrad_wmma_spec_t dww_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_direct_dw_wgrad_wmma_spec_t s = rocke_direct_dw_wgrad_wmma_spec_default();
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "DwWgradWmmaSpec");
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.waves = dict_int(d, "waves", s.waves);
+    s.tile_q = dict_int(d, "tile_q", s.tile_q);
+    s.rows = dict_int(d, "rows", s.rows);
+    s.target_blocks = dict_int(d, "target_blocks", s.target_blocks);
+    s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
+    s.prefetch = dict_bool(d, "prefetch", s.prefetch);
+    return s;
+}
+
+std::string conv_direct_dw_wgrad_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_dw_wgrad_wmma_spec_t s = dww_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_direct_dw_wgrad_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_direct_dw_wgrad_wmma_lower_llvm");
+}
+
+std::string conv_direct_dw_wgrad_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_direct_dw_wgrad_wmma_serialize_ir",
+                                rocke_direct_dw_wgrad_wmma_spec_t,
+                                dww_build_spec,
+                                rocke_build_direct_dw_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_dw_wgrad_wmma_verify(const py::dict& d,
+                                                          const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_direct_dw_wgrad_wmma_verify",
+                             rocke_direct_dw_wgrad_wmma_spec_t,
+                             dww_build_spec,
+                             rocke_build_direct_dw_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_direct_dw_wgrad_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_dw_wgrad_wmma_spec_t s = dww_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_direct_dw_wgrad_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_direct_dw_wgrad_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok)
+        rocke_direct_dw_wgrad_wmma_grid(&s, grid);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_direct_dw_wgrad_wmma_lds_bytes(&s));
+}
+
 /* ===================== conv_direct_fwd_gstream_wmma ====================== */
 
 /* Small-group forward walking row bands (gfx1250). The dict mirrors
@@ -1341,6 +1415,86 @@ py::tuple conv_direct_dgrad_wmma_describe(const py::dict& d, const std::string& 
                           std::string(name),
                           py::make_tuple(grid[0], grid[1], grid[2]),
                           rocke_direct_dgrad_wmma_lds_bytes(&s));
+}
+
+/* ======================== conv_direct_wgrad_wmma ========================== */
+
+/* Wave32 WMMA dense direct wgrad (gfx1250). The dict mirrors
+ * DirectWgradWmmaSpec with the problem nested. */
+rocke_direct_wgrad_wmma_spec_t dwgw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_direct_wgrad_wmma_spec_t s = rocke_direct_wgrad_wmma_spec_default();
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "DirectWgradWmmaSpec");
+    s.waves_k = dict_int(d, "waves_k", s.waves_k);
+    s.waves_c = dict_int(d, "waves_c", s.waves_c);
+    s.tiles_k = dict_int(d, "tiles_k", s.tiles_k);
+    s.tiles_c = dict_int(d, "tiles_c", s.tiles_c);
+    s.q_steps = dict_int(d, "q_steps", s.q_steps);
+    s.stages = dict_int(d, "stages", s.stages);
+    s.target_blocks = dict_int(d, "target_blocks", s.target_blocks);
+    s.prefetch = dict_bool(d, "prefetch", s.prefetch);
+    s.pad = dict_int(d, "pad", s.pad);
+    s.sched = dict_bool(d, "sched", s.sched);
+    s.xcd = dict_int(d, "xcd", s.xcd);
+    s.tdm = dict_bool(d, "tdm", s.tdm);
+    s.rows = dict_int(d, "rows", s.rows);
+    return s;
+}
+
+std::string conv_direct_wgrad_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_wgrad_wmma_spec_t s = dwgw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_direct_wgrad_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_direct_wgrad_wmma_lower_llvm");
+}
+
+std::string conv_direct_wgrad_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_direct_wgrad_wmma_serialize_ir",
+                                rocke_direct_wgrad_wmma_spec_t,
+                                dwgw_build_spec,
+                                rocke_build_direct_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_wgrad_wmma_verify(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_direct_wgrad_wmma_verify",
+                             rocke_direct_wgrad_wmma_spec_t,
+                             dwgw_build_spec,
+                             rocke_build_direct_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid_direct_wgrad_wmma_spec + kernel_name / launch geometry / lds_bytes
+ * in one call: -> (ok, reason, kernel_name, (gx, gy, gz), (bx, by, bz),
+ * lds_bytes). The geometry is (0, 0, 0) for a rejected spec. */
+py::tuple conv_direct_wgrad_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_direct_wgrad_wmma_spec_t s = dwgw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    long long grid[3] = {0, 0, 0};
+    int block[3] = {0, 0, 0};
+    bool ok = rocke_direct_wgrad_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_direct_wgrad_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok)
+        rocke_direct_wgrad_wmma_launch_geometry(&s, grid, block);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          py::make_tuple(block[0], block[1], block[2]),
+                          rocke_direct_wgrad_wmma_lds_bytes(&s));
 }
 
 /* ======================== conv_direct_fwd_wmma ============================ */
@@ -1844,6 +1998,95 @@ std::vector<std::string> conv_wgrad_reduce_verify(const py::dict& d, const std::
                              rocke_build_wgrad_workspace_reduce_new(&b, &s, arch.c_str()));
 }
 
+/* ===================== conv_direct_grouped_wgrad_wmma ===================== */
+
+/* Wave32 WMMA grouped direct wgrad (gfx1250, cpg = kpg in {4, 8}) into
+ * partial slots. The dict mirrors GroupedWgradWmmaSpec with the problem
+ * nested. */
+rocke_grouped_wgrad_wmma_spec_t gwgw_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    rocke_grouped_wgrad_wmma_spec_t s = rocke_grouped_wgrad_wmma_spec_default();
+    direct_spec_fill_problem(&s.problem, &s.name, d, store, "GroupedWgradWmmaSpec");
+    s.waves_c = dict_int(d, "waves_c", s.waves_c);
+    s.q_steps = dict_int(d, "q_steps", s.q_steps);
+    s.rows_per_chunk = dict_int(d, "rows_per_chunk", s.rows_per_chunk);
+    s.target_blocks = dict_int(d, "target_blocks", s.target_blocks);
+    s.stages = dict_int(d, "stages", s.stages);
+    return s;
+}
+
+std::string conv_direct_grouped_wgrad_wmma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_grouped_wgrad_wmma_spec_t s = gwgw_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_grouped_wgrad_wmma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(
+        st, ll, err, "rocke_library_engine.conv_direct_grouped_wgrad_wmma_lower_llvm");
+}
+
+std::string conv_direct_grouped_wgrad_wmma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_direct_grouped_wgrad_wmma_serialize_ir",
+                                rocke_grouped_wgrad_wmma_spec_t,
+                                gwgw_build_spec,
+                                rocke_build_grouped_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_grouped_wgrad_wmma_verify(const py::dict& d,
+                                                               const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_direct_grouped_wgrad_wmma_verify",
+                             rocke_grouped_wgrad_wmma_spec_t,
+                             gwgw_build_spec,
+                             rocke_build_grouped_wgrad_wmma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid_grouped_wgrad_wmma_spec + kernel_name / grid / lds_bytes and the
+ * fold contract in one call: -> (ok, reason, kernel_name, (gx, gy, gz),
+ * (bx, by, bz), lds_bytes, n_partitions, workspace_bytes, fold_taps,
+ * fold_channels). The grid, block and fold contract are zero for a rejected
+ * spec. */
+py::tuple conv_direct_grouped_wgrad_wmma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_grouped_wgrad_wmma_spec_t s = gwgw_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    int block[3] = {0, 0, 0};
+    long n_parts = 0, ws_bytes = 0;
+    long long taps = 0, chans = 0;
+    bool ok = rocke_grouped_wgrad_wmma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_grouped_wgrad_wmma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok) /* a rejected spec may have no channel tiles */
+    {
+        rocke_grouped_wgrad_wmma_launch_geometry(&s, grid, block);
+        n_parts = rocke_grouped_wgrad_wmma_n_partitions(&s);
+        ws_bytes = rocke_grouped_wgrad_wmma_workspace_bytes(&s);
+        taps = rocke_grouped_wgrad_wmma_fold_taps(&s);
+        chans = rocke_grouped_wgrad_wmma_fold_channels(&s);
+    }
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          py::make_tuple(block[0], block[1], block[2]),
+                          rocke_grouped_wgrad_wmma_lds_bytes(&s),
+                          n_parts,
+                          ws_bytes,
+                          taps,
+                          chans);
+}
+
 /* ================= conv_fwd_split_k_reduce (fwd split-K Stage 2) =============== */
 
 rocke_fwd_split_k_reduce_spec_t conv_fwd_split_k_reduce_build_spec(const py::dict& d,
@@ -1989,6 +2232,14 @@ void register_conv(py::module_& m)
           &conv_direct_dw_fwd_wmma_describe,
           py::arg("spec"),
           py::arg("arch"));
+    reg3("conv_direct_dw_wgrad_wmma",
+         &conv_direct_dw_wgrad_wmma_lower_llvm,
+         &conv_direct_dw_wgrad_wmma_serialize_ir,
+         &conv_direct_dw_wgrad_wmma_verify);
+    m.def("conv_direct_dw_wgrad_wmma_describe",
+          &conv_direct_dw_wgrad_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
     reg3("conv_direct_fwd_gstream_wmma",
          &conv_direct_fwd_gstream_wmma_lower_llvm,
          &conv_direct_fwd_gstream_wmma_serialize_ir,
@@ -2011,6 +2262,14 @@ void register_conv(py::module_& m)
          &conv_direct_dgrad_wmma_verify);
     m.def("conv_direct_dgrad_wmma_describe",
           &conv_direct_dgrad_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_wgrad_wmma",
+         &conv_direct_wgrad_wmma_lower_llvm,
+         &conv_direct_wgrad_wmma_serialize_ir,
+         &conv_direct_wgrad_wmma_verify);
+    m.def("conv_direct_wgrad_wmma_describe",
+          &conv_direct_wgrad_wmma_describe,
           py::arg("spec"),
           py::arg("arch"));
     reg3("conv_direct_fwd_wmma",
@@ -2037,6 +2296,16 @@ void register_conv(py::module_& m)
          conv_wgrad_reduce_lower_llvm,
          conv_wgrad_reduce_serialize_ir,
          conv_wgrad_reduce_verify);
+    /* gfx1250 grouped direct wgrad into partial slots (folded by the
+     * DwWgradFoldSpec kernel). */
+    reg3("conv_direct_grouped_wgrad_wmma",
+         &conv_direct_grouped_wgrad_wmma_lower_llvm,
+         &conv_direct_grouped_wgrad_wmma_serialize_ir,
+         &conv_direct_grouped_wgrad_wmma_verify);
+    m.def("conv_direct_grouped_wgrad_wmma_describe",
+          &conv_direct_grouped_wgrad_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
     /* ---- fwd split-K Stage 2 (folds the [ks_count][M][K] fp32 slabs) ---- */
     reg3("conv_fwd_split_k_reduce",
          conv_fwd_split_k_reduce_lower_llvm,

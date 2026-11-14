@@ -25,6 +25,7 @@
 
 #include "rocke/abi.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_wgrad_internal.hpp" /* the WMMA wgrad arch gates */
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 
@@ -422,6 +423,42 @@ static void check_dw_cachepolicy(const char* arch, int64_t want)
     rocke_ir_builder_free(&b);
 }
 
+/* The dense and grouped WMMA wgrad arch gates on a gfx1250 copy without TDM
+ * and with a 1 KiB LDS: no shipped arch reaches either refusal. */
+static void check_wmma_arch_gates(void)
+{
+    char why[256];
+    rocke_archtarget_t t = *rocke_archtarget_from_gfx("gfx1250");
+    why[0] = '\0';
+    if(!rocke_dwg::wgrad_wmma_target_ok(&t, "gfx1250", true, why, sizeof why))
+    {
+        fprintf(stderr, "FAIL wmma_gate_gfx1250: refused (%s)\n", why);
+        ++g_failures;
+    }
+    t.memory.has_tdm = false;
+    expect_refused("wmma_gate_no_tdm",
+                   rocke_dwg::wgrad_wmma_target_ok(&t, "gfx1250", true, why, sizeof why),
+                   why,
+                   "no TDM (nor ds_load_tr16_b128) on gfx1250");
+    t = *rocke_archtarget_from_gfx("gfx1250");
+    t.lds_capacity_bytes = 1024;
+    why[0] = '\0';
+    expect_refused("wmma_gate_lds_capacity",
+                   !rocke_dwg::wgrad_wmma_lds_over(2048, 4096, &t, "gfxX", why, sizeof why),
+                   why,
+                   "LDS 2048 B > 1024 on gfxX");
+    why[0] = '\0';
+    expect_refused("wmma_gate_lds_budget",
+                   !rocke_dwg::wgrad_wmma_lds_over(8192, 4096, &t, "gfxX", why, sizeof why),
+                   why,
+                   "LDS 8192 B > 4 KiB");
+    if(rocke_dwg::wgrad_wmma_lds_over(1024, 4096, &t, "gfxX", why, sizeof why))
+    {
+        fprintf(stderr, "FAIL wmma_gate_lds_fits: refused (%s)\n", why);
+        ++g_failures;
+    }
+}
+
 int main(void)
 {
     char why[REASON_CAP];
@@ -507,6 +544,7 @@ int main(void)
     check_dw_cachepolicy("gfx1201", ROCKE_CPOL_ATOMIC_CASCADE_DEV);
     check_dw_cachepolicy("gfx1151", 0);
     check_dw_cachepolicy("gfx1100", 0);
+    check_wmma_arch_gates();
 
     if(g_failures != 0)
     {
