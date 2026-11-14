@@ -36,6 +36,9 @@ Auto-detected from the .s file (override with CLI flags):
     - wavefront-size: .wavefront_size from amdhsa.kernels metadata
     - threads:        .reqd_workgroup_size from amdhsa.kernels metadata
 
+A kernel with MX scales also gets the MXScaleFormat it reads (see
+resolve_mx_scale_format).
+
 Usage:
     python -m tensilelite.AddCustomConfig <file.s> --yaml <test.yaml>
 
@@ -82,6 +85,45 @@ PREDICATE_FORK_PARAMETER_KEYS = (
 # the solution; StaggerU is a solution knob (handwritten kernels declare 0
 # because they do not implement Tensile's in-loop wrap).
 CUSTOM_CONFIG_FORK_PARAMETER_KEYS = PREDICATE_FORK_PARAMETER_KEYS + ("StaggerU",)
+
+# The MX scale layouts a handwritten kernel may declare. getCustomKernelConfig
+# refuses an MX kernel without one of them; "Auto" is resolved only for
+# Tensile-generated kernels.
+MX_SCALE_FORMATS = ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle")
+
+# rocRoller names a kernel that reads pre-swizzled scales with one of these.
+ROCROLLER_PRESWIZZLE_TAGS = ("_PSTA_", "_PTA_", "_PSTB_", "_PTB_")
+
+
+def resolve_mx_scale_format(origin, kernel_name, config):
+    """The MXScaleFormat a kernel's custom.config declares, or None without MX scales.
+
+    hipBLASLt serves packed MX scales (Block_32_UE8M0 and the other packed block
+    formats) only with NoSwizzle or InMemorySwizzle kernels, and the pre-swizzled
+    Block_32_UE8M0_32_8_EXT only with HostPreSwizzle kernels. A rocRoller kernel
+    reads the caller's packed buffer, so it is NoSwizzle unless its name carries a
+    pre-swizzle tag. Any other origin must declare its layout, through the YAML's
+    MXScaleFormat ForkParameter or --mx-scale-format.
+    """
+    problem_type = (config or {}).get("ProblemType") or {}
+    if not (problem_type.get("MXBlockA", 0) or problem_type.get("MXBlockB", 0)):
+        return None
+    declared = config.get("MXScaleFormat")
+    if origin == "rocroller":
+        named = ("HostPreSwizzle"
+                 if any(tag in (kernel_name or "") for tag in ROCROLLER_PRESWIZZLE_TAGS)
+                 else "NoSwizzle")
+        if declared is not None and declared != named:
+            raise RuntimeError(
+                f"rocRoller kernel {kernel_name} declares MXScaleFormat {declared}, "
+                f"but its name says {named}")
+        return named
+    if declared not in MX_SCALE_FORMATS:
+        raise RuntimeError(
+            f"Kernel {kernel_name} has MX scales, so it must declare the scale layout it "
+            f"reads ({', '.join(MX_SCALE_FORMATS)}); got {declared!r}. Pass "
+            "--mx-scale-format or set MXScaleFormat in the YAML's ForkParameters.")
+    return declared
 
 
 def _parse_tensile_yaml(path, kernel_name=None):
@@ -164,6 +206,13 @@ def _parse_tensile_yaml(path, kernel_name=None):
                     )
                 checkParametersAreValid((pred_key, values), validParameters)
                 config[pred_key] = values[0]
+            if "MXScaleFormat" in entry:
+                values = entry["MXScaleFormat"]
+                if not isinstance(values, list) or len(values) != 1:
+                    raise RuntimeError(
+                        "Custom kernel parameter 'MXScaleFormat' must be a single-valued "
+                        f"ForkParameter (got {values!r})")
+                config["MXScaleFormat"] = values[0]
         matched = config
         break
 
@@ -225,7 +274,7 @@ def _fmt_yaml_args(args, indent=4):
     return "\n".join([first] + middle + [last])
 
 
-def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
+def build_custom_config_yaml(origin, config, repository=None, version="1.0.0", kernel_name=""):
     """Builds the custom.config YAML block string.
 
     Args:
@@ -234,7 +283,12 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
                 May be None for provenance-only injection. Treated as read-only.
         repository: Optional source repository URL.
         version: Kernel version string.
+        kernel_name: The kernel's name, which carries rocRoller's scale-layout tags.
+
+    Raises RuntimeError when an MX kernel's scale layout cannot be resolved.
     """
+    mx_scale_format = resolve_mx_scale_format(origin, kernel_name, config)
+
     # Take local copies so we never mutate caller-supplied dicts.
     features = dict((config or {}).get("Features", {}))
     for flag in FEATURE_FLAGS:
@@ -259,6 +313,9 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     lines.append("  InternalSupportParams:")
     for k, v in isp.items():
         lines.append(f"    {k}: {v}")
+
+    if mx_scale_format:
+        lines.append(f"  MXScaleFormat: {mx_scale_format}")
 
     if config and "ProblemType" in config:
         lines.append("  ProblemType:")
@@ -409,6 +466,10 @@ def main():
                         help="Source repository URL")
     parser.add_argument("--version", default="1.0.0",
                         help="Kernel version (default: 1.0.0)")
+    parser.add_argument("--mx-scale-format", choices=MX_SCALE_FORMATS, default=None,
+                        help="MX scale layout the kernel reads (default: NoSwizzle for a "
+                             "rocRoller kernel without a pre-swizzle tag; required for "
+                             "other MX kernels unless the YAML sets it)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be injected without modifying the file")
 
@@ -441,8 +502,8 @@ def main():
         sys.exit(1)
 
     config = None
+    kernel_name = os.path.basename(filepath)[:-2]
     if args.yaml:
-        kernel_name = os.path.basename(filepath)[:-2]
         try:
             config = _parse_tensile_yaml(args.yaml, kernel_name)
         except RuntimeError as e:
@@ -456,6 +517,8 @@ def main():
             config["CustomKernel"] = ck
         if "WavefrontSize" not in config and "wavefront_size" in detected:
             config["WavefrontSize"] = detected["wavefront_size"]
+        if args.mx_scale_format:
+            config["MXScaleFormat"] = args.mx_scale_format
 
     auto_info = []
     if not args.origin and file_info["origin"]:
@@ -467,12 +530,17 @@ def main():
     if auto_info:
         print(f"Auto-detected: {', '.join(auto_info)}")
 
-    config_yaml = build_custom_config_yaml(
-        origin=origin,
-        config=config,
-        repository=args.repository,
-        version=args.version,
-    )
+    try:
+        config_yaml = build_custom_config_yaml(
+            origin=origin,
+            config=config,
+            repository=args.repository,
+            version=args.version,
+            kernel_name=kernel_name,
+        )
+    except RuntimeError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if not inject_custom_config(file_info, filepath, config_yaml, dry_run=args.dry_run):
         sys.exit(1)

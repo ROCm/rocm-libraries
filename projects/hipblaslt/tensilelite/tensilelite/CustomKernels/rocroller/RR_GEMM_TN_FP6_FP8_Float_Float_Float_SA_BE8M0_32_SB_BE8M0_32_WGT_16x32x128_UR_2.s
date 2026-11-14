@@ -1452,123 +1452,85 @@ amdhsa.kernels:
     .vgpr_count: 50
     .agpr_count: 4
     .max_flat_workgroup_size: 128
-    .workgroup_size: [128, 1, 1]
-    .kernel_dimensions: 2
     .wavefront_size: 64
-    .workitem_count: [{type: Multiply, lhs: {type: Convert, arg: {type: ArithmeticShiftR, lhs: {type: Subtract, lhs: {type: Add, lhs: {type: Kernel Argument, name: Tensor_0_size_0_1, variableType: {dataType: Int64, pointerType: Value}, dataDirection: read_only, expression: {type: CommandArgument, size: 8, offset: 8, name: Tensor_0_size_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}, offset: 8, size: 8}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 16}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 1}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 4}}, dataType: Int32}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 128}}, {type: Multiply, lhs: {type: Convert, arg: {type: ArithmeticShiftR, lhs: {type: Subtract, lhs: {type: Add, lhs: {type: Kernel Argument, name: Tensor_2_size_1_4, variableType: {dataType: Int64, pointerType: Value}, dataDirection: read_only, expression: {type: CommandArgument, size: 8, offset: 56, name: Tensor_2_size_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}, offset: 32, size: 8}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 32}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 1}}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 5}}, dataType: Int32}, rhs: {type: LiteralValue.UInt32, dataType: UInt32, value: 1}}, {is-null: true}]
-    .dynamic_sharedmemory_bytes: {type: LiteralValue.UInt32, dataType: UInt32, value: 0}
     .args:
       - .name: Tensor_0_stride_0_0
         .size: 8
         .offset: 0
-        .expression: {type: CommandArgument, size: 8, offset: 24, name: Tensor_0_stride_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_0_pointer
         .size: 8
         .offset: 8
-        .expression: {type: CommandArgument, size: 8, offset: 0, name: Tensor_0_pointer, variableType: {dataType: FP6, pointerType: PointerGlobal}, direction: read_write}
-        .variableType: {dataType: FP6, pointerType: PointerGlobal}
         .address_space: global
         .actual_access: read_write
         .value_kind: global_buffer
       - .name: Tensor_0_size_0_1
         .size: 8
         .offset: 16
-        .expression: {type: CommandArgument, size: 8, offset: 8, name: Tensor_0_size_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_2_stride_1_3
         .size: 8
         .offset: 24
-        .expression: {type: CommandArgument, size: 8, offset: 72, name: Tensor_2_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_2_pointer
         .size: 8
         .offset: 32
-        .expression: {type: CommandArgument, size: 8, offset: 40, name: Tensor_2_pointer, variableType: {dataType: FP8, pointerType: PointerGlobal}, direction: read_write}
-        .variableType: {dataType: FP8, pointerType: PointerGlobal}
         .address_space: global
         .actual_access: read_write
         .value_kind: global_buffer
       - .name: Tensor_2_size_1_4
         .size: 8
         .offset: 40
-        .expression: {type: CommandArgument, size: 8, offset: 56, name: Tensor_2_size_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: user_Float_Value_14
         .size: 4
         .offset: 48
-        .expression: {type: CommandArgument, size: 4, offset: 204, name: user_Float_Value_14, variableType: {dataType: Float, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Float, pointerType: Value}
         .value_kind: by_value
       - .name: user_Float_Value_12
         .size: 4
         .offset: 52
-        .expression: {type: CommandArgument, size: 4, offset: 200, name: user_Float_Value_12, variableType: {dataType: Float, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Float, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_4_stride_0_6
         .size: 8
         .offset: 56
-        .expression: {type: CommandArgument, size: 8, offset: 104, name: Tensor_4_stride_0, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_4_pointer
         .size: 8
         .offset: 64
-        .expression: {type: CommandArgument, size: 8, offset: 80, name: Tensor_4_pointer, variableType: {dataType: E8M0, pointerType: PointerGlobal}, direction: read_write}
-        .variableType: {dataType: E8M0, pointerType: PointerGlobal}
         .address_space: global
         .actual_access: read_write
         .value_kind: global_buffer
       - .name: Tensor_7_stride_1_8
         .size: 8
         .offset: 72
-        .expression: {type: CommandArgument, size: 8, offset: 152, name: Tensor_7_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_7_pointer
         .size: 8
         .offset: 80
-        .expression: {type: CommandArgument, size: 8, offset: 120, name: Tensor_7_pointer, variableType: {dataType: E8M0, pointerType: PointerGlobal}, direction: read_write}
-        .variableType: {dataType: E8M0, pointerType: PointerGlobal}
         .address_space: global
         .actual_access: read_write
         .value_kind: global_buffer
       - .name: Tensor_0_size_1_14
         .size: 8
         .offset: 88
-        .expression: {type: CommandArgument, size: 8, offset: 16, name: Tensor_0_size_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_21_stride_1_16
         .size: 8
         .offset: 96
-        .expression: {type: CommandArgument, size: 8, offset: 240, name: Tensor_21_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_21_pointer
         .size: 8
         .offset: 104
-        .expression: {type: CommandArgument, size: 8, offset: 208, name: Tensor_21_pointer, variableType: {dataType: Float, pointerType: PointerGlobal}, direction: read_write}
-        .variableType: {dataType: Float, pointerType: PointerGlobal}
         .address_space: global
         .actual_access: read_write
         .value_kind: global_buffer
       - .name: Tensor_10_stride_1_10
         .size: 8
         .offset: 112
-        .expression: {type: CommandArgument, size: 8, offset: 192, name: Tensor_10_stride_1, variableType: {dataType: Int64, pointerType: Value}, direction: read_only}
-        .variableType: {dataType: Int64, pointerType: Value}
         .value_kind: by_value
       - .name: Tensor_10_pointer
         .size: 8
         .offset: 120
-        .expression: {type: CommandArgument, size: 8, offset: 160, name: Tensor_10_pointer, variableType: {dataType: Float, pointerType: PointerGlobal}, direction: read_write}
-        .variableType: {dataType: Float, pointerType: PointerGlobal}
         .address_space: global
         .actual_access: read_write
         .value_kind: global_buffer
