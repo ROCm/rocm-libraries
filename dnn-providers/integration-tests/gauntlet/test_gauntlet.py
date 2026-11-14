@@ -1357,7 +1357,7 @@ def test_sdpa_backward_space_draws_every_feature_and_renders_it():
         if not axis.is_range:
             assert seen[name] == {json.dumps(v) for v in axis.values}, name
     assert seen_heads_masks == {
-        (d, m) for d in (64, 128, 192) for m in sp.axes["mask"].values
+        (d, m) for d in (64, 72, 96, 128, 136, 192) for m in sp.axes["mask"].values
     }
     assert (
         0 < groups_above_one < 400
