@@ -187,7 +187,7 @@ def test_data_parallel_custom_descriptor_rejects_partial_flag_aliases(semantic):
         validateCustomPersistentArgs(config)
 
 
-@pytest.mark.parametrize("version", [-1, 3, 99, True, "1"])
+@pytest.mark.parametrize("version", [-1, 4, 99, True, "1"])
 @pytest.mark.parametrize("regenerate", [False, True])
 def test_unknown_layout_rejected_before_regeneration(version, regenerate):
     config = _persistent_args_config()
