@@ -38,6 +38,7 @@ constexpr size_t MIN_RANK = 3;
 constexpr const char* FWD_OPERATION = "Convolution forward";
 constexpr const char* BWD_DATA_OPERATION = "Convolution backward data";
 constexpr const char* WRW_OPERATION = "Convolution backward weights";
+constexpr const char* FUSED_OPERATION = "Fused convolution bias activation";
 
 // Backward data declines a dy or dx with more elements than this (the largest 32-bit signed count).
 constexpr int64_t MAX_BWD_DATA_ELEMENTS = std::numeric_limits<int32_t>::max();
@@ -55,6 +56,21 @@ struct TensorInfo
 [[noreturn]] void decline(const std::string& reason)
 {
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason);
+}
+
+// "[1, 16, 1, 1]" for a dims vector.
+std::string dimsToString(const std::vector<int64_t>& dims)
+{
+    std::string text = "[";
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        if(i != 0)
+        {
+            text += ", ";
+        }
+        text += std::to_string(dims[i]);
+    }
+    return text + "]";
 }
 
 // Layout class mask of a tensor, computed on the graph tensor (unpadded rank 3, 4 or 5).
@@ -365,6 +381,53 @@ void validateConvBwdDataSize(const TensorAttributes& dy, const TensorAttributes&
     // strides.
     checkBwdDataElementCount("dy", dy);
     checkBwdDataElementCount("dx", dx);
+}
+
+void validateFusedConvBiasOperand(const TensorAttributes& x,
+                                  const TensorAttributes& yConv,
+                                  const TensorAttributes& bias)
+{
+    const auto* xDims = x.dims();
+    const auto* yDims = yConv.dims();
+    const auto* biasDims = bias.dims();
+
+    if(xDims == nullptr || yDims == nullptr || biasDims == nullptr)
+    {
+        decline(std::string(FUSED_OPERATION) + ": tensor x, y or bias has null dims");
+    }
+    if(yDims->size() < MIN_RANK)
+    {
+        decline(std::string(FUSED_OPERATION) + ": convolution output has rank below 3");
+    }
+
+    // Bias shape. ConvCKIgemmGrpFwdBiasActivFused reads whatever the ADD operand is as a
+    // per-channel vector of K elements, so a full-size residual or a scalar is read as garbage
+    // and the output is wrong without any error. Only [1, K, 1, .., 1] (K = output channels, same
+    // rank as the convolution output) is a per-channel bias. Workaround tracked by ALMIOPEN-3014;
+    // remove it when the MIOpen defect ALMIOPEN-3009 is fixed (the provider should keep refusing
+    // to treat a residual add as a bias unless it is taught residual-add fusion).
+    std::vector<int64_t> expectedDims(yDims->size(), 1);
+    expectedDims[1] = yDims->Get(1);
+    const std::vector<int64_t> actualDims(biasDims->begin(), biasDims->end());
+    if(actualDims != expectedDims)
+    {
+        decline(std::string(FUSED_OPERATION) + ": bias operand must have dims "
+                + dimsToString(expectedDims) + " (one value per output channel), got "
+                + dimsToString(actualDims));
+    }
+
+    // Bias data type. The same MIOpen fused solver never validates the bias data type and returns
+    // garbage when it differs from the io data type. The node checks of the fused builder let an
+    // fp32 bias through on an fp16 or bf16 convolution because the convolution intermediate is
+    // float and equals the bias type. Workaround tracked by ALMIOPEN-3016; remove it when the
+    // MIOpen defect ALMIOPEN-3011 is fixed.
+    if(bias.data_type() != x.data_type())
+    {
+        decline(std::string(FUSED_OPERATION) + ": bias data type "
+                + hipdnn_flatbuffers_sdk::data_objects::toString(bias.data_type())
+                + " must equal the io data type "
+                + hipdnn_flatbuffers_sdk::data_objects::toString(x.data_type()));
+    }
 }
 
 } // namespace miopen_plugin::conv_applicability

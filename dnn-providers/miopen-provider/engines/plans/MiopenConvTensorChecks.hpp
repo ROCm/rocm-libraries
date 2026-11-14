@@ -26,6 +26,12 @@ namespace miopen_plugin::conv_applicability
 //     tensor is accepted: MIOpen computes it correctly.
 // Backward data additionally has a size limit: dy and dx must each have at most 2^31 - 1 elements.
 //
+// Fused convolution + bias + activation (forward): the ADD operand that is not the convolution
+// output must
+//   - be a per-channel bias: dims [1, K, 1, .., 1] with K the convolution output's dims[1] and the
+//     same rank as the convolution output;
+//   - have the data type of the convolution input x (the io data type of the fused graph).
+//
 // Throws hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason) when the
 // tensors must be declined; `reason` names the operation, the offending tensor and the rule. Also
 // throws when a tensor has null dims() or strides(), differing dims()/strides() lengths, or rank
@@ -52,5 +58,14 @@ void validateConvWrwIoTensors(const hipdnn_flatbuffers_sdk::data_objects::Tensor
 // validators when the dims are not yet known to be sane.
 void validateConvBwdDataSize(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dy,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dx);
+
+/// Throws HipdnnPluginException(BAD_PARAM) unless `bias` (the ADD operand that is not the
+/// convolution output) is a per-channel bias of the fused convolution whose output tensor is
+/// `yConv`, with the data type of `x`. Reads only dims() (non-null, rank of `yConv` at least 3)
+/// and data_type() of the three tensors; strides are not checked.
+void validateFusedConvBiasOperand(
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yConv,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& bias);
 
 } // namespace miopen_plugin::conv_applicability

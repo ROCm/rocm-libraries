@@ -100,6 +100,12 @@ struct ConvolutionBiasActivationTestParam
 
     std::string label;
 
+    // Dims of the ADD operand that is not the convolution output. Empty: the per-channel bias
+    // getDerivedShape(yDims).
+    std::vector<int64_t> biasDimsOverride = {};
+    // Pass that operand as the first input of the ADD (bias + y_conv) instead of the second.
+    bool biasFirst = false;
+
     friend std::ostream& operator<<(std::ostream& os, const ConvolutionBiasActivationTestParam& tc)
     {
         using namespace hipdnn_data_sdk::utilities;
@@ -117,6 +123,8 @@ struct ConvolutionBiasActivationTestParam
         }
         os << "], ";
         os << "Virtual tensors: " << vecToString(tc.virtualTensors);
+        os << ", Bias dims override: " << vecToString(tc.biasDimsOverride);
+        os << ", Bias first: " << tc.biasFirst;
 
         return os;
     }
@@ -182,7 +190,9 @@ protected:
         std::shared_ptr<TensorAttributes> yBiasTensorAttr;
         if(param.op == FusedOp::CBA)
         {
-            const auto biasDims = getDerivedShape(convTestCase.yDims);
+            const auto biasDims = param.biasDimsOverride.empty()
+                                      ? getDerivedShape(convTestCase.yDims)
+                                      : param.biasDimsOverride;
 
             auto biasTensorAttrObj
                 = makeTensorAttributes("bias",
@@ -197,7 +207,9 @@ protected:
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
             biasAttrs.set_compute_data_type(param.dataTypes[TypeKey::BIAS_COMPUTE]);
 
-            yBiasTensorAttr = _graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
+            yBiasTensorAttr = param.biasFirst
+                                  ? _graphObj.pointwise(biasTensorAttr, yConvTensorAttr, biasAttrs)
+                                  : _graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
             yBiasTensorAttr->set_name("y_bias");
             yBiasTensorAttr->set_data_type(param.dataTypes[TypeKey::Y_BIAS]);
             yBiasTensorAttr->set_dim(convTestCase.yDims);
@@ -264,6 +276,11 @@ static test_conv_common::ConvTestCase validConvTestCase5d()
 {
     return {{2, 3, 4, 4, 4}, {1, 3, 2, 2, 2}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, 0};
 };
+
+static test_conv_common::ConvTestCase validConvTestCase4dMultiChannel()
+{
+    return {{2, 3, 4, 4}, {4, 3, 2, 2}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, 0};
+}
 
 static test_activation_common::ActivTestCase validActivTestCase()
 {
@@ -513,6 +530,154 @@ static std::vector<ConvolutionBiasActivationTestParam> testParams()
               {TypeKey::Y_CONV},
               false,
               "Invalid Bfloat16, y_conv intermediate tensor must be Float"},
+
+        // Bias operand: a per-channel bias [1, K, 1, 1] of the io data type is the only operand the
+        // fused solver computes correctly (ALMIOPEN-3014, ALMIOPEN-3016). The valid cases above
+        // are the controls for the shapes and types below; a negative is discriminating only on a
+        // device that has a fused solver for its graph.
+        Param{FusedOp::CBA,
+              validConvTestCase4dMultiChannel(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "Valid per-channel bias, K > 1"},
+        Param{FusedOp::CBA,
+              validConvTestCase4dMultiChannel(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "Valid per-channel bias as the first add operand",
+              {},
+              true},
+        Param{FusedOp::CBA,
+              validConvTestCase4dMultiChannel(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid, the add operand is a full-size residual",
+              {2, 4, 3, 3}},
+        Param{FusedOp::CBA,
+              validConvTestCase4dMultiChannel(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid, the add operand is a full-size residual as the first add operand",
+              {2, 4, 3, 3},
+              true},
+        Param{FusedOp::CBA,
+              validConvTestCase4dMultiChannel(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid, the add operand is a scalar while K > 1",
+              {1, 1, 1, 1}},
+        Param{FusedOp::CBA,
+              validConvTestCase4dMultiChannel(),
+              TensorLayout::NHWC,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid, the add operand is a full-size residual in NHWC",
+              {2, 4, 3, 3}},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid, the add operand is a full-size residual while K == 1",
+              {2, 1, 3, 3}},
+
+        // Bias data type: it must equal the io data type. An fp32 bias on a half or bfloat16
+        // convolution passes the intermediate data type checks because the convolution
+        // intermediate is float, so the intermediates and the bias compute type are float here.
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::HALF,
+              {{TypeKey::BIAS_COMPUTE, DataType::HALF}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "Valid Half"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::HALF,
+              {{TypeKey::BIAS, DataType::FLOAT},
+               {TypeKey::BIAS_COMPUTE, DataType::FLOAT},
+               {TypeKey::Y_CONV, DataType::FLOAT},
+               {TypeKey::Y_BIAS, DataType::FLOAT}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid Half, the bias is Float"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::HALF,
+              {{TypeKey::BIAS, DataType::FLOAT},
+               {TypeKey::BIAS_COMPUTE, DataType::FLOAT},
+               {TypeKey::Y_CONV, DataType::FLOAT},
+               {TypeKey::Y_BIAS, DataType::FLOAT}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid Half, the bias is Float and the first add operand",
+              {},
+              true},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::BFLOAT16,
+              {{TypeKey::BIAS, DataType::FLOAT},
+               {TypeKey::BIAS_COMPUTE, DataType::FLOAT},
+               {TypeKey::Y_CONV, DataType::FLOAT},
+               {TypeKey::Y_BIAS, DataType::FLOAT}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid Bfloat16, the bias is Float"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::FLOAT,
+              {{TypeKey::BIAS, DataType::HALF}, {TypeKey::BIAS_COMPUTE, DataType::HALF}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid Float, the bias is Half"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              validActivTestCase(),
+              hipdnn_frontend::DataType::BFLOAT16,
+              {{TypeKey::BIAS, DataType::HALF},
+               {TypeKey::BIAS_COMPUTE, DataType::HALF},
+               {TypeKey::Y_CONV, DataType::FLOAT},
+               {TypeKey::Y_BIAS, DataType::FLOAT}},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              false,
+              "Invalid Bfloat16, the bias is Half"},
         // Activation modes
         Param{FusedOp::CBA,
               validConvTestCase4d(),

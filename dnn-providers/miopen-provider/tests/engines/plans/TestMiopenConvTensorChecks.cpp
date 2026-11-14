@@ -28,6 +28,7 @@ using miopen_plugin::conv_applicability::validateConvBwdDataIoTensors;
 using miopen_plugin::conv_applicability::validateConvBwdDataSize;
 using miopen_plugin::conv_applicability::validateConvFwdIoTensors;
 using miopen_plugin::conv_applicability::validateConvWrwIoTensors;
+using miopen_plugin::conv_applicability::validateFusedConvBiasOperand;
 
 namespace
 {
@@ -1112,4 +1113,175 @@ TEST(TestMiopenConvTensorChecks, SizeLimitIsNotPartOfTheIoTensorRules)
     expectBackwardAccepted(
         {"dy huge", channelsFirst(hugeDims), channelsFirst(unitDims), channelsFirst(unitDims)});
     expectAccepted(channelsFirst(hugeDims), channelsFirst(unitDims), channelsFirst(unitDims));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fused convolution + bias + activation: the bias operand
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr const char* BIAS_DIMS_REASON = "bias operand must have dims";
+constexpr const char* BIAS_DATA_TYPE_REASON = "must equal the io data type";
+
+// Empty when the bias operand is accepted, otherwise the reason it is declined. `yConv` is the
+// virtual convolution output (float for a half or bfloat16 graph) and carries no strides check.
+std::string fusedDeclineReason(const TensorSpec& x, const TensorSpec& yConv, const TensorSpec& bias)
+{
+    const auto xBuffer = buildTensor(1, x);
+    const auto yBuffer = buildTensor(2, yConv);
+    const auto biasBuffer = buildTensor(3, bias);
+
+    return declineReasonOf([&]() {
+        validateFusedConvBiasOperand(
+            attributesOf(xBuffer), attributesOf(yBuffer), attributesOf(biasBuffer));
+    });
+}
+
+// Per-channel bias dims of a convolution output: 1 everywhere but the channel dim.
+std::vector<int64_t> perChannelDims(const std::vector<int64_t>& yDims)
+{
+    std::vector<int64_t> dims(yDims.size(), 1);
+    dims[1] = yDims[1];
+    return dims;
+}
+
+const std::vector<DataType> FUSED_IO_DATA_TYPES
+    = {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16};
+
+void expectBiasDimsDeclined(const char* name,
+                            const std::vector<int64_t>& biasDims,
+                            const std::vector<int64_t>& yDims = Y_DIMS)
+{
+    SCOPED_TRACE(name);
+    EXPECT_THAT(
+        fusedDeclineReason(channelsFirst(X_DIMS), channelsFirst(yDims), channelsFirst(biasDims)),
+        ::testing::HasSubstr(BIAS_DIMS_REASON));
+}
+
+} // namespace
+
+// The control of every negative below: a [1, K, 1, ..] bias of the io data type at rank 3, 4 and 5,
+// with the float convolution intermediate that a half or bfloat16 graph carries.
+TEST(TestMiopenConvTensorChecks, FusedBiasAcceptsPerChannelBiasOfTheIoDataType)
+{
+    for(const auto& shapes : rankShapes())
+    {
+        for(const DataType dataType : FUSED_IO_DATA_TYPES)
+        {
+            SCOPED_TRACE("rank " + std::to_string(shapes.y.size()) + ", "
+                         + hipdnn_flatbuffers_sdk::data_objects::toString(dataType));
+
+            EXPECT_EQ(fusedDeclineReason(channelsFirst(shapes.x, dataType),
+                                         channelsFirst(shapes.y, DataType::FLOAT),
+                                         channelsFirst(perChannelDims(shapes.y), dataType)),
+                      "");
+            EXPECT_EQ(fusedDeclineReason(channelsLast(shapes.x, dataType),
+                                         channelsLast(shapes.y, dataType),
+                                         channelsFirst(perChannelDims(shapes.y), dataType)),
+                      "");
+        }
+    }
+}
+
+// With one output channel the per-channel bias and the scalar coincide, so [1, 1, 1, 1] is a valid
+// bias there (and only there).
+TEST(TestMiopenConvTensorChecks, FusedBiasAcceptsSingleValueBiasForOneOutputChannel)
+{
+    const std::vector<int64_t> yDims = {2, 1, 6, 6};
+
+    EXPECT_EQ(fusedDeclineReason(
+                  channelsFirst(X_DIMS), channelsFirst(yDims), channelsFirst({1, 1, 1, 1})),
+              "");
+}
+
+// ALMIOPEN-3014: MIOpen reads the operand as a per-channel vector whatever its shape is.
+TEST(TestMiopenConvTensorChecks, FusedBiasDeclinesOperandThatIsNotPerChannel)
+{
+    // Y_DIMS is [2, 4, 6, 6]: K == 4, rank 4.
+    expectBiasDimsDeclined("full-size residual", Y_DIMS);
+    expectBiasDimsDeclined("scalar with K > 1", {1, 1, 1, 1});
+    expectBiasDimsDeclined("batch extent above 1", {2, 4, 1, 1});
+    expectBiasDimsDeclined("wrong channel count", {1, 3, 1, 1});
+    expectBiasDimsDeclined("channel count at the wrong position", {1, 1, 1, 4});
+    expectBiasDimsDeclined("spatial extent above 1", {1, 4, 6, 1});
+    expectBiasDimsDeclined("rank 3 operand against a rank 4 output", {1, 4, 1});
+    expectBiasDimsDeclined("rank 5 operand against a rank 4 output", {1, 4, 1, 1, 1});
+    expectBiasDimsDeclined("rank 3 full-size residual", {2, 4, 14}, {2, 4, 14});
+    expectBiasDimsDeclined("scalar against a rank 5 output", {1, 1, 1, 1, 1}, {2, 4, 6, 6, 6});
+}
+
+// The reason names the dims the operand must have and the dims it has.
+TEST(TestMiopenConvTensorChecks, FusedBiasDimsReasonNamesExpectedAndActualDims)
+{
+    EXPECT_THAT(fusedDeclineReason(
+                    channelsFirst(X_DIMS), channelsFirst(Y_DIMS), channelsFirst({1, 1, 1, 1})),
+                ::testing::AllOf(::testing::HasSubstr("[1, 4, 1, 1]"),
+                                 ::testing::HasSubstr("got [1, 1, 1, 1]")));
+}
+
+// ALMIOPEN-3016: the dims are right and only the data type differs from x.
+TEST(TestMiopenConvTensorChecks, FusedBiasDeclinesDataTypeDifferentFromTheIoDataType)
+{
+    const std::vector<int64_t> biasDims = perChannelDims(Y_DIMS);
+
+    // fp32 bias on a half graph slips through the node checks: the intermediate is float too.
+    EXPECT_THAT(fusedDeclineReason(channelsFirst(X_DIMS, DataType::HALF),
+                                   channelsFirst(Y_DIMS, DataType::FLOAT),
+                                   channelsFirst(biasDims, DataType::FLOAT)),
+                ::testing::HasSubstr(BIAS_DATA_TYPE_REASON));
+    EXPECT_THAT(fusedDeclineReason(channelsFirst(X_DIMS, DataType::BFLOAT16),
+                                   channelsFirst(Y_DIMS, DataType::FLOAT),
+                                   channelsFirst(biasDims, DataType::FLOAT)),
+                ::testing::HasSubstr(BIAS_DATA_TYPE_REASON));
+    EXPECT_THAT(fusedDeclineReason(channelsFirst(X_DIMS, DataType::FLOAT),
+                                   channelsFirst(Y_DIMS, DataType::FLOAT),
+                                   channelsFirst(biasDims, DataType::HALF)),
+                ::testing::HasSubstr(BIAS_DATA_TYPE_REASON));
+    EXPECT_THAT(fusedDeclineReason(channelsFirst(X_DIMS, DataType::HALF),
+                                   channelsFirst(Y_DIMS, DataType::FLOAT),
+                                   channelsFirst(biasDims, DataType::BFLOAT16)),
+                ::testing::HasSubstr(BIAS_DATA_TYPE_REASON));
+}
+
+TEST(TestMiopenConvTensorChecks, FusedBiasDataTypeReasonNamesBothTypes)
+{
+    EXPECT_THAT(fusedDeclineReason(channelsFirst(X_DIMS, DataType::HALF),
+                                   channelsFirst(Y_DIMS, DataType::FLOAT),
+                                   channelsFirst(perChannelDims(Y_DIMS), DataType::FLOAT)),
+                ::testing::AllOf(::testing::HasSubstr("FLOAT"), ::testing::HasSubstr("HALF")));
+}
+
+// Both rules are independent: a wrong shape with the right type is declined for the shape, and a
+// right shape with the wrong type is declined for the type (the cases above), so neither check can
+// stand in for the other.
+TEST(TestMiopenConvTensorChecks, FusedBiasShapeIsCheckedWithTheRightDataType)
+{
+    EXPECT_THAT(fusedDeclineReason(channelsFirst(X_DIMS, DataType::HALF),
+                                   channelsFirst(Y_DIMS, DataType::FLOAT),
+                                   channelsFirst(Y_DIMS, DataType::HALF)),
+                ::testing::HasSubstr(BIAS_DIMS_REASON));
+}
+
+TEST(TestMiopenConvTensorChecks, FusedBiasDeclinesMalformedTensors)
+{
+    const TensorSpec x = channelsFirst(X_DIMS);
+    const TensorSpec y = channelsFirst(Y_DIMS);
+    const TensorSpec bias = channelsFirst(perChannelDims(Y_DIMS));
+
+    TensorSpec nullX = x;
+    nullX.nullDims = true;
+    EXPECT_THAT(fusedDeclineReason(nullX, y, bias), ::testing::HasSubstr("null dims"));
+
+    TensorSpec nullY = y;
+    nullY.nullDims = true;
+    EXPECT_THAT(fusedDeclineReason(x, nullY, bias), ::testing::HasSubstr("null dims"));
+
+    TensorSpec nullBias = bias;
+    nullBias.nullDims = true;
+    EXPECT_THAT(fusedDeclineReason(x, y, nullBias), ::testing::HasSubstr("null dims"));
+
+    EXPECT_THAT(fusedDeclineReason(x, channelsFirst({2, 4}), channelsFirst({1, 4})),
+                ::testing::HasSubstr("rank below 3"));
 }
