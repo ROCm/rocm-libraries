@@ -31,9 +31,12 @@
 // valid, distinct, non-null pointer ([expr.new], [new.delete.single]).
 //
 // This test exercises operator new(0), new T[0], malloc(0), and calloc(0, 0):
-// none of them may throw or abort, and operator new/new[] must return a
-// non-null pointer.
+// none of them may throw or abort, operator new/new[] must return a non-null
+// pointer, and malloc/calloc must not report ENOMEM. operator new rounds a
+// zero size up to one byte before allocating, so only malloc/calloc reach the
+// zero-length path in __hipstdpar_aligned_alloc.
 
+#include <cerrno>
 #include <cstdlib>
 #include <new>
 
@@ -72,11 +75,25 @@ int main()
     delete[] arr;
 
     // malloc(0)/calloc(0, 0) are legally allowed to return nullptr, but must
-    // never crash or abort the process.
+    // never crash or abort the process, nor fail with ENOMEM. errno is
+    // accessed through a volatile because compilers may assume malloc/calloc
+    // leave it unchanged, and they are only interposed after optimization.
+    volatile int& error = errno;
+
+    error   = 0;
     void* m = publish(std::malloc(0));
+    if (!m && error == ENOMEM)
+    {
+      return EXIT_FAILURE;
+    }
     std::free(m);
 
+    error   = 0;
     void* c = publish(std::calloc(0, 0));
+    if (!c && error == ENOMEM)
+    {
+      return EXIT_FAILURE;
+    }
     std::free(c);
   }
   catch (...)
