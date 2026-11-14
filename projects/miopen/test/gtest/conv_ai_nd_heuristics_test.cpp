@@ -933,12 +933,12 @@ TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 // loudly and directly if a model is exported in a format the linked fdeep cannot parse (e.g. a
 // Keras 3 export against a Keras 2-era fdeep). Without this, such a breakage only surfaces
 // indirectly downstream -- and because the runtime now degrades gracefully to the non-AI
-// heuristic on a load failure, it would otherwise be masked in CI. The .tn.model files are
-// frugally-deep models EXCEPT the "*_metadata.tn.model" siblings, which are plain JSON read by
-// MIOpen directly (not by fdeep). Pure CPU fdeep load -- the handle is only used to identify the
-// device. An arch that ships no bundled models (e.g. gfx1250) is skipped only when the system db
-// holds no models at all; models present for other archs (a multi-arch install, a dev build tree)
-// are still loaded.
+// heuristic on a load failure, it would otherwise be masked in CI. The .tn.model and .ktn.model
+// files are frugally-deep models EXCEPT the "*_metadata.tn.model" siblings, which are plain JSON
+// read by MIOpen directly (not by fdeep). Pure CPU fdeep load -- the handle is only used to
+// identify the device. An arch that ships no bundled models (e.g. gfx1250) is skipped only when
+// the system db holds no models at all; models present for other archs (a multi-arch install, a
+// dev build tree) are still loaded.
 TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
 {
     const auto db = GetSystemDbPath();
@@ -949,7 +949,8 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
         for(const auto& entry : fs::directory_iterator(db))
         {
             const auto name = entry.path().filename().string();
-            if(name.ends_with(".tn.model") && name.find("metadata") == std::string::npos)
+            if((name.ends_with(".tn.model") || name.ends_with(".ktn.model")) &&
+               name.find("metadata") == std::string::npos)
                 models.push_back(entry.path());
         }
     }
@@ -959,7 +960,7 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
         GTEST_SKIP() << device_name << " has no bundled fdeep models and none are in " << db;
 
     ASSERT_TRUE(fs::exists(db)) << "system db path does not exist: " << db;
-    ASSERT_FALSE(models.empty()) << "no fdeep .tn.model files found in " << db;
+    ASSERT_FALSE(models.empty()) << "no fdeep .tn.model/.ktn.model files found in " << db;
 
     std::vector<std::string> failures;
     for(const auto& path : models)

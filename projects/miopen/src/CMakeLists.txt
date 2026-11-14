@@ -1178,6 +1178,15 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         kernels/lgbm_model_meta.json
         kernels/lgbm_rank.bin
         kernels/lgbm_pcfg.bin)
+    if(MIOPEN_FDEEP_MODEL_FORMAT STREQUAL "keras2")
+        # frugally-deep 0.15.x: replace the Keras 3 models with their Keras 2 copies (same names).
+        file(GLOB KERAS2_MODEL_FILES CONFIGURE_DEPENDS kernels/keras2/*.model)
+        foreach(KERAS2_MODEL_FILE ${KERAS2_MODEL_FILES})
+            get_filename_component(KERAS2_MODEL_FILENAME "${KERAS2_MODEL_FILE}" NAME)
+            list(REMOVE_ITEM MODEL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/kernels/${KERAS2_MODEL_FILENAME}")
+        endforeach()
+        list(APPEND MODEL_FILES ${KERAS2_MODEL_FILES})
+    endif()
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()

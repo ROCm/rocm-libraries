@@ -92,6 +92,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
   files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
   from the build tree without an install.
+* [Conv] The bundled AI heuristic models (`*.tn.model` and `*.ktn.model`) are now Keras 3 exports
+  for frugally-deep v0.21.0 or newer (fixes ROCm/rocm-libraries#889). Builds against
+  frugally-deep 0.15.x instead install temporary Keras 2 copies of the same models. Configuring
+  against frugally-deep 0.16 to 0.20 is an error because those versions can load neither set.
 * [Conv] The `ConvHipConv` config version is now `v0.5`, so user perf-db records written with
   hipconv v0.4 are rejected and those layers run the default config until re-tuned.
 * [Conv] `ConvHipConv` fp16 and bf16 backward weights now write dW directly in the weight type for
