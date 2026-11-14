@@ -362,7 +362,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
+                ShipsTheF32Objects
                 RanksTheNarrowerBucketFirst
+                ShipsTheWideAndPairBuckets
+                StagesTheHeadDim256KeysInChunksOn64KiBParts
                 EveryKernelDeclaresItsFamilysSignature
         )
     endif()
@@ -376,6 +379,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
                 EveryKernelDeclaresItsFamilysSignature
+                ServesHeadDim256OnFourWaves
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode)
@@ -401,7 +405,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheThirtyEightSlotSignature
+                EveryKernelDeclaresTheFortySevenSlotSignature
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
@@ -426,7 +430,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryDecodeVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheFortySlotSignature
+                EveryKernelDeclaresTheFortyFourSlotSignature
         )
     endif()
 
@@ -443,6 +447,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         CarriesNoGraphScopedMatcher
         CarriesExactlyOneSharedKernelScopedMatcher
     )
+
+    # A suite whose engine config declares behavior_notes renders one more case. The list
+    # names those suites; keep it in step with the configs' engine.behavior_notes.
+    set(_hkp_behavior_notes_suites
+        TestGfx950AttentionDensePacks
+        TestGfx1151WmmaAttentionPacks
+        TestGfx1151WmmaAttentionDecodePacks
+    )
+    # _hkp_generated_packs_cases_for(<out> <suite>): the cases <suite> registers.
+    function(_hkp_generated_packs_cases_for out_var suite)
+        set(_cases ${_hkp_generated_packs_cases})
+        if(suite IN_LIST _hkp_behavior_notes_suites)
+            list(APPEND _cases DeclaresItsConfiguredBehaviorNotes)
+        endif()
+        set(${out_var} ${_cases} PARENT_SCOPE)
+    endfunction()
 
     # Census for each HKP_PINNED_ATTENTION_ENGINES engine's production pack (the table is in
     # ../CMakeLists.txt). Each reads only the product shard, so it is eligible for census
@@ -470,6 +490,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -489,12 +510,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hkp_product_ships_engine_for_arch(_hkp_${_arch}_attention_${_snake}
                                           "hipkernel:${_local}" ${_arch})
         if(_hkp_${_arch}_attention_${_snake})
+            _hkp_generated_packs_cases_for(_hkp_cases Test${_local}Packs)
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
                 ARCHES ${_arch}
                 SUITES Test${_local}Packs
-                EXPECTED_CASES ${_hkp_generated_packs_cases}
+                EXPECTED_CASES ${_hkp_cases}
             )
         else()
             message(STATUS
@@ -566,12 +588,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             endif()
         endforeach()
         if(_hkp_rdna_wmma_attention_arches)
+            _hkp_generated_packs_cases_for(_hkp_cases ${_hkp_suite})
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
                 ARCHES ${_hkp_rdna_wmma_attention_arches}
                 SUITES ${_hkp_suite}
-                EXPECTED_CASES ${_hkp_generated_packs_cases}
+                EXPECTED_CASES ${_hkp_cases}
             )
         else()
             message(STATUS
@@ -596,6 +619,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx950ConvDgradAot for "
             "gfx950, so its census is not registered.")
+    endif()
+
+    # ... and its gfx1250 sibling, hipkernel:Gfx1250ConvDgradAot.
+    hkp_product_ships_engine_for_arch(_hkp_gfx1250_conv_dgrad_aot
+                                      "hipkernel:Gfx1250ConvDgradAot" gfx1250)
+    if(_hkp_gfx1250_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+        # Its trained ranker, as the ModelBinding companion above checks the attention
+        # engine's: the bound model loads and scores every shipped kernel.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL2KernelRankerScoresEveryShippedKernel
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1250ConvDgradAot for "
+            "gfx1250, so its census is not registered.")
     endif()
 
 endif()

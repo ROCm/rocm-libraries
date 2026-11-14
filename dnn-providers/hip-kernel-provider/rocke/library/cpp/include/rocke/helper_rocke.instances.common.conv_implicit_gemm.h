@@ -1,0 +1,330 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * rocke/helper_rocke.instances.common.conv_implicit_gemm.h -- C99 port of the
+ * ConvProblem dataclass from
+ * rocke/instances/common/conv_implicit_gemm.py (implicit-GEMM convolution,
+ * NHWC x KYXC -> NHWK).
+ *
+ *   Python (conv_implicit_gemm.py)        C99 (this header)
+ *   -----------------------------------   --------------------------------------
+ *   @dataclass(frozen=True) ConvProblem   rocke_conv_problem_t
+ *   ConvProblem(N, Hi, Wi, C, K, R, S,    rocke_conv_problem_make(...) /
+ *               sH, sW, pH, pW, dH, dW)     rocke_conv_problem_default()
+ *   .Ho            (property)             rocke_conv_problem_ho(...)
+ *   .Wo            (property)             rocke_conv_problem_wo(...)
+ *   .M             (property)             rocke_conv_problem_m(...)
+ *   .N_gemm        (property)             rocke_conv_problem_n_gemm(...)
+ *   .K_gemm        (property)             rocke_conv_problem_k_gemm(...)
+ *   .flops         (property)             rocke_conv_problem_flops(...)
+ *   .short()                              rocke_conv_problem_short(...)
+ *
+ * ConvProblem is a pure value type: its fields are the convolution shape
+ * parameters and its members are integer-arithmetic derived quantities plus a
+ * naming string. NONE of them touch the IR builder, so these are bit-for-bit
+ * value producers whose results are later baked into the descriptor DAG (e.g.
+ * via const_i32). A byte-identical IR sequence therefore follows from
+ * byte-identical return values here.
+ *
+ * Only ConvProblem is ported in this file. The surrounding spec/dataclasses
+ * (ConvAccumulatorEpilogue, ImplicitGemmConvSpec) and the builder entry points
+ * (build_implicit_gemm_conv, descriptor builders, epilogues) are NOT ported
+ * here; they are peers.
+ *
+ * Error model mirrors the rest of the C port: the short()-style string method
+ * uses an out-buffer + rocke_status_t return (ROCKE_ERR_VALUE when the buffer is
+ * too small / args are NULL), like the other spec helpers.
+ */
+#ifndef ROCKE_HELPER_ROCKE_INSTANCES_COMMON_CONV_IMPLICIT_GEMM_H
+#define ROCKE_HELPER_ROCKE_INSTANCES_COMMON_CONV_IMPLICIT_GEMM_H
+
+#include <stdbool.h>
+#include <stddef.h>
+
+#include "rocke/ir.h" /* rocke_status_t */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ------------------------------------------------------------------ *
+ * ConvProblem
+ * ------------------------------------------------------------------ *
+ *
+ * @dataclass(frozen=True)
+ * class ConvProblem:
+ *     N: int; Hi: int; Wi: int; C: int
+ *     K: int; Y: int; X: int
+ *     sH: int = 1; sW: int = 1
+ *     pH: int = 0; pW: int = 0
+ *     dH: int = 1; dW: int = 1
+ *     # 3-D-only (Optional[int], None => 2-D): Di, Z, sD, pD, dD
+ *
+ * Layouts (2-D):
+ *   A: NHWC fp16, shape [N, Hi, Wi, C]
+ *   B: KYXC fp16, shape [K, Y, X, C]
+ *   D: NHWK fp16, shape [N, Ho, Wo, K]
+ * Layouts (3-D, when Di/Z set):
+ *   A: NDHWC, [N, Di, Hi, Wi, C]; B: KZYXC, [K, Z, Y, X, C];
+ *   D: NDHWK, [N, Do, Ho, Wo, K]
+ *
+ * Implicit-GEMM packing:
+ *   M = N * Ho * Wo  (* Do for 3-D)
+ *   N_gemm = K
+ *   K_gemm = Y * X * C  (Z * Y * X * C for 3-D)
+ *
+ * Fields use int (signed 32-bit), matching the Python int() arithmetic the
+ * derived properties perform.
+ */
+typedef struct rocke_conv_problem
+{
+    int N;
+    int Hi;
+    int Wi;
+    int C;
+    int K;
+    int Y;
+    int X;
+    int sH; /* default 1 */
+    int sW; /* default 1 */
+    int pH; /* default 0 */
+    int pW; /* default 0 */
+    int dH; /* default 1 */
+    int dW; /* default 1 */
+    /* 3-D-only fields; 0/false => Python None (2-D conv). */
+    bool is_3d; /* true when Di/Z/sD/pD/dD are set */
+    int Di;
+    int Z;
+    int sD;
+    int pD;
+    int dD;
+    /* Grouped convolution (Python ConvProblem.groups, default 1).
+     * C and K are always the total counts across all groups. */
+    int groups; /* default 1 */
+} rocke_conv_problem_t;
+
+/* ConvProblem(N, Hi, Wi, C, K, Y, X, sH=1, sW=1, pH=0, pW=0, dH=1, dW=1):
+ * construct a 2-D ConvProblem with all fields explicit (is_3d=false; the 3-D
+ * fields zeroed). Use rocke_conv_problem_default() for the defaulted optional
+ * fields, or rocke_conv_problem_make_3d() for a 3-D problem. */
+rocke_conv_problem_t rocke_conv_problem_make(int N,
+                                             int Hi,
+                                             int Wi,
+                                             int C,
+                                             int K,
+                                             int Y,
+                                             int X,
+                                             int sH,
+                                             int sW,
+                                             int pH,
+                                             int pW,
+                                             int dH,
+                                             int dW);
+
+/* 3-D ConvProblem: adds the depth dims Di/Z/sD/pD/dD and sets is_3d=true. */
+rocke_conv_problem_t rocke_conv_problem_make_3d(int N,
+                                                int Di,
+                                                int Hi,
+                                                int Wi,
+                                                int C,
+                                                int K,
+                                                int Z,
+                                                int Y,
+                                                int X,
+                                                int sD,
+                                                int sH,
+                                                int sW,
+                                                int pD,
+                                                int pH,
+                                                int pW,
+                                                int dD,
+                                                int dH,
+                                                int dW);
+
+/* Construct a ConvProblem from only the required fields, taking the Python
+ * dataclass defaults for the optional ones (sH=sW=1, pH=pW=0, dH=dW=1). 2-D. */
+rocke_conv_problem_t rocke_conv_problem_default(int N, int Hi, int Wi, int C, int K, int Y, int X);
+
+/* ConvProblem.is_3d property: Di is not None. */
+bool rocke_conv_problem_is_3d(const rocke_conv_problem_t* p);
+
+/* ConvProblem.Do property (3-D only):
+ *   (Di + 2*pD - dD*(Z - 1) - 1) // sD + 1.  Returns 1 for 2-D problems
+ *   (so M = N*Ho*Wo*Do collapses to N*Ho*Wo). */
+int rocke_conv_problem_do(const rocke_conv_problem_t* p);
+
+/* ConvProblem.Ho property:
+ *   (Hi + 2*pH - dH*(Y - 1) - 1) // sH + 1
+ * Floor division matches Python's `//` for the non-negative operands this
+ * shape arithmetic produces. */
+int rocke_conv_problem_ho(const rocke_conv_problem_t* p);
+
+/* ConvProblem.Wo property:
+ *   (Wi + 2*pW - dW*(X - 1) - 1) // sW + 1 */
+int rocke_conv_problem_wo(const rocke_conv_problem_t* p);
+
+/* ConvProblem.M property:  N * Ho * Wo  (* Do for 3-D) */
+int rocke_conv_problem_m(const rocke_conv_problem_t* p);
+
+/* ConvProblem.N_gemm property:  K / groups  (= kpg; per-group output channels) */
+int rocke_conv_problem_n_gemm(const rocke_conv_problem_t* p);
+
+/* ConvProblem.K_gemm property:  Y * X * (C / groups)  (Z * Y * X * cpg for 3-D) */
+int rocke_conv_problem_k_gemm(const rocke_conv_problem_t* p);
+
+/* ConvProblem.flops property:  2 * M * N_gemm * K_gemm * groups
+ * Computed in 64-bit to avoid the int32 overflow Python's arbitrary-precision
+ * int never hits. */
+long long rocke_conv_problem_flops(const rocke_conv_problem_t* p);
+
+/* ConvProblem.is_pointwise property:
+ *   Y == 1 and X == 1 and sH == 1 and sW == 1 and pH == 0 and pW == 0
+ *   and (not is_3d or (Z == 1 and sD == 1 and pD == 0))
+ * For pointwise convolutions A, B, D are flat 2-D matrices and the
+ * coordinate-transform DAG reduces to multiply+add. */
+static inline bool rocke_conv_problem_is_pointwise(const rocke_conv_problem_t* p)
+{
+    if(p->Y != 1 || p->X != 1 || p->sH != 1 || p->sW != 1 || p->pH != 0 || p->pW != 0)
+        return false;
+    if(p->is_3d && (p->Z != 1 || p->sD != 1 || p->pD != 0))
+        return false;
+    return true;
+}
+
+/* ConvProblem.cpg property: C / groups (channels per group). */
+static inline int rocke_conv_problem_cpg(const rocke_conv_problem_t* p)
+{
+    return p->groups > 1 ? p->C / p->groups : p->C;
+}
+
+/* ConvProblem.kpg property: K / groups (output channels per group). */
+static inline int rocke_conv_problem_kpg(const rocke_conv_problem_t* p)
+{
+    return p->groups > 1 ? p->K / p->groups : p->K;
+}
+
+/* ConvProblem.short() ->
+ *   2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}{g}"  where g="G{groups}" if groups>1 else ""
+ *   3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}{g}"
+ * Writes the NUL-terminated string into `out` (capacity out_cap). On success
+ * returns ROCKE_OK and, if out_len != NULL, sets *out_len to the byte length
+ * (excluding the NUL). Returns ROCKE_ERR_VALUE on NULL args or a too-small
+ * buffer. */
+rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
+                                        char* out,
+                                        size_t out_cap,
+                                        size_t* out_len);
+
+/* coalesced_load_reason(operand, tile_rows, tile_cols, block_size, load_vec):
+ * whether a CoalescedTileLoader with this exact width can copy the tile (its
+ * chunk count must divide by block_size). Returns true if it can; otherwise
+ * writes the Python reason text into `reason` (if non-NULL) and returns
+ * false. */
+bool rocke_conv_coalesced_load_ok(const char* operand,
+                                  int tile_rows,
+                                  int tile_cols,
+                                  int block_size,
+                                  int load_vec,
+                                  char* reason,
+                                  size_t reason_cap);
+
+/* vector_width_reason((operand, vector_size, dtype), ...), one operand per
+ * call: an explicit width (has_vec) must keep one per-lane access within
+ * 16 bytes (8 x 16-bit or 4 x fp32). An unset width is derived from the
+ * per-dtype default ladder and always fits. Returns true if it fits;
+ * otherwise writes the Python reason text into `reason` (if non-NULL) and
+ * returns false. A NULL dtype is the "fp16" default. */
+bool rocke_conv_vector_width_ok(
+    const char* operand, bool has_vec, int vec, const char* dtype, char* reason, size_t reason_cap);
+
+/* ------------------------------------------------------------------ *
+ * ConvDataSpec.mma_dtype -- TF32 compute (_conv_implicit_gemm_common.py)
+ * ------------------------------------------------------------------ *
+ *
+ * mma_dtype selects the matrix-core input type when it differs from the
+ * storage type. NULL (Python None, the default) means the MMA consumes
+ * dtype_a / dtype_b as stored. The one other value is "tf32": A and B stay
+ * fp32 in memory and LDS, and each fragment read from LDS is reinterpreted as
+ * vec<tf32xN> for the catalog's TF32 atom -- native XF32 on gfx942, BF16x3
+ * emulation on gfx950.
+ *
+ * Every *_reason function below mirrors a Python "why, or None/''" helper:
+ * it returns true and writes the Python reason text into `reason` (if
+ * non-NULL) when the spec cannot build, and returns false when it can. */
+
+/* _TF32_LDS_LOAD_MAX: the widest single LDS load a TF32 fragment is issued as
+ * (fp32 elements): 16 B, one ds_read_b128. Wider fragments are read as several
+ * of these. */
+#define ROCKE_CONV_TF32_LDS_LOAD_MAX 4
+
+/* _is_tf32_spelling(dtype): does `dtype` spell the logical TF32 compute mode
+ * (tf32, xf32, any case)? NULL is not a spelling. */
+bool rocke_conv_is_tf32_spelling(const char* dtype);
+
+/* ConvDataSpec.is_tf32: mma_dtype == "tf32". */
+bool rocke_conv_data_is_tf32(const char* mma_dtype);
+
+/* ConvDataSpec.mma_a / mma_b: the dtype the MMA consumes for an operand
+ * stored as `storage` (mma_dtype or storage). */
+const char* rocke_conv_data_mma_operand(const char* storage, const char* mma_dtype);
+
+/* ConvDataSpec.mma_dtype_reason(): the storage/compute mix-ups the
+ * byte-sizing validators cannot catch. */
+bool rocke_conv_mma_dtype_reason(const char* dtype_a,
+                                 const char* dtype_b,
+                                 const char* dtype_d,
+                                 const char* mma_dtype,
+                                 char* reason,
+                                 size_t reason_cap);
+
+/* The conv spec fields the TF32 gates read. Python passes the spec itself
+ * (duck typed over the forward, dgrad and wgrad specs); each C family fills
+ * one of these from its own spec. effective_lds_layout() is evaluated by the
+ * family: its row stride, or (lds_layout_error non-NULL) the ValueError text
+ * it raised, which the gate returns where Python catches it. */
+typedef struct rocke_conv_tf32_spec_view
+{
+    const char* dtype_a;
+    const char* dtype_b;
+    const char* dtype_d;
+    const char* mma_dtype;
+    int wave_size;
+    int tile_m;
+    int tile_n;
+    int warp_m;
+    int warp_n;
+    int warp_tile_m;
+    int warp_tile_n;
+    int warp_tile_k;
+    bool lds_k_outer;
+    bool async_dma;
+    /* lds_layout is not None and lds_layout.swizzle is not None. The C specs
+     * take no lds_layout override, so their families always pass false. */
+    bool lds_layout_swizzled;
+    int lds_row_stride;
+    const char* lds_layout_error;
+} rocke_conv_tf32_spec_view_t;
+
+/* _tf32_conv_spec_reason(spec, arch, async_needs_k_outer=...): the one TF32
+ * gate of the dgrad and wgrad kernels (arch NULL = the arch-free validate()
+ * form). Every non-TF32 spec passes unless it spells TF32 as a storage dtype. */
+bool rocke_conv_tf32_conv_spec_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                      const char* arch,
+                                      bool async_needs_k_outer,
+                                      char* reason,
+                                      size_t reason_cap);
+
+/* _tf32_mfma_reason(spec, arch): the rules every implicit-GEMM direction
+ * shares for a TF32 spec -- wave64, a TF32 warp-tile atom (on `arch`, or on
+ * any arch when arch is NULL), the emulated-atom register ceiling, and the LDS
+ * row-stride alignment. The forward gate (_fwd_tf32_reason) calls it directly. */
+bool rocke_conv_tf32_mfma_reason(const rocke_conv_tf32_spec_view_t* spec,
+                                 const char* arch,
+                                 char* reason,
+                                 size_t reason_cap);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+#endif /* ROCKE_HELPER_ROCKE_INSTANCES_COMMON_CONV_IMPLICIT_GEMM_H */

@@ -525,13 +525,26 @@ namespace rocsparse
         // Quick return if possible
         if(m == 0 || n == 0 || (nnz_A == 0 && nnz_B == 0))
         {
-            if(handle->pointer_mode == rocsparse_pointer_mode_host)
+            // rocsparse_spgeam analysis is documented to run before C exists,
+            // so the nonzero count is stored on the descriptor.
+            if(called_from_spgeam && descr != nullptr)
             {
-                *nnz_C = 0;
+                descr->nnz_C = 0;
             }
-            else
+
+            // nnz_C is null when the caller has not supplied C.
+            if(nnz_C != nullptr)
             {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                // spgeam passes &mat_C->nnz, a host field, even in device pointer mode.
+                if(handle->pointer_mode == rocsparse_pointer_mode_host || called_from_spgeam)
+                {
+                    *nnz_C = 0;
+                }
+                else
+                {
+                    RETURN_IF_HIP_ERROR(
+                        rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                }
             }
 
             if(nnz_A == 0 && nnz_B == 0)
@@ -540,6 +553,13 @@ namespace rocsparse
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
                         handle, m + 1, static_cast<I>(descr_C->base), csr_row_ptr_C));
+                }
+                else if(called_from_spgeam && descr != nullptr && descr->csr_row_ptr_C != nullptr)
+                {
+                    // The descriptor row pointer is base 0. Fill it so a later
+                    // compute or symbolic compute copies a valid empty pattern into C.
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(
+                        handle, m + 1, int64_t(0), descr->indextype, descr->csr_row_ptr_C));
                 }
             }
             return rocsparse_status_success;

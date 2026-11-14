@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT_DIR = Path(__file__).parent
 
@@ -599,6 +600,76 @@ def test_round_trip_expansion():
     print("  PASS: round_trip_expansion")
 
 
+def test_resolve_plain_tensor_scoped_field_from_its_own_entry():
+    """_resolve() must let a non-whitelisted, non-dotted field (e.g. alignment, as
+    used by develop's SdpaBackward bundles) resolve from a tensor's own values.tensors[]
+    entry -- it has no field-name whitelist, mirroring the C++ loader's lookupJsonPath(),
+    which walks any placeholder path through the tensor's own entry with no restriction.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import canon, expand
+
+    g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+    g["tensors"][0]["alignment"] = 16
+
+    template = {
+        "nodes": [
+            {
+                "type": "ReluAttributes",
+                "name": "",
+                "inputs": {"x_tensor_uid": 0},
+                "outputs": {"y_tensor_uid": 1},
+            }
+        ],
+        "tensors": [
+            {
+                "uid": 0,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "alignment": "${case.alignment}",
+                "virtual": False,
+            },
+            {
+                "uid": 1,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            },
+        ],
+        "io_data_type": "${case.io_data_type}",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+    values = {
+        "io_data_type": "float",
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+                "alignment": 16,
+            },
+            {
+                "uid": 1,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+            },
+        ],
+    }
+
+    expanded = expand(template, values)
+    assert canon(expanded) == canon(g), "plain tensor-scoped field did not resolve"
+    print("  PASS: resolve_plain_tensor_scoped_field_from_its_own_entry")
+
+
 def test_case_ids():
     """Case ids are stable, bounded, and unique even for input-range-only diffs."""
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -923,7 +994,7 @@ def test_import_inputs_uid_canonicalized_by_name():
 def _inventory(root):
     """{relative path: file bytes, or None for a directory} under root."""
     return {
-        str(p.relative_to(root)): p.read_bytes() if p.is_file() else None
+        p.relative_to(root).as_posix(): p.read_bytes() if p.is_file() else None
         for p in sorted(root.rglob("*"))
     }
 
@@ -2198,13 +2269,2056 @@ def test_retier_bundles():
         print("  PASS: retier_bundles")
 
 
+def test_retier_keeps_import_mode():
+    """Moved cases keep their sweep's import_mode; mixed import_modes are refused."""
+    script = SCRIPT_DIR / "retier_bundles.py"
+    marker = {"grouping": ["template-attributes"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        template = _retier_graph_template(None)
+        _retier_write(
+            root, "quick", template, [_retier_case("a"), _retier_case("b")], {}
+        )
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        for tier in ("quick", "full"):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            sweep = json.loads(path.read_text())
+            if tier == "quick":
+                sweep = {"version": 1, "import_mode": marker, "cases": sweep["cases"]}
+            path.write_text(json.dumps(sweep))
+        asg = Path(tmp) / "asg.json"
+
+        def retier(rows):
+            with open(asg, "w") as f:
+                json.dump(
+                    [dict(current_tier=t, key=k, proposed_tier=n) for t, k, n in rows],
+                    f,
+                )
+            return run(
+                [
+                    sys.executable,
+                    script,
+                    "--bundle-dir",
+                    root,
+                    "--assignments",
+                    asg,
+                    "--apply",
+                ],
+                check=False,
+            )
+
+        r = retier(
+            [
+                ("quick", "Op/Default/a", "quick"),
+                ("quick", "Op/Default/b", "full"),
+                ("full", "Op/Default/c", "full"),
+            ]
+        )
+        assert r.returncode != 0 and "import_mode" in r.stderr, r.stderr
+        assert not (root / "standard").exists()
+
+        r = retier(
+            [
+                ("quick", "Op/Default/a", "quick"),
+                ("quick", "Op/Default/b", "standard"),
+                ("full", "Op/Default/c", "full"),
+            ]
+        )
+        assert r.returncode == 0, r.stderr
+        moved = json.loads((root / "standard/Op/Default/sweep.json").read_text())
+        assert moved.get("import_mode") == marker, moved
+        assert [c["id"] for c in moved["cases"]] == ["b"], moved
+        kept = json.loads((root / "full/Op/Default/sweep.json").read_text())
+        assert "import_mode" not in kept, kept
+        print("  PASS: retier_keeps_import_mode")
+
+
+# --------------------------------------------------------------------------
+# Grouped import (opt-in flags of import_graph.py)
+# --------------------------------------------------------------------------
+
+_GROUPED_FLAGS = (
+    "--op-dir",
+    "GroupedOp",
+    "--template-attributes",
+    "--template-alignment",
+    "--skeleton-value-form",
+    "--only-op-dir",
+    "--require-marked-sweep",
+)
+
+
+def _grouped_graph(causal=False, alignment=16, scale=None, runtime=False, dims=None):
+    """A one-node graph with node attributes, tensor alignment and a scale tensor.
+
+    ``scale`` bakes a by-value scale tensor; ``runtime`` makes it a runtime
+    pass-by-value tensor instead. With neither, the graph has no scale tensor.
+    """
+    dims = dims or [2, 3, 4, 5]
+    strides = [60, 20, 5, 1] if dims == [2, 3, 4, 5] else [2 * 3 * 4, 3 * 4, 4, 1]
+    graph = _make_graph("Grouped", [0, 1], dims, strides, "float")
+    node = graph["nodes"][0]
+    node["attributes"] = {"causal": causal, "window": None, "mode": "AUTO"}
+    node["compute_data_type"] = "float"
+    for t in graph["tensors"]:
+        t["alignment"] = alignment
+        t["is_runtime_pass_by_value"] = False
+    graph["tensors"][0]["name"] = "X"
+    graph["tensors"][1]["name"] = "Y"
+    if scale is not None or runtime:
+        node["inputs"]["scale_tensor_uid"] = 2
+        tensor = {
+            "uid": 2,
+            "name": "SCALE",
+            "dims": [1],
+            "strides": [1],
+            "data_type": "float",
+            "virtual": False,
+            "alignment": alignment,
+            "is_runtime_pass_by_value": runtime,
+        }
+        if not runtime:
+            tensor["value"] = scale
+            tensor["value_type"] = "FloatValue"
+        graph["tensors"].append(tensor)
+    return graph
+
+
+def _sweep_dirs(bundle_dir):
+    """Sorted sweep directories, relative to bundle_dir, as posix strings."""
+    return sorted(
+        p.parent.relative_to(bundle_dir).as_posix()
+        for p in bundle_dir.rglob("sweep.json")
+    )
+
+
+def _load_sweep(bundle_dir, rel):
+    with open(bundle_dir / rel / "sweep.json") as f:
+        return json.load(f)
+
+
+def _write_marked_sweep(bundle_dir, rel, graph, marker):
+    """Write a one-case sweep for graph at bundle_dir/rel with an import_mode."""
+    from bundle_utils import TENSOR_ALWAYS
+
+    out = bundle_dir / rel
+    out.mkdir(parents=True)
+    template = copy.deepcopy(graph)
+    for t in template["tensors"]:
+        for fld in TENSOR_ALWAYS:
+            t[fld] = f"${{case.{fld}}}"
+    values = {
+        "tensors": [
+            {"uid": t["uid"], **{fld: t[fld] for fld in TENSOR_ALWAYS}}
+            for t in graph["tensors"]
+        ]
+    }
+    sweep = {"version": 1, "cases": [{"id": "only", "values": values, "metadata": {}}]}
+    if marker is not None:
+        sweep = {"version": 1, "import_mode": marker, "cases": sweep["cases"]}
+    (out / "graph.template.json").write_text(json.dumps(template, indent=2) + "\n")
+    (out / "sweep.json").write_text(json.dumps(sweep, indent=2) + "\n")
+
+
+def test_inventory_keys_are_forward_slash_normalized():
+    """_inventory() keys stay forward-slash even when relative_to() would use backslashes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        nested = bundle_dir / "quick" / "Relu" / "Marked"
+        nested.mkdir(parents=True)
+        (nested / "sweep.json").write_bytes(b"{}")
+
+        class _BackslashRelPath:
+            def __init__(self, posix_str):
+                self._posix = posix_str
+
+            def __str__(self):
+                return self._posix.replace("/", "\\")
+
+            def as_posix(self):
+                return self._posix
+
+        real_relative_to = Path.relative_to
+
+        def fake_relative_to(self, *args, **kwargs):
+            return _BackslashRelPath(real_relative_to(self, *args, **kwargs).as_posix())
+
+        with patch.object(Path, "relative_to", fake_relative_to):
+            keys = _inventory(bundle_dir)
+        assert "quick/Relu/Marked/sweep.json" in keys, keys
+        assert not any("\\" in k for k in keys), keys
+        print("  PASS: inventory_keys_are_forward_slash_normalized")
+
+
+def test_grouped_default_mode_ignores_marked_sweep():
+    """Default mode never appends into a marked sweep, but reports a duplicate."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        _write_marked_sweep(
+            bundle_dir, "quick/Relu/Marked", g, {"grouping": ["template-attributes"]}
+        )
+        before = _inventory(bundle_dir)
+
+        r = _import(tmp, "dup", g, bundle_dir, "--strict", check=False)
+        assert r.returncode == 1, f"strict duplicate should exit 1:\n{r.stderr}"
+        assert "DUPLICATE" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "duplicate check wrote files"
+
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        r = _import(tmp, "new", g2, bundle_dir)
+        assert r.returncode == 0, r.stderr
+        assert "created new bundle" in r.stderr, r.stderr
+        assert (bundle_dir / "quick/Relu/Marked/sweep.json").read_bytes() == before[
+            "quick/Relu/Marked/sweep.json"
+        ], "default mode changed a marked sweep"
+        assert "import_mode" not in _load_sweep(bundle_dir, "quick/Relu/Nchw")
+        assert _sweep_dirs(bundle_dir) == ["quick/Relu/Marked", "quick/Relu/Nchw"]
+        print("  PASS: grouped_default_mode_ignores_marked_sweep")
+
+
+def test_grouped_creates_marked_sweep():
+    """Opt-in import writes import_mode and templates attributes and alignment."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _grouped_graph(alignment=2)
+        r = _import(tmp, "g", g, bundle_dir, *_GROUPED_FLAGS, "--topology", "Topo")
+        assert r.returncode == 0, r.stderr
+        rel = "quick/GroupedOp/Topo"
+        assert _sweep_dirs(bundle_dir) == [rel], _sweep_dirs(bundle_dir)
+        sweep = _load_sweep(bundle_dir, rel)
+        assert list(sweep) == ["version", "import_mode", "cases"], list(sweep)
+        assert sweep["import_mode"] == {
+            "grouping": [
+                "skeleton-value-form",
+                "template-alignment",
+                "template-attributes",
+            ],
+            "format": "compact",
+        }, sweep["import_mode"]
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        node = template["nodes"][0]
+        assert node["attributes"] == {
+            "causal": "${case.attributes.attributes__causal}",
+            "window": "${case.attributes.attributes__window}",
+            "mode": "${case.attributes.attributes__mode}",
+        }, node["attributes"]
+        assert node["compute_data_type"] == "${case.attributes.compute_data_type}"
+        assert (
+            node["type"] == "GroupedAttributes" and node["inputs"]["x_tensor_uid"] == 0
+        )
+        assert [t["alignment"] for t in template["tensors"]] == [
+            "${case.alignment.0}",
+            "${case.alignment.1}",
+        ]
+        values = sweep["cases"][0]["values"]
+        assert values["alignment"] == {"0": 2, "1": 2}, values
+        assert values["attributes"]["attributes__window"] is None, values
+
+        from bundle_utils import canon, expand
+
+        assert canon(expand(template, values)) == canon(
+            g
+        ), "template does not round-trip"
+        sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+        from support_matrix_units import expand_template_graph
+
+        loaded = expand_template_graph(template, sweep["cases"][0])
+        assert canon(loaded) == canon(g), "the loader mirror expands it differently"
+        print("  PASS: grouped_creates_marked_sweep")
+
+
+def test_grouped_append_attributes_round_trip():
+    """A case that differs only in attributes, alignment or baked value appends."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        from bundle_utils import canon, canonical_uid_map_by_name, expand, remap_graph
+
+        graphs = [
+            _grouped_graph(scale=0.5),
+            _grouped_graph(causal=True, alignment=4, scale=-1.0),
+        ]
+        graphs[1]["nodes"][0]["attributes"]["window"] = 7
+        for i, g in enumerate(graphs):
+            r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+            assert r.returncode == 0, r.stderr
+        assert "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        (scale,) = [t for t in template["tensors"] if t["name"] == "SCALE"]
+        assert scale["value"] == "${case.value}", scale
+        cases = _load_sweep(bundle_dir, rel)["cases"]
+        assert len(cases) == 2, cases
+        for case, g in zip(cases, graphs):
+            want = remap_graph(g, canonical_uid_map_by_name(g))
+            assert canon(expand(template, case["values"])) == canon(want), case["id"]
+        print("  PASS: grouped_append_attributes_round_trip")
+
+
+def test_grouped_value_forms_never_share_sweep():
+    """Baked, runtime and absent scale tensors give three sweeps."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        forms = [
+            _grouped_graph(scale=0.5),
+            _grouped_graph(runtime=True),
+            _grouped_graph(scale=0.25),
+            _grouped_graph(),
+        ]
+        for i, g in enumerate(forms):
+            r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+            assert r.returncode == 0, r.stderr
+        dirs = _sweep_dirs(bundle_dir)
+        assert len(dirs) == 3, dirs
+        counts = sorted(len(_load_sweep(bundle_dir, d)["cases"]) for d in dirs)
+        assert counts == [1, 1, 2], counts
+
+        from bundle_utils import skeleton_hash
+
+        baked, runtime = forms[0], forms[1]
+        assert skeleton_hash(baked) == skeleton_hash(runtime)
+        assert skeleton_hash(baked, value_form=True) != skeleton_hash(
+            runtime, value_form=True
+        )
+        print("  PASS: grouped_value_forms_never_share_sweep")
+
+
+def test_grouped_only_op_dir_blocks_cross_appends():
+    """--only-op-dir never appends across tiers or operation folders."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        flags = ("--template-attributes", "--only-op-dir")
+        g1 = _grouped_graph()
+        g2 = _grouped_graph(causal=True)
+        g3 = _grouped_graph(alignment=8)
+        r = _import(tmp, "g1", g1, bundle_dir, *flags, "--op-dir", "OpA")
+        assert r.returncode == 0, r.stderr
+        r = _import(
+            tmp, "g2", g2, bundle_dir, *flags, "--op-dir", "OpA", "--tier", "standard"
+        )
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        r = _import(tmp, "g3", g3, bundle_dir, *flags, "--op-dir", "OpB")
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        assert _sweep_dirs(bundle_dir) == [
+            "quick/OpA/Nchw",
+            "quick/OpB/Nchw",
+            "standard/OpA/Nchw",
+        ], _sweep_dirs(bundle_dir)
+        print("  PASS: grouped_only_op_dir_blocks_cross_appends")
+
+
+def test_grouped_require_marked_sweep():
+    """--require-marked-sweep refuses unmarked and differently marked sweeps."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        _write_marked_sweep(bundle_dir, "quick/Relu/Unmarked", g, None)
+        _write_marked_sweep(
+            bundle_dir, "quick/Relu/Other", g, {"grouping": ["template-alignment"]}
+        )
+        before = _inventory(bundle_dir)
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        flags = ("--template-attributes", "--only-op-dir", "--require-marked-sweep")
+        r = _import(tmp, "g2", g2, bundle_dir, *flags, "--topology", "Mine")
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        for rel in ("quick/Relu/Unmarked", "quick/Relu/Other"):
+            for name in ("graph.template.json", "sweep.json"):
+                key = f"{rel}/{name}"
+                assert (bundle_dir / key).read_bytes() == before[key], key
+
+        g3 = _make_graph("Relu", [0, 1], [3, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(tmp, "g3", g3, bundle_dir, *flags, "--topology", "Mine")
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        assert len(_load_sweep(bundle_dir, "quick/Relu/Mine")["cases"]) == 2
+        print("  PASS: grouped_require_marked_sweep")
+
+
+def test_grouped_case_id():
+    """--case-id sets the id and refuses an id the sweep already has."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(
+            tmp,
+            "g1",
+            _grouped_graph(),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--case-id",
+            "fp32_a1",
+        )
+        assert r.returncode == 0, r.stderr
+        r = _import(
+            tmp,
+            "g2",
+            _grouped_graph(causal=True),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--case-id",
+            "fp32_b2",
+        )
+        assert r.returncode == 0 and "appended case 'fp32_b2'" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        ids = [c["id"] for c in _load_sweep(bundle_dir, rel)["cases"]]
+        assert ids == ["fp32_a1", "fp32_b2"], ids
+
+        before = _inventory(bundle_dir)
+        r = _import(
+            tmp,
+            "g3",
+            _grouped_graph(alignment=4),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--case-id",
+            "fp32_a1",
+            check=False,
+        )
+        assert r.returncode == 1 and "already exists" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "refused import changed the tree"
+
+        r = _import(
+            tmp, "g4", _grouped_graph(), bundle_dir, "--case-id", "Bad-Id", check=False
+        )
+        assert r.returncode == 1 and "lowercase_snake_case" in r.stderr, r.stderr
+        print("  PASS: grouped_case_id")
+
+
+def _grouped_named_graph():
+    """A ternary graph whose creation-order UIDs differ from sorted-name order."""
+    graph = _ternary_graph({"x": 0, "dy": 1, "scale": 2, "out": 3})
+    for t in graph["tensors"]:
+        t["alignment"] = 16
+        t["is_runtime_pass_by_value"] = False
+    return graph
+
+
+def _import_grouped_capture(tmp, graph, sidecar):
+    """Grouped import of one capture; returns (bundle_dir, metadata, template, case)."""
+    bundle_dir = tmp / "bundles"
+    bundle_dir.mkdir()
+    graph_path = _capture(tmp / "capture", "named_case", graph, sidecar)
+    r = _import_capture(graph_path, bundle_dir, *_GROUPED_FLAGS, "--topology", "Topo")
+    assert r.returncode == 0, r.stderr
+    (rel,) = _sweep_dirs(bundle_dir)
+    (case,) = _load_sweep(bundle_dir, rel)["cases"]
+    with open(bundle_dir / rel / "graph.template.json") as f:
+        template = json.load(f)
+    return bundle_dir, case["metadata"], template, case
+
+
+def test_grouped_import_keeps_values_inputs():
+    """A format_version 2 case with a values input survives grouped import and re-expansion."""
+    from bundle_utils import (
+        canon,
+        canonical_uid_map_by_name,
+        expand,
+        inputs_by_name,
+        remap_graph,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _grouped_named_graph()
+        uid_map = canonical_uid_map_by_name(graph)
+        assert any(old != new for old, new in uid_map.items()), uid_map
+        values = {"kind": "values", "values": [64, 32], "repeat": True, "seed": 11}
+        sidecar = {
+            "format_version": 2,
+            "seed": 7,
+            "inputs": {"0": values, "1": {"seed": 22}, "2": {"seed": 33}},
+        }
+        _, meta, template, case = _import_grouped_capture(tmp, graph, sidecar)
+        assert meta["format_version"] == 2 and meta["seed"] == 7, meta
+        by_name = inputs_by_name(meta, template)
+        assert json.dumps(by_name, sort_keys=True) == json.dumps(
+            inputs_by_name(sidecar, graph), sort_keys=True
+        ), by_name
+        assert uid_map[0] != 0, uid_map
+        assert json.dumps(by_name["x"]) == json.dumps(values), by_name["x"]
+        assert canon(expand(template, case["values"])) == canon(
+            remap_graph(graph, uid_map)
+        ), "the case does not re-expand to the imported graph"
+        print("  PASS: grouped_import_keeps_values_inputs")
+
+
+def test_grouped_import_keeps_per_input_seeds():
+    """A grouped import that renumbers UIDs keeps each tensor's seed and fill spec."""
+    from bundle_utils import canonical_uid_map_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _grouped_named_graph()
+        uid_map = canonical_uid_map_by_name(graph)
+        sidecar = {
+            "format_version": 1,
+            "seed": 1234,
+            "inputs": {
+                "0": {"seed": 101},
+                "1": {"seed": 202},
+                "2": {"kind": "fixed", "seed": 303, "value": 0.125},
+            },
+        }
+        _, meta, template, _ = _import_grouped_capture(tmp, graph, sidecar)
+        assert sorted(meta["inputs"]) == sorted(
+            str(uid_map[int(u)]) for u in sidecar["inputs"]
+        ), meta["inputs"]
+        assert meta["inputs"] != sidecar["inputs"], "the import did not renumber UIDs"
+        assert inputs_by_name(meta, template) == inputs_by_name(sidecar, graph), meta
+        print("  PASS: grouped_import_keeps_per_input_seeds")
+
+
+def test_grouped_import_keeps_aliases_start_offsets_and_live_rows():
+    """A grouped import that renumbers UIDs keeps each alias, start offset, live-row entry and
+    view seed."""
+    from bundle_utils import aliases_by_name, canonical_uid_map_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graph = _grouped_named_graph()
+        uid_map = canonical_uid_map_by_name(graph)
+        assert uid_map[0] != 0 and uid_map[1] != 1, uid_map
+        sidecar = {
+            "format_version": 2,
+            "seed": 1234,
+            "inputs": {"0": {"seed": 101}, "1": {"seed": 202}, "2": {"seed": 303}},
+            "aliases": [{"uid": 1, "of": 0, "byte_offset": 0}],
+            "start_offsets": [{"uid": 0, "start_offset": 4}],
+            "live_rows": [{"uid": 2, "axis": 1, "lengths": 1}],
+        }
+        _, meta, template, _ = _import_grouped_capture(tmp, graph, sidecar)
+        assert meta["aliases"] == [
+            {"uid": uid_map[1], "of": uid_map[0], "byte_offset": 0}
+        ], meta["aliases"]
+        assert meta["start_offsets"] == [{"uid": uid_map[0], "start_offset": 4}], meta[
+            "start_offsets"
+        ]
+        assert meta["live_rows"] == [
+            {"uid": uid_map[2], "axis": 1, "lengths": uid_map[1]}
+        ], meta["live_rows"]
+        assert aliases_by_name(meta, template) == aliases_by_name(sidecar, graph), meta
+        assert aliases_by_name(meta, template) == [
+            {"view": "dy", "of": "x", "byte_offset": 0}
+        ], meta
+        assert inputs_by_name(meta, template)["dy"] == {"seed": 202}, meta["inputs"]
+        print("  PASS: grouped_import_keeps_aliases_start_offsets_and_live_rows")
+
+
+def test_grouped_topology():
+    """--topology names the folder and refuses a mismatch."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(
+            tmp,
+            "g1",
+            _grouped_graph(scale=0.5),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--topology",
+            "Baked",
+        )
+        assert r.returncode == 0, r.stderr
+        assert _sweep_dirs(bundle_dir) == ["quick/GroupedOp/Baked"]
+        before = _inventory(bundle_dir)
+
+        r = _import(
+            tmp,
+            "g2",
+            _grouped_graph(scale=0.25),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--topology",
+            "Other",
+            check=False,
+        )
+        assert r.returncode == 1 and "--topology Other" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "refused append changed the tree"
+
+        r = _import(
+            tmp,
+            "g3",
+            _grouped_graph(runtime=True),
+            bundle_dir,
+            *_GROUPED_FLAGS,
+            "--topology",
+            "Baked",
+            check=False,
+        )
+        assert r.returncode == 1 and "holds another sweep" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before, "refused create changed the tree"
+
+        r = _import(
+            tmp, "g4", _grouped_graph(), bundle_dir, "--topology", "../x", check=False
+        )
+        assert r.returncode == 1 and "not a folder name" in r.stderr, r.stderr
+        print("  PASS: grouped_topology")
+
+
+def test_grouped_attribute_keys_prefixed_per_node():
+    """An attribute key that two nodes share gets an n<index>__ prefix."""
+    from bundle_utils import canon, expand
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1, 2], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        for i, t in enumerate(g["tensors"]):
+            t["name"] = f"T{i}"
+        g["nodes"][0]["outputs"] = {"y_tensor_uid": 1}
+        g["nodes"].append(
+            {
+                "type": "ReluAttributes",
+                "name": "",
+                "inputs": {"x_tensor_uid": 1},
+                "outputs": {"y_tensor_uid": 2},
+            }
+        )
+        g["nodes"][0]["attributes"] = {"mode": "A", "only_first": 1}
+        g["nodes"][1]["attributes"] = {"mode": "B"}
+        r = _import(tmp, "g", g, bundle_dir, "--template-attributes")
+        assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        assert template["nodes"][0]["attributes"] == {
+            "mode": "${case.attributes.n0__attributes__mode}",
+            "only_first": "${case.attributes.attributes__only_first}",
+        }, template["nodes"][0]["attributes"]
+        assert template["nodes"][1]["attributes"] == {
+            "mode": "${case.attributes.n1__attributes__mode}"
+        }, template["nodes"][1]["attributes"]
+        values = _load_sweep(bundle_dir, rel)["cases"][0]["values"]
+        assert canon(expand(template, values)) == canon(g), "no round-trip"
+        print("  PASS: grouped_attribute_keys_prefixed_per_node")
+
+
+def test_grouped_runs_are_deterministic():
+    """Two identical grouped runs write identical bytes."""
+    trees = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        graphs = [
+            _grouped_graph(scale=0.5),
+            _grouped_graph(causal=True, scale=0.5),
+            _grouped_graph(runtime=True, dims=[1, 2, 3, 4]),
+            _grouped_graph(alignment=2, scale=2.0),
+        ]
+        for run_index in range(2):
+            bundle_dir = tmp / f"bundles{run_index}"
+            bundle_dir.mkdir()
+            for i, g in enumerate(graphs):
+                r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+                assert r.returncode == 0, r.stderr
+            trees.append(_inventory(bundle_dir))
+            for rel in _sweep_dirs(bundle_dir):
+                text = (bundle_dir / rel / "sweep.json").read_text()
+                assert _is_compact(text), f"{rel}/sweep.json is not compact"
+    assert trees[0] == trees[1], "grouped runs differ"
+    print("  PASS: grouped_runs_are_deterministic")
+
+
+def _grouped_top_level_round_trip(field, first, second):
+    """Two graphs that differ only in top-level ``field`` share one grouped sweep.
+
+    Both cases must expand back to their graphs with ``expand()`` and with the
+    loader mirror. A default-mode import keeps the field literal.
+    """
+    from bundle_utils import canon, canonical_uid_map_by_name, expand, remap_graph
+
+    sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+    from support_matrix_units import expand_template_graph
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = []
+        for value in (first, second):
+            g = _grouped_graph(scale=0.5)
+            g["is_override_shape_enabled"] = False
+            g["min_required_engine_api_version"] = {"major": 1, "minor": 0, "patch": 0}
+            g[field] = value
+            graphs.append(g)
+        for i, g in enumerate(graphs):
+            r = _import(tmp, f"g{i}", g, bundle_dir, *_GROUPED_FLAGS, "--strict")
+            assert r.returncode == 0, r.stderr
+        assert "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        with open(bundle_dir / rel / "graph.template.json") as f:
+            template = json.load(f)
+        for fld in ("is_override_shape_enabled", "min_required_engine_api_version"):
+            assert template[fld] == f"${{case.{fld}}}", template[fld]
+        cases = _load_sweep(bundle_dir, rel)["cases"]
+        assert [c["values"][field] for c in cases] == [first, second], cases
+        for case, g in zip(cases, graphs):
+            want = canon(remap_graph(g, canonical_uid_map_by_name(g)))
+            assert canon(expand(template, case["values"])) == want, case["id"]
+            assert canon(expand_template_graph(template, case)) == want, case["id"]
+
+        default_dir = tmp / "default"
+        default_dir.mkdir()
+        r = _import(tmp, "d", graphs[1], default_dir)
+        assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(default_dir)
+        with open(default_dir / rel / "graph.template.json") as f:
+            assert json.load(f)[field] == second, "default mode templated the field"
+
+
+def test_grouped_engine_api_version_per_case():
+    """Cases with different min_required_engine_api_version share a sweep."""
+    _grouped_top_level_round_trip(
+        "min_required_engine_api_version",
+        {"major": 1, "minor": 0, "patch": 0},
+        {"major": 1, "minor": 3, "patch": 0},
+    )
+    print("  PASS: grouped_engine_api_version_per_case")
+
+
+def test_grouped_override_shape_flag_per_case():
+    """Cases with different is_override_shape_enabled share a sweep."""
+    _grouped_top_level_round_trip("is_override_shape_enabled", False, True)
+    print("  PASS: grouped_override_shape_flag_per_case")
+
+
+# --------------------------------------------------------------------------
+# sweep.json layout (dump_sweep and the import_mode format key)
+# --------------------------------------------------------------------------
+
+
+def _compact_sample_sweep():
+    """A sweep with every member kind the compact layout treats differently."""
+    case = _retier_case("a", clip_attr=0.5)
+    case["values"]["alignment"] = {"0": 16}
+    case["values"]["tensors"].append(
+        {"uid": 1, "dims": [3], "strides": [1], "data_type": "half", "value": 0.25}
+    )
+    case["golden"] = {"path": "golden/a/a.json"}
+    case["values"][7] = {1: "int key"}
+    case[3] = [1, 2]
+    case["tensor_patches"] = [{"uid": 1, "value": None}]
+    empty = {"id": "b", "values": {}, "metadata": {}}
+    no_tensors = {"id": "c", "values": {"tensors": []}, "metadata": {"seed": 1}}
+    return {
+        "version": 1,
+        "import_mode": {"grouping": ["template-attributes"], "format": "compact"},
+        "cases": [case, empty, no_tensors],
+    }
+
+
+def _is_compact(text):
+    """True if text is the compact layout of the sweep it loads to."""
+    from bundle_utils import dump_sweep
+
+    return text == dump_sweep(json.loads(text), "compact")
+
+
+def test_sweep_format_compact_round_trip():
+    """dump_sweep compact loads to the same object, keeps key order, and puts one tensor per line."""
+    from bundle_utils import dump_sweep, sweep_format
+
+    sweep = _compact_sample_sweep()
+    text = dump_sweep(sweep, "compact")
+    back = json.loads(text)
+    assert json.dumps(back) == json.dumps(sweep), text
+    assert back["cases"][0]["values"]["7"] == {"1": "int key"}, text
+    assert '        "7": {"1": "int key"}' in text.splitlines(), text
+    assert '      "3": [1, 2],' in text.splitlines(), text
+    top = {"version": 1, 5: {"x": 1}, "cases": [{"id": "a", 2: True}]}
+    assert json.loads(dump_sweep(top, "compact")) == json.loads(json.dumps(top))
+    lines = text.splitlines()
+    assert '      "values": {' in lines, text
+    assert '        "tensors": [' in lines, text
+    tensor_lines = [ln for ln in lines if ln.startswith(" " * 10 + '{"uid": ')]
+    assert len(tensor_lines) == 2, text
+    assert (
+        '        "attributes": {"relu_lower_clip": 0.5},' in lines
+    ), "values members are not one compact line each"
+    assert any(ln.startswith('      "metadata": {"format_version": 1') for ln in lines)
+    assert '      "golden": {"path": "golden/a/a.json"},' in lines, text
+    assert '  "import_mode": {' in lines, "top level is not written as indent=2"
+    assert text.endswith("}\n") and _is_compact(text)
+    assert sweep_format(sweep) == "compact"
+
+    assert dump_sweep(sweep, "pretty") == json.dumps(sweep, indent=2) + "\n"
+    assert (
+        dump_sweep({"version": 1, "cases": []}, "compact")
+        == json.dumps({"version": 1, "cases": []}, indent=2) + "\n"
+    )
+    assert sweep_format({"version": 1, "cases": []}) == "pretty"
+    assert sweep_format({"import_mode": {"grouping": []}, "cases": []}) == "pretty"
+    try:
+        dump_sweep(sweep, "h4")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown format accepted")
+    print("  PASS: sweep_format_compact_round_trip")
+
+
+def test_grouped_append_keeps_sweep_format():
+    """An append writes the layout recorded in the sweep, whatever --sweep-format says."""
+    from bundle_utils import dump_sweep
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for fmt, other in (("compact", "pretty"), ("pretty", "compact")):
+            bundle_dir = tmp / f"bundles-{fmt}"
+            bundle_dir.mkdir()
+            create = ("--sweep-format", fmt) if fmt == "pretty" else ()
+            r = _import(
+                tmp,
+                "g1",
+                _grouped_graph(scale=0.5),
+                bundle_dir,
+                *_GROUPED_FLAGS,
+                *create,
+                "--strict",
+            )
+            assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+            r = _import(
+                tmp,
+                "g2",
+                _grouped_graph(causal=True, scale=0.5),
+                bundle_dir,
+                *_GROUPED_FLAGS,
+                "--sweep-format",
+                other,
+                "--strict",
+            )
+            assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+            (rel,) = _sweep_dirs(bundle_dir)
+            text = (bundle_dir / rel / "sweep.json").read_text()
+            sweep = json.loads(text)
+            assert sweep["import_mode"]["format"] == fmt, sweep["import_mode"]
+            assert len(sweep["cases"]) == 2, sweep
+            assert text == dump_sweep(sweep, fmt), f"append rewrote {fmt} as {other}"
+
+        legacy = tmp / "legacy"
+        legacy.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        marker = {"grouping": ["template-attributes"]}
+        _write_marked_sweep(legacy, "quick/Relu/Old", g, marker)
+        g2 = _make_graph("Relu", [0, 1], [3, 3, 4, 5], [60, 20, 5, 1], "float")
+        r = _import(
+            tmp,
+            "g3",
+            g2,
+            legacy,
+            "--template-attributes",
+            "--require-marked-sweep",
+            "--strict",
+        )
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        text = (legacy / "quick/Relu/Old/sweep.json").read_text()
+        sweep = json.loads(text)
+        assert sweep["import_mode"] == marker, sweep["import_mode"]
+        assert (
+            text == json.dumps(sweep, indent=2) + "\n"
+        ), "grouping-only sweep left pretty"
+        print("  PASS: grouped_append_keeps_sweep_format")
+
+
+def test_sweep_format_key_does_not_split_sweeps():
+    """--require-marked-sweep and retier compare import_mode without its format key."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [3, 3, 4, 5], [60, 20, 5, 1], "float")
+        flags = ("--template-attributes", "--only-op-dir", "--require-marked-sweep")
+        grouping = ["template-attributes"]
+        for i, marker in enumerate(
+            (
+                {"grouping": grouping},
+                {"grouping": grouping, "format": "pretty"},
+                {"grouping": grouping, "format": "compact"},
+            )
+        ):
+            bundle_dir = tmp / f"b{i}"
+            bundle_dir.mkdir()
+            _write_marked_sweep(bundle_dir, "quick/Relu/Mine", g, marker)
+            for fmt in (None, "compact", "pretty"):
+                extra = ("--sweep-format", fmt) if fmt else ()
+                r = _import(tmp, "g2", g2, bundle_dir, *flags, *extra, "--dry-run")
+                assert r.returncode == 0 and "appended" in r.stderr, (
+                    marker,
+                    fmt,
+                    r.stderr,
+                )
+            assert _sweep_dirs(bundle_dir) == ["quick/Relu/Mine"]
+
+        script = SCRIPT_DIR / "retier_bundles.py"
+        root = tmp / "retier"
+        template = _retier_graph_template(None)
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        for tier, marker in (
+            ("quick", {"grouping": grouping, "format": "pretty"}),
+            ("full", {"grouping": grouping}),
+        ):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            cases = json.loads(path.read_text())["cases"]
+            path.write_text(
+                json.dumps({"version": 1, "import_mode": marker, "cases": cases})
+            )
+        asg = tmp / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        merged = json.loads((root / "full/Op/Default/sweep.json").read_text())
+        assert sorted(c["id"] for c in merged["cases"]) == ["a", "c"], merged
+        print("  PASS: sweep_format_key_does_not_split_sweeps")
+
+
+def test_retier_keeps_sweep_format():
+    """retier_bundles writes a moved and a kept compact sweep in compact."""
+    from bundle_utils import dump_sweep
+
+    script = SCRIPT_DIR / "retier_bundles.py"
+    marker = {"grouping": ["template-attributes"], "format": "compact"}
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        template = _retier_graph_template(None)
+        _retier_write(
+            root, "quick", template, [_retier_case("a"), _retier_case("b")], {}
+        )
+        path = root / "quick" / "Op" / "Default" / "sweep.json"
+        cases = json.loads(path.read_text())["cases"]
+        path.write_text(
+            dump_sweep({"version": 1, "import_mode": marker, "cases": cases}, "compact")
+        )
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="quick"
+                    ),
+                    dict(
+                        current_tier="quick",
+                        key="Op/Default/b",
+                        proposed_tier="standard",
+                    ),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        for tier, ids in (("quick", ["a"]), ("standard", ["b"])):
+            text = (root / tier / "Op" / "Default" / "sweep.json").read_text()
+            sweep = json.loads(text)
+            assert sweep["import_mode"] == marker, sweep
+            assert [c["id"] for c in sweep["cases"]] == ids, sweep
+            assert (
+                _is_compact(text) and text != json.dumps(sweep, indent=2) + "\n"
+            ), tier
+        print("  PASS: retier_keeps_sweep_format")
+
+
+def test_retier_refuses_mixed_sweep_formats():
+    """retier_bundles refuses to merge sweeps whose sweep.json formats differ."""
+    from bundle_utils import dump_sweep
+
+    script = SCRIPT_DIR / "retier_bundles.py"
+    grouping = ["template-attributes"]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        template = _retier_graph_template(None)
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        for tier, fmt in (("quick", "compact"), ("full", "pretty")):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            cases = json.loads(path.read_text())["cases"]
+            marker = {"grouping": grouping, "format": fmt}
+            sweep = {"version": 1, "import_mode": marker, "cases": cases}
+            path.write_text(dump_sweep(sweep, fmt))
+        before = _inventory(root)
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "sweep.json formats" in r.stderr, r.stderr
+        assert _inventory(root) == before, "refused retier changed the tree"
+        print("  PASS: retier_refuses_mixed_sweep_formats")
+
+
+def test_retier_version_consistency():
+    """build_plan checks the sweep-level ``version`` like it checks import_mode/format.
+
+    Merging sweeps that disagree on ``version`` is refused, unless a merged
+    case has ``absent_tensors`` (which needs sweep version 2): then the output
+    is reconciled to version 2 regardless of what the source sweeps declared,
+    instead of silently keeping whichever sweep happened to be listed first.
+    """
+    script = SCRIPT_DIR / "retier_bundles.py"
+    template = _retier_graph_template(None)
+
+    # No merged case needs absent_tensors: a version mismatch must be refused,
+    # exactly like the import_mode/sweep-format checks.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        path = root / "full" / "Op" / "Default" / "sweep.json"
+        sweep = json.loads(path.read_text())
+        sweep["version"] = 2
+        path.write_text(json.dumps(sweep, indent=2))
+        before = _inventory(root)
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode != 0 and "sweep versions" in r.stderr, r.stderr
+        assert _inventory(root) == before, "refused retier changed the tree"
+
+    # A merged case with absent_tensors forces version 2, even though the
+    # sweep that would otherwise come first (by tier order) declares version 1.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(root, "quick", template, [_retier_case("a")], {})
+        absent_case = _retier_case("c")
+        absent_case["absent_tensors"] = [0]
+        absent_case["metadata"]["format_version"] = 2
+        _retier_write(root, "full", template, [absent_case], {})
+        for tier, version in (("quick", 1), ("full", 2)):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            sweep = json.loads(path.read_text())
+            sweep["version"] = version
+            path.write_text(json.dumps(sweep, indent=2))
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        merged = json.loads(
+            (root / "full" / "Op" / "Default" / "sweep.json").read_text()
+        )
+        assert merged["version"] == 2, merged
+        assert sorted(c["id"] for c in merged["cases"]) == ["a", "c"], merged
+
+    # The reverse merge order: the case that stays in the destination tier
+    # (and so sorts first) is the one from the lower-version sweep, and the
+    # case needing absent_tensors arrives from a different, higher-version
+    # sweep. The first-sorted sweep's own version must not simply be kept --
+    # the merge still has to force version 2.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "integration-test-bundles"
+        _retier_write(root, "full", template, [_retier_case("c")], {})
+        absent_case = _retier_case("a")
+        absent_case["absent_tensors"] = [0]
+        absent_case["metadata"]["format_version"] = 2
+        _retier_write(root, "quick", template, [absent_case], {})
+        for tier, version in (("full", 1), ("quick", 2)):
+            path = root / tier / "Op" / "Default" / "sweep.json"
+            sweep = json.loads(path.read_text())
+            sweep["version"] = version
+            path.write_text(json.dumps(sweep, indent=2))
+        asg = Path(tmp) / "asg.json"
+        asg.write_text(
+            json.dumps(
+                [
+                    dict(
+                        current_tier="quick", key="Op/Default/a", proposed_tier="full"
+                    ),
+                    dict(current_tier="full", key="Op/Default/c", proposed_tier="full"),
+                ]
+            )
+        )
+        r = run(
+            [
+                sys.executable,
+                script,
+                "--bundle-dir",
+                root,
+                "--assignments",
+                asg,
+                "--apply",
+            ],
+            check=False,
+        )
+        assert r.returncode == 0, r.stderr
+        merged = json.loads(
+            (root / "full" / "Op" / "Default" / "sweep.json").read_text()
+        )
+        assert merged["version"] == 2, merged
+        assert sorted(c["id"] for c in merged["cases"]) == ["a", "c"], merged
+    print("  PASS: retier_version_consistency")
+
+
+def test_default_mode_sweep_bytes_unchanged():
+    """Default mode writes json.dumps(indent=2) with no import_mode, and refuses --sweep-format."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        for name, graph, word in (
+            ("g", g, "created new bundle"),
+            ("g2", g2, "appended"),
+        ):
+            r = _import(tmp, name, graph, bundle_dir)
+            assert r.returncode == 0 and word in r.stderr, r.stderr
+            (rel,) = _sweep_dirs(bundle_dir)
+            raw = (bundle_dir / rel / "sweep.json").read_bytes()
+            sweep = json.loads(raw)
+            assert "import_mode" not in sweep, sweep
+            assert raw == (json.dumps(sweep, indent=2) + "\n").encode(), raw
+        before = _inventory(bundle_dir)
+        r = _import(tmp, "g3", g, bundle_dir, "--sweep-format", "compact", check=False)
+        assert r.returncode == 1 and "--sweep-format" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+        print("  PASS: default_mode_sweep_bytes_unchanged")
+
+
+# --------------------------------------------------------------------------
+# Remove patches and superset templates with absent tensors
+# --------------------------------------------------------------------------
+
+_SUPERSET_FLAGS = _GROUPED_FLAGS + ("--superset-templates",)
+
+
+def _optional_graph(sink=True, stats=True, bias=False, seq=4, virtual_stats=False):
+    """A one-node graph with optional ports.
+
+    Inputs q, k, v and, when asked, a sink and a bias; outputs o and, when asked,
+    stats. An unused optional port holds null. The uids follow creation order,
+    which differs from sorted-name order.
+    """
+    names = ["q", "k", "v", "o"]
+    names += ["sink"] if sink else []
+    names += ["bias"] if bias else []
+    names += ["stats"] if stats else []
+    uid = {name: i for i, name in enumerate(names)}
+    node = {
+        "type": "OptAttributes",
+        "name": "opt",
+        "attributes": {"causal": False},
+        "inputs": {
+            "q_tensor_uid": uid["q"],
+            "k_tensor_uid": uid["k"],
+            "v_tensor_uid": uid["v"],
+            "sink_tensor_uid": uid.get("sink"),
+            "bias_tensor_uid": uid.get("bias"),
+        },
+        "outputs": {"o_tensor_uid": uid["o"], "stats_tensor_uid": uid.get("stats")},
+    }
+    tensors = []
+    for name in names:
+        dims = [1, 2, seq, 1] if name in ("sink", "stats") else [1, 2, seq, 8]
+        strides = [2 * seq * dims[3], seq * dims[3], dims[3], 1]
+        tensors.append(
+            {
+                "uid": uid[name],
+                "name": name,
+                "dims": dims,
+                "strides": strides,
+                "data_type": "float",
+                "virtual": virtual_stats and name == "stats",
+                "alignment": 16,
+                "is_runtime_pass_by_value": False,
+            }
+        )
+    return {
+        "nodes": [node],
+        "tensors": tensors,
+        "io_data_type": "float",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+
+def _optional_sidecar(graph, base_seed):
+    """A sidecar with a per-input seed for each input tensor of the graph."""
+    inputs = {
+        str(t["uid"]): {"seed": base_seed + i}
+        for i, t in enumerate(graph["tensors"])
+        if t["name"] not in ("o", "stats")
+    }
+    return {"format_version": 1, "seed": base_seed, "inputs": inputs}
+
+
+def _import_optional(tmp, bundle_dir, name, graph, sidecar, *flags):
+    graph_path = _capture(tmp / "capture", name, graph, sidecar)
+    return _import_capture(graph_path, bundle_dir, *flags)
+
+
+def _sweep_and_template(bundle_dir, rel):
+    sweep = _load_sweep(bundle_dir, rel)
+    with open(bundle_dir / rel / "graph.template.json") as f:
+        return sweep, json.load(f)
+
+
+def _assert_absent_case_loads(sweep, template, case):
+    """The case-side rules the C++ loader checks for a case with absent tensors."""
+    from bundle_utils import absent_case_problems, absent_tensor_problems
+
+    assert absent_case_problems(sweep, template, case) == [], case
+
+    absent = case["absent_tensors"]
+    assert sweep["version"] == 2, sweep["version"]
+    assert case["metadata"]["format_version"] == 2, case["metadata"]
+    assert not absent_tensor_problems(template, absent), absent
+    assert not {e["uid"] for e in case["values"].get("tensors", [])} & set(absent)
+    for field, value in case["values"].items():
+        if field != "tensors" and isinstance(value, dict):
+            assert not {str(u) for u in absent} & set(value), (field, value)
+    assert not {int(u) for u in case["metadata"].get("inputs", {})} & set(absent)
+    assert "golden" not in case and "tensor_patches" not in case, case
+
+
+def test_import_remove_patch_round_trip():
+    """A field the case's tensor lacks becomes a remove patch; a placeholder field does not."""
+    from bundle_utils import canon, canonical_uid_map_by_name, expand_case, remap_graph
+
+    sys.path.insert(0, str(SCRIPT_DIR.parent / "scripts"))
+    from support_matrix_units import apply_tensor_patches, expand_template_graph
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        for t in g1["tensors"]:
+            t["is_runtime_pass_by_value"] = False
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "float")
+        g2["tensors"][0]["is_runtime_pass_by_value"] = False
+        assert _import(tmp, "g1", g1, bundle_dir).returncode == 0
+        r = _import(tmp, "g2", g2, bundle_dir)
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        first, second = sweep["cases"]
+        assert "tensor_patches" not in first, first
+        uid_map = canonical_uid_map_by_name(g2)
+        assert second["tensor_patches"] == [
+            {"uid": uid_map[1], "remove": ["is_runtime_pass_by_value"]}
+        ], second
+        want = canon(remap_graph(g2, uid_map))
+        assert canon(expand_case(template, second)) == want
+        mirrored = expand_template_graph(template, second)
+        apply_tensor_patches(mirrored, second)
+        assert canon(mirrored) == want, "the loader mirror disagrees"
+        r = _import(tmp, "g2again", g2, bundle_dir)
+        assert r.returncode == 0 and "DUPLICATE" in r.stderr, r.stderr
+
+        grouped_dir = tmp / "grouped"
+        grouped_dir.mkdir()
+        g3 = _grouped_graph(scale=0.5)
+        g4 = _grouped_graph(scale=0.5, dims=[1, 2, 3, 4])
+        del g4["tensors"][1]["alignment"]
+        r = _import(tmp, "g3", g3, grouped_dir, *_GROUPED_FLAGS)
+        assert r.returncode == 0, r.stderr
+        before = _inventory(grouped_dir)
+        r = _import(tmp, "g4", g4, grouped_dir, *_GROUPED_FLAGS, check=False)
+        _assert_refused(r, grouped_dir, before, "after extraction")
+        print("  PASS: import_remove_patch_round_trip")
+
+
+def test_superset_import_nested_cases():
+    """Cases whose tensor sets nest share one version 2 sweep and re-expand to their graphs."""
+    from bundle_utils import (
+        absent_by_name,
+        canon,
+        expand_case,
+        inputs_by_name,
+        remap_graph,
+        uid_map_onto,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = [
+            ("full", _optional_graph(), []),
+            ("no_sink", _optional_graph(sink=False, seq=8), ["sink"]),
+            ("no_stats", _optional_graph(stats=False, seq=16), ["stats"]),
+        ]
+        sidecars = {}
+        for i, (name, graph, _) in enumerate(graphs):
+            sidecars[name] = _optional_sidecar(graph, 100 * (i + 1))
+            r = _import_optional(
+                tmp,
+                bundle_dir,
+                name,
+                graph,
+                sidecars[name],
+                *_SUPERSET_FLAGS,
+                "--topology",
+                "Opt",
+                "--case-id",
+                name,
+                "--strict",
+            )
+            assert r.returncode == 0, r.stderr
+            if i == 0:
+                assert _load_sweep(bundle_dir, "quick/GroupedOp/Opt")["version"] == 1
+        assert _sweep_dirs(bundle_dir) == ["quick/GroupedOp/Opt"]
+        sweep, template = _sweep_and_template(bundle_dir, "quick/GroupedOp/Opt")
+        assert sweep["version"] == 2, sweep
+        cases = {c["id"]: c for c in sweep["cases"]}
+        assert "absent_tensors" not in cases["full"], cases["full"]
+        assert cases["full"]["metadata"]["format_version"] == 1
+        for name, graph, absent_names in graphs:
+            case = cases[name]
+            assert absent_by_name(case, template) == absent_names, case
+            if absent_names:
+                _assert_absent_case_loads(sweep, template, case)
+            want = remap_graph(graph, uid_map_onto(graph, template))
+            assert canon(expand_case(template, case)) == canon(want), name
+            assert inputs_by_name(case["metadata"], template) == inputs_by_name(
+                sidecars[name], graph
+            ), name
+
+        before = _inventory(bundle_dir)
+        r = _import_optional(
+            tmp,
+            bundle_dir,
+            "no_sink_again",
+            graphs[1][1],
+            sidecars["no_sink"],
+            *_SUPERSET_FLAGS,
+        )
+        assert r.returncode == 0 and "DUPLICATE" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+        print("  PASS: superset_import_nested_cases")
+
+
+def test_import_cache_matches_separate_runs():
+    """Imports that share an ImportCache write the bytes that separate runs write."""
+    import contextlib
+    import io
+    from unittest import mock
+
+    import import_graph
+
+    def flags(topology, case_id=None, strict=True):
+        out = [*_SUPERSET_FLAGS, "--topology", topology]
+        out += ["--case-id", case_id] if case_id is not None else []
+        return out + (["--strict"] if strict else [])
+
+    steps = [
+        ("full", _optional_graph(), 100, flags("Opt", "full")),
+        ("no_sink", _optional_graph(sink=False, seq=8), 200, flags("Opt", "no_sink")),
+        ("no_stats", _optional_graph(stats=False, seq=16), 300, flags("Opt", None)),
+        ("full_seq8", _optional_graph(seq=8), 400, flags("Opt", "full_seq8")),
+        ("dup", _optional_graph(sink=False, seq=8), 200, flags("Opt", "dup")),
+        (
+            "dup_skip",
+            _optional_graph(sink=False, seq=8),
+            200,
+            flags("Opt", strict=False),
+        ),
+        ("id_taken", _optional_graph(seq=32), 500, flags("Opt", "full")),
+        ("bias", _optional_graph(bias=True), 600, flags("Bias", "bias")),
+        ("bias_seq8", _optional_graph(bias=True, seq=8), 700, flags("Bias", None)),
+        ("no_sink_32", _optional_graph(sink=False, seq=32), 800, flags("Opt", "ns32")),
+    ]
+    flush_after = {"no_stats", "dup_skip"}
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        separate, shared = tmp / "separate", tmp / "shared"
+        separate.mkdir()
+        shared.mkdir()
+        cache = import_graph.ImportCache()
+        rcs_separate, rcs_shared = [], []
+        sweep_loads = []
+        json_load = json.load
+
+        def counting_load(f, *args, **kwargs):
+            if Path(getattr(f, "name", "")).name == "sweep.json":
+                sweep_loads.append(f.name)
+            return json_load(f, *args, **kwargs)
+
+        for name, graph, seed, step_flags in steps:
+            graph_path = _capture(
+                tmp / "capture", name, graph, _optional_sidecar(graph, seed)
+            )
+            rcs_separate.append(
+                _import_capture(graph_path, separate, *step_flags).returncode
+            )
+            argv = ["--graph", str(graph_path), "--bundle-dir", str(shared)]
+            with contextlib.redirect_stderr(io.StringIO()), mock.patch.object(
+                import_graph.json, "load", counting_load
+            ):
+                rcs_shared.append(import_graph.main(argv + step_flags, cache))
+            if name in flush_after:
+                cache.flush()
+                assert _inventory(shared) == _inventory(separate), name
+        cache.flush()
+        assert rcs_separate == [0, 0, 0, 0, 1, 0, 1, 0, 0, 0], rcs_separate
+        assert rcs_shared == rcs_separate, rcs_shared
+        assert _inventory(shared) == _inventory(separate)
+        assert _sweep_dirs(shared) == ["quick/GroupedOp/Bias", "quick/GroupedOp/Opt"]
+        assert len(_cases(shared)) == 7
+        assert len(sweep_loads) == 2, sweep_loads
+        assert all(e.get("memo") for e in cache._entries.values())
+        print("  PASS: import_cache_matches_separate_runs")
+
+
+def test_superset_import_needs_a_containing_template():
+    """A graph joins only a template that holds every tensor of it, by the loader's rules."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def tree(name, first, second, flags=_SUPERSET_FLAGS):
+            bundle_dir = tmp / name
+            bundle_dir.mkdir()
+            for i, graph in enumerate((first, second)):
+                r = _import(tmp, f"{name}{i}", graph, bundle_dir, *flags)
+                assert r.returncode == 0, r.stderr
+            return bundle_dir, r.stderr
+
+        bundle_dir, err = tree(
+            "other", _optional_graph(), _optional_graph(stats=False, bias=True)
+        )
+        assert len(_sweep_dirs(bundle_dir)) == 2 and "missed merge" not in err, err
+        for rel in _sweep_dirs(bundle_dir):
+            sweep = _load_sweep(bundle_dir, rel)
+            assert sweep["version"] == 1, sweep
+            assert not any("absent_tensors" in c for c in sweep["cases"]), sweep
+
+        bundle_dir, _ = tree(
+            "virtual", _optional_graph(virtual_stats=True), _optional_graph(stats=False)
+        )
+        assert len(_sweep_dirs(bundle_dir)) == 2, "a virtual tensor was made absent"
+
+        topo_dir = tmp / "topology"
+        topo_dir.mkdir()
+        for name, graph, topo in (
+            ("full", _optional_graph(), "Full"),
+            ("own", _optional_graph(sink=False), "Own"),
+            ("joins", _optional_graph(stats=False, seq=8), "Full"),
+            ("own_twin", _optional_graph(sink=False, seq=16), "Full"),
+        ):
+            r = _import(
+                tmp, f"t_{name}", graph, topo_dir, *_SUPERSET_FLAGS, "--topology", topo
+            )
+            assert r.returncode == 0, r.stderr
+            if name == "own":
+                assert "NOTE: the graph also fits" in r.stderr, r.stderr
+        assert _sweep_dirs(topo_dir) == ["quick/GroupedOp/Full", "quick/GroupedOp/Own"]
+        assert [
+            len(_load_sweep(topo_dir, rel)["cases"]) for rel in _sweep_dirs(topo_dir)
+        ] == [3, 1]
+
+        bundle_dir, _ = tree(
+            "unmarked",
+            _optional_graph(),
+            _optional_graph(sink=False),
+            flags=_GROUPED_FLAGS,
+        )
+        assert len(_sweep_dirs(bundle_dir)) == 2, "joined without --superset-templates"
+        print("  PASS: superset_import_needs_a_containing_template")
+
+
+def test_superset_import_order_of_smaller_cases():
+    """After the largest case, any order of the smaller cases gives the same template and cases."""
+    import itertools
+
+    smaller = [
+        ("no_sink", _optional_graph(sink=False, seq=8)),
+        ("no_stats", _optional_graph(stats=False, seq=16)),
+        ("neither", _optional_graph(sink=False, stats=False, seq=32)),
+    ]
+    results = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for n, order in enumerate(itertools.permutations(smaller)):
+            bundle_dir = tmp / f"bundles{n}"
+            bundle_dir.mkdir()
+            for name, graph in (("full", _optional_graph()),) + order:
+                r = _import(
+                    tmp,
+                    f"{n}_{name}",
+                    graph,
+                    bundle_dir,
+                    *_SUPERSET_FLAGS,
+                    "--topology",
+                    "Opt",
+                    "--case-id",
+                    name,
+                    "--strict",
+                )
+                assert r.returncode == 0, r.stderr
+            rel = "quick/GroupedOp/Opt"
+            sweep = _load_sweep(bundle_dir, rel)
+            template = (bundle_dir / rel / "graph.template.json").read_bytes()
+            cases = {c["id"]: json.dumps(c, sort_keys=True) for c in sweep["cases"]}
+            results.append((template, cases, sweep["version"]))
+    assert len(results) == 6 and all(r == results[0] for r in results), "orders differ"
+    print("  PASS: superset_import_order_of_smaller_cases")
+
+
+def test_superset_import_reports_missed_merge():
+    """A larger case after a smaller one starts a superset and leaves the smaller sweep unchanged."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(
+            tmp, "small", _optional_graph(sink=False), bundle_dir, *_SUPERSET_FLAGS
+        )
+        assert r.returncode == 0, r.stderr
+        (small_rel,) = _sweep_dirs(bundle_dir)
+        before = {
+            k: v
+            for k, v in _inventory(bundle_dir).items()
+            if Path(k).as_posix().startswith(small_rel)
+        }
+        r = _import(tmp, "large", _optional_graph(), bundle_dir, *_SUPERSET_FLAGS)
+        assert r.returncode == 0 and "created new bundle" in r.stderr, r.stderr
+        assert "missed merge" in r.stderr, r.stderr
+        assert str(bundle_dir / small_rel / "sweep.json") in r.stderr, r.stderr
+        after = _inventory(bundle_dir)
+        assert all(after[k] == v for k, v in before.items()), "smaller sweep changed"
+        assert len(_sweep_dirs(bundle_dir)) == 2
+        print("  PASS: superset_import_reports_missed_merge")
+
+
+def test_absent_case_problems_mirror_the_loader():
+    """absent_case_problems names each case rule of the C++ loader that a case breaks."""
+    from bundle_utils import absent_case_problems
+
+    template = {
+        "nodes": [
+            {
+                "type": "OptAttributes",
+                "inputs": {"q_tensor_uid": 0, "sink_tensor_uid": 1},
+                "outputs": {"o_tensor_uid": 2},
+            }
+        ],
+        "tensors": [
+            {"uid": 0, "name": "q", "virtual": False},
+            {"uid": 1, "name": "sink", "virtual": False},
+            {"uid": 2, "name": "o", "virtual": False},
+        ],
+    }
+    sweep = {"version": 2}
+    good = {
+        "id": "c",
+        "absent_tensors": [1],
+        "values": {"tensors": [{"uid": 0}, {"uid": 2}], "alignment": {"0": 16}},
+        "metadata": {"format_version": 2, "inputs": {"0": {"seed": 1}}},
+    }
+    assert absent_case_problems(sweep, template, good) == []
+    assert absent_case_problems(sweep, template, {"id": "full", "values": {}}) == []
+
+    def broken(**changes):
+        case = json.loads(json.dumps(good))
+        for key, value in changes.items():
+            case[key] = value
+        return absent_case_problems(sweep, template, case)
+
+    assert broken(absent_tensors=[]), "an empty list loads"
+    assert broken(absent_tensors=[1, 1]), "a repeated uid loads"
+    assert broken(absent_tensors=[7]), "a uid the template lacks loads"
+    assert broken(absent_tensors=[0]), "a uid held by two ports loads"
+    assert broken(values={"tensors": [{"uid": 1}]}), "a values.tensors entry loads"
+    assert broken(values={"alignment": {"1": 16}}), "a values.alignment key loads"
+    assert broken(tensor_patches=[{"uid": 1, "remove": ["x"]}])
+    assert broken(metadata={"format_version": 2, "inputs": {"1": {"seed": 3}}})
+    assert broken(metadata={"format_version": 2, "aliases": [{"uid": 0, "of": 1}]})
+    assert broken(metadata={"format_version": 1}), "format_version 1 loads"
+    assert broken(metadata=None), "no metadata loads"
+    assert broken(golden={"path": "g"}), "golden data loads"
+    assert absent_case_problems({"version": 1}, template, good), "sweep version 1 loads"
+    print("  PASS: absent_case_problems_mirror_the_loader")
+
+
+def test_import_refuses_metadata_uid_moves():
+    """A metadata uid that a uid remap would attach to another tensor fails the import."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        from bundle_utils import remap_graph
+
+        graph = _optional_graph(sink=False, stats=False)
+        graph = remap_graph(graph, {t["uid"]: t["uid"] + 10 for t in graph["tensors"]})
+        sidecar = {"format_version": 1, "seed": 1, "inputs": {"2": {"seed": 5}}}
+        before = _inventory(bundle_dir)
+        r = _import_optional(tmp, bundle_dir, "moved", graph, sidecar, *_GROUPED_FLAGS)
+        assert r.returncode == 1 and "moves a metadata uid" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+
+        full = _optional_graph()
+        part = _optional_graph(stats=False, seq=8)
+        for g in (full, part):
+            for t in g["tensors"]:
+                if t["name"] == "stats":
+                    t["name"] = "z_stats"
+        assert _import(tmp, "full", full, bundle_dir, *_SUPERSET_FLAGS).returncode == 0
+        absent_uid = len(part["tensors"])
+        sidecar = {"format_version": 2, "inputs": {str(absent_uid): {"seed": 5}}}
+        before = _inventory(bundle_dir)
+        r = _import_optional(tmp, bundle_dir, "part", part, sidecar, *_SUPERSET_FLAGS)
+        assert r.returncode == 1 and "names absent tensors" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == before
+        print("  PASS: import_refuses_metadata_uid_moves")
+
+
+def test_superset_index_of_a_sweep_with_only_absent_cases():
+    """A sweep whose every case has absent tensors still stands for its whole template."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        for name, graph in (
+            ("full", _optional_graph()),
+            ("no_sink", _optional_graph(sink=False, seq=8)),
+        ):
+            r = _import(
+                tmp, name, graph, bundle_dir, *_SUPERSET_FLAGS, "--case-id", name
+            )
+            assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep = _load_sweep(bundle_dir, rel)
+        sweep["cases"] = [c for c in sweep["cases"] if c["id"] != "full"]
+        (bundle_dir / rel / "sweep.json").write_text(json.dumps(sweep, indent=2) + "\n")
+        for name, graph in (
+            ("no_sink_2", _optional_graph(sink=False, seq=16)),
+            ("full_2", _optional_graph(seq=16)),
+        ):
+            r = _import(
+                tmp, name, graph, bundle_dir, *_SUPERSET_FLAGS, "--case-id", name
+            )
+            assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        assert _sweep_dirs(bundle_dir) == [rel]
+        cases = {c["id"]: c for c in _load_sweep(bundle_dir, rel)["cases"]}
+        assert "absent_tensors" in cases["no_sink_2"], cases["no_sink_2"]
+        assert "absent_tensors" not in cases["full_2"], cases["full_2"]
+        print("  PASS: superset_index_of_a_sweep_with_only_absent_cases")
+
+
+def test_superset_import_keeps_aliases_by_name():
+    """A superset join keeps a case's aliases, inputs and seeds attached to the same tensors."""
+    from bundle_utils import aliases_by_name, inputs_by_name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        full = _optional_graph()
+        assert _import(tmp, "full", full, bundle_dir, *_SUPERSET_FLAGS).returncode == 0
+        part = _optional_graph(sink=False, seq=8)
+        uid = {t["name"]: t["uid"] for t in part["tensors"]}
+        sidecar = _optional_sidecar(part, 500)
+        sidecar["format_version"] = 2
+        sidecar["aliases"] = [{"uid": uid["v"], "of": uid["k"], "byte_offset": 0}]
+        r = _import_optional(tmp, bundle_dir, "part", part, sidecar, *_SUPERSET_FLAGS)
+        assert r.returncode == 0 and "appended" in r.stderr, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        case = next(c for c in sweep["cases"] if c.get("absent_tensors"))
+        _assert_absent_case_loads(sweep, template, case)
+        assert aliases_by_name(case["metadata"], template) == aliases_by_name(
+            sidecar, part
+        ), case["metadata"]
+        assert inputs_by_name(case["metadata"], template) == inputs_by_name(
+            sidecar, part
+        ), case["metadata"]
+        print("  PASS: superset_import_keeps_aliases_by_name")
+
+
+_RAGGED_LINKS = {
+    "q": "ragged_offset_q",
+    "o": "ragged_offset_q",
+    "k": "ragged_offset_kv",
+    "v": "ragged_offset_kv",
+}
+
+
+def _ragged_graph(sink=True, stats=True, seq=4):
+    """:func:`_optional_graph` with ragged q, k, v and o.
+
+    q and o link to the offset tensor ``ragged_offset_q``; k and v link to
+    ``ragged_offset_kv``. The offset tensors take the next uids in creation
+    order, so their sorted-name uids differ.
+    """
+    graph = _optional_graph(sink=sink, stats=stats, seq=seq)
+    tensors = graph["tensors"]
+    next_uid = 1 + max(t["uid"] for t in tensors)
+    offsets = {}
+    for i, name in enumerate(("ragged_offset_q", "ragged_offset_kv")):
+        offsets[name] = next_uid + i
+        tensors.append(
+            {
+                "uid": next_uid + i,
+                "name": name,
+                "dims": [2, 1, 1, 1],
+                "strides": [1, 1, 1, 1],
+                "data_type": "int32",
+                "virtual": False,
+                "alignment": 16,
+                "is_runtime_pass_by_value": False,
+            }
+        )
+    for t in tensors:
+        if t["name"] in _RAGGED_LINKS:
+            t["ragged_offset_tensor_uid"] = offsets[_RAGGED_LINKS[t["name"]]]
+            t["ragged_offset_multiplier"] = 8
+    return graph
+
+
+def _ragged_links(graph):
+    """{tensor name: name of the tensor its ragged_offset_tensor_uid holds}."""
+    names = {t["uid"]: t["name"] for t in graph["tensors"]}
+    return {
+        t["name"]: names.get(t["ragged_offset_tensor_uid"])
+        for t in graph["tensors"]
+        if t.get("ragged_offset_tensor_uid") is not None
+    }
+
+
+def _ragged_sidecar(graph, base_seed, q_end, kv_end):
+    """:func:`_optional_sidecar` with exact ``values`` fills for the offset tensors."""
+    sidecar = _optional_sidecar(graph, base_seed)
+    sidecar["format_version"] = 2
+    uid = {t["name"]: t["uid"] for t in graph["tensors"]}
+    for name, end in (("ragged_offset_q", q_end), ("ragged_offset_kv", kv_end)):
+        sidecar["inputs"][str(uid[name])] = {
+            "kind": "values",
+            "values": [0, end],
+            "repeat": False,
+        }
+    return sidecar
+
+
+def test_remap_graph_remaps_tensor_links():
+    """remap_graph, canonical_uid_map and skeleton_hash follow tensor-level uid links."""
+    from bundle_utils import (
+        absent_tensor_problems,
+        canonical_uid_map,
+        canonical_uid_map_by_name,
+        remap_graph,
+        skeleton_hash,
+    )
+
+    graph = _ragged_graph()
+    assert _ragged_links(graph) == _RAGGED_LINKS
+    by_name = canonical_uid_map_by_name(graph)
+    offset_uids = [
+        t["uid"] for t in graph["tensors"] if t["name"].startswith("ragged_offset")
+    ]
+    assert all(by_name[u] != u for u in offset_uids), by_name
+    for make_map in (canonical_uid_map, canonical_uid_map_by_name):
+        remapped = remap_graph(graph, make_map(graph))
+        assert _ragged_links(remapped) == _RAGGED_LINKS, make_map.__name__
+        assert skeleton_hash(remapped) == skeleton_hash(graph), make_map.__name__
+
+    unlinked = copy.deepcopy(graph)
+    for t in unlinked["tensors"]:
+        t.pop("ragged_offset_tensor_uid", None)
+    assert canonical_uid_map(graph) == canonical_uid_map(unlinked)
+
+    swapped = copy.deepcopy(graph)
+    q = next(t for t in swapped["tensors"] if t["name"] == "q")
+    q["ragged_offset_tensor_uid"] = offset_uids[1]
+    assert skeleton_hash(swapped) != skeleton_hash(graph)
+
+    plain = _optional_graph()
+    null_links = copy.deepcopy(plain)
+    for t in null_links["tensors"]:
+        t["ragged_offset_tensor_uid"] = None
+    assert skeleton_hash(null_links) == skeleton_hash(plain)
+    assert _ragged_links(remap_graph(null_links, canonical_uid_map(null_links))) == {}
+
+    stale = copy.deepcopy(graph)
+    q = next(t for t in stale["tensors"] if t["name"] == "q")
+    q["ragged_offset_tensor_uid"] = 99
+    assert 99 in canonical_uid_map(stale)
+    try:
+        remap_graph(stale, canonical_uid_map_by_name(stale))
+    except ValueError as e:
+        assert "99" in str(e), e
+    else:
+        raise AssertionError("a link to a uid without a map entry remaps")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        r = _import(tmp, "stale", stale, bundle_dir, check=False)
+        assert r.returncode == 1 and "does not declare" in r.stderr, r.stderr
+        assert _inventory(bundle_dir) == {}, _inventory(bundle_dir)
+
+    problems = absent_tensor_problems(graph, [offset_uids[0]])
+    assert any("ragged_offset_tensor_uid" in p for p in problems), problems
+    print("  PASS: remap_graph_remaps_tensor_links")
+
+
+def test_import_ragged_graph_keeps_offset_links():
+    """An imported ragged graph keeps its offset links and offset values on renumbered uids."""
+    from bundle_utils import (
+        canon,
+        canonical_uid_map_by_name,
+        expand_case,
+        inputs_by_name,
+        remap_graph,
+    )
+
+    for mode, flags in (("default", ()), ("grouped", _GROUPED_FLAGS)):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            bundle_dir = tmp / "bundles"
+            bundle_dir.mkdir()
+            graph = _ragged_graph()
+            sidecar = _ragged_sidecar(graph, 300, 32, 24)
+            r = _import_optional(tmp, bundle_dir, "ragged", graph, sidecar, *flags)
+            assert r.returncode == 0, (mode, r.stderr)
+            (rel,) = _sweep_dirs(bundle_dir)
+            sweep, template = _sweep_and_template(bundle_dir, rel)
+            (case,) = sweep["cases"]
+            built = expand_case(template, case)
+            assert _ragged_links(built) == _RAGGED_LINKS, (mode, built["tensors"])
+            want = remap_graph(graph, canonical_uid_map_by_name(graph))
+            assert canon(built) == canon(want), mode
+            assert inputs_by_name(case["metadata"], template) == inputs_by_name(
+                sidecar, graph
+            ), (mode, case["metadata"])
+    print("  PASS: import_ragged_graph_keeps_offset_links")
+
+
+def test_superset_import_ragged_offset_values_per_case():
+    """A ragged superset sweep expands each case to its offset links and offset values."""
+    from bundle_utils import (
+        canon,
+        expand_case,
+        inputs_by_name,
+        remap_graph,
+        uid_map_onto,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = [
+            ("full", _ragged_graph(), 32, 24),
+            ("no_sink", _ragged_graph(sink=False, seq=8), 64, 40),
+            ("no_stats", _ragged_graph(stats=False, seq=16), 128, 96),
+        ]
+        sidecars = {}
+        for i, (name, graph, q_end, kv_end) in enumerate(graphs):
+            sidecars[name] = _ragged_sidecar(graph, 100 * (i + 1), q_end, kv_end)
+            r = _import_optional(
+                tmp,
+                bundle_dir,
+                name,
+                graph,
+                sidecars[name],
+                *_SUPERSET_FLAGS,
+                "--topology",
+                "Ragged",
+                "--case-id",
+                name,
+                "--strict",
+            )
+            assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        assert sweep["version"] == 2, sweep
+        cases = {c["id"]: c for c in sweep["cases"]}
+        assert sorted(cases) == ["full", "no_sink", "no_stats"], sorted(cases)
+        for name, graph, q_end, kv_end in graphs:
+            case = cases[name]
+            if case.get("absent_tensors"):
+                _assert_absent_case_loads(sweep, template, case)
+            built = expand_case(template, case)
+            assert _ragged_links(built) == _RAGGED_LINKS, (name, built["tensors"])
+            want = remap_graph(graph, uid_map_onto(graph, template))
+            assert canon(built) == canon(want), name
+            by_name = inputs_by_name(case["metadata"], template)
+            assert by_name["ragged_offset_q"]["values"] == [0, q_end], (name, by_name)
+            assert by_name["ragged_offset_kv"]["values"] == [0, kv_end], (name, by_name)
+            assert by_name == inputs_by_name(sidecars[name], graph), name
+        print("  PASS: superset_import_ragged_offset_values_per_case")
+
+
+def test_superset_import_ragged_offset_multiplier_per_case():
+    """Ragged graphs whose offset multipliers differ share one sweep and keep their own.
+
+    The serialiser writes a multiplier of 1 on every tensor; only linked tensors take it per case.
+    """
+    from bundle_utils import canon, expand_case, remap_graph, uid_map_onto
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+        graphs = []
+        for i, multiplier in enumerate((8, 24)):
+            graph = _ragged_graph(seq=4 * (i + 1))
+            for t in graph["tensors"]:
+                linked = t.get("ragged_offset_tensor_uid") is not None
+                t["ragged_offset_multiplier"] = multiplier if linked else 1
+            graphs.append((f"m{multiplier}", graph, multiplier))
+        for i, (name, graph, _) in enumerate(graphs):
+            r = _import_optional(
+                tmp,
+                bundle_dir,
+                name,
+                graph,
+                _ragged_sidecar(graph, 100 * (i + 1), 32, 24),
+                *_SUPERSET_FLAGS,
+                "--topology",
+                "Ragged",
+                "--case-id",
+                name,
+                "--strict",
+            )
+            assert r.returncode == 0, r.stderr
+        (rel,) = _sweep_dirs(bundle_dir)
+        sweep, template = _sweep_and_template(bundle_dir, rel)
+        assert all(
+            t["ragged_offset_multiplier"] == "${case.ragged_offset_multiplier}"
+            for t in template["tensors"]
+            if t.get("ragged_offset_tensor_uid") is not None
+        ), template["tensors"]
+        cases = {c["id"]: c for c in sweep["cases"]}
+        for name, graph, multiplier in graphs:
+            built = expand_case(template, cases[name])
+            assert canon(built) == canon(
+                remap_graph(graph, uid_map_onto(graph, template))
+            ), name
+            assert {
+                t["ragged_offset_multiplier"]
+                for t in built["tensors"]
+                if t.get("ragged_offset_tensor_uid") is not None
+            } == {multiplier}, name
+        plain = [
+            t
+            for t in template["tensors"]
+            if t.get("ragged_offset_tensor_uid") is None
+            and "ragged_offset_multiplier" in t
+        ]
+        assert plain and all(t["ragged_offset_multiplier"] == 1 for t in plain), plain
+        assert all(
+            "ragged_offset_multiplier" not in v
+            for c in sweep["cases"]
+            for v in c["values"]["tensors"]
+            if v["uid"] in {t["uid"] for t in plain}
+        ), sweep["cases"]
+        print("  PASS: superset_import_ragged_offset_multiplier_per_case")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
 
     tests = [
         test_skeleton_grouping,
+        test_inventory_keys_are_forward_slash_normalized,
         test_round_trip_expansion,
+        test_resolve_plain_tensor_scoped_field_from_its_own_entry,
         test_case_ids,
         test_place_and_verify,
         test_place_keeps_manual_cases,
@@ -2233,6 +4347,43 @@ def main() -> int:
         test_import_seed_only_difference_distinct_cases,
         test_diff_coverage_suite_qualified_join,
         test_retier_bundles,
+        test_grouped_default_mode_ignores_marked_sweep,
+        test_grouped_creates_marked_sweep,
+        test_grouped_append_attributes_round_trip,
+        test_grouped_value_forms_never_share_sweep,
+        test_grouped_only_op_dir_blocks_cross_appends,
+        test_grouped_require_marked_sweep,
+        test_grouped_case_id,
+        test_grouped_topology,
+        test_grouped_import_keeps_values_inputs,
+        test_grouped_import_keeps_per_input_seeds,
+        test_grouped_import_keeps_aliases_start_offsets_and_live_rows,
+        test_grouped_runs_are_deterministic,
+        test_grouped_attribute_keys_prefixed_per_node,
+        test_grouped_engine_api_version_per_case,
+        test_grouped_override_shape_flag_per_case,
+        test_retier_keeps_import_mode,
+        test_sweep_format_compact_round_trip,
+        test_grouped_append_keeps_sweep_format,
+        test_sweep_format_key_does_not_split_sweeps,
+        test_retier_keeps_sweep_format,
+        test_retier_refuses_mixed_sweep_formats,
+        test_retier_version_consistency,
+        test_default_mode_sweep_bytes_unchanged,
+        test_import_remove_patch_round_trip,
+        test_superset_import_nested_cases,
+        test_superset_import_needs_a_containing_template,
+        test_superset_import_order_of_smaller_cases,
+        test_superset_import_reports_missed_merge,
+        test_absent_case_problems_mirror_the_loader,
+        test_import_refuses_metadata_uid_moves,
+        test_superset_index_of_a_sweep_with_only_absent_cases,
+        test_superset_import_keeps_aliases_by_name,
+        test_import_cache_matches_separate_runs,
+        test_remap_graph_remaps_tensor_links,
+        test_import_ragged_graph_keeps_offset_links,
+        test_superset_import_ragged_offset_values_per_case,
+        test_superset_import_ragged_offset_multiplier_per_case,
     ]
 
     for t in tests:

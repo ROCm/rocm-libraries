@@ -620,12 +620,15 @@ def selector_matches(
     """
     algorithm = normalize_selector(request.algorithm)
     spec_id = normalize_selector(request.spec_id)
-    if algorithm not in ("auto", candidate.algorithm):
+    # Both sides normalized, as select() compares them: a spec_id with an
+    # upper-case character (a %-escape in a lossless label) still matches
+    # its own pin.
+    if algorithm not in ("auto", normalize_selector(candidate.algorithm)):
         return (
             False,
             f"request algorithm {request.algorithm!r} != {candidate.algorithm!r}",
         )
-    if spec_id not in ("auto", candidate.spec_id):
+    if spec_id not in ("auto", normalize_selector(candidate.spec_id)):
         return False, f"request spec_id {request.spec_id!r} != {candidate.spec_id!r}"
     return True, "ok"
 

@@ -24,9 +24,6 @@ _TESTS_ROOT = os.path.dirname(_COMMON_DIR)
 # The configs carrying ``skip-mi300a``, with the ROCM ticket for each.
 _MI300A_KNOWN_BUG_CONFIGS = [
     os.path.join(_COMMON_DIR, "streamk", "sk_hgemm_lsu.yaml"),  # ROCM-33647
-    os.path.join(_COMMON_DIR, "gemm", "swizzleA.yaml"),  # ROCM-33648
-    os.path.join(_COMMON_DIR, "gemm", "swizzleB.yaml"),  # ROCM-33649
-    os.path.join(_COMMON_DIR, "gemm", "agntab_coverage_gfx942.yaml"),  # ROCM-33650
 ]
 
 

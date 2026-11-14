@@ -1552,6 +1552,36 @@ static void op_tile_buffer_store_f32(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, soffset));
 }
 
+/* Python _op_tile_buffer_atomic_fadd_f32: the pre-add result is unused. The
+ * cachepolicy attr must be an integer in 0..31; a missing, non-integer or
+ * out-of-range value (hand-built or imported IR) is rejected, not coerced. */
+static void op_tile_buffer_atomic_fadd_f32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const rocke_value_t* val = op->operands[3];
+    const rocke_attr_value_t* cpv = rocke_attr_get(&op->attrs, "cachepolicy");
+    if(!cpv || cpv->kind != ROCKE_ATTR_INT || cpv->u.i < 0 || cpv->u.i > 0x1F)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: cachepolicy attr must be an integer in 0..31",
+                      rocke_opcode_name(op->opcode));
+    const int64_t cp = cpv->u.i;
+    const char* r;
+    rocke_ll_need(L, "raw.ptr.buffer.atomic.fadd.f32");
+    r = rocke_ll_fresh(L, "bafadd");
+    rocke_ll_emitf(L,
+                   "  %s = call float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+                   "float %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
+                   r,
+                   rocke_ll_operand(L, val),
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset),
+                   (long long)cp);
+}
+
 static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1564,8 +1594,9 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
         const char* scalar;
         const char* bc;
         rocke_ll_need(L, "raw.ptr.buffer.store.i32");
-        scalar = rocke_ll_fresh(L, "bsf32sc");
+        /* bc before scalar: the Python lowerer's fresh-name order. */
         bc = rocke_ll_fresh(L, "bsf32bc");
+        scalar = rocke_ll_fresh(L, "bsf32sc");
         rocke_ll_emitf(
             L, "  %s = extractelement <1 x float> %s, i32 0", scalar, rocke_ll_operand(L, val));
         rocke_ll_emitf(L, "  %s = bitcast float %s to i32", bc, scalar);
@@ -2165,6 +2196,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F32, op_tile_buffer_store_f32);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F32, op_tile_buffer_store_vN_f32);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN, op_tile_buffer_store_vN);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32, op_tile_buffer_atomic_fadd_f32);
 
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, op_tile_async_buffer_load_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,

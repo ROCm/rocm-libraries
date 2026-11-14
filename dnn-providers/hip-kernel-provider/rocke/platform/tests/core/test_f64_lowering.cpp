@@ -5,8 +5,8 @@
  * Mirrors TestHipF64Rejection / TestF64VectorArith in
  * tests/core/test_amdgpu_lowering_ops.py, and the C++ builder side of
  * tests/core/test_f64_conversions.py (the explicit f32 <-> f64 conversions)
- * and tests/core/test_zero_vec_and_lds_element_types.py (zero_vec of f64 and
- * i16, LDS loads of i16).
+ * and tests/core/test_zero_vec_and_lds_element_types.py (zero_vec of f64,
+ * i16 and u8, LDS loads of i16).
  */
 
 #include "rocke/error.hpp"
@@ -268,12 +268,15 @@ static int test_conversions_reject_the_wrong_source_type()
     return 0;
 }
 
-static int test_zero_vec_and_lds_load_admit_f64_and_i16()
+static int test_zero_vec_and_lds_load_admit_f64_i16_and_u8()
 {
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "zero_vec_and_lds") == ROCKE_OK);
     CHECK(rocke_b_zero_vec(&b, rocke_f64(), 2) != NULL);
     CHECK(rocke_b_zero_vec(&b, rocke_i16(), 4) != NULL);
+    const rocke_value_t* unsigned_bytes = rocke_b_zero_vec(&b, rocke_u8(), 8);
+    CHECK(unsigned_bytes != NULL);
+    CHECK(rocke_type_eq(unsigned_bytes->type, rocke_vector_type(&b, rocke_u8(), 8)));
     const int shape[] = {256};
     rocke_value_t* smem = rocke_b_smem_alloc(&b, rocke_i16(), shape, 1, "halves");
     rocke_value_t* index = rocke_b_thread_id_x(&b);
@@ -425,7 +428,7 @@ int main()
        || test_fabs_stays_in_double() || test_vector_binops_use_float_ops()
        || test_conversions_lower_to_one_instruction_each()
        || test_conversions_reject_the_wrong_source_type()
-       || test_zero_vec_and_lds_load_admit_f64_and_i16()
+       || test_zero_vec_and_lds_load_admit_f64_i16_and_u8()
        || test_scalar_global_accesses_are_8_byte_aligned() || test_mean_divides_by_n()
        || test_lds_allocation_is_8_byte_aligned())
     {

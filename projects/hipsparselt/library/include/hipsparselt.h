@@ -229,7 +229,9 @@ typedef enum {
                                                             - In other cases, the Bias type is ``FP32``.*/
    HIPSPARSELT_MATMUL_SPARSE_MAT_POINTER = 17,         /**< Pointer to the pruned sparse matrix. */
    HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER = 18,  /**< Pointer to the gate residual matrix G (D = G * X + G). Set before hipsparseLtMatmulAlgSelectionInit. HIP backend only. */
-   HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC = 19,         /**< Pointer to the matrix descriptor of the gate residual matrix G. HIP backend only. */
+   HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC = 19,         /**< Pointer to the matrix descriptor of the gate residual matrix G. HIP backend only. It is not copied. It must remain valid while
+                                                            the matmul descriptor is passed to any function. \ref hipsparseLtMatmulPlanInit gives each
+                                                            plan its own copy of it. */
 } hipsparseLtMatmulDescAttribute_t;
 
 /*!
@@ -528,6 +530,11 @@ hipsparseStatus_t hipsparseLtMatDescGetAttribute(const hipsparseLtHandle_t*     
  *
  *  \details
  *  \p hipsparseLtMatmulDescriptorInit creates a matrix multiplication descriptor.
+ *
+ *  \note
+ *  \p matA, \p matB, \p matC, and \p matD are not copied. They must remain valid while
+ *  \p matmulDescr is passed to any function. \ref hipsparseLtMatmulPlanInit gives each
+ *  plan its own copy of them.
  *
  *  @param[in]
  *  handle          the hipsparselt handle.

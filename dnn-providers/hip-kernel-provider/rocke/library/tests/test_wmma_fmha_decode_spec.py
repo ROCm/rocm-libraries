@@ -368,6 +368,77 @@ class TestDecodeSpec(unittest.TestCase):
             ("rocke_wmma_fmha_decode_merge_bf16", MERGE_THREADS),
         )
 
+    @staticmethod
+    def _i32_const(text, name):
+        import re
+
+        m = re.search(
+            re.escape(name) + r' : i32 = arith\.constant \(\s*\) \{ ity = s:"i32", '
+            r"value = i:(-?\d+) \}",
+            text,
+        )
+        assert m, name
+        return int(m.group(1))
+
+    def test_merge_padded_slots_load_masked_to_zero(self):
+        # A padded merge slot (s >= ns) re-reads split 0's partial under a zero weight;
+        # an Inf there gave Inf * 0 = NaN. Every WS_O partial load of the merge loop (the
+        # merge kernel and the fused merge in the main kernel share _split_merge) must
+        # feed an arith.select whose condition is the `s < num_splits` compare and whose
+        # false operand is a zero constant vector.
+        import re
+
+        from rocke.core.ir_serialize import serialize
+
+        spec = WmmaFmhaDecodeSpec(head_size=128)
+        for arch in _ARCHS:
+            for builder in (build_wmma_fmha_decode, build_wmma_fmha_decode_merge):
+                with self.subTest(arch=arch, builder=builder.__name__):
+                    text = serialize(builder(spec, arch=arch))
+                    loads = re.findall(
+                        r"(%\w+) : vec<f32x4> = memref\.global_load_vN \( %WS_O,", text
+                    )
+                    self.assertGreaterEqual(len(loads), 8)
+                    slots = set()
+                    for name in loads:
+                        m = re.search(
+                            r"vec<f32x4> = arith\.select \( (%\w+), "
+                            + re.escape(name)
+                            + r", (%\w+) \)",
+                            text,
+                        )
+                        self.assertIsNotNone(m, name)
+                        cond, false_val = m.groups()
+                        # The compare is `slot < num_splits` with slot = sg * U + i.
+                        mc = re.search(
+                            re.escape(cond)
+                            + r" : i1 = arith\.cmp \( (%\w+), %num_splits \) "
+                            + r'\{ pred = s:"lt" \}',
+                            text,
+                        )
+                        self.assertIsNotNone(mc, cond)
+                        ma = re.search(
+                            re.escape(mc.group(1))
+                            + r" : i32 = arith\.add \( (%\w+), (%\w+) \)",
+                            text,
+                        )
+                        self.assertIsNotNone(ma, mc.group(1))
+                        mm = re.search(
+                            re.escape(ma.group(1))
+                            + r" : i32 = arith\.mul \( %sg, (%\w+) \)",
+                            text,
+                        )
+                        self.assertIsNotNone(mm, ma.group(1))
+                        self.assertEqual(self._i32_const(text, mm.group(1)), 8)
+                        slots.add(self._i32_const(text, ma.group(2)))
+                        self.assertRegex(
+                            text,
+                            re.escape(false_val)
+                            + r" : vec<f32x4> = arith\.constant_vec \(\s*\) "
+                            + r'\{ elem = s:"f32", fill = f:0\.0, vec = i:4 \}',
+                        )
+                    self.assertEqual(slots, set(range(8)))
+
     def test_feature_off_ir_has_no_feature_ops(self):
         from rocke.core.ir_serialize import serialize
 
