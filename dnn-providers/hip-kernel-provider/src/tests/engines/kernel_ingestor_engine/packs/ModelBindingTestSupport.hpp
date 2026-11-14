@@ -23,6 +23,8 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 
+#include "tests/engines/kernel_ingestor_engine/packs/UnpulledModelsRecord.hpp"
+
 // The build's HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS, set by CMake on every census file
 // that includes this header (src/tests/CMakeLists.txt).
 #ifndef HKP_REQUIRE_DVC_DESCRIPTORS
@@ -45,10 +47,6 @@
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
-
-/// The skip record hkp_pack writes at the packed arch root when it leaves a UHD out for an
-/// un-pulled model (hkp_pack.pipeline.UNPULLED_RECORD).
-constexpr const char* UNPULLED_RECORD = "hkp-unpulled-models.record";
 
 using ModelMap = std::map<std::string,
                           std::map<std::string, hipdnn_plugin_sdk::ingestor::HeuristicDescriptor>>;
@@ -115,29 +113,7 @@ inline bool packedTreeHoldsUhd(const std::string& id)
 inline bool packedTreeRecordsUnpulled(const std::string& id)
 {
     const std::string root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
-    if(root.empty())
-    {
-        return false;
-    }
-    std::ifstream file(std::filesystem::path(root) / UNPULLED_RECORD);
-    if(!file)
-    {
-        return false;
-    }
-    const auto record = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/false);
-    if(!record.is_object() || !record.contains("unpulled_models")
-       || !record["unpulled_models"].is_array())
-    {
-        return false;
-    }
-    for(const auto& entry : record["unpulled_models"])
-    {
-        if(entry.is_object() && entry.value("uhd_id", std::string()) == id)
-        {
-            return true;
-        }
-    }
-    return false;
+    return !root.empty() && unpulledRecordNames(root, id);
 }
 
 /// Whether the case must check that the models `ids` name loaded. False only when the

@@ -10,7 +10,7 @@
   "sort_kernel_catalog": {
     "default": "964ee17d-c2cf-4420-a0c3-f2bc92e8a5c8",
     "gfx942": [
-      "8d71f503-ac1b-4bd0-aa53-fb93f364381a"
+      "18bb432e-d871-4290-9ae8-f5111aaf2ffe"
     ]
   },
   "knobs": [
@@ -32,7 +32,7 @@
   ],
   "predict_engine": {
     "gfx942": [
-      "3a8f1ffa-2304-46e1-ba46-3f686cb7401a"
+      "3f368687-5222-489f-b354-ee0dca01bded"
     ]
   }
 }

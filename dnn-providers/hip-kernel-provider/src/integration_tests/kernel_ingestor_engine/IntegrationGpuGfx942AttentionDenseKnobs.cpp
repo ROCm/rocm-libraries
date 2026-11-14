@@ -390,6 +390,11 @@ std::vector<KnobCase> knobCases()
                      makeShape(FP16, 64, 8, 8, Mask::NO_MASK, 0, 1, 384, 384),
                      COLD,
                      Tile{64, 64}});
+    // Cold on a graph whose K and V are one tensor: three unique inputs instead of four, so a
+    // ranker that read positional tensor features could not evaluate it.
+    auto sharedKv = makeShape(BF16, 128, 32, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024);
+    sharedKv.sharedKv = true;
+    cases.push_back({"Cold_SharedKv", sharedKv, COLD, Tile{256, 64}});
     // Shape breadth on a forced tile: B > 1, Sq != Skv, both alignments at equal lengths,
     // the deprecated causal flag, top-left windows at unequal lengths: Sq > Skv by less
     // than W, so the last 64 rows keep only part of their window, then Skv > Sq.
@@ -879,13 +884,14 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
         // Cold: a trained ranker bound for this arch picks whichever kernel it ranks fastest,
         // so only the shape's semantic class is pinned (the CPU reference below still checks
         // the launch); one that could not rank fell back to declared kernel order, which is a
-        // failure. Without a trained ranker the engine's score picks the tile and grid; which
+        // failure unless the pack left the ranker out because its model.bin was never pulled.
+        // Without a trained ranker the engine's score picks the tile and grid; which
         // of the class's lever variants it ranks first is the score's own policy (its goldens
         // pin that).
         const auto decidedBy = detail::rankingDecidedBy(ENGINE, recorder);
-        EXPECT_NE(decidedBy, std::optional<std::string>("declared_order"))
-            << "the bound ranker could not rank this graph. Captured logs:\n"
-            << recorder.getRecordedLogsAsString();
+        detail::expectRankerDecided(decidedBy,
+                                    detail::boundRankerLeftOutAsUnpulled(ENGINE),
+                                    recorder.getRecordedLogsAsString());
         if(decidedBy.has_value())
         {
             EXPECT_TRUE(selectedCarries(*selected, semanticKey(testCase.shape)))

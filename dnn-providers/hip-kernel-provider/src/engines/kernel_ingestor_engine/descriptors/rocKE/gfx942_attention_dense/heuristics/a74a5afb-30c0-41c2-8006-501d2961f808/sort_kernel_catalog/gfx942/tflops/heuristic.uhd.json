@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "8d71f503-ac1b-4bd0-aa53-fb93f364381a",
+  "id": "18bb432e-d871-4290-9ae8-f5111aaf2ffe",
   "name": "hipkernel:Gfx942AttentionDense kernel ranker (L2, gfx942, tflops)",
   "adapter": "tree_data",
   "features_signature": [
@@ -17,7 +17,6 @@
     "$kernel.use_exp2_fast",
     "$kernel.v_reg_prefetch",
     "$gfx942_attention_dense.causal",
-    "$graph.logical_bytes",
     {
       "value_or_default": [
         "$graph.nodes[0].generate_stats",
@@ -59,42 +58,9 @@
     "$graph.nodes[0].v.numel",
     "$graph.nodes[0].v.strides[0]",
     "$graph.nodes[0].v.strides[1]",
-    "$graph.nodes[0].v.strides[2]",
-    "$graph.tensor_count",
-    "$graph.tensors[0].data_type",
-    "$graph.tensors[0].dims[0]",
-    "$graph.tensors[0].dims[1]",
-    "$graph.tensors[0].dims[2]",
-    "$graph.tensors[0].dims[3]",
-    "$graph.tensors[0].strides[0]",
-    "$graph.tensors[0].strides[1]",
-    "$graph.tensors[0].strides[2]",
-    "$graph.tensors[1].data_type",
-    "$graph.tensors[1].dims[0]",
-    "$graph.tensors[1].dims[1]",
-    "$graph.tensors[1].dims[2]",
-    "$graph.tensors[1].dims[3]",
-    "$graph.tensors[1].strides[0]",
-    "$graph.tensors[1].strides[1]",
-    "$graph.tensors[1].strides[2]",
-    "$graph.tensors[2].data_type",
-    "$graph.tensors[2].dims[0]",
-    "$graph.tensors[2].dims[1]",
-    "$graph.tensors[2].dims[2]",
-    "$graph.tensors[2].dims[3]",
-    "$graph.tensors[2].strides[0]",
-    "$graph.tensors[2].strides[1]",
-    "$graph.tensors[2].strides[2]",
-    "$graph.tensors[3].data_type",
-    "$graph.tensors[3].dims[0]",
-    "$graph.tensors[3].dims[1]",
-    "$graph.tensors[3].dims[2]",
-    "$graph.tensors[3].dims[3]",
-    "$graph.tensors[3].strides[0]",
-    "$graph.tensors[3].strides[1]",
-    "$graph.tensors[3].strides[2]"
+    "$graph.nodes[0].v.strides[2]"
   ],
-  "features_hash": "sha256:da6d8c49cb3b2052",
+  "features_hash": "sha256:b939daf2b8502016",
   "trained_against": {
     "ued": {
       "id": "a74a5afb-30c0-41c2-8006-501d2961f808",
@@ -120,7 +86,7 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "0dd57b4ab6c1a2306f5b4279d1c3166ae54321a217aa6b99a72ad8f24d02ba31"
+    "hash": "c61528925c7a9e15c7e1a318992d95357524a08708e31d7bf0237b9b8f318b45"
   },
   "categorical_encoding": {
     "$kernel.nonpersist_decode": {

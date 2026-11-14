@@ -100,11 +100,14 @@ and `.gitignore` in git, `model.bin` from DVC.
 
 | Role | UHD | Does |
 |---|---|---|
-| L2 `sort_kernel_catalog` | `8d71f503-ac1b-4bd0-aa53-fb93f364381a` | ranks this catalog's kernels and picks the one to run |
-| L1 `predict_engine` | `3a8f1ffa-2304-46e1-ba46-3f686cb7401a` | predicts the engine's TFLOPS for the L2's pick |
+| L2 `sort_kernel_catalog` | `18bb432e-d871-4290-9ae8-f5111aaf2ffe` | ranks this catalog's kernels and picks the one to run |
+| L1 `predict_engine` | `3f368687-5222-489f-b354-ee0dca01bded` | predicts the engine's TFLOPS for the L2's pick |
 
 Neither model reads the attention scale (every training graph used 1/sqrt(d), so it would stand in
-for the head size) or a tensor uid, and both read an unset `generate_stats` as false. The L2 reads
+for the head size), a tensor uid, or a feature that depends on how many tensors the graph holds
+(`graph.tensors[N]`, `graph.tensor_count`, `graph.logical_bytes`: K and V may be one tensor). They
+read each operand through `graph.nodes[0].{q,k,v,o}`, and both read an unset `generate_stats` as
+false. The L2 reads
 no FLOPs-derived feature: hipDNN publishes none for a sliding-window graph, and a ranker that
 cannot evaluate falls back to declared kernel order, so the L2 ranks every graph the engine
 serves. No training graph had a window (`hipdnn_corpus_gen`'s `sdpa_fwd` has no window
