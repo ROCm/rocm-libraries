@@ -152,6 +152,108 @@ namespace
         EXPECT_EQ(gemm.initialize(algoWithUnknownIndex(), nullptr), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
+    // An algo index can name a grouped or a non-grouped solution, and their kernels take
+    // different arguments, so each launch refuses an algo of the other kind. Uniform
+    // summation order refuses some of these launches on its own, so both modes run.
+    TEST_F(AlgoErrors, smoke_GroupedAndNonGroupedAlgosAreRefusedByTheOtherKind)
+    {
+        constexpr size_t kWorkspace = size_t(32) << 20;
+        void*            workspace  = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, kWorkspace), hipSuccess);
+        auto freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
+        const std::unique_ptr<void, decltype(freeBuffer)> workspaceOwner(workspace, freeBuffer);
+
+        for(const int32_t uniformOrder : {1, 0})
+        {
+            SCOPED_TRACE("uniform summation order " + std::to_string(uniformOrder));
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                      HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                                      &uniformOrder,
+                                                      sizeof(uniformOrder)),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblaslt_ext::GemmPreference gemmPref;
+            gemmPref.setMaxWorkspaceBytes(kWorkspace);
+            gemmPref.setUniformSummationOrder(uniformOrder);
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     HIPBLAS_COMPUTE_32F);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            hipblaslt_ext::GemmInputs   in = inputs();
+            ASSERT_EQ(gemm.setProblem(kSize, kSize, kSize, 1, epilogue, in),
+                      HIPBLAS_STATUS_SUCCESS);
+            gemm.setMaxWorkspaceBytes(kWorkspace);
+
+            hipblaslt_ext::GroupedGemm grouped(handle,
+                                               HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               HIPBLAS_COMPUTE_32F);
+            std::vector<int64_t>                     size(2, kSize), batch(2, 1);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+            std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs());
+            ASSERT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
+                      HIPBLAS_STATUS_SUCCESS);
+            grouped.setMaxWorkspaceBytes(kWorkspace);
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> plainResults, groupedResults;
+            ASSERT_EQ(gemm.algoGetHeuristic(1, gemmPref, plainResults), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(grouped.algoGetHeuristic(1, gemmPref, groupedResults),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_FALSE(plainResults.empty());
+            if(groupedResults.empty())
+                GTEST_SKIP() << "the loaded library has no grouped solution for this problem";
+            hipblasLtMatmulAlgo_t plainAlgo   = plainResults[0].algo;
+            hipblasLtMatmulAlgo_t groupedAlgo = groupedResults[0].algo;
+
+            auto matmul = [&](const hipblasLtMatmulAlgo_t& algo) {
+                return hipblasLtMatmul(handle,
+                                       desc,
+                                       &alpha,
+                                       a,
+                                       layout,
+                                       b,
+                                       layout,
+                                       &beta,
+                                       c,
+                                       layout,
+                                       d,
+                                       layout,
+                                       &algo,
+                                       workspace,
+                                       kWorkspace,
+                                       nullptr);
+            };
+
+            // Each algo still runs on its own kind of problem.
+            EXPECT_EQ(matmul(plainAlgo), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.initialize(plainAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(grouped.initialize(groupedAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(grouped.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            EXPECT_EQ(matmul(groupedAlgo), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(gemm.initialize(groupedAlgo, workspace, false),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(grouped.initialize(plainAlgo, workspace, false),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            size_t required = 0;
+            EXPECT_EQ(gemm.isAlgoSupported(groupedAlgo, required), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(grouped.isAlgoSupported(plainAlgo, required), HIPBLAS_STATUS_INVALID_VALUE);
+        }
+    }
+
     TEST_F(AlgoErrors, smoke_HeuristicReportsZeroAlgosWhenRequestIsRejected)
     {
         hipblasLtMatmulHeuristicResult_t result{};
@@ -393,11 +495,9 @@ namespace
                   HIPBLAS_STATUS_NOT_SUPPORTED);
     }
 
-    // The extension API computes every layout as column-major, so a row-major A, B, C or D is
-    // refused rather than multiplied as if it were column-major (ROCM-29960). The C API
-    // rewrites a row-major A or B as its column-major transpose, but still refuses C and D
-    // with different orders. ORDER_COL set explicitly on all four is the control: it must
-    // still get algorithms and pass every call.
+    // Matmul computes every layout as column-major, so a row-major A, B, C or D is refused
+    // rather than multiplied as if it were column-major (ROCM-29960). ORDER_COL set
+    // explicitly on all four is the control: it must still get algorithms and pass every call.
     TEST_F(AlgoErrors, smoke_RowOrderIsRefused)
     {
         const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
@@ -420,37 +520,36 @@ namespace
             const hipblasStatus_t expected
                 = rowIndex < 0 ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_NOT_SUPPORTED;
             const std::string which = rowIndex < 0 ? "control" : std::string(1, "ABCD"[rowIndex]);
-            const bool        cApiRewrites = rowIndex == 0 || rowIndex == 1;
 
             hipblasLtMatmulHeuristicResult_t result{};
             int                              returned = -1;
             EXPECT_EQ(
                 hipblasLtMatmulAlgoGetHeuristic(
                     handle, desc, mats[0], mats[1], mats[2], mats[3], pref, 1, &result, &returned),
-                cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
+                expected)
                 << which;
-            if(cApiRewrites)
-                EXPECT_GT(returned, 0) << which;
-            else if(rowIndex >= 0)
+            if(rowIndex >= 0)
                 EXPECT_EQ(returned, 0) << which;
-            EXPECT_EQ(hipblasLtMatmul(handle,
-                                      desc,
-                                      &alpha,
-                                      a,
-                                      mats[0],
-                                      b,
-                                      mats[1],
-                                      &beta,
-                                      c,
-                                      mats[2],
-                                      d,
-                                      mats[3],
-                                      nullptr,
-                                      nullptr,
-                                      0,
-                                      nullptr),
-                      cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
-                << which;
+            {
+                EXPECT_EQ(hipblasLtMatmul(handle,
+                                          desc,
+                                          &alpha,
+                                          a,
+                                          mats[0],
+                                          b,
+                                          mats[1],
+                                          &beta,
+                                          c,
+                                          mats[2],
+                                          d,
+                                          mats[3],
+                                          nullptr,
+                                          nullptr,
+                                          0,
+                                          nullptr),
+                          expected)
+                    << which;
+            }
 
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,

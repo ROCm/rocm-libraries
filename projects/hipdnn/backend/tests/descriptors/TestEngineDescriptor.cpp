@@ -196,6 +196,26 @@ protected:
         _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
     }
 
+    /// An engaged `numericalNotes` writes that list, even an empty one; nullopt
+    /// leaves the field absent. Written through the Create* API: the object API
+    /// drops empty vectors.
+    void serializeEngineDetailsWithNumericalNotes(
+        int64_t engineId, const std::optional<std::vector<int32_t>>& numericalNotes)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+            builder,
+            engineId,
+            nullptr,
+            nullptr,
+            nullptr,
+            0,
+            numericalNotes ? &*numericalNotes : nullptr);
+        builder.Finish(engineDetails);
+        _engineDetailsBuffer = builder.Release();
+        _serializedEngineDetails = {_engineDetailsBuffer.data(), _engineDetailsBuffer.size()};
+    }
+
     void serializeEngineDetailsWithName(int64_t engineId, const char* name)
     {
         flatbuffers::FlatBufferBuilder builder;
@@ -492,6 +512,188 @@ TEST_F(TestEngineDescriptor, PreservesUnknownBehaviorNote)
     EXPECT_EQ(note, UNKNOWN_NOTE);
 }
 
+TEST_F(TestEngineDescriptor, GetNumericalNotesAbsentFieldReportsNondeterministic)
+{
+    // Default fixture buffer carries no numerical_notes field.
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TENSOR_CORE;
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 1, &noteCount, &note));
+    EXPECT_EQ(noteCount, 1);
+    EXPECT_EQ(note, HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesExplicitEmptyListReportsNoNotes)
+{
+    serializeEngineDetailsWithNumericalNotes(0, std::vector<int32_t>{});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 0, &noteCount, nullptr));
+    EXPECT_EQ(noteCount, 0);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesReturnsNotes)
+{
+    serializeEngineDetailsWithNumericalNotes(
+        0,
+        std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD,
+                             HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS,
+                             HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    int64_t noteCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 0, &noteCount, nullptr));
+    ASSERT_EQ(noteCount, 3);
+
+    std::vector<hipdnnBackendNumericalNote_t> notes(static_cast<size_t>(noteCount));
+    int64_t returnedCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                         HIPDNN_TYPE_NUMERICAL_NOTE,
+                                         noteCount,
+                                         &returnedCount,
+                                         notes.data()));
+    ASSERT_EQ(returnedCount, 3);
+    EXPECT_EQ(notes[0], HIPDNN_NUMERICAL_NOTE_WINOGRAD);
+    EXPECT_EQ(notes[1], HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS);
+    EXPECT_EQ(notes[2], HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesWithoutElementCount)
+{
+    serializeEngineDetailsWithNumericalNotes(
+        0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    std::vector<hipdnnBackendNumericalNote_t> notes(2);
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                         HIPDNN_TYPE_NUMERICAL_NOTE,
+                                         static_cast<int64_t>(notes.size()),
+                                         nullptr,
+                                         notes.data()));
+    EXPECT_EQ(notes[0], HIPDNN_NUMERICAL_NOTE_WINOGRAD);
+    EXPECT_EQ(notes[1], HIPDNN_NUMERICAL_NOTE_FFT);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesZeroRequestedWithOutputReturnsCountOnly)
+{
+    serializeEngineDetailsWithNumericalNotes(
+        0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT;
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 0, &noteCount, &note));
+    ASSERT_EQ(noteCount, 2);
+    EXPECT_EQ(note, HIPDNN_NUMERICAL_NOTE_TYPE_COUNT);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesNullOutputWithRequestedCountReturnsCountOnly)
+{
+    serializeEngineDetailsWithNumericalNotes(
+        0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 2, &noteCount, nullptr));
+    EXPECT_EQ(noteCount, 2);
+}
+
+// The first enumerator has value 0; only a negative value is invalid.
+TEST_F(TestEngineDescriptor, GetNumericalNotesAcceptsZeroValuedNote)
+{
+    static_assert(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE == 0);
+    serializeEngineDetailsWithNumericalNotes(
+        0, std::vector<int32_t>{static_cast<int32_t>(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE)});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_FFT;
+    int64_t noteCount = -1;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 1, &noteCount, &note));
+    EXPECT_EQ(noteCount, 1);
+    EXPECT_EQ(note, HIPDNN_NUMERICAL_NOTE_TENSOR_CORE);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesCountQueryRequiresElementCount)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 0, nullptr, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesInvalidType)
+{
+    auto engine = getEngineDescriptor();
+    makeEngineFinalized();
+
+    int64_t noteCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 0, &noteCount, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, GetNumericalNotesInsufficientOutputCount)
+{
+    serializeEngineDetailsWithNumericalNotes(
+        0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT;
+    int64_t returnedCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(engine->getAttribute(HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                                    HIPDNN_TYPE_NUMERICAL_NOTE,
+                                                    1,
+                                                    &returnedCount,
+                                                    &note),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineDescriptor, PreservesUnknownNumericalNote)
+{
+    constexpr hipdnnBackendNumericalNote_t UNKNOWN_NOTE = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT + 1;
+    serializeEngineDetailsWithNumericalNotes(0, std::vector<int32_t>{UNKNOWN_NOTE});
+
+    auto engine = getEngineDescriptor();
+    makeEngineFinalizedExpectingDetails();
+
+    hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_WINOGRAD;
+    int64_t returnedCount = 0;
+    ASSERT_NO_THROW(engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 1, &returnedCount, &note));
+    EXPECT_EQ(returnedCount, 1);
+    EXPECT_EQ(note, UNKNOWN_NOTE);
+}
+
+TEST_F(TestEngineDescriptor, SetNumericalNotesIsNotSupported)
+{
+    auto engine = getEngineDescriptor();
+    hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_WINOGRAD;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->setAttribute(
+            HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 1, &note),
+        HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
 /// Providers build the knob list by ranking the catalog, so finalize() must not load
 /// engine details; prediction and candidate reads never use them.
 TEST_F(TestEngineDescriptor, FinalizeDoesNotQueryEngineDetails)
@@ -615,6 +817,47 @@ TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPart
         HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, HIPDNN_TYPE_BEHAVIOR_NOTE, 1, &count, &note);
     EXPECT_EQ(count, 1);
     EXPECT_EQ(note, HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE);
+}
+
+TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPartialNumericalNotes)
+{
+    auto engine = getEngineDescriptor();
+    EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
+    engine->initializeHeuristicResult(getMockGraph(), ENGINE_ID);
+    serializeEngineDetailsWithNumericalNotes(
+        ENGINE_ID, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC, -1});
+    EXPECT_CALL(*getMockGraph(), getHandle()).Times(2).WillRepeatedly(Return(_mockHandle.get()));
+    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+        .Times(2)
+        .WillRepeatedly(Return(_mockEnginePluginResourceManager));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
+        .Times(2)
+        .WillRepeatedly(
+            Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* data) {
+                *data = _serializedEngineDetails;
+            }));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _)).Times(2);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _))
+        .WillOnce(Return("engine"));
+
+    int64_t count = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        engine->getAttribute(
+            HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 0, &count, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
+
+    serializeEngineDetailsWithNumericalNotes(ENGINE_ID,
+                                             std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD});
+    hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC;
+    engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 1, &count, &note);
+    EXPECT_EQ(count, 1);
+    EXPECT_EQ(note, HIPDNN_NUMERICAL_NOTE_WINOGRAD);
+    // A second successful read is the same immutable snapshot, not another provider query.
+    engine->getAttribute(
+        HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE, HIPDNN_TYPE_NUMERICAL_NOTE, 1, &count, &note);
+    EXPECT_EQ(count, 1);
+    EXPECT_EQ(note, HIPDNN_NUMERICAL_NOTE_WINOGRAD);
 }
 
 TEST_F(TestEngineDescriptor, GetEngineDescriptorGraph)
