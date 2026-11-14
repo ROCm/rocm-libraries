@@ -13,6 +13,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
+* GECON could return a wrong estimate for n larger than the wavefront size (a race in its LACN2
+  iteration)
+* GECON caused a memory access fault for n > 480 when the handle was in device pointer mode (the mode
+  set by `rocsolver_create_handle`)
+
 ### Known issues
 ### Upcoming changes
 

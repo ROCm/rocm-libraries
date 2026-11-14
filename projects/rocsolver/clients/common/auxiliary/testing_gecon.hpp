@@ -250,6 +250,11 @@ void testing_gecon(Arguments& argus)
     I n = argus.get<I>("n");
     I lda = argus.get<I>("lda", n);
 
+    // the handle can be in device pointer mode (the API scalars are on the device in both modes)
+    const bool device_mode = (argus.get<char>("pointer_mode", 'H') == 'D');
+    if(device_mode)
+        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+
     rocsolver_norm_type norm_type = char2rocsolver_norm_type(norm_typeC);
     rocblas_int hot_calls = argus.iters;
 
@@ -334,6 +339,14 @@ void testing_gecon(Arguments& argus)
     if(argus.unit_check || argus.norm_check)
         gecon_getError<T, I, S>(handle, norm_type, n, dA, lda, danorm, drcond, hA, hipiv, hanorm,
                                 hrcond, hrcond_res, &max_error);
+
+    // the pointer mode of the caller must be restored
+    if(device_mode)
+    {
+        rocblas_pointer_mode mode;
+        CHECK_ROCBLAS_ERROR(rocblas_get_pointer_mode(handle, &mode));
+        EXPECT_EQ(mode, rocblas_pointer_mode_device);
+    }
 
     // collect performance data
     if(argus.timing)
