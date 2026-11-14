@@ -116,6 +116,8 @@ std::vector<ConvKernelHandle> get_valid_configs(const Device& device,
                                                 std::size_t max_ranked)
 {
     check_device(device);
+    if(!par.is_valid())
+        return {};
     for(const auto& entry : device.arch->algorithms)
     {
         if(entry.algorithm == algo)
@@ -128,6 +130,8 @@ std::vector<ConvKernelHandle>
 get_valid_configs(const Device& device, const ConvParams& par, std::size_t max_ranked)
 {
     check_device(device);
+    if(!par.is_valid())
+        return {};
     std::vector<ScoredKernel> scored;
     for(const auto& entry : device.arch->algorithms)
     {
@@ -151,6 +155,8 @@ namespace
 // Applies get_valid_configs' filter to one kernel, for is_applicable and ConvLaunch::make.
 bool kernel_supports(const ConvKernel* kernel, const Device& device, const ConvParams& par)
 {
+    if(!par.is_valid())
+        return false;
     const auto algorithm_supports = [&] {
         for(const auto& entry : device.arch->algorithms)
             if(entry.algorithm == kernel->algorithm())
