@@ -73,6 +73,10 @@ constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
 constexpr size_t WORKSPACE_ALIGNMENT = 256;
 constexpr long long MAX_GRID_YZ = 65535;
 constexpr long long MAX_SPLITS = 16;
+/// Pixels x output channels of the rows reference tile (16 rows x 32 columns x 128 channels).
+constexpr long long ROWS_LARGE_TILE = 16LL * 32 * 128;
+/// Persistent rounds past which a smaller rows tile declines.
+constexpr long long ROWS_SMALL_TILE_ROUNDS = 8;
 constexpr int SPATIAL = CONV_NAIVE_SPATIAL_DIMS;
 
 long long divUp(long long value, long long divisor)
@@ -515,8 +519,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         if(config.pw < 1 || config.fn < 1 || config.wp < 1 || config.wq < 1 || config.wk < 1
            || (config.pp != 0 && config.pp != 1) || (config.pp == 1 && config.wk != 2)
            || (config.epi != 0 && config.epi != 1) || config.ring != 0 || config.bl != 0
-           || config.split != 0 || config.wm != 0 || config.wn != 0
-           || config.bm != config.wp * config.pw || config.bn != config.wk * config.fn * 16
+           || (config.split != 0 && (config.kd != 1 || config.pp != 0)) || config.wm != 0
+           || config.wn != 0 || config.bm != config.wp * config.pw
+           || config.bn != config.wk * config.fn * 16
            || (config.un != 1 && config.un != 2 && config.un != 4)
            || (config.un > 1 && config.kd != 1))
         {
@@ -607,12 +612,8 @@ int64_t rowsLdsBytes(const Config& config)
 
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
-    // Batch unfold addresses its images through the 16-byte LDS DMA (CDNA4, gfx950 alone).
-    const bool unfoldOk
-        = config.un <= 1
-          || hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0;
     return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
-           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName) && unfoldOk;
+           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName);
 }
 
 std::optional<Plan>
@@ -667,6 +668,18 @@ std::optional<Plan>
         {
             return std::nullopt;
         }
+        // gfx950 16-bit rows tiles smaller than the 16 x 32 x 128 tile serve tail-bound grids:
+        // past ROWS_SMALL_TILE_ROUNDS persistent rounds the tail is a small share and the large
+        // tile is ahead (MI355X, 384^2-1024^2 VAE layers), so they decline instead of near-tying
+        // it under autotune.
+        const long long tilePixelChannels
+            = static_cast<long long>(t.th) * config.wq * 16 * config.blockColumns();
+        if(config.split == 0 && !config.math && config.atom.rfind("mfma16x32_", 0) == 0
+           && tilePixelChannels < ROWS_LARGE_TILE
+           && t.blocks > ROWS_SMALL_TILE_ROUNDS * std::max<int64_t>(1, computeUnits))
+        {
+            return std::nullopt;
+        }
         tile = t;
     }
     else
@@ -715,7 +728,26 @@ std::optional<Plan>
     k2.splits = 1;
     k2.cps = static_cast<int>(chunks);
     plan.outElems = static_cast<long long>(a.n) * a.dout * a.ho * a.wo * a.k;
-    if(config.split != 0)
+    if(config.split != 0 && config.rows)
+    {
+        // Rows (one persistent block per unit): split-C serves only a grid whose tiles leave at
+        // least three quarters of the units idle (MI355X: 1.4x on n1 c640 64^2 at 40 tiles, 0.7-0.9x
+        // at 128-250 tiles, where the fp32 partials cost more than the fill gains), so larger
+        // layers keep the single-pass configs; 2+ chunks per split, <= 16 splits.
+        if(tile->blocks * 4 > computeUnits)
+        {
+            return std::nullopt;
+        }
+        const long long splits
+            = std::min({MAX_SPLITS, chunks / 2, divUp(computeUnits, tile->blocks)});
+        if(splits < 2)
+        {
+            return std::nullopt;
+        }
+        k2.cps = static_cast<int>(divUp(chunks, splits));
+        k2.splits = static_cast<int>(divUp(chunks, k2.cps));
+    }
+    else if(config.split != 0)
     {
         // Split only an under-filled grid: below 2 blocks per CU, 2+ chunks per split, <= 16.
         const long long wanted = 2 * std::max<int64_t>(1, computeUnits);
@@ -736,7 +768,8 @@ std::optional<Plan>
     if(config.rows)
     {
         // One 1-D grid of at most one block per unit; the kernel walks the tiles.
-        plan.grid[0] = static_cast<unsigned int>(std::min<long long>(tile->blocks, computeUnits));
+        plan.grid[0] = static_cast<unsigned int>(
+            std::min<long long>(tile->blocks * k2.splits, computeUnits));
         plan.grid[1] = 1;
         plan.grid[2] = 1;
     }
@@ -1072,6 +1105,7 @@ public:
             options.add("CONV_DIRECT_WQ", std::to_string(config.wq));
             options.add("CONV_DIRECT_WK", std::to_string(config.wk));
             options.add("CONV_DIRECT_UN", std::to_string(config.un));
+            options.add("CONV_DIRECT_SPLIT", std::to_string(config.split));
             options.add("CONV_DIRECT_PP", std::to_string(config.pp));
             options.add("CONV_DIRECT_EPI", std::to_string(config.epi));
         }

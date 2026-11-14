@@ -13,6 +13,16 @@
 //   C[s][r] += sum_k A[s][k] B[k][r]        = dw[c][r][s] over this row and step
 // Filters wider or taller than 4 tile into 4 x 4 tap groups (each its own accumulator).
 //
+// Non-finite x (parity with the reference): no product whose dy operand is not one of the
+// convolution's is kept, so an inf / NaN in x never meets a (row, column) pairing the convolution
+// does not have. Columns: where wo is not whole tiles (CONV_DW_COLMASK, set by the host) every
+// step ANDs the lane's A with a block-uniform mask of the columns before wo (all ones but in the
+// last tile; a branch there would split the step's block and cost more). Rows: an input row
+// with a real filter row that has no dy row here (outside the image or the partition, or at
+// stride 2 the other parity; a block-uniform test) saves the accumulators before its products
+// and restores them after, in the lanes of those filter rows: a few moves a row, not a select a
+// product.
+//
 // At stride 2 the x row is staged in two phase rows (its even and its odd columns), so A[s][k]
 // = phase (s % 2) at k + s / 2: again a shift along one row, and the operand read stays one
 // 64-bit window per lane.
@@ -42,6 +52,9 @@
 #ifndef CONV_DW_S
 #define CONV_DW_S 1
 #endif
+#ifndef CONV_DW_COLMASK
+#define CONV_DW_COLMASK 0
+#endif
 
 namespace hankel
 {
@@ -50,6 +63,7 @@ constexpr int NWG = CONV_DW_NWG; // 16-channel groups a wave
 constexpr int RG = (KH + 3) / 4, SG = (KW + 3) / 4;
 constexpr int CB = 64 * NWG; // channels a block
 constexpr int S = CONV_DW_S; // stride, both axes
+constexpr bool COLMASK = CONV_DW_COLMASK != 0; // wo not whole tiles
 constexpr int THREADS = 256;
 static_assert(CONV_DW_KD == 1, "2-D filters");
 static_assert(Q % 4 == 0 && Q >= 4, "whole 4-column steps");
@@ -301,13 +315,31 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                         continue; // a padding row's window is zeros
                     }
                     // The lane's B rows r = 4 rg + i: dy row (yy + ph - r) / S, or the zero slot.
+                    // A lane whose real filter row has no dy row keeps its sums (rows past KH
+                    // are never written out): the row is careful when any filter row of it has
+                    // none (block-uniform; at stride 2 every row, by parity).
                     const u16* bSlot[RG];
+                    bool keep[RG];
 #pragma unroll
                     for(int rg = 0; rg < RG; ++rg)
                     {
                         const int r = 4 * rg + i, num = yy + a.ph - r, oy = num / S;
                         const bool ok = r < KH && num >= o0 * S && num % S == 0 && oy < o1;
                         bSlot[rg] = ring + (ok ? oy % SLOTS : SLOTS) * SS + b * DP;
+                        keep[rg] = ok || r >= KH;
+                    }
+                    const bool careful
+                        = S != 1 || yy + a.ph - (KH - 1) < o0 * S || yy + a.ph >= o1 * S;
+                    f4 saved[NWG][RG][SG];
+                    if(careful)
+                    {
+#pragma unroll
+                        for(int cg = 0; cg < NWG; ++cg)
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    saved[cg][rg][sg] = acc[cg][rg][sg];
                     }
 #pragma unroll
                     for(int cg = 0; cg < NWG; ++cg)
@@ -343,6 +375,21 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                                 av[sg] = (u64)__builtin_amdgcn_alignbyte(e1, e0, ab)
                                          | ((u64)__builtin_amdgcn_alignbyte(e2, e1, ab) << 32);
                             }
+                            if constexpr(COLMASK)
+                            {
+                                // A's k is output column q0 + qq + k: in a step past wo (the last
+                                // tile's), zero the halves past it.
+                                // (A block-uniform mask, no branch: the step stays one block.)
+                                const int live = a.wo - (q0 + qq);
+                                const u64 mask = live >= 4   ? ~0ull
+                                                 : live <= 0 ? 0ull
+                                                             : (1ull << (16 * live)) - 1;
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                {
+                                    av[sg] &= mask;
+                                }
+                            }
 #pragma unroll
                             for(int rg = 0; rg < RG; ++rg)
                             {
@@ -355,6 +402,17 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                                 for(int sg = 0; sg < SG; ++sg)
                                     acc[cg][rg][sg] = mma<BF16>(av[sg], bv[rg], acc[cg][rg][sg]);
                         }
+                    }
+                    if(careful)
+                    {
+#pragma unroll
+                        for(int cg = 0; cg < NWG; ++cg)
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    acc[cg][rg][sg]
+                                        = keep[rg] ? acc[cg][rg][sg] : saved[cg][rg][sg];
                     }
                 }
                 __syncthreads();

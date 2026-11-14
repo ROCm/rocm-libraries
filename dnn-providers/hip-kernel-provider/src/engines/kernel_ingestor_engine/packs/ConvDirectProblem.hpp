@@ -110,7 +110,7 @@ struct Config
     /// output rows x 16 columns x 16 FN channels; ping-pong (pp) and staged epilogue (epi).
     bool rows = false;
     int pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0;
-    /// Rows batch unfold (2-D, 16-byte LDS DMA): an MFMA's 16 columns are 16 / un columns of
+    /// Rows batch unfold (2-D): an MFMA's 16 columns are 16 / un columns of
     /// each of un consecutive images; 1 is the plain tile.
     int un = 0;
     std::string archs; ///< ship list: comma-separated arch groups, or "any"
