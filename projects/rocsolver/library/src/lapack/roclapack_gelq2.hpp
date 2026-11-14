@@ -64,7 +64,7 @@ void rocsolver_gelq2_getMemorySize(const rocblas_int m,
     size_t s1, s2, w1, w2;
     rocsolver_larf_getMemorySize<BATCHED, T>(rocblas_side_right, m, n, batch_count, size_scalars,
                                              &s1, &w1);
-    rocsolver_larfg_getMemorySize<T>(n, batch_count, &w2, &s2);
+    THROW_IF_ROCBLAS_ERROR(rocsolver_larfg_getMemorySize<T>(n, batch_count, &w2, &s2));
     *size_work_workArr = std::max(w1, w2);
     *size_Abyx_norms = std::max(s1, s2);
 

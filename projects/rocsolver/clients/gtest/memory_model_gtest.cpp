@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include <stdlib.h>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <rocblas/rocblas.h>
@@ -219,5 +220,32 @@ TEST_F(checkin_misc_MEMORY_MODEL, DISABLED_user_owned)
 
     // 18. destroy handle
     ASSERT_EQ(hipFree(W), hipSuccess);
+    EXPECT_EQ(rocblas_destroy_handle(handle), rocblas_status_success);
+}
+
+/*************************************/
+/***** size query must not compute ***/
+/*************************************/
+TEST_F(checkin_misc_MEMORY_MODEL, lauum_size_query_leaves_input_unchanged)
+{
+    rocblas_handle handle;
+    ASSERT_EQ(rocblas_create_handle(&handle), rocblas_status_success);
+
+    std::vector<double> hA(stA);
+    for(size_t i = 0; i < hA.size(); ++i)
+        hA[i] = 1.0 + double(i % 7);
+    ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * stA, hipMemcpyHostToDevice), hipSuccess);
+
+    size_t size = 0;
+    ASSERT_EQ(rocblas_start_device_memory_size_query(handle), rocblas_status_success);
+    rocblas_status status = rocsolver_dlauum(handle, rocblas_fill_upper, n, dA, lda);
+    ASSERT_EQ(rocblas_stop_device_memory_size_query(handle, &size), rocblas_status_success);
+    EXPECT_TRUE(status == rocblas_status_size_increased || status == rocblas_status_size_unchanged);
+    EXPECT_GT(size, 0);
+
+    std::vector<double> hB(stA);
+    ASSERT_EQ(hipMemcpy(hB.data(), dA, sizeof(double) * stA, hipMemcpyDeviceToHost), hipSuccess);
+    EXPECT_EQ(hA, hB);
+
     EXPECT_EQ(rocblas_destroy_handle(handle), rocblas_status_success);
 }

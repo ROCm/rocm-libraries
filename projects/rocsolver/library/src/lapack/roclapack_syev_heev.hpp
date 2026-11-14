@@ -194,8 +194,8 @@ rocblas_status rocsolver_syev_heev_template(rocblas_handle handle,
     if(evect != rocblas_evect_original)
     {
         // only compute eigenvalues
-        rocsolver_sterf_template<S>(handle, n, D, (I)0, strideD, E, (I)0, strideE, info,
-                                    batch_count, (I*)work_stack);
+        THROW_IF_ROCBLAS_ERROR(rocsolver_sterf_template<S>(
+            handle, n, D, (I)0, strideD, E, (I)0, strideE, info, batch_count, (I*)work_stack));
     }
     else
     {
@@ -205,8 +205,9 @@ rocblas_status rocsolver_syev_heev_template(rocblas_handle handle,
             Abyx_norms_tmptr, tmptau_trfact, workArr);
 
         // compute eigenvalues and eigenvectors
-        rocsolver_steqr_template<T>(handle, evect, n, D, (I)0, strideD, E, (I)0, strideE, A, shiftA,
-                                    lda, strideA, info, batch_count, work_stack);
+        THROW_IF_ROCBLAS_ERROR(rocsolver_steqr_template<T>(handle, evect, n, D, (I)0, strideD, E,
+                                                           (I)0, strideE, A, shiftA, lda, strideA,
+                                                           info, batch_count, work_stack));
     }
 
     return rocblas_status_success;

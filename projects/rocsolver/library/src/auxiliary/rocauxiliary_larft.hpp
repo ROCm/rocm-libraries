@@ -606,7 +606,7 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     size_t lmemsize = sizeof(T) * (k + 1) * k;
 
     // Remaining kernels take scalars on device.
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    THROW_IF_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
 
     if(direct == rocblas_forward_direction)
     {

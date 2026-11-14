@@ -209,7 +209,8 @@ rocblas_status rocsolver_potf2_template(rocblas_handle handle,
         // ----------------------
         // use specialized kernel
         // ----------------------
-        potf2_run_small<T>(handle, uplo, n, A, shiftA, lda, strideA, info, batch_count);
+        THROW_IF_ROCBLAS_ERROR(
+            potf2_run_small<T>(handle, uplo, n, A, shiftA, lda, strideA, info, batch_count));
     }
     else
     {

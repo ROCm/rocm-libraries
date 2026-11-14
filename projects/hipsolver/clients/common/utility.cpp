@@ -22,12 +22,21 @@
  * ************************************************************************ */
 
 #include <chrono>
+#include <stdexcept>
+#include <string>
 
 #include "hipsolver.h"
 #include "utility.hpp"
 
 hipsolver_rng_t hipsolver_rng(69069);
 hipsolver_rng_t hipsolver_seed(hipsolver_rng);
+
+static void throw_if_hip_error(hipError_t status, const char* func)
+{
+    if(status != hipSuccess)
+        throw std::runtime_error(std::string(func) + ": " + hipGetErrorName(status) + ": "
+                                 + hipGetErrorString(status));
+}
 
 template <>
 char type2char<float>()
@@ -97,7 +106,7 @@ double get_time_us_no_sync()
  */
 double get_time_us()
 {
-    hipDeviceSynchronize();
+    throw_if_hip_error(hipDeviceSynchronize(), __func__);
     return get_time_us_no_sync();
 }
 
@@ -105,7 +114,7 @@ double get_time_us()
  */
 double get_time_us_sync(hipStream_t stream)
 {
-    hipStreamSynchronize(stream);
+    throw_if_hip_error(hipStreamSynchronize(stream), __func__);
     return get_time_us_no_sync();
 }
 

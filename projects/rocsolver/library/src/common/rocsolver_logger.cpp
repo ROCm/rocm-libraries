@@ -46,18 +46,22 @@ std::mutex rocsolver_logger::_mutex;
 static std::string rocblas_version()
 {
     size_t size;
-    rocblas_get_version_string_size(&size);
+    if(rocblas_get_version_string_size(&size) != rocblas_status_success || size == 0)
+        return "unknown";
     std::string str(size - 1, '\0');
-    rocblas_get_version_string(str.data(), size);
+    if(rocblas_get_version_string(str.data(), size) != rocblas_status_success)
+        return "unknown";
     return str;
 }
 
 static std::string rocsolver_version()
 {
     size_t size;
-    rocsolver_get_version_string_size(&size);
+    if(rocsolver_get_version_string_size(&size) != rocblas_status_success || size == 0)
+        return "unknown";
     std::string str(size - 1, '\0');
-    rocsolver_get_version_string(str.data(), size);
+    if(rocsolver_get_version_string(str.data(), size) != rocblas_status_success)
+        return "unknown";
     return str;
 }
 

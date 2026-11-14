@@ -252,10 +252,10 @@ rocblas_status rocsolver_sygvd_hegvd_template(rocblas_handle handle,
         handle, itype, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, batch_count,
         scalars, work1, work2, work3, work4, optim_mem);
 
-    rocsolver_syevd_heevd_template<BATCHED, STRIDED, T>(
+    THROW_IF_ROCBLAS_ERROR(rocsolver_syevd_heevd_template<BATCHED, STRIDED, T>(
         handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, iinfo, batch_count,
         scalars, work1, work2, work3, tmpz, splits, (T*)work4, tau, (T**)pivots_workArr, Aband,
-        he2hb_work, V_hb2st, tau_hb2st);
+        he2hb_work, V_hb2st, tau_hb2st));
 
     // combine info from POTRF with info from SYEV/HEEV
     ROCSOLVER_LAUNCH_KERNEL(sygv_update_info, gridReset, threads, 0, stream, info, iinfo, n,

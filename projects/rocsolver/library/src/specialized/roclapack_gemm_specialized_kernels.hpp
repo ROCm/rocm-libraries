@@ -233,7 +233,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     rocblas_pointer_mode pmode;
-    rocblas_get_pointer_mode(handle, &pmode);
+    THROW_IF_ROCBLAS_ERROR(rocblas_get_pointer_mode(handle, &pmode));
 
     // get warp size
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);

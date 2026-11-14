@@ -46,6 +46,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
 * Fixed sparse functions potentially not using the stream set in the handle.
+* Fixed internal errors (for example, failed HIP memory operations in BDSQR, STEDC, STERF, STEQR, SYEVJ, or POTF2) being
+  silently dropped by the calling routines, such as the SVD and eigensolver drivers. These errors are now returned from the
+  public API.
+* Fixed LAUUM running its computation during a rocBLAS device memory size query instead of returning the workspace size.
 
 
 

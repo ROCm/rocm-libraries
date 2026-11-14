@@ -217,7 +217,7 @@ void rocsolver_lahr2_getMemorySize(const rocblas_int n,
         s1 = 0;
 
     // extra requirements for calling larfg
-    rocsolver_larfg_getMemorySize<T>(n - k, batch_count, &s2, size_norms);
+    THROW_IF_ROCBLAS_ERROR(rocsolver_larfg_getMemorySize<T>(n - k, batch_count, &s2, size_norms));
 
     // work_workArr also used as trmv scratch (length nb per batch)
     *size_work_workArr = std::max({s1, s2, sizeof(T) * nb * batch_count});

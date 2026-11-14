@@ -432,11 +432,11 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
             T* gesdd_he2hb_work = (T*)(wa2_ptr + wa2_orig + i1);
             T* gesdd_V_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2);
             T* gesdd_tau_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2 + i3);
-            rocsolver_syevd_heevd_template<false, STRIDED, T>(
+            THROW_IF_ROCBLAS_ERROR(rocsolver_syevd_heevd_template<false, STRIDED, T>(
                 handle, rocblas_evect_original, rocblas_fill_upper, n, V_gemm, 0, ldv_gemm,
                 strideV_gemm, S, strideS, (SS*)workArr, strideS, info, batch_count, scalars, work1,
                 work2, work3, (SS*)UVtmpZ, (rocblas_int*)splits, (T*)tmptau_W, (T*)tau,
-                gesdd_workArr2, gesdd_Aband, gesdd_he2hb_work, gesdd_V_hb2st, gesdd_tau_hb2st);
+                gesdd_workArr2, gesdd_Aband, gesdd_he2hb_work, gesdd_V_hb2st, gesdd_tau_hb2st));
         }
 
         // Compute AV
@@ -502,11 +502,11 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
             T* gesdd_he2hb_work = (T*)(wa2_ptr + wa2_orig + i1);
             T* gesdd_V_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2);
             T* gesdd_tau_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2 + i3);
-            rocsolver_syevd_heevd_template<false, STRIDED, T>(
+            THROW_IF_ROCBLAS_ERROR(rocsolver_syevd_heevd_template<false, STRIDED, T>(
                 handle, rocblas_evect_original, rocblas_fill_upper, m, U_gemm, 0, ldu_gemm,
                 strideU_gemm, S, strideS, (SS*)workArr, strideS, info, batch_count, scalars, work1,
                 work2, work3, (SS*)UVtmpZ, (rocblas_int*)splits, (T*)tmptau_W, (T*)tau,
-                gesdd_workArr2, gesdd_Aband, gesdd_he2hb_work, gesdd_V_hb2st, gesdd_tau_hb2st);
+                gesdd_workArr2, gesdd_Aband, gesdd_he2hb_work, gesdd_V_hb2st, gesdd_tau_hb2st));
         }
 
         // Compute U^*A

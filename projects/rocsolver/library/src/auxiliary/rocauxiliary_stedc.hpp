@@ -1955,15 +1955,17 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
     // if no eigenvectors required with the classic solver, use sterf
     if(evect == rocblas_evect_none)
     {
-        rocsolver_sterf_template<S>(handle, n, D, shiftD, strideD, E, shiftE, strideE, info,
-                                    batch_count, static_cast<I*>(work_stack));
+        THROW_IF_ROCBLAS_ERROR(rocsolver_sterf_template<S>(handle, n, D, shiftD, strideD, E, shiftE,
+                                                           strideE, info, batch_count,
+                                                           static_cast<I*>(work_stack)));
     }
 
     // if size is too small with classic solver, use steqr
     else if(n < STEDC_MIN_DC_SIZE)
     {
-        rocsolver_steqr_template<T>(handle, evect, n, D, shiftD, strideD, E, shiftE, strideE, C,
-                                    shiftC, ldc, strideC, info, batch_count, work_stack);
+        THROW_IF_ROCBLAS_ERROR(rocsolver_steqr_template<T>(handle, evect, n, D, shiftD, strideD, E,
+                                                           shiftE, strideE, C, shiftC, ldc, strideC,
+                                                           info, batch_count, work_stack));
     }
 
     // otherwise use divide and conquer algorithm:

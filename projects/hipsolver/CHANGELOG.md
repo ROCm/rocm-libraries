@@ -47,6 +47,13 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 
 * Fixed hipsolverDnXpotrs calling 32-bit potrs instead of 64-bit potrs.
 * Fixed hipsolverSpSetStream not setting the internal rocsparse_handle stream.
+* Fixed the rocSOLVER backend leaving the handle in rocBLAS device memory size-query mode when a bufferSize function
+  received an invalid enum argument. Subsequent calls on that handle could report success without performing any computation.
+* Fixed the rocSOLVER backend ignoring errors from the rocBLAS device memory size query in bufferSize functions, which could
+  return an uninitialized workspace size.
+* Fixed sparse functions with Cholesky reordering ignoring failures from the CHOLMOD symbolic analysis.
+* Fixed `-Wunused-result` and `-Wunused-value` warnings for unchecked HIP return values in the clients, and removed the
+  build flag that suppressed them.
 
 
 ## hipSOLVER 3.7.0 for ROCm 10.1.0

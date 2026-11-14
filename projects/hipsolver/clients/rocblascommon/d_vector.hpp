@@ -81,13 +81,14 @@ public:
             if(PAD > 0)
             {
                 // Copy guard to device memory before allocated memory
-                hipMemcpy(d, guard, sizeof(guard), hipMemcpyHostToDevice);
+                EXPECT_EQ(hipMemcpy(d, guard, sizeof(guard), hipMemcpyHostToDevice), hipSuccess);
 
                 // Point to allocated block
                 d += PAD;
 
                 // Copy guard to device memory after allocated memory
-                hipMemcpy(d + size, guard, sizeof(guard), hipMemcpyHostToDevice);
+                EXPECT_EQ(hipMemcpy(d + size, guard, sizeof(guard), hipMemcpyHostToDevice),
+                          hipSuccess);
             }
         }
 #endif
@@ -102,7 +103,8 @@ public:
             U host[PAD];
 
             // Copy device memory after allocated memory to host
-            hipMemcpy(host, d + this->size, sizeof(guard), hipMemcpyDeviceToHost);
+            EXPECT_EQ(hipMemcpy(host, d + this->size, sizeof(guard), hipMemcpyDeviceToHost),
+                      hipSuccess);
 
             // Make sure no corruption has occurred
             EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);
@@ -111,7 +113,7 @@ public:
             d -= PAD;
 
             // Copy device memory after allocated memory to host
-            hipMemcpy(host, d, sizeof(guard), hipMemcpyDeviceToHost);
+            EXPECT_EQ(hipMemcpy(host, d, sizeof(guard), hipMemcpyDeviceToHost), hipSuccess);
 
             // Make sure no corruption has occurred
             EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);
@@ -129,7 +131,8 @@ public:
                 U host[PAD];
 
                 // Copy device memory after allocated memory to host
-                hipMemcpy(host, d + this->size, sizeof(guard), hipMemcpyDeviceToHost);
+                EXPECT_EQ(hipMemcpy(host, d + this->size, sizeof(guard), hipMemcpyDeviceToHost),
+                          hipSuccess);
 
                 // Make sure no corruption has occurred
                 EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);
@@ -138,7 +141,7 @@ public:
                 d -= PAD;
 
                 // Copy device memory after allocated memory to host
-                hipMemcpy(host, d, sizeof(guard), hipMemcpyDeviceToHost);
+                EXPECT_EQ(hipMemcpy(host, d, sizeof(guard), hipMemcpyDeviceToHost), hipSuccess);
 
                 // Make sure no corruption has occurred
                 EXPECT_EQ(memcmp(host, guard, sizeof(guard)), 0);

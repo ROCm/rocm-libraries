@@ -102,9 +102,6 @@ if(BUILD_FORTRAN_BINDINGS)
 endif()
 
 add_library(hipsolver-common INTERFACE)
-target_compile_options(hipsolver-common INTERFACE
-  -Wno-unused-result # TODO: address [[nodiscard]] warnings
-)
 if(BUILD_ADDRESS_SANITIZER)
   target_compile_options(hipsolver-common INTERFACE
     -fsanitize=address
