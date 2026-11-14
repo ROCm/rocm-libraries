@@ -9,10 +9,14 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <Tensile/SolutionLibrary.hpp>
+
 #include <cstdint>
 #include <limits>
 #include <tuple>
 #include <vector>
+
+#include "../../../library/src/amd_detail/rocblaslt/src/include/get_all_search_type_for_test.hpp"
 
 namespace
 {
@@ -88,7 +92,8 @@ namespace
         }
 
         hipblasStatus_t cHeuristic(uint64_t                                       limit,
-                                   std::vector<hipblasLtMatmulHeuristicResult_t>& out)
+                                   std::vector<hipblasLtMatmulHeuristicResult_t>& out,
+                                   int requested = kRequested)
         {
             hipblasLtMatmulPreference_t pref   = nullptr;
             hipblasStatus_t             status = hipblasLtMatmulPreferenceCreate(&pref);
@@ -96,7 +101,7 @@ namespace
                 return status;
             status = hipblasLtMatmulPreferenceSetAttribute(
                 pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &limit, sizeof(limit));
-            out.assign(kRequested, {});
+            out.assign(requested, {});
             int count = 0;
             if(status == HIPBLAS_STATUS_SUCCESS)
                 status = hipblasLtMatmulAlgoGetHeuristic(handle,
@@ -106,7 +111,7 @@ namespace
                                                          layoutD,
                                                          layoutD,
                                                          pref,
-                                                         kRequested,
+                                                         requested,
                                                          out.data(),
                                                          &count);
             out.resize(status == HIPBLAS_STATUS_SUCCESS ? count : 0);
@@ -140,7 +145,8 @@ namespace
         }
 
         hipblasStatus_t cppHeuristic(uint64_t                                       limit,
-                                     std::vector<hipblasLtMatmulHeuristicResult_t>& out)
+                                     std::vector<hipblasLtMatmulHeuristicResult_t>& out,
+                                     int requested = kRequested)
         {
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
@@ -155,7 +161,7 @@ namespace
                 return status;
             hipblaslt_ext::GemmPreference pref;
             pref.setMaxWorkspaceBytes(limit);
-            return gemm.algoGetHeuristic(kRequested, pref, out);
+            return gemm.algoGetHeuristic(requested, pref, out);
         }
     };
 
@@ -252,5 +258,43 @@ namespace
             hipblasLtMatmulAlgo_t algo = fitting.front().algo;
             EXPECT_EQ(gemm.initialize(algo, ws), HIPBLAS_STATUS_SUCCESS);
         }
+    }
+
+    // Ranking a single algo does not call getAllSolutions. Asking for more algos
+    // than the ranking returns does, through both top-up call sites, and the
+    // search type is the no-ranking one. The hook is cleared before each query.
+    TEST_F(HeuristicWorkspaceLimit, smoke_TopUpPassesNoRankingSearch)
+    {
+        constexpr int kNoCall = -1;
+        constexpr int kNoRank
+            = static_cast<int>(TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING);
+        constexpr int kMany = 100000;
+
+        std::vector<hipblasLtMatmulHeuristicResult_t> results;
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        if(cHeuristic(kWorkspace, results, 1) != HIPBLAS_STATUS_SUCCESS || results.empty())
+            GTEST_SKIP() << "No solution for this problem in the loaded library";
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall)
+            << "hipblasLtMatmulAlgoGetHeuristic called getAllSolutions while the ranking "
+               "already filled the request";
+
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cHeuristic(kWorkspace, results, kMany), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_LT(results.size(), static_cast<size_t>(kMany));
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank)
+            << "topUpWithSizeIndependentSolutions did not pass a no-ranking search";
+
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cppHeuristic(kWorkspace, results, 1), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(results.size(), 1u);
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoCall)
+            << "rocblaslt_algo_get_heuristic_cpp called getAllSolutions while the ranking "
+               "already filled the request";
+
+        rocblaslt_testing_reset_last_get_all_search_type_for_test();
+        ASSERT_EQ(cppHeuristic(kWorkspace, results, kMany), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_LT(results.size(), static_cast<size_t>(kMany));
+        EXPECT_EQ(rocblaslt_testing_last_get_all_search_type_for_test(), kNoRank)
+            << "rocblaslt_algo_get_heuristic_cpp top-up did not pass a no-ranking search";
     }
 } // namespace

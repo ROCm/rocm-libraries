@@ -412,15 +412,15 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
     const auto& loader = miopen::solver::CkImplLibLoader::Get(GetCurrentDeviceName());
     if(!loader.IsLoaded())
         return false;
 
-    auto data_type = problem.GetInDataType();
-    return loader.IsArgsSupported(
-        CKSolverType::GrpConvFwd, problem, kernel_id, data_type, use_tf32);
+    // use_tf32 is dropped by Deserialize; recompute it from the problem so a restored config is
+    // validated against the right (TF32 or FP32) instance set.
+    return loader.IsArgsSupportedTf32Aware(CKSolverType::GrpConvFwd, problem, kernel_id);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::operator==(
@@ -506,8 +506,7 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConvFwd, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConvFwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

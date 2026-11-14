@@ -153,9 +153,9 @@ def _parse_args(argv):
         metavar="NAME",
         help="A folder of the source root that this build does not pack: a "
         "top-level child (a descriptor family whose build flag is off) or a "
-        "'/'-separated path below the root (a conv family whose DVC-stored "
-        "catalogs were not pulled), matched case-insensitively. A name that "
-        "matches no folder is ignored. Repeatable.",
+        "'/'-separated path under the root (a bundle or conv family whose DVC "
+        "files were not pulled), matched case-insensitively. A name that matches "
+        "no folder is ignored. Repeatable.",
     )
     p.add_argument(
         "--disable-kind",
@@ -165,6 +165,13 @@ def _parse_args(argv):
         help="A kernel_source kind this build has no producer for. Its UKDs are "
         "pruned like arch-pruned ones, and a KDP left with none is dropped. "
         "Repeatable; an unknown kind is an error.",
+    )
+    p.add_argument(
+        "--require-dvc",
+        action="store_true",
+        help="A model file that is absent while its `<model>.dvc` pointer exists "
+        "(a `dvc pull` that was not run) is an error. Without it the model's UHD "
+        "is left out of the shipped tree with a warning.",
     )
     return p.parse_args(argv)
 
@@ -185,6 +192,7 @@ def main(argv=None):
         source_label=args.source_label,
         exclude_folders=tuple(args.exclude_folder),
         disabled_kinds=tuple(args.disable_kind),
+        require_dvc=args.require_dvc,
     )
     return 0
 

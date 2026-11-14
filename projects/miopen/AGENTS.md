@@ -150,8 +150,8 @@ ctest -N -L '^quick$'
 # Generic hardware: -LE ex_gpu drops the arch-specific suites.
 ctest --output-on-failure --no-tests=error -L '^quick$' -LE ex_gpu
 # Architecture with its own exclusions: use the exact ex_gpu_* key from
-# test_categories.yaml, often a family name (gfx942 -> ex_gpu_gfx94X).
-ctest --output-on-failure --no-tests=error -L '^quick$' -L '^ex_gpu_gfx94X$'
+# test_categories.yaml, often a family name (gfx1100 -> ex_gpu_gfx110X).
+ctest --output-on-failure --no-tests=error -L '^quick$' -L '^ex_gpu_gfx110X$'
 # Discrete mode (naive solvers apply to every GPU; many solvers skip unsupported ones):
 ./bin/test_unit_conv_solver_ConvDirectNaiveConvFwd --gtest_filter='Smoke/*FP32*'
 # Driver; keep reference verification enabled (-V 0 disables it):

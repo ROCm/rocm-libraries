@@ -1,5 +1,6 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
+  # skip-mi300a: ROCM-33647 (hangs the GPU client on MI300A, which blocks the whole run). Passes on MI300X, so only MI300A skips it. Remove the mark when the ticket is fixed.
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict, skip-mi300a] # not supported by arch
 
 GlobalParameters:
   SyncsPerBenchmark: 0

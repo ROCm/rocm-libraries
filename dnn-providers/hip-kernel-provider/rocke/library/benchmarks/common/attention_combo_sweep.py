@@ -41,7 +41,7 @@ from dispatch.attention import (
     attention_dispatch_result,
     iter_dispatch_attention_all,
 )
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from rocke.dispatch.core import spec_identity
 from rocke.dispatch.tuning.walk import sample_count, sweep_level
 from benchmarks.common.attention_flops import attention_flops
@@ -206,7 +206,7 @@ def _unified_tensors(req, seed: int):
         "cu_seqlens_q": cu,
         "seqused_k": used,
         "block_table": table,
-        "problem": _problem(req),
+        "problem": attention_problem(req),
         "_dense_q": q_dense,
         "_dense_k": k_dense,
         "_dense_v": v_dense,

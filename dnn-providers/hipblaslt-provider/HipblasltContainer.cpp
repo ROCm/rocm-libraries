@@ -36,8 +36,9 @@ HipblasltContainer::HipblasltContainer()
     _engineManager = std::make_unique<EngineManager>();
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
-    auto hipblasltEngine
-        = std::make_unique<PlanBuilderEngine>(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+    // The hipBLASLt matmul plans are capture-safe; the engine reports graph capture support.
+    auto hipblasltEngine = std::make_unique<PlanBuilderEngine>(
+        hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID, true);
 
     auto matmulPlanBuilder = std::make_unique<HipblasltMatmulPlanBuilder>();
     hipblasltEngine->addPlanBuilder(std::move(matmulPlanBuilder));

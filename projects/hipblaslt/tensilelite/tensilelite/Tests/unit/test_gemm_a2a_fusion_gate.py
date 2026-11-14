@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tensilelite.TensileCreateLibrary.Run import _includeGemmA2AFusionProblemType
+from tensilelite.create_library.run import _includeGemmA2AFusionProblemType
 
 
 pytestmark = pytest.mark.unit
@@ -50,7 +50,7 @@ def test_disabled_build_drops_fused_logic_and_reports_it(
     still passed as a successful build.
     """
     import tensilelite.LibraryIO as LibraryIO
-    import tensilelite.TensileCreateLibrary.Run as RunModule
+    import tensilelite.create_library.run as RunModule
 
     parsed = [
         LibraryIO.LibraryLogic(

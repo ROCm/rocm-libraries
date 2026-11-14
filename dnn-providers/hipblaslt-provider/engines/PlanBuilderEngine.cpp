@@ -4,12 +4,14 @@
 #include "PlanBuilderEngine.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 
 namespace hipblaslt_plugin
 {
 
-PlanBuilderEngine::PlanBuilderEngine(int64_t id)
+PlanBuilderEngine::PlanBuilderEngine(int64_t id, bool supportsGraphCapture)
     : _id(id)
+    , _supportsGraphCapture(supportsGraphCapture)
 {
 }
 
@@ -38,7 +40,13 @@ void PlanBuilderEngine::getDetails(HipdnnEnginePluginHandle& handle,
                                    hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id);
+    std::vector<int32_t> behaviorNotes;
+    if(_supportsGraphCapture)
+    {
+        behaviorNotes.push_back(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE));
+    }
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+        builder, _id, nullptr, &behaviorNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

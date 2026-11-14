@@ -260,9 +260,8 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
 | `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `host_memory_gtest.cpp` | `HostMemory_pre_checkin` | How the client holds pinned host memory: an idle buffer of 1 GiB or more stays cached only while consecutive tests reuse it (released after a test that does not, or when a test of another shape needs new memory), a smaller one until 100 consecutive tests have not reused it, large buffers get no 20% reuse slack, and a failed host allocation is reported instead of used. The `query_*` tests point the host-memory query (`host_memory.hpp`) at temporary copies of `/proc/meminfo` and the cgroup files, and check that it takes the smaller of `MemAvailable` and the tightest container memory limit (cgroup v1 or v2, up to the root). The `limit_*` tests check that `HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` caps that budget and never raises it, and that it makes the memory preflight skip. Pins at most about 3.3 GiB; no hipBLASLt kernels |
-| `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
-| `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers |
+| `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
 | `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
 
@@ -354,7 +353,9 @@ Before allocating, every `hipblaslt-test` matmul case estimates the device and h
 needs, including the CPU reference's float or double copies of A and B, and skips with both amounts
 when either does not fit. A case that runs out anyway, at a pinned host allocation or a device
 allocation, also skips. Every such skip begins "Not enough memory:", and the end of the run lists
-them under `[ MEMORY   ]`. Two environment variables help a large-memory lane:
+them under `[ MEMORY   ]`. On Linux the run's last lines also give the process's peak resident
+memory, pinned host buffers included, under `[ PEAK RSS ]`. Two environment variables help a
+large-memory lane:
 
 - `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1` turns those skips into failures, so a run can require
   that every case ran.
@@ -650,6 +651,7 @@ the C++ build and test.
 | --- | --- | --- | --- |
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
+| Logic corpus checks (`TensileLogic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
@@ -687,6 +689,7 @@ tracked as a gap.
 - TensileLite Python unit and characterization suites: on GPU across four architectures via
   `preliminary`, against installed artifacts via TheRock, and on CPU in the coverage lane
 - The TensileLite coverage floor and per-file ratchet, through `Component CI Summary`
+- The logic corpus checks on logic-only changes, through `Component CI Summary`
 - The rocjitsu GEMM workload runner unit tests, through `Component CI Summary`, when
   `clients/scripts/rocjitsu` changes
 - `pre-commit`
@@ -728,25 +731,24 @@ about "what do we currently know is broken" has to check all nine.
 | --- | --- | --- | --- |
 | [`clients/tests/data/known_bugs.yaml`](clients/tests/data/known_bugs.yaml) | Client GTest cases matched by parameters, optionally per architecture. Excluded from every tier | Comment convention | **No.** The case never runs, so nothing can observe a fix |
 | `GTEST_SKIP()` in client sources | Individual cases at runtime | None | Not applicable, and mostly not bugs: these are environment guards (no GPU present, no Stream-K kernel selected for the problem) |
-| [`TensileLogic/known_bugs.yaml`](tensilelite/tensilelite/TensileLogic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
+| [`logic/known_bugs.yaml`](tensilelite/tensilelite/logic/known_bugs.yaml) | Library-logic validation failures, keyed on logic file path plus `SolutionNameMin` | Structured `ticket:` field | **Partly.** Re-validates each entry and reports stale ones, but only warns |
 | Filename-driven marks in `tensilelite/tensilelite/Tests/common/config_helpers.py` | Any config YAML whose path contains `xfail`, `wip` or `disabled` | None; the reason lives in a filename | **Partly.** An `xfail` or `wip` path is strict, because `tensilelite/pytest.ini` sets `xfail_strict = True`, so an unexpected pass fails the run. A `disabled` path is a plain skip |
 | `skip-<arch>` marks in config YAML `TestParameters` | A config on named architectures | Free-text comment | Not applicable |
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
 | Coverage-pass filters in [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) | Tests that crash only in the coverage build, dropped from the coverage pass that would otherwise run them: `StreamKNullStream`, and pointer-array matmuls under `HIPBLASLT_CHECK_NUMERICS` | Ticket in a comment beside each filter (AIHPBLAS-5137, AIHPBLAS-5136) | **No.** The excluded combination stops running, so the coverage job cannot see either fix and a person has to delete the filter. The blind spot is narrow, though: both tests still run in the unfiltered `precheckin` job, so what goes unobserved is the coverage build and the enabled-`CHECK_NUMERICS` combination, not the tests themselves |
-| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| `@needs_logic_corpus` tests, resolved through [`logic_corpus.py`](tensilelite/tensilelite/Tests/unit/logic_corpus.py) | The few unit tests that still read the logic corpus (see [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests)), whenever `library/.../Logic` is not on disk | Issue URL in the skip reason; `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1` turns the skip into a failure | **Not applicable.** It gates on a precondition rather than a bug, and the cross-file checks it once hid now run in `TensileLogic --check-all` regardless |
 
 This last mechanism is a different shape from the other eight: it is not quarantining a *known* bug
-at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
-quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
-this precondition checks for never exists by design (see
-[CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)), so the 2 tests behind
-it in `test_PlaceholderMerge.py` cannot execute for real in that lane, ever, independent of whether
-the underlying data is correct. (A third, in `test_GpuRevisionTarget.py`, was deleted along with
-the module it tested in [PR #11777](https://github.com/ROCm/rocm-libraries/pull/11777).) [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
-narrowed the marker from a module-wide xfail (which was false-XPASSing 3 unrelated tests) to just
-the 2 tests that need the corpus; it fixed the XPASS problem it was solving but left this shape
-intact.
+at all, but gating on a precondition. In TheRock CI's installed-artifact layout the corpus never
+exists by design (see [CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)),
+so these tests skip there every time. That used to hide real corpus checks, which made it a **Blind**
+entry. Those checks now live where the corpus is: `TensileLogic --check-all` for cross-file facts.
+The `@needs_logic_corpus` tests themselves also run, with the corpus required, in the
+`Component CI: hipBLASLt Logic Corpus` lane on any change under `Tensile/Logic/`. Every run prints
+a `needs_logic_corpus: N ran, M skipped` line so a lane that lacks the corpus says so
+([#14887](https://github.com/ROCm/rocm-libraries/issues/14887),
+[ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834)).
 
 **The distinction that matters is the last column.** Format is cosmetic; what separates a healthy
 suppression from rot is whether the mechanism can tell you the underlying bug got fixed. That sorts
@@ -895,7 +897,7 @@ the set of architectures the library supports or builds for.
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
 | Linux, gfx103X / gfx120X | Partial | Nightly, in TheRock's own nightly | |
-| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
+| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. The client suite runs as 4 shards, then the large-memory cases one group per process; a large case that skips for lack of memory fails the job (`HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1`). The job summary lists each process's peak memory and every test that stopped for memory. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
 
 ### Scoping test cases to architectures
 
@@ -909,6 +911,9 @@ A client test case can be limited to some architectures in its YAML:
 - **`known_bug_platforms`** in [`known_bugs.yaml`](clients/tests/data/known_bugs.yaml) is an exact,
   case-insensitive list of names without the feature suffix, so `gfx1250` and `gfx1250-strict` are
   separate entries.
+- **`require_solution_chip_ids`** lists up to four PCI chip IDs, for example `[0x75a0, 0x75a3]`, for
+  a case that sets `allow_no_solution: 1` because its kernels are registered for those devices only.
+  On a listed device a missing solution fails; elsewhere it still skips.
 
 For gfx1250:
 
@@ -945,8 +950,8 @@ red sanitizer run does not block a merge.
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
 on pull requests touching either library, either test driver, the suppression file, or the workflow,
 nightly at 07:00 UTC, and on manual dispatch.
-It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
-`linux-release-host-asan` preset), runs quick tests for relevant PRs, and runs standard tests
+It builds through TheRock using its `linux-release-host-asan` preset directly for host-only
+ASAN, runs quick tests for relevant PRs, and runs standard tests
 nightly on gfx942 and gfx950. Both architectures test hipBLASLt and hipSPARSELt.
 Manual dispatch accepts the test type as a workflow input.
 The selected type is passed to the test runners for every architecture.
@@ -969,6 +974,11 @@ Host-only AddressSanitizer does not require GPU page-fault retry (XNACK), so thi
 it. The shared test launcher preserves the caller's XNACK setting for host-ASAN artifacts and sets
 `HSA_XNACK=1` for full-ASAN artifacts. The suppression file is the thing to look at first when a
 leak report appears that seems to come from outside hipBLASLt.
+
+Both [`test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) and
+[`test_hipsparselt.py`](../../test/therock/test_hipsparselt.py) set `OMP_NUM_THREADS=1`
+for host and device ASAN runs. OpenMP provides limited speedups in these test clients
+and introduces high overhead in ASAN builds.
 
 **How to build it yourself.** For a standalone hipBLASLt build, `-DHIPBLASLT_ENABLE_ASAN=ON` or
 `-DHIPBLASLT_ENABLE_TSAN=ON`, with `-DTENSILELITE_ENABLE_HOST_ASAN=ON` for the TensileLite host
@@ -1753,11 +1763,6 @@ cadence, and pull requests get a performance number.
   and a drift produces confusing test-selection behavior rather than an obvious failure.
 - **Run derived-parameter assignment in the library logic gate** (AIHPBLAS-3575), so a logic entry
   that would fail in code generation fails at the gate instead.
-- **Give the chip-ID-arch-lock check coverage everywhere**
-  ([#7481](https://github.com/ROCm/rocm-libraries/issues/7481)). Its pytest copies never run in
-  TheRock, because the installed tree does not ship the logic corpus, and gfx1250 gets no TheRock test
-  stage at all.
-
 #### Keep it honest
 
 **Goal.** The rules that stop the test system from decaying again once it has been regularized.

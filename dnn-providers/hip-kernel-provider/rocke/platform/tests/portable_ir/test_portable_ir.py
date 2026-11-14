@@ -23,6 +23,7 @@
 #                   in the process at all -- the shape this actually deploys in.
 #                   It comes from the same source-keyed artifact bundle.
 
+import json
 import os
 import pkgutil
 import subprocess
@@ -34,6 +35,7 @@ from pathlib import Path
 import pytest
 
 import rocke.portable_ir.tests as _unit_tests
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -190,7 +192,8 @@ def test_parity_matrix():
     assert r.returncode == 0, r.stdout[-6000:] + r.stderr[-4000:]
 
 
-def test_standalone_cli_matches_python(tmp_path):
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_standalone_cli_matches_python(tmp_path, arch):
     """A binary with no Python in it reproduces the Python lowerer's .ll.
 
     parity_matrix proves the C++ engine agrees, but it drives that engine over
@@ -217,7 +220,7 @@ kernel, recipe = record_kernel(lambda: build_elementwise(spec))
 open(out + "/k.ir.json", "w").write(ir_export.export_kernel_ir_json(kernel))
 open(out + "/k.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(recipe))
 open(out + "/py.ll", "w").write(
-    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="gfx950"))
+    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="{arch}"))
 """
     r = _run([sys.executable, "-c", author, str(tmp_path)])
     assert r.returncode == 0, r.stderr[-4000:]
@@ -228,7 +231,7 @@ open(out + "/py.ll", "w").write(
         (["--recipe", str(tmp_path / "k.recipe.cbor"), "--cbor"], "CBOR recipe"),
     ):
         got = subprocess.run(
-            [cli, *args, "--arch", "gfx950", "--flavor", "llvm20"],
+            [cli, *args, "--arch", arch, "--flavor", "llvm20"],
             capture_output=True,
             text=True,
         )
@@ -342,3 +345,230 @@ open(sys.argv[1], "w").write(
         text=True,
     )
     assert f"kernel attr '{key}'" not in got.stderr, got.stderr[-2000:]
+
+
+def test_standalone_importers_carry_and_refuse_param_attrs(tmp_path):
+    """Both C++ importers carry every pointer attribute the lowerer emits, and
+    refuse a param attr they cannot read.
+
+    ``nonnull``, ``dereferenceable`` and an explicit ``nocapture=False`` change
+    the emitted argument list, so the replay of a kernel that states them must
+    still match the Python lowerer byte for byte. A key the importers do not
+    know is an error rather than silently dropped, in both artifact forms."""
+    cli = _replay_cli()
+    author = """
+import json, sys
+from rocke.core import ir_export
+from rocke.core.ir import F32, IRBuilder, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.portable_ir.src.recording_builder import record_kernel
+
+
+def build():
+    b = IRBuilder("param_attr_probe")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    src = b.param(
+        "src", PtrType(F32, "global"), nonnull=True, dereferenceable=256, align=16
+    )
+    dst = b.param("dst", PtrType(F32, "global"), nocapture=False, writeonly=True)
+    tid = b.thread_id_x()
+    b.global_store(dst, tid, b.global_load_f32(src, tid, align=4), align=4)
+    b.ret()
+    return b.kernel
+
+
+out = sys.argv[1]
+kernel, recipe = record_kernel(build)
+open(out + "/k.ir.json", "w").write(ir_export.export_kernel_ir_json(kernel))
+open(out + "/k.recipe.json", "w").write(json.dumps(recipe))
+open(out + "/py.ll", "w").write(
+    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="gfx950"))
+"""
+    r = _run([sys.executable, "-c", author, str(tmp_path)])
+    assert r.returncode == 0, r.stderr[-4000:]
+
+    expected = (tmp_path / "py.ll").read_text()
+    assert "nonnull" in expected and "dereferenceable(256)" in expected
+    ir_doc = json.loads((tmp_path / "k.ir.json").read_text())
+    recipe = json.loads((tmp_path / "k.recipe.json").read_text())
+    ir_doc["kernel"]["params"][0]["attrs"]["el"] = 1048576
+    first_param = next(i for i in recipe["program"] if i.get("op") == "param")
+    first_param["attrs"]["el"] = 1048576
+    (tmp_path / "bad.ir.json").write_text(json.dumps(ir_doc))
+    (tmp_path / "bad.recipe.json").write_text(json.dumps(recipe))
+
+    def replay(flag, path):
+        return subprocess.run(
+            [cli, flag, str(path), "--arch", "gfx950", "--flavor", "llvm20"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for form, flag in (("ir.json", "--ir"), ("recipe.json", "--recipe")):
+        got = replay(flag, tmp_path / f"k.{form}")
+        assert got.returncode == 0, f"{form}: {got.stderr[-2000:]}"
+        assert got.stdout == expected, f"{form}: replay diverged from Python"
+
+        got = replay(flag, tmp_path / f"bad.{form}")
+        assert got.returncode != 0, f"{form}: an unknown param attr was accepted"
+        assert "param 'src' has unknown attr 'el'" in got.stderr, got.stderr[-2000:]
+
+
+def test_standalone_importers_carry_and_refuse_param_facts(tmp_path):
+    """Both C++ importers read an integer parameter's facts -- ints, and a
+    relation stored as its canonical intexpr JSON -- and refuse a declaration
+    the builder refuses, with the builder's text.
+
+    The facts lower to no byte, so the replay of a kernel that states them
+    matches the Python lowerer exactly."""
+    cli = _replay_cli()
+    author = """
+import json, sys
+from rocke.core import ir_export
+from rocke.core.intexpr import product_of
+from rocke.core.ir import I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.portable_ir.src.recording_builder import record_kernel
+
+
+def build():
+    b = IRBuilder("param_fact_probe")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    out = b.param("out", PtrType(I32, "global"), align=16)
+    m = b.param("M", I32, ge=1, le=4096, multiple_of=8)
+    ldc = b.param("ldc", I32, ge=m)
+    b.param("sb", I32, ge=product_of(m, ldc))
+    tid = b.thread_id_x()
+    b.global_store(out, tid, b.add(m, ldc))
+    b.ret()
+    return b.kernel
+
+
+out = sys.argv[1]
+kernel, recipe = record_kernel(build)
+open(out + "/k.ir.json", "w").write(ir_export.export_kernel_ir_json(kernel))
+open(out + "/k.recipe.json", "w").write(json.dumps(recipe))
+open(out + "/py.ll", "w").write(
+    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="gfx950"))
+"""
+    r = _run([sys.executable, "-c", author, str(tmp_path)])
+    assert r.returncode == 0, r.stderr[-4000:]
+
+    expected = (tmp_path / "py.ll").read_text()
+    ir_doc = json.loads((tmp_path / "k.ir.json").read_text())
+    recipe = json.loads((tmp_path / "k.recipe.json").read_text())
+    relation = '{"mul":[{"param":"M"},{"param":"ldc"}]}'
+    assert ir_doc["kernel"]["params"][3]["attrs"] == {"ge": relation}
+    recorded = [i for i in recipe["program"] if i.get("op") == "param"]
+    assert recorded[3]["attrs"] == {"ge": relation}
+    ir_doc["kernel"]["params"][2]["attrs"]["ge"] = '{"param":"K"}'
+    recorded[2]["attrs"]["ge"] = '{"param":"K"}'
+    (tmp_path / "bad.ir.json").write_text(json.dumps(ir_doc))
+    (tmp_path / "bad.recipe.json").write_text(json.dumps(recipe))
+
+    def replay(flag, path):
+        return subprocess.run(
+            [cli, flag, str(path), "--arch", "gfx950", "--flavor", "llvm20"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for form, flag in (("ir.json", "--ir"), ("recipe.json", "--recipe")):
+        got = replay(flag, tmp_path / f"k.{form}")
+        assert got.returncode == 0, f"{form}: {got.stderr[-2000:]}"
+        assert got.stdout == expected, f"{form}: replay diverged from Python"
+
+        got = replay(flag, tmp_path / f"bad.{form}")
+        assert (
+            got.returncode != 0
+        ), f"{form}: a relation on an unknown name was accepted"
+        assert (
+            "ldc: the relation names K, which is not a parameter of this kernel"
+            in got.stderr
+        ), got.stderr[-2000:]
+
+
+def _cli_plan(tmp_path, name, recipe, ints=None, strs=None):
+    """The standalone CLI's launch plan of ``recipe`` (CBOR), in the shape of
+    ``launch.plan``, or the CLI's error text when it refuses one."""
+    from rocke.portable_ir.src.online import ARG_KINDS
+    from rocke.portable_ir.src.recipe_bundle import cbor_encode
+
+    path = tmp_path / f"{name}.recipe.cbor"
+    path.write_bytes(cbor_encode(recipe))
+    spec = [
+        arg
+        for flag, values in (("--int", ints or {}), ("--str", strs or {}))
+        for key, value in values.items()
+        for arg in (flag, f"{key}={value}")
+    ]
+    got = subprocess.run(
+        [_replay_cli(), "--recipe", str(path), "--cbor", "--plan", *spec],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if got.returncode != 0:
+        return got.stderr
+    plan = json.loads(got.stdout)
+    for arg in plan["args"]:
+        arg["kind"] = ARG_KINDS[arg["kind"]]
+    if plan["geometry"] is not None:
+        for key in ("grid", "block"):
+            plan["geometry"][key] = tuple(plan["geometry"][key])
+    if plan["cluster"] is not None:
+        plan["cluster"] = tuple(plan["cluster"])
+    return plan
+
+
+def test_standalone_cli_plans_and_refuses_like_python(tmp_path):
+    """The C++ launch plan, through a binary with no Python in it, describes
+    the same launch as ``launch.plan`` and refuses the same recipes with the
+    same text: parameters that state facts, a kernel that checks a value on
+    the GPU (its check word would go unread), and a block other than the
+    kernel's exact ``workgroup_size``."""
+    from rocke.portable_ir.src import launch
+    from rocke.portable_ir.tests import test_launch as cases
+    from rocke.portable_ir.utils.recipe_expand import ExpandError
+    from rocke.tests import gpu_check_recipes
+
+    planned = {
+        "toy": (cases.toy(), {"D": 1000}, {"dtype": "f32"}),
+        "mixed_signature": (cases.mixed_signature_recipe(), {"D": 1}, {}),
+        "clustered": (cases.clustered(2, 1, 1), {"D": 65}, {"dtype": "f32"}),
+        "exact_block": (cases.exact_block_recipe(), {}, {}),
+    }
+    for name, (recipe, ints, strs) in planned.items():
+        assert _cli_plan(tmp_path, name, recipe, ints, strs) == launch.plan(
+            recipe, ints, strs
+        ), name
+
+    refused = {
+        "facts": (cases.facts_recipe(), cases.FACTS_REFUSAL),
+        "gpu_check": (
+            gpu_check_recipes.gpu_check_recipe(),
+            gpu_check_recipes.GPU_CHECK_REFUSAL,
+        ),
+        "gpu_check_unused_result": (
+            gpu_check_recipes.gpu_check_recipe(result_used=False),
+            gpu_check_recipes.GPU_CHECK_REFUSAL,
+        ),
+        "gpu_check_and_facts": (
+            gpu_check_recipes.gpu_check_recipe(with_facts=True),
+            gpu_check_recipes.GPU_CHECK_AND_FACTS_REFUSAL,
+        ),
+        "wrong_block": (
+            cases.exact_block_recipe((32, 1, 1)),
+            cases.wrong_block_refusal((32, 1, 1)),
+        ),
+        "no_block": (cases.exact_block_recipe(None), cases.NO_BLOCK_REFUSAL),
+    }
+    for name, (recipe, message) in refused.items():
+        with pytest.raises(ExpandError) as python_refusal:
+            launch.plan(recipe, {}, {})
+        assert str(python_refusal.value) == message, name
+        cli_refusal = _cli_plan(tmp_path, name, recipe)
+        assert isinstance(cli_refusal, str), f"{name}: the C++ plan was handed out"
+        assert cli_refusal.rstrip("\n").endswith(message), f"{name}: {cli_refusal}"

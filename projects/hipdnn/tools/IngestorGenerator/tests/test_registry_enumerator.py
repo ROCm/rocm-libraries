@@ -102,6 +102,124 @@ def test_the_synthetic_manifest_enumerates(probe):
     assert len({k["name"] for k in kernels}) == len(kernels) > 0
 
 
+def test_a_pin_list_adds_each_later_candidates_specs_to_the_cells_it_admits(probe):
+    """The first pin gives each cell its default spec; a later one adds its sweep specs
+    where it admits the cell, each spec once."""
+    single = re_.Registry(probe.manifest)
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    listed = re_.Registry(probe.manifest)
+    assert listed.candidate.name == "probe_grid"
+    assert [c.name for _, c in listed.extra_pins] == ["probe_persist_a"]
+    cell = listed.cells()[0]
+    # The probe candidates sweep the same specs: the union holds each once.
+    assert listed.space(cell) == single.space(cell)
+
+    extra = listed.extra_pins[0][1]
+    base = listed.candidate.select_spec(listed.request(cell))
+    added = dataclasses.replace(base, tile_m=256)
+    extra.sweep_space = lambda request: [added]
+    _, specs = listed.space(cell)
+    assert specs == single.space(cell)[1] + [added]
+
+    extra.admits = lambda request: (False, "declined")
+    assert listed.space(cell) == single.space(cell)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Tuned:
+    """A registry spec wrapped with its tuning id, as rocKE's dispatcher hands back."""
+
+    kernel_spec: object
+    tuning_id: str
+
+
+def test_a_pin_lists_kernels_trace_to_the_pin_that_supplied_them(probe):
+    """A spec only a later pin sweeps carries that pin's spec_id and tuning id; a
+    spec both pins sweep stays the first pin's."""
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    registry = re_.Registry(probe.manifest)
+    first, later = registry.candidate, registry.extra_pins[0][1]
+    sweep = synth.ProbeCandidate.sweep_space
+    added = dataclasses.replace(
+        first.select_spec(registry.request(registry.cells()[0])), tile_n=256
+    )
+    # Both pins sweep the probe specs; only the later one adds tile_n 256.
+    first.sweep_space = lambda r: [
+        _Tuned(s, f"grid@{s.tile_n}") for s in sweep(first, r)
+    ]
+    later.sweep_space = lambda r: [
+        _Tuned(s, f"a@{s.tile_n}") for s in [*sweep(later, r), added]
+    ]
+
+    kernels = re_.build_config(probe.manifest, registry)["packs"][0]["kernels"]
+    provenance = {k["name"]: k["provenance"] for k in kernels}
+    assert provenance["probe.bf16_d64_h8_c0_tn32"] == {
+        "rocke_spec_id": "grid",
+        "rocke_tuning_id": "grid@32",
+    }
+    assert provenance["probe.bf16_d64_h8_c0_tn256"] == {
+        "rocke_spec_id": "a",
+        "rocke_tuning_id": "a@256",
+    }
+
+
+def test_base_spec_is_the_named_pins_select_spec(probe):
+    """The first pin's by default; a later pin's own, unwrapped; a pin the manifest
+    does not list is refused."""
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    registry = re_.Registry(probe.manifest)
+    cell = registry.cells()[0]
+    later_pin, later = registry.extra_pins[0]
+    first = registry.space(cell)[0]
+    own = dataclasses.replace(first, tile_m=256)
+    later.select_spec = lambda request: _Tuned(own, "a@own")
+    later.sweep_space = lambda request: [own]
+
+    assert registry.base_spec(cell) == registry.base_spec(cell, registry.pin) == first
+    assert registry.base_spec(cell, later_pin) == own
+    with pytest.raises(re_.EnumerationError, match="not one of"):
+        registry.base_spec(cell, {"algorithm": "persist", "spec_id": "b"})
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("spec_overrides", {"tile_m": 128}),
+        ("neutral_fields", ["tile_m"]),
+        ("selector_fields", ["heads"]),
+        ("cell_keyed_by", ["tile_m"]),
+    ],
+)
+def test_base_spec_refuses_a_section_that_reshapes_its_cells(probe, key, value):
+    """cell_spaces rewrites or merges such a section's specs, so a raw request combo's
+    select_spec is not its cell's default kernel: base_spec names the key instead."""
+    probe.manifest["enumerate"][key] = value
+    registry = re_.Registry(probe.manifest)
+    with pytest.raises(re_.EnumerationError, match=rf"enumerate sets \['{key}'\]"):
+        registry.base_spec(registry.cells()[0])
+
+
+def test_each_pin_of_a_list_must_match_one_candidate(probe, capsys):
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist"},
+    ]
+    assert _run_probe(probe) == 2
+    assert "matches 2 registry candidates" in capsys.readouterr().err
+    probe.manifest["enumerate"]["pin"] = []
+    assert _run_probe(probe) == 2
+    assert "non-empty list of mappings" in capsys.readouterr().err
+
+
 _SEGMENT_LAUNCHES = {"segment": {}, "reduce": {"role": "reduce"}}
 
 
@@ -964,6 +1082,106 @@ def test_an_also_section_may_not_repeat_a_kernel_name(probe):
 def test_an_also_section_must_cross_the_same_cell_fields(probe):
     manifest = _with_also(probe, cells=[{"fields": ["hdim"], "values": [[128]]}])
     assert _run_probe(probe, manifest) == 2
+
+
+# ---------------------------------------------------------------------------
+# enumerate.also spec_overrides: twins of the primary's kernels with one spec field
+# the registry never selects (e.g. an LSE output) set on
+# ---------------------------------------------------------------------------
+
+
+def _twin_section(**overrides) -> dict:
+    """The primary's own pin and cells, one kernel per cell (no free fields), with
+    ``order`` overridden and a template of its own."""
+    section = {
+        "pin": {"algorithm": "probe", "spec_id": "grid"},
+        "fixed": {"arch": synth.ARCH, "dtype": "bf16"},
+        "cells": copy.deepcopy(synth.probe_manifest("unused")["enumerate"]["cells"]),
+        "free_fields": [],
+        "spec_overrides": {"order": "col"},
+        "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_c{causal}_tn{tile_n}_col",
+    }
+    section.update(overrides)
+    return section
+
+
+def _with_twins(probe, **overrides) -> dict:
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["also"] = [_twin_section(**overrides)]
+    return manifest
+
+
+def test_spec_overrides_add_twins_and_leave_the_primary_unchanged(probe):
+    """One twin per cell, named by the section's template and built with the
+    override; every primary kernel keeps its name, spec and default marker."""
+    assert _run_probe(probe) == 0
+    primary = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    both = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert both[: len(primary)] == primary
+    twins = both[len(primary) :]
+    assert len(twins) == 4
+    assert all(k["name"].endswith("_col") for k in twins)
+    assert all(k["kernel_source"]["spec"]["order"] == "col" for k in twins)
+
+
+def test_a_twin_section_keeps_its_own_default_floor(probe):
+    """The twins are their own (cell, overrides) group, so each cell's twin is a
+    default that variant reduction keeps, beside the primary's default."""
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    twins = [k for k in kernels if k["name"].endswith("_col")]
+    assert all(k.get("default") for k in twins)
+    assert sum(1 for k in kernels if k.get("default")) == 2 * len(twins)
+
+
+def test_an_override_ships_even_when_spec_fields_omit_it(probe):
+    """The override is what sets the twin apart, so its spec always carries it."""
+    manifest = _with_twins(probe, spec_fields=["dtype", "tile_m", "tile_n", "causal"])
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert kernels[-1]["kernel_source"]["spec"]["order"] == "col"
+
+
+def test_twins_without_their_own_template_collide(probe):
+    """The primary's template renders no override slot here, so twin names repeat
+    primary names: refused rather than shipped as duplicates."""
+    manifest = _with_twins(probe)
+    del manifest["enumerate"]["also"][0]["kernel_name_template"]
+    assert _run_probe(probe, manifest) == 2
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"no_such_field": 1}, {}, ["order"], {"order": ["col"]}],
+    ids=["unknown-field", "empty", "not-a-mapping", "non-scalar"],
+)
+def test_bad_spec_overrides_are_refused(probe, overrides):
+    assert _run_probe(probe, _with_twins(probe, spec_overrides=overrides)) == 2
+
+
+def _feature_order(manifest: dict) -> dict:
+    """``manifest`` with ``order`` a feature field, as an LSE flag the twins set is."""
+    manifest["reduction"] = {
+        "fields": {"feature": ["order"], "performance": [], "ignored": []}
+    }
+    return manifest
+
+
+def test_a_twin_override_may_be_a_feature_axis_across_sections(probe):
+    """The primary keeps the registry's ``order`` and the twins pin ``col``, so the
+    engine's kernels take both values: a feature axis, not a pinned field."""
+    assert _run_probe(probe, _feature_order(_with_twins(probe))) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert len([k for k in kernels if k["name"].endswith("_col")]) == 4
+
+
+def test_an_override_every_section_pins_alike_is_no_feature_axis(probe, capsys):
+    """Pinned to ``col`` in every section, ``order`` takes one value engine-wide."""
+    manifest = _feature_order(_with_twins(probe))
+    manifest["enumerate"]["spec_overrides"] = {"order": "col"}
+    assert _run_probe(probe, manifest) == 2
+    assert "a pinned field takes one value" in capsys.readouterr().err
 
 
 def _split_also(split, **overrides) -> dict:
