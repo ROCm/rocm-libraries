@@ -22,10 +22,16 @@ ROCSOLVER_BEGIN_NAMESPACE
 *************************************************************/
 
 /** getf2_small_kernel takes care of of matrices with m < n
-    m <= GETF2_MAX_THDS and n <= GETF2_MAX_COLS **/
+    m <= GETF2_MAX_THDS and n <= GETF2_MAX_COLS.
+    DIM is the capacity of the per-thread row array and must be >= n; the number
+    of columns n is a run-time argument, so one instantiation serves every n <= DIM.
+    The loops run to DIM and skip the columns past n: the bound must be a
+    compile-time constant for every index into rA to be fixed after unrolling,
+    which keeps rA in registers instead of scratch memory. **/
 template <int DIM, typename T, typename I, typename INFO, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     getf2_small_kernel(const I m,
+                       const I n,
                        U AA,
                        const rocblas_stride shiftA,
                        const I lda,
@@ -58,7 +64,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     // (SHUFFLES DO NOT IMPROVE PERFORMANCE IN THIS CASE)
     extern __shared__ double lmem[];
     T* common = reinterpret_cast<T*>(lmem);
-    common += ty * std::max(m, DIM);
+    common += ty * std::max(m, n);
 
     // local variables
     T pivot_value;
@@ -67,83 +73,93 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     I mypiv = myrow + 1; // to build ipiv
     INFO myinfo = 0; // to build info
     T rA[DIM]; // to store this-row values
+    const I kmax = std::min(m, n);
 
     // read corresponding row from global memory into local array
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        rA[j] = A[myrow + j * lda];
+        if(j < n)
+            rA[j] = A[myrow + j * lda];
 
-        // for each pivot (main loop)
+            // for each pivot (main loop)
 #pragma unroll DIM
-    for(I k = 0; k < std::min(m, I(DIM)); ++k)
+    for(I k = 0; k < DIM; ++k)
     {
-        // share current column
-        common[myrow] = rA[k];
-        __syncthreads();
-
-        // search pivot index
-        pivot_index = k;
-        pivot_value = common[k];
-        for(I i = k + 1; i < m; ++i)
+        if(k < kmax)
         {
-            test_value = common[i];
-            if(aabs<S>(pivot_value) < aabs<S>(test_value))
+            // share current column
+            common[myrow] = rA[k];
+            __syncthreads();
+
+            // search pivot index
+            pivot_index = k;
+            pivot_value = common[k];
+            for(I i = k + 1; i < m; ++i)
             {
-                pivot_value = test_value;
-                pivot_index = i;
+                test_value = common[i];
+                if(aabs<S>(pivot_value) < aabs<S>(test_value))
+                {
+                    pivot_value = test_value;
+                    pivot_index = i;
+                }
             }
-        }
 
-        // check singularity and scale value for current column
-        if(pivot_value != T(0))
-            pivot_value = S(1) / pivot_value;
-        else if(myinfo == 0)
-            myinfo = k + 1;
+            // check singularity and scale value for current column
+            if(pivot_value != T(0))
+                pivot_value = S(1) / pivot_value;
+            else if(myinfo == 0)
+                myinfo = k + 1;
 
-        // synchronize across waves before overwriting common
-        __syncthreads();
+            // synchronize across waves before overwriting common
+            __syncthreads();
 
-        // swap rows (lazy swaping)
-        if(myrow == pivot_index)
-        {
-            myrow = k;
-            // share pivot row
-            for(I j = k + 1; j < DIM; ++j)
-                common[j] = rA[j];
-        }
-        else if(myrow == k)
-        {
-            myrow = pivot_index;
-            mypiv = pivot_index + 1;
-            if(permut_idx && pivot_index != k)
-                swap(permut[k], permut[pivot_index]);
-        }
-        __syncthreads();
+            // swap rows (lazy swaping)
+            if(myrow == pivot_index)
+            {
+                myrow = k;
+                // share pivot row
+                for(I j = k + 1; j < DIM; ++j)
+                    if(j < n)
+                        common[j] = rA[j];
+            }
+            else if(myrow == k)
+            {
+                myrow = pivot_index;
+                mypiv = pivot_index + 1;
+                if(permut_idx && pivot_index != k)
+                    swap(permut[k], permut[pivot_index]);
+            }
+            __syncthreads();
 
-        // scale current column and update trailing matrix
-        if(myrow > k)
-        {
-            rA[k] *= pivot_value;
-            for(I j = k + 1; j < DIM; ++j)
-                rA[j] -= rA[k] * common[j];
+            // scale current column and update trailing matrix
+            if(myrow > k)
+            {
+                rA[k] *= pivot_value;
+                for(I j = k + 1; j < DIM; ++j)
+                    if(j < n)
+                        rA[j] -= rA[k] * common[j];
+            }
+            __syncthreads();
         }
-        __syncthreads();
     }
 
     // write results to global memory
-    if(myrow < DIM)
+    if(myrow < n)
         ipiv[myrow] = mypiv + offset;
     if(myrow == 0 && *info == 0 && myinfo > 0)
         *info = myinfo + offset;
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        A[myrow + j * lda] = rA[j];
+        if(j < n)
+            A[myrow + j * lda] = rA[j];
 }
 
-/** getf2_npvt_small_kernel (non pivoting version) **/
+/** getf2_npvt_small_kernel (non pivoting version). DIM and n as in
+    getf2_small_kernel. **/
 template <int DIM, typename T, typename I, typename INFO, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     getf2_npvt_small_kernel(const I m,
+                            const I n,
                             U AA,
                             const rocblas_stride shiftA,
                             const I lda,
@@ -169,46 +185,53 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     // (SHUFFLES DO NOT IMPROVE PERFORMANCE IN THIS CASE)
     extern __shared__ double lmem[];
     T* common = reinterpret_cast<T*>(lmem);
-    T* val = common + hipBlockDim_y * DIM;
-    common += ty * DIM;
+    T* val = common + hipBlockDim_y * n;
+    common += ty * n;
 
     // local variables
     INFO myinfo = 0; // to build info
     T rA[DIM]; // to store this-row values
+    const I kmax = std::min(m, n);
 
     // read corresponding row from global memory into local array
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        rA[j] = A[myrow + j * lda];
+        if(j < n)
+            rA[j] = A[myrow + j * lda];
 
-        // for each pivot (main loop)
+            // for each pivot (main loop)
 #pragma unroll DIM
-    for(I k = 0; k < std::min(m, I(DIM)); ++k)
+    for(I k = 0; k < DIM; ++k)
     {
-        // share pivot row
-        if(myrow == k)
+        if(k < kmax)
         {
-            val[ty] = rA[k];
-            for(I j = k + 1; j < DIM; ++j)
-                common[j] = rA[j];
+            // share pivot row
+            if(myrow == k)
+            {
+                val[ty] = rA[k];
+                for(I j = k + 1; j < DIM; ++j)
+                    if(j < n)
+                        common[j] = rA[j];
 
-            if(val[ty] != T(0))
-                val[ty] = S(1) / val[ty];
+                if(val[ty] != T(0))
+                    val[ty] = S(1) / val[ty];
+            }
+            __syncthreads();
+
+            // check singularity
+            if(val[ty] == 0 && myinfo == 0)
+                myinfo = k + 1;
+
+            // scale current column and update trailing matrix
+            if(myrow > k)
+            {
+                rA[k] *= val[ty];
+                for(I j = k + 1; j < DIM; ++j)
+                    if(j < n)
+                        rA[j] -= rA[k] * common[j];
+            }
+            __syncthreads();
         }
-        __syncthreads();
-
-        // check singularity
-        if(val[ty] == 0 && myinfo == 0)
-            myinfo = k + 1;
-
-        // scale current column and update trailing matrix
-        if(myrow > k)
-        {
-            rA[k] *= val[ty];
-            for(I j = k + 1; j < DIM; ++j)
-                rA[j] -= rA[k] * common[j];
-        }
-        __syncthreads();
     }
 
     // write results to global memory
@@ -216,7 +239,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         *info = myinfo + offset;
 #pragma unroll DIM
     for(I j = 0; j < DIM; ++j)
-        A[myrow + j * lda] = rA[j];
+        if(j < n)
+            A[myrow + j * lda] = rA[j];
 }
 
 /** getf2_panel_kernel takes care of small matrices with m >= n **/
@@ -563,15 +587,6 @@ rocblas_status getf2_run_small(rocblas_handle handle,
                                I* permut_idx,
                                const rocblas_stride stride)
 {
-#define RUN_LUFACT_SMALL(DIM)                                                                      \
-    if(pivot)                                                                                      \
-        ROCSOLVER_LAUNCH_KERNEL((getf2_small_kernel<DIM, T>), grid, block, lmemsize, stream, m, A, \
-                                shiftA, lda, strideA, ipiv, shiftP, strideP, info, batch_count,    \
-                                offset, permut_idx, stride);                                       \
-    else                                                                                           \
-        ROCSOLVER_LAUNCH_KERNEL((getf2_npvt_small_kernel<DIM, T>), grid, block, lmemsize, stream,  \
-                                m, A, shiftA, lda, strideA, info, batch_count, offset)
-
     // determine sizes
     I opval[] = {GETF2_OPTIM_NGRP};
     I ngrp = (batch_count < 2 || m > 32) ? 1 : opval[m - 1];
@@ -592,76 +607,39 @@ rocblas_status getf2_run_small(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // instantiate cases to make number of columns n known at compile time
-    // this should allow loop unrolling.
-    // kernel launch
-    switch(n)
+    // n is passed at run time; DIM only sizes the per-thread row array. The sizes step by 8,
+    // so the array is never much larger than n and the register use stays close to what n
+    // needs. A row of 64 double-complex values does not fit in registers, so double complex
+    // also gets a size of 60, the largest that does; for other types that slot is 64.
+    ROCSOLVER_ASSUME_X(n >= 1 && n <= GETF2_SSKER_MAX_N, "getf2_run_small needs small n");
+    constexpr bool is_z = std::is_same_v<T, rocblas_double_complex>;
+    constexpr int DIM60 = is_z ? 60 : 64;
+    const int sz = (n <= 56) ? (n - 1) / 8 : (is_z && n > 60) ? 8 : 7;
+    if(pivot)
     {
-    case 1: RUN_LUFACT_SMALL(1); break;
-    case 2: RUN_LUFACT_SMALL(2); break;
-    case 3: RUN_LUFACT_SMALL(3); break;
-    case 4: RUN_LUFACT_SMALL(4); break;
-    case 5: RUN_LUFACT_SMALL(5); break;
-    case 6: RUN_LUFACT_SMALL(6); break;
-    case 7: RUN_LUFACT_SMALL(7); break;
-    case 8: RUN_LUFACT_SMALL(8); break;
-    case 9: RUN_LUFACT_SMALL(9); break;
-    case 10: RUN_LUFACT_SMALL(10); break;
-    case 11: RUN_LUFACT_SMALL(11); break;
-    case 12: RUN_LUFACT_SMALL(12); break;
-    case 13: RUN_LUFACT_SMALL(13); break;
-    case 14: RUN_LUFACT_SMALL(14); break;
-    case 15: RUN_LUFACT_SMALL(15); break;
-    case 16: RUN_LUFACT_SMALL(16); break;
-    case 17: RUN_LUFACT_SMALL(17); break;
-    case 18: RUN_LUFACT_SMALL(18); break;
-    case 19: RUN_LUFACT_SMALL(19); break;
-    case 20: RUN_LUFACT_SMALL(20); break;
-    case 21: RUN_LUFACT_SMALL(21); break;
-    case 22: RUN_LUFACT_SMALL(22); break;
-    case 23: RUN_LUFACT_SMALL(23); break;
-    case 24: RUN_LUFACT_SMALL(24); break;
-    case 25: RUN_LUFACT_SMALL(25); break;
-    case 26: RUN_LUFACT_SMALL(26); break;
-    case 27: RUN_LUFACT_SMALL(27); break;
-    case 28: RUN_LUFACT_SMALL(28); break;
-    case 29: RUN_LUFACT_SMALL(29); break;
-    case 30: RUN_LUFACT_SMALL(30); break;
-    case 31: RUN_LUFACT_SMALL(31); break;
-    case 32: RUN_LUFACT_SMALL(32); break;
-    case 33: RUN_LUFACT_SMALL(33); break;
-    case 34: RUN_LUFACT_SMALL(34); break;
-    case 35: RUN_LUFACT_SMALL(35); break;
-    case 36: RUN_LUFACT_SMALL(36); break;
-    case 37: RUN_LUFACT_SMALL(37); break;
-    case 38: RUN_LUFACT_SMALL(38); break;
-    case 39: RUN_LUFACT_SMALL(39); break;
-    case 40: RUN_LUFACT_SMALL(40); break;
-    case 41: RUN_LUFACT_SMALL(41); break;
-    case 42: RUN_LUFACT_SMALL(42); break;
-    case 43: RUN_LUFACT_SMALL(43); break;
-    case 44: RUN_LUFACT_SMALL(44); break;
-    case 45: RUN_LUFACT_SMALL(45); break;
-    case 46: RUN_LUFACT_SMALL(46); break;
-    case 47: RUN_LUFACT_SMALL(47); break;
-    case 48: RUN_LUFACT_SMALL(48); break;
-    case 49: RUN_LUFACT_SMALL(49); break;
-    case 50: RUN_LUFACT_SMALL(50); break;
-    case 51: RUN_LUFACT_SMALL(51); break;
-    case 52: RUN_LUFACT_SMALL(52); break;
-    case 53: RUN_LUFACT_SMALL(53); break;
-    case 54: RUN_LUFACT_SMALL(54); break;
-    case 55: RUN_LUFACT_SMALL(55); break;
-    case 56: RUN_LUFACT_SMALL(56); break;
-    case 57: RUN_LUFACT_SMALL(57); break;
-    case 58: RUN_LUFACT_SMALL(58); break;
-    case 59: RUN_LUFACT_SMALL(59); break;
-    case 60: RUN_LUFACT_SMALL(60); break;
-    case 61: RUN_LUFACT_SMALL(61); break;
-    case 62: RUN_LUFACT_SMALL(62); break;
-    case 63: RUN_LUFACT_SMALL(63); break;
-    case 64: RUN_LUFACT_SMALL(64); break;
-    default: ROCSOLVER_UNREACHABLE();
+        auto kernel = std::array{
+            getf2_small_kernel<8, T, I, INFO, U>,  getf2_small_kernel<16, T, I, INFO, U>,
+            getf2_small_kernel<24, T, I, INFO, U>, getf2_small_kernel<32, T, I, INFO, U>,
+            getf2_small_kernel<40, T, I, INFO, U>, getf2_small_kernel<48, T, I, INFO, U>,
+            getf2_small_kernel<56, T, I, INFO, U>, getf2_small_kernel<DIM60, T, I, INFO, U>,
+            getf2_small_kernel<64, T, I, INFO, U>};
+        ROCSOLVER_LAUNCH_KERNEL(kernel[sz], grid, block, lmemsize, stream, m, n, A, shiftA, lda,
+                                strideA, ipiv, shiftP, strideP, info, batch_count, offset,
+                                permut_idx, stride);
+    }
+    else
+    {
+        auto kernel = std::array{getf2_npvt_small_kernel<8, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<16, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<24, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<32, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<40, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<48, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<56, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<DIM60, T, I, INFO, U>,
+                                 getf2_npvt_small_kernel<64, T, I, INFO, U>};
+        ROCSOLVER_LAUNCH_KERNEL(kernel[sz], grid, block, lmemsize, stream, m, n, A, shiftA, lda,
+                                strideA, info, batch_count, offset);
     }
 
     return rocblas_status_success;
