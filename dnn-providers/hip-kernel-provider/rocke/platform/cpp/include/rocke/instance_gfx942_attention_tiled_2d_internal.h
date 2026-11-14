@@ -87,8 +87,11 @@ extern "C" {
  * (16 N-tiles for HD=256/16 * 1) or HD=256 narrow (16 N-tiles * 2 atoms). 64
  * covers any buildable shape. */
 #define ROCKE_GFX942_ATTN2D_MAX_ACCS 64
-/* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS. */
-#define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS 96
+/* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS, the
+ * K/V buffer slot and two tiles' carried page ids. */
+#define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS 128
+/* Pages per tile the loop carries page ids for (Python PAGE_PREFETCH bound). */
+#define ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES 16
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE 16
 /* QK / PV K-iters: HD/16 or T/16 on the narrow atom, HD/8 on the 32x32x8 wide
@@ -300,6 +303,21 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* v_rsrc; /* make_buffer_resource(V)         */
     rocke_value_t* out_rsrc;
 
+    /* ---- K/V page copies (Python KV_PAGES / PAGE_COPIES / PAGE_PREFETCH) ---- *
+     * Emitted once after the paged-KV descriptor when page copies are on. */
+    rocke_value_t* page_kv_head_b_v; /* kv_head_idx * HD * KV_BYTES     */
+    rocke_value_t* lane_within_b_v; /* the lane's part of a copy offset */
+    /* Page ids the loop carries, by the tile index value they belong to (the
+     * Python tile_pages dict). NULL tiles mean nothing is carried. */
+    rocke_value_t* page_start_tile;
+    rocke_value_t* page_start[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_start_next[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_cur_tile;
+    rocke_value_t* page_cur[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_next_tile;
+    rocke_value_t* page_next[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_after_next[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+
     /* ---- per-lane Q VGPR gather (lines 3426-3592) ---- *
      * The Q MFMA A-operand registers (one path: the legacy 16x16 gather; the
      * other: the 32x32x16 / direct-global gather). The active list is q_regs
@@ -492,6 +510,14 @@ rocke_value_t** rocke_gfx942_attn2d_tile_page_ptrs(rocke_gfx942_attn2d_build_ctx
 
 /* PAGE_RSRC_I64: i64 K/V addressing through per-page pointers. */
 bool rocke_gfx942_attn2d_page_rsrc_i64(const rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* PAGE_PREFETCH: the loop carries the page ids of the current and next tile. */
+bool rocke_gfx942_attn2d_page_prefetch(const rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* _tile_page_ids: the tile's page ids into out[0..N_BLOCKS_PER_TILE-1]. */
+void rocke_gfx942_attn2d_tile_page_ids(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* kv_tile_idx,
+                                       rocke_value_t** out);
 
 /* _kv_head_page_b: the kv head's byte offset within a page. */
 rocke_value_t* rocke_gfx942_attn2d_kv_head_page_b(rocke_gfx942_attn2d_build_ctx_t* ctx);

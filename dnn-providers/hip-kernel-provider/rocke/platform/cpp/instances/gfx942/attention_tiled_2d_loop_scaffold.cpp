@@ -268,6 +268,20 @@ void rocke_gfx942_attn2d_emit_preloop_prefetch(rocke_gfx942_attn2d_build_ctx_t* 
     if(ctx == NULL)
         return;
 
+    /* Page ids of the first tile and of the one after it, carried into the
+     * loop; iteration i then reads the ids of tile i + 2. */
+    const bool page_prefetch = rocke_gfx942_attn2d_page_prefetch(ctx);
+    if(page_prefetch)
+    {
+        rocke_value_t* c_one = rocke_b_const_i32(B, 1);
+        rocke_value_t* start_next_raw = rocke_b_add(B, ctx->tile_start, c_one);
+        rocke_value_t* in_range = rocke_b_cmp_lt(B, start_next_raw, ctx->tile_end);
+        rocke_value_t* start_next = rocke_b_select(B, in_range, start_next_raw, ctx->tile_start);
+        rocke_gfx942_attn2d_tile_page_ids(ctx, ctx->tile_start, ctx->page_start);
+        rocke_gfx942_attn2d_tile_page_ids(ctx, start_next, ctx->page_start_next);
+        ctx->page_start_tile = ctx->tile_start;
+    }
+
     /* Prefetch tile_start's K into buffer 0 BEFORE the loop (3591). */
     rocke_gfx942_attn2d_issue_k(ctx, ctx->tile_start, rocke_b_const_i32(B, 0));
 
@@ -277,6 +291,36 @@ void rocke_gfx942_attn2d_emit_preloop_prefetch(rocke_gfx942_attn2d_build_ctx_t* 
     ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
     ctx->iter_args[idx] = rocke_b_const_i32(B, 0);
     ctx->iter_args_count = idx + 1;
+    if(page_prefetch
+       && ctx->iter_args_count + 2 * ctx->N_BLOCKS_PER_TILE > ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS)
+    {
+        B->status = ROCKE_ERR_VALUE;
+        snprintf(B->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "%d loop carries exceed the %d-entry iter_args table",
+                 ctx->iter_args_count + 2 * ctx->N_BLOCKS_PER_TILE,
+                 ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS);
+        return;
+    }
+    if(page_prefetch)
+    {
+        for(int j = 0; j < ctx->N_BLOCKS_PER_TILE; ++j)
+        {
+            idx = ctx->iter_args_count++;
+            snprintf(
+                ctx->iter_args_name_buf[idx], sizeof(ctx->iter_args_name_buf[0]), "page_cur%d", j);
+            ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
+            ctx->iter_args[idx] = ctx->page_start[j];
+        }
+        for(int j = 0; j < ctx->N_BLOCKS_PER_TILE; ++j)
+        {
+            idx = ctx->iter_args_count++;
+            snprintf(
+                ctx->iter_args_name_buf[idx], sizeof(ctx->iter_args_name_buf[0]), "page_next%d", j);
+            ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
+            ctx->iter_args[idx] = ctx->page_start_next[j];
+        }
+    }
 
     /* kv_step (3689) is emitted by the caller AFTER emit_licm_hoist to keep the
      * const in Python emission order; see rocke_gfx942_attn2d_emit_kv_step. */
