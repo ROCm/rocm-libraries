@@ -3,7 +3,7 @@
 - MinimumRequiredVersion: 5.0.0
 - navi21
 - gfx1030
-- [Device 73a2]
+- [Device 73a1]
 - Activation: true
   ActivationComputeDataType: 0
   ActivationNoGuard: false
