@@ -988,6 +988,60 @@ class TestAvoidRegressions:
             assert merged["ExactLogic"][0][1][1] == 0.95
             assert os.path.isfile(os.path.join(out_dir, extra_name))
 
+    def test_incremental_only_copies_companion_csv_xz(
+        self, dict_logic: dict[str, Any]
+    ) -> None:
+        """Incremental-only YAML with a companion .csv.xz copies both files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_dir = os.path.join(tmpdir, "orig")
+            inc_dir = os.path.join(tmpdir, "inc")
+            out_dir = os.path.join(tmpdir, "out")
+            os.makedirs(orig_dir)
+            os.makedirs(inc_dir)
+
+            inc_name = "mesh_logic.yaml"
+            inc_path = os.path.join(inc_dir, inc_name)
+            logic = deepcopy(dict_logic)
+            LibraryIO.writeYAML(
+                inc_path,
+                logic,
+                explicit_start=False,
+                explicit_end=False,
+                sort_keys=False,
+            )
+            companion = inc_path + ".csv.xz"
+            Path(companion).write_bytes(b"fake csv.xz content")
+
+            with patch("tensilelite.merge_library.compareProblemType"), patch(
+                "tensilelite.merge_library.compareDestFolderToYaml"
+            ), patch("tensilelite.merge_library.reNameSolutions"):
+                avoidRegressions(orig_dir, inc_dir, out_dir, forceMerge=True)
+
+            assert os.path.isfile(os.path.join(out_dir, inc_name))
+            assert os.path.isfile(os.path.join(out_dir, inc_name + ".csv.xz"))
+
+    def test_incremental_only_meshbased_without_companion_exits(self) -> None:
+        """Incremental-only MeshBased YAML without companion .csv.xz exits."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_dir = os.path.join(tmpdir, "orig")
+            inc_dir = os.path.join(tmpdir, "inc")
+            out_dir = os.path.join(tmpdir, "out")
+            os.makedirs(orig_dir)
+            os.makedirs(inc_dir)
+
+            inc_name = "mesh_logic.yaml"
+            inc_path = os.path.join(inc_dir, inc_name)
+            LibraryIO.writeYAML(
+                inc_path,
+                {"LibraryType": "MeshBased", "Solutions": [], "ExactLogic": []},
+                explicit_start=False,
+                explicit_end=False,
+                sort_keys=False,
+            )
+
+            with pytest.raises(SystemExit):
+                avoidRegressions(orig_dir, inc_dir, out_dir, forceMerge=True)
+
 
 @pytest.mark.unit
 class TestMainFunction:

@@ -36,6 +36,7 @@
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/SingleSolutionLibrary.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -114,6 +115,35 @@ namespace TensileLite
             return std::shared_ptr<MySolution>();
 
         return iter->second;
+    }
+
+    /**
+ * Like resolveContextSolution, but wraps the result in a
+ * SingleSolutionLibrary — the lazy (blobCache) or eager (solution map)
+ * form as appropriate.  Returns nullptr when the context is missing or
+ * the index is not found; the caller decides the error message.
+ */
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SingleSolutionLibrary<MyProblem, MySolution>>
+        resolveSSLibrary(LibraryIOContext<MySolution>* ctx, int index)
+    {
+        using SSLib = SingleSolutionLibrary<MyProblem, MySolution>;
+
+        if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
+            return nullptr;
+
+        if(ctx->blobCache)
+        {
+            if(!ctx->blobCache->contains(index))
+                return nullptr;
+            return std::make_shared<SSLib>(index, ctx->blobCache);
+        }
+
+        auto iter = ctx->solutions->find(index);
+        if(iter == ctx->solutions->end())
+            return nullptr;
+
+        return std::make_shared<SSLib>(iter->second);
     }
 
     /**

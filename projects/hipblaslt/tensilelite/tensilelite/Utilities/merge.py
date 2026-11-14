@@ -138,6 +138,11 @@ def loadData(filename):
         sys.stdout.flush()
         sys.exit(-1)
     data = yaml.load(stream, yaml.SafeLoader)
+    if isinstance(data, list) and len(data) > 11 and data[11] == "MeshBased":
+        sys.exit(
+            f"[Error] {filename}: MeshBased library type is not yet supported "
+            f"by TensileMergeLibrary."
+        )
     return data
 
 def compareDestFolderToYaml(originalDir, incFile, incData):

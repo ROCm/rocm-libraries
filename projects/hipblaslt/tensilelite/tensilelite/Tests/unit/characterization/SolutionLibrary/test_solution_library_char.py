@@ -85,6 +85,14 @@ def test_matching_from_state_gridbased_has_no_speed():
     assert "speed" not in lib.table[0]
 
 
+def test_matching_from_state_meshbased_has_no_speed():
+    sols = [FakeSol(0), FakeSol(1)]
+    d = _matching_d("MeshBased", [0, 1], [[[5, 9], [1, 0.8]]])
+    lib = M.MatchingLibrary.FromOriginalState(d, sols)
+    assert lib.distance == "MeshBased"
+    assert "speed" not in lib.table[0]
+
+
 def test_matching_from_state_range_property_map():
     sols = [FakeSol(0), FakeSol(1)]
     d = _matching_d("Range", [0, 2, 6], [[[5, 9, 13], [1, 0.5]]])

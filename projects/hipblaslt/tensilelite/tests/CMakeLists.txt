@@ -78,6 +78,7 @@ if(NOT TENSILELITE_ENABLE_YAML)
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/MeshBasedTableBin_test.cpp"
     )
 endif()
 
