@@ -23,9 +23,43 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VDot4CI32I8
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
+
+class FMA_I8_HPA_DOT4(MAC):
+    asmCaps = {"v_dot4c_i32_i8": True}
+    kernel = {
+        "ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Int8),
+                        "MacDataTypeB": DataType(DataTypeEnum.Int8),
+                        "HighPrecisionAccumulate": True},
+        "UseDotInstruction": True,
+    }
+
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
+        kernel = writer.states.kernel
+        priority = Component.Priority.find(writer)
+        module = Module("FMA_I8_HPA_DOT4")
+        module.addComment(self.commentHeader())
+        for b in range(kernel["ThreadTile1"]):
+            for a in range(kernel["ThreadTile0"]):
+                for iui in range(innerUnroll):
+                    blockA = a if tPA["tileIdx"] == 0 else b
+                    blockB = b if tPB["tileIdx"] != 0 else a
+                    module.add(VDot4CI32I8(
+                        vgpr(f"ValuC+{a + b * kernel['ThreadTile0']}"),
+                        vgpr(f"ValuA_X{m}_I{iui}+{blockA}"),
+                        vgpr(f"ValuB_X{m}_I{iui}+{blockB}")))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
+        prio = priority(writer, 0, "Reset priority after processing macs")
+        if prio:
+            module.add(prio)
+        return module
+
 
 class FMA_I8_HPA(MAC):
     @staticmethod
@@ -36,6 +70,7 @@ class FMA_I8_HPA(MAC):
         "ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Int8),
                         "MacDataTypeB": DataType(DataTypeEnum.Int8),
                         "HighPrecisionAccumulate": True},
+        "UseDotInstruction": False,
     }
 
     def __call__(self, writer, m, innerUnroll):

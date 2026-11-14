@@ -1429,6 +1429,7 @@
     'LdsPadMXSA',
     'LdsPadMXSB',
     'LdsPadMetadata',
+    'LocalDotLayout',
     'LocalReadVectorWidth',
     'LocalReadVectorWidthA',
     'LocalReadVectorWidthB',
@@ -2134,6 +2135,15 @@
         1,
       ]),
       'len': 7,
+      'type': 'list',
+    }),
+    'LocalDotLayout': dict({
+      'head': list([
+        1,
+        2,
+        4,
+      ]),
+      'len': 4,
       'type': 'list',
     }),
     'LocalReadVectorWidth': dict({
