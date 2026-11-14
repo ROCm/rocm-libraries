@@ -191,6 +191,7 @@ endif()
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
+# split-KV 3D segment workspace staying inside i32 element addressing, the
 # host-side SDPA sequence-length and padding-mask adapters/specs, the
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
 # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
@@ -220,6 +221,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_spec_predicate_parity.py"
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
     "tests/library/tests/test_attention_tiled_3d_decode_split.py"
+    "tests/library/tests/test_attention_3d_workspace_i32_guard.py"
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
     "tests/library/tests/test_attention_tiled_launch_signature.py"
     "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
