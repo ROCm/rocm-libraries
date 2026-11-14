@@ -256,18 +256,6 @@ def test_an_mma_operand_tile_loads_from_any_rank_2_tensor(
 # ---- GPU (gfx90a) ------------------------------------------------------------------------------------
 
 
-def _gfx90a_present() -> bool:
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0) == "gfx90a"
-    except Exception:  # noqa: BLE001
-        # Any HIP or driver failure means there is no usable GPU here.
-        return False
-
-
-_needs_gfx90a = pytest.mark.skipif(not _gfx90a_present(), reason="needs a gfx90a GPU")
-
 _GUARD = 1 << 16  # guard elements on each side of every device buffer
 _SRC_GUARD = -7777.0  # what an unmasked out-of-bounds read would return
 _DST_INIT = -12345.0  # every output element and guard before the launch
@@ -309,7 +297,7 @@ def _run_guarded(kernel, src: np.ndarray, dst_elements: int, grid) -> np.ndarray
     return dst_h
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("batch_origin", ["runtime", "int"])
 def test_rank_3_load_then_store_is_bit_exact(batch_origin: str) -> None:
     # SRC (G, M, N) packed; DST (G, M, N) with a padded batch stride, so the gap after each batch

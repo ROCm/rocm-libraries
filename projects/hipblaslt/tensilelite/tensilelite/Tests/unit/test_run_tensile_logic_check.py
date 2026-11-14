@@ -95,8 +95,8 @@ def test_paths_outside_logic_and_validators_select_nothing(script, project, tmp_
 @pytest.mark.parametrize(
     "validator",
     [
-        "projects/hipblaslt/tensilelite/tensilelite/TensileLogic/Run.py",
-        "projects/hipblaslt/tensilelite/tensilelite/TensileLogic/known_bugs.yaml",
+        "projects/hipblaslt/tensilelite/tensilelite/logic/run.py",
+        "projects/hipblaslt/tensilelite/tensilelite/logic/known_bugs.yaml",
         "projects/hipblaslt/tensilelite/tensilelite/CustomYamlLoader.py",
         "projects/hipblaslt/scripts/run_tensile_logic_check.py",
     ],

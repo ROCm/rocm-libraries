@@ -526,9 +526,9 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       void* user,
                                       bool n_base_first);
 
-/* _emit_wmma_acc_scatter(...): the WMMA sibling of the walk above. Each slot's
- * (row, col) comes from the op's c_layout() map instead of lane math; the
- * default and cshuffle epilogues share it through the same per_cell callback. */
+/* _emit_wmma_acc_scatter(...): the WMMA sibling of the walk above. Each result
+ * slot's (row, col) comes from the op's dst_layout() map instead of lane math;
+ * the cshuffle epilogue uses this walk with its LDS staging callback. */
 void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,

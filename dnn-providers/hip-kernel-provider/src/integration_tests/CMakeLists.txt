@@ -51,6 +51,9 @@ if(ENABLE_ASM_SDPA_ENGINE)
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
+            # Group mode against the CPU reference (compiles empty without the ingestor,
+            # whose frontend-built lane it uses).
+            asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
@@ -123,6 +126,37 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
         )
     endif()
+    hkp_product_offers_engine(_hkp_gfx1250_conv_dgrad_aot_bundle "hipkernel:Gfx1250ConvDgradAot")
+    if(_hkp_gfx1250_conv_dgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx1250ConvDgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX1250_CONV_DGRAD_AOT=1
+        )
+    endif()
+    # The FlyDSL SDPA engines end to end through the frontend Graph API (Graph::sdpa needs
+    # HIPDNN_ENABLE_SDPA; the source compiles empty without it).
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPDNN_ENABLE_SDPA)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontend.cpp
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontendFeatures.cpp
+        )
+    endif()
+    # The architectures the FlyDSL SDPA forward engines have objects for: the content list,
+    # not GPU_TARGETS, so the frontend lane skips exactly the architectures FlyDSL ships no
+    # SDPA objects for (FlydslSdpaFrontendGraphs.hpp, flydslSdpaServes). Empty without content.
+    set(_flydsl_sdpa_archs "")
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        foreach(_flydsl_op sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_cdna sdpa_cdna_decode)
+            list(APPEND _flydsl_sdpa_archs ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}})
+        endforeach()
+        list(REMOVE_DUPLICATES _flydsl_sdpa_archs)
+    endif()
+    string(REPLACE ";" "," _flydsl_sdpa_archs "${_flydsl_sdpa_archs}")
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS="${_flydsl_sdpa_archs}"
+    )
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -279,6 +313,47 @@ while(_engines)
         )
     endif()
 endwhile()
+
+# The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
+# the product ships. Split ships gfx950 content and gfx11-generic content, which the pack
+# expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
+# routed per architecture exactly as the pinned attention targets above: the predicate is
+# the one the census uses, and the entry installs into that architecture's shard so a
+# package without the architecture carries no entry for an engine it no longer ships. The
+# backward bundles include bf16 cases, so the target takes the engine's tolerance config,
+# as its tiered checks do.
+foreach(_hkp_bwd_engine IN ITEMS split merged)
+    foreach(_hkp_bwd_arch IN LISTS HKP_FLYDSL_SDPA_BWD_ARCHS)
+        set(_hkp_bwd_ships FALSE)
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+            hkp_product_ships_engine_for_arch(_hkp_bwd_ships
+                "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}" ${_hkp_bwd_arch})
+        endif()
+        if(NOT (HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPDNN_ENABLE_KERNEL_INGESTOR
+                AND HIPDNN_ENABLE_SDPA AND _hkp_bwd_ships
+                AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target))
+            continue()
+        endif()
+
+        # The shard names this TOML, so it is reserved with the shard as well as passed as
+        # TEST_CONFIG; hkp_reserve_census_shard() says why. It is the per-architecture file
+        # the external-integration registration shares.
+        hkp_flydsl_sdpa_bwd_arch_toml(_hkp_bwd_toml ${_hkp_bwd_engine} ${_hkp_bwd_arch})
+        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch} FILES "${_hkp_bwd_toml}")
+        add_external_integration_test_target(
+            TARGET_NAME hip_kernel_provider_flydsl_sdpa_bwd_${_hkp_bwd_engine}_${_hkp_bwd_arch}_gpu_ref_integration_tests
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME   "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch}
+            REFERENCE_EXECUTOR gpu
+            TEST_CONFIG "${_hkp_bwd_toml}"
+            GTEST_FILTER "quick_SdpaBackward_*:standard_SdpaBackward_*:comprehensive_SdpaBackward_*:full_SdpaBackward_*:-*_fwd_pair*"
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+        )
+    endforeach()
+endforeach()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)

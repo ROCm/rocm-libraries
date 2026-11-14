@@ -48,7 +48,7 @@ from collections import Counter
 
 import pytest
 
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 from toolchain_test_helpers import shared_assembler, toolchain_for
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
@@ -280,7 +280,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     ``problem_fingerprint`` selects a stable problem-group identity and takes
     precedence over the positional ``problem_index``.
     """
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase

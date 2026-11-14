@@ -481,6 +481,7 @@ namespace TensileLite
                     ScopedDevice device((*m_devices)[d]->deviceId);
                     HIP_CHECK_EXC(hipEventRecord(m_stop[d], (*m_devices)[d]->stream));
                 }
+                ScopedTimer timer("benchmark_event_sync");
                 for(auto stop : m_stop)
                     HIP_CHECK_EXC(hipEventSynchronize(stop));
             }
@@ -495,10 +496,16 @@ namespace TensileLite
             for(size_t d = 0; d < m_devices->size(); d++)
             {
                 float eventMs = 0.0f;
-                HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, m_start[d], m_stop[d]));
+                {
+                    ScopedTimer timer("benchmark_event_elapsed_time");
+                    HIP_CHECK_EXC(hipEventElapsedTime(&eventMs, m_start[d], m_stop[d]));
+                }
                 maxMs = std::max(maxMs, eventMs);
-                HIP_CHECK_EXC(hipEventDestroy(m_start[d]));
-                HIP_CHECK_EXC(hipEventDestroy(m_stop[d]));
+                {
+                    ScopedTimer timer("benchmark_event_destroy");
+                    HIP_CHECK_EXC(hipEventDestroy(m_start[d]));
+                    HIP_CHECK_EXC(hipEventDestroy(m_stop[d]));
+                }
             }
             m_start.clear();
             m_stop.clear();
@@ -519,6 +526,8 @@ namespace TensileLite
             {
                 auto sleepTime = totalTime * (m_sleepPercent / 100.0);
 
+                // Deliberate idle time (--sleep-percent / SleepPercent), not work.
+                ScopedTimer timer("benchmark_sleep");
                 std::this_thread::sleep_for(sleepTime);
             }
         }
