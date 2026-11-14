@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "id": "036a601d-05c4-541b-8f20-b74b7a01f662",
+  "name": "conv_group_valu config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "kb",
+      "type": "int"
+    },
+    {
+      "name": "cb",
+      "type": "int"
+    },
+    {
+      "name": "p",
+      "type": "int"
+    },
+    {
+      "name": "fd",
+      "type": "int"
+    },
+    {
+      "name": "fr",
+      "type": "int"
+    },
+    {
+      "name": "fs",
+      "type": "int"
+    },
+    {
+      "name": "sw",
+      "type": "int"
+    },
+    {
+      "name": "dw",
+      "type": "int"
+    },
+    {
+      "name": "pw",
+      "type": "int"
+    },
+    {
+      "name": "nw",
+      "type": "int"
+    }
+  ]
+}

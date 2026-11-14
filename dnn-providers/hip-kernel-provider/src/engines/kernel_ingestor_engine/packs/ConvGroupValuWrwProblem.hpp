@@ -28,10 +28,10 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_group_valu_wrw
 {
 
-/// A backward weights the engine serves: one conv node, 1-D or 2-D, fp32 / fp16 / bf16 tensors
-/// of one element type, compute type unset or fp32, any groups, any padding, stride and
-/// dilation (a config fixes the width's), both conv modes, extents and channel counts within 32
-/// bits. x and dy either both channels-first with the width packed (`nchw`) or both
+/// A backward weights the engine serves: one conv node, 1-D, 2-D or 3-D (a tile per depth tap),
+/// fp32 / fp16 / bf16 tensors of one element type, compute type unset or fp32, any groups, any
+/// padding, stride and dilation (a config fixes the width's), both conv modes, extents and
+/// channel counts within 32 bits. x and dy either both channels-first with the width packed (`nchw`) or both
 /// channels-last with the channels packed (`nhwc`); dw any strides.
 struct GvwProblem
 {
@@ -46,6 +46,15 @@ struct GvwProblem
     int ph = 0, pw = 0; ///< pre-padding
     int sh = 1, sw = 1;
     int dh = 1, dw = 1;
+    int di = 1; ///< x depth (below 3-D: 1)
+    int dOut = 1; ///< dy depth
+    int t = 1; ///< filter depth taps
+    int pd = 0; ///< depth pre-padding
+    int sd = 1; ///< depth stride
+    int dd = 1; ///< depth dilation
+    long long xsd = 0; ///< depth element strides of x, dy and dw (below 3-D: 0)
+    long long ysd = 0;
+    long long wsd = 0;
     int flip = 0; ///< convolution mode: the filter is reflected
     int elementBytes = 0;
     bool channelsFirst = false; ///< x and dy: the width packed (xs_w = ys_w = 1)

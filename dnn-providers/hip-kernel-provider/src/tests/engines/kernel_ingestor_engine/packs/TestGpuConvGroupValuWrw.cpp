@@ -317,6 +317,19 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"HeightStrideDilation", height});
     // Enough rows for several splits, folded in order.
     cases.push_back({"Splits", conv(33, 8, 8, 2, {20, 16}, {3, 3}, {1, 1}, {1, 1}, false)});
+    // 3-D: a tile per depth tap, rows over the output depth; depth padding, stride, dilation.
+    cases.push_back(
+        {"ThreeDNchw", conv(2, 8, 8, 2, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, false)});
+    cases.push_back(
+        {"ThreeDNhwc", conv(2, 8, 8, 2, {5, 6, 8}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, true)});
+    cases.push_back(
+        {"ThreeDStride2", conv(3, 8, 16, 2, {7, 8, 9}, {3, 3, 3}, {1, 1, 1}, {2, 2, 2}, false)});
+    auto depthDilation = conv(2, 8, 8, 2, {9, 6, 8}, {3, 3, 3}, {2, 1, 1}, {1, 1, 1}, false);
+    depthDilation.dilation = {2, 1, 1};
+    cases.push_back({"ThreeDDepthDilation", depthDilation});
+    auto convolution3d = conv(2, 8, 8, 2, {4, 6, 8}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, false);
+    convolution3d.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"ThreeDConvolutionMode", convolution3d});
     return cases;
 }
 

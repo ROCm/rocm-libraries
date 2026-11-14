@@ -17,6 +17,11 @@
 // workspace, which the fold kernel adds in split order. No atomics: the result is the same on
 // every run.
 //
+// 3-D: a tile is also one depth tap t (the grid's tiles are fd x the plane's), its reduction rows
+// images x output depth x output rows; a row reads the x depth slice od sd - pd + t dd, and a
+// row whose slice is depth padding adds nothing. The depth is a runtime argument: the 2-D configs
+// serve every depth filter. (The row ring stays 2-D.)
+//
 // One HIPRTC compile per config and alignment class; every shape is a runtime argument
 // (ConvGroupValuWrwArgs.h).
 //   GVW_DT      element type of x, dy and dw: 0 fp32, 1 fp16, 2 bf16 (16-bit read as raw bits)
@@ -363,8 +368,10 @@ __device__ inline void halve(float (&v)[NAP], int lane)
 /// Writes the sum @p value of filter element @p e of tile @p tile to dw, in dw's element type.
 __device__ inline void writeDw(const ConvGroupValuWrwArgs& a, int tile, int e, float value)
 {
-    const int g = tile / (a.cBlocks * a.kBlocks);
-    const int rem = tile - g * (a.cBlocks * a.kBlocks);
+    const int t = tile / a.tilesPlane;
+    const int planeTile = tile - t * a.tilesPlane;
+    const int g = planeTile / (a.cBlocks * a.kBlocks);
+    const int rem = planeTile - g * (a.cBlocks * a.kBlocks);
     const int cb = rem / a.kBlocks;
     const int kb = rem - cb * a.kBlocks;
     const int s = e % FS;
@@ -375,8 +382,9 @@ __device__ inline void writeDw(const ConvGroupValuWrwArgs& a, int tile, int e, f
     const long long cc = static_cast<long long>(cb) * CB + c;
     const long long rr = a.flip != 0 ? FR - 1 - r : r;
     const long long ss = a.flip != 0 ? FS - 1 - s : s;
+    const long long tt = a.flip != 0 ? a.fd - 1 - t : t;
     Raw* dw = static_cast<Raw*>(a.dw);
-    dw[kk * a.ws[0] + cc * a.ws[1] + rr * a.ws[2] + ss * a.ws[3]] = fromFloat(value);
+    dw[kk * a.ws[0] + cc * a.ws[1] + tt * a.wsd + rr * a.ws[2] + ss * a.ws[3]] = fromFloat(value);
 }
 
 } // namespace
@@ -393,13 +401,12 @@ __device__ inline void passDot2(float (&acc)[CB][KB][FR][FS],
                                 bool firstCol,
                                 bool lastCol,
                                 int lane,
-                                int dn,
+                                int xImg, // element offset of the row's x image and depth slice
+                                int yImg, // the same for dy
                                 int oy,
                                 int ox0,
-                                int xsn,
                                 int xsc,
                                 int xsh,
-                                int ysn,
                                 int ysk,
                                 int ysh)
 {
@@ -412,7 +419,7 @@ __device__ inline void passDot2(float (&acc)[CB][KB][FR][FS],
 #pragma unroll
             for(int k = 0; k < KB; ++k)
             {
-                const int e = dn * ysn + k * ysk + oy * ysh + ox0;
+                const int e = yImg + k * ysk + oy * ysh + ox0;
                 loadDwords<P / 2, VBY>(yr, ok ? static_cast<unsigned>(e * ES) : OOB, dyd[k]);
             }
         }
@@ -427,7 +434,7 @@ __device__ inline void passDot2(float (&acc)[CB][KB][FR][FS],
             for(int c = 0; c < CB; ++c)
             {
                 unsigned own[OWNW];
-                const int e = dn * xsn + c * xsc + iy * xsh + ox0;
+                const int e = xImg + c * xsc + iy * xsh + ox0;
                 loadDwords<OWNW, VBX>(xr, ok ? static_cast<unsigned>(e * ES) : OOB, own);
 #pragma unroll
                 for(int i = 0; i < LW; ++i)
@@ -821,8 +828,10 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
 {
     const int tile = static_cast<int>(blockIdx.x);
     const int split = static_cast<int>(blockIdx.y);
-    const int g = tile / (a.cBlocks * a.kBlocks);
-    const int rem = tile - g * (a.cBlocks * a.kBlocks);
+    const int tap = tile / a.tilesPlane; // the depth tap
+    const int planeTile = tile - tap * a.tilesPlane;
+    const int g = planeTile / (a.cBlocks * a.kBlocks);
+    const int rem = planeTile - g * (a.cBlocks * a.kBlocks);
     const int cb = rem / a.kBlocks;
     const int kb = rem - cb * a.kBlocks;
     const int c0 = g * a.cpg + cb * CB; // x channel of the tile's first input channel
@@ -853,6 +862,8 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
     const int ysk = static_cast<int>(a.ys[1]);
     const int ysh = static_cast<int>(a.ys[2]);
     const int ysw = static_cast<int>(a.ys[3]);
+    const int xsd = static_cast<int>(a.xsd);
+    const int ysd = static_cast<int>(a.ysd);
 
     float acc[CB][KB][FR][FS];
 #pragma unroll
@@ -944,7 +955,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
         for(int pr = rowBegin + wave * rpw; pr < rowEnd; pr += NW * rpw)
         {
             // The pass's first image: a 64-bit base the lanes' 32-bit offsets start from.
-            const int n0 = pr / a.ho;
+            const int n0 = pr / a.rowsAnImage;
             const long long xBase
                 = (static_cast<long long>(n0) * a.xs[0] + static_cast<long long>(c0) * a.xs[1])
                   * ES;
@@ -957,10 +968,18 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
                 = gvwRsrc(static_cast<const char*>(a.dy) + yBase, a.yBytes - yBase);
 
             const int row = pr + slot;
-            const bool rowOk = row < rowEnd;
-            const int n = row / a.ho;
-            const int oy = row - n * a.ho;
+            const int n = row / a.rowsAnImage;
+            const int plane = row - n * a.rowsAnImage;
+            const int od = plane / a.ho;
+            const int oy = plane - od * a.ho;
             const int dn = n - n0;
+            // The x depth slice this row's tap reads; outside x (depth padding) the row adds
+            // nothing.
+            const int id = od * a.sd - a.pd + tap * a.dd;
+            const bool rowOk
+                = (row < rowEnd) & (static_cast<unsigned>(id) < static_cast<unsigned>(a.di));
+            const int xImg = dn * xsn + id * xsd;
+            const int yImg = dn * ysn + od * ysd;
 
             if constexpr(DOT2)
             {
@@ -974,13 +993,12 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
                          firstCol,
                          lastCol,
                          lane,
-                         dn,
+                         xImg,
+                         yImg,
                          oy,
                          ox0,
-                         xsn,
                          xsc,
                          xsh,
-                         ysn,
                          ysk,
                          ysh);
             }
@@ -996,7 +1014,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
 #pragma unroll
                         for(int k = 0; k < KB; ++k)
                         {
-                            const int e = dn * ysn + k * ysk + oy * ysh + ox0;
+                            const int e = yImg + k * ysk + oy * ysh + ox0;
                             loadRaw<P, VBY>(yr, ok ? static_cast<unsigned>(e * ES) : OOB, dyw[k]);
                         }
                     }
@@ -1006,7 +1024,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
                         for(int j = 0; j < P; ++j)
                         {
                             const bool ok = rowOk & (ox0 + j < a.wo);
-                            const int e = dn * ysn + oy * ysh + (ox0 + j) * ysw;
+                            const int e = yImg + oy * ysh + (ox0 + j) * ysw;
                             Raw v[KB];
                             loadRaw<KB, VBY>(yr, ok ? static_cast<unsigned>(e * ES) : OOB, v);
 #pragma unroll
@@ -1047,7 +1065,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
 #pragma unroll
                         for(int c = 0; c < CB; ++c)
                         {
-                            const int e = dn * xsn + c * xsc + iy * xsh + ox0 * SW;
+                            const int e = xImg + c * xsc + iy * xsh + ox0 * SW;
                             loadRaw<OWN, VBX>(xr, ok ? static_cast<unsigned>(e * ES) : OOB, own[c]);
                             if constexpr(RAGGED)
                             {
@@ -1066,7 +1084,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
                         {
                             const int ix = ox0 * SW + u;
                             const bool ok = rowIn & (ix < a.wi);
-                            const int e = dn * xsn + iy * xsh + ix * xsw;
+                            const int e = xImg + iy * xsh + ix * xsw;
                             Raw v[CB];
                             loadRaw<CB, VBX>(xr, ok ? static_cast<unsigned>(e * ES) : OOB, v);
 #pragma unroll
