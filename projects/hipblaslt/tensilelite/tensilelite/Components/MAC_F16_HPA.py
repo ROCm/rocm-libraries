@@ -122,9 +122,10 @@ class FMA_F16_HPA_MAD_MIX(MAC):
                             dst=c, src0=a, src1=b, src2=c,
                             vop3=VOP3PModifiers(op_sel=op_sel, op_sel_hi=[1, 1, 0]),
                             comment=f"ValuC[{cidx}] iui={iui}"))
-                        prio = priority(writer, 1, "Raise priority while processing macs")
-                        if prio:
-                            module.add(prio)
+                        if offset == 0:
+                            prio = priority(writer, 1, "Raise priority while processing macs")
+                            if prio:
+                                module.add(prio)
 
         prio = priority(writer, 0, "Reset priority after macs")
         if prio:
