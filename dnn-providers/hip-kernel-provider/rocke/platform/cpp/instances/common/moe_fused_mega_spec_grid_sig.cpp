@@ -34,6 +34,7 @@
 #include "rocke/instance_gemm_universal.h"
 #include "rocke/instance_moe_fused_mega.h"
 #include "rocke/instance_moe_fused_mega_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_type_bytes */
 
 /* ===================================================================== *
  *  FusedMegaKernelSpec defaults + __post_init__
@@ -264,7 +265,7 @@ void rocke_moe_fused_mega_down_universal_spec(const rocke_moe_fused_mega_kernel_
  *  Python:
  *      def _lds_allocs(spec) -> Tuple[LdsAlloc, ...]:
  *          t = spec.gate_up_tile(); td = spec.down_tile()
- *          eb = lds_elem_bytes(_storage_dtype(spec.gate_up_universal_spec()))
+ *          eb = type_bytes(_storage_dtype(spec.gate_up_universal_spec()))
  *          return (LdsAlloc("A_smem",      eb, t.tile_m * t.tile_k),
  *                  LdsAlloc("Bg_smem",     eb, t.tile_n * t.tile_k),
  *                  LdsAlloc("Bu_smem",     eb, t.tile_n * t.tile_k),
@@ -289,7 +290,7 @@ void rocke_moe_fused_mega_lds_allocs(const rocke_gemm_universal_spec_t* u_gu,
     }
     t = &u_gu->tile;
     td = &u_down->tile;
-    eb = rocke_mega_lds_elem_bytes(rocke_moe_storage_dtype(u_gu));
+    eb = rocke_i_type_bytes(rocke_moe_storage_dtype(u_gu));
 
     out[0].name = "A_smem";
     out[0].elem_bytes = eb;

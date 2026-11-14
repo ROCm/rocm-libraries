@@ -48,6 +48,7 @@ from dispatch.attention.unified_rules import (
     unified_space,
 )
 from rocke.core.arch import ArchTarget
+from rocke.dispatch.core import PinRefused
 from kernels.common.attention_unified import (
     _num_segments,
     _tiled_2d_impl,
@@ -684,7 +685,11 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
     def test_padded_k_with_aliased_q_is_refused(self):
         req = _request(mask_type=1, kv_block_size=64)
         spec_id = "gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm"
-        with self.assertRaisesRegex(ValueError, "aliased Q"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, "
+            "expected one of them True",
+        ):
             tuning_spec_with_knobs(req, spec_id, _KQ_PAD)
         reread = tuning_spec_with_knobs(req, spec_id, {**_KQ_PAD, "use_q_reread": True})
         self.assertTrue(reread.kernel_spec.use_kq_lds_pad)
@@ -703,6 +708,29 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
                 self.assertIsNotNone(padded, why)
                 self.assertEqual(padded.tuning_id, unpadded.tuning_id)
                 self.assertEqual(padded.knobs, ())
+
+    def test_a_zero_width_pad_names_the_unpadded_spec(self):
+        # Single K with Q re-read lays out any pad of nonzero width; a zero
+        # width lays out none, so the pin is the unpadded kernel's id, and a
+        # stored id for those knobs that is not that id is refused on replay.
+        req = _request(mask_type=1, kv_block_size=64)
+        spec_id = "gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm"
+        single_k = {"use_k_single_buffer": True, "use_q_reread": True}
+        zero_width_knobs = {**single_k, "use_kq_lds_pad": True, "kq_lds_pad_halves": 0}
+        unpadded = tuning_spec_with_knobs(req, spec_id, single_k)
+        zero_width = tuning_spec_with_knobs(req, spec_id, zero_width_knobs)
+        self.assertEqual(zero_width.tuning_id, unpadded.tuning_id)
+        self.assertEqual(dict(zero_width.knobs), single_k)
+
+        stem = unpadded.tuning_id.split("@")[0]
+        with self.assertRaises(PinRefused) as refused:
+            attention_tuning_spec(
+                req, spec_id, tuning_id=f"{stem}@{'0' * 16}", knobs=zero_width_knobs
+            )
+        self.assertIn(
+            f"tuning_knobs canonicalize to tuning_id '{unpadded.tuning_id}'",
+            str(refused.exception),
+        )
 
     def test_offered_pads_are_laid_out_and_never_alias_q(self):
         shape = dict(mask_type=1, kv_block_size=64)

@@ -98,6 +98,12 @@ from rocke.helpers.transforms import (
 MFMA_M = 16
 MFMA_N = 16
 
+# Bytes one wave writes per async-DMA LDS copy: 64 lanes x 16 B.
+_ASYNC_DMA_WAVE_SLAB_BYTES = 64 * 16
+# bf16 elements in one wave's async-DMA K slab (2 B per element). The KQ LDS
+# pad goes between these slabs, so a padded K row never straddles one.
+_KQ_PAD_SLAB_HALVES = _ASYNC_DMA_WAVE_SLAB_BYTES // 2
+
 
 # CK-Tile C-accumulator warp distribution for the 32x32x16 MFMA atom. The
 # hand-rolled ``mfma_32x32x16_c_row/col`` lane arithmetic (in
@@ -389,8 +395,8 @@ class UnifiedAttention2DTiledSpec:
     # (``kq_lds_pad_halves=16``) for a ~25% Sq8192 latency win.
     use_kq_lds_pad: bool = False
     # Pad width in halves for the slab-granularity K_lds pad (must be a multiple
-    # of 8 to keep ds_read/ds_write b128 16-byte alignment). Only used when
-    # ``use_kq_lds_pad`` is set.
+    # of 8 to keep ds_read/ds_write b128 16-byte alignment; 0 lays out no pad).
+    # Only used when ``use_kq_lds_pad`` is set.
     kq_lds_pad_halves: int = 8
     # Transposed 32x32 softmax has one online-softmax state per query lane,
     # not one per output-dimension accumulator register. Keep a single m/l
@@ -552,6 +558,12 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
                 f"{type(self.use_additive_bias).__name__}"
+            )
+        if self.kq_lds_pad_halves < 0:
+            raise ValueError(
+                "KQ LDS pad width failed - "
+                f"kq_lds_pad_halves={self.kq_lds_pad_halves}, expected >= 0 "
+                "(0 lays out no pad)"
             )
         if self.right_bound < -1:
             raise ValueError(
@@ -833,6 +845,18 @@ class UnifiedAttention2DTiledSpec:
                     f"tile_size={self.tile_size_eff}). Set use_q_direct_reg to "
                     "lift this (Q is then gathered to VGPRs, never to the K slot)."
                 )
+            # Q staged in this K slot is written and read with unpadded
+            # (row, col) addressing, which does not match a laid-out K slab
+            # pad. A pad the kernel does not lay out is inert, so only a
+            # laid-out one is refused.
+            if self.kq_lds_pad_slab_rows and self.q_staged_in_k_lds:
+                raise ValueError(
+                    "KQ LDS pad failed - "
+                    f"use_q_reread={self.use_q_reread}, "
+                    f"use_q_direct_reg={self.use_q_direct_reg}, expected one "
+                    "of them True (transposed 32x32 path) or use_kq_lds_pad=False "
+                    "(Q staged in the padded single K slot is read unpadded)"
+                )
         if self.use_fast_paged_kv_desc:
             if not (
                 self.dtype == "bf16"
@@ -931,6 +955,69 @@ class UnifiedAttention2DTiledSpec:
     def n_blocks_per_tile(self) -> int:
         """How many paged-KV cache blocks one kernel iter consumes."""
         return self.tile_size_eff // self.block_size
+
+    @property
+    def fp8_k_in_lds(self) -> bool:
+        """True when K_lds holds raw fp8 K, dequantized in registers on read.
+
+        ``__post_init__`` refuses ``use_fp8_mfma_qk`` without an fp8 KV cache,
+        so the flag alone decides it.
+        """
+        return self.use_fp8_mfma_qk
+
+    @property
+    def q_staged_in_k_lds(self) -> bool:
+        """True when Q is staged in K_lds instead of its own slab or registers.
+
+        Q shares K_lds only when K_lds holds the kernel dtype (not raw fp8 K),
+        Q is neither re-read from a dedicated Q_lds nor gathered straight to
+        registers, and Q fits in the two K slots: rows 0..block_m of slot 0,
+        spilling into slot 1 when block_m > tile size.
+        """
+        if self.fp8_k_in_lds or self.use_q_reread or self.use_q_direct_reg:
+            return False
+        q_bytes = self.block_m * self.head_size * 2
+        k_slots_bytes = 2 * self.tile_size_eff * self.head_size * 2
+        return q_bytes <= k_slots_bytes
+
+    @property
+    def _kq_pad_whole_slab_rows(self) -> int:
+        """K rows per async-DMA slab, or 0 when a K row does not divide it."""
+        if _KQ_PAD_SLAB_HALVES % self.head_size:
+            return 0
+        return _KQ_PAD_SLAB_HALVES // self.head_size
+
+    @property
+    def kq_lds_pad_off_reason(self) -> str | None:
+        """Why a set ``use_kq_lds_pad`` would be laid out as no pad, or None
+        when it would be laid out. It does not read ``use_kq_lds_pad`` itself:
+        ``kq_lds_pad_slab_rows`` combines the two.
+
+        The pad is laid out only for a bf16 K read from a single K slot, with
+        whole async-DMA slabs tiling the KV tile and a nonzero pad width that
+        keeps the 16-byte LDS access alignment.
+        """
+        if self.fp8_k_in_lds:
+            return "the KQ LDS pad is off under native-FP8 K LDS"
+        if self.kq_lds_pad_halves == 0:
+            return "the KQ LDS pad width is 0"
+        slab_rows = self._kq_pad_whole_slab_rows
+        if not slab_rows:
+            return "the KQ LDS pad needs a K row that divides the async-DMA slab"
+        if self.tile_size_eff % slab_rows:
+            return "the KQ LDS pad needs whole async-DMA slabs to tile the KV tile"
+        if self.kq_lds_pad_halves % 8:
+            return "the KQ LDS pad width needs to be a multiple of 8 halves (16 bytes)"
+        if not self.use_k_single_buffer:
+            return "the KQ LDS pad is only laid out for a single-K schedule"
+        return None
+
+    @property
+    def kq_lds_pad_slab_rows(self) -> int:
+        """K rows per padded K_lds slab when the KQ pad is laid out, else 0."""
+        if not self.use_kq_lds_pad or self.kq_lds_pad_off_reason is not None:
+            return 0
+        return self._kq_pad_whole_slab_rows
 
     @property
     def dtype_ir(self) -> Type:
@@ -1241,7 +1328,7 @@ def build_unified_attention_2d_tiled(
     # populates the same LDS slabs as the bf16 path. ``KV_BYTES`` flips
     # the byte-stride math for the paged-KV descriptor.
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
-    FP8_MFMA_QK = KV_FP8 and spec.use_fp8_mfma_qk
+    FP8_MFMA_QK = spec.fp8_k_in_lds
     FP8_MFMA_PV = KV_FP8 and spec.use_fp8_mfma_pv
     # Native fp8 QK (32x32 combo with raw fp8 K, fp8-quantized Q, native fp8
     # MFMA) was implemented and measured: a LOSE-LOSE here -- slower AND less
@@ -1258,24 +1345,11 @@ def build_unified_attention_2d_tiled(
     # SLAB_ROWS*HD*2) contiguous slab per wave per call, so padding BETWEEN slabs
     # keeps the write contiguous while breaking the row-aliased bank conflict on
     # the QK read. Correct (write+read consistent) -> numerics preserved.
-    KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if spec.use_kq_lds_pad else 0
-    # SLAB_ROWS = rows filled by one wave's 1024-B (WAVE=64 lanes x 16 B) slab.
-    KQ_SLAB_ROWS = (512 // HD) if KQ_LDS_PAD else 0
-    # The slab pad's remap is only implemented for the non-fp8 K read (see the K
-    # read path below). The async-DMA write pads whenever KQ_LDS_PAD is set, but
-    # the fp8 K read does NOT remap -- an fp8+pad combo would address different
-    # slots -> silent numeric corruption. So disable the pad under fp8 (and under
-    # unsupported geometry) so write and read stay consistent. Byte-identical for
-    # the supported bf16 D256 path (FP8_MFMA_QK is False there).
-    if KQ_LDS_PAD and (
-        FP8_MFMA_QK
-        or 512 % HD != 0
-        or KQ_SLAB_ROWS == 0
-        or T % KQ_SLAB_ROWS != 0
-        or KQ_LDS_PAD % 8 != 0
-    ):
-        KQ_LDS_PAD = 0
-        KQ_SLAB_ROWS = 0
+    # SLAB_ROWS = rows filled by one wave's 1024-B (WAVE=64 lanes x 16 B) slab;
+    # 0 when the spec does not lay the pad out (see kq_lds_pad_off_reason), so
+    # the K write and every K read stay on the same layout.
+    KQ_SLAB_ROWS = spec.kq_lds_pad_slab_rows
+    KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if KQ_SLAB_ROWS else 0
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -1550,28 +1624,14 @@ def build_unified_attention_2d_tiled(
     K_LDS_DTYPE = FP8E4M3 if FP8_MFMA_QK else dtype
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
-    Q_BYTES = BLOCK_M * HD * 2
-    # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
-    K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
-    K_BUF_BYTES = T * HD * K_LDS_ELEM_BYTES
-    K_TOTAL_BYTES = 2 * K_BUF_BYTES  # K_lds has 2 double-buffer slots
-    # Q can alias K_lds when (a) the dtypes match and (b) it fits in the
-    # full K_lds region (both slots). When ``BLOCK_M <= T`` Q fits in one
-    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills
-    # into K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather +
-    # store use ``(buf, row, col)`` indexing in both cases.
-    # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
-    # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
-    Q_ALIAS_K = (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
-    # Q re-read needs a dedicated Q_lds that survives the K prefetch (aliased Q
-    # gets overwritten by K[0]), so it cannot share K_lds.
-    if spec.use_q_reread:
-        Q_ALIAS_K = False
-    # direct-to-register Q gather: Q never touches LDS (no Q_lds at all),
-    # so it cannot alias K either.
+    # Whether Q is staged in K_lds is the spec's rule (q_staged_in_k_lds). When
+    # ``BLOCK_M <= T`` Q fits in one slot (rows 0..BLOCK_M of K_lds[0]); when
+    # ``BLOCK_M > T`` Q spills into K_lds[1] (rows T..2T map to
+    # K_lds[1, row-T, :]). The gather + store use ``(buf, row, col)`` indexing
+    # in both cases. The fp8-MFMA path, Q re-read and direct-to-register Q keep
+    # Q out of K_lds.
+    Q_ALIAS_K = spec.q_staged_in_k_lds
     Q_DIRECT_REG = bool(spec.use_q_direct_reg)
-    if Q_DIRECT_REG:
-        Q_ALIAS_K = False
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
     # Deep K prefetch ring. kv_ring_depth=3 allocates K_lds as 3 slots
     # so K[i], K[i+1], K[i+2] are resident simultaneously (vs the depth-2
@@ -1584,10 +1644,6 @@ def build_unified_attention_2d_tiled(
     # with the ring (>2) and V-double-buffer paths in __post_init__.
     K_SINGLE_BUFFER = bool(spec.use_k_single_buffer)
     K_BUFS = 1 if K_SINGLE_BUFFER else (KV_RING_DEPTH if KV_RING_DEPTH > 2 else 2)
-    if KQ_LDS_PAD and K_BUFS != 1:
-        # Slab pad only wired for the single-buffer K path; disable otherwise.
-        KQ_LDS_PAD = 0
-        KQ_SLAB_ROWS = 0
     if KQ_LDS_PAD:
         # Slab-granularity layout: [K_BUFS, T/SLAB_ROWS, SLAB_ROWS*HD + PAD].
         # Each DMA wave-slab (SLAB_ROWS contiguous rows) lands in one padded
@@ -1697,7 +1753,7 @@ def build_unified_attention_2d_tiled(
     # know about FP8. Only allocate the fp8 staging slabs when actually
     # using the async-FP8 path (round 2 v1) -- otherwise they'd waste LDS
     # and starve occupancy on the round-1 sync FP8 path.
-    if KV_FP8 and spec.use_fp8_mfma_qk:
+    if FP8_MFMA_QK:
         K_fp8_lds = b.smem_alloc(FP8E4M3, [2, T, HD], name_hint="Kfp8lds")
         V_fp8_lds = b.smem_alloc(FP8E4M3, [1, T, HD], name_hint="Vfp8lds")
     if Q_DIRECT_REG:
@@ -2094,7 +2150,7 @@ def build_unified_attention_2d_tiled(
     # the wave-uniform `lds_dst`. Each wave issues its own instruction
     # but they share the LDS pointer unless we add a wave offset; with
     # NUM_WARPS=1 this collapses to zero.
-    WAVE_BYTES = WAVE * 16  # dwords=4 → 16 bytes per lane × 64 lanes
+    WAVE_BYTES = _ASYNC_DMA_WAVE_SLAB_BYTES
     if NUM_WARPS == 1:
         wave_lds_offset_i64 = b.const_i64(0)
     else:
@@ -2513,7 +2569,7 @@ def build_unified_attention_2d_tiled(
     # 9-17 kv-tiles per CTA, the sync stall was the dominant cost
     # (5000 µs vs Triton's 50 µs measured on
     # `n254q5880k10999_fp8kv` in round 1).
-    if KV_FP8 and spec.use_fp8_mfma_qk:
+    if FP8_MFMA_QK:
         # The async FP8 loader is gated on use_fp8_mfma_qk. We pick the
         # largest dwords (and per-lane payload) that the tile bytes
         # support, mirroring the K_FP8_DWORDS / K_BYTES_PER_LANE pick
@@ -2989,9 +3045,10 @@ def build_unified_attention_2d_tiled(
         ``cvt_pk_f32_fp8`` + ``* k_scale`` + cast -- to the exact 8 bf16 the
         bf16 K_lds path would have held (bit-identical), then feed the
         standard bf16 MFMA. (Unfused cvt + explicit f32 multiply: the fused
-        ``cvt_scalef32`` truncates non-pow2 scales; see the 16x16 path.)
-        Otherwise read bf16 directly. Shared by the 16x16 and 32x32 QK
-        paths so both get the fp8 LDS-footprint win.
+        ``cvt_scalef32`` truncates non-pow2 scales; see
+        ``dequant_fp8x8_to_dtype``.) Otherwise read bf16 directly. Every QK
+        path (16x16, 32x32 and transposed 32x32) reads K through here, so
+        each reads K in the type and layout the K copy wrote.
         """
         if KQ_XOR_SWIZZLE:
             # Measurement-only vanilla XOR swizzle: permute the read column by
@@ -3000,7 +3057,7 @@ def build_unified_attention_2d_tiled(
             # aligned + in [0, HD)). Read-only -> numerically wrong; used solely
             # to measure the SQ_LDS_BANK_CONFLICT delta.
             k_off = b.xor(k_off, b.mul(b.mod(k_row, b.const_i32(8)), b.const_i32(8)))
-        if KQ_LDS_PAD and not K_FP8_MFMA:
+        if KQ_LDS_PAD:
             # Slab-granularity padded layout: K_lds is
             # [K_BUFS, T/SLAB_ROWS, SLAB_ROWS*HD + PAD]. Map the logical
             # (row, col) to (slab, row_in_slab*HD + col) so the read hits the
@@ -3903,6 +3960,9 @@ def build_unified_attention_2d_tiled(
                 # Non-transposed 32x32 QK: ``S32_n[n] = vec_f32(16)``,
                 # one 32x32x16 C tile per warp. Downstream softmax/PV
                 # consume this via the non-transposed mask block below.
+                # K goes through the shared K reader, like the transposed
+                # path: when K_lds holds raw fp8 bytes it reads them as fp8
+                # and dequantizes with k_scale before the bf16 MFMA.
                 S32_n = [None] * QK_N_TILES
                 for n in range(QK_N_TILES):
                     acc32 = b.zero_vec_f32(16)
@@ -3911,9 +3971,7 @@ def build_unified_attention_2d_tiled(
                         kc_off32 = b.add(
                             b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8))
                         )
-                        B32_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row32, kc_off32, dtype=dtype, n=8
-                        )
+                        B32_v = _read_k8_mfma_operand(cur_buf, k_row32, kc_off32)
                         q32_op = _read_q32(k) if Q_REREAD else Q32_reg[k]
                         acc32 = _mfma_32x32x16(b, dtype, q32_op, B32_v, acc32)
                     S32_n[n] = acc32
@@ -3924,44 +3982,13 @@ def build_unified_attention_2d_tiled(
                 for k in range(QK_K_ITERS):
                     kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                     k_row = b.add(b.const_i32(n * 16), lane_col)
-                    if K_FP8_MFMA:
-                        # K_lds holds raw fp8 bytes. Dequant in register to
-                        # bf16 (bit-identical to what the bf16 K_lds path
-                        # would have written) then run the standard bf16
-                        # MFMA.
-                        #
-                        # Uses gfx950's fused ``v_cvt_scalef32_pk_f32_fp8``
-                        # which folds the per-element scale multiply into
-                        # the cvt: 2 fused scaled cvts + 2 packed bf16
-                        # cvts = 4 instructions per 8-element load (vs the
-                        # old 2 cvt_pk_f32_fp8 + 8 fmul + 2 cvt_pk_bf16_f32
-                        # = 12 instructions). Triton uses the same fused
-                        # intrinsic in its long-prefill FP8 kernel.
-                        B_fp8 = b.smem_load_vN(
-                            K_lds,
-                            cur_buf,
-                            k_row,
-                            kc_off,
-                            dtype=FP8E4M3,
-                            n=8,
+                    # The shared K reader, as on the 32x32 paths: fp8 K in
+                    # K_lds is read as fp8 and dequantized with k_scale.
+                    B_v = _read_k8_mfma_operand(cur_buf, k_row, kc_off)
+                    for atom in range(M_ATOMS_PER_WARP):
+                        acc_per_atom[atom] = _mfma_16x16x32(
+                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
                         )
-                        # See FP8 dequant note in dequant_fp8x8_to_dtype:
-                        # cvt_scalef32_pk_f32_fp8 uses E8M0-only scale,
-                        # silently truncating non-pow2 scales. The helper uses
-                        # the unfused cvt_pk_f32_fp8 + explicit f32 multiply.
-                        B_v = dequant_fp8x8_to_dtype(b, B_fp8, k_scale_p, dtype)
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
-                    else:
-                        B_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8
-                        )
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
                 for atom in range(M_ATOMS_PER_WARP):
                     S_n[atom][n] = acc_per_atom[atom]
 

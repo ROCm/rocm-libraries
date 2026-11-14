@@ -172,14 +172,6 @@ void rocke_i_refuse_non_u8_source(const rocke_op_t* op);
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 
-/* Element count an LDS vector access of width `vec` can actually claim as its
- * alignment granularity. The natural answer is `vec`, but an LDS tile advances
- * by its innermost dimension per row, so when that dimension is not a multiple
- * of `vec` -- what a bank-conflict pad such as lds_k_pad does -- alternate rows
- * start off the natural boundary. Returns gcd(vec, innermost_dim), or `vec`
- * when the shape is unavailable. Multiply by the element size for bytes.
- * Mirrors lower_llvm._smem_vec_align / ir.py smem_store_vN. */
-int rocke_i_smem_vec_align_elems(const rocke_type_t* smem_type, int vec);
 /* VectorType(elem, count) allocated in `arena`, for callers that hold an arena
  * but no builder (the lowerers). `elem` must be non-NULL; NULL on OOM. The
  * name is the one rocke_vector_type gives the same type. */
@@ -199,6 +191,53 @@ const rocke_type_t* rocke_require_ir_type(const char* dtype);
  * (memory, not a value) and ckc::ValueError "unknown dtype '<name>'" for a
  * scalar with no format. */
 int rocke_i_type_bits(const rocke_type_t* t);
+
+/* The number of whole bytes a value of type `t` occupies (Python
+ * core/ir.py::type_bytes): rocke_i_type_bits divided by eight. Throws
+ * ckc::ValueError "type_bytes failed - type=<name> (<bits> bits), expected a
+ * whole number of bytes" for a width that is not whole bytes. */
+int rocke_i_type_bytes(const rocke_type_t* t);
+
+/* The natural alignment, in bytes, of one access of `lanes` `elem` values
+ * (Python core/ir.py::vector_access_align): its byte width when that is a power
+ * of two, else the element width. Throws through rocke_i_type_bytes for an
+ * element with no whole-byte width. */
+int64_t rocke_i_vector_access_align(int64_t lanes, const rocke_type_t* elem);
+
+/* The alignment, in bytes, of one access of `lanes` `elem` values into LDS
+ * tile type `smem_type` (Python core/ir.py::smem_vector_access_align):
+ * rocke_i_vector_access_align, bounded by what every row start of the tile
+ * guarantees: gcd(lanes, innermost dimension) elements, since a pad such as
+ * lds_k_pad that leaves the innermost dimension a non-multiple of `lanes`
+ * starts alternate rows off the natural boundary. A type with no shape gives
+ * no row bound. */
+int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
+                                         int64_t lanes,
+                                         const rocke_type_t* elem);
+
+/* Whether `align` is a valid alignment claim, in bytes: a positive power of
+ * two (Python core/ir.py::_checked_align). */
+bool rocke_i_is_valid_align(int64_t align);
+
+/* The refusal text of an alignment claim that is not a positive power of two
+ * (Python core/ir.py::_checked_align), formatted with the op name and the
+ * claim as a long long. */
+#define ROCKE_I_ALIGN_NOT_POWER_OF_TWO_FMT \
+    "%s failed - align=%lld, expected a positive power of two"
+
+/* The `align` attribute of memory op `op`, in bytes, or 0 when the op carries
+ * none (Python core/ir.py::align_attr, which returns None). Throws
+ * ckc::TypeError "<op> failed - align=<kind>, expected an integer" for an
+ * attribute that is not an integer, and ckc::ValueError "<op> failed -
+ * align=<n>, expected a positive power of two" for one that is not a positive
+ * power of two: converting or capping it would turn an invalid claim into a
+ * valid one. */
+int64_t rocke_i_align_attr(const rocke_op_t* op);
+
+/* The alignment, in bytes, that vector access `op` of `lanes` `elem` values
+ * claims (Python core/ir.py::claimed_align): rocke_i_align_attr when the op
+ * carries one, else rocke_i_vector_access_align. */
+int64_t rocke_i_claimed_align(const rocke_op_t* op, int64_t lanes, const rocke_type_t* elem);
 
 /* The bytes one buffer access of `count` `elem` elements moves (Python
  * core/ir.py::_buffer_access_bytes): `elem` is a scalar whose width is whole

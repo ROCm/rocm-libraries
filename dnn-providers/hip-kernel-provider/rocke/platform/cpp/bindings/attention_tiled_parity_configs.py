@@ -1352,6 +1352,42 @@ GFX950_ATTENTION_TILED_2D = [
 GFX950_ATTENTION_TILED_2D += [
     {**GFX950_ATTENTION_TILED_2D[i], "lse_layout": "head_major"} for i in (64, 65, 66)
 ]
+# idx75-76: fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+# non-transposed and transposed 32x32 QK paths, which read K through one shared
+# reader.
+GFX950_ATTENTION_TILED_2D += [
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 32,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "kv_storage_dtype": "fp8e4m3",
+        "use_fp8_mfma_qk": True,
+        "use_mfma_32x32": True,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 32,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "kv_storage_dtype": "fp8e4m3",
+        "use_fp8_mfma_qk": True,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+    },
+]
 
 GFX942_ATTENTION_TILED_3D = [
     {

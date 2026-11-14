@@ -189,7 +189,9 @@ endif()
 # and K/V cache policy, the scalar fallback's cache key and block-table
 # stride kernarg, the unified attention running-max carry and keyless
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
+# gfx950 tiled-2D K reads from LDS on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
+# LDS alignment claims of the backward kernel with the slices dK / dV sink, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
 # host-side SDPA sequence-length and padding-mask adapters/specs, the
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
@@ -206,6 +208,7 @@ endif()
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_bwd_gemm.py"
     "tests/library/tests/test_attention_bwd_body.py"
+    "tests/library/tests/test_attention_bwd_lds_alignment.py"
     "tests/library/tests/test_gfx1250_attention_operand_roles.py"
     "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
     "tests/library/tests/test_attention_dense_decode.py"
@@ -219,6 +222,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_scalar_cache_key.py"
     "tests/library/tests/test_attention_spec_predicate_parity.py"
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
+    "tests/library/tests/test_attn_tiled_2d_gfx950_k_lds_read.py"
     "tests/library/tests/test_attention_tiled_3d_decode_split.py"
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
     "tests/library/tests/test_attention_tiled_launch_signature.py"
@@ -492,6 +496,7 @@ endif()
 # install tree.
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx950_numeric.py"
+    "tests/library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py"
     "tests/library/tests/test_extended_parity_attention.py")
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TESTS "")
 foreach(_rocke_attn_gpu_test ${_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS})
