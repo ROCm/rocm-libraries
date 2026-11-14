@@ -248,7 +248,7 @@ sits at the opposite, much weaker end.
 #### C++ library and clients (weak, and structurally blocked)
 
 Most of the host-only tests that exist are compiled into `hipblaslt-test` alongside the GPU tests,
-in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
+in [`clients/tests/src/`](clients/tests/src/). The last four rows are in
 [`clients/tests/unit/`](clients/tests/unit/), described after the table:
 
 | File | Suites | What it covers |
@@ -264,6 +264,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
 | `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
+| `unit/exception_logging_gtest.cpp` | `HostUnitExceptionLoggingDeathTest` | A public call that fails with a C++ exception (an unparsable `HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32` makes `hipblasLtMatmulDescCreate` throw) returns `HIPBLAS_STATUS_INTERNAL_ERROR` and writes the exception text to the error log at `HIPBLASLT_LOG_LEVEL=1`. Runs in a child process because the logger reads its environment once |
 
 The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipblaslt-test-hostunit`
 ([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no
