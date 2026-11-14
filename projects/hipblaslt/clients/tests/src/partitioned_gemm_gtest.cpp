@@ -48,7 +48,7 @@ namespace
         }
         DeviceBuf(const DeviceBuf&)            = delete;
         DeviceBuf& operator=(const DeviceBuf&) = delete;
-        void* get() const
+        void*      get() const
         {
             return m_ptr;
         }
@@ -119,11 +119,11 @@ namespace
             }
         }
 
-        static constexpr size_t                          kWorkspace = 32 << 20;
-        std::vector<int>                                 devices;
+        static constexpr size_t                              kWorkspace = 32 << 20;
+        std::vector<int>                                     devices;
         std::vector<std::unique_ptr<hipblaslt_local_handle>> handles;
-        std::vector<hipStream_t>                         streams;
-        std::vector<std::unique_ptr<DeviceBuf>>          workspaceBufs;
+        std::vector<hipStream_t>                             streams;
+        std::vector<std::unique_ptr<DeviceBuf>>              workspaceBufs;
     };
 
     // The full problem used by every case: fp16 in/out, fp32 compute, TN, column-major.
@@ -226,7 +226,7 @@ namespace
             in.a.assign(a.begin(), a.end());
             in.b.assign(b.begin(), b.end());
             in.c.assign(c.begin(), c.end());
-            in.d = d;
+            in.d     = d;
             in.alpha = &alpha;
             in.beta  = &beta;
             return in;
@@ -236,11 +236,11 @@ namespace
         float                                   alpha = 1.f, beta = 0.f;
     };
 
-    hipblasStatus_t setReplicated(PartitionedGemm&        gemm,
-                                  SplitDim                dim,
+    hipblasStatus_t setReplicated(PartitionedGemm&             gemm,
+                                  SplitDim                     dim,
                                   PartitionedGemmInputs const& in,
-                                  int64_t                 m = kM,
-                                  int64_t                 n = kN)
+                                  int64_t                      m = kM,
+                                  int64_t                      n = kN)
     {
         return gemm.setProblem(m,
                                n,
@@ -289,8 +289,8 @@ namespace
                     if(std::fabs(want - have) > 2e-3f * std::max(1.f, std::fabs(want)))
                         bad++;
                 }
-            EXPECT_EQ(bad, 0u) << "partition " << i << " slice [" << offset << ", "
-                               << offset + size << ")";
+            EXPECT_EQ(bad, 0u) << "partition " << i << " slice [" << offset << ", " << offset + size
+                               << ")";
         }
     }
 
@@ -383,16 +383,19 @@ TEST(pre_checkin_partitioned_gemm_ext, RejectsBadSizesAndScalars)
     Operands          op;
     ReplicatedBuffers buffers(parts, op);
 
-    EXPECT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs(), kM, 0), HIPBLAS_STATUS_INVALID_VALUE);
-    EXPECT_EQ(setReplicated(gemm, SplitDim::M, buffers.inputs(), -1, kN), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs(), kM, 0),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::M, buffers.inputs(), -1, kN),
+              HIPBLAS_STATUS_INVALID_VALUE);
     // The split dimension must hold at least one index per partition.
-    EXPECT_EQ(setReplicated(gemm, SplitDim::M, buffers.inputs(), 1, kN), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::M, buffers.inputs(), 1, kN),
+              HIPBLAS_STATUS_INVALID_VALUE);
 
     auto in  = buffers.inputs();
     in.alpha = nullptr;
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
-    in       = buffers.inputs();
-    in.beta  = nullptr;
+    in      = buffers.inputs();
+    in.beta = nullptr;
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
@@ -407,7 +410,8 @@ TEST(pre_checkin_partitioned_gemm_ext, UserArgsAreNotSupportedYet)
     std::vector<void*> userArgs{&dummy, &dummy};
     EXPECT_EQ(gemm.run(userArgs, parts.streams), HIPBLAS_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(gemm.getDefaultValueForDeviceUserArguments(userArgs), HIPBLAS_STATUS_NOT_SUPPORTED);
-    EXPECT_EQ(gemm.run(std::vector<void*>(2, nullptr), parts.streams), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(gemm.run(std::vector<void*>(2, nullptr), parts.streams),
+              HIPBLAS_STATUS_INVALID_VALUE);
 }
 
 TEST(pre_checkin_partitioned_gemm_ext, RejectsStreamsOnTheSameDevice)
@@ -496,7 +500,7 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
 
     // Matrix `shared` lives on device 0 and partition 1 reads it across devices.
     std::vector<std::unique_ptr<DeviceBuf>> bufs;
-    auto sharedCopy = [&](std::vector<half_t> const& host) {
+    auto                                    sharedCopy = [&](std::vector<half_t> const& host) {
         bufs.push_back(std::make_unique<DeviceBuf>(0, host.size() * 2, host.data()));
         return bufs.back()->get();
     };
@@ -509,7 +513,7 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
         static_cast<void>(hipGetLastError());
     }
 
-    ReplicatedBuffers buffers(parts, op);
+    ReplicatedBuffers     buffers(parts, op);
     PartitionedGemmInputs in = buffers.inputs();
     // A and B Shared: one pointer, on device 0.
     if(cs.a == Placement::Shared)
@@ -517,10 +521,10 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
     if(cs.b == Placement::Shared)
         in.b = {sharedCopy(op.b)};
     // A or B Sliced: each partition holds only its slice (contiguous columns of the K x X matrix).
-    const SplitDim dim = cs.dim;
-    const int64_t  total = dim == SplitDim::M ? kM : kN;
+    const SplitDim dim    = cs.dim;
+    const int64_t  total  = dim == SplitDim::M ? kM : kN;
     int64_t        off[2] = {0, total / 2}, sz[2] = {total / 2, total - total / 2};
-    auto sliceOf = [&](std::vector<half_t> const& host, int i) {
+    auto           sliceOf = [&](std::vector<half_t> const& host, int i) {
         std::vector<half_t> s(host.begin() + off[i] * kK, host.begin() + (off[i] + sz[i]) * kK);
         bufs.push_back(std::make_unique<DeviceBuf>(i, s.size() * 2, s.data()));
         return bufs.back()->get();
@@ -581,10 +585,12 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
     {
         int64_t offset = 0, size = 0;
         ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
-        const int64_t rows = cs.d == Placement::Sliced ? lddUse : kLdd;
-        std::vector<half_t> got(size_t(rows) * (cs.d == Placement::Sliced && dim == SplitDim::N ? size : kN));
+        const int64_t       rows = cs.d == Placement::Sliced ? lddUse : kLdd;
+        std::vector<half_t> got(size_t(rows)
+                                * (cs.d == Placement::Sliced && dim == SplitDim::N ? size : kN));
         ASSERT_EQ(hipSetDevice(i), hipSuccess);
-        ASSERT_EQ(hipMemcpy(got.data(), in.d[i], got.size() * 2, hipMemcpyDeviceToHost), hipSuccess);
+        ASSERT_EQ(hipMemcpy(got.data(), in.d[i], got.size() * 2, hipMemcpyDeviceToHost),
+                  hipSuccess);
         size_t bad = 0;
         for(int64_t col = 0; col < (dim == SplitDim::N ? size : kN); col++)
             for(int64_t row = 0; row < (dim == SplitDim::M ? size : kM); row++)
@@ -597,7 +603,8 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
                 if(std::fabs(want - have) > 2e-3f * std::max(1.f, std::fabs(want)))
                     bad++;
             }
-        EXPECT_EQ(bad, 0u) << "partition " << i << " slice [" << offset << ", " << offset + size << ")";
+        EXPECT_EQ(bad, 0u) << "partition " << i << " slice [" << offset << ", " << offset + size
+                           << ")";
     }
 }
 
@@ -605,10 +612,28 @@ INSTANTIATE_TEST_SUITE_P(
     partitioned_gemm_ext_multi_gpu,
     partitioned_gemm_ext_multi_gpu,
     ::testing::Values(
-        Combo{"M_Replicated", SplitDim::M, Placement::Replicated, Placement::Replicated, Placement::Replicated},
-        Combo{"N_Replicated", SplitDim::N, Placement::Replicated, Placement::Replicated, Placement::Replicated},
-        Combo{"M_SharedAB", SplitDim::M, Placement::Shared, Placement::Shared, Placement::Replicated},
-        Combo{"N_SharedAB", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Replicated},
-        Combo{"M_SlicedAandD", SplitDim::M, Placement::Sliced, Placement::Replicated, Placement::Sliced},
-        Combo{"N_SlicedBandD", SplitDim::N, Placement::Replicated, Placement::Sliced, Placement::Sliced}),
+        Combo{"M_Replicated",
+              SplitDim::M,
+              Placement::Replicated,
+              Placement::Replicated,
+              Placement::Replicated},
+        Combo{"N_Replicated",
+              SplitDim::N,
+              Placement::Replicated,
+              Placement::Replicated,
+              Placement::Replicated},
+        Combo{
+            "M_SharedAB", SplitDim::M, Placement::Shared, Placement::Shared, Placement::Replicated},
+        Combo{
+            "N_SharedAB", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Replicated},
+        Combo{"M_SlicedAandD",
+              SplitDim::M,
+              Placement::Sliced,
+              Placement::Replicated,
+              Placement::Sliced},
+        Combo{"N_SlicedBandD",
+              SplitDim::N,
+              Placement::Replicated,
+              Placement::Sliced,
+              Placement::Sliced}),
     [](::testing::TestParamInfo<Combo> const& info) { return std::string(info.param.name); });

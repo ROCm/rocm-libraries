@@ -29,14 +29,14 @@ namespace
     {
         int64_t     m = 4096, n = 4096, k = 4096;
         std::string transA = "T", transB = "N";
-        std::string precision = "f16";
-        std::string splitDim = "N";
+        std::string precision  = "f16";
+        std::string splitDim   = "N";
         std::string placementA = "replicated", placementB = "replicated", placementC = "replicated",
                     placementD = "replicated";
-        int         partitions = 2;
-        int         iters = 20, coldIters = 5;
-        int         workspaceMB = 64;
-        bool        verify = false, single = false;
+        int  partitions        = 2;
+        int  iters = 20, coldIters = 5;
+        int  workspaceMB = 64;
+        bool verify = false, single = false;
     };
 
     // One device allocation, freed on the device that owns it.
@@ -61,8 +61,8 @@ namespace
                 static_cast<void>(hipFree(m_ptr));
             }
         }
-        Buf(const Buf&)            = delete;
-        Buf& operator=(const Buf&) = delete;
+        Buf(const Buf&)             = delete;
+        Buf&  operator=(const Buf&) = delete;
         void* get() const
         {
             return m_ptr;
@@ -82,7 +82,8 @@ namespace
     void check(hipblasStatus_t s, const char* what)
     {
         if(s != HIPBLAS_STATUS_SUCCESS)
-            throw std::runtime_error(std::string(what) + " returned status " + std::to_string(int(s)));
+            throw std::runtime_error(std::string(what) + " returned status "
+                                     + std::to_string(int(s)));
     }
 
     Placement parsePlacement(std::string const& s)
@@ -120,15 +121,15 @@ namespace
                            << " device(s) are visible\n";
             return 1;
         }
-        const int  P   = o.partitions;
-        const bool tA  = o.transA == "T" || o.transA == "t";
-        const bool tB  = o.transB == "T" || o.transB == "t";
-        const auto opA = tA ? HIPBLAS_OP_T : HIPBLAS_OP_N;
-        const auto opB = tB ? HIPBLAS_OP_T : HIPBLAS_OP_N;
-        const SplitDim dim = o.splitDim == "M" || o.splitDim == "m" ? SplitDim::M : SplitDim::N;
+        const int       P   = o.partitions;
+        const bool      tA  = o.transA == "T" || o.transA == "t";
+        const bool      tB  = o.transB == "T" || o.transB == "t";
+        const auto      opA = tA ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+        const auto      opB = tB ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+        const SplitDim  dim = o.splitDim == "M" || o.splitDim == "m" ? SplitDim::M : SplitDim::N;
         const Placement pA = parsePlacement(o.placementA), pB = parsePlacement(o.placementB),
                         pC = parsePlacement(o.placementC), pD = parsePlacement(o.placementD);
-        const int64_t   m = o.m, n = o.n, k = o.k;
+        const int64_t m = o.m, n = o.n, k = o.k;
         // column-major storage and leading dimensions of the full matrices
         const int64_t lda = tA ? k : m, ldb = tB ? n : k, ldc = m, ldd = m;
         const int64_t aCols = tA ? m : k, bCols = tB ? k : n;
@@ -166,12 +167,12 @@ namespace
             workspaces.push_back(workspaceBufs.back()->get());
         }
 
-        auto hostA = randomData<T>(size_t(lda) * aCols, 1);
-        auto hostB = randomData<T>(size_t(ldb) * bCols, 2);
+        auto           hostA = randomData<T>(size_t(lda) * aCols, 1);
+        auto           hostB = randomData<T>(size_t(ldb) * bCols, 2);
         std::vector<T> hostC(size_t(ldc) * n, T(0));
 
         std::vector<std::unique_ptr<Buf>> bufs;
-        auto keep = [&](std::unique_ptr<Buf> b) {
+        auto                              keep = [&](std::unique_ptr<Buf> b) {
             bufs.push_back(std::move(b));
             return bufs.back()->get();
         };
@@ -188,8 +189,11 @@ namespace
                 static_cast<void>(hipGetLastError());
             }
 
-        auto makeInput = [&](Placement p, std::vector<T> const& host, int64_t ld, int64_t cols,
-                             bool sliceColumns) {
+        auto makeInput = [&](Placement             p,
+                             std::vector<T> const& host,
+                             int64_t               ld,
+                             int64_t               cols,
+                             bool                  sliceColumns) {
             std::vector<const void*> out;
             if(p == Placement::Shared)
                 out.push_back(keep(std::make_unique<Buf>(0, host.size() * sizeof(T), host.data())));
@@ -197,13 +201,16 @@ namespace
                 for(int i = 0; i < P; i++)
                 {
                     if(p == Placement::Replicated)
-                        out.push_back(keep(std::make_unique<Buf>(i, host.size() * sizeof(T), host.data())));
+                        out.push_back(
+                            keep(std::make_unique<Buf>(i, host.size() * sizeof(T), host.data())));
                     else
                     {
                         (void)cols;
                         (void)sliceColumns;
-                        std::vector<T> s(host.begin() + off[i] * ld, host.begin() + (off[i] + sz[i]) * ld);
-                        out.push_back(keep(std::make_unique<Buf>(i, s.size() * sizeof(T), s.data())));
+                        std::vector<T> s(host.begin() + off[i] * ld,
+                                         host.begin() + (off[i] + sz[i]) * ld);
+                        out.push_back(
+                            keep(std::make_unique<Buf>(i, s.size() * sizeof(T), s.data())));
                     }
                 }
             return out;
@@ -213,9 +220,10 @@ namespace
         in.b = makeInput(pB, hostB, ldb, bCols, true);
         in.c = makeInput(pC, hostC, ldc, n, false);
         // D: Shared = one buffer, Replicated = a full buffer each, Sliced = just the slice
-        const int64_t lddUse = pD == Placement::Sliced
-                                   ? (dim == SplitDim::M ? *std::max_element(sz.begin(), sz.end()) : m)
-                                   : ldd;
+        const int64_t lddUse
+            = pD == Placement::Sliced
+                  ? (dim == SplitDim::M ? *std::max_element(sz.begin(), sz.end()) : m)
+                  : ldd;
         if(pD == Placement::Shared)
             in.d.push_back(keep(std::make_unique<Buf>(0, size_t(ldd) * n * sizeof(T))));
         else
@@ -231,8 +239,9 @@ namespace
         in.beta  = &beta;
 
         PartitionedGemm gemm(handles, opA, opB, type, type, type, type, HIPBLAS_COMPUTE_32F);
-        check(gemm.setProblem(m, n, k, 1, lda, ldb, ldc, lddUse, 0, 0, 0, 0, dim, pA, pB, pC, pD, in),
-              "setProblem");
+        check(
+            gemm.setProblem(m, n, k, 1, lda, ldb, ldc, lddUse, 0, 0, 0, 0, dim, pA, pB, pC, pD, in),
+            "setProblem");
         gemm.setMaxWorkspaceBytes(workspaceBytes);
         GemmPreference pref;
         pref.setMaxWorkspaceBytes(workspaceBytes);
@@ -259,16 +268,19 @@ namespace
         for(int i = 0; i < o.iters; i++)
             check(gemm.run(streams), "run");
         syncAll();
-        const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count()
-                          / o.iters;
+        const double us
+            = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0)
+                  .count()
+              / o.iters;
 
         // ---- the same GEMM on device 0 (reference values, optional timing) ----
-        double              singleUs = 0;
-        std::vector<T>      ref;
-        bool                verified = false, pass = true;
+        double         singleUs = 0;
+        std::vector<T> ref;
+        bool           verified = false, pass = true;
         if(o.verify || o.single)
         {
-            Buf a(0, hostA.size() * sizeof(T), hostA.data()), b(0, hostB.size() * sizeof(T), hostB.data()),
+            Buf a(0, hostA.size() * sizeof(T), hostA.data()),
+                b(0, hostB.size() * sizeof(T), hostB.data()),
                 c(0, hostC.size() * sizeof(T), hostC.data()), d(0, size_t(ldd) * n * sizeof(T)),
                 ws(0, workspaceBytes);
             Gemm            full(handles[0], opA, opB, type, type, type, type, HIPBLAS_COMPUTE_32F);
@@ -281,7 +293,8 @@ namespace
             inputs.setD(d.get());
             inputs.setAlpha(&alpha);
             inputs.setBeta(&beta);
-            check(full.setProblem(m, n, k, 1, lda, ldb, ldc, ldd, 0, 0, 0, 0, epilogue, inputs, problemType),
+            check(full.setProblem(
+                      m, n, k, 1, lda, ldb, ldc, ldd, 0, 0, 0, 0, epilogue, inputs, problemType),
                   "reference setProblem");
             full.setMaxWorkspaceBytes(workspaceBytes);
             std::vector<hipblasLtMatmulHeuristicResult_t> fullHeuristic;
@@ -289,7 +302,8 @@ namespace
             if(!fullHeuristic.empty())
             {
                 Buf::check(hipSetDevice(0), "hipSetDevice");
-                check(full.initialize(fullHeuristic[0].algo, ws.get(), true, streams[0]), "reference initialize");
+                check(full.initialize(fullHeuristic[0].algo, ws.get(), true, streams[0]),
+                      "reference initialize");
                 for(int i = 0; i < o.coldIters; i++)
                     check(full.run(streams[0]), "reference run");
                 Buf::check(hipStreamSynchronize(streams[0]), "sync");
@@ -297,20 +311,27 @@ namespace
                 for(int i = 0; i < o.iters; i++)
                     check(full.run(streams[0]), "reference run");
                 Buf::check(hipStreamSynchronize(streams[0]), "sync");
-                singleUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - s0).count()
+                singleUs = std::chrono::duration<double, std::micro>(
+                               std::chrono::steady_clock::now() - s0)
+                               .count()
                            / o.iters;
                 ref.resize(size_t(ldd) * n);
-                Buf::check(hipMemcpy(ref.data(), d.get(), ref.size() * sizeof(T), hipMemcpyDeviceToHost), "memcpy");
+                Buf::check(
+                    hipMemcpy(ref.data(), d.get(), ref.size() * sizeof(T), hipMemcpyDeviceToHost),
+                    "memcpy");
             }
             if(o.verify && !ref.empty())
             {
                 verified = true;
                 for(int i = 0; i < P && pass; i++)
                 {
-                    const int64_t rows = pD == Placement::Sliced ? lddUse : ldd;
-                    std::vector<T> got(size_t(rows) * (pD == Placement::Sliced && dim == SplitDim::N ? sz[i] : n));
+                    const int64_t  rows = pD == Placement::Sliced ? lddUse : ldd;
+                    std::vector<T> got(
+                        size_t(rows) * (pD == Placement::Sliced && dim == SplitDim::N ? sz[i] : n));
                     Buf::check(hipSetDevice(pD == Placement::Shared ? 0 : i), "hipSetDevice");
-                    Buf::check(hipMemcpy(got.data(), in.d[pD == Placement::Shared ? 0 : i], got.size() * sizeof(T),
+                    Buf::check(hipMemcpy(got.data(),
+                                         in.d[pD == Placement::Shared ? 0 : i],
+                                         got.size() * sizeof(T),
                                          hipMemcpyDeviceToHost),
                                "memcpy");
                     for(int64_t col = 0; col < (dim == SplitDim::N ? sz[i] : n) && pass; col++)
@@ -319,8 +340,9 @@ namespace
                             const int64_t r    = dim == SplitDim::M ? off[i] + row : row;
                             const int64_t c    = dim == SplitDim::N ? off[i] + col : col;
                             const float   want = float(ref[r + c * ldd]);
-                            const float   have = pD == Placement::Sliced ? float(got[row + col * rows])
-                                                                         : float(got[r + c * rows]);
+                            const float   have = pD == Placement::Sliced
+                                                     ? float(got[row + col * rows])
+                                                     : float(got[r + c * rows]);
                             if(std::fabs(want - have) > 2e-3f * std::max(1.f, std::fabs(want)))
                             {
                                 pass = false;
@@ -332,12 +354,14 @@ namespace
         }
 
         const double gflops = 2.0 * double(m) * double(n) * double(k) / 1e9 / (us * 1e-6);
-        hipblaslt_cout << "partitions,split_dim,M,N,K,transA,transB,type,placement_a,placement_b,placement_c,"
-                          "placement_d,hipblaslt-Gflops,us,single_device_us,verify\n";
-        hipblaslt_cout << P << "," << (dim == SplitDim::M ? "M" : "N") << "," << m << "," << n << "," << k << ","
-                       << o.transA << "," << o.transB << "," << o.precision << "," << o.placementA << ","
-                       << o.placementB << "," << o.placementC << "," << o.placementD << "," << gflops << "," << us
-                       << "," << (o.single || o.verify ? singleUs : 0) << ","
+        hipblaslt_cout
+            << "partitions,split_dim,M,N,K,transA,transB,type,placement_a,placement_b,placement_c,"
+               "placement_d,hipblaslt-Gflops,us,single_device_us,verify\n";
+        hipblaslt_cout << P << "," << (dim == SplitDim::M ? "M" : "N") << "," << m << "," << n
+                       << "," << k << "," << o.transA << "," << o.transB << "," << o.precision
+                       << "," << o.placementA << "," << o.placementB << "," << o.placementC << ","
+                       << o.placementD << "," << gflops << "," << us << ","
+                       << (o.single || o.verify ? singleUs : 0) << ","
                        << (verified ? (pass ? "PASS" : "FAIL") : "-") << "\n";
 
         for(int i = 0; i < P; i++)
@@ -352,7 +376,7 @@ namespace
 int main(int argc, char* argv[])
 try
 {
-    Options o;
+    Options             o;
     options_description desc("hipblaslt-bench-partitioned command line options");
     desc.add_options()
         // clang-format off

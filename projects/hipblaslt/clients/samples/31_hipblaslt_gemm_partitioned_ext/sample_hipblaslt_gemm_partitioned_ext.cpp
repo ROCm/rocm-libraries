@@ -145,8 +145,8 @@ int main(int argc, char** argv)
             for(int64_t row = 0; row < m; row++)
                 if(out[row + col * ldd] != half_k && ++errors < 5)
                     std::cerr << "partition " << i << " D(" << row << "," << col << ") = 0x"
-                              << std::hex << out[row + col * ldd] << std::dec << ", expected "
-                              << k << std::endl;
+                              << std::hex << out[row + col * ldd] << std::dec << ", expected " << k
+                              << std::endl;
         std::cout << "partition " << i << " computed columns [" << offset << ", " << offset + size
                   << ")" << std::endl;
     }

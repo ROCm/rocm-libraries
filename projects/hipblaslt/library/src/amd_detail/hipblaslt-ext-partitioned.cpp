@@ -82,16 +82,16 @@ namespace hipblaslt_ext
     public:
         std::vector<std::unique_ptr<Gemm>> gemms;
 
-        hipblasOperation_t opA, opB;
-        hipDataType        typeA, typeB, typeC, typeD;
+        hipblasOperation_t   opA, opB;
+        hipDataType          typeA, typeB, typeC, typeD;
         hipblasComputeType_t typeCompute;
 
-        bool    hasProblem = false;
-        int64_t m = 0, n = 0, k = 0, batch = 1;
-        int64_t ld[4]     = {};
-        int64_t stride[4] = {};
-        SplitDim  dim     = SplitDim::M;
-        Placement placement[4] = {};
+        bool                 hasProblem = false;
+        int64_t              m = 0, n = 0, k = 0, batch = 1;
+        int64_t              ld[4]        = {};
+        int64_t              stride[4]    = {};
+        SplitDim             dim          = SplitDim::M;
+        Placement            placement[4] = {};
         std::vector<int64_t> sliceOffset, sliceSize;
 
         size_t count() const
@@ -146,7 +146,7 @@ namespace hipblaslt_ext
                 std::make_unique<Gemm>(handle, opA, opB, typeA, typeB, typeC, typeD, typeCompute));
     }
 
-    PartitionedGemm::~PartitionedGemm()                                    = default;
+    PartitionedGemm::~PartitionedGemm()                                     = default;
     PartitionedGemm::PartitionedGemm(PartitionedGemm&&) noexcept            = default;
     PartitionedGemm& PartitionedGemm::operator=(PartitionedGemm&&) noexcept = default;
 
@@ -174,7 +174,7 @@ namespace hipblaslt_ext
                                                 Placement                    placementD,
                                                 const PartitionedGemmInputs& inputs)
     {
-        auto& s            = *pimpl;
+        auto&        s     = *pimpl;
         const size_t parts = s.count();
         if(parts == 0 || m <= 0 || n <= 0 || k <= 0 || batch_count <= 0)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -192,7 +192,7 @@ namespace hipblaslt_ext
 
         // The pointers: 1 for Shared, N otherwise.
         const Placement place[4] = {placementA, placementB, placementC, placementD};
-        const size_t    have[4]  = {inputs.a.size(), inputs.b.size(), inputs.c.size(), inputs.d.size()};
+        const size_t have[4] = {inputs.a.size(), inputs.b.size(), inputs.c.size(), inputs.d.size()};
         for(int t = 0; t < 4; t++)
             if(have[t] != (place[t] == Placement::Shared ? size_t(1) : parts))
                 return HIPBLAS_STATUS_INVALID_VALUE;
@@ -213,7 +213,7 @@ namespace hipblaslt_ext
 
         const std::vector<const void*> dPointers(inputs.d.begin(), inputs.d.end());
         const int64_t                  leading[4] = {lda, ldb, ldc, ldd};
-        const int64_t strides[4] = {strideA, strideB, strideC, strideD};
+        const int64_t                  strides[4] = {strideA, strideB, strideC, strideD};
         for(size_t i = 0; i < parts; i++)
         {
             // Element offset of this partition's slice inside each matrix, for hints that
@@ -233,8 +233,8 @@ namespace hipblaslt_ext
             }
 
             const void*        ptr[4];
-            const void* const* lists[4] = {
-                inputs.a.data(), inputs.b.data(), inputs.c.data(), dPointers.data()};
+            const void* const* lists[4]
+                = {inputs.a.data(), inputs.b.data(), inputs.c.data(), dPointers.data()};
             for(int t = 0; t < 4; t++)
             {
                 const void* p = lists[t][place[t] == Placement::Shared ? 0 : i];
@@ -256,20 +256,20 @@ namespace hipblaslt_ext
             const int64_t   mi = dim == SplitDim::M ? size[i] : m;
             const int64_t   ni = dim == SplitDim::N ? size[i] : n;
             auto            st = s.gemms[i]->setProblem(mi,
-                                                        ni,
-                                                        k,
-                                                        batch_count,
-                                                        leading[0],
-                                                        leading[1],
-                                                        leading[2],
-                                                        leading[3],
-                                                        strides[0],
-                                                        strides[1],
-                                                        strides[2],
-                                                        strides[3],
-                                                        epilogue,
-                                                        slice,
-                                                        type);
+                                             ni,
+                                             k,
+                                             batch_count,
+                                             leading[0],
+                                             leading[1],
+                                             leading[2],
+                                             leading[3],
+                                             strides[0],
+                                             strides[1],
+                                             strides[2],
+                                             strides[3],
+                                             epilogue,
+                                             slice,
+                                             type);
             if(st != HIPBLAS_STATUS_SUCCESS)
                 return st;
         }
@@ -288,7 +288,8 @@ namespace hipblaslt_ext
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    hipblasStatus_t PartitionedGemm::getSlice(size_t partition, int64_t& offset, int64_t& size) const
+    hipblasStatus_t
+        PartitionedGemm::getSlice(size_t partition, int64_t& offset, int64_t& size) const
     {
         auto const& s = *pimpl;
         if(!s.hasProblem || partition >= s.count())
@@ -299,7 +300,7 @@ namespace hipblaslt_ext
     }
 
     hipblasStatus_t PartitionedGemm::algoGetHeuristic(
-        const int requestedAlgoCount,
+        const int                                      requestedAlgoCount,
         const GemmPreference&                          pref,
         std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults)
     {
@@ -402,9 +403,8 @@ namespace hipblaslt_ext
             ScopedDevice guard(device);
             if(!guard.ok())
                 return HIPBLAS_STATUS_INVALID_VALUE;
-            auto st = s.gemms[i]->run(streams[i],
-                                      start.empty() ? nullptr : start[i],
-                                      stop.empty() ? nullptr : stop[i]);
+            auto st = s.gemms[i]->run(
+                streams[i], start.empty() ? nullptr : start[i], stop.empty() ? nullptr : stop[i]);
             if(st != HIPBLAS_STATUS_SUCCESS)
                 return st;
         }
