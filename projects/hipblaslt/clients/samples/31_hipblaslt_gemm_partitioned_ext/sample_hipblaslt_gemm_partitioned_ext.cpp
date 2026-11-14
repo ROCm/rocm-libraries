@@ -7,8 +7,9 @@
 //   - one hipBLASLt handle, stream, workspace and set of matrices per partition (device)
 //   - the problem is the full m x n x k GEMM; it is split along N, so partition i computes
 //     m x n_i x k and writes its columns of D at their final place in its own full-size D
-//   - every matrix is Replicated: each partition owns a whole copy and the library adds the
-//     slice offset. See hipblaslt_ext::Placement for the other hints.
+//   - every matrix has one pointer per partition. Here each partition owns a whole copy; passing
+//     the same pointer for every partition would share one matrix. The library adds the slice
+//     offset to each pointer.
 //
 // A and B hold ones, so every element of D must equal k. The sample checks that.
 //
@@ -87,7 +88,6 @@ int main(int argc, char** argv)
     inputs.alpha = &alpha;
     inputs.beta  = &beta;
 
-    using hipblaslt_ext::Placement;
     CHECK_HIPBLASLT_ERROR(gemm.setProblem(m,
                                           n,
                                           k,
@@ -101,10 +101,6 @@ int main(int argc, char** argv)
                                           0,
                                           0,
                                           hipblaslt_ext::SplitDim::N,
-                                          Placement::Replicated,
-                                          Placement::Replicated,
-                                          Placement::Replicated,
-                                          Placement::Replicated,
                                           inputs));
 
     // Only algorithms that every partition accepts for its slice come back.

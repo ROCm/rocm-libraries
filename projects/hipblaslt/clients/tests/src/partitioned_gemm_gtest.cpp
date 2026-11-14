@@ -255,10 +255,6 @@ namespace
                                0,
                                0,
                                dim,
-                               Placement::Replicated,
-                               Placement::Replicated,
-                               Placement::Replicated,
-                               Placement::Replicated,
                                in);
     }
 
@@ -348,27 +344,10 @@ TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongPointerCounts)
     in.a.pop_back();
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
 
-    // A Shared matrix needs exactly one.
+    // A single pointer is too few: every matrix needs one per partition.
     in = buffers.inputs();
-    EXPECT_EQ(gemm.setProblem(kM,
-                              kN,
-                              kK,
-                              1,
-                              kLda,
-                              kLdb,
-                              kLdc,
-                              kLdd,
-                              0,
-                              0,
-                              0,
-                              0,
-                              SplitDim::N,
-                              Placement::Shared,
-                              Placement::Replicated,
-                              Placement::Replicated,
-                              Placement::Replicated,
-                              in),
-              HIPBLAS_STATUS_INVALID_VALUE);
+    in.a.resize(1);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
 
     // A null pointer is rejected.
     in      = buffers.inputs();
@@ -474,6 +453,14 @@ TEST(pre_checkin_partitioned_gemm_ext, OnePartitionMatchesGemm)
 
 namespace
 {
+    // How a test lays out one matrix: one copy on device 0 that every partition reads (the pointer
+    // list repeats it), or a copy per partition.
+    enum class Placement
+    {
+        Shared,
+        Replicated,
+    };
+
     struct Combo
     {
         const char* name;
@@ -517,9 +504,21 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
     PartitionedGemmInputs in = buffers.inputs();
     // A and B Shared: one pointer, on device 0.
     if(cs.a == Placement::Shared)
-        in.a = {sharedCopy(op.a)};
+    {
+        const void* a = sharedCopy(op.a);
+        in.a          = {a, a};
+    }
     if(cs.b == Placement::Shared)
-        in.b = {sharedCopy(op.b)};
+    {
+        const void* b = sharedCopy(op.b);
+        in.b          = {b, b};
+    }
+    if(cs.d == Placement::Shared)
+    {
+        bufs.push_back(std::make_unique<DeviceBuf>(0, size_t(kLdd) * kN * 2));
+        void* d = bufs.back()->get();
+        in.d    = {d, d};
+    }
     const SplitDim dim = cs.dim;
     int64_t        lddUse = kLdd;
 
@@ -536,10 +535,6 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
                               0,
                               0,
                               dim,
-                              cs.a,
-                              cs.b,
-                              Placement::Replicated,
-                              cs.d,
                               in),
               HIPBLAS_STATUS_SUCCESS);
 
@@ -600,5 +595,7 @@ INSTANTIATE_TEST_SUITE_P(
         Combo{
             "M_SharedAB", SplitDim::M, Placement::Shared, Placement::Shared, Placement::Replicated},
         Combo{
-            "N_SharedAB", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Replicated}),
+            "N_SharedAB", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Replicated},
+        Combo{"M_SharedABD", SplitDim::M, Placement::Shared, Placement::Shared, Placement::Shared},
+        Combo{"N_SharedABD", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Shared}),
     [](::testing::TestParamInfo<Combo> const& info) { return std::string(info.param.name); });

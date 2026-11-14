@@ -1112,34 +1112,16 @@ namespace hipblaslt_ext
     };
 
     /*! \ingroup types_module
-     *  \brief A hint that says how to read the pointers passed for one matrix.
-     *
-     *  \details hipBLASLt does not allocate or copy these matrices. The caller owns the
-     * memory and keeps replicated copies equal. The hint only tells PartitionedGemm how many
-     * pointers to expect and whether to add the partition's slice offset.
-     *
-     *  | Hint       | Pointers | The library uses for partition ``i``          |
-     *  |------------|----------|------------------------------------------------|
-     *  | Shared     | 1        | ``ptr + offset_i`` (the whole matrix, reachable from every partition) |
-     *  | Replicated | N        | ``ptr[i] + offset_i`` (a whole copy per partition) |
-     *
-     *  The leading dimension and batch stride passed to PartitionedGemm::setProblem describe
-     * the whole matrix, and every partition reads its slice through them. A caller that keeps
-     * only a slice per partition passes pointers to the slice start with the same strides. A
-     * matrix that is not split by the chosen SplitDim (for example B when splitting M) is used
-     * whole by every partition, so its hint only decides whether 1 or N pointers are passed.
-     */
-    enum class Placement
-    {
-        Shared,
-        Replicated,
-    };
-
-    /*! \ingroup types_module
      *  \brief The inputs of a PartitionedGemm.
      *
-     *  \details ``a``, ``b`` and ``c`` hold 1 pointer for a ``Shared`` matrix and N pointers
-     * otherwise. ``d`` follows the same rule. ``alpha`` and ``beta`` are host pointers, as in
+     *  \details ``a``, ``b``, ``c`` and ``d`` hold one pointer per partition, N in total;
+     * pointer ``i`` is the one partition ``i`` uses. Each points at a whole matrix (the library
+     * adds the partition's slice offset), and the leading dimensions and batch strides of
+     * PartitionedGemm::setProblem describe that whole matrix. Passing the same pointer N times
+     * shares one matrix between the partitions (it must be reachable from every partition
+     * device); passing different pointers gives each partition its own copy, which the caller
+     * keeps equal. For D, the same pointer means every partition writes its slice into one D.
+     * hipBLASLt allocates and copies nothing. ``alpha`` and ``beta`` are host pointers, as in
      * GemmInputs, and apply to every partition.
      */
     struct PartitionedGemmInputs
@@ -1222,13 +1204,11 @@ namespace hipblaslt_ext
         *  @param[in]
         *  dim                              The dimension to split.
         *  @param[in]
-        *  placementA,placementB,placementC,placementD  How to read the pointers of each matrix.
-        *  @param[in]
         *  inputs                           The pointers and the host alpha and beta.
         *
         *  \retval HIPBLAS_STATUS_SUCCESS           If the problem was set on every partition.
-        *  \retval HIPBLAS_STATUS_INVALID_VALUE     If the number of pointers does not match
-        * the placement, a size is not positive, or the split dimension is smaller than the
+        *  \retval HIPBLAS_STATUS_INVALID_VALUE     If a pointer list does not hold one
+        * pointer per partition, a size is not positive, or the split dimension is smaller than the
         * number of partitions.
         *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If the types or operations are not
         * supported (conjugate transpose, sub-byte types), or a partition rejects its slice.
@@ -1246,10 +1226,6 @@ namespace hipblaslt_ext
                                                     int64_t                      strideC,
                                                     int64_t                      strideD,
                                                     SplitDim                     dim,
-                                                    Placement                    placementA,
-                                                    Placement                    placementB,
-                                                    Placement                    placementC,
-                                                    Placement                    placementD,
                                                     const PartitionedGemmInputs& inputs);
 
         /*! \ingroup library_module

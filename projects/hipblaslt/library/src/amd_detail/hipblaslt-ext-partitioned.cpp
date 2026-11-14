@@ -91,7 +91,6 @@ namespace hipblaslt_ext
         int64_t              ld[4]        = {};
         int64_t              stride[4]    = {};
         SplitDim             dim          = SplitDim::M;
-        Placement            placement[4] = {};
         std::vector<int64_t> sliceOffset, sliceSize;
 
         size_t count() const
@@ -168,10 +167,6 @@ namespace hipblaslt_ext
                                                 int64_t                      strideC,
                                                 int64_t                      strideD,
                                                 SplitDim                     dim,
-                                                Placement                    placementA,
-                                                Placement                    placementB,
-                                                Placement                    placementC,
-                                                Placement                    placementD,
                                                 const PartitionedGemmInputs& inputs)
     {
         auto&        s     = *pimpl;
@@ -190,11 +185,10 @@ namespace hipblaslt_ext
             if(b == 0)
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
 
-        // The pointers: 1 for Shared, N otherwise.
-        const Placement place[4] = {placementA, placementB, placementC, placementD};
+        // One pointer per partition for every matrix.
         const size_t have[4] = {inputs.a.size(), inputs.b.size(), inputs.c.size(), inputs.d.size()};
         for(int t = 0; t < 4; t++)
-            if(have[t] != (place[t] == Placement::Shared ? size_t(1) : parts))
+            if(have[t] != parts)
                 return HIPBLAS_STATUS_INVALID_VALUE;
         if(inputs.alpha == nullptr || inputs.beta == nullptr)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -216,8 +210,8 @@ namespace hipblaslt_ext
         const int64_t                  strides[4] = {strideA, strideB, strideC, strideD};
         for(size_t i = 0; i < parts; i++)
         {
-            // Element offset of this partition's slice inside each matrix, for hints that
-            // point at a whole matrix. The matrices are column-major.
+            // Element offset of this partition's slice inside each (whole) matrix. The
+            // matrices are column-major.
             int64_t elems[4] = {0, 0, 0, 0};
             if(dim == SplitDim::M)
             {
@@ -237,7 +231,7 @@ namespace hipblaslt_ext
                 = {inputs.a.data(), inputs.b.data(), inputs.c.data(), dPointers.data()};
             for(int t = 0; t < 4; t++)
             {
-                const void* p = lists[t][place[t] == Placement::Shared ? 0 : i];
+                const void* p = lists[t][i];
                 if(p == nullptr)
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 ptr[t] = advance(p, elems[t], bytes[t]);
@@ -277,9 +271,8 @@ namespace hipblaslt_ext
         s.m = m, s.n = n, s.k = k, s.batch = batch_count;
         for(int t = 0; t < 4; t++)
         {
-            s.ld[t]        = leading[t];
-            s.stride[t]    = strides[t];
-            s.placement[t] = place[t];
+            s.ld[t]     = leading[t];
+            s.stride[t] = strides[t];
         }
         s.dim         = dim;
         s.sliceOffset = std::move(offset);

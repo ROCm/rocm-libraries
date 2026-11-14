@@ -2279,30 +2279,29 @@ public:
         }
         check(hipSetDevice(previous), "hipSetDevice");
 
+        // One pointer per partition: the device 0 buffer repeated for a shared tensor, the device 0
+        // buffer then the replicas for a replicated one.
         auto pointers = [&](int t) {
             std::vector<const void*> v{src[t]};
-            if(m_replicated[t])
-                v.insert(v.end(), m_replica[t].begin(), m_replica[t].end());
+            for(size_t i = 1; i < m_streams.size(); i++)
+                v.push_back(m_replicated[t] ? m_replica[t][i - 1] : src[t]);
             return v;
         };
         hipblaslt_ext::PartitionedGemmInputs in;
         in.a = pointers(0);
         in.b = pointers(1);
         in.c = pointers(2);
-        in.d = {d};
-        if(m_replicated[3])
-            in.d.insert(in.d.end(), m_replica[3].begin(), m_replica[3].end());
+        for(const void* p : pointers(3))
+            in.d.push_back(const_cast<void*>(p));
         in.alpha = alpha;
         in.beta  = beta;
-        m_m = m;
-        m_n = n;
+        m_m      = m;
+        m_n      = n;
         m_batch   = batch;
         m_ldd     = ldd;
         m_strideD = strideD;
-        using P   = hipblaslt_ext::Placement;
-        auto place = [&](int t) { return m_replicated[t] ? P::Replicated : P::Shared; };
-        return m_gemm->setProblem(m, n, k, batch, lda, ldb, ldc, ldd, strideA, strideB, strideC,
-                                  strideD, m_dim, place(0), place(1), place(2), place(3), in);
+        return m_gemm->setProblem(
+            m, n, k, batch, lda, ldb, ldc, ldd, strideA, strideB, strideC, strideD, m_dim, in);
     }
 
     // Copies the replicated inputs from the device 0 buffers to the partition devices.
