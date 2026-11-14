@@ -77,6 +77,11 @@ WORKFLOWS = {
 # Inputs --reuse-build sets; the workflow must declare both.
 REUSE_INPUTS = ("baseline_run_id", "prebuilt_stages")
 
+# Filled into a workflow's trigger_source input, when it declares one, so the
+# run's name shows it came from this script rather than gh or the web UI.
+TRIGGER_SOURCE_INPUT = "trigger_source"
+TRIGGER_SOURCE = "hipdnn-trigger-ci"
+
 YAML_KEY = re.compile(r"""^(\s*)["']?([\w-]+)["']?:(?:\s+(.*))?$""")
 
 INSTALL_HINTS = {
@@ -499,6 +504,9 @@ def cmd_dispatch(args):
             f"{workflow_file} at '{ref}' has no input {', '.join(unknown)}; "
             f"{describe_inputs(declared)}"
         )
+    # An explicit -f trigger_source=... wins.
+    if TRIGGER_SOURCE_INPUT in declared and TRIGGER_SOURCE_INPUT not in inputs:
+        inputs[TRIGGER_SOURCE_INPUT] = TRIGGER_SOURCE
     if args.reuse_build:
         missing = [name for name in REUSE_INPUTS if name not in declared]
         if missing:
