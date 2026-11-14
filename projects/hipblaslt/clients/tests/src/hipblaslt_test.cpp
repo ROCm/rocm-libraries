@@ -68,7 +68,7 @@ thread_pool::thread_pool()
     while(thread_count-- > 1);
 }
 
-thread_pool::~thread_pool()
+void thread_pool::shutdown()
 {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -76,7 +76,8 @@ thread_pool::~thread_pool()
     }
     m_cond.notify_all();
     for(auto& thread : m_threads)
-        thread.join();
+        if(thread.joinable())
+            thread.join();
 }
 
 void thread_pool::submit(std::function<void()> func, std::promise<void> promise)
