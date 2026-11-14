@@ -16835,9 +16835,14 @@ class KernelWriterAssembly(KernelWriter):
         # The tail loop is a runtime loop: one emitted body runs once per remaining MI-K step, so a
         # compile-time immediate would re-read the same K block every trip. Advance the address VGPR
         # instead (like the normal reader); nothing reads it after the tail loop.
+        # Every LocalReadAddr+i advances: with LDSSegmentInterleave the reads of component h go through
+        # LocalReadAddr+h (+1 is a fan-out of +0, or the B-rotate delta), not just +0.
         incBytes = int(round(inc * tP["bpeDS"]))
-        module.add(VAddU32(dst=vgpr("LocalReadAddr%s" % tc), src0=incBytes, src1=vgpr("LocalReadAddr%s" % tc),
-                           comment="lr%s += %u (swizzledTDM tail K-step, bytes)" % (tc, incBytes)))
+        numLra = self.states.a.numVgprLocalReadAddr if tP["isA"] else self.states.b.numVgprLocalReadAddr
+        for i in range(numLra):
+          module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u" % (tc, i)), src0=incBytes,
+                             src1=vgpr("LocalReadAddr%s+%u" % (tc, i)),
+                             comment="lr%s+%u += %u (swizzledTDM tail K-step, bytes)" % (tc, i, incBytes)))
         return module
       tP["localReadOffset"] += inc
       module.addComment0("lr%s localReadOffset -> %d (swizzledTDM K-sub-iter inc)" % (tc, tP["localReadOffset"]))
