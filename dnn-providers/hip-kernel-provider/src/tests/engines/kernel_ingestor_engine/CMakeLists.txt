@@ -42,6 +42,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPaged.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanHeader.cpp
@@ -118,6 +119,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionCatalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotPacks.cpp

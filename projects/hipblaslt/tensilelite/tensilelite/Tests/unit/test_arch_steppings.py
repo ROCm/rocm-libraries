@@ -2583,11 +2583,13 @@ def _spawnedCommands(monkeypatch, groups, argv=PARENT_ARGV, requestedJobs=-1):
         spawned.append((cmd, env))
         return _Proc()
 
-    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + argv)
+    # The dispatcher's command line, so a child built from sys.argv instead of
+    # the argv handed in would carry the command name.
+    monkeypatch.setattr(Run.sys, "argv", ["tensilelite", "create-library"] + argv)
     monkeypatch.setattr(Run.subprocess, "Popen", _popen)
     # Pinned so the job split is the machine-independent part of the arithmetic.
     monkeypatch.setattr(Run, "_cpuCount", lambda: 128)
-    Run._buildGroupsSeparately(groups, requestedJobs)
+    Run._buildGroupsSeparately(groups, requestedJobs, argv)
     return spawned
 
 
@@ -2753,13 +2755,12 @@ def test_a_failed_group_is_not_swallowed(monkeypatch):
             return self._rc
 
     returnCodes = iter([0, 1])
-    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + PARENT_ARGV)
     monkeypatch.setattr(
         Run.subprocess, "Popen", lambda cmd, env=None: _Proc(next(returnCodes))
     )
 
     with pytest.raises(SystemExit):
-        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1)
+        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1, PARENT_ARGV)
 
 
 def test_the_attached_form_of_the_jobs_flag_is_replaced_too(monkeypatch):
@@ -2824,13 +2825,62 @@ def test_a_child_still_running_is_stopped_when_a_spawn_fails(monkeypatch):
             raise nxt
         return nxt
 
-    monkeypatch.setattr(Run.sys, "argv", ["TensileCreateLibrary"] + PARENT_ARGV)
     monkeypatch.setattr(Run.subprocess, "Popen", _popen)
 
     with pytest.raises(OSError):
-        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1)
+        Run._buildGroupsSeparately([[GFX1250], [GFX1250_STRICT]], -1, PARENT_ARGV)
 
     assert len(terminated) == 1
+
+
+def test_a_dispatched_build_hands_its_children_only_its_own_arguments(
+    monkeypatch, tmp_path
+):
+    """``tensilelite create-library`` and ``python -m tensilelite create-library``
+    leave the command name in sys.argv. A request for two architectures that share
+    an ISA (gfx1250 and gfx1250-strict) splits into one child per group, and a
+    child handed that name would take it for its LogicPath and shift every
+    positional after it."""
+    from types import SimpleNamespace
+
+    from tensilelite import cli
+
+    Run = importlib.import_module("tensilelite.create_library.run")
+    outputPath = str(tmp_path / "out")
+    argv = [f"--architecture={GFX1250};{GFX1250_STRICT}", "/src/library", outputPath, "HIP"]
+    spawned = []
+
+    class _Proc:
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return 0
+
+    def _popen(cmd, env=None):
+        spawned.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(Run.sys, "argv", ["tensilelite", "create-library"] + argv)
+    monkeypatch.delenv(Run._GROUP_BUILD_ENV, raising=False)
+    monkeypatch.setattr(Run, "setVerbosity", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        Run,
+        "validateToolchain",
+        lambda *a: ("/fake/hipcc", None, "/fake/bundler", None),
+    )
+    # Replaced on the module rather than patched on subprocess itself: a
+    # failing assertion here reaches the report hook in Tests/conftest.py, which
+    # runs a real subprocess of its own.
+    monkeypatch.setattr(Run, "subprocess", SimpleNamespace(Popen=_popen))
+
+    assert cli.main(["create-library"] + argv) == 0
+
+    assert len(spawned) == 2
+    for cmd in spawned:
+        assert cmd[1:3] == ["-m", "tensilelite.create_library"]
+        assert "create-library" not in cmd
+        assert cmd[3:6] == ["/src/library", outputPath, "HIP"]
 
 
 def test_the_architecture_flag_is_replaced_whatever_its_spelling(monkeypatch):

@@ -1390,6 +1390,10 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int, argv=Non
 
     The output directory is shared: each run keeps its scratch to itself
     (buildTmpDir) and their per-architecture outputs are named apart.
+
+    ``argv`` is this run's own arguments, the ones main parsed. Not sys.argv:
+    behind the ``tensilelite`` dispatcher that still starts with the command
+    name, which a child would take for its LogicPath.
     """
     print1(
         f"# Architectures requested need {len(groups)} builds to cover: "
