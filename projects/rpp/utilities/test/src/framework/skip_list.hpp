@@ -51,13 +51,12 @@ inline constexpr const char* kSkipList[] = {
 
     // ---- known kernel defects ---------------------------------------------------
     "Image_Color/ColorCastTest.Correctness/*",
-    "Image_Color/ColorJitterTest.Correctness/HOST_*_PLN1_*_b0_c0_h0_s1",
-    "Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0_h0_s0",
-    "Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0_h90_s1",
-    "Image_Color/ColorJitterTest.Correctness/HOST_*_b0_c0p25_h0_s1",
+    "Image_Color/ColorJitterTest.Correctness/HOST_*_PLN1_*",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_b0p25_c0_h0_s1",
-    "Image_Color/ColorJitterTest.Correctness/HOST_F16toF16_*",
-    "Image_Color/ColorJitterTest.Correctness/HOST_F32toF32_*",
+    "Image_Color/ColorJitterTest.Correctness/HOST_I8toI8_*_b0_c0_h90_s1",
+    "Image_Color/ColorJitterTest.Correctness/HOST_I8toI8_*_b0_c0p25_h0_s1",
+    "Image_Color/ColorJitterTest.Correctness/HOST_U8toU8_*_b0_c0_h90_s1",
+    "Image_Color/ColorJitterTest.Correctness/HOST_U8toU8_*_b0_c0p25_h0_s1",
     "Image_Color/ExposureTest.Correctness/HOST_I8toI8_????_FullRoi_1x45x13_*",
     "Image_Color/ExposureTest.Correctness/HOST_I8toI8_????_FullRoi_2x36x55_*",
     "Image_Color/ExposureTest.Correctness/HOST_I8toI8_????_PartialRoi_*",
