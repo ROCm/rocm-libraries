@@ -34,7 +34,8 @@ using conv_naive::ConvDirection;
 using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
-constexpr ConvDirection DIRECTIONS[] = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA};
+constexpr std::array<ConvDirection, 2> DIRECTIONS
+    = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA};
 
 /// The base problem every refusal mutates: 3x3, stride 1, padding 1, NCHW.
 ConvShape baseShape()
@@ -453,9 +454,18 @@ bool admits(const ConfigFields& fields,
             ConvShape shape = baseShape(),
             const std::string& dtype = "HALF")
 {
-    shape.dataType = dtype == "FLOAT"  ? DataType::FLOAT
-                     : dtype == "HALF" ? DataType::HALF
-                                       : DataType::BFLOAT16;
+    if(dtype == "FLOAT")
+    {
+        shape.dataType = DataType::FLOAT;
+    }
+    else if(dtype == "HALF")
+    {
+        shape.dataType = DataType::HALF;
+    }
+    else
+    {
+        shape.dataType = DataType::BFLOAT16;
+    }
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 64;
@@ -785,7 +795,7 @@ TEST(TestConvDirectPlan, TileFitsTheHaloAndTheWorkspaceHoldsTheWeights)
     EXPECT_EQ(a.kpad, 64);
     EXPECT_EQ(a.ca, 64 / 16);
     EXPECT_EQ(plan->weightElems, 9 * 64 * 64);
-    EXPECT_EQ(plan->weightBytes, size_t{9 * 64 * 64 * 2});
+    EXPECT_EQ(plan->weightBytes, size_t{9} * 64 * 64 * 2);
     EXPECT_EQ(a.splits, 1);
     EXPECT_GE(plan->workspaceBytes, plan->weightBytes);
 }
@@ -850,8 +860,8 @@ TEST(TestConvDirectPlan, ThreeBf16TriplesTheReductionAndStagesTheSplitInput)
     ASSERT_TRUE(plan.has_value());
     EXPECT_EQ(plan->args.c, 24);
     EXPECT_EQ(plan->cpad, 32);
-    EXPECT_EQ(plan->weightBytes, size_t{9 * 32 * 64 * 2});
-    EXPECT_EQ(plan->splitInputBytes, size_t{2 * 7 * 6 * 24 * 2});
+    EXPECT_EQ(plan->weightBytes, size_t{9} * 32 * 64 * 2);
+    EXPECT_EQ(plan->splitInputBytes, size_t{2} * 7 * 6 * 24 * 2);
 }
 
 TEST(TestConvDirectPlan, RingConfigsSplitDepthNoFinerThanTheFilter)

@@ -339,9 +339,8 @@ public:
             = tile->variant == DepthwiseVariant::GATHER || tile->variant == DepthwiseVariant::PHASE;
         // The gather reads the filter as the forward convolution does: reflected only for
         // true convolution.
-        options.add(
-            "CONV_DW_FLIP",
-            std::string((gather ? problem->convolutionMode : problem->flipFilter) ? "1" : "0"));
+        const bool flip = gather ? problem->convolutionMode : problem->flipFilter;
+        options.add("CONV_DW_FLIP", std::string(flip ? "1" : "0"));
         const std::array<std::pair<const char*, int64_t>, 15> tileDefines{{{"WSTRIP", tile->wstrip},
                                                                            {"STRIDE", tile->stride},
                                                                            {"VEC", tile->vec},

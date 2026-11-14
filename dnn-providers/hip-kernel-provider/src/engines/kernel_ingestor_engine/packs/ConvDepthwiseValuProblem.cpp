@@ -52,6 +52,7 @@ bool isPacked(const long long* strides,
 }
 
 std::array<long long, 2 + SPATIAL>
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     extentsOf(long long n, long long c, const long long (&spatial)[SPATIAL])
 {
     return {n, c, spatial[0], spatial[1], spatial[2]};

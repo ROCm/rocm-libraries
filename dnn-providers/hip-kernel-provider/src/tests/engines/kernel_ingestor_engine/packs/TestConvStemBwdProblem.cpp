@@ -472,11 +472,11 @@ std::vector<RefusalCase> refusalCases()
          }},
         {"FilterTapsPadded",
          [](ConvGraphSpec& s) {
-             s.w.strides = {3 * 7 * 8, 7 * 8, 8, 1}; // rows of 8, 7 used
+             s.w.strides = {int64_t{3} * 7 * 8, int64_t{7} * 8, 8, 1}; // rows of 8, 7 used
          }},
         {"FilterChannelsOutermost",
          [](ConvGraphSpec& s) {
-             s.w.strides = {49, 16 * 49, 7, 1}; // C K R S
+             s.w.strides = {49, int64_t{16} * 49, 7, 1}; // C K R S
          }},
         // The batch times dx's depth within the grid's z (images tiny).
         {"BatchBeyondGrid", reshaped([](ConvShape& shape) {
@@ -671,7 +671,11 @@ StemBwdConfig configOf(const ConfigFields& f)
 
 std::string dtypeName(DataType dataType)
 {
-    return dataType == DataType::FLOAT ? "FLOAT" : dataType == DataType::HALF ? "HALF" : "BFLOAT16";
+    if(dataType == DataType::FLOAT)
+    {
+        return "FLOAT";
+    }
+    return dataType == DataType::HALF ? "HALF" : "BFLOAT16";
 }
 
 hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch)
@@ -1148,7 +1152,7 @@ TEST(TestConvStemBwdLaunch, GridsArgumentsAndTheWorkspace)
     EXPECT_EQ(launch->block, 256u);
     EXPECT_EQ(launch->kernelType, "K1AtomMfmaF16");
     // B: 16 columns x 16 offsets x 32 (16 output channels padded to the chunk), fp16.
-    EXPECT_EQ(launch->workspaceBytes, size_t{16 * 16 * 32 * 2});
+    EXPECT_EQ(launch->workspaceBytes, size_t{16} * 16 * 32 * 2);
     EXPECT_EQ(launch->transformGrid, 32u);
     const auto& a = launch->args;
     EXPECT_EQ(a.n, 2);
@@ -1206,7 +1210,7 @@ TEST(TestConvStemBwdLaunch, SpaceToDepthTakesTwoByTwoPhasesAndSubPixelsInTheRedu
     EXPECT_EQ(launch->gridY, 4u);
     EXPECT_EQ(launch->gridZ, 2u);
     // B: 16 columns x 2 x 3 offsets x 4 sub-pixels x 32.
-    EXPECT_EQ(launch->workspaceBytes, size_t{16 * 6 * 4 * 32 * 2});
+    EXPECT_EQ(launch->workspaceBytes, size_t{16} * 6 * 4 * 32 * 2);
     const auto& a = launch->args;
     EXPECT_EQ(a.kp, 4 * 32);
     EXPECT_EQ(a.kpr, 32);
@@ -1264,7 +1268,7 @@ TEST(TestConvStemBwdLaunch, ThreeDFoldsPlanesIntoTheGridAndTapsIntoTheReduction)
     ASSERT_TRUE(launch.has_value());
     EXPECT_EQ(launch->gridZ, 2u * 5u);
     // B: 16 columns x 16 offsets x 3 taps x 32.
-    EXPECT_EQ(launch->workspaceBytes, size_t{16 * 16 * 3 * 32 * 2});
+    EXPECT_EQ(launch->workspaceBytes, size_t{16} * 16 * 3 * 32 * 2);
     const auto& a = launch->args;
     EXPECT_EQ(a.kp, 3 * 32);
     EXPECT_EQ(a.kpr, 32);
@@ -1321,7 +1325,7 @@ TEST(TestConvStemBwdLaunch, TheFmaLoopTakesSixteenThreadsARow)
     EXPECT_EQ(launch->kernelType, "");
     EXPECT_EQ(launch->gridX, 1u); // 32 super-columns, 2 x 16 per block
     EXPECT_EQ(launch->gridY, 1u); // 15 super-rows, 16 per block
-    EXPECT_EQ(launch->workspaceBytes, size_t{12 * 16 * 16 * 4});
+    EXPECT_EQ(launch->workspaceBytes, size_t{12} * 16 * 16 * 4);
 }
 
 TEST(TestConvStemBwdLaunch, OneDimensionalGraphsPadTheLeadingAxes)

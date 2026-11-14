@@ -353,11 +353,11 @@ std::vector<RefusalCase> refusalCases()
          [](ConvGraphSpec& s) { s.w.strides = packedStrides(s.w.dims, true); }},
         {"DxRowPadded",
          [](ConvGraphSpec& s) {
-             s.x.strides = {24 * 40, 40, 40, 1}; // rows 40 apart, 37 used
+             s.x.strides = {int64_t{24} * 40, 40, 40, 1}; // rows 40 apart, 37 used
          }},
         {"FilterTapsPadded",
          [](ConvGraphSpec& s) {
-             s.w.strides = {24 * 9, 9, 9, 1}; // taps 9 apart, 8 used
+             s.w.strides = {int64_t{24} * 9, 9, 9, 1}; // taps 9 apart, 8 used
          }},
         // Sizes: one image of dy and the filter within 32-bit byte offsets, images x rows within
         // the grid.
@@ -484,9 +484,18 @@ bool admits(const ConfigFields& fields,
             ConvShape shape = baseShape(),
             const std::string& dtype = "HALF")
 {
-    shape.dataType = dtype == "FLOAT"  ? DataType::FLOAT
-                     : dtype == "HALF" ? DataType::HALF
-                                       : DataType::BFLOAT16;
+    if(dtype == "FLOAT")
+    {
+        shape.dataType = DataType::FLOAT;
+    }
+    else if(dtype == "HALF")
+    {
+        shape.dataType = DataType::HALF;
+    }
+    else
+    {
+        shape.dataType = DataType::BFLOAT16;
+    }
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 48;
@@ -630,7 +639,7 @@ TEST(TestConvIgemmNchwKernelMatch, TheGridLimitsTheChannelTiles)
     f.wn = 1;
     f.wp = 1;
     EXPECT_FALSE(admits(f, "gfx1100", shape));
-    shape.c = 16 * 65535;
+    shape.c = int64_t{16} * 65535;
     EXPECT_TRUE(admits(f, "gfx1100", shape));
 }
 

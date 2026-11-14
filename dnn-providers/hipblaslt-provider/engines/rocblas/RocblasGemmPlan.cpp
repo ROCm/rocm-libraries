@@ -52,7 +52,7 @@ void RocblasGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
                               uint32_t numDeviceBuffers,
                               void* /*workspace*/) const
 {
-    const rocblas_handle rocblasHandle = handle.rocblasHandle();
+    rocblas_handle rocblasHandle = handle.rocblasHandle();
     if(rocblas_set_stream(rocblasHandle, handle.getStream()) != rocblas_status_success)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

@@ -180,7 +180,11 @@ enum class SplitAxis
 
 int64_t& extentOf(GemmCall& call, SplitAxis axis)
 {
-    return axis == SplitAxis::N ? call.n : axis == SplitAxis::K ? call.k : call.batchCount;
+    if(axis == SplitAxis::N)
+    {
+        return call.n;
+    }
+    return axis == SplitAxis::K ? call.k : call.batchCount;
 }
 
 /// @p call's operands advanced by @p count matrices, columns (n) or reduction elements (k).

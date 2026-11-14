@@ -61,6 +61,7 @@ int64_t divUp(int64_t value, int64_t divisor)
 
 /// True when @p strides are packed for @p extents with the axes in @p order (slowest first);
 /// extent-1 axes may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool packedInOrder(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
                    const std::array<size_t, CONV_NAIVE_TENSOR_DIMS>& order)
@@ -81,6 +82,7 @@ bool packedInOrder(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 /// The elements one image (n fixed) of an operand of @p extents spans through @p strides (non-
 /// negative, as the base parse admits them): 1 + the sum over the other axes of (extent - 1) x
 /// stride. nullopt when the sum overflows.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 std::optional<int64_t> imageSpan(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                                  const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -107,9 +109,11 @@ constexpr std::array<size_t, CONV_NAIVE_TENSOR_DIMS> CHANNELS_FIRST_ORDER{0, 1, 
 constexpr std::array<size_t, CONV_NAIVE_TENSOR_DIMS> CHANNELS_LAST_ORDER{0, 2, 3, 4, 1};
 
 /// Packed element strides (n, c, d, h, w) of an operand of @p extents in a layout.
-void packedStrides(const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
-                   bool channelsLast,
-                   long long (&strides)[5])
+void packedStrides(
+    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
+    bool channelsLast,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    long long (&strides)[5])
 {
     const auto& order = channelsLast ? CHANNELS_LAST_ORDER : CHANNELS_FIRST_ORDER;
     long long running = 1;
@@ -936,7 +940,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     if(direct)
     {
-        threads = 8 * info->wave;
+        threads = int64_t{8} * info->wave;
     }
     if(generic)
     {
@@ -1115,10 +1119,13 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     // Channels-first runs are loaded whole from within an image. The generic loop's buffers
     // span the images' strides.
     // (Block-based generic buffers: the per-step windows.)
-    const int64_t xImage = generic ? (config.pb == 1 ? xWindow : problem.xSpan)
-                                   : a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
-    const int64_t yImage = generic ? (config.pb == 1 ? yWindow : problem.ySpan)
-                                   : a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    int64_t xImage = a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
+    int64_t yImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    if(generic)
+    {
+        xImage = config.pb == 1 ? xWindow : problem.xSpan;
+        yImage = config.pb == 1 ? yWindow : problem.ySpan;
+    }
     if(!generic && cf && (xImage < config.vec || yImage < config.vec))
     {
         return std::nullopt;
@@ -1191,12 +1198,20 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         gridX = divUp(kg, config.bk) * divUp(cg, config.bc);
         const int64_t frows = a.filter[0] * a.filter[1];
         // A phased ring runs one grid row per height phase; its tracks walk the dy rows.
-        gridY = a.groups
-                * (generic && config.dw > 0
-                       ? a.filter[0] * a.filter[1] * divUp(a.filter[2], config.fr)
-                   : generic ? divUp(problem.taps, config.fr)
-                   : rows    ? divUp(frows, config.fr)
-                             : a.filter[0] * (phased ? a.stride[1] : 1));
+        int64_t rowsPerGroup = a.filter[0] * (phased ? a.stride[1] : 1);
+        if(generic && config.dw > 0)
+        {
+            rowsPerGroup = a.filter[0] * a.filter[1] * divUp(a.filter[2], config.fr);
+        }
+        else if(generic)
+        {
+            rowsPerGroup = divUp(problem.taps, config.fr);
+        }
+        else if(rows)
+        {
+            rowsPerGroup = divUp(frows, config.fr);
+        }
+        gridY = a.groups * rowsPerGroup;
         // Packed rows: a plane's chunks are its groups of packRows rows.
         chunks = packed ? divUp(a.outSpatial[1], packRows) : divUp(a.outSpatial[2], config.bq);
         // A phased ring's one class keeps every step; a stride-1 ring's tracks end at their
@@ -1214,12 +1229,22 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             {chunks,
              trackLong * trackLen
                  + (a.dilation[1] - trackLong) * std::max<int64_t>(trackLen - 1, 0)});
-        steps = packed ? pack_features::checkedProduct({a.n, a.outSpatial[0], chunks})
-                : rows
-                    ? pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks})
-                : planeSteps.has_value()
-                    ? pack_features::checkedProduct({a.n, a.outSpatial[0], *planeSteps})
-                    : std::nullopt;
+        if(packed)
+        {
+            steps = pack_features::checkedProduct({a.n, a.outSpatial[0], chunks});
+        }
+        else if(rows)
+        {
+            steps = pack_features::checkedProduct({a.n, a.outSpatial[0], a.outSpatial[1], chunks});
+        }
+        else if(planeSteps.has_value())
+        {
+            steps = pack_features::checkedProduct({a.n, a.outSpatial[0], *planeSteps});
+        }
+        else
+        {
+            steps = std::nullopt;
+        }
     }
     if(gridX < 1 || gridX > INT_LIMIT || gridY < 1 || gridY > MAX_GRID_YZ || !steps.has_value()
        || *steps < 1 || !partialElems.has_value() || trackLen > INT_LIMIT || chunks > INT_LIMIT)

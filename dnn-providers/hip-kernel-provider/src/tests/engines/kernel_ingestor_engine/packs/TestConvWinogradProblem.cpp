@@ -3,6 +3,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -33,15 +34,18 @@ using conv_winograd::parseWinogradProblem;
 using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
-constexpr ConvDirection DIRECTIONS[] = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA};
-constexpr ConvDirection ALL_DIRECTIONS[]
+constexpr std::array<ConvDirection, 2> DIRECTIONS
+    = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA};
+constexpr std::array<ConvDirection, 3> ALL_DIRECTIONS
     = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS};
 
 std::string directionName(ConvDirection direction)
 {
-    return direction == ConvDirection::FORWARD         ? "Fwd"
-           : direction == ConvDirection::BACKWARD_DATA ? "Bwd"
-                                                       : "Wrw";
+    if(direction == ConvDirection::FORWARD)
+    {
+        return "Fwd";
+    }
+    return direction == ConvDirection::BACKWARD_DATA ? "Bwd" : "Wrw";
 }
 
 /// The base problem every refusal mutates: 3x3, stride 1, padding 1, NCHW.
@@ -302,9 +306,11 @@ TEST(TestConvWinogradForm, StrideTwoBackwardScattersPhasesAsChannels)
 
 TensorSpec& written(ConvGraphSpec& spec)
 {
-    return spec.direction == ConvDirection::FORWARD         ? spec.y
-           : spec.direction == ConvDirection::BACKWARD_DATA ? spec.x
-                                                            : spec.w;
+    if(spec.direction == ConvDirection::FORWARD)
+    {
+        return spec.y;
+    }
+    return spec.direction == ConvDirection::BACKWARD_DATA ? spec.x : spec.w;
 }
 
 /// Rebuilds the operands of @p spec from @p shape (a consistent change of several fields).
@@ -671,9 +677,18 @@ bool admits(const ConfigFields& fields,
             ConvShape shape = baseShape(),
             const std::string& dtype = "FLOAT")
 {
-    shape.dataType = dtype == "FLOAT"  ? DataType::FLOAT
-                     : dtype == "HALF" ? DataType::HALF
-                                       : DataType::BFLOAT16;
+    if(dtype == "FLOAT")
+    {
+        shape.dataType = DataType::FLOAT;
+    }
+    else if(dtype == "HALF")
+    {
+        shape.dataType = DataType::HALF;
+    }
+    else
+    {
+        shape.dataType = DataType::BFLOAT16;
+    }
     // bf16 graphs and F(4,3) configs are admitted only with their opt-ins (bf16Permitted,
     // f43Permitted); the configs' own rules are what these cases test.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter bf16(
@@ -1229,10 +1244,10 @@ TEST(TestConvWinogradPlan, SlicesTheBatchUnderTheCacheAndSizesTheWorkspace)
     ASSERT_TRUE(whole.has_value());
     EXPECT_EQ(whole->slices, 1);
     // U, V and M of F(2,3): 16 positions x (K x C, C x tiles, K x tiles fp32).
-    const size_t tiles = 8 * 4 * 3;
-    EXPECT_EQ(whole->uBytes, size_t{16 * 6 * 4 * 4});
-    EXPECT_EQ(whole->vBytes, size_t{16 * 4 * 4} * tiles);
-    EXPECT_EQ(whole->mBytes, size_t{16 * 6 * 4} * tiles);
+    const size_t tiles = size_t{8} * 4 * 3;
+    EXPECT_EQ(whole->uBytes, size_t{16} * 6 * 4 * 4);
+    EXPECT_EQ(whole->vBytes, size_t{16} * 4 * 4 * tiles);
+    EXPECT_EQ(whole->mBytes, size_t{16} * 6 * 4 * tiles);
     EXPECT_GE(whole->workspaceBytes, whole->uBytes + whole->vBytes + whole->mBytes);
 
     auto llcFields = ConfigFields{};
@@ -1443,7 +1458,7 @@ TEST(TestConvWinogradPlan, CooperativeFilterBufferHoldsWholeSixteenChannelUnits)
     ASSERT_TRUE(config.has_value());
     const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
     ASSERT_TRUE(plan.has_value());
-    EXPECT_EQ(plan->uBytes, size_t{16 * 16 * 16 * 2});
+    EXPECT_EQ(plan->uBytes, size_t{16} * 16 * 16 * 2);
 }
 
 TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositions)
@@ -1479,8 +1494,8 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
             *problem, *conv_winograd::configOf(kernelOf(fused3, "FLOAT")), countedDevice());
         ASSERT_TRUE(staged.has_value());
         // NHWC staged to NCHW: x is 2 x 4 x 7 x 6, y 2 x 6 x 4 x 3, in their graph extents.
-        const size_t xBytes = 2 * 4 * 7 * 6 * 4;
-        const size_t yBytes = 2 * 6 * 4 * 3 * 4;
+        const size_t xBytes = size_t{2} * 4 * 7 * 6 * 4;
+        const size_t yBytes = size_t{2} * 6 * 4 * 3 * 4;
         ASSERT_TRUE(staged->in.needed);
         EXPECT_EQ(staged->in.bytes, direction == ConvDirection::FORWARD ? xBytes : yBytes);
         EXPECT_EQ(staged->out.bytes, direction == ConvDirection::FORWARD ? yBytes : xBytes);
@@ -1534,9 +1549,11 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelOf(const ConfigFields& f,
 
 DataType dataTypeNamed(const std::string& dtype)
 {
-    return dtype == "FLOAT"  ? DataType::FLOAT
-           : dtype == "HALF" ? DataType::HALF
-                             : DataType::BFLOAT16;
+    if(dtype == "FLOAT")
+    {
+        return DataType::FLOAT;
+    }
+    return dtype == "HALF" ? DataType::HALF : DataType::BFLOAT16;
 }
 
 bool admitsWrw(const ConfigFields& fields,
@@ -1654,9 +1671,15 @@ TEST(TestConvWinogradWrwKernelMatch, LargerTilesRunOnFp32Operands)
         {
             auto sixteen = wrwAtom(arch);
             sixteen.m = r;
-            const std::string device = std::string(arch) == "gfx950"  ? "gfx950"
-                                       : std::string(arch) == "gfx11" ? "gfx1100"
-                                                                      : "gfx1201";
+            std::string device = "gfx1201";
+            if(std::string(arch) == "gfx950")
+            {
+                device = "gfx950";
+            }
+            else if(std::string(arch) == "gfx11")
+            {
+                device = "gfx1100";
+            }
             EXPECT_FALSE(admitsWrw(sixteen, device, baseShape(), "HALF"));
             EXPECT_FALSE(admitsWrw(sixteen, device, baseShape(), "BFLOAT16"));
         }
@@ -1869,16 +1892,16 @@ TEST(TestConvWinogradWrwPlan, SizesTransformsAndPartialsAndPadsTheTiles)
     EXPECT_EQ(plan->wrw.ldt, 64);
     EXPECT_EQ(plan->slices, 1);
     EXPECT_EQ(plan->wrw.splits, 1);
-    EXPECT_EQ(plan->uBytes, size_t{16 * 6 * 64 * 4});
-    EXPECT_EQ(plan->vBytes, size_t{16 * 4 * 64 * 4});
-    EXPECT_EQ(plan->partBytes, size_t{16 * 6 * 4 * 4});
+    EXPECT_EQ(plan->uBytes, size_t{16} * 6 * 64 * 4);
+    EXPECT_EQ(plan->vBytes, size_t{16} * 4 * 64 * 4);
+    EXPECT_EQ(plan->partBytes, size_t{16} * 6 * 4 * 4);
     EXPECT_GE(plan->workspaceBytes, plan->uBytes + plan->vBytes + plan->partBytes);
     // F(3,4): 36 positions, 2 x 2 tiles per image.
     f.m = 4;
     const auto big = wrwPlan(baseShape(), f, 1);
     ASSERT_TRUE(big.has_value());
     EXPECT_EQ(big->wrw.tiles, 8);
-    EXPECT_EQ(big->uBytes, size_t{36 * 6 * 64 * 4});
+    EXPECT_EQ(big->uBytes, size_t{36} * 6 * 64 * 4);
 }
 
 TEST(TestConvWinogradWrwPlan, SplitsTheTilesUntilTheBlocksFillTheDevice)
@@ -1893,7 +1916,7 @@ TEST(TestConvWinogradWrwPlan, SplitsTheTilesUntilTheBlocksFillTheDevice)
     EXPECT_EQ(plan->wrw.splitTiles % 64, 0);
     EXPECT_GE(static_cast<long long>(plan->wrw.splits) * plan->wrw.splitTiles, plan->wrw.ldt);
     EXPECT_LT(static_cast<long long>(plan->wrw.splits - 1) * plan->wrw.splitTiles, plan->wrw.ldt);
-    EXPECT_EQ(plan->partBytes, size_t{16 * 6 * 4 * 4} * static_cast<size_t>(plan->wrw.splits));
+    EXPECT_EQ(plan->partBytes, size_t{16} * 6 * 4 * 4 * static_cast<size_t>(plan->wrw.splits));
     // A device reporting no units: one split.
     const auto unknown = wrwPlan(shape, wrwFma(), 0);
     ASSERT_TRUE(unknown.has_value());
@@ -1954,7 +1977,7 @@ TEST(TestConvWinogradWrwPlan, StagesChannelsLastByTransposeAndMixedByCopy)
     EXPECT_EQ(nhwc->in.transposeBlocks[0], 1u);
     EXPECT_EQ(nhwc->in.transposeBlocks[1], 1u);
     EXPECT_EQ(nhwc->in.transposeBlocks[2], 2u);
-    EXPECT_EQ(nhwc->in.bytes, size_t{2 * 4 * 7 * 6 * 4});
+    EXPECT_EQ(nhwc->in.bytes, size_t{2} * 4 * 7 * 6 * 4);
     // Mixed layouts: the element-wise copy.
     auto spec = specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS);
     spec.y.strides = packedStrides(spec.y.dims, true);
@@ -1962,7 +1985,7 @@ TEST(TestConvWinogradWrwPlan, StagesChannelsLastByTransposeAndMixedByCopy)
     ASSERT_TRUE(mixed.has_value());
     EXPECT_TRUE(mixed->in.needed && !mixed->in.transpose);
     EXPECT_TRUE(mixed->out.needed && !mixed->out.transpose);
-    EXPECT_EQ(mixed->out.bytes, size_t{2 * 6 * 7 * 6 * 4});
+    EXPECT_EQ(mixed->out.bytes, size_t{2} * 6 * 7 * 6 * 4);
 }
 
 TEST(TestConvWinogradComputeType, ServesCudnnsComputeTypesPerElementType)

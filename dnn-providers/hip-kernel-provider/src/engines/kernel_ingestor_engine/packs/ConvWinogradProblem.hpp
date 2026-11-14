@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -143,7 +144,7 @@ struct Staging
     bool needed = false;
     /// Backward weights: a packed NHWC operand transposed to NCHW (copy.dims: N, H x W, C).
     bool transpose = false;
-    unsigned int transposeBlocks[3] = {1, 1, 1};
+    std::array<unsigned int, 3> transposeBlocks = {1, 1, 1};
     K5CopyArgs copy{};
     size_t workspaceOffset = 0;
     size_t bytes = 0;
@@ -164,10 +165,10 @@ struct Plan
     int slices = 1;
     size_t workspaceBytes = 0;
     /// Launch grids for one slice: transforms and GEMM (multipass), or the persistent kernel.
-    unsigned int filterBlocks[3] = {1, 1, 1};
-    unsigned int inputBlocks[3] = {1, 1, 1};
-    unsigned int gemmBlocks[3] = {1, 1, 1};
-    unsigned int outputBlocks[3] = {1, 1, 1};
+    std::array<unsigned int, 3> filterBlocks = {1, 1, 1};
+    std::array<unsigned int, 3> inputBlocks = {1, 1, 1};
+    std::array<unsigned int, 3> gemmBlocks = {1, 1, 1};
+    std::array<unsigned int, 3> outputBlocks = {1, 1, 1};
     unsigned int mainBlocks = 1;
     unsigned int mainThreads = 256;
     /// Backward weights: the transformed dy (U), the transformed x (V), the fp32 partials, and

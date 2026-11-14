@@ -575,12 +575,20 @@ TEST(TestConvStemBwdCatalog, KnobsTellApartEveryConfigOfAGraph)
     // one graph can admit) no two configs may share every knob.
     static constexpr std::array<const char*, 13> KNOBS{
         "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw", "ft", "sd"};
-    std::set<std::vector<int64_t>> seen[3];
+    std::array<std::set<std::vector<int64_t>>, 3> seen;
     for(const auto& kernel : catalog())
     {
         SCOPED_TRACE(kernel.name);
         const auto dtype = kernel.getStringMetadata("dtype");
-        const int slot = dtype == "FLOAT" ? 0 : dtype == "HALF" ? 1 : 2;
+        size_t slot = 2;
+        if(dtype == "FLOAT")
+        {
+            slot = 0;
+        }
+        else if(dtype == "HALF")
+        {
+            slot = 1;
+        }
         std::vector<int64_t> tuple;
         tuple.reserve(KNOBS.size());
         for(const char* knob : KNOBS)

@@ -175,7 +175,11 @@ DisjointCase randomDisjointCase(std::mt19937& random, int trial)
         g.stride[axis] = used ? extent + pick(0, 2) : 1;
         g.prePadding[axis] = used ? pick(0, 2) : 0;
         const long long post = used ? pick(0, 2) : 0;
-        g.input[axis] = used ? (axis == 2 && trial % 2 == 0 ? 8 * pick(2, 5) : pick(3, 37)) : 1;
+        g.input[axis] = 1;
+        if(used)
+        {
+            g.input[axis] = axis == 2 && trial % 2 == 0 ? 8 * pick(2, 5) : pick(3, 37);
+        }
         g.output[axis] = (g.input[axis] + g.prePadding[axis] + post - extent) / g.stride[axis] + 1;
         if(g.output[axis] < 1)
         {
@@ -236,7 +240,7 @@ void disjointReference(const DisjointCase& caseData,
     for(long long index = 0; index < total; ++index)
     {
         long long rest = index;
-        long long position[3];
+        std::array<long long, 3> position{};
         for(int axis = 2; axis >= 0; --axis)
         {
             position[axis] = rest % g.input[axis];

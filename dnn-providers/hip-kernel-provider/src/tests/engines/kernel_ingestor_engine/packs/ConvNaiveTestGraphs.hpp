@@ -160,22 +160,19 @@ inline ConvGraphSpec specFor(const ConvShape& shape, ConvDirection direction)
 inline ::flatbuffers::Offset<data_objects::TensorAttributes>
     serializeTensor(flatbuffers::FlatBufferBuilder& builder, int64_t uid, const TensorSpec& tensor)
 {
-    return data_objects::CreateTensorAttributesDirect(
-        builder,
-        uid,
-        nullptr,
-        tensor.dataType,
-        &tensor.strides,
-        &tensor.dims,
-        tensor.isVirtual,
-        data_objects::TensorValue::NONE,
-        0,
-        tensor.runtimePassByValue,
-        tensor.raggedOffsetUid.has_value()
-            ? ::flatbuffers::Optional<int64_t>(*tensor.raggedOffsetUid)
-            : ::flatbuffers::nullopt,
-        tensor.alignment,
-        tensor.raggedOffsetMultiplier);
+    return data_objects::CreateTensorAttributesDirect(builder,
+                                                      uid,
+                                                      nullptr,
+                                                      tensor.dataType,
+                                                      &tensor.strides,
+                                                      &tensor.dims,
+                                                      tensor.isVirtual,
+                                                      data_objects::TensorValue::NONE,
+                                                      0,
+                                                      tensor.runtimePassByValue,
+                                                      tensor.raggedOffsetUid,
+                                                      tensor.alignment,
+                                                      tensor.raggedOffsetMultiplier);
 }
 
 inline flatbuffers::FlatBufferBuilder buildGraph(const ConvGraphSpec& spec)

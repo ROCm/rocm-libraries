@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -25,7 +26,7 @@ namespace
 using namespace hipblaslt_plugin;
 using namespace hipblaslt_plugin::test;
 
-constexpr ConvDirection ALL_DIRECTIONS[]
+constexpr std::array<ConvDirection, 3> ALL_DIRECTIONS
     = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS};
 
 ConvProblem parse(const ConvGemmShape& shape, ConvDirection direction)
@@ -237,7 +238,7 @@ TEST(TestConvRepackFormulation, StagedChannelsLastRunsOneGemmOverEveryImage)
         }
         else
         {
-            EXPECT_TRUE(call.m == 2 * 3 * 4 || call.n == 2 * 3 * 4);
+            EXPECT_TRUE(call.m == int64_t{2} * 3 * 4 || call.n == int64_t{2} * 3 * 4);
         }
         // y staged channels-last next to the columns.
         EXPECT_EQ(staged->workspace.size(), followY->workspace.size() + 1);
@@ -294,8 +295,8 @@ TEST(TestConvRepackFormulation, GroupedChannelsFirstBackwardWeightsBatchesTheLon
     const auto& stage = calls->stages.at(0);
     ASSERT_EQ(stage.calls.size(), 2u);
     ASSERT_EQ(calls->workspace.size(), 2u); // columns, partials
-    const int64_t perGroup = 3 * (2 * 9);
-    EXPECT_EQ(calls->workspace[1].bytes, static_cast<size_t>(8 * 2 * perGroup) * sizeof(float));
+    const int64_t perGroup = int64_t{3} * (2 * 9);
+    EXPECT_EQ(calls->workspace[1].bytes, static_cast<size_t>(perGroup * 8 * 2) * sizeof(float));
     for(size_t g = 0; g < stage.calls.size(); ++g)
     {
         const auto& call = stage.calls[g];
@@ -438,7 +439,7 @@ TEST(TestConvRepackFormulation, SplitReductionFillsTheGpuWithFp32Partials)
     const auto* sum = stepArgs<StridedCastArgs>(stage.after.at(0));
     ASSERT_NE(sum, nullptr);
     EXPECT_EQ(sum->batches, 32);
-    EXPECT_EQ(split->workspaceBytes, 32u * 320 * 320 * sizeof(float));
+    EXPECT_EQ(split->workspaceBytes, size_t{32} * 320 * 320 * sizeof(float));
 
     // Enough tiles already (4096 x 4096 is 1024): split leaves the plan as it is.
     shape.c = shape.k = 4096;
@@ -474,7 +475,7 @@ TEST(TestConvRepackFormulation, OneByOneChannelsFirstBackwardWeightsBatchesImage
         ASSERT_EQ(calls->workspace.size(), 1u);
         const auto partial = calls->workspace[0].uid;
         EXPECT_EQ(calls->workspace[0].bytes,
-                  static_cast<size_t>(3 * 6 * (8 / groups)) * sizeof(float));
+                  static_cast<size_t>(int64_t{3} * 6 * (8 / groups)) * sizeof(float));
         for(const auto& call : stage.calls)
         {
             EXPECT_EQ(call.batchCount, 3);
@@ -919,7 +920,7 @@ TEST(TestConvRepackFormulation, LongNarrowBackwardWeightsSumsInFp32)
     ASSERT_NE(stepArgs<StridedCastArgs>(round.before[0]), nullptr);
     EXPECT_EQ(round.before[0].srcUid, accumulator);
     EXPECT_EQ(round.before[0].dstUid, CONV_W_UID);
-    EXPECT_EQ(calls->workspace[0].bytes, 512u * 512 * sizeof(float));
+    EXPECT_EQ(calls->workspace[0].bytes, size_t{512} * 512 * sizeof(float));
 
     // fp32 needs no copy, and a short reduction writes fp16 w directly.
     shape.dataType = conv_data_objects::DataType::FLOAT;
@@ -949,7 +950,7 @@ TEST(TestConvRepackFormulation, DeclinesAFilterInNeitherColumnOrder)
 {
     auto problem = parse(padded3x3(), ConvDirection::FORWARD);
     // (k, c, r, s) stored k, s, c, r: neither (c, r, s) nor (r, s, c) nests into one stride.
-    problem.w.strides = {4 * 3 * 3, 3, 1, 4 * 3};
+    problem.w.strides = {int64_t{4} * 3 * 3, 3, 1, int64_t{4} * 3};
     EXPECT_FALSE(im2colGemmCalls(problem).has_value());
 }
 

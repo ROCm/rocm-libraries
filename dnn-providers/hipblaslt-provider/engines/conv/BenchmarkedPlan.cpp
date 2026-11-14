@@ -105,7 +105,7 @@ void BenchmarkedPlan::execute(const HipdnnEnginePluginHandle& handle,
         return;
     }
 
-    const hipStream_t stream = handle.getStream();
+    hipStream_t stream = handle.getStream();
     const Event start;
     const Event stop;
     float best = std::numeric_limits<float>::max();

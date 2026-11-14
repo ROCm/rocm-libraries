@@ -92,6 +92,7 @@ bool fitsInt(long long value)
 
 /// True when @p strides (n, c, d, h, w) are packed channels-last for @p extents; extent-1 axes
 /// may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsLast(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                   const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -108,6 +109,7 @@ bool channelsLast(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 }
 
 /// True when @p strides (n, c, d, h, w) are packed channels-first for @p extents.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsFirst(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -145,12 +147,15 @@ ConvIgemmCopyArgs copyOf5(const std::array<long long, 5>& dims,
 /// The activation @p strides (n, c, d, h, w) staged into (in) or out of (out) the workspace's
 /// packed channels-last copy: by a tiled transpose when packed channels-first, else by the
 /// strided copy.
-Staging activationStaging(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
-                          long long n,
-                          long long c,
-                          const long long (&spatial)[SPATIAL],
-                          bool in,
-                          int elementBytes)
+Staging activationStaging(
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
+    long long n,
+    long long c,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    const long long (&spatial)[SPATIAL],
+    bool in,
+    int elementBytes)
 {
     Staging staging;
     staging.needed = true;
@@ -411,9 +416,10 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
     k2.dout = static_cast<int>(outExt[0]);
     k2.ho = static_cast<int>(outExt[1]);
     k2.wo = static_cast<int>(outExt[2]);
-    const long long pads[3] = {forward ? a.prePadding[0] : a.filter[0] - 1 - a.prePadding[0],
-                               forward ? a.prePadding[1] : a.filter[1] - 1 - a.prePadding[1],
-                               forward ? a.prePadding[2] : a.filter[2] - 1 - a.prePadding[2]};
+    const std::array<long long, 3> pads
+        = {forward ? a.prePadding[0] : a.filter[0] - 1 - a.prePadding[0],
+           forward ? a.prePadding[1] : a.filter[1] - 1 - a.prePadding[1],
+           forward ? a.prePadding[2] : a.filter[2] - 1 - a.prePadding[2]};
     k2.pd = static_cast<int>(pads[0]);
     k2.ph = static_cast<int>(pads[1]);
     k2.pw = static_cast<int>(pads[2]);

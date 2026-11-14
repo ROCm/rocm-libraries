@@ -121,6 +121,7 @@ bool fitsInt(long long value)
 
 /// True when @p strides (in n, c, d, h, w slots) are packed in @p order (slowest axis first,
 /// as slot indices) for @p extents (in the same slots); extent-1 axes may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool packedIn(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
               const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
               const std::array<int, 4>& order)
@@ -141,6 +142,7 @@ bool packedIn(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 constexpr std::array<int, 4> NCHW_ORDER{0, 1, 3, 4};
 constexpr std::array<int, 4> NHWC_ORDER{0, 3, 4, 1};
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 Layout layoutOf(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                 const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -587,7 +589,15 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         {
             // 4 x (4 / bins) waves per 16-tile group; the epilogue's LDS (8 x 4 / bins x bk x bt
             // fp32) within 64 KiB.
-            const int perRow = config.bins == 4 ? 1 : config.bins == 2 ? 2 : 0;
+            int perRow = 0;
+            if(config.bins == 4)
+            {
+                perRow = 1;
+            }
+            else if(config.bins == 2)
+            {
+                perRow = 2;
+            }
             if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
                || (config.arch != "gfx11" && config.arch != "gfx12")
                || (config.bk != 32 && config.bk != 64) || perRow == 0
@@ -723,18 +733,34 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
     // dtype's error band).
     plan.wrwOpt = config.f16Math || (!fma && !fp32 && config.m == 2) ? 1 : 0;
     plan.operandBytes = plan.wrwOpt == 0 ? 4 : 2;
-    plan.wrwAtom = fma                      ? 0
-                   : config.arch == "gfx9"  ? 1
-                   : config.arch == "gfx11" ? 3
-                   : config.arch == "gfx12" ? 4
-                                            : 5;
+    if(fma)
+    {
+        plan.wrwAtom = 0;
+    }
+    else if(config.arch == "gfx9")
+    {
+        plan.wrwAtom = 1;
+    }
+    else if(config.arch == "gfx11")
+    {
+        plan.wrwAtom = 3;
+    }
+    else if(config.arch == "gfx12")
+    {
+        plan.wrwAtom = 4;
+    }
+    else
+    {
+        plan.wrwAtom = 5;
+    }
     const long long ob = plan.operandBytes;
     const long long bm = config.gemmBm;
     const long long bn = config.gemmBn;
     const long long bk = config.gemmBk;
     plan.gemmThreads = static_cast<unsigned int>(
         fma ? (bm / config.tm) * (bn / config.tn)
-            : config.waves * (config.arch == "gfx11" || config.arch == "gfx12" ? 32 : 64));
+            : static_cast<long long>(config.waves)
+                  * (config.arch == "gfx11" || config.arch == "gfx12" ? 32 : 64));
     // Both LDS tiles, rows of bk tiles plus one 16-byte unit.
     if((bm + bn) * (bk + 16 / ob) * ob > 65536)
     {
@@ -854,16 +880,17 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
     offset = alignUp(offset + plan.partBytes);
     plan.workspaceBytes = offset;
 
-    const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
-        if(x < 1 || x > INT_LIMIT || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
-        {
-            return false;
-        }
-        blocks[0] = static_cast<unsigned int>(x);
-        blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
-        blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
-        return true;
-    };
+    const auto grid
+        = [](std::array<unsigned int, 3>& blocks, long long x, long long y, long long z) {
+              if(x < 1 || x > INT_LIMIT || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
+              {
+                  return false;
+              }
+              blocks[0] = static_cast<unsigned int>(x);
+              blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
+              blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
+              return true;
+          };
     // k5wTransform: 64 tiles x 4 channels.
     const long long tb = 64;
     const long long cb = 4;
@@ -1000,7 +1027,7 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     {
         // The fused layout, plus one K block the wave-uniform loads of a partial block may read.
         const long long vw = problem.base.dataType == data_objects::DataType::HALF ? 2 : 1;
-        uBytes = groups * 16 * divUp(cgi, vw) * cgo * 4 + config.bk * 4;
+        uBytes = groups * 16 * divUp(cgi, vw) * cgo * 4 + static_cast<long long>(config.bk) * 4;
         break;
     }
     default:
@@ -1063,17 +1090,18 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
 
     // Every grid built here runs 256-thread blocks; one dispatch addresses at most 2^32 - 1
     // work items along x.
-    const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
-        if(x < 1 || x > INT_LIMIT || x * 256 > static_cast<long long>(UINT32_MAX)
-           || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
-        {
-            return false;
-        }
-        blocks[0] = static_cast<unsigned int>(x);
-        blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
-        blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
-        return true;
-    };
+    const auto grid
+        = [](std::array<unsigned int, 3>& blocks, long long x, long long y, long long z) {
+              if(x < 1 || x > INT_LIMIT || x * 256 > static_cast<long long>(UINT32_MAX)
+                 || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
+              {
+                  return false;
+              }
+              blocks[0] = static_cast<unsigned int>(x);
+              blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
+              blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
+              return true;
+          };
     // The persistent (fused) kernels size their grid from the device's units: a device that
     // reports none is declined rather than guessed at.
     const long long computeUnits = device_units::dispatchUnits(device);
@@ -1103,7 +1131,8 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     case Variant::FUSED:
     {
         const long long vw = problem.base.dataType == data_objects::DataType::HALF ? 2 : 1;
-        const long long lanesPerBin = (config.bk / config.tm) * (config.bt / config.tn);
+        const long long lanesPerBin
+            = static_cast<long long>(config.bk / config.tm) * (config.bt / config.tn);
         plan.mainThreads = static_cast<unsigned int>(16 / (64 / lanesPerBin) * 64);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
         if(!grid(plan.filterBlocks, divUp(groups * divUp(cgi, vw) * cgo, 256), 1, 1))
@@ -1219,6 +1248,35 @@ using conv_winograd::Plan;
 using conv_winograd::Variant;
 using conv_winograd::WinogradProblem;
 
+/// The direction token the heuristic features bind.
+std::string_view directionToken(ConvDirection direction)
+{
+    if(direction == ConvDirection::FORWARD)
+    {
+        return "FWD";
+    }
+    return direction == ConvDirection::BACKWARD_DATA ? "BWD" : "WRW";
+}
+
+/// CONV_WINO_VARIANT: the kernel source's code for each variant.
+int variantCodeOf(Variant variant)
+{
+    constexpr std::array<Variant, 6> CODED = {Variant::MULTIPASS,
+                                              Variant::FUSED,
+                                              Variant::WMMA,
+                                              Variant::WREG,
+                                              Variant::SREG,
+                                              Variant::COOP};
+    for(size_t code = 0; code < CODED.size(); ++code)
+    {
+        if(CODED[code] == variant)
+        {
+            return static_cast<int>(code);
+        }
+    }
+    return static_cast<int>(CODED.size()); // WRW
+}
+
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view FWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_winograd_fwd.graph_match";
 constexpr std::string_view BWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_winograd_bwd.graph_match";
@@ -1277,10 +1335,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirecti
     bound[std::string(Y_TOKEN)] = problem->yUid;
     bound[std::string(DTYPE_TOKEN)]
         = std::string(data_objects::EnumNameDataType(problem->base.dataType));
-    bound[std::string(DIRECTION_TOKEN)]
-        = std::string(direction == ConvDirection::FORWARD         ? "FWD"
-                      : direction == ConvDirection::BACKWARD_DATA ? "BWD"
-                                                                  : "WRW");
+    bound[std::string(DIRECTION_TOKEN)] = std::string(directionToken(direction));
     const auto flops = pack_features::checkedMultiply(2, problem->base.multiplyAccumulates);
     if(flops.has_value())
     {
@@ -1516,13 +1571,7 @@ public:
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_WINO_T", elementTypeFor(resolved->problem.base.dataType));
-        const int variantCode = config.variant == Variant::MULTIPASS ? 0
-                                : config.variant == Variant::FUSED   ? 1
-                                : config.variant == Variant::WMMA    ? 2
-                                : config.variant == Variant::WREG    ? 3
-                                : config.variant == Variant::SREG    ? 4
-                                : config.variant == Variant::COOP    ? 5
-                                                                     : 6;
+        const int variantCode = variantCodeOf(config.variant);
         options.add("CONV_WINO_VARIANT", std::to_string(variantCode));
         options.add("CONV_WINO_DIR",
                     std::string(resolved->problem.direction == ConvDirection::FORWARD ? "0" : "1"));
@@ -1571,7 +1620,7 @@ public:
         const auto build = [&](std::string_view entryPoint,
                                const std::vector<KernelArgument>& signature,
                                unsigned int threads,
-                               const unsigned int(&blocks)[3]) {
+                               const std::array<unsigned int, 3>& blocks) {
             KernelDefinition definition = kernel;
             definition.source.entryPoint = std::string(entryPoint);
             auto code = buildIngestorKernelCode(
@@ -1581,7 +1630,7 @@ public:
             return code;
         };
         std::vector<IngestorKernelCode> kernels;
-        const unsigned int mainGrid[3] = {plan.mainBlocks, 1, 1};
+        const std::array<unsigned int, 3> mainGrid = {plan.mainBlocks, 1, 1};
         switch(config.variant)
         {
         case Variant::MULTIPASS:
@@ -1664,7 +1713,7 @@ public:
                     total = std::max(total, staging->copy.total);
                 }
             }
-            const unsigned int copyGrid[3]
+            const std::array<unsigned int, 3> copyGrid
                 = {static_cast<unsigned int>(std::clamp<long long>(
                        (total + COPY_BLOCK - 1) / COPY_BLOCK, 1, COPY_MAX_BLOCKS)),
                    1,

@@ -1278,13 +1278,13 @@ TEST(TestConvDepthwiseValuRowtile, RefusesOneFieldAtATime)
     EXPECT_TRUE(rowtileAdmits(base, depthwise(c, {1, widest}, {3, 3}, {1, 1}, true)));
     EXPECT_FALSE(rowtileAdmits(base, depthwise(c, {1, widest + 1}, {3, 3}, {1, 1}, true)));
     // The grid's channel-block and N x H-tile extents below 2^16.
-    auto rows = depthwise(40, {4 * 32767, 3}, {3, 3}, {1, 1}, true);
+    auto rows = depthwise(40, {int64_t{4} * 32767, 3}, {3, 3}, {1, 1}, true);
     EXPECT_TRUE(rowtileAdmits(base, rows));
-    rows.input = {4 * 32768, 3};
+    rows.input = {int64_t{4} * 32768, 3};
     EXPECT_FALSE(rowtileAdmits(base, rows));
     const auto one = rowtileConfig(3, 4, 4, 1);
-    EXPECT_TRUE(rowtileAdmits(one, depthwise(64 * 65535, {3, 3}, {3, 3}, {1, 1}, true)));
-    EXPECT_FALSE(rowtileAdmits(one, depthwise(64 * 65536, {3, 3}, {3, 3}, {1, 1}, true)));
+    EXPECT_TRUE(rowtileAdmits(one, depthwise(int64_t{64} * 65535, {3, 3}, {3, 3}, {1, 1}, true)));
+    EXPECT_FALSE(rowtileAdmits(one, depthwise(int64_t{64} * 65536, {3, 3}, {3, 3}, {1, 1}, true)));
 }
 
 // The rowtile cores keep f16 operands packed and let the FMA widen them (v_fma_mix_f32). This

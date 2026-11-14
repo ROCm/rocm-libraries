@@ -3,6 +3,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -29,7 +30,7 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing::conv_naive
 using conv_naive::ConvDirection;
 using conv_naive::parseConvNaiveProblem;
 
-constexpr ConvDirection ALL_DIRECTIONS[]
+constexpr std::array<ConvDirection, 3> ALL_DIRECTIONS
     = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS};
 
 std::optional<conv_naive::ConvNaiveProblem> parse(const ConvGraphSpec& spec)

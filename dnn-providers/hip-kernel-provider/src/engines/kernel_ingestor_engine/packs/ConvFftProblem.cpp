@@ -30,7 +30,7 @@ constexpr int64_t INT_LIMIT = std::numeric_limits<int>::max();
 constexpr int64_t WORK_ITEM_LIMIT = (int64_t{1} << 32) - 1;
 constexpr size_t ALIGN = 256;
 /// LDS a block may declare on every target (64 KiB; gfx950 has 160).
-constexpr int64_t LDS_LIMIT_BYTES = 64 * 1024;
+constexpr int64_t LDS_LIMIT_BYTES = int64_t{64} * 1024;
 
 bool fitsInt(long long value)
 {
@@ -125,8 +125,10 @@ std::optional<FftProblem> parseFftProblem(const MatchContext& context, ConvDirec
     problem.dilW = static_cast<int>(a.dilation[2]);
     problem.flip = a.flipFilter != 0 ? 1 : 0;
     // (n, c, d, h, w) -> (n, c, h, w); depth is 1.
+    // NOLINTBEGIN(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     const long long* strides[3] = {a.xStrides, a.wStrides, a.yStrides};
     long long* out[3] = {problem.xStr, problem.wStr, problem.yStr};
+    // NOLINTEND(modernize-avoid-c-arrays)
     for(int t = 0; t < 3; ++t)
     {
         out[t][0] = strides[t][0];
@@ -411,7 +413,7 @@ std::optional<Plan> planFor(const FftProblem& problem,
     {
         // ConvFftCore.h FftProductTile: tm tiles a thread, 256 / (gn / 4) threads along the tiles
         // (64 x 64 or 128 x 64, 128 x 32, 256 x 16).
-        const int64_t bm = (256 / (config.gn / 4)) * config.tm;
+        const int64_t bm = static_cast<int64_t>(256 / (config.gn / 4)) * config.tm;
         plan.filterGrid = groups * a.ca * divUp(a.cb, config.pb);
         plan.productGridPerChunk = groups * bins * divUp(a.cb, config.gn) * divUp(plan.chunk, bm);
     }

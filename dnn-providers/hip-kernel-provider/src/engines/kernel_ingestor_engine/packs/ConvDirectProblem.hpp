@@ -69,7 +69,7 @@ struct DirectProblem
     int elementBytes = 0;
     /// The graph filter's element strides in forward roles (k, c, t, r, s), and whether it is
     /// reflected (true convolution).
-    long long wStrides[5] = {};
+    std::array<long long, 5> wStrides = {};
     int flip = 0;
     /// The forward-form input (x, or dy) and output (y, or dx), staged when not channels-last.
     Staging in;
@@ -118,15 +118,27 @@ struct Config
     /// Output pixels per block (the planner's tile budget) and output channels per block.
     int blockPixels() const
     {
-        return fma ? (threads / nt) * tm : rows ? wp * pw * wq * 16 : bm;
+        if(fma)
+        {
+            return (threads / nt) * tm;
+        }
+        return rows ? wp * pw * wq * 16 : bm;
     }
     int blockColumns() const
     {
-        return fma ? nt * tn : rows ? wk * fn * 16 : bn;
+        if(fma)
+        {
+            return nt * tn;
+        }
+        return rows ? wk * fn * 16 : bn;
     }
     int blockThreads() const
     {
-        return fma ? threads : rows ? wp * wq * wk * wave : wm * wn * wave;
+        if(fma)
+        {
+            return threads;
+        }
+        return rows ? wp * wq * wk * wave : wm * wn * wave;
     }
 };
 
@@ -153,7 +165,7 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName);
 struct Plan
 {
     K2Args args{}; ///< the problem with this config's tile and split; pointers filled at launch
-    unsigned int grid[3] = {1, 1, 1};
+    std::array<unsigned int, 3> grid = {1, 1, 1};
     int cpad = 0; ///< reduction channels of the formatted weights (x3 for three-bf16)
     long long weightElems = 0;
     long long outElems = 0;

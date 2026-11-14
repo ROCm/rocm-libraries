@@ -130,7 +130,7 @@ std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int tw, int cb)
 size_t expandedElements(const GroupProblem& problem)
 {
     const auto& a = problem.igemm.args;
-    const auto taps = static_cast<size_t>(problem.kernelT * problem.kernelR * problem.kernelS);
+    const auto taps = static_cast<size_t>(problem.kernelT) * problem.kernelR * problem.kernelS;
     const auto nbi = static_cast<size_t>(problem.nbi);
     return problem.nbi > 0 ? static_cast<size_t>(a.groups) * nbi * nbi * taps * 256
                            : static_cast<size_t>(a.c / 16) * taps * 256;
@@ -476,7 +476,7 @@ long long
     // least, more taps a round as the staging's LDS holds them.
     const long long stage
         = ((rows * cols + 1) * (16LL * nbi + vec) + dy * (16LL * cb + vec)) * elementBytes;
-    const long long red = nbi == 2 ? nbi * cb * 256LL * 4 : 0;
+    const long long red = nbi == 2 ? static_cast<long long>(nbi) * cb * 256 * 4 : 0;
     return std::max(stage, red);
 }
 
@@ -618,7 +618,7 @@ constexpr std::string_view WRW_REDUCE_ENTRY_POINT = "ConvGroupWrwReduce";
 constexpr unsigned int COPY_BLOCK = 256;
 constexpr long long COPY_MAX_BLOCKS = 1LL << 20;
 /// LDS a workgroup may take (every target arch has at least 64 KB).
-constexpr long long LDS_LIMIT = 64 * 1024;
+constexpr long long LDS_LIMIT = 64LL * 1024;
 
 constexpr std::string_view X_TOKEN = "conv_group.x.uid";
 constexpr std::string_view W_TOKEN = "conv_group.w.uid";
@@ -1373,7 +1373,9 @@ public:
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());
         conv.setBlockSize(
-            static_cast<unsigned int>(tile->fma ? FMA_THREADS : 4 * tile->info.wave), 1, 1);
+            static_cast<unsigned int>(tile->fma ? FMA_THREADS : int64_t{4} * tile->info.wave),
+            1,
+            1);
         conv.setGridSize(blocks.front(), 1, 1);
 
         KernelDefinition expandKernel = kernel;
@@ -1612,7 +1614,7 @@ private:
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4WrwArgs>());
         conv.setBlockSize(
-            static_cast<unsigned int>(tile.fma ? FMA_THREADS : 4 * tile.info.wave), 1, 1);
+            static_cast<unsigned int>(tile.fma ? FMA_THREADS : int64_t{4} * tile.info.wave), 1, 1);
         conv.setGridSize(wrw->second.grid, 1, 1);
         KernelDefinition reduceKernel = kernel;
         reduceKernel.source.entryPoint = std::string(WRW_REDUCE_ENTRY_POINT);

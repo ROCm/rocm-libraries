@@ -249,9 +249,19 @@ bool naiveOverBudget(const nlohmann::json& row, int64_t computeUnits)
     const int64_t cPerGroup = w[1];
     const auto direction = row.at("dir").get<std::string>();
     const bool weights = direction == "wrw";
-    const auto total = direction == "fwd"   ? checkedProduct({n, k, *outElements})
-                       : direction == "bwd" ? checkedProduct({n, c, *inElements})
-                                            : checkedProduct({k, cPerGroup, *filterElements});
+    std::optional<int64_t> total;
+    if(direction == "fwd")
+    {
+        total = checkedProduct({n, k, *outElements});
+    }
+    else if(direction == "bwd")
+    {
+        total = checkedProduct({n, c, *inElements});
+    }
+    else
+    {
+        total = checkedProduct({k, cPerGroup, *filterElements});
+    }
     const auto macs = checkedProduct({n, k, *outElements, cPerGroup, *filterElements});
     if(!total || !macs)
     {
@@ -436,7 +446,7 @@ Observed discover(hipdnnHandle_t handle,
 
 const Census& census()
 {
-    static const Census RESULT = [] {
+    static const Census s_result = [] {
         Census c;
         c.arch = deviceArch();
         if(c.arch.empty())
@@ -609,7 +619,7 @@ const Census& census()
         }
         return c;
     }();
-    return RESULT;
+    return s_result;
 }
 
 /// The tier a row is mapped to on this architecture, or nothing when the map has none.

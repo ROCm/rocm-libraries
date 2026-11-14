@@ -92,6 +92,7 @@ size_t alignUp(size_t value)
 
 /// True when @p strides (n, c, d, h, w) are packed channels-last for @p extents; extent-1 axes
 /// may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsLast(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                   const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -108,6 +109,7 @@ bool channelsLast(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 }
 
 /// True when @p strides (n, c, d, h, w) are packed channels-first for @p extents.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsFirst(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {
@@ -160,12 +162,15 @@ ConvIgemmCopyArgs copyOf(const std::array<long long, N>& dims,
 
 /// The activation @p strides (n, c, d, h, w) staged into (in) or out of (out) the workspace's
 /// packed channels-last copy.
-Staging activationStaging(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
-                          long long n,
-                          long long c,
-                          const long long (&spatial)[SPATIAL],
-                          bool in,
-                          int elementBytes)
+Staging activationStaging(
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
+    long long n,
+    long long c,
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
+    const long long (&spatial)[SPATIAL],
+    bool in,
+    int elementBytes)
 {
     Staging staging;
     staging.needed = true;
@@ -757,9 +762,15 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     const long long reduction = forward ? a.c / a.groups : a.k / a.groups;
     const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
     const long long phaseTaps = std::max<long long>(1, divUp(taps, problem.phases));
-    const long long iterations = pack == 1 && reduction < bk ? divUp(phaseTaps, bk / reduction)
-                                 : pack == 2                 ? divUp(phaseTaps * reduction, bk)
-                                                             : phaseTaps * divUp(reduction, bk);
+    long long iterations = phaseTaps * divUp(reduction, bk);
+    if(pack == 1 && reduction < bk)
+    {
+        iterations = divUp(phaseTaps, bk / reduction);
+    }
+    else if(pack == 2)
+    {
+        iterations = divUp(phaseTaps * reduction, bk);
+    }
     const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
     long long splits
         = tiles >= wanted
@@ -1394,17 +1405,21 @@ public:
             KernelDefinition copyKernel = kernel;
             const bool transpose = stagings[i]->transpose;
             const bool expand = stagings[i]->expand;
-            copyKernel.source.entryPoint = std::string(expand      ? EXPAND_ENTRY_POINT
-                                                       : transpose ? TRANSPOSE_ENTRY_POINT
-                                                                   : COPY_ENTRY_POINT);
-            auto copy = buildIngestorKernelCode(_kernelCompiler,
-                                                _kpackLoader,
-                                                context,
-                                                copyKernel,
-                                                options,
-                                                expand      ? expandSignature()
-                                                : transpose ? transposeSignature()
-                                                            : copySignature());
+            std::string_view entryPoint = COPY_ENTRY_POINT;
+            const std::vector<KernelArgument>* signature = &copySignature();
+            if(expand)
+            {
+                entryPoint = EXPAND_ENTRY_POINT;
+                signature = &expandSignature();
+            }
+            else if(transpose)
+            {
+                entryPoint = TRANSPOSE_ENTRY_POINT;
+                signature = &transposeSignature();
+            }
+            copyKernel.source.entryPoint = std::string(entryPoint);
+            auto copy = buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, copyKernel, options, *signature);
             long long blocks = 0;
             if(transpose)
             {

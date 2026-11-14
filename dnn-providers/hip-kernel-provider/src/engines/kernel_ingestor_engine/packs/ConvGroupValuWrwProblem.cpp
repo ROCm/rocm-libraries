@@ -53,6 +53,7 @@ int64_t divUp(int64_t value, int64_t divisor)
 /// Bytes from a tensor's first element to one past its last: sum of (extent - 1) x stride, plus
 /// one element. nullopt for a negative stride or an overflow.
 std::optional<long long>
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     extentBytes(const long long (&dims)[4], const long long (&strides)[4], int elementBytes)
 {
     int64_t last = 0;
@@ -189,8 +190,10 @@ std::optional<GvwProblem> parseGvwProblem(const MatchContext& context)
         return std::nullopt;
     }
     // (n, c, d, h, w) -> (n, c, h, w); depth is 1.
+    // NOLINTBEGIN(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     const long long* strides[3] = {a.xStrides, a.wStrides, a.yStrides};
     long long* out[3] = {problem.xStr, problem.wStr, problem.yStr};
+    // NOLINTEND(modernize-avoid-c-arrays)
     for(int t = 0; t < 3; ++t)
     {
         out[t][0] = strides[t][0];
@@ -198,8 +201,10 @@ std::optional<GvwProblem> parseGvwProblem(const MatchContext& context)
         out[t][2] = strides[t][3];
         out[t][3] = strides[t][4];
     }
+    // NOLINTBEGIN(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     const long long xDims[4] = {a.n, a.c, problem.hi, problem.wi};
     const long long yDims[4] = {a.n, a.k, problem.ho, problem.wo};
+    // NOLINTEND(modernize-avoid-c-arrays)
     const auto xBytes = extentBytes(xDims, problem.xStr, problem.elementBytes);
     const auto yBytes = extentBytes(yDims, problem.yStr, problem.elementBytes);
     if(!xBytes.has_value() || !yBytes.has_value())
@@ -329,6 +334,7 @@ std::optional<Plan>
     // within 31 bits; the pass's first image is a 64-bit base.
     const int64_t images = std::min<int64_t>(problem.n, divUp(rowsPerPass - 1, problem.ho) + 1);
     const int es = problem.elementBytes;
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     const auto reach = [&](const long long(&str)[4],
                            int64_t channels,
                            int64_t h,

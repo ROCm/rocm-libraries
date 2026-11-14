@@ -199,9 +199,18 @@ TEST(TestConvDepthwiseValuProblem, DeclinesUnpackedTensors)
     for(const char* operand : {"x", "w", "y"})
     {
         auto spec = specFor(depthwise(5, true), ConvDirection::FORWARD);
-        auto& tensor = std::string(operand) == "x"   ? spec.x
-                       : std::string(operand) == "w" ? spec.w
-                                                     : spec.y;
+        const std::string name(operand);
+        auto& tensor = [&]() -> auto& {
+            if(name == "x")
+            {
+                return spec.x;
+            }
+            if(name == "w")
+            {
+                return spec.w;
+            }
+            return spec.y;
+        }();
         tensor.strides[0] += 3; // a gap after every image (filter: every channel)
         EXPECT_FALSE(parse(spec).has_value()) << operand;
     }

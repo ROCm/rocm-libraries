@@ -37,6 +37,7 @@ int64_t divUp(int64_t value, int64_t divisor)
 
 /// True when @p strides (n, c, d, h, w) are packed channels-first for @p extents; extent-1 axes
 /// may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool channelsFirst(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
 {

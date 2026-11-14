@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,7 @@ std::optional<ConvGemmPlanCalls> resolve(const ConvGemmShape& shape, ConvDirecti
     return directGemmCalls(*problem);
 }
 
-constexpr ConvDirection ALL_DIRECTIONS[]
+constexpr std::array<ConvDirection, 3> ALL_DIRECTIONS
     = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS};
 
 ConvGemmShape channelsLast(ConvGemmShape shape)

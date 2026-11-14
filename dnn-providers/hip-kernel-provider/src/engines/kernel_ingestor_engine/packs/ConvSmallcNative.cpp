@@ -214,7 +214,8 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
     // One input image within the kernel's 32-bit buffer offsets (its window loads); the span
     // covers every element an image's strides reach.
     long long span = 1;
-    const long long extents[5] = {a.n, inChannels, inExtents[0], inExtents[1], inExtents[2]};
+    const std::array<long long, 5> extents
+        = {a.n, inChannels, inExtents[0], inExtents[1], inExtents[2]};
     for(int i = 1; i < 5; ++i)
     {
         if(inStrides[i] < 0)
@@ -241,7 +242,7 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
     args.dout = static_cast<int>(outExtents[0]);
     args.ho = static_cast<int>(outExtents[1]);
     args.wo = static_cast<int>(outExtents[2]);
-    int pads[3];
+    std::array<int, 3> pads{};
     for(int axis = 0; axis < 3; ++axis)
     {
         // Backward: dx row i reads dy rows i + pre - f dil, i.e. the forward window from

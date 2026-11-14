@@ -594,7 +594,20 @@ public:
         const bool tile = config.variant == "tile";
         const bool hankel = config.variant == "hankel";
         const bool vtile = config.variant == "vtile";
-        options.add("CONV_DW_VARIANT", std::string(vtile ? "3" : hankel ? "2" : tile ? "1" : "0"));
+        std::string variant = "0";
+        if(vtile)
+        {
+            variant = "3";
+        }
+        else if(hankel)
+        {
+            variant = "2";
+        }
+        else if(tile)
+        {
+            variant = "1";
+        }
+        options.add("CONV_DW_VARIANT", variant);
         options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
         // Defined only for a multiplier, so the multiplier-1 programs compile as before.
         if(config.mult != 1)

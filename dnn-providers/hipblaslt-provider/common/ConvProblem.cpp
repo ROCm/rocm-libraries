@@ -259,8 +259,16 @@ std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection d
     {
         return std::nullopt;
     }
-    const ConvOperand& written
-        = fields->written == fields->x ? *x : (fields->written == fields->w ? *w : *y);
+    const ConvOperand* writtenOperand = &*y;
+    if(fields->written == fields->x)
+    {
+        writtenOperand = &*x;
+    }
+    else if(fields->written == fields->w)
+    {
+        writtenOperand = &*w;
+    }
+    const ConvOperand& written = *writtenOperand;
     if(!hasDistinctElements(written))
     {
         return std::nullopt;

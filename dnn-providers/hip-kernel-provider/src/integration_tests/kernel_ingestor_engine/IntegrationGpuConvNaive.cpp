@@ -188,7 +188,11 @@ float toleranceEpsilons(Direction direction, const Problem& problem)
     case Direction::FWD:
         return static_cast<float>(problem.w[1] * filter);
     case Direction::BWD:
-        return static_cast<float>((problem.w[0] / (problem.x[1] / problem.w[1])) * filter);
+    {
+        // K / G output channels a group, exact: G = C / (C / G).
+        const int64_t outputChannelsPerGroup = problem.w[0] / (problem.x[1] / problem.w[1]);
+        return static_cast<float>(outputChannelsPerGroup * filter);
+    }
     case Direction::WRW:
         return static_cast<float>(problem.y[0] * problem.y[2] * problem.y[3]);
     default:

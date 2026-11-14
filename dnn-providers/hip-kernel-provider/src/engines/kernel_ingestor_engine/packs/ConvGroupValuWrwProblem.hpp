@@ -50,9 +50,11 @@ struct GvwProblem
     int elementBytes = 0;
     bool channelsFirst = false; ///< x and dy: the width packed (xs_w = ys_w = 1)
     bool channelsLast = false; ///< x and dy: the channels packed (xs_c = ys_c = 1)
+    // NOLINTBEGIN(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
     long long xStr[4] = {}; ///< n, c, h, w element strides
     long long wStr[4] = {}; ///< k, c, r, s
     long long yStr[4] = {}; ///< n, k, h, w
+    // NOLINTEND(modernize-avoid-c-arrays)
     long long xBytes = 0; ///< bytes from x's first element to one past its last
     long long yBytes = 0;
     int xAlign = 0; ///< the byte alignment the graph declares for x's pointer, at most 16

@@ -543,11 +543,11 @@ std::vector<DeviceCase> deviceCases()
     // 24 channels of 10 x 12, rows 16 apart (channels-first elements).
     generic("GenericPaddedRowsNchw",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}),
-            {24 * 10 * 16, 10 * 16, 16, 1});
+            {int64_t{24} * 10 * 16, int64_t{10} * 16, 16, 1});
     // Channels-last, positions 32 channels apart (24 used): channel vectors.
     generic("GenericPaddedChannelsNhwc",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
-            {10 * 12 * 32, 1, 12 * 32, 32});
+            {int64_t{10} * 12 * 32, 1, int64_t{12} * 32, 32});
     // One channels-last x image of 2^30 elements (2 GiB in 16-bit, 4 GiB in fp32): the generic
     // loop's block-based buffers (pb 1), rebased each step. 1x1 stride 4 keeps the CPU
     // reference short.
@@ -561,7 +561,7 @@ std::vector<DeviceCase> deviceCases()
     // Positions 26 apart: not whole vectors, channels-last elements.
     generic("GenericPaddedChannelsNhwcElements",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
-            {10 * 12 * 26, 1, 12 * 26, 26});
+            {int64_t{10} * 12 * 26, 1, int64_t{12} * 26, 26});
     return cases;
 }
 
@@ -963,33 +963,33 @@ TEST_P(TestGpuConvWrwThreeBf16, FloatInfinities)
 /// convolution, padding past the filter, and many reduction steps (several splits).
 std::vector<DeviceCase> threeBf16Cases()
 {
-    static const std::set<std::string> NAMES{"Nchw3x3",
-                                             "Nhwc3x3",
-                                             "Nhwc3x3Wide",
-                                             "ThreeD3x3x3",
-                                             "ThreeDNhwc3x3x3",
-                                             "OneD1x7",
-                                             "Stride2",
-                                             "Stride2Nhwc",
-                                             "Dilation2",
-                                             "GroupedNhwc3x3",
-                                             "Stem7x7Stride2",
-                                             "Stem7x7Stride2Nhwc",
-                                             "Pointwise1x1Nhwc",
-                                             "Pointwise1x1OddChannels",
-                                             "PaddingPastTheFilter",
-                                             "ManySteps",
-                                             "TrueConvolutionNhwc",
-                                             "FilterKrscUnderNchw"};
+    static const std::set<std::string> s_names{"Nchw3x3",
+                                               "Nhwc3x3",
+                                               "Nhwc3x3Wide",
+                                               "ThreeD3x3x3",
+                                               "ThreeDNhwc3x3x3",
+                                               "OneD1x7",
+                                               "Stride2",
+                                               "Stride2Nhwc",
+                                               "Dilation2",
+                                               "GroupedNhwc3x3",
+                                               "Stem7x7Stride2",
+                                               "Stem7x7Stride2Nhwc",
+                                               "Pointwise1x1Nhwc",
+                                               "Pointwise1x1OddChannels",
+                                               "PaddingPastTheFilter",
+                                               "ManySteps",
+                                               "TrueConvolutionNhwc",
+                                               "FilterKrscUnderNchw"};
     std::vector<DeviceCase> cases;
     for(const auto& deviceCase : deviceCases())
     {
-        if(NAMES.count(deviceCase.name) != 0)
+        if(s_names.count(deviceCase.name) != 0)
         {
             cases.push_back(deviceCase);
         }
     }
-    if(cases.size() != NAMES.size())
+    if(cases.size() != s_names.size())
     {
         throw std::logic_error("a three-bf16 case names no device case");
     }
@@ -1042,12 +1042,20 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
     static constexpr std::array<const char*, 23> KNOBS{
         "atom_id", "loop", "layout", "bk",  "bc", "bq",    "fr",  "s",  "sw",  "dw", "wk",  "wc",
         "tk",      "tc",   "vec",    "xcd", "ns", "align", "bpu", "wq", "dws", "pb", "math"};
-    std::set<std::vector<int64_t>> seen[3];
+    std::array<std::set<std::vector<int64_t>>, 3> seen;
     for(const auto& kernel : catalog())
     {
         SCOPED_TRACE(kernel.name);
         const auto dtype = stringOf(kernel, "dtype");
-        const int slot = dtype == "FLOAT" ? 0 : dtype == "HALF" ? 1 : 2;
+        size_t slot = 2;
+        if(dtype == "FLOAT")
+        {
+            slot = 0;
+        }
+        else if(dtype == "HALF")
+        {
+            slot = 1;
+        }
         std::vector<int64_t> tuple;
         tuple.reserve(KNOBS.size());
         for(const char* knob : KNOBS)

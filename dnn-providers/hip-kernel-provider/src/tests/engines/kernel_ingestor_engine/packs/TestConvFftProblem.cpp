@@ -35,10 +35,17 @@ using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 
 PackSymbols packFor(ConvDirection direction)
 {
+    const char* graphMatch = "hipkernel.conv_fft_wrw.graph_match";
+    if(direction == ConvDirection::FORWARD)
+    {
+        graphMatch = "hipkernel.conv_fft_fwd.graph_match";
+    }
+    else if(direction == ConvDirection::BACKWARD_DATA)
+    {
+        graphMatch = "hipkernel.conv_fft_bwd.graph_match";
+    }
     return {"",
-            direction == ConvDirection::FORWARD         ? "hipkernel.conv_fft_fwd.graph_match"
-            : direction == ConvDirection::BACKWARD_DATA ? "hipkernel.conv_fft_bwd.graph_match"
-                                                        : "hipkernel.conv_fft_wrw.graph_match",
+            graphMatch,
             "",
             "hipkernel.conv_fft.kernel_match",
             "",

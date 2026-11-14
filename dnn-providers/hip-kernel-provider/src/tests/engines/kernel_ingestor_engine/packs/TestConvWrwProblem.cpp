@@ -207,7 +207,7 @@ TEST(TestConvWrwForm, AnyStridesParseForTheGenericLoop)
     mixed.x.strides = packedStrides(mixed.x.dims, true);
     auto rows = rowPaddedSpec();
     auto channels = specOf(baseShape());
-    channels.y.strides = {41 * 120, 120, 12, 1}; // 40 channels in an image of 41
+    channels.y.strides = {int64_t{41} * 120, 120, 12, 1}; // 40 channels in an image of 41
     for(const auto& spec : {mixed, rows, channels})
     {
         const auto problem = parse(spec);
@@ -228,12 +228,12 @@ TEST(TestConvWrwForm, AnyStridesParseForTheGenericLoop)
     EXPECT_FALSE(padded->largeImage);
     // Spans past 2^31 bytes (rows 2^28 bytes apart): large images, for block-based buffers.
     auto xFar = specOf(baseShape());
-    xFar.x.strides = {24 * 10 * 16, 10 * 16, int64_t{1} << 27, 1};
+    xFar.x.strides = {int64_t{24} * 10 * 16, int64_t{10} * 16, int64_t{1} << 27, 1};
     const auto xFarProblem = parse(xFar);
     ASSERT_TRUE(xFarProblem.has_value());
     EXPECT_TRUE(xFarProblem->largeImage);
     auto yFar = specOf(baseShape());
-    yFar.y.strides = {40 * 10 * 12, 1, int64_t{1} << 27, 40};
+    yFar.y.strides = {int64_t{40} * 10 * 12, 1, int64_t{1} << 27, 40};
     const auto yFarProblem = parse(yFar);
     ASSERT_TRUE(yFarProblem.has_value());
     EXPECT_TRUE(yFarProblem->largeImage);
@@ -274,17 +274,17 @@ TEST(TestConvWrwForm, ChannelVectorsNeedUnitChannelStridesAndWholeVectors)
     // Padded channels-last rows: positions 32 elements apart (whole vectors) yes, 28 apart
     // (3.5 vectors) no; the padded image's batch stride likewise.
     auto spec = specOf(channelsLastShape());
-    spec.x.strides = {10 * 12 * 32 + 4, 1, 12 * 32, 32};
+    spec.x.strides = {int64_t{10} * 12 * 32 + 4, 1, int64_t{12} * 32, 32};
     EXPECT_FALSE(vectors(spec));
-    spec.x.strides = {10 * 12 * 32, 1, 12 * 32, 32};
+    spec.x.strides = {int64_t{10} * 12 * 32, 1, int64_t{12} * 32, 32};
     EXPECT_TRUE(vectors(spec));
-    spec.x.strides = {10 * 12 * 28, 1, 12 * 28, 28};
+    spec.x.strides = {int64_t{10} * 12 * 28, 1, int64_t{12} * 28, 28};
     EXPECT_FALSE(vectors(spec));
     // dy's strides too.
     spec = specOf(channelsLastShape());
-    spec.y.strides = {10 * 12 * 44, 1, 12 * 44, 44};
+    spec.y.strides = {int64_t{10} * 12 * 44, 1, int64_t{12} * 44, 44};
     EXPECT_FALSE(vectors(spec));
-    spec.y.strides = {10 * 12 * 48, 1, 12 * 48, 48};
+    spec.y.strides = {int64_t{10} * 12 * 48, 1, int64_t{12} * 48, 48};
     EXPECT_TRUE(vectors(spec));
     // A unit channel stride on x only, or on dy only.
     spec = specOf(baseShape());
@@ -295,10 +295,10 @@ TEST(TestConvWrwForm, ChannelVectorsNeedUnitChannelStridesAndWholeVectors)
     EXPECT_FALSE(vectors(spec));
     // Channels 2 apart, every other stride whole vectors: x, then dy.
     spec = specOf(channelsLastShape());
-    spec.x.strides = {10 * 12 * 48, 2, 12 * 48, 48};
+    spec.x.strides = {int64_t{10} * 12 * 48, 2, int64_t{12} * 48, 48};
     EXPECT_FALSE(vectors(spec));
     spec = specOf(channelsLastShape());
-    spec.y.strides = {10 * 12 * 80, 2, 12 * 80, 80};
+    spec.y.strides = {int64_t{10} * 12 * 80, 2, int64_t{12} * 80, 80};
     EXPECT_FALSE(vectors(spec));
     // An axis of extent 1 carries any stride; fp32 vectors are 4 channels.
     auto oneImage = channelsLastShape();
@@ -351,21 +351,21 @@ std::vector<RefusalCase> refusalCases()
         // strides without overflow.
         {"StridedSpanOverflows",
          [](ConvGraphSpec& s) {
-             s.x.strides = {24 * 10 * 16, int64_t{1} << 61, 16, 1}; // 23 x 2^61
+             s.x.strides = {int64_t{24} * 10 * 16, int64_t{1} << 61, 16, 1}; // 23 x 2^61
          }},
         {"StridedSpanSumOverflows",
          [](ConvGraphSpec& s) {
              // 23 x 2^58 + 9 x 2^59: each axis within 64 bits, their sum past it.
-             s.x.strides = {24 * 10 * 16, int64_t{1} << 58, int64_t{1} << 59, 1};
+             s.x.strides = {int64_t{24} * 10 * 16, int64_t{1} << 58, int64_t{1} << 59, 1};
          }},
         // dw: packed K C T R S or K T R S C.
         {"FilterTapsPadded",
          [](ConvGraphSpec& s) {
-             s.w.strides = {24 * 3 * 4, 3 * 4, 4, 1}; // rows of 4, 3 used
+             s.w.strides = {int64_t{24} * 3 * 4, int64_t{3} * 4, 4, 1}; // rows of 4, 3 used
          }},
         {"FilterChannelsOutermost",
          [](ConvGraphSpec& s) {
-             s.w.strides = {9, 40 * 9, 3, 1}; // C K R S
+             s.w.strides = {9, int64_t{40} * 9, 3, 1}; // C K R S
          }},
         // The batch within 32 bits (images tiny).
         {"BatchBeyondInt",
@@ -648,7 +648,11 @@ WrwConfig configOf(const ConfigFields& f)
 
 std::string dtypeName(DataType dataType)
 {
-    return dataType == DataType::FLOAT ? "FLOAT" : dataType == DataType::HALF ? "HALF" : "BFLOAT16";
+    if(dataType == DataType::FLOAT)
+    {
+        return "FLOAT";
+    }
+    return dataType == DataType::HALF ? "HALF" : "BFLOAT16";
 }
 
 hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, int units = 304)
@@ -2750,7 +2754,7 @@ TEST(TestConvWrwLaunch, TheGenericLoopReadsTheGraphsStridesAndSpans)
     EXPECT_EQ(a.trackLen, 0);
     // dy rows padded to 16 columns: its span too.
     auto dyPadded = specOf(baseShape());
-    dyPadded.y.strides = {40 * 10 * 16, 160, 16, 1};
+    dyPadded.y.strides = {int64_t{40} * 10 * 16, 160, 16, 1};
     const auto dyProblem = parse(dyPadded);
     ASSERT_TRUE(dyProblem.has_value());
     const auto dyLaunch

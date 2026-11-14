@@ -192,11 +192,11 @@ TEST(TestConvGroupValuWrwGraph, RefusesLayoutsWithNeitherAxisPacked)
     auto spec = specFor(grouped(), ConvDirection::BACKWARD_WEIGHTS);
     const auto good = spec;
     EXPECT_TRUE(graphAcceptsSpec(good));
-    spec.x.strides = {128 * 56 * 112, 56 * 112, 112, 2};
+    spec.x.strides = {int64_t{128} * 56 * 112, int64_t{56} * 112, 112, 2};
     EXPECT_FALSE(graphAcceptsSpec(spec));
     // dy alone strided: the same.
     auto dySpec = good;
-    dySpec.y.strides = {128 * 56 * 112, 56 * 112, 112, 2};
+    dySpec.y.strides = {int64_t{128} * 56 * 112, int64_t{56} * 112, 112, 2};
     EXPECT_FALSE(graphAcceptsSpec(dySpec));
     // x channels-first, dy channels-last: no common axis either.
     auto mixed = good;

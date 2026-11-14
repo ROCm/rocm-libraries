@@ -323,6 +323,7 @@ public:
         auto* specA = reinterpret_cast<ConvFftComplex*>(base + plan.aOffset);
         auto* specB = reinterpret_cast<ConvFftComplex*>(base + plan.bOffset);
         const auto stream = handle.getStream();
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
         const auto copy4 = [](long long(&to)[4], const long long(&from)[4]) {
             for(int i = 0; i < 4; ++i)
             {

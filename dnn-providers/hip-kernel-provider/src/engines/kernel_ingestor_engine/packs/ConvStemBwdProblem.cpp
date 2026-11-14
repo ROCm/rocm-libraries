@@ -6,6 +6,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvStemBwdProblem.hpp"
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <limits>
 #include <stdexcept>
@@ -47,6 +48,7 @@ int64_t floorDiv(int64_t a, int64_t b)
 
 /// True when @p strides are packed for @p extents with the axes in @p order (slowest first);
 /// extent-1 axes may carry any stride.
+// NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
 bool packedInOrder(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
                    const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents,
                    const std::array<size_t, CONV_NAIVE_TENSOR_DIMS>& order)
@@ -423,8 +425,10 @@ std::optional<StemBwdLaunch>
     m.oh = static_cast<int>(sd ? problem.sdOh : problem.oh);
     m.ow = static_cast<int>(sd ? problem.sdOw : problem.ow);
     // (n, k, h, w) and (n, c, h, w); the depth axis apart (2-D configs: trivial).
-    const long long dyAxes[4] = {a.yStrides[0], a.yStrides[1], a.yStrides[3], a.yStrides[4]};
-    const long long dxAxes[4] = {a.xStrides[0], a.xStrides[1], a.xStrides[3], a.xStrides[4]};
+    const std::array<long long, 4> dyAxes
+        = {a.yStrides[0], a.yStrides[1], a.yStrides[3], a.yStrides[4]};
+    const std::array<long long, 4> dxAxes
+        = {a.xStrides[0], a.xStrides[1], a.xStrides[3], a.xStrides[4]};
     std::copy(std::begin(dyAxes), std::end(dyAxes), m.dys);
     std::copy(std::begin(dxAxes), std::end(dxAxes), m.dxs);
     m.dyImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
@@ -453,7 +457,8 @@ std::optional<StemBwdLaunch>
     t.oh = m.oh;
     t.ow = m.ow;
     t.flip = a.flipFilter != 0 ? 1 : 0;
-    const long long wAxes[4] = {a.wStrides[0], a.wStrides[1], a.wStrides[3], a.wStrides[4]};
+    const std::array<long long, 4> wAxes
+        = {a.wStrides[0], a.wStrides[1], a.wStrides[3], a.wStrides[4]};
     std::copy(std::begin(wAxes), std::end(wAxes), t.ws);
     t.ft = static_cast<int>(config.ft);
     t.kpr = static_cast<int>(kpr);

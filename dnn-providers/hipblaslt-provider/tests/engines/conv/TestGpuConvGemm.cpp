@@ -332,13 +332,13 @@ int64_t offsetOf(const std::vector<int64_t>& index, const std::vector<int64_t>& 
 
 std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims);
 
-/// @p filter's elements reflected along every spatial axis, into @p reflected.
+/// @p input's elements reflected along every spatial axis, into @p output.
 template <typename T>
-void reflectFilter(Tensor<T>& filter, Tensor<T>& reflected)
+void reflectFilter(Tensor<T>& input, Tensor<T>& output)
 {
-    const auto& dims = filter.dims();
-    const auto* source = static_cast<const T*>(filter.rawHostData());
-    auto* target = static_cast<T*>(reflected.rawHostData());
+    const auto& dims = input.dims();
+    const auto* source = static_cast<const T*>(input.rawHostData());
+    auto* target = static_cast<T*>(output.rawHostData());
     for(const auto& index : allIndices(dims))
     {
         auto mirror = index;
@@ -346,9 +346,9 @@ void reflectFilter(Tensor<T>& filter, Tensor<T>& reflected)
         {
             mirror[axis] = dims[axis] - 1 - index[axis];
         }
-        target[offsetOf(mirror, reflected.strides())] = source[offsetOf(index, filter.strides())];
+        target[offsetOf(mirror, output.strides())] = source[offsetOf(index, input.strides())];
     }
-    reflected.markHostModified();
+    output.markHostModified();
 }
 
 std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims)
@@ -1609,10 +1609,18 @@ TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
         std::array<int64_t, 4> at{};
         for(size_t axis = 0; axis < 4; ++axis)
         {
-            at[axis] = sample == 0 ? 0
-                       : sample == 1
-                           ? outDims[axis] - 1
-                           : static_cast<int64_t>(random() % static_cast<uint64_t>(outDims[axis]));
+            if(sample == 0)
+            {
+                at[axis] = 0;
+            }
+            else if(sample == 1)
+            {
+                at[axis] = outDims[axis] - 1;
+            }
+            else
+            {
+                at[axis] = static_cast<int64_t>(random() % static_cast<uint64_t>(outDims[axis]));
+            }
         }
         double want = 0.0;
         for(int64_t inner = 0; inner < (forward ? shape.c : shape.k); ++inner)
