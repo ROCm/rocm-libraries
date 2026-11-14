@@ -195,8 +195,8 @@ inline void compute_snow_24_host(__m256& pVecR, __m256& pVecG, __m256& pVecB, __
     pMask[3] = _mm256_and_ps(
         pMask[0], pMask[1]);  // if(l >= lower_threshold && l <= upper_threshold && darkMode ==1)
     __m256 pLDivDiff = _mm256_div_ps(pL, pDiffThreshold);  // l / thresholdDiff
-    __m256 pBrightnessScale = _mm256_fmsub_ps(
-        _mm256_sub_ps(avx_p1, pBrightnessFactor), pLDivDiff,
+    __m256 pBrightnessScale = _mm256_fnmadd_ps(
+        _mm256_sub_ps(pBrightnessFactor, avx_p1), pLDivDiff,
         pBrightnessFactor);  // brightnessFactor - (brightnessFactor - 1) * l/thresholdDiff
     pL = _mm256_blendv_ps(pL, _mm256_mul_ps(pL, pBrightnessScale), pMask[3]);  // l = l * scale
     pMask[0] =
@@ -320,8 +320,8 @@ inline void compute_snow_8_host(__m256* p, __m256* pSnowParams) {
     pMask[3] = _mm256_and_ps(
         pMask[0], pMask[1]);  // if(l >= lower_threshold && l <= upper_threshold && darkMode ==1)
     __m256 pLDivDiff = _mm256_div_ps(pL, pDiffThreshold);  // l / thresholdDiff
-    __m256 pBrightnessScale = _mm256_fmsub_ps(
-        _mm256_sub_ps(avx_p1, pBrightnessFactor), pLDivDiff,
+    __m256 pBrightnessScale = _mm256_fnmadd_ps(
+        _mm256_sub_ps(pBrightnessFactor, avx_p1), pLDivDiff,
         pBrightnessFactor);  // brightnessFactor - (brightnessFactor - 1) * l/thresholdDiff
     pL = _mm256_blendv_ps(pL, _mm256_mul_ps(pL, pBrightnessScale), pMask[3]);  // l = l * scale
     pMask[0] = _mm256_cmp_ps(pL, pSnowParams[1],
