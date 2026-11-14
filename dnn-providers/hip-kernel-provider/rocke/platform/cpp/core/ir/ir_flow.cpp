@@ -786,6 +786,24 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_TILE_SMEM_PTR_ADD, ops, 2, rocke_i64(), NULL, "lds_addr");
 }
 
+/* The LDS-DMA instruction offset: 0..4095 bytes, recorded only when nonzero so a
+ * kernel without one serializes as before (ir.py _lds_dma_attrs). */
+static bool lds_dma_offset_attr(rocke_ir_builder_t* b,
+                                rocke_attr_map_t* attrs,
+                                const char* name,
+                                int offset)
+{
+    if(offset < 0 || offset > 4095)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s offset must be 0..4095 bytes, got %d", name, offset);
+        return false;
+    }
+    if(offset != 0)
+        rocke_attr_set_int(b, attrs, "offset", (int64_t)offset);
+    return true;
+}
+
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* lds_addr,
@@ -793,6 +811,19 @@ void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* soffset,
                                         int dwords,
                                         int coherency)
+{
+    rocke_b_async_buffer_load_lds_addr_off(
+        b, rsrc, lds_addr, voffset, soffset, dwords, coherency, 0);
+}
+
+void rocke_b_async_buffer_load_lds_addr_off(rocke_ir_builder_t* b,
+                                            rocke_value_t* rsrc,
+                                            rocke_value_t* lds_addr,
+                                            rocke_value_t* voffset,
+                                            rocke_value_t* soffset,
+                                            int dwords,
+                                            int coherency,
+                                            int offset)
 {
     rocke_value_t* ops[4];
     rocke_attr_map_t attrs;
@@ -814,6 +845,8 @@ void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
     rocke_attr_set_int(b, &attrs, "aux", (int64_t)coherency);
+    if(!lds_dma_offset_attr(b, &attrs, "tile.async_buffer_load_lds_addr", offset))
+        return;
     ops[0] = rsrc;
     ops[1] = lds_addr;
     ops[2] = voffset;
@@ -828,6 +861,18 @@ void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b,
                                    rocke_value_t* soffset,
                                    int dwords,
                                    int coherency)
+{
+    rocke_b_async_buffer_load_lds_off(b, rsrc, lds_ptr, voffset, soffset, dwords, coherency, 0);
+}
+
+void rocke_b_async_buffer_load_lds_off(rocke_ir_builder_t* b,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* lds_ptr,
+                                       rocke_value_t* voffset,
+                                       rocke_value_t* soffset,
+                                       int dwords,
+                                       int coherency,
+                                       int offset)
 {
     rocke_value_t* ops[4];
     rocke_attr_map_t attrs;
@@ -847,6 +892,8 @@ void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b,
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
     rocke_attr_set_int(b, &attrs, "aux", (int64_t)coherency);
+    if(!lds_dma_offset_attr(b, &attrs, "tile.async_buffer_load_lds", offset))
+        return;
     ops[0] = rsrc;
     ops[1] = lds_ptr;
     ops[2] = voffset;

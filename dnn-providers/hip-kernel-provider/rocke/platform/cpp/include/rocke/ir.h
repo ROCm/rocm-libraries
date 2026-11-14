@@ -1154,6 +1154,17 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            rocke_value_t* c,
                            rocke_value_t* const* extra,
                            int num_extra);
+/* rocke_b_mma with a scale_sel (IRBuilder.mma scale_sel=(sel_a, sel_b)): only a
+ * scaled MFMA atom takes one, and each index must be 0..3. */
+rocke_value_t* rocke_b_mma_scale_sel(rocke_ir_builder_t* b,
+                                     const char* op_id,
+                                     rocke_value_t* a,
+                                     rocke_value_t* bb,
+                                     rocke_value_t* c,
+                                     rocke_value_t* const* extra,
+                                     int num_extra,
+                                     int sel_a,
+                                     int sel_b);
 
 /* ----- inline asm ----- */
 /* Value-preserving optimization boundary for i1/i8/i16/i32/i64/bf16/f16/f32/
@@ -1270,6 +1281,16 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* c,
                                                        rocke_value_t* a_scale,
                                                        rocke_value_t* b_scale);
+/* As above with scale_sel: sel_a / sel_b (0..3) pick the byte of the A and B
+ * scale VGPR each lane reads (opsel_a / opsel_b). */
+rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4_sel(rocke_ir_builder_t* b,
+                                                           rocke_value_t* a,
+                                                           rocke_value_t* bb,
+                                                           rocke_value_t* c,
+                                                           rocke_value_t* a_scale,
+                                                           rocke_value_t* b_scale,
+                                                           int sel_a,
+                                                           int sel_b);
 rocke_value_t* rocke_b_wmma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
                                              rocke_value_t* bb,
@@ -1450,6 +1471,24 @@ void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b,
                                    rocke_value_t* soffset,
                                    int dwords,
                                    int coherency);
+/* As above with the instruction's immediate LDS byte offset, 0..4095 (IRBuilder
+ * offset=); offset 0 builds the same op as the plain form. */
+void rocke_b_async_buffer_load_lds_addr_off(rocke_ir_builder_t* b,
+                                            rocke_value_t* rsrc,
+                                            rocke_value_t* lds_addr,
+                                            rocke_value_t* voffset,
+                                            rocke_value_t* soffset,
+                                            int dwords,
+                                            int coherency,
+                                            int offset);
+void rocke_b_async_buffer_load_lds_off(rocke_ir_builder_t* b,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* lds_ptr,
+                                       rocke_value_t* voffset,
+                                       rocke_value_t* soffset,
+                                       int dwords,
+                                       int coherency,
+                                       int offset);
 void rocke_b_buffer_load_lds_async(rocke_ir_builder_t* b,
                                    rocke_value_t* rsrc,
                                    rocke_value_t* lds_ptr,

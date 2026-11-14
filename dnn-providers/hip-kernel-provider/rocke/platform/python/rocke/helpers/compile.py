@@ -121,8 +121,10 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 # The direct code-object backend (``rocke.runtime.code_object``, the Rust
 # compiler of rocKE IR; ``code_object_backend="direct"``):
 # - ``DIRECT_LEVERS_ATTR``: a kernel's own direct-compiler levers (a list or a
-#   ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names), joined to the
-#   environment's for its compile only; not IR (stripped before serialization).
+#   ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names), for its
+#   compile only: the direct backend passes them, with ``DIRECT_DEFAULT_LEVERS``,
+#   as the compiler's ``dlevers`` kernel attribute (``with_direct_levers``) and
+#   never touches the environment; not IR itself (stripped before serialization).
 # - ``DIRECT_SCOPES_ATTR`` + the op attribute ``SCOPE_OP_ATTR``: per-op lever
 #   scopes by name (``"<scope>:<lever>+<lever>;..."`` on the kernel, the scope
 #   name on its ops; ``qwen38_mono.persist.knobs.RustScope``). The direct
@@ -145,7 +147,9 @@ def request_code_object_backend(kernel: KernelDef, backend: str) -> KernelDef:
     """Mark ``kernel`` to compile with ``backend`` (``"comgr"`` | ``"direct"``)
     when ``compile_kernel`` is not told otherwise; returns ``kernel``."""
     if backend not in ("comgr", "direct"):
-        raise ValueError(f"code-object backend must be 'comgr' or 'direct', not {backend!r}")
+        raise ValueError(
+            f"code-object backend must be 'comgr' or 'direct', not {backend!r}"
+        )
     setattr(kernel, _CODE_OBJECT_BACKEND_REQUEST, backend)
     return kernel
 
@@ -242,7 +246,9 @@ def compile_kernel(
     raises instead). The COMGR path is the same code with or without this.
     """
     _lower_arch, isa = _resolve_compile_target(arch, isa)
-    selected_code_object_backend = _selected_code_object_backend(code_object_backend, kernel)
+    selected_code_object_backend = _selected_code_object_backend(
+        code_object_backend, kernel
+    )
     if selected_code_object_backend == "direct":
         try:
             return _compile_kernel_direct(
@@ -317,7 +323,9 @@ def compile_kernel(
     )
 
 
-def _selected_code_object_backend(code_object_backend: Optional[str], kernel: KernelDef) -> str:
+def _selected_code_object_backend(
+    code_object_backend: Optional[str], kernel: KernelDef
+) -> str:
     """``code_object_backend``, else the kernel's mark, else the environment
     (``ROCKE_CODEOBJ_BACKEND``), else ``"comgr"``; validated."""
     if code_object_backend is None:
@@ -388,10 +396,34 @@ def direct_source(kernel: KernelDef) -> KernelDef:
         return Region(label=region.label, ops=ops)
 
     body = region_of(kernel.body)
-    attrs = {k: v for k, v in kernel.attrs.items() if k not in (DIRECT_SCOPES_ATTR, DIRECT_LEVERS_ATTR)}
+    attrs = {
+        k: v
+        for k, v in kernel.attrs.items()
+        if k not in (DIRECT_SCOPES_ATTR, DIRECT_LEVERS_ATTR)
+    }
     if body is kernel.body and len(attrs) == len(kernel.attrs):
         return kernel
-    return dataclasses.replace(kernel, body=body, attrs=attrs, params=list(kernel.params))
+    return dataclasses.replace(
+        kernel, body=body, attrs=attrs, params=list(kernel.params)
+    )
+
+
+def with_direct_levers(kernel: KernelDef, levers: List[str]) -> KernelDef:
+    """A copy of ``kernel`` whose ``dlevers`` kernel attribute also turns on
+    ``levers`` (the compiler decides each lever it names there over
+    ``ROCKE_DIRECT_LEVERS``; a ``-name`` already in it still wins, since off
+    beats on). ``kernel`` itself when ``levers`` is empty."""
+    from ..core.ir import LEVER_SCOPE_ATTR
+
+    if not levers:
+        return kernel
+    own = kernel.attrs.get(LEVER_SCOPE_ATTR)
+    if own is not None and not isinstance(own, str):
+        # The compiler refuses it as malformed; keep it so it still does.
+        return kernel
+    text = ",".join(dict.fromkeys(_lever_names(own) + levers))
+    attrs = {**kernel.attrs, LEVER_SCOPE_ATTR: text}
+    return dataclasses.replace(kernel, attrs=attrs, params=list(kernel.params))
 
 
 def _compile_kernel_direct(
@@ -411,32 +443,31 @@ def _compile_kernel_direct(
     t_pass = time.perf_counter()
     ir_text = print_ir(kernel) if capture_ir_text else ""
     t1 = time.perf_counter()
-    # The backend's defaults and the kernel's own levers (``attrs["direct_levers"]``)
-    # join the environment's for this compile; named op scopes become ``dlevers``
-    # before the lifting (a lifted asm statement keeps its scope).
-    levers = direct_default_levers() + _lever_names(kernel.attrs.get(DIRECT_LEVERS_ATTR))
+    # Named op scopes become ``dlevers`` before the lifting (a lifted asm
+    # statement keeps its scope).
     source = direct_source(kernel)
     # Inline-asm idioms the direct compiler lowers as IR ops, on a copy
     # (`kernel` itself keeps its asm for a COMGR fallback).
     if lift_enabled():
         source = lift(source)
+    # The backend's defaults and the kernel's own levers (``attrs["direct_levers"]``)
+    # go to the compiler as the kernel's ``dlevers`` attribute, which decides the
+    # levers it names for this compile only; ``ROCKE_DIRECT_LEVERS`` still turns on
+    # the others. No process state changes, so concurrent compiles cannot see each
+    # other's levers.
+    source = with_direct_levers(
+        source,
+        direct_default_levers() + _lever_names(kernel.attrs.get(DIRECT_LEVERS_ATTR)),
+    )
     serialized = serialize(source)
     t2 = time.perf_counter()
-    saved = os.environ.get("ROCKE_DIRECT_LEVERS")
-    if levers:
-        merged = _lever_names(saved)
-        os.environ["ROCKE_DIRECT_LEVERS"] = ",".join(dict.fromkeys(merged + levers))
     try:
-        hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(serialized, isa=isa)
+        hsaco, codeobj_t, _info, _resources = build_direct_rocke_ir_hsaco(
+            serialized, isa=isa
+        )
     except DirectUnsupported as refused:
         refused.pass_stats = pass_stats
         raise
-    finally:
-        if levers:
-            if saved is None:
-                os.environ.pop("ROCKE_DIRECT_LEVERS", None)
-            else:
-                os.environ["ROCKE_DIRECT_LEVERS"] = saved
     t3 = time.perf_counter()
 
     timings["ir_opt"] = (t_pass - t0) * 1000.0

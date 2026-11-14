@@ -32,7 +32,7 @@ reworking the kernel builders.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from ..core.arch import ArchTarget, LayoutMap, MmaOp
 from ..core.ir import (
@@ -581,6 +581,7 @@ class MfmaAtom:
         c: Value,
         a_scale: Value,
         b_scale: Value,
+        scale_sel: Optional[Tuple[int, int]] = None,
     ) -> Value:
         """Issue the existing 16x16x128 scaled MFMA wrapper (P15).
 
@@ -591,8 +592,13 @@ class MfmaAtom:
         ``ArchTarget.mma.op_for_shape`` and pass that ``MmaOp`` and both
         scale operands to ``IRBuilder.mma``. See the field manual's
         ``reference/mma_metadata.md`` for the two paths.
+
+        ``scale_sel`` is ``(opsel_a, opsel_b)``, the byte (0..3) of each scale
+        VGPR to read; ``None`` reads byte 0 of both. The builder validates it.
         """
-        return b.mfma_scale_f32_16x16x128_f8f6f4(a, bb, c, a_scale, b_scale)
+        return b.mfma_scale_f32_16x16x128_f8f6f4(
+            a, bb, c, a_scale, b_scale, scale_sel=scale_sel
+        )
 
     def zero_acc(self, b: IRBuilder) -> Value:
         """Allocate a fresh `<c_per_lane x float>` accumulator (all zeros).

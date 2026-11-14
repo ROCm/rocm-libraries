@@ -726,9 +726,11 @@ class _Lowerer:
             )
             return
         if "scale_sel" in op.attrs:
-            raise ValueError(
-                f"tile.mma {op_id}: scale_sel applies only to a scaled MFMA atom"
-            )
+            from .arch.mfma_scale import scale_sel_refusal
+
+            error = scale_sel_refusal(op_id)
+            if error:
+                raise ValueError(error)
         if op_id in TF32_MMA:
             error = tf32_mma_target_error(op_id, self.arch)
             if error:
@@ -2071,19 +2073,37 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
-        """HIP debug shim for P15 MX MFMA scaled.
+        """Lower P15 MX MFMA scaled to its gfx950 builtin.
 
-        Hipcc 20 does not expose a builtin for the scaled MX MFMA;
-        emit an inline-asm stub that documents the shape so kernel
-        authors can read the HIP source to sanity-check the data
-        flow. Production runs go through the LLVM path which has
-        the real intrinsic.
+        Emits ``__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4`` with fp8e4m3
+        A and B (``cbsz = blgp = 0``) and ``scale_sel`` as ``opsel_a`` /
+        ``opsel_b``, the same operands as the LLVM lowering. A 32-byte payload
+        that is not ``i32x8`` is bit-cast to it.
         """
+        from .arch.mfma_scale import mx16_format_error, mx16_operand_error
+        from .lower_llvm import _scale_sel
+
+        if self.arch.gfx != "gfx950":
+            raise NotImplementedError(
+                "tile.mma mfma_scale_f32_16x16x128_f8f6f4 requires gfx950"
+            )
+        error = mx16_operand_error(op.operands, op.results) or mx16_format_error(
+            op.attrs
+        )
+        if error:
+            raise ValueError(error)
         a, b, c, a_scale, b_scale = op.operands
+        sel_a, sel_b = _scale_sel(op)
+
+        def payload(v: Value) -> str:
+            if v.type.name == "vec<i32x8>":
+                return _name(v)
+            return f"__builtin_bit_cast(i32x8, {_name(v)})"
+
         self._emit(
-            f"f32x4 {_name(op.result)} = {_name(c)};  // P15 MX MFMA stub:"
-            f" scale_a={_name(a_scale)} scale_b={_name(b_scale)}"
-            f" mantissa_a={_name(a)} mantissa_b={_name(b)}"
+            f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4("
+            f"{payload(a)}, {payload(b)}, {_name(c)}, 0, 0, "
+            f"{sel_a}, {_name(a_scale)}, {sel_b}, {_name(b_scale)});"
         )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:

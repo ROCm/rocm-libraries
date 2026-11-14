@@ -465,20 +465,10 @@ static bool _expand_emulated_mma(rocke_lower_t* L, const rocke_op_t* op, const c
  * _scale_sel accepts the same values. */
 static void mma_scale_sel(rocke_lower_t* L, const rocke_op_t* op, int64_t* sel_a, int64_t* sel_b)
 {
-    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "scale_sel");
-    *sel_a = 0;
-    *sel_b = 0;
-    if(!v)
-    {
-        return;
-    }
-    if(v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 2 || v->u.ilist.ints[0] < 0 ||
-       v->u.ilist.ints[0] > 3 || v->u.ilist.ints[1] < 0 || v->u.ilist.ints[1] > 3)
+    if(!rocke_mma_scale_sel(&op->attrs, sel_a, sel_b))
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "tile.mma scale_sel must be two byte indices in 0..3");
     }
-    *sel_a = v->u.ilist.ints[0];
-    *sel_b = v->u.ilist.ints[1];
 }
 
 /* op_id -> handler. Mirrors the Python CDNA emit_mma which rebuilds the legacy
@@ -530,11 +520,9 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     char tf32_error[ROCKE_ERR_MSG_CAP];
     if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof tf32_error))
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
-    if(rocke_attr_get(&op->attrs, "scale_sel"))
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "tile.mma %s: scale_sel applies only to a scaled MFMA atom",
-                      op_id);
+    if(rocke_attr_get(&op->attrs, "scale_sel") && !rocke_mma_accepts_scale_sel(op_id))
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "tile.mma %s: scale_sel applies only to a scaled MFMA atom", op_id);
 
     /* An emulated atom is expanded here, before ISA dispatch, so the expansion
      * is written once rather than per ISA family. Native atoms -- every atom
@@ -1415,15 +1403,29 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
     {
         return;
     }
-    if(op->num_operands != 5)
+    /* Mirrors Python _op_tile_mfma_scale_f32_16x16x128_f8f6f4: gfx950 only,
+     * 32-byte fp8e4m3 A / B, scale_sel as opsel_a / opsel_b. */
+    if(!L->backend || strcmp(L->backend->gfx, "gfx950") != 0)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s expects 5 operands", op->name);
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "tile.mma " ROCKE_MX16_OP_ID " requires gfx950");
+    }
+    {
+        char error[ROCKE_ERR_MSG_CAP];
+        if(rocke_mx16_operand_error(
+               op->operands, op->num_operands, op->results, op->num_results, error, sizeof error)
+           || rocke_mx16_format_error(&op->attrs, error, sizeof error))
+        {
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        }
     }
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
     a_scale = op->operands[3];
     b_scale = op->operands[4];
+    int64_t sel_a = 0;
+    int64_t sel_b = 0;
+    mma_scale_sel(L, op, &sel_a, &sel_b);
     rocke_ll_need(L, "mfma.scale.f32.16x16x128.f8f6f4");
 
     /* Normalise A / B to <8 x i32> (accept either packed or byte-vector). */
@@ -1455,12 +1457,14 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
                        "  %s = call <4 x float> "
                        "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
                        "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                       "i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s)",
+                       "i32 0, i32 0, i32 %lld, i32 %s, i32 %lld, i32 %s)",
                        mma_result_name(L, op),
                        a_packed,
                        b_packed,
                        rocke_ll_operand(L, c),
+                       (long long)sel_a,
                        rocke_ll_operand(L, a_scale),
+                       (long long)sel_b,
                        rocke_ll_operand(L, b_scale));
     }
     else
@@ -1469,12 +1473,14 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(rocke_lower_t* L, const roc
                        "  %s = call <4 x float> "
                        "@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
                        "<8 x i32> %s, <8 x i32> %s, <4 x float> %s, "
-                       "i32 0, i32 0, i32 0, i32 0, i32 %s, i32 0, i32 %s, i32 0)",
+                       "i32 0, i32 0, i32 0, i32 %lld, i32 %s, i32 %lld, i32 %s, i32 0)",
                        mma_result_name(L, op),
                        a_packed,
                        b_packed,
                        rocke_ll_operand(L, c),
+                       (long long)sel_a,
                        rocke_ll_operand(L, a_scale),
+                       (long long)sel_b,
                        rocke_ll_operand(L, b_scale));
     }
 }

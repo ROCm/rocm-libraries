@@ -191,16 +191,9 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "scaled MFMA result must be vec<f32x16>");
         /* scale_sel: the byte, 0..3, of the A and B scale VGPR (Python _scale_sel). */
         int64_t sel[2] = {0, 0};
-        if(const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "scale_sel"))
-        {
-            if(v->kind != ROCKE_ATTR_INT_LIST || v->u.ilist.count != 2 ||
-               v->u.ilist.ints[0] < 0 || v->u.ilist.ints[0] > 3 || v->u.ilist.ints[1] < 0 ||
-               v->u.ilist.ints[1] > 3)
-                return rocke_h_fail(
-                    lw, ROCKE_ERR_VALUE, "tile.mma scale_sel must be two byte indices in 0..3");
-            sel[0] = v->u.ilist.ints[0];
-            sel[1] = v->u.ilist.ints[1];
-        }
+        if(!rocke_mma_scale_sel(&op->attrs, &sel[0], &sel[1]))
+            return rocke_h_fail(
+                lw, ROCKE_ERR_VALUE, "tile.mma scale_sel must be two byte indices in 0..3");
         rocke_h_emitf(lw,
                       "f32x16 %s = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(%s, %s, %s, %d, "
                       "%d, %lld, %s, %lld, %s);",
@@ -216,9 +209,53 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
                       rocke_h_name(lw, op->operands[4]));
         return ROCKE_OK;
     }
+    /* The 16x16x128 MX atom (Python _op_tile_mfma_scale_f32_16x16x128_f8f6f4):
+     * fp8e4m3 A / B (cbsz = blgp = 0), scale_sel as opsel_a / opsel_b, and a
+     * 32-byte payload that is not i32x8 bit-cast to it. */
+    if(strcmp(op_id, ROCKE_MX16_OP_ID) == 0)
+    {
+        if(!lw->arch.gfx || strcmp(lw->arch.gfx, "gfx950") != 0)
+            return rocke_h_fail(
+                lw, ROCKE_ERR_NOTIMPL, "tile.mma " ROCKE_MX16_OP_ID " requires gfx950");
+        char error[ROCKE_ERR_MSG_CAP];
+        if(rocke_mx16_operand_error(
+               op->operands, op->num_operands, op->results, op->num_results, error, sizeof error)
+           || rocke_mx16_format_error(&op->attrs, error, sizeof error))
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        int64_t sel[2] = {0, 0};
+        if(!rocke_mma_scale_sel(&op->attrs, &sel[0], &sel[1]))
+            return rocke_h_fail(
+                lw, ROCKE_ERR_VALUE, "tile.mma scale_sel must be two byte indices in 0..3");
+        const char* payload[2];
+        for(int i = 0; i < 2; ++i)
+        {
+            const rocke_value_t* v = op->operands[i];
+            payload[i] = strcmp(v->type->name, "vec<i32x8>") == 0
+                             ? rocke_h_name(lw, v)
+                             : rocke_arena_printf(&lw->b->arena,
+                                                  "__builtin_bit_cast(i32x8, %s)",
+                                                  rocke_h_name(lw, v));
+            if(!payload[i])
+                return rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory formatting an MMA operand");
+        }
+        rocke_h_emitf(lw,
+                      "f32x4 %s = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(%s, %s, %s, 0, "
+                      "0, %lld, %s, %lld, %s);",
+                      rocke_h_name(lw, op->results[0]),
+                      payload[0],
+                      payload[1],
+                      rocke_h_name(lw, op->operands[2]),
+                      (long long)sel[0],
+                      rocke_h_name(lw, op->operands[3]),
+                      (long long)sel[1],
+                      rocke_h_name(lw, op->operands[4]));
+        return lw->status;
+    }
     if(rocke_attr_get(&op->attrs, "scale_sel"))
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "tile.mma %s: scale_sel applies only to a scaled MFMA atom", op_id);
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_VALUE,
+                            "tile.mma %s: scale_sel applies only to a scaled MFMA atom",
+                            op_id);
     int tf32_count = rocke_tf32_mma_count(op_id);
     if(tf32_count)
     {

@@ -390,8 +390,13 @@ COMGR object does not change.
 - `dlevers = s:"<levers>"`: the kernel's own levers, in an op scope's syntax
   (`,` or `+` joined; `-name` turns a lever off). Each lever it names is
   decided for that kernel whatever `ROCKE_DIRECT_LEVERS` says; an op's own
-  `dlevers` scope still overrides it. An unknown name is
-  `ROCKE_DIRECT_MALFORMED`, so `compile_kernel` does not fall back to COMGR.
+  `dlevers` scope still overrides it. An unknown name, or a kernel `dlevers`
+  that is not a string, is `ROCKE_DIRECT_MALFORMED`, so `compile_kernel` does
+  not fall back to COMGR.
+  `compile_kernel` passes the kernel's `direct_levers` attribute and the
+  backend's default levers to the compiler this way, on a copy of the kernel.
+  It does not set `ROCKE_DIRECT_LEVERS`, so concurrent compiles do not see
+  each other's levers.
 
 ## Changing the compiler
 

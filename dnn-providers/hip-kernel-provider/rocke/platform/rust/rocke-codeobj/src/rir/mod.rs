@@ -231,6 +231,18 @@ pub fn unknown_levers(text: &str) -> Vec<String> {
     d.on.into_iter().chain(d.off).filter(|n| !LEVERS.contains(&n.as_str())).collect()
 }
 
+/// The names of `ROCKE_DIRECT_LEVERS` that are no lever of [`LEVERS`], as
+/// [`kernel_lever`] splits it. The variable turns levers on only, so a
+/// `-name` there is unknown too.
+pub fn unknown_env_levers() -> Vec<String> {
+    std::env::var("ROCKE_DIRECT_LEVERS").map(|v| unknown_env_lever_names(&v)).unwrap_or_default()
+}
+
+/// [`unknown_env_levers`] of the variable's value `text`.
+pub fn unknown_env_lever_names(text: &str) -> Vec<String> {
+    text.split([',', '+']).map(str::trim).filter(|n| !n.is_empty() && !LEVERS.contains(n)).map(String::from).collect()
+}
+
 /// One `dlevers` scope: the levers it turns on and off.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LeverDelta {

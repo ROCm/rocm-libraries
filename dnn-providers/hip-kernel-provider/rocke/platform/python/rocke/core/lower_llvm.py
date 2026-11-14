@@ -1795,17 +1795,14 @@ def _scale_sel(op: Op) -> Tuple[int, int]:
     """A scaled MFMA's ``scale_sel``: the byte, 0..3, of the A and of the B
     scale VGPR each lane reads (``opsel_a`` / ``opsel_b``). Byte 0 when absent.
     The C++ engine (mma.cpp) and the direct compiler accept the same values."""
+    from .arch.mfma_scale import scale_sel_error
+
     sel = op.attrs.get("scale_sel")
     if sel is None:
         return 0, 0
-    if (
-        not isinstance(sel, (list, tuple))
-        or len(sel) != 2
-        or not all(type(s) is int and 0 <= s <= 3 for s in sel)
-    ):
-        raise ValueError(
-            f"tile.mma scale_sel must be two byte indices in 0..3, got {sel!r}"
-        )
+    error = scale_sel_error(sel)
+    if error:
+        raise ValueError(error)
     return sel[0], sel[1]
 
 
@@ -1813,11 +1810,12 @@ def _lds_dma_offset(op: Op) -> int:
     """A buffer LDS-DMA op's instruction offset, 0..4095 bytes (0 when
     absent). The C++ engine (mem.cpp) and the direct compiler accept the same
     values."""
+    from .arch.mfma_scale import lds_dma_offset_error
+
     offset = op.attrs.get("offset", 0)
-    if type(offset) is not int or not 0 <= offset <= 4095:
-        raise ValueError(
-            f"{op.name} offset must be 0..4095 bytes, got {offset!r}"
-        )
+    error = lds_dma_offset_error(op.name, offset)
+    if error:
+        raise ValueError(error)
     return offset
 
 
@@ -3931,7 +3929,9 @@ class _Lowerer:
             raise NotImplementedError(f"math.{name} currently supports f32")
         self._need(f"{name}.f32")
         args = ", ".join(f"float {self._operand(v)}" for v in op.operands)
-        self._current().emit(f"  {op.result.name} = call float @llvm.{name}.f32({args})")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.{name}.f32({args})"
+        )
 
     def _op_math_exp2_fast(self, op: Op) -> None:
         (v,) = op.operands
@@ -4593,13 +4593,11 @@ class _Lowerer:
         # expansion serves both MFMA and WMMA. Native atoms -- every atom that
         # predates XF32 -- fall straight through, so their emission is unchanged.
         if "scale_sel" in op.attrs:
-            from .arch.mfma_scale import gfx950_scaled_mfma
+            from .arch.mfma_scale import scale_sel_refusal
 
-            if gfx950_scaled_mfma(op.attrs.get("op_id", "")) is None:
-                raise ValueError(
-                    f"tile.mma {op.attrs.get('op_id')}: scale_sel applies only to "
-                    "a scaled MFMA atom"
-                )
+            error = scale_sel_refusal(op.attrs.get("op_id", ""))
+            if error:
+                raise ValueError(error)
         if self._expand_emulated_mma(op):
             return
         self._backend.emit_mma(self, op)
@@ -5004,19 +5002,32 @@ class _Lowerer:
     def _op_tile_mfma_scale_f32_16x16x128_f8f6f4(self, op: Op) -> None:
         """Lower P15 MX MFMA scaled intrinsic.
 
-        Operands ``a``, ``b`` are 32-byte mantissa vectors; the scaled
-        intrinsic packs them as ``<8 x i32>``. Scales are i32 E8M0
-        bytes broadcast in-instruction; we emit them as ``i32`` to
-        match the LLVM intrinsic signature (the AMDGPU backend
-        broadcasts the byte across all 16 output rows).
+        Operands ``a``, ``b`` are 32-byte fp8e4m3 payloads (see
+        ``mfma_scale.MX16_PAYLOAD_TYPES``); the intrinsic takes them as
+        ``<8 x i32>``. Scales are i32 VGPRs; ``scale_sel`` picks the byte of
+        each that holds the E8M0 scale (``opsel_a`` / ``opsel_b``).
+
+        In the llvm20/22 11-operand form the selectors go in the immarg
+        directly before each scale, matching the llvm23 9-operand form
+        (``cbsz, blgp, opsel_a, scale_a, opsel_b, scale_b``).
 
         Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
         """
+        from .arch.mfma_scale import mx16_format_error, mx16_operand_error
+
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError(
+                "tile.mma mfma_scale_f32_16x16x128_f8f6f4 requires gfx950"
+            )
+        error = mx16_operand_error(op.operands, op.results) or mx16_format_error(
+            op.attrs
+        )
+        if error:
+            raise ValueError(error)
         a, b, c, a_scale, b_scale = op.operands
+        sel_a, sel_b = _scale_sel(op)
         self._need("mfma.scale.f32.16x16x128.f8f6f4")
-        # Bitcast a / b to <8 x i32>; they arrive as <16 x byte>-style
-        # vectors — we accept both <16 x i8>/<16 x fp8e4m3> and
-        # <8 x i32> at the IR-level and normalise here.
+        # Bitcast a / b to <8 x i32> when they arrive as 32 bytes.
         a_packed = self._fresh("mxa")
         b_packed = self._fresh("mxb")
         a_ty = _llvm_type(a.type)
@@ -5039,8 +5050,8 @@ class _Lowerer:
                 f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
                 f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
                 f"<4 x float> {self._operand(c)}, "
-                f"i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-                f"i32 0, i32 {self._operand(b_scale)})"
+                f"i32 0, i32 0, i32 {sel_a}, i32 {self._operand(a_scale)}, "
+                f"i32 {sel_b}, i32 {self._operand(b_scale)})"
             )
         else:
             self._current().emit(
@@ -5048,8 +5059,8 @@ class _Lowerer:
                 f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
                 f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
                 f"<4 x float> {self._operand(c)}, "
-                f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-                f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
+                f"i32 0, i32 0, i32 0, i32 {sel_a}, i32 {self._operand(a_scale)}, "
+                f"i32 {sel_b}, i32 {self._operand(b_scale)}, i32 0)"
             )
 
     def _op_tile_mfma_scale_mx(self, op: Op) -> None:
@@ -5084,8 +5095,8 @@ class _Lowerer:
             f"  {op.result.name} = call {acc_ty} @llvm.amdgcn.{key}("
             f"{self._operand_with_type(a)}, {self._operand_with_type(b)}, "
             f"{acc_ty} {self._operand(c)}, i32 {fa}, i32 {fb}, "
-            f"i32 {int(op.attrs.get('opsel_a', 0))}, i32 {self._operand(sa)}, "
-            f"i32 {int(op.attrs.get('opsel_b', 0))}, i32 {self._operand(sb)})"
+            f"i32 {op.attrs.get('opsel_a', 0)}, i32 {self._operand(sa)}, "
+            f"i32 {op.attrs.get('opsel_b', 0)}, i32 {self._operand(sb)})"
         )
 
     def _lower_cvt_scalef32_pk_f32_to_8bit(self, op: Op, kind: str) -> None:
@@ -5961,6 +5972,7 @@ class _Lowerer:
             f"@llvm.amdgcn.cvt.scalef32.pk.bf16.fp4(i32 {self._operand(src)}, "
             f"float {self._operand(scale)}, i32 {int(op.attrs['byte'])})"
         )
+
     def _op_tile_perm_b32(self, op: Op) -> None:
         """``v_perm_b32`` — in-lane byte select across two VGPRs (pure VALU)."""
         src0, src1, sel = op.operands
@@ -6926,7 +6938,9 @@ class _Lowerer:
 
     def _op_tile_s_getreg(self, op: Op) -> None:
         """``tile.s_getreg``: ``device_ops.xcc_id`` / ``hw_id``'s asm."""
-        self._device_asm(op, f"s_getreg_b32 $0, hwreg(HW_REG_{op.attrs['hwreg']})", "=s")
+        self._device_asm(
+            op, f"s_getreg_b32 $0, hwreg(HW_REG_{op.attrs['hwreg']})", "=s"
+        )
 
     def _op_tile_s_sleep(self, op: Op) -> None:
         """``tile.s_sleep``: ``device_ops.s_sleep``'s asm."""
@@ -6947,7 +6961,9 @@ class _Lowerer:
         bits = ["sc1"] if op.attrs["scope"] == "system" else []
         if not op.attrs["returns"]:
             cp = (" " + " ".join(bits)) if bits else ""
-            self._device_asm(op, f"global_atomic_add{x2} $0, $1, $2{cp}", "v,v,s,~{memory}")
+            self._device_asm(
+                op, f"global_atomic_add{x2} $0, $1, $2{cp}", "v,v,s,~{memory}"
+            )
             return
         cp = " " + " ".join(["sc0", *bits])
         self._device_asm(

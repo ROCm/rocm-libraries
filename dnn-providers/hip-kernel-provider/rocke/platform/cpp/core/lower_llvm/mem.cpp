@@ -1413,6 +1413,7 @@ static int64_t ll_lds_dma_offset(rocke_lower_t* L, const rocke_op_t* op)
     if(v->kind != ROCKE_ATTR_INT || v->u.i < 0 || v->u.i > 4095)
     {
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s offset must be 0..4095 bytes", op->name);
+        return 0;
     }
     return v->u.i;
 }
