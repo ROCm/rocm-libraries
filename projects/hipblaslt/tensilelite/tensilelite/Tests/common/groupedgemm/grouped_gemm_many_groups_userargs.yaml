@@ -1,0 +1,51 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported yet
+
+# grouped_gemm_many_groups.yaml with the gemm arguments passed as device user arguments.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  MaxWorkspaceSize: 3355443200
+  UseUserArgs: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      GroupedGemm:   True
+      SupportUserArgs: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 8, 1,  1,   2, 2,  2,2 ]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - SourceSwap: [true]
+        # TODO GSU=2 + Algo=MB fails kernel launch with user arguments, as in
+        # grouped_gemm_userargs.yaml; grouped_gemm_many_groups.yaml covers GSU=2.
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [8, 8, 160], [16, 16, 320], [1], [64] ]
