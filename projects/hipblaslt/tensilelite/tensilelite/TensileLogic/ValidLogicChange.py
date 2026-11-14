@@ -11,8 +11,11 @@ in the logic-corpus lane).
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from .ValidLibraryShape import library_shape_errors
 
 try:
     import yaml
@@ -286,8 +289,50 @@ def changed_logic_paths(repo_root: Path, list_file: Path) -> list[tuple[str, Pat
     return paths
 
 
+def _introduced(new_errors: list[str], base_errors: list[str]) -> list[str]:
+    """Drop each new error that the base revision already had.
+
+    Args:
+        new_errors: Messages for the changed file.
+        base_errors: Messages for the same file at the base revision.
+
+    Returns:
+        The messages the change added. A repeated message counts once per copy.
+
+    Raises:
+        No exceptions are raised.
+    """
+    remaining = Counter(base_errors)
+    introduced = []
+    for message in new_errors:
+        if remaining[message]:
+            remaining[message] -= 1
+        else:
+            introduced.append(message)
+    return introduced
+
+
+def file_errors(rel: str, data: Any) -> list[str]:
+    """Run the checks that read one revision of one file.
+
+    Args:
+        rel: Repository-relative posix path.
+        data: Parsed logic document.
+
+    Returns:
+        Error messages.
+
+    Raises:
+        No exceptions are raised.
+    """
+    return library_shape_errors(data, Path(rel))
+
+
 def logic_change_errors(rel: str, new_data: Any, base_data: Any, added: bool) -> list[str]:
     """Run every change check on one added or modified logic file.
+
+    A modified file reports only the single-revision errors that its base
+    revision did not have, so an untouched problem never fails a change.
 
     Args:
         rel: Repository-relative posix path.
@@ -301,12 +346,11 @@ def logic_change_errors(rel: str, new_data: Any, base_data: Any, added: bool) ->
     Raises:
         No exceptions are raised.
     """
-    del rel
-    return (
-        list_format_errors(new_data, base_data, added)
-        + solution_uid_errors(new_data, base_data)
-        + key_order_errors(new_data, base_data, added)
-    )
+    errors = list_format_errors(new_data, base_data, added)
+    errors += solution_uid_errors(new_data, base_data)
+    errors += key_order_errors(new_data, base_data, added)
+    base_errors = [] if added else file_errors(rel, base_data)
+    return errors + _introduced(file_errors(rel, new_data), base_errors)
 
 
 def check_changed_logic(
