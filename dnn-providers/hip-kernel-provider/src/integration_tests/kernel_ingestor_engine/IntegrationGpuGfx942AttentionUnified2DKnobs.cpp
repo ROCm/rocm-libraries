@@ -173,14 +173,14 @@ std::vector<KnobCase> knobCases()
     constexpr auto BF16 = DataType::BFLOAT16;
     constexpr auto FP16 = DataType::HALF;
     const std::array<ForcedClass, 14> forced{{
-        {64, &D64_GEOMETRIES[0], BF16, {8, 8}},
-        {64, &D64_GEOMETRIES[0], FP16, {24, 6}},
+        {64, D64_GEOMETRIES.data(), BF16, {8, 8}},
+        {64, D64_GEOMETRIES.data(), FP16, {24, 6}},
         {64, &D64_GEOMETRIES[1], BF16, {64, 8}},
         {64, &D64_GEOMETRIES[1], FP16, {64, 8}},
         {64, &D64_GEOMETRIES[2], BF16, {8, 8}},
         {64, &D64_GEOMETRIES[2], FP16, {8, 8}},
-        {128, &D128_GEOMETRIES[0], BF16, {48, 3}},
-        {128, &D128_GEOMETRIES[0], FP16, {64, 8}},
+        {128, D128_GEOMETRIES.data(), BF16, {48, 3}},
+        {128, D128_GEOMETRIES.data(), FP16, {64, 8}},
         {128, &D128_GEOMETRIES[1], BF16, {20, 10}},
         {128, &D128_GEOMETRIES[2], BF16, {16, 2}},
         {128, &D128_GEOMETRIES[3], BF16, {16, 4}},
