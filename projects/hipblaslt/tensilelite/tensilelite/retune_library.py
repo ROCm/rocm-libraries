@@ -27,10 +27,16 @@ from . import ClientWriter
 from . import LibraryIO
 from . import LibraryLogic
 from .Common.GlobalParameters import globalParameters, assignGlobalParameters, restoreDefaultGlobalParameters, __version__
-from .Common.Utilities import print1, printWarning, ensurePath as ensurePathUtil
+from .Common.Utilities import print1, printWarning, printExit, ensurePath as ensurePathUtil
 from .Common.Constants import HR
+from .Common.Architectures import baseArchName, gfxToIsa
+from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from .Common.Types import makeDebugConfig
 from .run import addCommonArguments, argUpdatedGlobalParameters
 from .SolutionStructs import ProblemSizes
+from .SolutionStructs.Solution import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
+from .Toolchain.Assembly import makeAssemblyToolchain
+from .Toolchain.Source import makeSourceToolchain
 from .Toolchain.Validators import validateToolchain
 
 from pathlib import Path
@@ -40,7 +46,6 @@ import copy
 import os
 import shutil
 import sys
-from pathlib import Path
 
 workingDirectoryStack = []
 def pushWorkingPath( foldername ):
@@ -67,10 +72,25 @@ def setWorkingPath( fullPathName ):
   globalParameters["WorkingPath"] = ensurePath(fullPathName)
 
 
-def parseCurrentLibrary(libPath, sizePath):
+def libraryArchitectureName(libYaml):
+    if isinstance(libYaml, dict):
+        arch = libYaml.get("ArchitectureName")
+    elif isinstance(libYaml, list) and len(libYaml) > 2:
+        arch = libYaml[2]
+        if isinstance(arch, dict):
+            arch = arch.get("Architecture")
+    else:
+        return None
+    return baseArchName(arch) if isinstance(arch, str) else None
+
+
+def parseCurrentLibrary(libPath, sizePath, assembler, isaInfoMap, lazyLibraryLoading):
     libYaml = LibraryIO.read(libPath)
-    # parseLibraryLogicData mutates the original data, so make a copy
-    fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), libPath)
+    if not isaInfoMap:
+        printExit(f"No ISA capability map for {libPath}")
+    fields = LibraryIO.parseLibraryLogicData(
+        copy.deepcopy(libYaml), libPath, assembler, False, True, False,
+        isaInfoMap, lazyLibraryLoading)
     (_, _, problemType, solutions, exactLogic, _, _) = fields
 
     # get performance metric from list or dict logic formats
@@ -97,7 +117,9 @@ def parseCurrentLibrary(libPath, sizePath):
     return (libYaml, solutions, problemSizes)
 
 
-def runBenchmarking(solutions, problemSizes, outPath, update, cxxCompiler: str, cCompiler: str, assembler: str, offloadBundler: str):
+def runBenchmarking(solutions, problemSizes, outPath, update, cxxCompiler, cCompiler,
+                    asmToolchain, srcToolchain, isaInfoMap, deviceId, gfxName,
+                    debugConfig, problemType):
     # TODO some copy-pasting from BenchmarkProblems.benchmarkProblemType
     # could use a refactor to elimate duplicated code
     ClientWriter.getClientExecutablePath()
@@ -114,23 +136,39 @@ def runBenchmarking(solutions, problemSizes, outPath, update, cxxCompiler: str, 
 
     if update:
         globalParameters["LibraryUpdateFile"] = os.path.join(resultsDir, "update.yaml")
+    biasTypes = problemType["BiasDataTypeList"]
+    gateTypes = problemType["GateResidualDataTypeList"]
+    biasTypeArgs = BiasTypeArgs(problemType, [biasTypes[0]]) if biasTypes else ""
+    gateTypeArgs = GateTypeArgs(problemType, [gateTypes[0]]) if gateTypes else ""
+    factorDimArgs = FactorDimArgs(problemType, [0])
+    activationArgs = (ActivationArgs(problemType, [[{"Enum": "relu"}]])
+                      if problemType["ActivationType"] in ["all", "hipblaslt_all"]
+                      else "")
+
 
     pushWorkingPath(shortName)
     pushWorkingPath("source")
-    BenchmarkProblems.writeBenchmarkFiles(benchmarkDir, solutions, problemSizes , "", "", "", "", shortName, [], cxxCompiler, assembler, offloadBundler)
+    BenchmarkProblems.writeBenchmarkFiles(
+        benchmarkDir, solutions, problemSizes, biasTypeArgs, factorDimArgs,
+        activationArgs, [False], shortName, [], asmToolchain, srcToolchain,
+        Path(sourceDir), debugConfig, gateTypeArgs, deviceId, gfxName,
+        isaInfoMap, {}, [gfxName])
     popWorkingPath() # source
 
     libraryLogicPath = None
     forBenchmark = True
     # TODO make this work with TileAware selection
-    returncode = ClientWriter.runClient(libraryLogicPath, forBenchmark, False, cxxCompiler, cCompiler)
+    returncode = ClientWriter.runClient(
+        libraryLogicPath, forBenchmark, False, cxxCompiler, cCompiler,
+        Path(benchmarkDir), configPaths=[os.path.join(sourceDir, "ClientParameters.ini")])
     if returncode:
         printWarning("Benchmarking Client exited with code {}. Trying to continue".format(returncode))
 
     # write solutions yaml file
     for sol in solutions:
         sol["ISA"] = list(sol["ISA"])
-    LibraryIO.writeSolutions(libraryFile, problemSizes, "", solutions)
+    LibraryIO.writeSolutions(libraryFile, problemSizes, biasTypeArgs, activationArgs,
+                             solutions, gateTypeArgs=gateTypeArgs)
 
     popWorkingPath() # benchmark
 
@@ -163,6 +201,7 @@ def TensileRetuneLibrary(userArgs):
                            help="Method for making new library logic file")
 
     addCommonArguments(argParser)
+    argParser.set_defaults(LibraryFormat="msgpack")
     args = argParser.parse_args(userArgs)
 
     libPath = args.LogicFile
@@ -192,16 +231,39 @@ def TensileRetuneLibrary(userArgs):
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     restoreDefaultGlobalParameters()
 
-    assignGlobalParameters({"LibraryFormat": libraryFormat, "OutputPath": outputPath})
+    globalParameters["WorkingPath"] = str(outputPath)
+    logicArchName = libraryArchitectureName(LibraryIO.read(libPath))
+    if not logicArchName:
+        printExit(f"Library logic file {libPath} names no architecture")
+    isaInfoMap = makeIsaInfoMap([gfxToIsa(logicArchName)], str(cxxCompiler))
+    applyArchCapOverrides(isaInfoMap, [logicArchName])
+    assignGlobalParameters({"LibraryFormat": libraryFormat, "OutputPath": outputPath}, isaInfoMap)
+    globalParameters["SleepPercent"] = 0
 
     overrideParameters = argUpdatedGlobalParameters(args)
     for key, value in overrideParameters.items():
         print1("Overriding {0}={1}".format(key, value))
         globalParameters[key] = value
 
-    # parse library logic then setup and run benchmarks
-    (rawYaml, solutions, problemSizes) = parseCurrentLibrary(libPath, sizePath)
-    runBenchmarking(solutions, problemSizes, outputPath, update, cxxCompiler, cCompiler, assembler, offloadBundler)
+    asmToolchain = makeAssemblyToolchain(
+        assembler, offloadBundler, globalParameters["CodeObjectVersion"],
+        globalParameters["BuildIdKind"], globalParameters["AsmDebug"])
+    srcToolchain = makeSourceToolchain(
+        cxxCompiler, offloadBundler, globalParameters["AsanBuild"],
+        globalParameters["BuildIdKind"], save_temps=False)
+    debugConfig = makeDebugConfig({
+        "SplitGSU": False, "PrintSolutionRejectionReason": True,
+        "PrintIndexAssignmentInfo": False,
+    })
+    rawYaml, solutions, problemSizes = parseCurrentLibrary(
+        libPath, sizePath, asmToolchain.assembler, isaInfoMap,
+        globalParameters["LazyLibraryLoading"])
+    if not solutions:
+        printExit(f"No solutions found in {libPath}")
+    runBenchmarking(
+        solutions, problemSizes, outputPath, update, cxxCompiler, cCompiler,
+        asmToolchain, srcToolchain, isaInfoMap, args.device, logicArchName,
+        debugConfig, solutions[0]["ProblemType"])
 
     if remake:
         # write library logic file
@@ -212,15 +274,20 @@ def TensileRetuneLibrary(userArgs):
                 "DeviceNames": rawYaml.get("DeviceNames"),
             }
         else:
+            arch = rawYaml[2]
             logicHeader = {
                 "ScheduleName": rawYaml[1],
-                "ArchitectureName": rawYaml[2],
+                "ArchitectureName": arch.get("Architecture") if isinstance(arch, dict) else arch,
                 "DeviceNames": rawYaml[3],
             }
         LibraryLogic.main(
             logicHeader,
-            cxxCompiler,
-            outputPath
+            asmToolchain.assembler,
+            outputPath,
+            debugConfig.splitGSU,
+            debugConfig.printSolutionRejectionReason,
+            debugConfig.printIndexAssignmentInfo,
+            isaInfoMap
         )
 
     if update:
