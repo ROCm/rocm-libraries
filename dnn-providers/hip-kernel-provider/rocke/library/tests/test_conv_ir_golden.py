@@ -3763,6 +3763,52 @@ def cases():
             build_direct_dgrad_wmma_case(_dtype, **_over),
         )
 
+    # --- conv_direct_dgrad_pp_mfma: LDS-DMA ping-pong MFMA dgrad (gfx950) ---
+    # buffer_load ... lds staging, two wave ranks with s_setprio ping-pong,
+    # per-buffer LDS alias scopes, in-kernel transposed weights read with
+    # ds_read_b64_tr_b16. The C++ twin is gated (every knob, both dtypes) by
+    # library/tests/parity/conv_direct_dgrad_pp_mfma_emit.*.
+    def build_direct_dgrad_pp_mfma_case(dtype, KH, block_k):
+        def _build():
+            from kernels.common.conv_direct_dgrad_pp_mfma import (
+                DgradPpMfmaSpec,
+                build_dgrad_pp_mfma,
+                dgrad_pp_mfma_problem,
+            )
+            from kernels.common.conv_direct_grouped import DirectConvProblem
+
+            p = DirectConvProblem(
+                N=2,
+                H=20,
+                W=24,
+                groups=1,
+                cpg=72,
+                kpg=96,
+                KH=KH,
+                KW=KH,
+                PAD=(KH - 1) // 2,
+                stride=1,
+                dtype=dtype,
+            )
+            return build_dgrad_pp_mfma(
+                DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(p), block_k=block_k),
+                arch="gfx950",
+            )
+
+        return _build
+
+    for _case_id, _dtype, _KH, _bk in (
+        ("bf16_k3_bk128", "bf16", 3, 128),
+        ("fp16_k3_bk256", "fp16", 3, 256),
+        ("bf16_k5_bk128", "bf16", 5, 128),
+    ):
+        add(
+            "conv_direct_dgrad_pp_mfma",
+            f"conv_direct_dgrad_pp_mfma/gfx950/{_case_id}",
+            "gfx950",
+            build_direct_dgrad_pp_mfma_case(_dtype, _KH, _bk),
+        )
+
     # --- conv_direct_fwd_wmma: wave32 WMMA direct forward (gfx1250) ---
     # 3-D TDM halo and weight staging, shifted halo reads per tap, TDM
     # epilogue. Every case needs llvm23 (TDM), so the other flavors record

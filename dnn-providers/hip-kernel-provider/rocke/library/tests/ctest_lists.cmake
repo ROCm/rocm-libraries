@@ -48,6 +48,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_direct_fwd_gstream_wmma.py"
     "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
     "tests/library/tests/test_direct_dgrad_wmma.py"
+    "tests/library/tests/test_direct_dgrad_pp_mfma.py"
     "tests/library/tests/test_direct_fwd_wmma.py"
     "tests/library/tests/test_conv_fwd_split_k.py"
     "tests/library/tests/test_conv_winograd_fwd_cpu.py"

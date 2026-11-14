@@ -35,6 +35,7 @@ extern "C" {
 #include "rocke/arena.h"
 #include "rocke/instance_conv_dgrad_patch_wmma.h"
 #include "rocke/instance_conv_dgrad_smallc_wmma.h"
+#include "rocke/instance_conv_direct_dgrad_pp_mfma.h"
 #include "rocke/instance_conv_direct_dgrad_wmma.h"
 #include "rocke/instance_conv_direct_dw_fwd_wmma.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
@@ -1343,6 +1344,101 @@ py::tuple conv_direct_dgrad_wmma_describe(const py::dict& d, const std::string& 
                           rocke_direct_dgrad_wmma_lds_bytes(&s));
 }
 
+/* ======================== conv_direct_dgrad_pp_mfma ======================= */
+
+/* LDS-DMA ping-pong MFMA direct dgrad (gfx950). The dict mirrors
+ * DgradPpMfmaSpec with the (transposed, forward-pass) problem nested. */
+rocke_dgrad_pp_mfma_spec_t ddpp_build_spec(const py::dict& d, std::deque<std::string>& store)
+{
+    auto keep = [&](const std::string& s) -> const char* {
+        store.push_back(s);
+        return store.back().c_str();
+    };
+    rocke_dgrad_pp_mfma_spec_t s = rocke_dgrad_pp_mfma_spec_default();
+    if(!d.contains("problem") || !py::isinstance<py::dict>(d["problem"]))
+        throw py::value_error("DgradPpMfmaSpec requires a problem dictionary");
+    {
+        py::dict pd = d["problem"].cast<py::dict>();
+        const char* required[] = {"N", "H", "W", "groups", "cpg", "kpg"};
+        for(const char* key : required)
+        {
+            if(!pd.contains(key))
+                throw py::value_error(std::string("DgradPpMfmaSpec.problem requires ") + key);
+        }
+        std::string v;
+        fill_direct_conv_problem(&s.problem, pd);
+        /* dict_str reads None as absent. An explicit None dtype is rejected
+         * (Python's validator refuses it) rather than read as the fp16
+         * default; only an omitted dtype takes the default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error("DgradPpMfmaSpec.problem.dtype must be a string, not None");
+        if(dict_str(pd, "dtype", v))
+            s.problem.dtype = keep(v);
+    }
+    {
+        std::string v;
+        if(dict_str(d, "name", v))
+            s.name = keep(v);
+    }
+    s.block_k = dict_int(d, "block_k", s.block_k);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    return s;
+}
+
+std::string conv_direct_dgrad_pp_mfma_lower_llvm(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_pp_mfma_spec_t s = ddpp_build_spec(d, store);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t st = rocke_dgrad_pp_mfma_lower_to_llvm(
+        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_lowered(st, ll, err, "rocke_library_engine.conv_direct_dgrad_pp_mfma_lower_llvm");
+}
+
+std::string conv_direct_dgrad_pp_mfma_serialize_ir(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_SERIALIZE_BODY("rocke_library_engine.conv_direct_dgrad_pp_mfma_serialize_ir",
+                                rocke_dgrad_pp_mfma_spec_t,
+                                ddpp_build_spec,
+                                rocke_build_dgrad_pp_mfma_new(&b, &s, arch.c_str()));
+}
+
+std::vector<std::string> conv_direct_dgrad_pp_mfma_verify(const py::dict& d,
+                                                          const std::string& arch)
+{
+    require_arch(arch);
+    ROCKE_FAMILY_VERIFY_BODY("rocke_library_engine.conv_direct_dgrad_pp_mfma_verify",
+                             rocke_dgrad_pp_mfma_spec_t,
+                             ddpp_build_spec,
+                             rocke_build_dgrad_pp_mfma_new(&b, &s, arch.c_str()));
+}
+
+/* is_valid_dgrad_pp_mfma_spec + kernel_name / grid / lds_bytes in one call:
+ * -> (ok, reason, kernel_name, (gx, gy, gz), lds_bytes). */
+py::tuple conv_direct_dgrad_pp_mfma_describe(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    std::deque<std::string> store;
+    rocke_dgrad_pp_mfma_spec_t s = ddpp_build_spec(d, store);
+    char reason[512];
+    char name[512];
+    int grid[3] = {0, 0, 0};
+    bool ok = rocke_dgrad_pp_mfma_is_valid_spec(&s, arch.c_str(), reason, sizeof reason);
+    if(rocke_dgrad_pp_mfma_kernel_name(&s, name, sizeof name) != ROCKE_OK)
+        name[0] = '\0';
+    if(ok)
+        rocke_dgrad_pp_mfma_grid(&s, grid);
+    return py::make_tuple(ok,
+                          std::string(reason),
+                          std::string(name),
+                          py::make_tuple(grid[0], grid[1], grid[2]),
+                          rocke_dgrad_pp_mfma_lds_bytes(&s));
+}
+
 /* ======================== conv_direct_fwd_wmma ============================ */
 
 /* Wave32 WMMA direct forward (gfx1250). The dict mirrors DirectFwdWmmaSpec
@@ -2011,6 +2107,14 @@ void register_conv(py::module_& m)
          &conv_direct_dgrad_wmma_verify);
     m.def("conv_direct_dgrad_wmma_describe",
           &conv_direct_dgrad_wmma_describe,
+          py::arg("spec"),
+          py::arg("arch"));
+    reg3("conv_direct_dgrad_pp_mfma",
+         &conv_direct_dgrad_pp_mfma_lower_llvm,
+         &conv_direct_dgrad_pp_mfma_serialize_ir,
+         &conv_direct_dgrad_pp_mfma_verify);
+    m.def("conv_direct_dgrad_pp_mfma_describe",
+          &conv_direct_dgrad_pp_mfma_describe,
           py::arg("spec"),
           py::arg("arch"));
     reg3("conv_direct_fwd_wmma",

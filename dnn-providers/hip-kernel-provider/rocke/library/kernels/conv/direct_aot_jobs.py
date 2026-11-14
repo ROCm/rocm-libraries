@@ -24,6 +24,7 @@ from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
     DIRECT_DEPTHWISE_WIN_FWD as _DW_WIN_FWD,
     DIRECT_DGRAD_PATCH_WMMA as _DGRAD_PATCH,
+    DIRECT_DGRAD_PP_MFMA as _DGRAD_PP_MFMA,
     DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
@@ -619,6 +620,11 @@ DGRAD_WMMA_DILATED_KNOBS = (
     (2, 4, 4, 8, 32, 1, 32, 2, True),
     (2, 4, 4, 8, 64, 1, 32, 2, True),
 )
+# LDS-DMA ping-pong MFMA dgrad (direct_dgrad_pp_mfma, gfx950): "same"-padded
+# square filters and the output-channel block. 7x7 fits LDS only below the
+# 128-channel block its transposing weight reads need.
+DGRAD_PP_MFMA_FILTERS = (3, 5)
+DGRAD_PP_MFMA_BLOCK_K = (128, 256)
 WGRAD_MFMA_K = (32,)
 # Wave32 WMMA direct forward (direct_fwd_wmma): (waves_k, waves_p, tiles_k,
 # tiles_p, tile_w, tile_n, ck, stages, prefetch, split_barrier,
@@ -1645,6 +1651,15 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad, dh, dw in DGRAD_WMMA_DILATIONS
         ),
     ),
+    # LDS-DMA ping-pong dgrad on wave64 MFMA (gfx950): dense, stride 1, odd
+    # square filters with "same" padding; C and K runtime.
+    _DGRAD_PP_MFMA: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
+            for k in DGRAD_PP_MFMA_FILTERS
+        ),
+    ),
     # Stem dgrad on wave32 WMMA: patch embeddings (stride == filter, no
     # padding) of 3-channel images, and the overlapping 3- / 4-channel stems
     # of the reference workloads. dX channels baked, dY channels runtime.
@@ -2227,6 +2242,11 @@ def _knob_grid(
                     k_atoms=ka,
                     m_tiles=mt,
                 )
+    elif variant == _DGRAD_PP_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and transposing LDS reads: gfx950 only
+        for bk in DGRAD_PP_MFMA_BLOCK_K:
+            yield dict(block_k=bk)
     elif variant == _DGRAD_WMMA:
         from rocke.core.arch import ArchTarget
 

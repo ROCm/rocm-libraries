@@ -474,6 +474,17 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_dgrad_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DgradPpMfmaSpec` -> flat dict (the transposed forward-pass
+    problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        block_k=spec.block_k,
+        wave_size=spec.wave_size,
+    )
+
+
 def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectFwdWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -1107,6 +1118,47 @@ def lower_conv_direct_dgrad_wmma(
         py_fn=py_fn,
         cpp_ll_fn=lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         cpp_ir_fn=lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        spec_name=name_of(spec),
+    )
+
+
+def lower_conv_direct_dgrad_pp_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> GemmLowerResult:
+    """Lower a :class:`DgradPpMfmaSpec` (the gfx950 LDS-DMA ping-pong MFMA
+    direct dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dgrad_pp_mfma import build_dgrad_pp_mfma
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        k = build_dgrad_pp_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from rocke.core.ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    # The engine is imported on the C++ path only: backend="python" needs no
+    # rocke_library_engine.
+    def eng():
+        return import_engine(ENGINE_MODULE)
+
+    sd = conv_direct_dgrad_pp_mfma_spec_to_dict(spec)
+    return lower_family(
+        family="conv_direct_dgrad_pp_mfma",
+        arch=arch,
+        backend=backend,
+        want_ir=want_ir,
+        py_fn=py_fn,
+        cpp_ll_fn=lambda: eng().conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch=arch),
+        cpp_ir_fn=lambda: eng().conv_direct_dgrad_pp_mfma_serialize_ir(sd, arch=arch),
         spec_name=name_of(spec),
     )
 

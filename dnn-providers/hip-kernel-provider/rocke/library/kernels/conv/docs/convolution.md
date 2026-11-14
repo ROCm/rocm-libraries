@@ -5,6 +5,7 @@ This page covers:
 - `library/kernels/common/conv_implicit_gemm.py`
 - `library/kernels/common/conv_direct_grouped.py`
 - `library/kernels/common/conv_direct_nongrouped.py`
+- `library/kernels/common/conv_direct_dgrad_pp_mfma.py` (gfx950 direct dgrad)
 - `library/kernels/common/conv_direct_wgrad_tiled.py`,
   `library/kernels/common/conv_direct_dw_wgrad.py`,
   `library/kernels/common/conv_direct_wgrad_gather.py`,
@@ -1318,6 +1319,58 @@ packed super-group under the phase decomposition), `DGRAD_WMMA_STRIDED_KNOBS`,
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_wmma`). The C++ twin
 covers every knob; the byte-identity gate is
 `library/tests/parity/conv_direct_dgrad_wmma_emit.{c,py}` (llvm23 lane).
+
+## Direct Dgrad on MFMA with LDS DMA (gfx950)
+
+`library/kernels/common/conv_direct_dgrad_pp_mfma.py`, spec `DgradPpMfmaSpec`,
+builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`).
+A dense (`groups == 1`) stride-1 dgrad for gfx950 (wave64,
+`mfma_f32_16x16x32`), computed as the forward pass over the transposed problem
+(`dgrad_pp_mfma_problem`: dY in, dX out, padding `dil_h * (KH - 1) - PAD`
+per axis). The spec's problem is that forward pass: its `cpg` is the dgrad's
+K and its `kpg` the dgrad's C. The arch gate reads `ArchTarget` capabilities
+(wave64, `ds_read_b64_tr_b16`, 16-byte `buffer_load ... lds`,
+`mfma_f32_16x16x32`), which of the known targets only gfx950 has.
+
+A workgroup of 8 waves owns a 16x16 dX pixel tile and `block_k` (128 or 256)
+dX channels, and walks the dY channels in chunks of 64:
+
+- every operand byte is staged with `buffer_load ... lds` (16 bytes per lane,
+  4 for the narrow tail of a halo row), never through VGPRs; the
+  bank-conflict-free LDS layout is a 16-byte granule XOR applied on the global
+  side;
+- the waves form two ranks of 4: rank 0 streams the next filter tap's weights
+  into a double buffer, rank 1 the next chunk's dY halo
+  `[16 + KH - 1][16 + KW - 1][64]` into the other input buffer, a few 1 KiB
+  pieces per step;
+- the KRSC filter is read flipped and transposed in-kernel: a tap's weights
+  are staged as `[64 dY channels][block_k dX channels]` with granule `g` of
+  row `r` at slot `g ^ 2 * (r % 4 + 4 * ((r / 8) % 2))`, and the A fragments
+  are read with two `ds_read_b64_tr_b16` per operand, so there is no weight
+  pre-pass;
+- rank 1 runs one barrier behind; every step (one tap, one 32-channel half of
+  the chunk) is `reads + DMA issue; barrier; s_setprio 1; MFMAs; s_setprio 0;
+  barrier`, so one rank's MFMAs overlap the other rank's fragment reads and
+  DMA issue. The `vmcnt` waits are explicit, every buffer is its own LDS
+  allocation (`lds_alias_scopes`), and the chunk loop is unrolled twice so
+  each read names its buffer statically.
+
+Runtime (kernargs, the forward direct-conv block over the transposed problem):
+batch, extents and both channel counts. Build-time: the filter, padding,
+dtype and `block_k`. Constraints: square odd filters, stride 1, no dilation,
+"same" padding on both axes (an explicit `pad_w` is flipped with `PAD`),
+every extent and channel count at least 1, the dgrad's K a multiple of 8 and
+C a multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 only
+at `block_k` 128, 7x7 not at all), and one dY image, one dX image and the
+filter each at most `INT32_MAX` bytes (the buffer descriptors span them and a
+masked lane reads at that offset), with an i32 block count. The AOT
+grid is `DGRAD_PP_MFMA_FILTERS` (3, 5) times `DGRAD_PP_MFMA_BLOCK_K`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_pp_mfma`, a
+single-kernel forward-ABI step of `DIRECT_DGRAD_FPROP_SINGLE`); a binary is
+offered where at least half of its padded tile grid is real work. The C++
+twin covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_dgrad_pp_mfma_emit.{c,py}`, the GPU numeric
+test `library/tests/test_direct_dgrad_pp_mfma.py`.
 
 ## Direct Forward on WMMA (gfx1250)
 
