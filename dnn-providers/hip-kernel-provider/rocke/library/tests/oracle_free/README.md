@@ -6,6 +6,10 @@ every legal score equal, so the softmax row for query `q` is uniform over its
 legal key set `A(q)`. Each expected output follows from legal-key arithmetic
 alone, rounded correctly into the subject dtype.
 
+A separate check on the same zero-Q launches, which tests where the kernel
+writes its output and that it writes nothing outside it, is described in
+[README_codeword.md](README_codeword.md).
+
 ## Exposures
 
 Each case runs `Sk / D + 1` launches on the same zero-Q, finite, nonconstant K:
