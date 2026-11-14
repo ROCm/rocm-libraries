@@ -277,6 +277,62 @@ static void ShrinkToFind10Results(std::vector<Solution>& found)
     found = std::move(out);
 }
 
+/// Restores invokers for find-db solutions loaded in a fresh process/handle.
+/// Only the best solution of every algorithm is prepared and registered as the
+/// find 1.0 result, mirroring what FindConvolution() returns after
+/// ShrinkToFind10Results(). Kernels are taken from the kernel cache and tuning
+/// parameters from perf-db, so no benchmarking happens here. Returns false if
+/// any of the solutions cannot be restored, so the caller can fall back to a
+/// regular search.
+static bool RebuildInvokersFromFindDb(ExecutionContext ctx,
+                                      const conv::ProblemDescription& problem,
+                                      std::vector<Solution> cached)
+{
+    problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
+    ShrinkToFind10Results(cached);
+
+    const auto config = problem.MakeNetworkConfig();
+    auto& handle      = ctx.GetStream();
+
+    try
+    {
+        for(const auto& sol : cached)
+        {
+            const auto& id = sol.GetSolver();
+            if(!id.IsValid())
+            {
+                MIOPEN_LOG_I2("Find-db: invalid solver id in cached record");
+                return false;
+            }
+
+            const auto algo = AlgorithmName{id.GetAlgo(problem.GetDirection())};
+
+            if(const auto invoker = handle.GetInvoker(config, id))
+            {
+                handle.RegisterInvoker(*invoker, config, id.ToString(), algo);
+                continue;
+            }
+
+            if(!id.GetSolver().IsApplicable(ctx, problem))
+            {
+                MIOPEN_LOG_I2("Find-db: cached solver " << id.ToString()
+                                                        << " is not applicable anymore");
+                return false;
+            }
+
+            PrepareInvoker(ctx, problem, config, id);
+        }
+    }
+    catch(const std::exception& ex)
+    {
+        MIOPEN_LOG_W("Find-db: failed to rebuild invokers from cached record: " << ex.what());
+        return false;
+    }
+
+    return true;
+}
+
 MIOPEN_INTERNALS_EXPORT
 std::vector<solver::ConvSolution>
 GetConvSolutions(const ExecutionContext& ctx,
@@ -591,7 +647,10 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
                 return ret;
             },
             /*path_suffix=*/"",
-            &invoke_ctx);
+            &invoke_ctx,
+            [&](const std::vector<Solution>& cached) {
+                return RebuildInvokersFromFindDb(ctx, problem, cached);
+            });
     }
 
     if(env::enabled(MIOPEN_DEBUG_COMPILE_ONLY))
