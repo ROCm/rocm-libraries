@@ -101,6 +101,8 @@ typedef enum {
   HIPBLASLT_EPILOGUE_SIGMOID = 1024,              /**<Apply sigmoid activation function pointwise. */
   HIPBLASLT_EPILOGUE_SWISH_EXT = 65536,           /**<Apply Swish pointwise transform to the results (``x:=Swish(x, 1)``).*/
   HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,      /**<Apply Bias and then Swish transform.*/
+  HIPBLASLT_EPILOGUE_SWISH_AUX_EXT = 65664,       /**<Apply Swish transform to D and output the activation input in AUX.*/
+  HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT = 65668,  /**<Apply Bias and then Swish transform to D and output the biased activation input in AUX.*/
   HIPBLASLT_EPILOGUE_CLAMP_EXT = 131072,          /**<Apply pointwise clamp to the results (``x:=max(alpha, min(x, beta))``).*/
   HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,     /**<Apply Bias and then clamp.*/
   HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT = 131200,      /**<Output GEMM results before applying clamp transform.*/
