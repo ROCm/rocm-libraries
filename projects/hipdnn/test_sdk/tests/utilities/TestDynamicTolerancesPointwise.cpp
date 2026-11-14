@@ -6,7 +6,9 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuDeviceExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseErrorClassification.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/ReferencePointwiseBase.hpp>
 #include <vector>
 
 using namespace hipdnn_data_sdk::types;
@@ -387,6 +389,39 @@ TEST(TestClassifyPointwiseOp, OnePerClassCorrect)
               PointwiseErrorClass::TRANSCENDENTAL_BWD);
     EXPECT_EQ(classifyPointwiseOp(PointwiseMode::GELU_FWD), PointwiseErrorClass::COMPOSITE_FWD);
     EXPECT_EQ(classifyPointwiseOp(PointwiseMode::GELU_BWD), PointwiseErrorClass::COMPOSITE_BWD);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::IDENTITY), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::CEIL), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::CMP_EQ), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::CMP_LT), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::LOGICAL_OR), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::LOGICAL_NOT), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::GEN_INDEX), PointwiseErrorClass::BITWISE);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::ADD_SQUARE), PointwiseErrorClass::LINEAR);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::RSQRT), PointwiseErrorClass::RATIONAL);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::LOG), PointwiseErrorClass::TRANSCENDENTAL_FWD);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::TAN), PointwiseErrorClass::TRANSCENDENTAL_FWD);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::ERF), PointwiseErrorClass::TRANSCENDENTAL_FWD);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::ELU_BWD), PointwiseErrorClass::TRANSCENDENTAL_BWD);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::SOFTPLUS_FWD), PointwiseErrorClass::COMPOSITE_FWD);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::GELU_APPROX_TANH_BWD),
+              PointwiseErrorClass::COMPOSITE_BWD);
+    EXPECT_EQ(classifyPointwiseOp(PointwiseMode::SWISH_BWD), PointwiseErrorClass::COMPOSITE_BWD);
+
+    // Tolerance increases with error class (bitwise < linear < rational < transcendental < composite)
+    // Tolerance of backward modes exceed their forward counterparts
+    const auto tolerance = [](PointwiseMode mode) {
+        return calculatePointwiseTolerance<float, float, float>(1.0, classifyPointwiseOp(mode));
+    };
+    EXPECT_LT(tolerance(PointwiseMode::FLOOR), tolerance(PointwiseMode::ADD_SQUARE));
+    EXPECT_LT(tolerance(PointwiseMode::ADD_SQUARE), tolerance(PointwiseMode::DIV));
+    EXPECT_LT(tolerance(PointwiseMode::DIV), tolerance(PointwiseMode::EXP));
+    EXPECT_LT(tolerance(PointwiseMode::EXP), tolerance(PointwiseMode::SOFTPLUS_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::ELU_BWD), tolerance(PointwiseMode::ELU_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::GELU_BWD), tolerance(PointwiseMode::GELU_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::GELU_APPROX_TANH_BWD),
+              tolerance(PointwiseMode::GELU_APPROX_TANH_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::SWISH_BWD), tolerance(PointwiseMode::SWISH_FWD));
+    EXPECT_GT(tolerance(PointwiseMode::SOFTPLUS_BWD), tolerance(PointwiseMode::SOFTPLUS_FWD));
 }
 
 // Exercise every enum value for branch coverage; verify result is a valid class
@@ -402,6 +437,65 @@ TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
         EXPECT_LE(static_cast<uint8_t>(errorClass),
                   static_cast<uint8_t>(PointwiseErrorClass::COMPOSITE_BWD))
             << "invalid class for " << EnumNamesPointwiseMode()[static_cast<int>(mode)];
+
+        // Tolerances must be positive but small relative to the value scale for every mode
+        const auto name = std::string(EnumNamesPointwiseMode()[static_cast<int>(mode)]);
+        EXPECT_GT((calculatePointwiseTolerance<float, float, float>(1.0, errorClass)), 0.0f)
+            << name;
+        EXPECT_GT((calculatePointwiseTolerance<half, half, float>(1.0, errorClass)), 0.0f) << name;
+        EXPECT_GT((calculatePointwiseTolerance<bfloat16, bfloat16, float>(1.0, errorClass)), 0.0f)
+            << name;
+        EXPECT_LT((calculatePointwiseTolerance<float, float, float>(1.0, errorClass)), 1e-4f)
+            << name;
+        EXPECT_LT((calculatePointwiseTolerance<half, half, float>(1.0, errorClass)), 0.05f) << name;
+        EXPECT_LT((calculatePointwiseTolerance<bfloat16, bfloat16, float>(1.0, errorClass)), 0.05f)
+            << name;
+    }
+
+    // The float evaluation of the unary modes that are not exact (EXP, LOG, SQRT, RSQRT, RECIPROCAL,
+    // SIN, TAN, ERF, ELU_FWD, SOFTPLUS_FWD), run through the CPU reference with float compute, must
+    // stay within the tolerance of their class relative to the exact (double) result. IDENTITY,
+    // CEIL, FLOOR, LOGICAL_NOT and GEN_INDEX are exact and are not part of this table.
+    struct UnaryCase
+    {
+        PointwiseMode mode;
+        double input;
+        double exact;
+    };
+
+    const std::vector<UnaryCase> allCases = {
+        {PointwiseMode::EXP, 1.5, std::exp(1.5)},
+        {PointwiseMode::LOG, 2.5, std::log(2.5)},
+        {PointwiseMode::SQRT, 3.0, std::sqrt(3.0)},
+        {PointwiseMode::RSQRT, 3.0, 1.0 / std::sqrt(3.0)},
+        {PointwiseMode::RECIPROCAL, 3.0, 1.0 / 3.0},
+        {PointwiseMode::SIN, 1.2, std::sin(1.2)},
+        {PointwiseMode::TAN, 0.7, std::tan(0.7)},
+        {PointwiseMode::ERF, 0.8, std::erf(0.8)},
+        {PointwiseMode::ELU_FWD, -1.3, std::exp(-1.3) - 1.0},
+        {PointwiseMode::SOFTPLUS_FWD, 0.9, std::log(1.0 + std::exp(0.9))},
+    };
+
+    for(const auto& testCase : allCases)
+    {
+        hipdnn_data_sdk::utilities::Tensor<float> input({1, 1, 1, 1});
+        hipdnn_data_sdk::utilities::Tensor<float> output({1, 1, 1, 1});
+        input.fillWithValue(static_cast<float>(testCase.input));
+
+        hipdnn_test_sdk::utilities::ReferencePointwiseBase<
+            hipdnn_test_sdk::utilities::CpuDeviceExecutor<float, float>,
+            float,
+            float>::pointwiseCompute<float, float>(testCase.mode, output, input);
+
+        const double scale = isBoundedOutput(testCase.mode)
+                                 ? 1.0
+                                 : std::max(std::abs(testCase.input), std::abs(testCase.exact));
+        const auto tol = static_cast<double>(calculatePointwiseTolerance<float, float, float>(
+            scale, classifyPointwiseOp(testCase.mode)));
+
+        EXPECT_LE(std::abs(static_cast<double>(output.getHostValue(0, 0, 0, 0)) - testCase.exact),
+                  tol)
+            << EnumNamesPointwiseMode()[static_cast<int>(testCase.mode)];
     }
 }
 

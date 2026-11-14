@@ -19,12 +19,28 @@ TEST(TestPointwiseValidation, UnaryModesClassifiedCorrectly)
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::EXP));
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::LOG));
     EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::SQRT));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::RSQRT));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::RECIPROCAL));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::SIN));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::TAN));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::ERF));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::CEIL));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::FLOOR));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::ELU_FWD));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::SOFTPLUS_FWD));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::IDENTITY));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::LOGICAL_NOT));
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::GEN_INDEX));
 
     // Test that binary operations are NOT unary
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::ADD));
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::SUB));
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::MUL));
     EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::RELU_BWD));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::DIV));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::CMP_EQ));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::LOGICAL_AND));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::GELU_BWD));
 }
 
 TEST(TestPointwiseValidation, BinaryModesClassifiedCorrectly)
@@ -39,11 +55,28 @@ TEST(TestPointwiseValidation, BinaryModesClassifiedCorrectly)
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::RELU_BWD));
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::SIGMOID_BWD));
     EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::TANH_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::ADD_SQUARE));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_EQ));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_NEQ));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_GT));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_GE));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_LT));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::CMP_LE));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::LOGICAL_AND));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::LOGICAL_OR));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::GELU_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::GELU_APPROX_TANH_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::SWISH_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::ELU_BWD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::SOFTPLUS_BWD));
 
     // Test that unary operations are NOT binary
     EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::RELU_FWD));
     EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::SIGMOID_FWD));
     EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::TANH_FWD));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::IDENTITY));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::LOGICAL_NOT));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::GEN_INDEX));
 }
 
 TEST(TestPointwiseValidation, TernaryModesClassifiedCorrectly)
@@ -54,6 +87,9 @@ TEST(TestPointwiseValidation, TernaryModesClassifiedCorrectly)
     // Test that unary and binary operations are NOT ternary
     EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::RELU_FWD));
     EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::ADD));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::CMP_EQ));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::LOGICAL_NOT));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::GEN_INDEX));
 }
 
 TEST(TestPointwiseValidation, MutualExclusivityOfCategories)
@@ -142,7 +178,22 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
                                                               PointwiseMode::NEG,
                                                               PointwiseMode::GELU_FWD,
                                                               PointwiseMode::GELU_APPROX_TANH_FWD,
-                                                              PointwiseMode::SWISH_FWD};
+                                                              PointwiseMode::SWISH_FWD,
+                                                              PointwiseMode::IDENTITY,
+                                                              PointwiseMode::EXP,
+                                                              PointwiseMode::LOG,
+                                                              PointwiseMode::SQRT,
+                                                              PointwiseMode::RSQRT,
+                                                              PointwiseMode::RECIPROCAL,
+                                                              PointwiseMode::SIN,
+                                                              PointwiseMode::TAN,
+                                                              PointwiseMode::ERF,
+                                                              PointwiseMode::CEIL,
+                                                              PointwiseMode::FLOOR,
+                                                              PointwiseMode::ELU_FWD,
+                                                              PointwiseMode::SOFTPLUS_FWD,
+                                                              PointwiseMode::LOGICAL_NOT,
+                                                              PointwiseMode::GEN_INDEX};
 
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
@@ -166,15 +217,15 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
 TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
 {
     // Define which binary operations are currently implemented
-    const std::set<PointwiseMode> expectedImplementedBinary = {PointwiseMode::ADD,
-                                                               PointwiseMode::SUB,
-                                                               PointwiseMode::MUL,
-                                                               PointwiseMode::CMP_GT,
-                                                               PointwiseMode::RELU_BWD,
-                                                               PointwiseMode::SIGMOID_BWD,
-                                                               PointwiseMode::TANH_BWD,
-                                                               PointwiseMode::MAX_OP,
-                                                               PointwiseMode::MIN_OP};
+    const std::set<PointwiseMode> expectedImplementedBinary = {
+        PointwiseMode::ADD,        PointwiseMode::SUB,        PointwiseMode::MUL,
+        PointwiseMode::CMP_GT,     PointwiseMode::CMP_EQ,     PointwiseMode::CMP_NEQ,
+        PointwiseMode::CMP_GE,     PointwiseMode::CMP_LT,     PointwiseMode::CMP_LE,
+        PointwiseMode::DIV,        PointwiseMode::ADD_SQUARE, PointwiseMode::LOGICAL_AND,
+        PointwiseMode::LOGICAL_OR, PointwiseMode::RELU_BWD,   PointwiseMode::SIGMOID_BWD,
+        PointwiseMode::TANH_BWD,   PointwiseMode::GELU_BWD,   PointwiseMode::GELU_APPROX_TANH_BWD,
+        PointwiseMode::SWISH_BWD,  PointwiseMode::ELU_BWD,    PointwiseMode::SOFTPLUS_BWD,
+        PointwiseMode::MAX_OP,     PointwiseMode::MIN_OP};
 
     // Check all binary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
