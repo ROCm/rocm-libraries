@@ -8,7 +8,7 @@ GlobalParameters:
   SleepPercent: 0
   NumElementsToValidate: 4096
   DataInitTypeBeta: 1
-  DataInitTypeAlpha: 1
+  DataInitTypeAlpha: 2
   Device: 0
   LibraryFormat: msgpack
 BenchmarkProblems:

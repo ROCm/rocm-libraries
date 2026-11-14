@@ -5245,7 +5245,7 @@ class GlobalWriteBatchWriter:
 
         if kernel["ProblemType"]["ComputeDataType"].isHalf() and not kernel["ProblemType"]["HighPrecisionAccumulate"]:
           # (h,h,h,h,h,h), internal alpha is f16 (2-16bits)
-          if sumIdxV%2:
+          if sumIdxV%2 or usePK:
             newSumIdx = sumIdxV // 2 - self.parentWriter.states.c.startVgprValu
             module.add(VMulPKF16(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx)), comment="*= alpha sumIdx=%u vi=%u"%(elementSumIdx[elementIdx], vi)))
 
