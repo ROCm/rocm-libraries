@@ -57,7 +57,7 @@ void rocblas_init(std::vector<T>& A,
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = random_generator<T>();
+                A[i + rocblas_stride(j) * lda + i_batch * stride] = random_generator<T>();
 }
 
 // Initialize vector with random values
@@ -68,7 +68,7 @@ inline void
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = random_generator<T>();
+                A[i + rocblas_stride(j) * lda + i_batch * stride] = random_generator<T>();
 }
 
 template <typename T>
@@ -82,7 +82,8 @@ void rocblas_init_sin(std::vector<T>& A,
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = sin(i + j * lda + i_batch * stride);
+                A[i + rocblas_stride(j) * lda + i_batch * stride]
+                    = sin(i + rocblas_stride(j) * lda + i_batch * stride);
 }
 
 // Initialize matrix so adjacent entries have alternating sign.
@@ -105,7 +106,8 @@ void rocblas_init_alternating_sign(std::vector<T>& A,
             for(size_t j = 0; j < N; ++j)
             {
                 auto value = random_generator<T>();
-                A[i + j * lda + i_batch * stride] = (i ^ j) & 1 ? value : negate(value);
+                A[i + rocblas_stride(j) * lda + i_batch * stride]
+                    = (i ^ j) & 1 ? value : negate(value);
             }
 }
 
@@ -122,7 +124,8 @@ void rocblas_init_alternating_sign(T* A,
             for(size_t j = 0; j < N; ++j)
             {
                 auto value = random_generator<T>();
-                A[i + j * lda + i_batch * stride] = (i ^ j) & 1 ? value : negate(value);
+                A[i + rocblas_stride(j) * lda + i_batch * stride]
+                    = (i ^ j) & 1 ? value : negate(value);
             }
 }
 
@@ -137,7 +140,8 @@ void rocblas_init_cos(std::vector<T>& A,
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = cos(i + j * lda + i_batch * stride);
+                A[i + rocblas_stride(j) * lda + i_batch * stride]
+                    = cos(i + rocblas_stride(j) * lda + i_batch * stride);
 }
 
 /*! \brief  symmetric matrix initialization: */
@@ -151,8 +155,8 @@ void rocblas_init_symmetric(std::vector<T>& A, size_t N, size_t lda)
             auto value = random_generator<T>();
             // Warning: It's undefined behavior to assign to the
             // same array element twice in same sequence point (i==j)
-            A[j + i * lda] = value;
-            A[i + j * lda] = value;
+            A[j + rocblas_stride(i) * lda] = value;
+            A[i + rocblas_stride(j) * lda] = value;
         }
 }
 
@@ -168,8 +172,8 @@ void rocblas_init_symmetric(T* A, size_t N, size_t lda, size_t stride = 0, size_
                 auto value = random_generator<T>();
                 // Warning: It's undefined behavior to assign to the
                 // same array element twice in same sequence point (i==j)
-                A[b * stride + j + i * lda] = value;
-                A[b * stride + i + j * lda] = value;
+                A[b * stride + j + rocblas_stride(i) * lda] = value;
+                A[b * stride + i + rocblas_stride(j) * lda] = value;
             }
     }
 }
@@ -189,9 +193,9 @@ void rocblas_clear_symmetric(rocblas_fill uplo,
             for(size_t j = i + 1; j < N; ++j)
             {
                 if(uplo == rocblas_fill_upper)
-                    A[b * stride + j + i * lda] = 0; // clear lower
+                    A[b * stride + j + rocblas_stride(i) * lda] = 0; // clear lower
                 else
-                    A[b * stride + i + j * lda] = 0; // clear upper
+                    A[b * stride + i + rocblas_stride(j) * lda] = 0; // clear upper
             }
     }
 }
@@ -206,9 +210,9 @@ void rocblas_init_hermitian(std::vector<T>& A, size_t N, size_t lda)
         for(size_t j = 0; j <= i; ++j)
         {
             auto value = random_generator<T>();
-            A[j + i * lda] = value;
+            A[j + rocblas_stride(i) * lda] = value;
             value.y = (i == j) ? 0 : negate(value.y);
-            A[i + j * lda] = value;
+            A[i + rocblas_stride(j) * lda] = value;
         }
 }
 
@@ -224,7 +228,7 @@ void rocblas_init_hpl(std::vector<T>& A,
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = random_hpl_generator<T>();
+                A[i + rocblas_stride(j) * lda + i_batch * stride] = random_hpl_generator<T>();
 }
 
 /* ============================================================================================
@@ -249,7 +253,7 @@ void rocblas_init_nan(std::vector<T>& A,
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                A[i + j * lda + i_batch * stride] = T(rocblas_nan_rng());
+                A[i + rocblas_stride(j) * lda + i_batch * stride] = T(rocblas_nan_rng());
 }
 
 /* ============================================================================================
@@ -267,8 +271,8 @@ void rocblas_packInt8(std::vector<T>& A, size_t M, size_t N, size_t batch_count,
         for(size_t colBase = 0; colBase < N; colBase += 4)
             for(size_t row = 0; row < lda; row++)
                 for(size_t colOffset = 0; colOffset < 4; colOffset++)
-                    A[(colBase * lda + 4 * row) + colOffset + (stride_a * count)]
-                        = temp[(colBase + colOffset) * lda + row + (stride_a * count)];
+                    A[(rocblas_stride(colBase) * lda + 4 * row) + colOffset + (stride_a * count)]
+                        = temp[rocblas_stride(colBase + colOffset) * lda + row + (stride_a * count)];
 }
 
 /* ============================================================================================
@@ -316,7 +320,8 @@ void rocblas_copy_matrix(const T* A,
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
             for(size_t j = 0; j < N; ++j)
-                B[i + j * ldb + i_batch * strideb] = A[i + j * lda + i_batch * stridea];
+                B[i + rocblas_stride(j) * ldb + i_batch * strideb]
+                    = A[i + rocblas_stride(j) * lda + i_batch * stridea];
 }
 
 /** rocsolver_diagonal_mode enum is used to define the type of diagonal when

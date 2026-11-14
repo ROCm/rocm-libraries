@@ -198,9 +198,9 @@ void sytrs_initData(const rocblas_handle handle,
                     for(rocblas_int j = 0; j < n; j++)
                     {
                         if(i == j)
-                            hA[b][i + j * lda] += 400;
+                            hA[b][i + rocblas_stride(j) * lda] += 400;
                         else
-                            hA[b][i + j * lda] -= 4;
+                            hA[b][i + rocblas_stride(j) * lda] -= 4;
                     }
                 }
 
@@ -210,7 +210,8 @@ void sytrs_initData(const rocblas_handle handle,
                 {
                     for(rocblas_int j = 0; j < n; j++)
                     {
-                        std::swap(hA[b][i + j * lda], hA[b][n - 1 - i + j * lda]);
+                        std::swap(hA[b][i + rocblas_stride(j) * lda],
+                                  hA[b][n - 1 - i + rocblas_stride(j) * lda]);
                     }
                 }
 
@@ -221,7 +222,10 @@ void sytrs_initData(const rocblas_handle handle,
         for(I b = 0; b < bc; ++b)
         {
             int info = 0;
-            int lwork = lda * n;
+            // (workspace query of SYTRF, as in LAPACK: lwork = -1 returns the optimal size)
+            T wquery;
+            cpu_sytrf(uplo, n, hA[b], lda, hIpiv_cpu[b], &wquery, -1, &info);
+            int lwork = int(std::real(wquery));
             std::vector<T> work(lwork);
 
             cpu_sytrf(uplo, n, hA[b], lda, hIpiv_cpu[b], work.data(), lwork, &info);
@@ -383,9 +387,9 @@ void testing_sytrs(Arguments& argus)
     I nrhs = argus.get<rocblas_int>("nrhs", n);
     I lda = argus.get<rocblas_int>("lda", n);
     I ldb = argus.get<rocblas_int>("ldb", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nrhs);
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     I bc = argus.batch_count;

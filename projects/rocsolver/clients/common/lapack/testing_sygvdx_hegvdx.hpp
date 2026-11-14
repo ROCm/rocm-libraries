@@ -307,7 +307,8 @@ void sygvdx_hegvdx_initData(const rocblas_handle handle,
             // with spectrum in a desired range (-20, 20). Then we construct the generalized pair
             // (A, B) from there.
             memset(hB[b], 0,
-                   sizeof(T) * n * ldb); // since ldb >= n, make sure all entries of B are initialized
+                   sizeof(T) * rocblas_stride(n)
+                       * ldb); // since ldb >= n, make sure all entries of B are initialized
             for(rocblas_int i = 0; i < n; i++)
             {
                 // scale matrices and set hA = M (symmetric/hermitian), hB = U (upper triangular)
@@ -315,28 +316,34 @@ void sygvdx_hegvdx_initData(const rocblas_handle handle,
                 {
                     if(i == j)
                     {
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 10;
-                        U[b][i + j * ldu] = std::real(U[b][i + j * ldu]) / 100 + 1;
-                        hB[b][i + j * ldb] = U[b][i + j * ldu];
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 10;
+                        U[b][i + rocblas_stride(j) * ldu]
+                            = std::real(U[b][i + rocblas_stride(j) * ldu]) / 100 + 1;
+                        hB[b][i + rocblas_stride(j) * ldb] = U[b][i + rocblas_stride(j) * ldu];
                     }
                     else
                     {
                         if(j == i + 1)
                         {
-                            hA[b][i + j * lda] = (hA[b][i + j * lda] - 5) / 10;
-                            hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                            hA[b][i + rocblas_stride(j) * lda]
+                                = (hA[b][i + rocblas_stride(j) * lda] - 5) / 10;
+                            hA[b][j + rocblas_stride(i) * lda]
+                                = sconj(hA[b][i + rocblas_stride(j) * lda]);
                         }
                         else
-                            hA[b][j + i * lda] = hA[b][i + j * lda] = 0;
+                            hA[b][j + rocblas_stride(i) * lda] = hA[b][i + rocblas_stride(j) * lda]
+                                = 0;
 
-                        U[b][i + j * ldu] = (U[b][i + j * ldu] - 5) / 100;
-                        hB[b][i + j * ldb] = U[b][i + j * ldu];
-                        hB[b][j + i * ldb] = 0;
-                        U[b][j + i * ldu] = 0;
+                        U[b][i + rocblas_stride(j) * ldu]
+                            = (U[b][i + rocblas_stride(j) * ldu] - 5) / 100;
+                        hB[b][i + rocblas_stride(j) * ldb] = U[b][i + rocblas_stride(j) * ldu];
+                        hB[b][j + rocblas_stride(i) * ldb] = 0;
+                        U[b][j + rocblas_stride(i) * ldu] = 0;
                     }
                 }
                 if(i == n / 4 || i == n / 2 || i == n - 1 || i == n / 7 || i == n / 5 || i == n / 3)
-                    hA[b][i + i * lda] *= -1;
+                    hA[b][i + rocblas_stride(i) * lda] *= -1;
             }
 
             // form B = U' U
@@ -352,13 +359,13 @@ void sygvdx_hegvdx_initData(const rocblas_handle handle,
                 // in those matrices in the batch that are non positive definite
                 rocblas_int i = n / 4 + b;
                 i -= (i / n) * n;
-                hB[b][i + i * ldb] = 0;
+                hB[b][i + rocblas_stride(i) * ldb] = 0;
                 i = n / 2 + b;
                 i -= (i / n) * n;
-                hB[b][i + i * ldb] = 0;
+                hB[b][i + rocblas_stride(i) * ldb] = 0;
                 i = n - 1 + b;
                 i -= (i / n) * n;
-                hB[b][i + i * ldb] = 0;
+                hB[b][i + rocblas_stride(i) * ldb] = 0;
             }
 
             if(itype == rocblas_eform_ax)
@@ -390,19 +397,23 @@ void sygvdx_hegvdx_initData(const rocblas_handle handle,
                         {
                             if(itype != rocblas_eform_bax)
                             {
-                                A[b][i + j * lda] = hA[b][i + j * lda];
-                                B[b][i + j * ldb] = hB[b][i + j * ldb];
+                                A[b][i + rocblas_stride(j) * lda]
+                                    = hA[b][i + rocblas_stride(j) * lda];
+                                B[b][i + rocblas_stride(j) * ldb]
+                                    = hB[b][i + rocblas_stride(j) * ldb];
                             }
                             else
                             {
-                                A[b][i + j * lda] = hB[b][i + j * ldb];
-                                B[b][i + j * ldb] = hA[b][i + j * lda];
+                                A[b][i + rocblas_stride(j) * lda]
+                                    = hB[b][i + rocblas_stride(j) * ldb];
+                                B[b][i + rocblas_stride(j) * ldb]
+                                    = hA[b][i + rocblas_stride(j) * lda];
                             }
                         }
                         else
                         {
-                            A[b][i + j * lda] = hA[b][i + j * lda];
-                            B[b][i + j * ldb] = hB[b][i + j * ldb];
+                            A[b][i + rocblas_stride(j) * lda] = hA[b][i + rocblas_stride(j) * lda];
+                            B[b][i + rocblas_stride(j) * ldb] = hB[b][i + rocblas_stride(j) * ldb];
                         }
                     }
                 }
@@ -472,8 +483,8 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
     std::vector<S> rwork(lrwork);
     std::vector<int> iwork(liwork);
     std::vector<int> hIfail(n);
-    host_strided_batch_vector<T> A(lda * n, 1, lda * n, bc);
-    host_strided_batch_vector<T> B(ldb * n, 1, ldb * n, bc);
+    host_strided_batch_vector<T> A(rocblas_stride(lda) * n, 1, rocblas_stride(lda) * n, bc);
+    host_strided_batch_vector<T> B(rocblas_stride(ldb) * n, 1, rocblas_stride(ldb) * n, bc);
     std::vector<closest_largest_subsequences<S>> clss(bc);
     std::vector<bool> skip_test(bc, false);
 
@@ -653,8 +664,8 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                     {
                         int jj = hWResIds[j]; // Id of rocSOLVER eigen-pair associated to j-th LAPACK eigen-pair
                         alpha = T(1) / hWRes[b][jj];
-                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hZRes[b] + jj * ldz, 1, beta,
-                                      hA[b] + j * lda, 1);
+                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hZRes[b] + rocblas_stride(jj) * ldz,
+                                      1, beta, hA[b] + rocblas_stride(j) * lda, 1);
                     }
 
                     // move B*x into hZRes
@@ -663,7 +674,8 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                         for(rocblas_int j = 0; j < numMatchingEigs; j++)
                         {
                             int jj = hWResIds[j]; // Id of rocSOLVER eigen-pair associated to j-th LAPACK eigen-pair
-                            hZRes[b][i + j * ldz] = hB[b][i + jj * ldb];
+                            hZRes[b][i + rocblas_stride(j) * ldz]
+                                = hB[b][i + rocblas_stride(jj) * ldb];
                         }
                     }
                 }
@@ -676,8 +688,8 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                     {
                         int jj = hWResIds[j]; // Id of rocSOLVER eigen-pair associated to j-th LAPACK eigen-pair
                         alpha = T(1) / hWRes[b][jj];
-                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hB[b] + jj * ldb, 1, beta,
-                                      hA[b] + j * lda, 1);
+                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hB[b] + rocblas_stride(jj) * ldb,
+                                      1, beta, hA[b] + rocblas_stride(j) * lda, 1);
                     }
                     // move hZRes
                     for(rocblas_int i = 0; i < n; i++)
@@ -686,7 +698,8 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                         {
                             int jj = hWResIds[j]; // Id of rocSOLVER eigen-pair associated to j-th LAPACK eigen-pair
                             if(j != jj)
-                                hZRes[b][i + j * ldz] = hZRes[b][i + jj * ldz];
+                                hZRes[b][i + rocblas_stride(j) * ldz]
+                                    = hZRes[b][i + rocblas_stride(jj) * ldz];
                         }
                     }
                 }
@@ -713,8 +726,8 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                                      1); // convert eigenvalues from type S to type T, if required
 
                 // Create thin wrappers of input matrices A and B
-                auto AWrap = HMat::Wrap(A.data() + b * lda * n, lda, n);
-                auto BWrap = HMat::Wrap(B.data() + b * ldb * n, ldb, n);
+                auto AWrap = HMat::Wrap(A.data() + rocblas_stride(b) * lda * n, lda, n);
+                auto BWrap = HMat::Wrap(B.data() + rocblas_stride(b) * ldb * n, ldb, n);
 
                 // We want the sub-blocks starting from row 0, col 0 and with size n x n of A and B
                 auto A_b = (*AWrap).block(BDesc().nrows(n).ncols(n));
@@ -821,8 +834,8 @@ void sygvdx_hegvdx_getPerfData(const rocblas_handle handle,
                                const bool perf,
                                const bool singular)
 {
-    host_strided_batch_vector<T> A(lda * n, 1, lda * n, bc);
-    host_strided_batch_vector<T> B(ldb * n, 1, ldb * n, bc);
+    host_strided_batch_vector<T> A(rocblas_stride(lda) * n, 1, rocblas_stride(lda) * n, bc);
+    host_strided_batch_vector<T> B(rocblas_stride(ldb) * n, 1, rocblas_stride(ldb) * n, bc);
 
     if(!perf)
     {
@@ -888,10 +901,10 @@ void testing_sygvdx_hegvdx(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldb = argus.get<rocblas_int>("ldb", n);
     rocblas_int ldz = argus.get<rocblas_int>("ldz", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * n);
     rocblas_stride stW = argus.get<rocblas_stride>("strideW", n);
-    rocblas_stride stZ = argus.get<rocblas_stride>("strideZ", ldz * n);
+    rocblas_stride stZ = argus.get<rocblas_stride>("strideZ", rocblas_stride(ldz) * n);
 
     S vl = S(argus.get<double>("vl", 0));
     S vu = S(argus.get<double>("vu", erangeC == 'V' ? 1 : 0));

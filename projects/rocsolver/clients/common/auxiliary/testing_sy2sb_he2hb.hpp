@@ -55,9 +55,9 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
         {
             for(I i = 0; i < j; ++i) // strictly upper
             {
-                hA[i + j * lda] = sconj(hA[j + i * lda]);
+                hA[i + rocblas_stride(j) * lda] = sconj(hA[j + rocblas_stride(i) * lda]);
             }
-            hA[j + j * lda] = real(hA[j + j * lda]);
+            hA[j + rocblas_stride(j) * lda] = real(hA[j + rocblas_stride(j) * lda]);
         }
     }
     else if(uplo == rocblas_fill_upper)
@@ -66,9 +66,9 @@ void cpu_hermitianize(const rocblas_fill uplo, const I n, Th hA, const I lda)
         {
             for(I i = 0; i < j; ++i) // strictly upper
             {
-                hA[j + i * lda] = sconj(hA[i + j * lda]);
+                hA[j + rocblas_stride(i) * lda] = sconj(hA[i + rocblas_stride(j) * lda]);
             }
-            hA[j + j * lda] = real(hA[j + j * lda]);
+            hA[j + rocblas_stride(j) * lda] = real(hA[j + rocblas_stride(j) * lda]);
         }
     }
     else if(uplo != rocblas_fill_full)
@@ -104,15 +104,15 @@ void cpu_band2full(const rocblas_fill uplo, const I n, I kd, Th hAband, const I 
 
         // Copy kd-by-kd lower triangle T, using ldab - 1 to shift columns.
         cpu_lacpy(rocblas_fill_lower, kd, kd, // opts
-                  &hAband[ldab * (n - kd)], ldab - 1, // src
-                  &hA[(lda + 1) * (n - kd)], lda); // dst
+                  &hAband[rocblas_stride(ldab) * (n - kd)], ldab - 1, // src
+                  &hA[rocblas_stride(lda + 1) * (n - kd)], lda); // dst
 
         // Hermitianize matrix A, copying conjugate of strictly lower to upper.
         for(I j = 0; j < n; ++j)
         {
             for(I i = std::max<I>(j - kd, 0); i < j; ++i) // strictly upper band
             {
-                hA[i + j * lda] = sconj(hA[j + i * lda]);
+                hA[i + rocblas_stride(j) * lda] = sconj(hA[j + rocblas_stride(i) * lda]);
             }
         }
     }
@@ -267,7 +267,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     device_strided_batch_vector<T> dV(size_A, 1, size_A, 1); // Householder vectors
     device_strided_batch_vector<T> dW(size_A, 1, size_A, 1); // work
     CHECK_HIP_ERROR(dV.memcheck());
@@ -317,7 +317,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
                                               n, n_kd, n_kd, // dims
                                               &dV[0][kd], lda, // Householder V vectors below bandwidth kd
                                               dTau[0], // tau
-                                              &dW[0][kd * lda], lda));
+                                              &dW[0][rocblas_stride(kd) * lda], lda));
 
     // W -= A.
     // todo: geadd or tzadd. Using axpy assumes dA and dW have the same lda.
@@ -493,8 +493,8 @@ void testing_sy2sb_he2hb(Arguments& argus)
     }
 
     // determine sizes
-    size_t size_A = lda * n;
-    size_t size_Aband = ldab * n;
+    size_t size_A = rocblas_stride(lda) * n;
+    size_t size_Aband = rocblas_stride(ldab) * n;
     size_t size_tau = std::max<I>(n - kd, 0);
     double max_errors[2] = {0, 0};
     double gpu_time_used = 0, cpu_time_used = 0;

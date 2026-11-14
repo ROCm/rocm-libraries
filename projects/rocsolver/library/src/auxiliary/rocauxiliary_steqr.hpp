@@ -225,7 +225,7 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                         ROCBLAS_CHECK(rocsolver_lasr_template<T, S>(
                             handle, rocblas_side_right, rocblas_pivot_variable,
                             rocblas_backward_direction, n, m - lsv + 1, dWork + lsv, strideW,
-                            dWork + n - 1 + lsv, strideW, C, lsv * ldc, ldc, strideC, (I)1));
+                            dWork + n - 1 + lsv, strideW, C, idx2D(0, lsv, ldc), ldc, strideC, (I)1));
                     }
                 }
             }
@@ -312,7 +312,7 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
                         ROCBLAS_CHECK(rocsolver_lasr_template<T, S>(
                             handle, rocblas_side_right, rocblas_pivot_variable,
                             rocblas_forward_direction, n, lsv - m + 1, dWork + m, strideW,
-                            dWork + n - 1 + m, strideW, C, m * ldc, ldc, strideC, (I)1));
+                            dWork + n - 1 + m, strideW, C, idx2D(0, m, ldc), ldc, strideC, (I)1));
                     }
                 }
             }
@@ -353,8 +353,8 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
 
                 if(m != el)
                 {
-                    ROCSOLVER_LAUNCH_KERNEL(swap_kernel<T>, dim3(blocks), dim3(BS1), (I)0, stream,
-                                            n, C + el * ldc, (I)1, C + m * ldc, (I)1);
+                    ROCSOLVER_LAUNCH_KERNEL(swap_kernel<T>, dim3(blocks), dim3(BS1), (I)0, stream, n,
+                                            C + idx2D(0, el, ldc), (I)1, C + idx2D(0, m, ldc), (I)1);
                 }
             }
         }
@@ -530,8 +530,8 @@ __device__ void run_steqr(const I tid,
                 if(m != el)
                 {
                     run_lasr(rocblas_side_right, rocblas_pivot_variable, rocblas_backward_direction,
-                             n, m - lsv + 1, work + lsv, work + n - 1 + lsv, C + 0 + lsv * ldc, ldc,
-                             tid, tid_inc);
+                             n, m - lsv + 1, work + lsv, work + n - 1 + lsv, C + idx2D(0, lsv, ldc),
+                             ldc, tid, tid_inc);
                     __syncthreads();
                 }
             }
@@ -620,8 +620,8 @@ __device__ void run_steqr(const I tid,
                 if(m != el)
                 {
                     run_lasr(rocblas_side_right, rocblas_pivot_variable, rocblas_forward_direction,
-                             n, lsv - m + 1, work + m, work + n - 1 + m, C + 0 + m * ldc, ldc, tid,
-                             tid_inc);
+                             n, lsv - m + 1, work + m, work + n - 1 + m, C + idx2D(0, m, ldc), ldc,
+                             tid, tid_inc);
                     __syncthreads();
                 }
             }
@@ -673,7 +673,7 @@ __device__ void run_steqr(const I tid,
             if(m != el)
             {
                 for(I j = 0; j < n; j++)
-                    swap(C[j + el * ldc], C[j + m * ldc]);
+                    swap(C[idx2D(j, el, ldc)], C[idx2D(j, m, ldc)]);
             }
             __syncthreads();
         }

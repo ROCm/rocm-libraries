@@ -85,10 +85,10 @@ void testing_lahr2_bad_arg()
 
 #ifdef ROCSOLVER_ENABLE_HESSENBERG
     // memory allocations
-    device_strided_batch_vector<T> dA(lda * n, 1, lda * n, 1);
+    device_strided_batch_vector<T> dA(rocblas_stride(lda) * n, 1, rocblas_stride(lda) * n, 1);
     device_strided_batch_vector<T> dTau(nb, 1, nb, 1);
-    device_strided_batch_vector<T> dT(ldt * nb, 1, ldt * nb, 1);
-    device_strided_batch_vector<T> dY(ldy * nb, 1, ldy * nb, 1);
+    device_strided_batch_vector<T> dT(rocblas_stride(ldt) * nb, 1, rocblas_stride(ldt) * nb, 1);
+    device_strided_batch_vector<T> dY(rocblas_stride(ldy) * nb, 1, rocblas_stride(ldy) * nb, 1);
     CHECK_HIP_ERROR(dA.memcheck());
     CHECK_HIP_ERROR(dTau.memcheck());
     CHECK_HIP_ERROR(dT.memcheck());
@@ -272,10 +272,10 @@ void testing_lahr2(Arguments& argus)
     // N/A
 
     // determine sizes
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     size_t size_tau = nb;
-    size_t size_T = ldt * nb;
-    size_t size_Y = ldy * nb;
+    size_t size_T = rocblas_stride(ldt) * nb;
+    size_t size_Y = rocblas_stride(ldy) * nb;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;

@@ -291,17 +291,18 @@ void stein_getError(const rocblas_handle handle,
             for(int i = 0; i < n; i++)
             {
                 alpha = hW[0][j] - hD[0][i];
-                hZ[0][i + j * ldz] = hZRes[0][i + j * ldz] * alpha;
+                hZ[0][i + rocblas_stride(j) * ldz] = hZRes[0][i + rocblas_stride(j) * ldz] * alpha;
             }
-            t1 = hZRes[0][j * ldz];
-            hZRes[0][j * ldz] = hE[0][0] * hZRes[0][1 + j * ldz];
+            t1 = hZRes[0][rocblas_stride(j) * ldz];
+            hZRes[0][rocblas_stride(j) * ldz] = hE[0][0] * hZRes[0][1 + rocblas_stride(j) * ldz];
             for(int i = 1; i < n - 1; i++)
             {
-                t2 = hZRes[0][i + j * ldz];
-                hZRes[0][i + j * ldz] = hE[0][i - 1] * t1 + hE[0][i] * hZRes[0][(i + 1) + j * ldz];
+                t2 = hZRes[0][i + rocblas_stride(j) * ldz];
+                hZRes[0][i + rocblas_stride(j) * ldz]
+                    = hE[0][i - 1] * t1 + hE[0][i] * hZRes[0][(i + 1) + rocblas_stride(j) * ldz];
                 t1 = t2;
             }
-            hZRes[0][(n - 1) + j * ldz] = hE[0][n - 2] * t1;
+            hZRes[0][(n - 1) + rocblas_stride(j) * ldz] = hE[0][n - 2] * t1;
         }
 
         // error is then ||hZ - hZRes|| / ||hZ||
@@ -437,7 +438,7 @@ void testing_stein(Arguments& argus)
     size_t size_W = size_D;
     size_t size_iblock = size_D;
     size_t size_isplit = size_D;
-    size_t size_Z = ldz * n;
+    size_t size_Z = rocblas_stride(ldz) * n;
     size_t size_ifail = size_D;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 

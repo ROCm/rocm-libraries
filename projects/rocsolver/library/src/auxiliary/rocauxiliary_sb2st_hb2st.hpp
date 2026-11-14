@@ -228,7 +228,7 @@ __device__ void
             T value = 0;
             for(I i = xid; i < m; i += DIMX)
             {
-                value += conj(C[i + j * ldc]) * v[i];
+                value += conj(C[idx2D(i, j, ldc)]) * v[i];
             }
             value += shift_left(value, 16);
             value += shift_left(value, 8);
@@ -246,7 +246,7 @@ __device__ void
             // Cj = Cj - tau v conj( wj ) = C[:,j] - tau v (v^H Cj)
             for(I i = xid; i < m; i += DIMX)
             {
-                C[i + j * ldc] -= tau * v[i] * conj(s_work[yid]);
+                C[idx2D(i, j, ldc)] -= tau * v[i] * conj(s_work[yid]);
             }
         }
     }
@@ -260,7 +260,7 @@ __device__ void
             T value = 0;
             for(I j = xid; j < n; j += DIMX)
             {
-                value += C[i + j * ldc] * v[j];
+                value += C[idx2D(i, j, ldc)] * v[j];
             }
             value += shift_left(value, 16);
             value += shift_left(value, 8);
@@ -278,7 +278,7 @@ __device__ void
             // Cj = Cj - tau wj v^H = Cj - tau (Cj v) v^H
             for(I j = xid; j < n; j += DIMX)
             {
-                C[i + j * ldc] -= tau * conj(v[j]) * s_work[yid];
+                C[idx2D(i, j, ldc)] -= tau * conj(v[j]) * s_work[yid];
             }
         }
     }
@@ -315,7 +315,7 @@ __device__ void hb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
         T value = 0;
         for(I i = xid; i < n; i += DIMX)
         {
-            value += C[i + j * ldc] * v[i];
+            value += C[idx2D(i, j, ldc)] * v[i];
         }
         value += shift_left(value, 16);
         value += shift_left(value, 8);
@@ -367,7 +367,7 @@ __device__ void hb2st_helarf(const I xid, const I yid, I n, T* v, T tau, T* C, I
     {
         for(I i = xid; i < n; i += DIMX)
         {
-            C[i + j * ldc] -= tau * v[i] * conj(s_work[j]) + conj(tau) * s_work[i] * conj(v[j]);
+            C[idx2D(i, j, ldc)] -= tau * v[i] * conj(s_work[j]) + conj(tau) * s_work[i] * conj(v[j]);
         }
     }
 }
@@ -443,7 +443,7 @@ __device__ void hb2st_task(const I xid,
             // Copy column sweep to shared memory, A[j+1:j+1+nc, s].
             for(I i = xid; i < nc; i += DIMX)
             {
-                s_housev[i] = Aband[(idiag + 1 + i) + sweep * ldab];
+                s_housev[i] = Aband[idx2D((idiag + 1 + i), sweep, ldab)];
             }
 
             // Generate Householder reflector.
@@ -453,7 +453,7 @@ __device__ void hb2st_task(const I xid,
             // and copy subdiagonal element to E.
             if(xid == 0)
             {
-                Aband[idiag + 1 + sweep * ldab] = s_housev[0];
+                Aband[idx2D(idiag + 1, sweep, ldab)] = s_housev[0];
                 E[sweep] = std::real(s_housev[0]);
                 s_housev[0] = T(1);
                 tau[vj] = s_tau;
@@ -461,10 +461,10 @@ __device__ void hb2st_task(const I xid,
             // if V is initialized to Identity, don't need to store i=0.
             for(I i = xid; i < nc; i += DIMX)
             {
-                V[vi + i + vj * ldv] = s_housev[i];
+                V[idx2D(vi + i, vj, ldv)] = s_housev[i];
                 if(xid > 0)
                 {
-                    Aband[idiag + 1 + i + sweep * ldab] = 0; // todo: only for clarity
+                    Aband[idx2D(idiag + 1 + i, sweep, ldab)] = 0; // todo: only for clarity
                 }
             }
         }
@@ -504,7 +504,7 @@ __device__ void hb2st_task(const I xid,
             get_v_index(n, kd, sweep, task - 1, vpi, vpj);
             for(I i = xid; i < kd; i += DIMX)
             {
-                s_housev[i] = V[vpi + i + vpj * ldv];
+                s_housev[i] = V[idx2D(vpi + i, vpj, ldv)];
             }
             if(xid == 0)
             {
@@ -529,7 +529,7 @@ __device__ void hb2st_task(const I xid,
                 // Copy 1st column of bulge to shared memory.
                 for(I i = xid; i < nc; i += DIMX)
                 {
-                    s_housev[i] = Aband[idiag + kd + i + jp * ldab];
+                    s_housev[i] = Aband[idx2D(idiag + kd + i, jp, ldab)];
                 }
 
                 // Generate current Householder reflector, vc.
@@ -539,15 +539,15 @@ __device__ void hb2st_task(const I xid,
                 // and copy 1st element of larfg back to A.
                 if(xid == 0)
                 {
-                    Aband[idiag + kd + jp * ldab] = s_housev[0];
+                    Aband[idx2D(idiag + kd, jp, ldab)] = s_housev[0];
                     s_housev[0] = T(1);
-                    V[vi + vj * ldv] = s_housev[0];
+                    V[idx2D(vi, vj, ldv)] = s_housev[0];
                     tau[vj] = s_tau;
                 }
                 for(I i = xid + 1; i < nc; i += DIMX)
                 {
-                    V[vi + i + vj * ldv] = s_housev[i];
-                    Aband[idiag + kd + i + jp * ldab] = T(0);
+                    V[idx2D(vi + i, vj, ldv)] = s_housev[i];
+                    Aband[idx2D(idiag + kd + i, jp, ldab)] = T(0);
                 }
             }
             __syncthreads();
@@ -584,8 +584,8 @@ __device__ void hb2st_task(const I xid,
         {
             for(I i = xid; i < kd - 1; i += DIMX)
             {
-                Aband[idiag - (kd - 1) + i + jc * ldab]
-                    = conj(Aband[idiag + (kd - 1) - i + (jp + 1 + i) * ldab]);
+                Aband[idx2D(idiag - (kd - 1) + i, jc, ldab)]
+                    = conj(Aband[idx2D(idiag + (kd - 1) - i, jp + 1 + i, ldab)]);
             }
         }
     }
@@ -688,7 +688,7 @@ ROCSOLVER_KERNEL void hb2st_copy_diag(I n,
         S* D = load_ptr_batch<S>(DD, bid, 0, strideD);
 
         // copy diag
-        D[tid] = std::real(Aband[tid * ldab]);
+        D[tid] = std::real(Aband[idx2D(0, tid, ldab)]);
     }
 }
 

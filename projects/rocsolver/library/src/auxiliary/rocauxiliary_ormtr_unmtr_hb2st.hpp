@@ -297,7 +297,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
             // Generate T:  kv x kv
             rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, mv,
                                         kv, // opts
-                                        V, vj * ldv + shiftV, ldv, strideV, // V: mv x kv
+                                        V, idx2D(0, vj, ldv) + shiftV, ldv, strideV, // V: mv x kv
                                         &tau[vj], strideTau, // tau
                                         Tr, ldt, strideT, // T
                                         bc, scalars, work, workArr);
@@ -308,7 +308,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
             // W = V * op(T), dim: (mv x kv) = (mv x kv) (kv x kv)
             auto opT = descend ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
             rocsolver_gemm(handle, rocblas_operation_none, opT, mv, kv, kv, // opts
-                           &one, V, vj * ldv + shiftV, ldv, strideV, // V
+                           &one, V, idx2D(0, vj, ldv) + shiftV, ldv, strideV, // V
                            Tr, 0, ldt, strideT, // op(T)
                            &zero, W, 0, ldw, strideW, // W
                            bc, workArr);
@@ -323,7 +323,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                 // Z = V^H Ci:  (kv x n) = (mv x kv)^H (mv x n)
                 rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
                                rocblas_operation_none, kv, n, mv, // opts
-                               &one, V, vj * ldv + shiftV, ldv, strideV, // V^H
+                               &one, V, idx2D(0, vj, ldv) + shiftV, ldv, strideV, // V^H
                                C, ii + shiftC, ldc, strideC, // C
                                &zero, Z, 0, ldz, strideZ, // Z
                                bc, workArr);
@@ -347,8 +347,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                 // Z = Vr^H Ci^H:  (kv x m) = (mv x kv)^H (m x mv)^H
                 rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
                                rocblas_operation_conjugate_transpose, kv, m, mv, // opts
-                               &one, V, vj * ldv + shiftV, ldv, strideV, // V^H
-                               C, ii * ldc + shiftC, ldc, strideC, // C^H
+                               &one, V, idx2D(0, vj, ldv) + shiftV, ldv, strideV, // V^H
+                               C, idx2D(0, ii, ldc) + shiftC, ldc, strideC, // C^H
                                &zero, Z, 0, ldz, strideZ, // Z
                                bc, workArr);
 
@@ -357,7 +357,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                                rocblas_operation_conjugate_transpose, m, mv, kv, // opts
                                &negone, Z, 0, ldz, strideZ, // Z^H
                                W, 0, ldw, strideW, // W^H
-                               &one, C, ii * ldc + shiftC, ldc, strideC, // C
+                               &one, C, idx2D(0, ii, ldc) + shiftC, ldc, strideC, // C
                                bc, workArr);
             }
 

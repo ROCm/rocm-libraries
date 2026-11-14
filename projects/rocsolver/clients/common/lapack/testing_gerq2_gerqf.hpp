@@ -143,7 +143,7 @@ void gerq2_gerqf_initData(const rocblas_handle handle,
             for(rocblas_int b = 0; b < bc; ++b)
                 for(rocblas_int j = 0; j < n; j++)
                     for(rocblas_int i = 0; i < m; i++)
-                        hA[b][i + j * lda] = (i == j ? T(1) : T(0));
+                        hA[b][i + rocblas_stride(j) * lda] = (i == j ? T(1) : T(0));
         }
         else if(matrix == "randint")
         {
@@ -255,12 +255,12 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     {
         // Copy R: upper trapezoid in last min_mn columns,
         // on & above diagonal (n-m), zero elsewhere.
-        std::vector<T> hC(lda * n, T(0));
+        std::vector<T> hC(rocblas_stride(lda) * n, T(0));
         for(rocblas_int j = n - min_mn; j < n; ++j)
         {
             for(rocblas_int i = 0; i < m && i <= j + m - n; ++i)
             {
-                hC[i + j * lda] = hARes[b][i + j * lda];
+                hC[i + rocblas_stride(j) * lda] = hARes[b][i + rocblas_stride(j) * lda];
             }
         }
 
@@ -274,7 +274,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
         // Compute norm( R*Q - A ); hA[b] is still the original A.
         for(rocblas_int j = 0; j < n; ++j)
             for(rocblas_int i = 0; i < m; ++i)
-                hC[i + j * lda] -= hA[b][i + j * lda];
+                hC[i + rocblas_stride(j) * lda] -= hA[b][i + rocblas_stride(j) * lda];
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
         if(n > 0)
@@ -290,18 +290,19 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     // Q is min_mn x n; Q * Q^H is min_mn x min_mn.
 
     // Work array for cpu_gemm output: min_mn x min_mn.
-    std::vector<T> hR(min_mn * min_mn);
+    std::vector<T> hR(rocblas_stride(min_mn) * min_mn);
 
     max_errors[1] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
         // Copy last min_mn rows of hARes[b] (RQ reflectors) to hQ (min_mn x n, lda cols).
         // The reflectors are in rows m-min_mn .. m-1 of hARes[b].
-        std::vector<T> hQ(lda * n);
+        std::vector<T> hQ(rocblas_stride(lda) * n);
         rocblas_int row_offset = m - min_mn;
         for(rocblas_int j = 0; j < n; ++j)
             for(rocblas_int i = 0; i < min_mn; ++i)
-                hQ[i + j * lda] = hARes[b][(i + row_offset) + j * lda];
+                hQ[i + rocblas_stride(j) * lda]
+                    = hARes[b][(i + row_offset) + rocblas_stride(j) * lda];
 
         // Generate explicit Q (min_mn x n) in hQ via ungrq.
         cpu_orgrq_ungrq(min_mn, n, min_mn, hQ.data(), lda, hIpiv[b], hW.data(),
@@ -310,7 +311,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
         // Set hR = I (min_mn x min_mn).
         std::fill(hR.begin(), hR.end(), T(0));
         for(rocblas_int i = 0; i < min_mn; ++i)
-            hR[i + i * min_mn] = T(1);
+            hR[i + rocblas_stride(i) * min_mn] = T(1);
 
         // Compute hR = I - Q * Q^H.
         cpu_gemm(rocblas_operation_none, rocblas_operation_conjugate_transpose, min_mn, min_mn,
@@ -435,7 +436,7 @@ void testing_gerq2_gerqf(Arguments& argus)
     rocblas_int m = argus.get<rocblas_int>("m");
     rocblas_int n = argus.get<rocblas_int>("n", m);
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
     std::string matrix = argus.get<std::string>("matrix", "randint");
 

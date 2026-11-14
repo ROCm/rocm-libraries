@@ -173,9 +173,9 @@ void gesv_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -188,15 +188,15 @@ void gesv_initData(const rocblas_handle handle,
                 rocblas_int j = n / 4 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
                 j = n / 2 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
                 j = n - 1 + b;
                 j -= (j / n) * n;
                 for(rocblas_int i = 0; i < n; i++)
-                    hA[b][i + j * lda] = 0;
+                    hA[b][i + rocblas_stride(j) * lda] = 0;
             }
         }
     }
@@ -363,9 +363,9 @@ void testing_gesv(Arguments& argus)
     rocblas_int nrhs = argus.get<rocblas_int>("nrhs", n);
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldb = argus.get<rocblas_int>("ldb", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * nrhs);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * nrhs);
 
     rocblas_int bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;
