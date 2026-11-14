@@ -289,29 +289,31 @@ protected:
         __builtin_unreachable();
     }
 
-    // 10 Philox4x32 rounds
+public:
+    /// Computes one Philox4x32-10 block: ten rounds applied to \p counter
+    /// under \p key. Does not read or modify the engine state.
     __forceinline__ __device__ __host__
-    uint4 ten_rounds(uint4 counter, uint2 key)
+    static uint4 ten_rounds(uint4 counter, uint2 key)
     {
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 1
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 2
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 3
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 4
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 5
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 6
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 7
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 8
-        counter = this->single_round(counter, key);
-        key     = this->bumpkey(key); // 9
-        return this->single_round(counter, key); // 10
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 1
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 2
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 3
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 4
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 5
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 6
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 7
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 8
+        counter = single_round(counter, key);
+        key     = bumpkey(key); // 9
+        return single_round(counter, key); // 10
     }
 
 private:
@@ -456,6 +458,28 @@ __forceinline__ __device__ __host__
 void skipahead_sequence(unsigned long long sequence, rocrand_state_philox4x32_10* state)
 {
     return state->discard_subsequence(sequence);
+}
+
+/**
+ * \brief Computes one Philox4x32-10 block from a counter and a key.
+ *
+ * Applies the ten Philox4x32 rounds to \p counter under \p key and returns the
+ * four resulting 32-bit values. This is the stateless block function underlying
+ * ::rocrand_state_philox4x32_10: a state initialized with seed \p s, subsequence
+ * \p ss and offset <tt>4 * n</tt> returns from ::rocrand4 the block for counter
+ * <tt>{lo(n), hi(n), lo(ss), hi(ss)}</tt> and key <tt>{lo(s), hi(s)}</tt>.
+ *
+ * Equivalent to cuRAND's \p curand_Philox4x32_10.
+ *
+ * \param counter 128-bit counter
+ * \param key 64-bit key
+ *
+ * \return Four pseudorandom values (32-bit) as an <tt>uint4</tt>
+ */
+__forceinline__ __device__ __host__
+uint4 rocrand_philox4x32_10(uint4 counter, uint2 key)
+{
+    return rocrand_device::philox4x32_10_engine::ten_rounds(counter, key);
 }
 
 /** @} */ // end of group rocranddevice

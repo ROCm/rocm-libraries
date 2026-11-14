@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1051,6 +1051,126 @@ TEST(hiprand_kernel_h_mtgp_32, hiprand)
 {
     typedef hiprandStateMtgp32_t state_type;
     hiprand_kernel_h_hiprand_mtgp_test<state_type>();
+}
+
+__global__
+    __launch_bounds__(64, HIPRAND_DEFAULT_MIN_WARPS_PER_EU) void hiprand_philox4x32_10_kernel(
+        const uint4* counters, const uint2* keys, uint4* output, const size_t size)
+{
+    const unsigned int index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    if(index < size)
+    {
+        output[index] = hiprand_Philox4x32_10(counters[index], keys[index]);
+    }
+}
+
+__global__
+    __launch_bounds__(64, HIPRAND_DEFAULT_MIN_WARPS_PER_EU) void hiprand_philox4x32_10_state_kernel(
+        uint4* block_output, uint4* state_output, unsigned long long seed, const size_t size)
+{
+    const unsigned int index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    if(index < size)
+    {
+        const unsigned long long subsequence = index * 0x100000001ULL;
+        const unsigned long long block       = (UINT_MAX - 3ULL) + index * 0x10001ULL;
+
+        hiprandStatePhilox4_32_10_t state;
+        hiprand_init(seed, subsequence, 4 * block, &state);
+
+        const uint4 counter = {static_cast<unsigned int>(block),
+                               static_cast<unsigned int>(block >> 32),
+                               static_cast<unsigned int>(subsequence),
+                               static_cast<unsigned int>(subsequence >> 32)};
+        const uint2 key = {static_cast<unsigned int>(seed), static_cast<unsigned int>(seed >> 32)};
+
+        state_output[index] = hiprand4(&state);
+        block_output[index] = hiprand_Philox4x32_10(counter, key);
+    }
+}
+
+TEST(hiprand_kernel_h_philox4x32_10, hiprand_Philox4x32_10_known_answers)
+{
+    // Known-answer vectors from Random123 (tests/kat_vectors)
+    const std::vector<uint4> counters = {
+        {0x00000000U, 0x00000000U, 0x00000000U, 0x00000000U},
+        {0xffffffffU, 0xffffffffU, 0xffffffffU, 0xffffffffU},
+        {0x243f6a88U, 0x85a308d3U, 0x13198a2eU, 0x03707344U}
+    };
+    const std::vector<uint2> keys = {
+        {0x00000000U, 0x00000000U},
+        {0xffffffffU, 0xffffffffU},
+        {0xa4093822U, 0x299f31d0U}
+    };
+    const std::vector<uint4> expected = {
+        {0x6627e8d5U, 0xe169c58dU, 0xbc57ac4cU, 0x9b00dbd8U},
+        {0x408f276dU, 0x41c83b0eU, 0xa20bc7c6U, 0x6d5451fdU},
+        {0xd16cfe09U, 0x94fdccebU, 0x5001e420U, 0x24126ea1U}
+    };
+    const size_t size = counters.size();
+
+    uint4* counters_device;
+    uint2* keys_device;
+    uint4* output;
+    HIP_CHECK(hipMallocHelper((void**)&counters_device, size * sizeof(uint4)));
+    HIP_CHECK(hipMallocHelper((void**)&keys_device, size * sizeof(uint2)));
+    HIP_CHECK(hipMallocHelper((void**)&output, size * sizeof(uint4)));
+    HIP_CHECK(
+        hipMemcpy(counters_device, counters.data(), size * sizeof(uint4), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(keys_device, keys.data(), size * sizeof(uint2), hipMemcpyHostToDevice));
+
+    hiprand_philox4x32_10_kernel<<<dim3(1), dim3(64), 0, 0>>>(counters_device,
+                                                              keys_device,
+                                                              output,
+                                                              size);
+    HIP_CHECK(hipGetLastError());
+
+    std::vector<uint4> output_host(size);
+    HIP_CHECK(hipMemcpy(output_host.data(), output, size * sizeof(uint4), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(counters_device));
+    HIP_CHECK(hipFree(keys_device));
+    HIP_CHECK(hipFree(output));
+
+    for(size_t i = 0; i < size; i++)
+    {
+        EXPECT_EQ(output_host[i].x, expected[i].x);
+        EXPECT_EQ(output_host[i].y, expected[i].y);
+        EXPECT_EQ(output_host[i].z, expected[i].z);
+        EXPECT_EQ(output_host[i].w, expected[i].w);
+    }
+}
+
+TEST(hiprand_kernel_h_philox4x32_10, hiprand_Philox4x32_10_matches_state)
+{
+    const unsigned long long seed = 0xdeadbeefbeefdeadULL;
+    const size_t             size = 256;
+
+    uint4* block_output;
+    uint4* state_output;
+    HIP_CHECK(hipMallocHelper((void**)&block_output, size * sizeof(uint4)));
+    HIP_CHECK(hipMallocHelper((void**)&state_output, size * sizeof(uint4)));
+
+    hiprand_philox4x32_10_state_kernel<<<dim3(4), dim3(64), 0, 0>>>(block_output,
+                                                                    state_output,
+                                                                    seed,
+                                                                    size);
+    HIP_CHECK(hipGetLastError());
+
+    std::vector<uint4> block_host(size);
+    std::vector<uint4> state_host(size);
+    HIP_CHECK(
+        hipMemcpy(block_host.data(), block_output, size * sizeof(uint4), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(state_host.data(), state_output, size * sizeof(uint4), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(block_output));
+    HIP_CHECK(hipFree(state_output));
+
+    for(size_t i = 0; i < size; i++)
+    {
+        EXPECT_EQ(block_host[i].x, state_host[i].x);
+        EXPECT_EQ(block_host[i].y, state_host[i].y);
+        EXPECT_EQ(block_host[i].z, state_host[i].z);
+        EXPECT_EQ(block_host[i].w, state_host[i].w);
+    }
 }
 
 template<class T>
