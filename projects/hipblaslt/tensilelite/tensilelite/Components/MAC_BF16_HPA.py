@@ -23,7 +23,7 @@
 ################################################################################
 from rocisa.code import Module
 from rocisa.container import vgpr
-from rocisa.instruction import SSetPrior, VDot2F32BF16, VDot2CF32BF16
+from rocisa.instruction import SSetPrior, VDot2F32BF16, VDot2CF32BF16, VAndB32, VFmaF32, VLShiftLeftB32
 
 from rocisa.enum import DataTypeEnum
 from ..Common.DataType import DataType
@@ -37,82 +37,49 @@ class FMA_BF16_HPA(MAC):
               "UseDotInstruction": False,
               }
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("FMA_BF16_HPA")
         module.addComment(self.commentHeader())
         priority = Component.Priority.find(writer)
 
-        vars = {}
-        vars["m"] = m
-        vars["ThreadTile0"] = kernel["ThreadTile0"]
-        vars["ThreadTile0Half"] = kernel["ThreadTile0"] // 2
+        for iui in range(innerUnroll):
+            for tensor in ("A", "B"):
+                for block in range(kernel[f"ThreadTile{tensor}"] // 2 - 1, -1, -1):
+                    base = f"Valu{tensor}_X{m}_I{iui}"
+                    src = vgpr(f"{base}+{block}")
+                    module.add(VAndB32(dst=vgpr(f"{base}+{block * 2 + 1}"),
+                                       src0="0xffff0000", src1=src))
+                    module.add(VLShiftLeftB32(dst=vgpr(f"{base}+{block * 2}"),
+                                              shiftHex=hex(16), src=src))
 
-        for iui in range(0, innerUnroll):
-            vars["iui"] = iui
-            for blockA in range(kernel["ThreadTileA"]//2-1, -1, -1):
-                vars["blockA"] = blockA
-                dst = "v[vgprValuA_X{m}_I{iui}+{blockA}*2+1]".format_map(vars)
-                src = "v[vgprValuA_X{m}_I{iui}+{blockA}]".format_map(vars)
-                module.addInst("v_and_b32", dst, "0xffff0000", src, "")
-                dst = "v[vgprValuA_X{m}_I{iui}+{blockA}*2]".format_map(vars)
-                module.addInst("v_lshlrev_b32", dst, 16, src, "")
-            for blockB in range(kernel["ThreadTileB"]//2-1, -1, -1):
-                vars["blockB"] = blockB
-                dst = "v[vgprValuB_X{m}_I{iui}+{blockB}*2+1]".format_map(vars)
-                src = "v[vgprValuB_X{m}_I{iui}+{blockB}]".format_map(vars)
-                module.addInst("v_and_b32", dst, "0xffff0000", src, "")
-                dst = "v[vgprValuB_X{m}_I{iui}+{blockB}*2]".format_map(vars)
-                module.addInst("v_and_b32", dst, 16, src, "")
+        tt0 = kernel["ThreadTile0"]
+        for block1 in range(kernel["ThreadTile1"] // 2):
+            for block0 in range(tt0 // 2):
+                for iui in range(innerUnroll):
+                    first_dim_a = bool(tPB["tile01Idx"])
+                    block_a = block0 if first_dim_a else block1
+                    block_b = block1 if first_dim_a else block0
+                    a = [vgpr(f"ValuA_X{m}_I{iui}+{block_a * 2 + j}") for j in range(2)]
+                    b = [vgpr(f"ValuB_X{m}_I{iui}+{block_b * 2 + j}") for j in range(2)]
+                    pairs = ((a[0], b[0]),
+                             (a[1], b[0]) if first_dim_a else (a[0], b[1]),
+                             (a[0], b[1]) if first_dim_a else (a[1], b[0]),
+                             (a[1], b[1]))
+                    base = block0 * 2 + block1 * tt0 * 2
+                    for offset, (src0, src1) in zip((0, 1, tt0, tt0 + 1), pairs):
+                        cidx = base + offset
+                        c = vgpr(f"ValuC+{cidx}")
+                        module.add(VFmaF32(dst=c, src0=src0, src1=src1, src2=c,
+                                           comment=f"ValuC[{cidx}]"))
+                        if offset == 0:
+                            prio = priority(writer, 1, "Raise priority while processing macs")
+                            if prio:
+                                module.add(prio)
 
-        for block1 in range(0, kernel["ThreadTile1"]//2):
-            vars["block1"] = block1
-            for block0 in range(0, kernel["ThreadTile0"]//2):
-                vars["block0"] = block0
-                if kernel["ProblemType"]["HighPrecisionAccumulate"]:
-                    # we treat HighPrecisionAccumulate as expanded packed math
-                    for iui in range(0, innerUnroll):
-                        vars["iui"] = iui
-
-                        vars["blockA"] = block0 if writer.tPB["tile01Idx"] else block1
-                        vars["blockB"] = block1 if writer.tPB["tile01Idx"] else block0
-
-                        aStr0 = "v[vgprValuA_X{m}_I{iui}+{blockA}*2+0]".format_map(vars)
-                        aStr1 = "v[vgprValuA_X{m}_I{iui}+{blockA}*2+1]".format_map(vars)
-                        bStr0 = "v[vgprValuB_X{m}_I{iui}+{blockB}*2+0]".format_map(vars)
-                        bStr1 = "v[vgprValuB_X{m}_I{iui}+{blockB}*2+1]".format_map(vars)
-
-                        cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + 0
-                        cStr = "v[vgprValuC+{block0}*2+{block1}*{ThreadTile0}*2+0*2+0]".format_map(vars)
-                        module.addInst("v_fma_f32", cStr, aStr0, bStr0, cStr, "ValuC[%u]" % cidx)
-
-                        module.add(priority(writer, 1, "Raise priority while processing macs"))
-
-                        aStr = aStr1 if writer.tPB["tile01Idx"] else aStr0
-                        bStr = bStr0 if writer.tPB["tile01Idx"] else bStr1
-                        cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + 1
-                        cStr = "v[vgprValuC+{block0}*2+{block1}*{ThreadTile0}*2+0*2+1]".format_map(vars) # *2 b/c of fp32
-                        module.addInst("v_fma_f32", cStr, aStr, bStr, cStr, "ValuC[%u]" % cidx)
-
-                        aStr = aStr0 if writer.tPB["tile01Idx"] else aStr1
-                        bStr = bStr1 if writer.tPB["tile01Idx"] else bStr0
-                        cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + kernel["ThreadTile0"] + 0
-                        cStr = "v[vgprValuC+{block0}*2+{block1}*{ThreadTile0}*2+{ThreadTile0Half}*2+0]".format_map(vars)
-                        module.addInst("v_fma_f32", cStr, aStr, bStr, cStr, "ValuC[%u]" % cidx)
-
-                        cidx = block0*2 + block1*kernel["ThreadTile0"]*2 + kernel["ThreadTile0"] + 1
-                        cStr = "v[vgprValuC+{block0}*2+{block1}*{ThreadTile0}*2+{ThreadTile0Half}*2+1]".format_map(vars)
-                        module.addInst("v_fma_f32", cStr, aStr1, bStr1, cStr, "ValuC[%u]" % cidx)
-                        """
-                        ignore this, not quite correct for mixed precision
-                        D.f[31:16] = S0.f[31:16] * S1.f[31:16] + S2.f[31:16]
-                        D.f[15:00] = S0.f[15:00] * S1.f[15:00] + S2.f[15:00]
-                        C[0] = A[0]*B[0]+D[0]
-                        C[1] = A[1]*B[1]+D[1]
-                        """
-                        #module.add(self.getBomb(-13))
-
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
         return module
 
 #dot2
