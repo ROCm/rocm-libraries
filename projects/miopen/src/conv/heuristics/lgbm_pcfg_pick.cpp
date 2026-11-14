@@ -182,7 +182,8 @@ std::vector<std::string> RankBucket(const LgbmForest& forest,
 }
 
 // The grouped-conv XDLOPS solvers ship a two-tower kernel-tuning-net (KTN)
-// perf-config predictor (the *_input_encoder / *_kernel_config_encoder models),
+// perf-config predictor (the *_input_encoder model plus a precomputed config-embedding
+// table that replaces the former *_kernel_config_encoder),
 // run inside the solver's own GetDefaultPerformanceConfig on gfx90a/gfx942/gfx950
 // (see PerformanceConfig...::IsModelApplicable). The two-tower takes precedence
 // there; the LGBM perf-config picker is the fallback for solvers/architectures

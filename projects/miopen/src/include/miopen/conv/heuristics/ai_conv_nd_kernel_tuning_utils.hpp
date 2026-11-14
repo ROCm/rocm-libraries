@@ -32,6 +32,7 @@
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/timer.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
@@ -152,6 +153,21 @@ struct SolverHeuristicConfig
         // Future versions may relax this constraint.
         return IsPowerOfTwo(split_k_value);
     }
+
+    /// @brief The split-k gate the lazy-applicability walk applies before the CK validator.
+    /// A deterministic request forbids split_k != 1 on split-k solvers, and split-k solvers must
+    /// pass IsValidSplitK. Non-split-k solvers are never gated on split_k: their vocab ids are bare
+    /// so parse_kernel_id yields split_k 1, which IsValidSplitK would wrongly reject (it accepts
+    /// only 0 for them) -- gating them here silently disabled the AI pick for Fwd/3D-Fwd/3D-Bwd.
+    /// @return true if a candidate with this split_k may be considered.
+    bool PassesSplitKGate(bool is_deterministic, int split_k_value) const
+    {
+        if(is_deterministic && uses_split_k && split_k_value != 1)
+            return false;
+        if(uses_split_k && !IsValidSplitK(split_k_value))
+            return false;
+        return true;
+    }
 };
 
 /**
@@ -212,94 +228,7 @@ GetFeaturesND(const miopen::conv::ProblemDescription&, int max_cu, const std::st
 MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetKernelAsTokens(const std::string& kernel);
 MIOPEN_INTERNALS_EXPORT std::vector<std::string>
 ProcessExplicitXdlParams(const std::vector<std::string>& params);
-MIOPEN_INTERNALS_EXPORT void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
-                                                  std::vector<int>& indexes,
-                                                  std::vector<std::vector<std::string>>& kernels);
 
-MIOPEN_INTERNALS_EXPORT
-std::vector<int> GenerateSplitK(int max_split_k);
-
-// Main template implementation with validation function
-template <typename DataType, typename ValidationFunc>
-std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
-RunParameterPredictionModel(
-    const miopen::ExecutionContext& ctx,
-    const miopen::conv::ProblemDescription& problem,
-    std::vector<std::string>& valid_kernels,
-    int& index,
-    int& split_k,
-    std::string& kernel_id,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-        fill_valid_kernels,
-    std::string solver_name,
-    ValidationFunc&& is_valid)
-{
-    valid_kernels = fill_valid_kernels(problem);
-
-    // Filter kernels by type
-    std::vector<int> heuristic_indexes;
-    std::vector<std::vector<std::string>> heuristic_kernels;
-    FillHeuristicKernels(valid_kernels, heuristic_indexes, heuristic_kernels);
-    // Prepare features and split_k values
-    const std::string& arch = ctx.GetStream().GetDeviceName();
-
-    // Use AI model to select best candidate
-    try
-    {
-        std::map<std::string, float> features =
-            GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-
-        bool use_split_k = split_k != 0;
-        if(split_k > 1)
-        {
-            MIOPEN_THROW("Invalid initial split_k value for performing AI Heuristics: " +
-                         std::to_string(split_k) + ". Expected 0 (no split) or 1 (default split).");
-        }
-
-        auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
-            arch,
-            solver_name,
-            features,
-            heuristic_kernels,
-            use_split_k,
-            std::forward<ValidationFunc>(is_valid));
-
-        // Check if we have any candidates
-        if(!result.IsEmpty())
-        {
-            // Get the best candidate (first in the sorted list)
-            int best_index   = result.GetBestKernelIndex();
-            int best_split_k = result.GetBestSplitK();
-
-            if(best_index >= 0 && best_index < static_cast<int>(valid_kernels.size()))
-            {
-                index   = best_index;
-                split_k = best_split_k;
-                if(use_split_k)
-                {
-                    kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
-                }
-                else
-                {
-                    kernel_id = valid_kernels[index];
-                }
-                return {true, result};
-            }
-        }
-        MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
-        return {false, result};
-    }
-    catch(const std::exception& ex)
-    {
-        // Catch std::exception, not just miopen::Exception: a model fdeep cannot load/run
-        // (e.g. one exported in an incompatible format) throws a non-miopen exception, and at
-        // runtime that must degrade to the non-AI heuristic rather than fail the convolution.
-        // (Broken bundled models are caught loudly by the dedicated model-load gtest, so this
-        // graceful fallback does not hide them in CI.)
-        MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
-        return {false, miopen::ai::tuning::candidate_selection::CandidateSelectionResult{}};
-    }
-}
 // ============================================================================
 // Centralized AI Heuristics Runner
 // ============================================================================
@@ -393,15 +322,12 @@ bool RunKTNGeneric(ConfigType& config,
  * // Fallback to default initialization
  * ```
  */
-template <typename FillKernelsFunc,
-          typename KTNRunnerFunc          = std::nullptr_t,
-          typename CKValidatorCreatorFunc = std::nullptr_t>
+template <typename KTNRunnerFunc = std::nullptr_t, typename CKValidatorCreatorFunc = std::nullptr_t>
 bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      HeuristicInitState& state,
                      const miopen::ExecutionContext& ctx,
                      const miopen::conv::ProblemDescription& problem,
                      bool is_deterministic,
-                     FillKernelsFunc&& fill_valid_kernels,
                      KTNRunnerFunc&& ktn_runner              = nullptr,
                      CKValidatorCreatorFunc&& ck_val_creator = nullptr,
                      bool use_tf32                           = false)
@@ -425,89 +351,55 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
         MIOPEN_LOG_I2(solver_cfg.solver_name << ": Candidate Selection heuristics for " << arch);
         std::string solver_name = solver_cfg.GetSolverNameForArch(arch);
 
-        // Fill valid kernels with TF32 fallback support
-        // If use_tf32 is true, first try with TF32; if no kernels, retry without TF32
-        state.valid_kernels = fill_valid_kernels(problem, use_tf32);
-
-        if(state.valid_kernels.empty() && use_tf32)
+        // Fast path: when the caller supplies an is_args_supported callback and a precomputed
+        // config vocabulary (v3 table) is installed, rank the whole vocabulary by model score and
+        // check applicability lazily top-down, skipping the (often ~200 ms) FillValidKernels
+        // enumeration. Behaviour-preserving: first applicable in score order is the argmax over
+        // applicable candidates. Fails closed to the solver's non-AI default when no vocab is
+        // installed or none of the ranked candidates is applicable.
+        if constexpr(!std::is_same_v<CKValidatorCreatorFunc, std::nullptr_t>)
         {
-            // TF32 fallback: retry without TF32
-            MIOPEN_LOG_I2(solver_cfg.solver_name
-                          << ": TF32 yielded no kernels, retrying without TF32");
-            state.valid_kernels = fill_valid_kernels(problem, false);
-        }
-
-        if(state.valid_kernels.empty())
-        {
-            MIOPEN_LOG_I(solver_cfg.solver_name << ": No valid kernels found");
+            // Whole fast-path attempt (features + rank + lazy applicability): rank the precomputed
+            // config vocabulary by model score, then check CK applicability lazily top-down.
+            const miopen::ScopedTimeLogger fastpath_timer(std::string{solver_cfg.solver_name} +
+                                                          " CandidateSelection.lazy_fastpath");
+            std::map<std::string, float> fp_features =
+                GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+            // Build the per-candidate applicability check here, from the CK validator plus
+            // the solver's deterministic and split-k gates, so each solver no longer hand-rolls its
+            // own is_args_supported lambda. SelectBestVocabCandidate returns the bare
+            // GetTypeString.
+            auto ck_validator = ck_val_creator(problem);
+            auto lazy_check   = [&](const std::string& base, int split_k, bool fp32_pass) -> bool {
+                // PassesSplitKGate does not gate non-split-k solvers on split_k; the pick below
+                // already forces split_k 0 for them.
+                return solver_cfg.PassesSplitKGate(is_deterministic, split_k) &&
+                       ck_validator(base, split_k, fp32_pass);
+            };
+            auto lazy = ai::tuning::candidate_selection::SelectBestVocabCandidate(
+                arch, solver_name, fp_features, use_tf32, lazy_check);
+            if(lazy)
+            {
+                const std::string& base = lazy->first;
+                // Non-split solvers leave split_k 0 on the Reset/non-AI path; match that.
+                const int split_k   = solver_cfg.uses_split_k ? lazy->second : 0;
+                state.valid_kernels = {base};
+                state.SetResult(0, split_k, solver_cfg.uses_split_k);
+                MIOPEN_LOG_I(solver_cfg.solver_name
+                             << ": Candidate Selection (lazy applicability) selected: "
+                             << state.kernel_id);
+                return true;
+            }
+            // A lazy miss -- vocab present but nothing applicable, the table absent, or the
+            // LGBM-only/kill switch -- goes straight to the solver's non-AI default (fail-closed).
             return false;
         }
 
-        // Filter kernels by type
-        std::vector<int> heuristic_indexes;
-        std::vector<std::vector<std::string>> heuristic_kernels;
-        FillHeuristicKernels(state.valid_kernels, heuristic_indexes, heuristic_kernels);
-
-        // Prepare features
-        std::map<std::string, float> features =
-            GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-
-        bool use_split_k = solver_cfg.uses_split_k;
-
-        try
-        {
-            // Validation function: Filters candidate (kernel_index, split_k) combinations
-            // - Checks kernel index bounds
-            // - Enforces deterministic mode restrictions (split_k must be 1)
-            // - Validates split_k using solver configuration rules
-            // - Uses CK's IsSupportedBySplitK when ck_validator is provided
-            auto is_valid = [&](int ki, int sk) {
-                if(ki < 0 || ki >= static_cast<int>(state.valid_kernels.size()))
-                    return false;
-                if(is_deterministic && solver_cfg.uses_split_k && sk != 1)
-                    return false;
-                if(!solver_cfg.IsValidSplitK(sk))
-                    return false;
-
-                // If CK validator creator is provided, use CK's IsSupportedBySplitK
-                if constexpr(!std::is_same_v<CKValidatorCreatorFunc, std::nullptr_t>)
-                {
-                    auto ck_validator = ck_val_creator(problem);
-                    if(!ck_validator(state.valid_kernels[ki], sk))
-                    {
-                        MIOPEN_LOG_T("CK rejected kernel+split_k: " << state.valid_kernels[ki]
-                                                                    << "+" << sk);
-                        return false;
-                    }
-                }
-                return true;
-            };
-
-            auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
-                arch, solver_name, features, heuristic_kernels, use_split_k, is_valid);
-
-            if(!result.IsEmpty())
-            {
-                int best_index   = result.GetBestKernelIndex();
-                int best_split_k = result.GetBestSplitK();
-
-                if(best_index >= 0 && best_index < static_cast<int>(state.valid_kernels.size()))
-                {
-                    state.SetResult(best_index, best_split_k, use_split_k);
-                    MIOPEN_LOG_I(solver_cfg.solver_name << ": Candidate Selection selected: "
-                                                        << state.kernel_id);
-                    return true;
-                }
-            }
-
-            MIOPEN_LOG_I(solver_cfg.solver_name
-                         << ": AI prediction returned no valid candidates, falling back");
-        }
-        catch(const miopen::Exception& ex)
-        {
-            MIOPEN_LOG_I2(solver_cfg.solver_name << ": [Warning] AI model failed: " << ex.what());
-        }
-
+        // The CK grouped-conv solvers always supply the lazy callback above, so reaching here means
+        // no precomputed-vocab path is available -> no AI pick (the solver uses its non-AI
+        // default). The former FillValidKernels/FillHeuristicKernels + config-tower enumeration
+        // path has been removed: two-tower selection ships with a precomputed config-embedding
+        // table, so the config-side encoding was dead once the lazy path became authoritative.
         return false;
     }
 

@@ -24,19 +24,29 @@
  *
  *******************************************************************************/
 #include <gtest/gtest.h>
+#include "gtest_common.hpp" // IsTestSupportedByDevice, Gpu
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures
+#include <miopen/solver/ck_impl_lib_loader.hpp> // CkImplLibLoader, CKSolverType (CK enumeration)
+#include <miopen/env_debug.hpp>                 // debug::env::UpdateEnvVariable (table toggle)
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/md5.hpp> // miopen::md5 (loader md5-mismatch test)
+#include <random>
 #include <miopen/handle.hpp>
 #include <string>
 #include <map>
+#include <set>
+#include <numeric>
 #include <optional>
 #include <vector>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+#include <array>
+#include <cstdint>
+#include <fstream>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::ai::tuning::candidate_selection;
@@ -57,16 +67,22 @@ void PrintTo(const CandidateSelectionParams& p, std::ostream* os)
 }
 
 // Default validation function: accepts all kernel/split_k combinations
-inline constexpr auto accept_all_combinations = [](int, int) { return true; };
-
+// Files required for every test: the input encoder (run live) and the metadata. The config encoder
+// is NOT listed here -- it is deliberately dropped from the shipped artifacts (the precomputed
+// kernel_config_embeddings table replaces it), so its absence must not fail file-presence checks.
 auto GetCandidateSelectionModelFiles(const CandidateSelectionParams& params)
 {
     const auto db_path = miopen::GetSystemDbPath();
     return std::vector<miopen::fs::path>{
         db_path / (params.arch + "_" + params.solver + "_input_encoder.tn.model"),
-        db_path / (params.arch + "_" + params.solver + "_kernel_config_encoder.tn.model"),
         db_path / (params.arch + "_" + params.solver + "_metadata.tn.model")};
 }
+
+// Note: there is no "skip if the config encoder is missing" guard any more. The config encoder is
+// never shipped (the precomputed embedding table replaces it) and nothing here needs it -- the
+// model constructor does not load it, candidate selection reads the precomputed config vocabulary,
+// and the input-feature tests use the input encoder. The fixture already skips/fails on missing
+// input encoder + metadata.
 
 auto GetMissingModelFiles(const CandidateSelectionParams& params)
 {
@@ -87,33 +103,6 @@ std::string FormatMissingFiles(const std::vector<miopen::fs::path>& missing_file
     return os.str();
 }
 
-std::vector<std::vector<std::string>> GenerateValidKernelParams(
-    const CandidateSelectionMetadata& meta, const std::string& kernel_name, int num_candidates = 3)
-{
-    const auto& kernel_str_mapping = meta.GetKernelStrMapping(kernel_name);
-    std::vector<std::vector<std::string>> valid_kernel_params;
-    for(int i = 0; i < num_candidates; ++i)
-    {
-        std::vector<std::string> candidate(meta.output_params().size(), "nan");
-        candidate[0] = kernel_name;
-        for(const auto& kv : kernel_str_mapping)
-        {
-            const std::string& param_name = kv.second;
-            const std::string& index      = kv.first;
-            const int index_int           = std::stoi(index);
-            if(param_name.find("kernel_name") != std::string::npos)
-                continue;
-            auto it = meta.sequence_encodings().find(param_name);
-            if(it == meta.sequence_encodings().end())
-                candidate[index_int] = "0";
-            else
-                candidate[index_int] = it->second.begin()->first;
-        }
-        valid_kernel_params.push_back(candidate);
-    }
-    return valid_kernel_params;
-}
-
 class GPU_CandidateSelection_FP32 : public ::testing::TestWithParam<CandidateSelectionParams>
 {
 protected:
@@ -123,7 +112,14 @@ protected:
     {
         const auto& params      = GetParam();
         const auto current_arch = handle.GetDeviceName();
-        const auto missing      = GetMissingModelFiles(params);
+        // Candidate-selection (KTN) models and the CK-IGEMM path ship only for gfx942/gfx950. On
+        // any other device (e.g. RDNA gfx110X) there is nothing to exercise, so skip rather than
+        // run the foreign-arch models on an unsupported device (they are shipped for every build
+        // target).
+        if(!IsTestSupportedByDevice(Gpu::gfx94X | Gpu::gfx950))
+            GTEST_SKIP() << "Candidate selection ships for gfx942/gfx950 only; current device "
+                         << current_arch << " is unsupported.";
+        const auto missing = GetMissingModelFiles(params);
 
         if(missing.empty())
             return;
@@ -183,21 +179,9 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
     ASSERT_FALSE(encoded.empty()) << "EncodeInputFeatures returned empty vector!";
 }
 
-TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigs_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionModel model(params.arch, params.solver);
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
-    // Fill with class index 0, which is in range for every categorical output encoding (and is not
-    // the -1 missing-value token). A categorical value >= its class count is rejected by
-    // AppendKernelConfigOneHot, so an arbitrary fill like 2.0 would (correctly) throw.
-    std::vector<std::vector<float>> encoded_candidates(100, std::vector<float>(feature_size, 0.0f));
-    auto encoded = model.EncodeKernelConfigs(encoded_candidates);
-    ASSERT_FALSE(encoded.empty()) << "EncodeKernelConfigs returned empty vector!";
-    for(const auto& vec : encoded)
-        ASSERT_FALSE(vec.empty()) << "EncodeKernelConfigs returned a candidate with empty vector!";
-}
+// (The config side is now the precomputed vocabulary ranked by SelectBestVocabCandidate -- there is
+// no per-candidate config encode to assert here; the end-to-end selection is exercised by the
+// driver and the SelectBestVocab* tests below.)
 
 TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
 {
@@ -229,20 +213,6 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
     }
 }
 
-TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigsEdgeCases_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionModel model(params.arch, params.solver);
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
-    std::vector<std::vector<float>> empty_candidates;
-    EXPECT_THROW(model.EncodeKernelConfigs(empty_candidates), std::exception);
-    std::vector<std::vector<float>> candidates_short(1, std::vector<float>(feature_size - 1, 2.0f));
-    EXPECT_THROW(model.EncodeKernelConfigs(candidates_short), std::exception);
-    std::vector<std::vector<float>> candidates_long(1, std::vector<float>(feature_size + 1, 2.0f));
-    EXPECT_THROW(model.EncodeKernelConfigs(candidates_long), std::exception);
-}
-
 TEST_P(GPU_CandidateSelection_FP32, KernelStrMappingUnknownKernelThrows_Test)
 {
     const auto& params = GetParam();
@@ -271,22 +241,6 @@ TEST_P(GPU_CandidateSelection_FP32, InputOutputParamIndexThrows_Test)
     EXPECT_THROW(meta.GetOutputParamIndex("nonexistent_param"), std::exception);
 }
 
-TEST_P(GPU_CandidateSelection_FP32, EncodeKernelParamsBadValueThrows_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    std::vector<std::vector<std::string>> bad_params = {
-        {params.kernel_name, "nonexistent_value", "nan"}};
-
-    // The function should not throw, but should return empty result due to invalid mapping
-    std::vector<std::vector<float>> result;
-    EXPECT_NO_THROW(result = EncodeKernelParams(bad_params, meta, /*use_split_k=*/false));
-
-    // Verify that the invalid candidate was skipped (empty result)
-    EXPECT_TRUE(result.empty())
-        << "Expected empty result when all candidates have invalid mappings";
-}
-
 TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
 {
     const auto& params = GetParam();
@@ -295,19 +249,25 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
         features[name] = 1.0f;
-    auto encoded_features    = model.EncodeInputFeatures(features);
-    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
-    auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta, /*use_split_k=*/false);
-    auto encoded_configs     = model.EncodeKernelConfigs(encoded_candidates);
-    std::vector<std::pair<int, float>> ids =
-        model.SelectBestCandidateIndices(encoded_features, encoded_configs);
+    auto encoded_features = model.EncodeInputFeatures(features);
+    // Rank real config embeddings taken straight from the shipped vocab (exactly what a table hit
+    // returns), so the selection is exercised without reconstructing a raw table key:
+    // GenerateValidKernelParams builds synthetic configs that are not enumerated, hence not in the
+    // table, and would miss.
+    const auto& vocab      = GetConfigEmbeddingVocab(params.arch, params.solver);
+    const auto& emb_matrix = GetConfigEmbeddingMatrix(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty()) << "shipped config-embedding vocab is empty";
+    std::vector<std::vector<float>> encoded_configs;
+    for(std::size_t i = 0; i < 3 && i < vocab.size(); ++i)
+        encoded_configs.push_back(emb_matrix[i]);
+    auto ids = model.SelectBestCandidateIndices(encoded_features, encoded_configs);
     ASSERT_FALSE(ids.empty()) << "No candidates were selected!";
     for(const auto& candidate : ids)
     {
         const int idx = candidate.first;
         ASSERT_GE(idx, 0) << "Candidate index is negative!";
-        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
-            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
+        ASSERT_LT(idx, static_cast<int>(encoded_configs.size()))
+            << "Candidate index " << idx << " out of range [0, " << encoded_configs.size() - 1
             << "]";
     }
 }
@@ -322,178 +282,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
                  std::exception);
 }
 
-TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    std::map<std::string, float> features;
-    for(const auto& name : meta.input_params())
-        features[name] = 1.0f;
-    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
-    auto result              = ModelSelectBestCandidate(params.arch,
-                                           params.solver,
-                                           features,
-                                           valid_kernel_params,
-                                           /*use_split_k=*/false,
-                                           accept_all_combinations);
-    for(const auto& idx : result.kernel_indices)
-    {
-        ASSERT_GE(idx, 0) << "Candidate index is negative!";
-        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
-            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
-            << "]";
-    }
-}
-
-TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitK_Test)
-{
-    const auto& params                            = GetParam();
-    std::vector<std::vector<std::string>> kernels = {{"typeA", "p1"}, {"typeB", "p2"}};
-    std::vector<int> indexes                      = {0, 1};
-    std::vector<int> split_ks = miopen::solver::conv::GenerateSplitK(params.split_k);
-    auto [expanded, mapping] =
-        ExpandKernelParamsWithSplitK(kernels, indexes, split_ks, accept_all_combinations);
-    ASSERT_EQ(expanded.size(), 8u);
-    ASSERT_EQ(mapping.size(), 8u);
-    std::vector<std::vector<std::string>> expected_expanded = {
-        {"typeA", "p1", "1"},
-        {"typeA", "p1", "2"},
-        {"typeA", "p1", "4"},
-        {"typeA", "p1", "8"},
-        {"typeB", "p2", "1"},
-        {"typeB", "p2", "2"},
-        {"typeB", "p2", "4"},
-        {"typeB", "p2", "8"},
-    };
-    std::vector<std::pair<int, int>> expected_mapping = {
-        {0, 1}, {0, 2}, {0, 4}, {0, 8}, {1, 1}, {1, 2}, {1, 4}, {1, 8}};
-    for(size_t i = 0; i < expanded.size(); ++i)
-    {
-        ASSERT_EQ(expanded[i], expected_expanded[i]);
-        ASSERT_EQ(mapping[i], expected_mapping[i]);
-    }
-}
-
-TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitKFunctionality_Test)
-{
-    const auto& params                            = GetParam();
-    std::vector<std::vector<std::string>> kernels = {
-        {"DeviceGroupedConvBwdWeight_Xdl_CShuffle", "p1"}};
-    std::vector<int> indexes  = {0};
-    std::vector<int> split_ks = miopen::solver::conv::GenerateSplitK(params.split_k);
-    auto [expanded, mapping] =
-        ExpandKernelParamsWithSplitK(kernels, indexes, split_ks, accept_all_combinations);
-    ASSERT_EQ(expanded.size(), split_ks.size());
-    ASSERT_EQ(mapping.size(), split_ks.size());
-    for(size_t i = 0; i < split_ks.size(); ++i)
-    {
-        ASSERT_EQ(expanded[i][0], "DeviceGroupedConvBwdWeight_Xdl_CShuffle");
-        ASSERT_EQ(expanded[i][2], std::to_string(split_ks[i]));
-        ASSERT_EQ(mapping[i].first, 0);
-        ASSERT_EQ(mapping[i].second, split_ks[i]);
-    }
-}
-
-// === Wavelet / conditional-kernel decode tests ===
-//
-// The Wavelet WRW kernel (DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3) has a variable
-// type-string length and a packed first token "{load}l+{math}m". These tests exercise the
-// special-case decode in EncodeKernelParams (see ai_candidate_selection.cpp). They only run on the
-// WRW solvers whose metadata actually contains the Wavelet kernel.
-//
-// Candidate layout (0-based, kernel_name prepended at [0]):
-//   [0] kernel_name
-//   [1] "{load}l+{math}m"  (CK type-string index 0)
-//   [2..15] 14 remaining base params (CK indices 1..14)  -> 15 base tokens total, base len 16
-//   [16] NumGroupsToMerge  (CK index 15, present only when > 1)
-//   [last] SplitK          (appended by ExpandKernelParamsWithSplitK when use_split_k)
-
 namespace {
-constexpr const char* kWaveletKernel = "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3";
-
-bool MetadataHasKernel(const CandidateSelectionMetadata& meta, const std::string& kernel_name)
-{
-    try
-    {
-        meta.GetKernelStrMapping(kernel_name);
-        return true;
-    }
-    catch(const std::exception&)
-    {
-        return false;
-    }
-}
-
-// Find the slot of an output param (by suffix) within the *encoded* vector, i.e. the index after
-// constant output params have been dropped. Returns -1 if absent or constant.
-int EncodedSlotForSuffix(const CandidateSelectionMetadata& meta, const std::string& suffix)
-{
-    int slot = 0;
-    for(const auto& param_name : meta.output_params())
-    {
-        if(meta.GetOutputConstant(param_name).has_value())
-            continue; // constant params are skipped in the encoded vector
-        if(param_name.size() >= suffix.size() &&
-           param_name.compare(param_name.size() - suffix.size(), suffix.size(), suffix) == 0)
-            return slot;
-        ++slot;
-    }
-    return -1;
-}
-
-// Return the metadata constant for an output param matched by suffix (e.g. the value a retrain
-// pinned a feature to when it was constant in the training set), or std::nullopt when no output
-// param with that suffix is a declared constant.
-std::optional<std::string> OutputConstantForSuffix(const CandidateSelectionMetadata& meta,
-                                                   const std::string& suffix)
-{
-    for(const auto& param_name : meta.output_params())
-    {
-        if(param_name.size() >= suffix.size() &&
-           param_name.compare(param_name.size() - suffix.size(), suffix.size(), suffix) == 0)
-            return meta.GetOutputConstant(param_name);
-    }
-    return std::nullopt;
-}
-
-// Build a Wavelet candidate. Base form (no NGM, no SplitK) has length 16: kernel_name + packed
-// token + 14 numeric base params. include_num_groups appends NumGroupsToMerge at [16] (length 17).
-std::vector<std::string> MakeWaveletCandidate(bool include_num_groups, const std::string& ngm = "2")
-{
-    std::vector<std::string> c;
-    c.push_back(kWaveletKernel); // [0]
-    c.push_back("128l+256m");    // [1] packed TileLoadMath token
-    for(int i = 0; i < 14; ++i)  // [2..15] remaining 14 base params
-        c.push_back("1");
-    if(include_num_groups)
-        c.push_back(ngm); // [16] NumGroupsToMerge (CK emits only when > 1)
-    return c;
-}
-
-// The CShuffleV3 large-tensor kernel emits BlkGemmPipelineScheduler / -Version
-// ("inline_after_optionals") right after the optional NumGroupsToMerge, then the appended SplitK.
-// base_param_count is 15, so the candidate is kernel_name + 15 base params, then (optional NGM),
-// scheduler, version, then the appended SplitK. CK keeps the "BlkGemmPipelineScheduler:" label on
-// these tokens at inference, so that is what the candidate carries here.
-constexpr const char* kV3LargeTensorKernel =
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_Large_Tensor";
-
-std::vector<std::string> MakeV3LargeTensorCandidate(bool include_num_groups,
-                                                    const std::string& scheduler,
-                                                    const std::string& version,
-                                                    const std::string& ngm = "2")
-{
-    std::vector<std::string> c;
-    c.push_back(kV3LargeTensorKernel); // [0]
-    for(int i = 0; i < 15; ++i)        // [1..15] 15 base params
-        c.push_back("1");
-    if(include_num_groups)
-        c.push_back(ngm);   // NumGroupsToMerge (present only when > 1)
-    c.push_back(scheduler); // inline-after-optionals "BlkGemmPipelineScheduler:..."
-    c.push_back(version);   // inline-after-optionals "BlkGemmPipelineVersion:..."
-    return c;
-}
-
 // A complete input-feature map for EngineerCandidateSelectionInputFeatures (every FeatureAt key),
 // so a throw can only come from the precision-class check, not a missing feature.
 std::map<std::string, float> MakeFullInputFeatureMap()
@@ -509,188 +298,6 @@ std::map<std::string, float> MakeFullInputFeatureMap()
     };
 }
 } // namespace
-
-TEST_P(GPU_CandidateSelection_FP32, WaveletSplitTileLoadMath_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    if(!MetadataHasKernel(meta, kWaveletKernel))
-        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
-
-    auto candidate = MakeWaveletCandidate(/*include_num_groups=*/false); // length 16
-    std::vector<std::vector<std::string>> kparams{candidate};
-
-    auto encoded = EncodeKernelParams(kparams, meta, /*use_split_k=*/false);
-    ASSERT_EQ(encoded.size(), 1u) << "Wavelet candidate was unexpectedly skipped";
-
-    // Validate that the packed "{load}l+{math}m" token decodes its math part to 256. Whether
-    // TileMathThreadGroupSize survives as a live encoded feature depends on the trained model: the
-    // 2D Wrw models keep it live (TileLoad is the constant), whereas the retrained 3D Wrw models
-    // pin *both* TileLoad and TileMath to a constant. Assert against whichever form the shipped
-    // metadata declares so this stays correct across retrains.
-    const std::string math_suffix = "TileMathThreadGroupSize";
-    const int math_slot           = EncodedSlotForSuffix(meta, math_suffix);
-    if(math_slot >= 0)
-    {
-        EXPECT_FLOAT_EQ(encoded[0][math_slot], 256.0f)
-            << "math part of '128l+256m' not decoded to 256";
-    }
-    else
-    {
-        // Dropped as a constant: the value is fixed in metadata, not emitted into the vector.
-        const auto math_const = OutputConstantForSuffix(meta, math_suffix);
-        ASSERT_TRUE(math_const.has_value())
-            << "TileMathThreadGroupSize is neither a live encoded feature nor a metadata constant";
-        EXPECT_EQ(*math_const, "256") << "constant TileMathThreadGroupSize does not match 256";
-    }
-}
-
-TEST_P(GPU_CandidateSelection_FP32, WaveletNumGroupsConditional_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    if(!MetadataHasKernel(meta, kWaveletKernel))
-        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
-
-    const int ngm_slot = EncodedSlotForSuffix(meta, "NumGroupsToMerge");
-    ASSERT_GE(ngm_slot, 0);
-    const float missing = meta.GetMissingValueToken();
-
-    // Present: NumGroupsToMerge="2" (candidate length 17) -> decoded (not missing).
-    {
-        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
-        auto encoded   = EncodeKernelParams({candidate}, meta, /*use_split_k=*/false);
-        ASSERT_EQ(encoded.size(), 1u);
-        EXPECT_NE(encoded[0][ngm_slot], missing)
-            << "NumGroupsToMerge present but decoded as missing";
-    }
-    // Absent: base candidate (length 16) -> NumGroupsToMerge resolves to the missing token.
-    {
-        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/false);
-        auto encoded   = EncodeKernelParams({candidate}, meta, /*use_split_k=*/false);
-        ASSERT_EQ(encoded.size(), 1u);
-        EXPECT_FLOAT_EQ(encoded[0][ngm_slot], missing)
-            << "NumGroupsToMerge absent but not decoded as missing token";
-    }
-}
-
-TEST_P(GPU_CandidateSelection_FP32, WaveletSplitKResolution_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    if(!MetadataHasKernel(meta, kWaveletKernel))
-        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
-
-    const int splitk_slot = EncodedSlotForSuffix(meta, "SplitK");
-    ASSERT_GE(splitk_slot, 0);
-    const float missing = meta.GetMissingValueToken();
-
-    // With use_split_k: SplitK is the appended last token (NGM present + appended splitk -> len
-    // 18).
-    {
-        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
-        candidate.push_back("8"); // appended SplitK (mirrors ExpandKernelParamsWithSplitK)
-        auto encoded = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
-        ASSERT_EQ(encoded.size(), 1u);
-        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], 8.0f) << "appended SplitK not decoded to 8";
-    }
-    // Without use_split_k: SplitK must resolve to the missing token.
-    {
-        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
-        auto encoded   = EncodeKernelParams({candidate}, meta, /*use_split_k=*/false);
-        ASSERT_EQ(encoded.size(), 1u);
-        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], missing)
-            << "SplitK decoded as present when use_split_k is false";
-    }
-}
-
-// The pipeline params (BlkGemmPipelineScheduler/-Version) in the CShuffleV3 large-tensor kernel are
-// "inline_after_optionals": their position shifts with the optional NumGroupsToMerge. This verifies
-// that the trailing SplitK is decoded from the correct (appended last) token rather than a
-// pipeline-param token, and that the pipeline params themselves decode.
-TEST_P(GPU_CandidateSelection_FP32, V3LargeTensorPipelineParamDecode_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    if(!MetadataHasKernel(meta, kV3LargeTensorKernel))
-        GTEST_SKIP() << "V3 large-tensor kernel not present in metadata for " << params.solver;
-    if(meta.GetConditionalLayout(kV3LargeTensorKernel) == nullptr)
-        GTEST_SKIP() << "V3 large-tensor kernel has no conditional layout in metadata for "
-                     << params.solver;
-
-    const int splitk_slot = EncodedSlotForSuffix(meta, "SplitK");
-    const int sched_slot  = EncodedSlotForSuffix(meta, "BlkGemmPipelineScheduler");
-    ASSERT_GE(splitk_slot, 0);
-    ASSERT_GE(sched_slot, 0) << "scheduler expected to be a live (encoded) feature";
-    const float missing = meta.GetMissingValueToken();
-
-    // NumGroups omitted (the g=1 case): [16]=scheduler, [17]=version, [18]=appended SplitK.
-    {
-        auto candidate = MakeV3LargeTensorCandidate(/*include_num_groups=*/false,
-                                                    "BlkGemmPipelineScheduler:Intrawave",
-                                                    "BlkGemmPipelineVersion:v4");
-        candidate.push_back("8"); // appended SplitK (mirrors ExpandKernelParamsWithSplitK)
-        auto encoded = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
-        ASSERT_EQ(encoded.size(), 1u) << "V3 large-tensor candidate was unexpectedly skipped";
-        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], 8.0f)
-            << "SplitK must decode from the appended token, not a pipeline-param token";
-        EXPECT_NE(encoded[0][sched_slot], missing) << "scheduler token not decoded";
-    }
-    // NumGroups present: scheduler shifts right by one but is still resolved by position.
-    {
-        auto candidate = MakeV3LargeTensorCandidate(/*include_num_groups=*/true,
-                                                    "BlkGemmPipelineScheduler:Interwave",
-                                                    "BlkGemmPipelineVersion:v1",
-                                                    "2");
-        candidate.push_back("4"); // appended SplitK
-        auto encoded = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
-        ASSERT_EQ(encoded.size(), 1u);
-        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], 4.0f)
-            << "SplitK mis-decoded with NumGroups present";
-        EXPECT_NE(encoded[0][sched_slot], missing);
-    }
-    // The scheduler value is actually read: Intrawave vs Interwave must encode differently.
-    {
-        auto intra = MakeV3LargeTensorCandidate(
-            false, "BlkGemmPipelineScheduler:Intrawave", "BlkGemmPipelineVersion:v4");
-        auto inter = MakeV3LargeTensorCandidate(
-            false, "BlkGemmPipelineScheduler:Interwave", "BlkGemmPipelineVersion:v4");
-        auto e_intra = EncodeKernelParams({intra}, meta, /*use_split_k=*/false);
-        auto e_inter = EncodeKernelParams({inter}, meta, /*use_split_k=*/false);
-        ASSERT_EQ(e_intra.size(), 1u);
-        ASSERT_EQ(e_inter.size(), 1u);
-        EXPECT_NE(e_intra[0][sched_slot], e_inter[0][sched_slot])
-            << "Intrawave vs Interwave must encode to different values";
-    }
-}
-
-// A candidate carrying a non-numeric value in a numeric output slot must be ranked last via the
-// all-NaN sentinel, not abort encoding for every candidate. Here the appended SplitK token is
-// non-numeric; the other (valid) candidate must still encode normally.
-TEST_P(GPU_CandidateSelection_FP32, EncodeFailureSkipsCandidate_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    if(!MetadataHasKernel(meta, kWaveletKernel))
-        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
-
-    auto good = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
-    good.push_back("8"); // valid appended SplitK
-    auto bad = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
-    bad.push_back("not_a_number"); // non-numeric appended SplitK -> unparseable numeric slot
-
-    std::vector<std::vector<float>> encoded;
-    ASSERT_NO_THROW(encoded = EncodeKernelParams({good, bad}, meta, /*use_split_k=*/true));
-    ASSERT_EQ(encoded.size(), 2u) << "both candidates must produce an encoding row";
-
-    const auto is_nan = [](float v) { return std::isnan(v); };
-    EXPECT_FALSE(std::all_of(encoded[0].begin(), encoded[0].end(), is_nan))
-        << "valid candidate must not be sentinel'd";
-    ASSERT_FALSE(encoded[1].empty());
-    EXPECT_TRUE(std::all_of(encoded[1].begin(), encoded[1].end(), is_nan))
-        << "candidate with unparseable numeric value must be the all-NaN sentinel";
-    EXPECT_EQ(encoded[0].size(), encoded[1].size()) << "sentinel width must match a normal row";
-}
 
 // A precision the model wasn't trained on (e.g. INT8 on a model whose precision encoding lacks it,
 // such as the 3-class Wrw/Bwd models) must throw so the caller falls back to the non-AI heuristic,
@@ -983,48 +590,6 @@ TEST_P(GPU_CandidateSelection_FP32, Engineered3dInputSwap_Test)
         << "out_d slot must carry in_d after Backward swap";
 }
 
-// The conditional-layout descriptor is loaded from metadata: present for the Wavelet kernel,
-// absent for a fully static kernel (which then decodes via the plain kernel_str_mapping path).
-TEST_P(GPU_CandidateSelection_FP32, ConditionalLayoutDescriptorPresence_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-
-    // Static kernel (used as the common test kernel) must have no conditional layout.
-    EXPECT_EQ(meta.GetConditionalLayout("DeviceGroupedConvBwdWeight_Xdl_CShuffle"), nullptr);
-
-    if(MetadataHasKernel(meta, kWaveletKernel))
-    {
-        const auto* layout = meta.GetConditionalLayout(kWaveletKernel);
-        ASSERT_NE(layout, nullptr) << "Wavelet metadata present but conditional layout missing";
-        EXPECT_EQ(layout->base_param_count, 15u);
-        EXPECT_TRUE(layout->conditional_params.count("NumGroupsToMerge") == 1);
-        EXPECT_TRUE(layout->conditional_params.count("SplitK") == 1);
-        EXPECT_TRUE(layout->packed_params.count("TileLoadMathThreadGroupSize") == 1);
-    }
-}
-
-// A fully static kernel decodes via the plain path (no conditional descriptor needed).
-TEST_P(GPU_CandidateSelection_FP32, StaticKernelDecodes_Test)
-{
-    const auto& params        = GetParam();
-    const std::string& kernel = params.kernel_name; // the per-solver static kernel
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    if(!MetadataHasKernel(meta, kernel))
-        GTEST_SKIP() << "Kernel not present in metadata for " << params.solver;
-
-    ASSERT_EQ(meta.GetConditionalLayout(kernel), nullptr)
-        << "test kernel is expected to be static (no conditional layout)";
-
-    // Build a candidate from the static mapping (all numeric "1"s), as GenerateValidKernelParams
-    // does.
-    auto candidates = GenerateValidKernelParams(meta, kernel, 1);
-    auto encoded    = EncodeKernelParams(candidates, meta, /*use_split_k=*/false);
-    ASSERT_EQ(encoded.size(), 1u) << "static kernel candidate was unexpectedly skipped";
-    EXPECT_EQ(encoded[0].size(),
-              meta.output_params().size() - meta.GetConstantOutputIndices().size());
-}
-
 // === INSTANTIATION ===
 
 // Helper function to generate test parameters for both 2D and 3D solvers
@@ -1055,6 +620,241 @@ std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
     };
 }
 
+// ============================================================================
+// lazy-applicability walk (SelectBestVocabCandidate)
+// ============================================================================
+namespace {
+// Bare GetTypeString from a vocab id: strip a trailing "+<split_k>" after the final '>'.
+std::string VocabBase(const std::string& kid)
+{
+    const auto gt   = kid.rfind('>');
+    const auto plus = kid.find('+', gt == std::string::npos ? 0 : gt);
+    return plus == std::string::npos ? kid : kid.substr(0, plus);
+}
+// All-ones input features for a solver (same convention as SelectBestCandidateValid_Test).
+std::map<std::string, float> AllOnesFeatures(const std::string& arch, const std::string& solver)
+{
+    CandidateSelectionMetadata meta(arch, solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    return features;
+}
+} // namespace
+
+// Best-first: when every candidate is applicable, the walk returns the highest-ranked vocab base.
+// The ranking is recomputed exactly as SelectBestCandidateIndices does (inner product, NaN last).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabBestFirst_Test)
+{
+    const auto& params = GetParam();
+    const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
+    const auto& emb    = GetConfigEmbeddingMatrix(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty());
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    CandidateSelectionModel model(params.arch, params.solver);
+    const auto encoded_features = model.EncodeInputFeatures(features);
+    int best                    = -1;
+    float best_score            = 0.0f;
+    for(std::size_t i = 0; i < vocab.size(); ++i)
+    {
+        if(emb[i].size() != encoded_features.size())
+            continue;
+        const float s =
+            std::inner_product(emb[i].begin(), emb[i].end(), encoded_features.begin(), 0.0f);
+        if(std::isnan(s))
+            continue;
+        if(best < 0 || s > best_score)
+        {
+            best       = static_cast<int>(i);
+            best_score = s;
+        }
+    }
+    ASSERT_GE(best, 0);
+    auto accept_all = [](const std::string&, int, bool) { return true; };
+    auto result     = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->first, VocabBase(vocab[best]))
+        << "accept-all walk did not return the top-ranked candidate";
+}
+
+// First applicable wins: when only one vocab base is applicable, the walk returns exactly it,
+// regardless of its rank (i.e. it keeps walking past rejected higher-ranked candidates).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabFirstApplicableWins_Test)
+{
+    const auto& params = GetParam();
+    const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty());
+    const std::string target = VocabBase(vocab[vocab.size() / 2]);
+    const auto features      = AllOnesFeatures(params.arch, params.solver);
+    auto only_target         = [&](const std::string& base, int, bool) { return base == target; };
+    auto result              = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, only_target);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->first, target);
+}
+
+// TF32 two-pass: a predicate that only accepts on the FP32 fallback pass is reached iff use_tf32,
+// mirroring the enumeration order (TF32 set first, FP32 set only if nothing applied).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabTwoPassTf32_Test)
+{
+    const auto& params = GetParam();
+    const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty());
+    const std::string target = VocabBase(vocab.front());
+    const auto features      = AllOnesFeatures(params.arch, params.solver);
+    auto fp32_only           = [&](const std::string& base, int, bool fp32_pass) {
+        return fp32_pass && base == target;
+    };
+    // use_tf32 -> the FP32 fallback pass runs and finds the target.
+    auto tf32_on = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/true, fp32_only);
+    ASSERT_TRUE(tf32_on.has_value());
+    EXPECT_EQ(tf32_on->first, target);
+    // no TF32 -> only the first pass runs, the target is never offered, nothing applies.
+    auto tf32_off = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, fp32_only);
+    EXPECT_FALSE(tf32_off.has_value());
+}
+
+// Nothing applicable in either pass -> nullopt (caller falls to the non-AI default).
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabNoneApplicable_Test)
+{
+    const auto& params  = GetParam();
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    auto reject_all     = [](const std::string&, int, bool) { return false; };
+    EXPECT_FALSE(SelectBestVocabCandidate(
+                     params.arch, params.solver, features, /*use_tf32=*/true, reject_all)
+                     .has_value());
+}
+
+namespace {
+// RAII: restore an env var to "0" on scope exit, so a failed EXPECT mid-test cannot leak the
+// setting into later tests sharing the process.
+struct ScopedEnvVar
+{
+    const char* key;
+    ScopedEnvVar(const char* k, const char* v) : key(k)
+    {
+        miopen::debug::env::UpdateEnvVariable(key, v);
+    }
+    ~ScopedEnvVar() { miopen::debug::env::UpdateEnvVariable(key, "0"); }
+};
+} // namespace
+
+// Kill switch: MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB empties the vocab -> nullopt even
+// with an accept-all predicate.
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabKillSwitch_Test)
+{
+    const auto& params  = GetParam();
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    auto accept_all     = [](const std::string&, int, bool) { return true; };
+    ScopedEnvVar guard("MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB", "1");
+    auto result = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
+    EXPECT_FALSE(result.has_value());
+}
+
+// LGBM-only: MIOPEN_DEBUG_LGBM_ONLY turns the two-tower (lazy) path off -> nullopt.
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabLgbmOnly_Test)
+{
+    const auto& params  = GetParam();
+    const auto features = AllOnesFeatures(params.arch, params.solver);
+    auto accept_all     = [](const std::string&, int, bool) { return true; };
+    ScopedEnvVar guard("MIOPEN_DEBUG_LGBM_ONLY", "1");
+    auto result = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
+    EXPECT_FALSE(result.has_value());
+}
+
+// Deterministic split-k gate: a predicate that rejects any split_k != 1 must yield either no pick
+// (the vocab has no split_k=1 entry) or a pick with split_k == 1 -- never a split_k>1 kernel.
+TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabRejectsNonUnitSplitK_Test)
+{
+    const auto& params     = GetParam();
+    const auto features    = AllOnesFeatures(params.arch, params.solver);
+    auto unit_split_k_only = [](const std::string&, int split_k, bool) { return split_k == 1; };
+    auto result            = SelectBestVocabCandidate(
+        params.arch, params.solver, features, /*use_tf32=*/false, unit_split_k_only);
+    if(result.has_value())
+        EXPECT_EQ(result->second, 1);
+}
+
+namespace {
+// Map a candidate-selection solver name to its CK loader solver type.
+std::optional<miopen::solver::CKSolverType> CKSolverTypeForSolver(const std::string& s)
+{
+    using miopen::solver::CKSolverType;
+    if(s == "ConvHipImplicitGemmGroupFwdXdlops")
+        return CKSolverType::GrpConvFwd;
+    if(s == "ConvHipImplicitGemmGroupBwdXdlops")
+        return CKSolverType::GrpConvBwd;
+    if(s == "ConvHipImplicitGemmGroupWrwXdlops")
+        return CKSolverType::GrpConvWrw;
+    if(s == "ConvHipImplicitGemm3DGroupFwdXdlops")
+        return CKSolverType::GrpConv3dFwd;
+    if(s == "ConvHipImplicitGemm3DGroupBwdXdlops")
+        return CKSolverType::GrpConv3dBwd;
+    if(s == "ConvHipImplicitGemm3DGroupWrwXdlops")
+        return CKSolverType::GrpConv3dWrw;
+    return std::nullopt;
+}
+
+// Strip the "+<split_k>" suffix a split-k solver appends after the final '>' (mirrors the loader).
+std::string VocabBaseId(const std::string& id)
+{
+    const auto gt   = id.rfind('>');
+    const auto plus = id.find('+', gt == std::string::npos ? 0 : gt);
+    return plus == std::string::npos ? id : id.substr(0, plus);
+}
+} // namespace
+
+// The shipped config-embedding vocab must cover the build's live CK instance set: the lazy walk
+// only ranks kernels that are in the vocab, so a regeneration that truncated or mismatched it would
+// silently make those kernels unselectable. ASSERT the vocab is present, and EXPECT most live CK
+// instances are covered (lenient, to tolerate modest CK version drift between the shipped table and
+// the build's CK plugin). Runs for the current device arch only.
+TEST_P(GPU_CandidateSelection_FP32, ShippedVocabCoversCKInstances_Test)
+{
+    const auto& params      = GetParam();
+    const auto current_arch = handle.GetDeviceName();
+    if(params.arch != current_arch)
+        GTEST_SKIP() << "CK enumeration uses the current device's plugin; skipping foreign arch "
+                     << params.arch;
+
+    const auto ck_solver = CKSolverTypeForSolver(params.solver);
+    ASSERT_TRUE(ck_solver.has_value()) << "No CKSolverType mapping for solver " << params.solver;
+
+    const auto ck_instances =
+        miopen::solver::CkImplLibLoader::Get(current_arch).GetAllKernelTypeStrings(*ck_solver);
+    ASSERT_FALSE(ck_instances.empty()) << "No CK instances enumerated for " << params.solver;
+
+    const auto& vocab = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty()) << "Shipped config-embedding vocab is empty for " << params.arch
+                                << "_" << params.solver
+                                << " -- the table is missing or was truncated to nothing.";
+
+    std::set<std::string> vocab_bases;
+    for(const auto& id : vocab)
+        vocab_bases.insert(VocabBaseId(id));
+
+    std::size_t covered = 0;
+    std::string first_missing;
+    for(const auto& k : ck_instances)
+    {
+        if(vocab_bases.count(k) != 0)
+            ++covered;
+        else if(first_missing.empty())
+            first_missing = k;
+    }
+    const double fraction = static_cast<double>(covered) / static_cast<double>(ck_instances.size());
+    EXPECT_GE(fraction, 0.5)
+        << "Shipped vocab covers only " << covered << " / " << ck_instances.size()
+        << " live CK instances for " << params.arch << "_" << params.solver
+        << " -- likely a stale or truncated table; regenerate it. First uncovered: "
+        << first_missing;
+}
+
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_CandidateSelection_FP32,
                          ::testing::ValuesIn(GenerateCandidateSelectionParams()),
@@ -1063,6 +863,156 @@ INSTANTIATE_TEST_SUITE_P(Full,
                              PrintTo(testInfo.param, &os);
                              return os.str();
                          });
+
+// ============================================================================
+// config-embedding table loader
+// ============================================================================
+// Every shipped table loads into a non-empty vocabulary: well-formed MICE, a v3 vocab block, and an
+// md5 that matches the installed input encoder (a mismatch rejects the table -> empty vocab).
+TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
+{
+    const std::array<const char*, 2> arches  = {"gfx942", "gfx950"};
+    const std::array<const char*, 6> solvers = {"ConvHipImplicitGemmGroupFwdXdlops",
+                                                "ConvHipImplicitGemmGroupBwdXdlops",
+                                                "ConvHipImplicitGemmGroupWrwXdlops",
+                                                "ConvHipImplicitGemm3DGroupFwdXdlops",
+                                                "ConvHipImplicitGemm3DGroupBwdXdlops",
+                                                "ConvHipImplicitGemm3DGroupWrwXdlops"};
+    const auto db                            = miopen::GetSystemDbPath();
+    int present                              = 0;
+    for(const auto* arch : arches)
+        for(const auto* solver : solvers)
+        {
+            const auto path =
+                db / (std::string(arch) + "_" + solver + "_kernel_config_embeddings.bin");
+            if(!miopen::fs::exists(path))
+                continue;
+            ++present;
+            EXPECT_FALSE(GetConfigEmbeddingVocab(arch, solver).empty())
+                << arch << "_" << solver
+                << ": table present but vocab empty (rejected / md5 mismatch / no v3 block)";
+        }
+    // This suite is compiled only with MIOPEN_ENABLE_AI_KERNEL_TUNING (see the guard at the top of
+    // the file). All 12 (gfx942 + gfx950) x 6-solver tables ship with this PR, so require every one
+    // -- EXPECT_GT(present, 0) would stay green if 11 of 12 .bin files were dropped from packaging.
+    EXPECT_EQ(present, static_cast<int>(arches.size() * solvers.size()))
+        << "expected all " << arches.size() * solvers.size()
+        << " shipped config-embedding tables installed at " << db << ", found " << present;
+}
+
+// The loader loads a well-formed v3 table and fails closed on every malformed one -- bad magic, a
+// non-v3 version, a row-region size mismatch, an md5 that does not match the input encoder (stale
+// table vs refreshed model), and a truncated kernel-id block. Crafted in a temp directory and read
+// through LoadConfigEmbeddingVocabFromFile, so nothing is written into the installed system db
+// (which is normally read-only, and would make the test GTEST_SKIP / silently never run).
+TEST(CPU_ConfigEmbeddingTableLoader_NONE, RejectsMalformedTables)
+{
+    namespace fs = miopen::fs;
+    std::random_device rd;
+    const auto dir =
+        fs::temp_directory_path() / ("miopen_cet_" + std::to_string(rd()) + std::to_string(rd()));
+    fs::create_directories(dir);
+
+    auto put_u32 = [](std::vector<char>& b, std::uint32_t v) {
+        const char* c = reinterpret_cast<const char*>(&v);
+        b.insert(b.end(), c, c + 4);
+    };
+    auto put_f32 = [](std::vector<char>& b, float v) {
+        const char* c = reinterpret_cast<const char*>(&v);
+        b.insert(b.end(), c, c + 4);
+    };
+    // Serialize a MICE table: magic[4] + 6 u32 header (+ 32-byte md5 for v3) + num_rows (key,emb)
+    // rows; for v3 also append the length-prefixed kernel-id block. truncate_ids makes the last
+    // id's length prefix run past EOF. claimed_rows can exceed the rows actually written (size
+    // mismatch).
+    auto make = [&](const char* magic,
+                    std::uint32_t version,
+                    std::uint32_t key_dim,
+                    std::uint32_t emb_dim,
+                    std::uint32_t written_rows,
+                    std::uint32_t claimed_rows,
+                    const std::string& md5_str,
+                    const std::vector<std::string>& ids,
+                    bool truncate_ids) {
+        std::vector<char> b;
+        b.insert(b.end(), magic, magic + 4);
+        put_u32(b, version);
+        put_u32(b, key_dim);
+        put_u32(b, emb_dim);
+        put_u32(b, claimed_rows);
+        put_u32(b, 0); // key_dtype = fp32
+        put_u32(b, 0); // emb_dtype = fp32
+        if(version == 3)
+        {
+            std::string h = md5_str;
+            h.resize(32, '0');
+            b.insert(b.end(), h.begin(), h.end());
+        }
+        for(std::uint32_t r = 0; r < written_rows; ++r)
+        {
+            for(std::uint32_t k = 0; k < key_dim; ++k)
+                put_f32(b, static_cast<float>(r + k));
+            for(std::uint32_t e = 0; e < emb_dim; ++e)
+                put_f32(b, 0.5f * static_cast<float>(r) + static_cast<float>(e));
+        }
+        if(version == 3)
+        {
+            for(std::uint32_t r = 0; r < written_rows; ++r)
+            {
+                if(truncate_ids && r + 1 == written_rows)
+                {
+                    put_u32(b, 1u << 30); // length prefix runs far past EOF
+                    break;
+                }
+                const std::string id = r < ids.size() ? ids[r] : std::string();
+                put_u32(b, static_cast<std::uint32_t>(id.size()));
+                b.insert(b.end(), id.begin(), id.end());
+            }
+        }
+        return b;
+    };
+    auto write = [&](const std::string& name, const std::vector<char>& bytes) {
+        std::ofstream os(dir / name, std::ios::binary);
+        os.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    auto vocab_of = [&](const std::string& name, const std::string& enc) {
+        return LoadConfigEmbeddingVocabFromFile((dir / name).string(), enc);
+    };
+
+    // Input encoder the table hashes against, with the matching md5 for the positive/mismatch
+    // cases.
+    const std::string enc_bytes = "miopen-test-input-encoder-bytes";
+    write("enc.bin", std::vector<char>(enc_bytes.begin(), enc_bytes.end()));
+    const auto enc_path                = (dir / "enc.bin").string();
+    const std::string good_md5         = miopen::md5(enc_bytes);
+    const std::vector<std::string> ids = {"KernelA", "KernelB"};
+
+    // Positive control: a well-formed v3 table loads to a 2-entry vocab.
+    write("good.bin", make("MICE", 3, 2, 3, 2, 2, good_md5, ids, false));
+    EXPECT_EQ(vocab_of("good.bin", enc_path).size(), 2u);
+
+    // bad magic.
+    write("badmagic.bin", make("XXXX", 3, 2, 3, 2, 2, good_md5, ids, false));
+    EXPECT_TRUE(vocab_of("badmagic.bin", enc_path).empty());
+
+    // non-v3 version (no kernel-id block -> no usable vocab).
+    write("badver.bin", make("MICE", 2, 2, 3, 2, 2, good_md5, ids, false));
+    EXPECT_TRUE(vocab_of("badver.bin", enc_path).empty());
+
+    // size mismatch: header claims 10 rows, only 2 written.
+    write("badsize.bin", make("MICE", 3, 2, 3, 2, 10, good_md5, ids, false));
+    EXPECT_TRUE(vocab_of("badsize.bin", enc_path).empty());
+
+    // md5 mismatch: table hash does not match the input encoder (stale table / refreshed model).
+    write("badmd5.bin", make("MICE", 3, 2, 3, 2, 2, std::string(32, 'f'), ids, false));
+    EXPECT_TRUE(vocab_of("badmd5.bin", enc_path).empty());
+
+    // truncated kernel-id block: a length prefix runs past EOF.
+    write("badids.bin", make("MICE", 3, 2, 3, 2, 2, good_md5, ids, true));
+    EXPECT_TRUE(vocab_of("badids.bin", enc_path).empty());
+
+    fs::remove_all(dir);
+}
 
 #else
 // Add a dummy test when AI kernel tuning is disabled
