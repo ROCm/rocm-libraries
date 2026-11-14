@@ -463,8 +463,7 @@ std::vector<Solution> VerifiedFDBSolution(const ExecutionContext& ctx,
                                     params,
                                     conv::GetConvSolverFinders(),
                                     std::nullopt,
-                                    force_attach_binary,
-                                    conv::NaiveTimeFloorMs(ctx_copy.GetStream(), problem));
+                                    force_attach_binary);
 
                 if(env::enabled(MIOPEN_WARN_SEARCH))
                     MIOPEN_LOG_W("Find Ended: " << record.GetKey());
@@ -579,8 +578,7 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
                                     params,
                                     conv::GetConvSolverFinders(),
                                     std::nullopt,
-                                    force_attach_binary,
-                                    conv::NaiveTimeFloorMs(ctx_copy.GetStream(), problem));
+                                    force_attach_binary);
 
                 if(env::enabled(MIOPEN_WARN_SEARCH))
                     MIOPEN_LOG_W("Find Ended: " << record.GetKey());

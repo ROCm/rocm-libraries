@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <numeric>
 #include <thread>
 
@@ -615,8 +616,7 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         const PrimitiveFindParameters& parameters,
                         const std::vector<std::unique_ptr<ISolversFinder>>& finders,
                         const std::optional<FindOptions>& options,
-                        bool force_attach_binary,
-                        float naive_floor_ms)
+                        bool force_attach_binary)
 {
     auto& handle = ctx.GetStream();
 
@@ -640,6 +640,22 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
         total += it->second.size();
         ++it;
+    }
+
+    float naive_floor_ms = 0.0f;
+    if(env::value(MIOPEN_NAIVE_TIMEOUT))
+    {
+        const auto* conv_problem = dynamic_cast<const conv::ProblemDescription*>(&problem);
+        bool has_naive          = false;
+        bool has_non_naive      = false;
+        for(const auto& ss : solutions)
+            for(const auto& s : ss.second)
+            {
+                has_naive |= IsNaiveSolution(s);
+                has_non_naive |= !IsNaiveSolution(s);
+            }
+        if(conv_problem != nullptr && has_naive && has_non_naive)
+            naive_floor_ms = conv::NaiveTimeFloorMs(handle, *conv_problem);
     }
 
     // Naive solvers are left out of the precompile list when another solver is available. A naive
@@ -761,14 +777,16 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
 
 float NaiveTimeFloorMs(const Handle& handle, const ProblemDescription& problem)
 {
+    if(!env::value(MIOPEN_NAIVE_TIMEOUT))
+        return 0.0f;
+    using Interp = solver::ProblemInterpreter;
     // The naive kernels run one scalar thread per output element and never use matrix
-    // instructions. Assume they reach at most this share of the fp32 FMA peak, so the bound stays
-    // below their real run time. The share is generous: see the measurements in the pull request.
+    // instructions. This 10 percent ceiling is a measured heuristic, not a hardware guarantee; if
+    // naive exceeds it, the estimate can be too high and skip a solver that would have completed.
     constexpr double NaiveMaxPeakFractionPct = 10.0;
     // fp32 FMA lanes per hardware CU per clock, counting RDNA dual issue.
     constexpr double FmaLanesPerCu = 128.0;
 
-    using Interp         = solver::ProblemInterpreter;
     const double out_pos = static_cast<double>(Interp::GetBatchN(problem)) *
                            Interp::GetOutputChannelK(problem) * Interp::GetOutputDepthDo(problem) *
                            Interp::GetOutputHeightHo(problem) * Interp::GetOutputWidthWo(problem);
@@ -777,9 +795,16 @@ float NaiveTimeFloorMs(const Handle& handle, const ProblemDescription& problem)
                              Interp::GetFilterHeightY(problem) * Interp::GetFilterWidthX(problem);
     const double flops = 2.0 * out_pos * reduction;
 
-    const double peak_flops = static_cast<double>(handle.GetMaxHardwareComputeUnits()) *
-                              FmaLanesPerCu * 2.0 * static_cast<double>(handle.GetClockRateKhz()) *
-                              1e3;
+    double peak_flops = 0.0;
+    try
+    {
+        peak_flops = static_cast<double>(handle.GetMaxHardwareComputeUnits()) * FmaLanesPerCu *
+                     2.0 * static_cast<double>(handle.GetClockRateKhz()) * 1e3;
+    }
+    catch(const std::exception&)
+    {
+        return 0.0f;
+    }
     if(!(flops > 0.0) || !(peak_flops > 0.0))
         return 0.0f;
     return static_cast<float>(flops / (peak_flops * NaiveMaxPeakFractionPct / 100.0) * 1e3);
