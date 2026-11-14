@@ -970,6 +970,35 @@ refused -- the engine stays applicable and reports UNAVAILABLE naming both revis
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 
+**Re-stamping a model.** Any edit to an engine's selector inputs changes its revision and
+expires its shipped models, including edits that cannot move a prediction. When the engine
+changed only in such ways, `restamp` rebinds the model instead of a retrain, and refuses
+unless it can prove it. It reads the selector dump of the build that trained the model and
+of the build to bind (`HIPDNN_UHD_SELECTOR_DUMP_DIR=<dir>` makes a build write one
+`<engine>.selector.json` per engine) and diffs the two descriptions:
+
+```bash
+python -m uhd_gen restamp <model .uhd.json> \
+    --selector-before <dump at the training build> --selector-after <dump at this build> \
+    [--rows-before <L1 corpus at the old revision> --rows-after <L1 corpus at the new revision>] \
+    --write
+```
+
+A change is **hard**, and refused ("retrain"), if it can change what the engine runs: any
+generic-engine change beyond a kernel's `source_file` (its `sha256` still pins the bytes; with
+only those moves the proof is `path-only` and needs no measurement), and, for a native
+source-digest engine, any changed `.co`, `.csv`, `.hip`, `codegen.py` or `kernels/` input, a
+changed selector kind, or an unknown kind. Other native source changes are **soft** and need
+`measured-parity`: the engine's own L1 corpora at the two revisions (each collected at the
+revision it is paired with, over the same graphs) must agree per graph (`|ln(after/before)|`
+of the model's label, by default median <= 0.03, at most 5% of graphs over 0.10, at least 30
+graphs), and no graph may be served at the new revision that was not at the old. A graph
+served before and declined after is allowed and counted. A pass sets
+`trained_against.selector_revision` and appends `{from, to, proof, changes, parity}` to the
+ignored `trained_against["x-restamps"]`; without `--write` it only judges, and `--report`
+writes the verdict as `uhd_gen.restamp_report/1`. The runtime rule is unchanged: the loaded
+model must still match the engine's revision exactly.
+
 Install the intended catalog-ranking model before collecting L1 measurements.
 Changing that model changes the descriptor engine's immediate selector and can
 invalidate an existing L1 model. Collect and train L1 against the final selector;
