@@ -432,10 +432,10 @@ broader hardware coverage than PR or nightly CI provides. See
 
 ### Build-Time Validation of Library Logic
 
-**What it does, briefly.** `TensileLogic --check-all` validates the library logic YAML before any of
+**What it does, briefly.** `tensilelite logic --check-all` validates the library logic YAML before any of
 it is compiled: chip IDs, matrix instructions, work-group shapes, the XCC work-group mapping, and
 custom kernel declarations, one file at a time. It reads YAML only, needs no GPU, and runs as a CMake
-build step ahead of `TensileCreateLibrary` rather than as a test, so a failure stops the build with no
+build step ahead of `tensilelite create-library` rather than as a test, so a failure stops the build with no
 check name and no test report. It is the only mechanism in the component that validates tuning data
 rather than code, and it exists because of one specific incident that cost about three months before
 this validator — which had already existed, unused, for over a year — was finally wired in.
@@ -650,8 +650,8 @@ the C++ build and test.
 | Validation area | Required before merge | Owner | Responsibility |
 | --- | --- | --- | --- |
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
-| Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
-| Logic corpus checks (`TensileLogic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
+| Library logic validation (`tensilelite logic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
+| Logic corpus checks (`tensilelite logic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
@@ -680,7 +680,7 @@ tracked as a gap.
 
 **Trusted gate.** A failure here is a real problem with the change.
 
-- Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
+- Build on both platforms, which includes the `tensilelite logic --check-all` library logic validation
 - Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
   through Multi-Arch CI
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
@@ -737,13 +737,13 @@ about "what do we currently know is broken" has to check all nine.
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
 | Coverage-pass filters in [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) | Tests that crash only in the coverage build, dropped from the coverage pass that would otherwise run them: `StreamKNullStream`, and pointer-array matmuls under `HIPBLASLT_CHECK_NUMERICS` | Ticket in a comment beside each filter (AIHPBLAS-5137, AIHPBLAS-5136) | **No.** The excluded combination stops running, so the coverage job cannot see either fix and a person has to delete the filter. The blind spot is narrow, though: both tests still run in the unfiltered `precheckin` job, so what goes unobserved is the coverage build and the enabled-`CHECK_NUMERICS` combination, not the tests themselves |
-| `@needs_logic_corpus` tests, resolved through [`logic_corpus.py`](tensilelite/tensilelite/Tests/unit/logic_corpus.py) | The few unit tests that still read the logic corpus (see [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests)), whenever `library/.../Logic` is not on disk | Issue URL in the skip reason; `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1` turns the skip into a failure | **Not applicable.** It gates on a precondition rather than a bug, and the cross-file checks it once hid now run in `TensileLogic --check-all` regardless |
+| `@needs_logic_corpus` tests, resolved through [`logic_corpus.py`](tensilelite/tensilelite/Tests/unit/logic_corpus.py) | The few unit tests that still read the logic corpus (see [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests)), whenever `library/.../Logic` is not on disk | Issue URL in the skip reason; `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1` turns the skip into a failure | **Not applicable.** It gates on a precondition rather than a bug, and the cross-file checks it once hid now run in `tensilelite logic --check-all` regardless |
 
 This last mechanism is a different shape from the other eight: it is not quarantining a *known* bug
 at all, but gating on a precondition. In TheRock CI's installed-artifact layout the corpus never
 exists by design (see [CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)),
 so these tests skip there every time. That used to hide real corpus checks, which made it a **Blind**
-entry. Those checks now live where the corpus is: `TensileLogic --check-all` for cross-file facts.
+entry. Those checks now live where the corpus is: `tensilelite logic --check-all` for cross-file facts.
 The `@needs_logic_corpus` tests themselves also run, with the corpus required, in the
 `Component CI: hipBLASLt Logic Corpus` lane on any change under `Tensile/Logic/`. Every run prints
 a `needs_logic_corpus: N ran, M skipped` line so a lane that lacks the corpus says so
@@ -771,7 +771,7 @@ was in those few lines.
 The two YAML quarantine files each have half of what the other needs. The client list has the better
 prose discipline: named entries, a ROCm ticket, a root-cause explanation, and a note to remove the
 entry so the case re-activates as an enforced gate. But it is all in comments, so no tool can act on
-it, and the excluded case never runs again. The TensileLogic list has the weaker narrative and the
+it, and the excluded case never runs again. The `tensilelite logic` list has the weaker narrative and the
 better structure: a real `ticket:` field, keys chosen so they survive library re-tuning, and a check
 that re-validates every entry on each run and reports the ones that no longer reproduce.
 
@@ -1313,7 +1313,7 @@ the product as a whole as well as its parts. For a math library they become:
 | Kind | Question it answers | Oracle | Needs a GPU | Today, for example |
 | --- | --- | --- | --- | --- |
 | Host unit | Does this piece of code do what it says? | Expected values and invariants | No | TensileLite Python unit tests, rocisa tests, the TensileLite C++ host tests, the tuning-store test, GEKO |
-| Static and build checks | Is the source, or the artifact generated from it, well formed? | A rule set | No | `TensileLogic --check-all`, `pre-commit`, lint, and (once they exist) type checking and clang-tidy |
+| Static and build checks | Is the source, or the artifact generated from it, well formed? | A rule set | No | `tensilelite logic --check-all`, `pre-commit`, lint, and (once they exist) type checking and clang-tidy |
 | Numerical correctness | Does a GEMM on real hardware match a reference? | A CPU reference within a tolerance | Yes | The hipBLASLt client GTest suite, TensileLite `Tests/common` |
 | Performance | Is it at least as fast as it was? | A baseline with a measured noise floor | Yes | The nightly benchmarking lane |
 
@@ -1385,7 +1385,7 @@ pass:
 5. **The corpus is a shared fixture.** StinkyTofu's scheduled-versus-unscheduled comparison needs
    realistic kernels, and the corpus supplies them, so the layers share inputs without sharing
    ownership.
-6. **Static checks of the corpus data belong to the corpus.** `TensileLogic --check-all` already
+6. **Static checks of the corpus data belong to the corpus.** `tensilelite logic --check-all` already
    validates the library logic before codegen; under this split it is the corpus layer's static check.
 7. **A crash costs one case.** Some kernels fault the GPU or hang. The harness records the crash
    against the case that caused it, checks that the GPU still runs a basic GEMM, and carries on in a

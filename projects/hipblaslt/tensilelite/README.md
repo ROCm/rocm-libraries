@@ -1,261 +1,253 @@
 # TensileLite
 
-## Building and Running Tests
+TensileLite is hipBLASLt's Python generator, logic validator, and tuning
+workflow. It ships as one pure-Python wheel, `tensilelite`, plus a native
+benchmark client, `tensilelite-client`.
 
-While full test suites can be run with a single `tox` command, developers may wish to
-build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately.
-This is useful for debugging specific problems or isolating issues in a specific test.
+## Versions
 
-### Run Test Suite with Tox
+| Version | Built by | Meaning |
+| --- | --- | --- |
+| `5.0.0+g<commit>` | `pip install <path>`, tox, `invoke install`, standalone CMake | A development build of that rocm-libraries commit. It makes no ROCm claim. |
+| `5.0.0+g<commit>.dirty` | The same, from a checkout with uncommitted changes | As above; the exact changes are recorded in a digest in `_build_info.py`. |
+| `5.0.0+rocm<identity>` | TheRock release, release-candidate and nightly builds | Released as part of that ROCm build. |
+| `5.0.0+devrocm<identity>` | TheRock CI and development builds | Built in that TheRock development build. |
 
-The standard workflow for running the entire test suite is to use `tox`. This command will build
-`tensilelite-client` and execute all tests.
+`VERSION` and `tensilelite.GENERATOR_VERSION` identify the generator format
+written to logic and configuration files and must remain equal. The commit is
+always recorded in the installed package (`tensilelite/_build_info.py`), also
+for `+rocm`/`+devrocm` wheels.
 
+## ROCm installations
+
+TensileLite selects one ROCm installation when it is imported:
+
+| Installation | How it is found | ROCm identity |
+| --- | --- | --- |
+| TheRock Python SDK (`pip install rocm[...]`) | `rocm_sdk_core` in the same Python | `rocm_sdk_core.__version__` (full) |
+| TheRock native install (`/opt/rocm`, packages) | `ROCM_PATH`, `/opt/rocm`, or `hipconfig` on `PATH` | `share/therock/therock_manifest.json` (full); `.info/version` if the manifest is missing |
+| Older ROCm install | same | `.info/version` (`X.Y.Z` only) |
+
+Older installs are supported on a best-effort basis without CI: generation
+works, and benchmarking needs a client you build against that ROCm and bind
+(see [Source development](#source-development)). They ship no
+`tensilelite-client`.
+
+A `+rocm`/`+devrocm` wheel must match its ROCm installation, comparing full
+identities (or `X.Y.Z` on an older install). A `+g<commit>` wheel makes no ROCm
+claim and is not compared. `rocisa` is a separately prepared Python dependency;
+TensileLite requires it to be importable but does not prescribe its layout.
+
+At present the Python-SDK path and the strict wheel/ROCm comparison are
+implemented but gated off until TheRock forwards the required package identity
+and SDK payload.
+
+
+## Supported interface
+
+```bash
+tensilelite benchmark-cluster --help
+tensilelite create-library --help
+tensilelite generate-summations --help
+tensilelite logic --help
+tensilelite logic-to-yaml --help
+tensilelite merge-library --help
+tensilelite retune-library --help
+tensilelite run --help
+tensilelite update-library --help
+
+# Equivalent module form
+python -m tensilelite --help
 ```
+
+The wheel exposes `import tensilelite` and the `tensilelite` command family
+only. The legacy `Tensile` namespace, `Tensile/bin` launchers and `Tensile*`
+console scripts are gone, with no compatibility package:
+
+| Legacy command | Use instead |
+| --- | --- |
+| `Tensile` | `tensilelite run` |
+| `TensileCreateLibrary` | `tensilelite create-library` |
+| `TensileLogic` | `tensilelite logic` |
+| `TensileGetPath` | No command: read packaged files through `tensilelite.resources` |
+| Other `Tensile<Name>` scripts | `tensilelite --help` lists the subcommands |
+
+
+## Released installation
+
+For a conventional ROCm prefix, use the wheel index delivered with the target
+release and select that same prefix:
+
+```bash
+export ROCM_PATH=/opt/rocm
+python -m pip install --index-url <rocm-wheel-index> tensilelite
+python -c 'import tensilelite, rocisa; print(tensilelite.__version__)'
+```
+
+With TheRock's Python SDK, install the matching core, libraries, and device
+payload in the same Python environment before installing TensileLite. TensileLite
+uses the core package's full Python distribution version and its interpreter's
+tool trampolines; it does not require `rocm[devel]` or a synthetic ROCm prefix:
+
+```bash
+python -m pip install --index-url <rocm-wheel-index> \
+  'rocm[libraries,device-<target>]'
+python -m pip install --index-url <rocm-wheel-index> tensilelite
+```
+
+When the strict validation gate is enabled, import fails when the wheel and ROCm
+release differ or when rocisa cannot be imported. The client is resolved and
+validated only when a
+benchmark/validation workflow requests its path. A configured client binding
+always wins for a conventional-prefix installation. The Python SDK model
+currently reports that the client is unavailable because `rocm-sdk-libraries`
+does not yet ship it; its final state uses that package's exact
+`tensilelite-client` console script from the active Python environment. The
+conventional-prefix model uses
+`$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client` (with `.exe` on
+Windows). Neither model performs a broad client search on `PATH`.
+
+Optional runtime capabilities remain available as extras:
+
+```bash
+python -m pip install 'tensilelite[profile]'     # yappi profiling
+python -m pip install 'tensilelite[hip-query]'   # hip-python GPU queries
+python -m pip install 'tensilelite[orjson]'      # preferred JSON accelerator
+python -m pip install 'tensilelite[ujson]'
+python -m pip install 'tensilelite[simplejson]'
+```
+
+Only one JSON extra is needed. If multiple backends are installed, TensileLite
+prefers orjson, then ujson, then simplejson, and finally the Python standard
+library.
+
+
+## Source development
+
+From a Linux ROCm development environment, the one-command setup installs the
+shared development requirements and editable rocisa, builds/stages
+`tensilelite-client`, and installs TensileLite editably into the active Python
+environment:
+
+```bash
 cd rocm-libraries/projects/hipblaslt/tensilelite
-tox -e py3 -- tensilelite/Tests -m common
+invoke install --gpu-targets gfx942
 ```
 
-Subsequently, you can run just the TensileLite unit tests via:
+The editable installation records the built client's absolute path in the
+current user's keyed `~/.tensilelite/bindings/` registry. Python source edits
+are immediately visible; rerun `invoke build-client` after client source or
+CMake changes.
 
+`invoke install` also installs the standalone stinkytofu binding used by the
+gfx1250 backend when a gfx1250 GPU is detected. Pass `--stinkytofu on|off` to
+force the decision, or `--rebuild-stinkytofu` to rebuild an already-installed
+binding. After changing rocisa or stinkytofu C++ sources, rerun `invoke rocisa`
+(or `invoke install`).
+
+Each step remains available independently. A manual source install may bind any
+existing client executable:
+
+```bash
+python -m pip install -r requirements-dev-common.txt
+invoke build-client --gpu-targets gfx942
+
+python -m pip install --no-build-isolation --no-deps -e .
+python -m tensilelite_configure_client \
+  --client "$PWD/build_tmp/tensilelite/client/tensilelite-client"
+
+
+# Remove only this installation's development binding.
+python -m tensilelite_configure_client --reset
 ```
+
+The package and the client are paired by the rocm-libraries commit they were
+built from (`tensilelite-client --source-revision`):
+
+- an installed package and its client must report exactly the same commit,
+  including the `.dirty.<digest>` suffix of a build with uncommitted changes;
+- an editable install computes its commit from the checkout when the client is
+  first requested, so the client must be built from the same commit; local
+  uncommitted changes on either side only warn;
+- a package or client built without a commit never pairs. Build from a git
+  checkout, or pass the commit with `TENSILELITE_SOURCE_REVISION` (pip) or
+  `-DTENSILELITE_SOURCE_REVISION` (CMake).
+
+The client also records the ROCm it was compiled against
+(`tensilelite-client --build-rocm`). A different major ROCm version than the
+selected installation is an error; other differences warn once.
+
+The client value must be an absolute executable. A configured binding is
+exclusive: a broken configured path never falls back to the production client. Configuration
+does not alter the wheel, and the client selection is frozen after its first
+request in a process. Use a fresh process after changing or resetting a binding.
+
+
+## Tests
+
+Tox builds the client, configures the active editable installation, and uses the
+selected real ROCm SDK before importing either Python package:
+
+```bash
 tox -e unit -- tensilelite/Tests/unit
-```
-
-### Generate coverage report with Tox
-
-```
-cd rocm-libraries/projects/hipblaslt/tensilelite
+tox -e py3 -- tensilelite/Tests -m common
+tox -e coverage-unit
 tox -e coverage
 ```
 
-This will:
-- Run all unit tests with coverage
-- Run all common tests with coverage
-- Generate HTML, XML, and JSON reports
-- Display a summary in the terminal
+Useful variables:
 
-```
-cd rocm-libraries/projects/hipblaslt/tensilelite
-tox -e coverage-unit
-```
+- `TENSILELITE_TEST_ARCH`: architecture used for unit-test staging (default
+  `gfx942`).
+- `TENSILE_NUM_PYTEST_WORKERS`: pytest worker count (default `4`).
+- `TENSILELITE_CLIENT_ARGS`: extra arguments forwarded to `invoke build-client`
+  by full/coverage tox environments.
 
-Runs only Python unit tests.
+The optional affected-tests hook is installed with:
 
-### Pre-commit hook (affected tests)
-
-An opt-in git pre-commit hook runs the unit + characterization tests affected by
-your staged TensileLite changes and blocks the commit on real failures (it falls
-back to the full unit + characterization suite when it cannot narrow the set). It
-runs `uv run pytest`, which imports rocisa (a HIP native extension), so install and
-commit from inside a ROCm dev container (HIP at `/opt/rocm`, a Python with dev
-headers). Run `invoke rocisa` explicitly after native rocisa changes. Mount the
-repo at the same absolute path inside the container as on the host — git
-worktrees use an absolute gitdir pointer, so a different mount breaks git.
-
-```
-cd rocm-libraries/projects/hipblaslt/tensilelite
-uv sync                          # provisions deps, rocisa, and the pre-commit app
-uv run invoke precommit-install  # writes the git hook (once per clone)
-```
-
-`VERSION` and `tensilelite.GENERATOR_VERSION` identify the generator format and
-must remain equal. A build from a checkout is a development build versioned
-`5.0.0+g<commit>` (`.dirty` when the checkout has uncommitted changes). Only
-TheRock's build stamps a ROCm identity: `+rocm<identity>` for releases, release
-candidates and nightlies, `+devrocm<identity>` for its development builds.
-
-`git commit` from inside the container then runs the affected tests. Bypass once
-with `git commit --no-verify`. On a snapshot mismatch the hook prints a
-`--snapshot-update` command scoped to the failing file(s).
-
-### Build client with invoke and Run a Test (Default Path)
-
-This workflow uses `invoke` to build the C++ client into the default `build_tmp`
-directory and bind it to the active editable installation.
-
-```
-cd rocm-libraries/projects/hipblaslt/tensilelite
-
-# install invoke if you haven't already
-pip3 install invoke
-
-# install rocisa as an editable package (once after cloning, or after pyproject.toml changes)
-invoke rocisa
-
-# build the C++ client to the default location
-invoke build-client
+```bash
+uv sync
+invoke build-client --gpu-targets gfx942
 invoke configure-client --build-dir build_tmp
-
-# override the default toolchain with a specific ROCm install
-invoke build-client \
-  --gpu-targets gfx950 \
-  --rocm-path /opt/rocm-7.3.0 \
-  --export-compile-commands
-
-# run an individual test directly — no wrapper script needed
-python -m tensilelite run tensilelite/Tests/common/exception/<test>.yaml tensile-out
+uv run invoke precommit-install
 ```
 
-### Rebuilding after C++ changes
-
-`invoke build-client` builds the tensilelite-client executable only — it does
-**not** rebuild the rocisa Python module (`_rocisa.so`).  If you edit rocisa or
-stinkytofu C++ sources you must re-run `invoke rocisa` for those changes to
-take effect in Python:
-
-| What you changed | Command to rebuild |
-|---|---|
-| rocisa C++ sources | `invoke rocisa` |
-| stinkytofu C++ sources | `invoke rocisa` |
-| tensilelite-client C++ sources | `invoke build-client` |
-| rocisa `pyproject.toml` or `CMakeLists.txt` | `invoke rocisa` |
-
-Example workflow after editing stinkytofu or rocisa code:
-
-```bash
-# 1. Rebuild the rocisa Python module (includes stinkytofu)
-invoke rocisa
-
-# 2. Rebuild the C++ client (if needed)
-invoke build-client
-```
-
-If you forget to rebuild, importing rocisa will raise an `ImportError` listing
-the stale source files:
-
-```
-ImportError: rocisa C++ sources are newer than the built _rocisa.so — bindings are stale.
-  Modified: .../shared/stinkytofu/src/ir/asm/Function.cpp
-  Rebuild:  cmake --build <build_dir> --target _rocisa
-```
-
-**3. Build with CMake (Custom Location) and Bind the Client**
-
-This workflow is for when you need to build the client outside the default
-`build_tmp` directory. Bind that executable to the active installation before
-running a test. Be sure to pass the hipBLASLt project root when configuring.
-
-```
-cd rocm-libraries/projects/hipblaslt/tensilelite
-
-# install rocisa (once after cloning)
-invoke rocisa
-
-# configure in a custom directory (e.g., my-custom-build)
-cmake --preset tensilelite -S .. -B my-custom-build
-
-# build
-cmake --build my-custom-build --parallel
+Rebuild the client after committing; it must be built from the same commit as
+the editable package.
 
 
-# bind the custom client and run a test
-python -m tensilelite_configure_client \
-  --client "$PWD/my-custom-build/tensilelite/client/tensilelite-client"
-python -m tensilelite run tensilelite/Tests/pre_checkin/<test>.yaml tensile-out
-```
+## CMake integration
 
-**4. Build with tox (Custom Build Args)**
+Device generation builds the `tensilelite` wheel, unpacks it into the build
+tree (`<build>/tensilelite-wheel`) and runs it with the in-tree raw rocisa build
+through a command-scoped `PYTHONPATH`. Nothing is installed into the selected
+Python. It does not resolve or bind `tensilelite-client`.
 
-This workflow uses `tox` with custom CMake arguments, which is useful for creating
-specialized builds (e.g., Debug builds) and setting the architecture.
+The configure records the rocm-libraries commit for the wheel and the client,
+and re-runs when `HEAD` moves. Building from a tree without git records no
+commit and warns that client pairing is disabled; pass
+`-DTENSILELITE_SOURCE_REVISION=<commit>` to record one.
 
-```
-# bind the custom client and run a test
-python -m tensilelite_configure_client \
-  --client "$PWD/my-custom-build/tensilelite/client/tensilelite-client"
-python -m tensilelite run tensilelite/Tests/pre_checkin/<test>.yaml tensile-out
-```
+Device-generation builds require Python 3.10 and Python development headers;
+stable-ABI rocisa builds require Python 3.12. A true host-only build does not
+require TensileLite Python. Standalone Windows builds must set `ROCM_PATH` to
+the SDK used for the build.
 
-**4. Build with tox (Custom Build Args)**
+Relevant options:
 
-This workflow uses `tox` with custom CMake arguments, which is useful for creating
-specialized builds (e.g., Debug builds) and setting the architecture.
+- `TENSILELITE_ENABLE_HOST`
+- `TENSILELITE_ENABLE_CLIENT`
+- `TENSILELITE_BUILD_TESTING`
+- `ROCISA_BUILD_PYTHON` (rocisa-only root configuration)
+- `GPU_TARGETS`
 
-```
-# build the client using tox with custom CMake flags
-cd rocm-libraries/projects/hipblaslt/tensilelite
-TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e py3 -- tensilelite/Tests -m common
 
-# run tests with a single pytest worker (useful for debugging)
-TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- tensilelite/Tests -m common
-```
+## Design records
 
-`invoke build-client` follows the existing `tensilelite` CMake preset by default.
-In this repo, `/opt/rocm` compiler settings come from the preset and
-`CMAKE_EXPORT_COMPILE_COMMANDS` is enabled by default.
+- `docs/Public.md`: original proposal.
+- `docs/PackagingDecisions.md`: accepted choices and rationale.
+- `docs/PackagingPlan.md`: implementation and acceptance plan.
+- `PythonBuildGrillingDecisions.md`: current canonical Python-build decisions.
 
-Use these flags when you want to override or make that behavior explicit:
-
-* `--rocm-path <path>`: Override the compiler toolchain to use `<path>/bin/amdclang` and `<path>/bin/amdclang++`
-* `--export-compile-commands`: Explicitly force `CMAKE_EXPORT_COMPILE_COMMANDS=ON`
-* `--enable-rocprof`: Sets `TENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON`
-
-### Speeding Up Builds with ccache
-
-Install ccache to cache compiled objects across rebuilds:
-
-```bash
-sudo apt install ccache    # Ubuntu/Debian
-```
-
-`invoke rocisa` and `invoke build-client` will detect ccache automatically
-and use it as the compiler launcher. No additional configuration is needed.
-
-### Environment Variables
-
-* `TENSILE_NUM_PYTEST_WORKERS`: Number of parallel pytest workers used by tox (default: `4`)
-* `TENSILELITE_CLIENT_ARGS`: Additional arguments passed to `invoke build-client` during tox runs
-
-### Options
-
-* `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
-* `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
-* `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
-* `GPU_TARGETS:` Semicolon separated list of gfx targets to build
-
-## How to Rebuild Object Codes Directly from Assembly
-
-During the tuning process, it is of interest to modify an assembly file/s and rebuild the corresponding object file/s and then relink the corresponding co file. Currently, we generate additional source files and a script to provide this workflow.
-
-A new `Makefile` is added that manages rebuilding a co file during iterative development when tuning. One modifies an assembly file of interest, then runs `make` and make will detect what file/s changed and rebuild accordingly.
-
-Assumptions:
-
-- Each problem directory contains a library directory with one co file corresponding to one architecture
-
-Install rocisa with `invoke rocisa`, then run the package entry point directly:
-
-```
-python -m tensilelite run \
-  <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
-```
-
-To build asm only:
-
-```
-# modify an assembly file in
-# tensile-out/1_BenchmarkProblems/Cijk_Ailk_Bjlk_DB_UserArgs_00/00_Final/caches/<key>/source/build_tmp/SOURCE/assembly
-# The scratch directory is SOURCE, except when a silicon stepping was asked for.
-# A stepping shares its ISA with the architecture it steps, so both would otherwise
-# claim the same directory; it gets SOURCE-<stepping> instead, and only it does
-# (gfx1250 -> SOURCE, gfx1250-strict -> SOURCE-gfx1250-strict).
-make co TENSILE_OUT=tensile-out
-# re-run the client
-```
-
-The Makefile will set the target based on the name of the co file and sets a default wavefront flag but each of these can be customized as follows:
-
-For 64 wavefront size systems,
-
-```
-make co TENSILE_OUT=tensile-out ARCH="gfx942" WAVE=64
-```
-
-For 32 wavefront size systems,
-
-```
-make co TENSILE_OUT=tensile-out ARCH="gfx1100" WAVE=32
-```
-
-In addition, we provide `ASM_ARGS` and `LINK_ARGS` as additional customization points for the assemble and link step respectively. If the architecture cannot be detect corectly, you may need to manually add ``ARCH="gfx942:xnack-"`` to the ``make`` command.
+<!-- Copyright Advanced Micro Devices, Inc., or its affiliates. -->
+<!-- SPDX-License-Identifier: MIT -->
