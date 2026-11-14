@@ -14167,7 +14167,8 @@ def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem
     W = Wo, cpg' = kpg, kpg' = cpg, PAD' = dil_h*(KH-1)-PAD`` and
     ``pad_w' = dil_w*(KW-1)-PAD_W``. An implicit ``pad_w`` (-1) stays -1
     when ``dil_w*(KW-1) == dil_h*(KH-1)`` (the column flip then equals the
-    row flip); other negative values are kept (the validators refuse them).
+    row flip). A negative column flip, or a ``pad_w`` below -1, gives a
+    ``pad_w'`` below -1 (never the implicit -1), which the validators refuse.
     The flipped padding is the general one, so the transposed
     problem's ``Ho, Wo`` are the dgrad's ``H, W`` for any dilation (it is
     ``KH-1-PAD`` at dilation 1). Stride and dilation are kept, so the forward
@@ -14193,12 +14194,14 @@ def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem
 
 def _dgrad_transposed_pad_w(p: DirectConvProblem) -> int:
     """``pad_w`` of :func:`dgrad_4c_transposed_problem`: the column flip
-    ``dil_w*(KW-1)-PAD_W``, left implicit (-1) when it equals the row flip."""
+    ``dil_w*(KW-1)-PAD_W``, left implicit (-1) when it equals the row flip.
+    A negative flip maps below -1, so it never reads as the implicit -1."""
     if p.pad_w < -1:
         return p.pad_w
     if p.pad_w == -1 and p.dil_w * (p.KW - 1) == p.dil_h * (p.KH - 1):
         return -1
-    return p.dil_w * (p.KW - 1) - p.PAD_W
+    flip = p.dil_w * (p.KW - 1) - p.PAD_W
+    return flip if flip >= 0 else min(flip, -2)
 
 
 def make_dgrad_4c_spec(

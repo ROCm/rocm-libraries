@@ -120,7 +120,17 @@ def test_transposed_problem_flips_dilated_padding():
         assert dgrad_pp_mfma_reason(DgradPpMfmaSpec(problem=tp)) == "dilation must be 1"
 
 
-@pytest.mark.skipif(not _HAS_TORCH, reason="needs torch (CPU)")
+@pytest.mark.parametrize("KH, PAD, dw", [(3, 1, 1), (3, 1, 2), (5, 2, 1)])
+def test_transposed_problem_negative_column_flip_is_refused(KH, PAD, dw):
+    """An explicit pad_w = dil_w*(KW-1)+1 flips to -1, which must not read
+    as the implicit pad_w (= PAD'): it maps below -1 and is refused."""
+    d = replace(_dgrad(H=11, W=11, KH=KH), PAD=PAD, dil_w=dw, pad_w=dw * (KH - 1) + 1)
+    tp = dgrad_pp_mfma_problem(d)
+    assert tp.pad_w < -1, (d, tp)
+    why = dgrad_pp_mfma_reason(DgradPpMfmaSpec(problem=replace(tp, dil_w=1)))
+    assert why is not None and "pad_w must be -1" in why, why
+
+
 @pytest.mark.parametrize(
     "KH, KW, PAD, dil, pad_w",
     [
@@ -135,9 +145,8 @@ def test_transposed_problem_matches_cpu_dgrad(KH, KW, PAD, dil, pad_w):
     """The forward conv over the transposed problem (flipped, k<->c
     transposed filter) is the CPU dgrad: same dX extents and values. An
     implicit pad_w stays -1 only when the column flip equals the row flip
-    (dil_w*(KW-1) == dil_h*(KH-1)); else it is dil_w*(KW-1)-PAD."""
-    import torch
-
+    (dil_w*(KW-1) == dil_h*(KH-1)); else it is dil_w*(KW-1)-PAD. The padding
+    and extent checks need no torch; only the value check does."""
     dh, dw = dil
     d = replace(
         _dgrad(N=1, H=9, W=11, C=4, K=3, KH=KH),
@@ -154,6 +163,7 @@ def test_transposed_problem_matches_cpu_dgrad(KH, KW, PAD, dil, pad_w):
         assert tp.pad_w == dw * (KW - 1) - d.PAD_W, (d, tp)
     assert (tp.Ho, tp.Wo) == (d.H, d.W), (d, tp)
 
+    torch = pytest.importorskip("torch")
     torch.manual_seed(0)
     w = torch.randn(d.total_k, d.total_c, KH, KW, dtype=torch.float64)
     dy = torch.randn(d.N, d.total_k, d.Ho, d.Wo, dtype=torch.float64)
