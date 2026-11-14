@@ -28,10 +28,8 @@ SOFTWARE.
 
 // -------------------- Set 0 - bilateral_filter weight kernel --------------------
 
-// One thread per image: the spatial Gaussian (kernelSize x kernelSize, row-major) and the range
-// exponent factor 1 / (2 * stdDevRange^2). Both are computed in double, and the range factor is
-// saturated to FLT_MAX, as on HOST: in float, 2 * sigma^2 underflows for sigma below ~4e-20, the
-// factor becomes inf, and the centre tap's 0 * inf gives NaN instead of a weight of 1.
+// The range factor is capped at FLT_MAX, as on HOST: for tiny sigma it overflows float, and the
+// centre tap's 0 * inf would be NaN instead of a weight of 1.
 __global__ void bilateral_filter_weights_tensor(float* spatialTensor, float* rangeMulFactorTensor,
                                                 float* stdDevSpaceTensor, float* stdDevRangeTensor,
                                                 int kernelSize, int batchSize) {
@@ -51,18 +49,19 @@ __global__ void bilateral_filter_weights_tensor(float* spatialTensor, float* ran
     rangeMulFactorTensor[id_z] = fmin(1.0 / (2.0 * rangeStdDev * rangeStdDev), (double)FLT_MAX);
 }
 
-// -------------------- Set 1 - bilateral_filter generic kernel --------------------
+// -------------------- Set 1 - bilateral_filter tiled kernel --------------------
 
-// One thread per output pixel (id_x, id_y) of image id_z, looping over the channels. Every layout
-// pair is addressed through the descriptor strides (n, c, h, w), so one kernel covers PKD3, PLN3,
-// PLN1 and the PKD3 <-> PLN3 conversions. The source is read at the ROI offset with the window
-// clamped to the ROI on both axes (REPLICATE), and the output is written from the destination
-// origin, as on HOST.
-template <typename T>
-__global__ void bilateral_filter_generic_tensor(T* srcPtr, uint4 srcStridesNCHW, T* dstPtr,
-                                                uint4 dstStridesNCHW, int channels, int kernelSize,
-                                                RpptROIPtr roiTensorPtrSrc, float* spatialTensor,
-                                                float* rangeMulFactorTensor) {
+// Must be launched with LOCAL_THREADS_X x LOCAL_THREADS_Y blocks: the tile is sized from them
+template <typename T, int kernelSize>
+__global__ void bilateral_filter_tiled_tensor(T* srcPtr, uint4 srcStridesNCHW, T* dstPtr,
+                                              uint4 dstStridesNCHW, int channels,
+                                              RpptROIPtr roiTensorPtrSrc, float* spatialTensor,
+                                              float* rangeMulFactorTensor) {
+    constexpr int padLength = kernelSize / 2;
+    constexpr int tileWidth = LOCAL_THREADS_X + 2 * padLength;
+    constexpr int tileHeight = LOCAL_THREADS_Y + 2 * padLength;
+    constexpr int threadsPerBlock = LOCAL_THREADS_X * LOCAL_THREADS_Y;
+
     int id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
@@ -71,27 +70,44 @@ __global__ void bilateral_filter_generic_tensor(T* srcPtr, uint4 srcStridesNCHW,
     int roiBeginY = roiTensorPtrSrc[id_z].xywhROI.xy.y;
     int roiWidth = roiTensorPtrSrc[id_z].xywhROI.roiWidth;
     int roiHeight = roiTensorPtrSrc[id_z].xywhROI.roiHeight;
+
+    // Uniform across the block, so no thread is left waiting at __syncthreads()
+    int blockBeginX = hipBlockIdx_x * hipBlockDim_x;
+    int blockBeginY = hipBlockIdx_y * hipBlockDim_y;
+    if ((blockBeginX >= roiWidth) || (blockBeginY >= roiHeight)) return;
+
+    __shared__ float src_smem[3][tileHeight][tileWidth];
+    T* srcPtrImage = srcPtr + (id_z * srcStridesNCHW.x);
+
+#pragma unroll
+    for (int idx = hipThreadIdx_y * LOCAL_THREADS_X + hipThreadIdx_x; idx < tileWidth * tileHeight;
+         idx += threadsPerBlock) {
+        int ty = idx / tileWidth;
+        int tx = idx % tileWidth;
+        int srcY = roiBeginY + max(0, min(blockBeginY - padLength + ty, roiHeight - 1));
+        int srcX = roiBeginX + max(0, min(blockBeginX - padLength + tx, roiWidth - 1));
+        int srcIdx = (srcY * srcStridesNCHW.z) + (srcX * srcStridesNCHW.w);
+        for (int c = 0; c < channels; c++)
+            src_smem[c][ty][tx] = (float)srcPtrImage[srcIdx + c * srcStridesNCHW.y];
+    }
+
+    __syncthreads();
+
+    // Guard only after the barrier, which every thread must reach
     if ((id_x >= roiWidth) || (id_y >= roiHeight)) return;
 
-    int padLength = kernelSize / 2;
     float* spatial = &spatialTensor[id_z * kernelSize * kernelSize];
     float rangeMulFactor = rangeMulFactorTensor[id_z];
-
-    int centreIdx =
-        ((roiBeginY + id_y) * srcStridesNCHW.z) + ((roiBeginX + id_x) * srcStridesNCHW.w);
     int dstIdx = (id_z * dstStridesNCHW.x) + (id_y * dstStridesNCHW.z) + (id_x * dstStridesNCHW.w);
 
     for (int c = 0; c < channels; c++) {
-        T* srcPtrChannel = srcPtr + (id_z * srcStridesNCHW.x) + (c * srcStridesNCHW.y);
-        float centre = (float)srcPtrChannel[centreIdx];
+        float centre = src_smem[c][hipThreadIdx_y + padLength][hipThreadIdx_x + padLength];
         float sum = 0.0f, weightSum = 0.0f;
+#pragma unroll
         for (int i = 0; i < kernelSize; i++) {
-            int rowIdx =
-                (roiBeginY + max(0, min(id_y - padLength + i, roiHeight - 1))) * srcStridesNCHW.z;
+#pragma unroll
             for (int j = 0; j < kernelSize; j++) {
-                int colIdx = (roiBeginX + max(0, min(id_x - padLength + j, roiWidth - 1))) *
-                             srcStridesNCHW.w;
-                float pixel = (float)srcPtrChannel[rowIdx + colIdx];
+                float pixel = src_smem[c][hipThreadIdx_y + i][hipThreadIdx_x + j];
                 float diff = pixel - centre;
                 float weight = spatial[i * kernelSize + j] * expf(-(diff * diff) * rangeMulFactor);
                 sum += weight * pixel;
@@ -99,7 +115,6 @@ __global__ void bilateral_filter_generic_tensor(T* srcPtr, uint4 srcStridesNCHW,
             }
         }
 
-        // The centre tap has weight 1, so weightSum >= 1. U8/I8 round to nearest as on HOST.
         float result = sum / weightSum;
         if constexpr (std::is_same<T, Rpp8u>::value || std::is_same<T, Rpp8s>::value)
             result = nearbyintf(result);
@@ -118,11 +133,9 @@ RppStatus hip_exec_bilateral_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
     if (roiType == RpptRoiType::LTRB)
         RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
-    // One grid layer per image of this call, not per image the handle was created for, so a call
-    // with fewer images than the handle's batch size never reads past the given ROIs.
+    // Images in this call, not the handle's batch size, so no read past the given ROIs
     int batchSize = dstDescPtr->n;
 
-    // Per-image spatial weights, followed by the per-image range factors
     float* spatialTensor = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
     float* rangeMulFactorTensor = spatialTensor + batchSize * kernelSize * kernelSize;
     hipLaunchKernelGGL(
@@ -131,25 +144,41 @@ RppStatus hip_exec_bilateral_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
         stdDevSpaceTensor, stdDevRangeTensor, (int)kernelSize, batchSize);
     HIP_CHECK_LAUNCH_RETURN();
 
-    hipLaunchKernelGGL(
-        bilateral_filter_generic_tensor<T>,
-        dim3(ceil((float)dstDescPtr->w / LOCAL_THREADS_X),
-             ceil((float)dstDescPtr->h / LOCAL_THREADS_Y),
-             ceil((float)batchSize / LOCAL_THREADS_Z)),
-        dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(), srcPtr,
-        make_uint4(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
-                   srcDescPtr->strides.hStride, srcDescPtr->strides.wStride),
-        dstPtr,
-        make_uint4(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
-                   dstDescPtr->strides.hStride, dstDescPtr->strides.wStride),
-        (int)dstDescPtr->c, (int)kernelSize, roiTensorPtrSrc, spatialTensor, rangeMulFactorTensor);
+    using TiledKernelType = void (*)(T*, uint4, T*, uint4, int, RpptROIPtr, float*, float*);
+    TiledKernelType kernelFn = nullptr;
+    switch (kernelSize) {
+        case 3:
+            kernelFn = bilateral_filter_tiled_tensor<T, 3>;
+            break;
+        case 5:
+            kernelFn = bilateral_filter_tiled_tensor<T, 5>;
+            break;
+        case 7:
+            kernelFn = bilateral_filter_tiled_tensor<T, 7>;
+            break;
+        case 9:
+            kernelFn = bilateral_filter_tiled_tensor<T, 9>;
+            break;
+        default:
+            return RPP_ERROR_NOT_IMPLEMENTED;
+    }
+    hipLaunchKernelGGL(kernelFn,
+                       dim3(ceil((float)dstDescPtr->w / LOCAL_THREADS_X),
+                            ceil((float)dstDescPtr->h / LOCAL_THREADS_Y),
+                            ceil((float)batchSize / LOCAL_THREADS_Z)),
+                       dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
+                       handle.GetStream(), srcPtr,
+                       make_uint4(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                  srcDescPtr->strides.hStride, srcDescPtr->strides.wStride),
+                       dstPtr,
+                       make_uint4(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                                  dstDescPtr->strides.hStride, dstDescPtr->strides.wStride),
+                       (int)dstDescPtr->c, roiTensorPtrSrc, spatialTensor, rangeMulFactorTensor);
     HIP_CHECK_LAUNCH_RETURN();
 
     return RPP_SUCCESS;
 }
 
-// The tensor executor sizes its grid by dstDescPtr->n, so it already launches a single grid layer
-// for a single image.
 template <typename T>
 RppStatus hip_exec_bilateral_filter_single_image(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                                  RpptDescPtr dstDescPtr, Rpp32f* stdDevSpaceTensor,
