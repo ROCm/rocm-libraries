@@ -31,6 +31,7 @@
 /.github/workflows/component-ci-rocisa.yml          @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
 /.github/workflows/component-ci-stinkytofu.yml      @ROCm/rocm-math-lib-build-infra @ROCm/stinkytofu-reviewers
 /.github/workflows/component-ci-tensilelite-coverage.yml   @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+/.github/workflows/component-ci-tensilelite-pip-sdk-smoke.yml   @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
 
 # Individual contributors
 /.github/workflows/auto-retry-failed.yml            @ROCm/rocm-libraries-reviewers @tony-davis

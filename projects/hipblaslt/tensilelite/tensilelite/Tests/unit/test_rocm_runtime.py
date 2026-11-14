@@ -448,6 +448,8 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
     core_path = tmp_path / "venv" / "site-packages" / "rocm_sdk_core"
     scripts.mkdir(parents=True)
     user_scripts.mkdir(parents=True)
+    monkeypatch.delenv("THEROCK_PACKAGE_VERSION", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path / "conflicting-rocm"))
 
     monkeypatch.setitem(
         sys.modules,
@@ -667,6 +669,39 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
     assert _runtime.client_executable() == configured
     assert validated == [(configured, package)]
 
+def test_python_sdk_mismatched_explicit_binding_does_not_fall_back(tmp_path, monkeypatch):
+    scripts = tmp_path / "venv" / "bin"
+    scripts.mkdir(parents=True)
+    configured = tmp_path / "configured-client"
+    configured.write_text("client", encoding="utf-8")
+    monkeypatch.setattr(_runtime, "_client", None)
+    monkeypatch.setattr(
+        _runtime,
+        "_installation",
+        _rocm.PythonRocm(
+            version="10.1.0a20260813",
+            path=scripts,
+            executable_search_paths=(scripts,),
+        ),
+    )
+    _set_tensilelite_version(monkeypatch, "5.0.0+rocm10.1.0a20260813")
+    monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: configured)
+    monkeypatch.setattr(
+        _runtime,
+        "default_client_candidate",
+        lambda *args: (_ for _ in ()).throw(AssertionError("default client was probed")),
+    )
+    monkeypatch.setattr(
+        _runtime,
+        "validate_client",
+        lambda path, installation: (_ for _ in ()).throw(
+            client_binding.ClientBindingError("Client source revision mismatch")
+        ),
+    )
+    monkeypatch.setattr(_runtime, "current_installation", lambda: _package(tmp_path))
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError, match="Client source revision mismatch"):
+        _runtime.client_executable()
 def _initialize_runtime_with_root(root: Path, monkeypatch) -> None:
     monkeypatch.setattr(_runtime, "_client", None)
     monkeypatch.setattr(_runtime, "_installation", None)
@@ -766,7 +801,6 @@ def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def enable_runtime_validation(monkeypatch):
-    monkeypatch.setattr(_rocm, "_ENABLE_PYTHON_ROCM_RUNTIME", True)
     monkeypatch.setattr(_rocm, "_not_checked_warned", False)
 
 

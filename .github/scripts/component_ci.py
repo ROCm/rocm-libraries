@@ -9,6 +9,7 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - tensilelite_coverage=true/false
   - hipblaslt_logic_corpus=true/false
   - hipblaslt_rocjitsu_scripts=true/false
+  - tensilelite_pip_sdk_smoke=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered.
@@ -61,6 +62,18 @@ COMPONENTS = {
         "test_solution_uid_uniqueness.py",
         "projects/hipblaslt/tensilelite/tox.ini",
         ".github/workflows/component-ci-logic-corpus.yml",
+    ],
+    # TensileLite's ROCm selection with TheRock's pip-installed SDK. It also
+    # runs daily from its own workflow, so SDK regressions show up without a PR.
+    "tensilelite_pip_sdk_smoke": [
+        "projects/hipblaslt/tensilelite/tensilelite/_rocm.py",
+        "projects/hipblaslt/tensilelite/tensilelite/_runtime.py",
+        "projects/hipblaslt/tensilelite/_tensilelite_client_binding.py",
+        "projects/hipblaslt/tensilelite/setup.py",
+        "projects/hipblaslt/tensilelite/pyproject.toml",
+        "projects/hipblaslt/tensilelite/tox.ini",
+        "projects/hipblaslt/tensilelite/scripts/pip_sdk_smoke.py",
+        ".github/workflows/component-ci-tensilelite-pip-sdk-smoke.yml",
     ],
     "hipblaslt_rocjitsu_scripts": [
         "projects/hipblaslt/clients/scripts/rocjitsu/**",

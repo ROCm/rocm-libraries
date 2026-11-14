@@ -247,12 +247,61 @@ def test_default_client_candidate_uses_first_existing_executable_path(tmp_path, 
     client = fallback / executable
     client.parent.mkdir()
     client.write_text("client", encoding="utf-8")
+    client.chmod(0o755)
+    identity = binding.ClientIdentity(_SHA, "7.2.4 base")
+    monkeypatch.setattr(binding, "validate_client", lambda path, installation: identity)
 
     def default_client():
         return binding.default_client_candidate(installation, (primary, fallback), "test prefix")
 
     selected = binding.selected_client(default_client, installation)
-    assert selected == binding.ClientCandidate(client, "test prefix")
+    assert selected == binding.ClientCandidate(client, "test prefix", identity)
+
+
+def _fake_query_client(path, revision):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        f"  --source-revision) echo {revision} ;;\n"
+        "  --build-rocm) echo '7.2.4 base' ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX test executable")
+def test_default_client_candidate_skips_a_client_from_another_commit(tmp_path):
+    installation = _installation(tmp_path)
+    primary = tmp_path / "primary" / binding.client_executable_name()
+    fallback = tmp_path / "fallback" / binding.client_executable_name()
+    _fake_query_client(primary, _OTHER_SHA)
+    _fake_query_client(fallback, _SHA)
+
+    candidate = binding.default_client_candidate(
+        installation, (primary.parent, fallback.parent), "Python SDK"
+    )
+
+    assert candidate == binding.ClientCandidate(
+        fallback, "Python SDK", binding.ClientIdentity(_SHA, "7.2.4 base")
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX test executable")
+def test_default_client_candidate_reports_every_client_from_another_commit(tmp_path):
+    installation = _installation(tmp_path)
+    candidates = [tmp_path / name / binding.client_executable_name() for name in ("first", "second")]
+    for candidate in candidates:
+        _fake_query_client(candidate, _OTHER_SHA)
+
+    with pytest.raises(binding.ClientBindingError, match="built from this package's commit") as exc:
+        binding.default_client_candidate(
+            installation, tuple(candidate.parent for candidate in candidates), "Python SDK"
+        )
+
+    assert all(str(candidate) in str(exc.value) for candidate in candidates)
+    assert _OTHER_SHA in str(exc.value)
 
 
 @pytest.mark.parametrize("editable", [False, True])

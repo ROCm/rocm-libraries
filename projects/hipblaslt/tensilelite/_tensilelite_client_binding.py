@@ -68,6 +68,8 @@ class ClientIdentity:
 class ClientCandidate:
     path: Path
     source: str
+    # Set when the candidate was already validated against the installation.
+    identity: "ClientIdentity | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -161,11 +163,27 @@ def default_client_candidate(
     executable_search_paths: tuple[Path, ...],
     source: str,
 ) -> ClientCandidate:
-    """Find tensilelite-client in the selected executable search paths."""
+    """Find the first client in the selected paths built from this package's commit.
+
+    Candidates are validated by source revision (``validate_client``); one from
+    another commit is skipped and reported if no candidate fits.
+    """
+    rejected: list[str] = []
     for directory in executable_search_paths:
         candidate = directory / client_executable_name()
-        if candidate.is_file():
-            return ClientCandidate(candidate, source)
+        if not candidate.is_file():
+            continue
+        try:
+            identity = validate_client(candidate, installation)
+        except ClientBindingError as exc:
+            rejected.append(f"  {candidate}: {exc}")
+            continue
+        return ClientCandidate(candidate, source, identity)
+    if rejected:
+        raise ClientBindingError(
+            "No tensilelite-client built from this package's commit was found in the "
+            "selected executable paths:\n" + "\n".join(rejected)
+        )
     raise ClientBindingError(
         "tensilelite-client was not found in the selected executable paths:\n"
         f"  selected by: {source}\n"
