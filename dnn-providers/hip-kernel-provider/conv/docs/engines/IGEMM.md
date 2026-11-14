@@ -1,0 +1,140 @@
+<!--
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+SPDX-License-Identifier:  MIT
+-->
+
+# CONV_IGEMM_FWD / BWD (K1) — implicit GEMM, the general workhorse for forward and backward data
+
+> Engine ids: `hipkernel:CONV_IGEMM_FWD`, `hipkernel:CONV_IGEMM_BWD` · Generator: `conv/generators/gen_igemm.py` · Kernels: `src/engines/kernel_ingestor_engine/descriptors/conv/igemm/kernels/` (`ConvIgemm.cpp`, `ConvIgemmCore.h`) · Pack: `packs/ConvIgemmNative.cpp`, `packs/ConvIgemmProblem.hpp`
+
+## At a glance
+
+- **What:** implicit GEMM on matrix cores (MFMA, WMMA) or FMA micro-tiles, channels-last native, runtime shapes; a config fixes only the atom, the tile and a few code-path knobs.
+- **Covers:** fwd and bwd-data; fp32, fp16, bf16 (TF32-class forms under `HIP_KERNEL_PROVIDER_CONV_TF32`); any layout (NHWC native, packed NCHW by tiled transpose or the `cf` epilogue, anything else by strided copy); 1-D/2-D/3-D; any groups; any stride, dilation and padding; both conv modes; images past 2^31 pixels on large-image configs.
+- **Arches:** MFMA on gfx908, gfx90a, gfx942, gfx950 (gfx950's double-rate 16x16x32 / 32x32x16 atoms; xf32 on gfx942); WMMA on gfx11 and gfx12; an FMA kernel admitted for every type on every architecture (the only fp32 path on RDNA, the only path on gfx906, gfx103x and gfx1250; the last two are not validated on hardware).
+- **Wins when:** compute-bound dense and grouped layers in fwd and bwd-data, NCHW 16-bit backward data, 3-D fp32, and everything on gfx906 (where MIOpen falls to im2col + rocBLAS). It serves every fwd/bwd graph of the 2K subset.
+- **Loses when:** gfx90a/gfx908 NCHW fp16 forward vs MIOpen's older XDLOPS implicit GEMMs (1.2-1.4x behind), gfx906 NCHW fp16 forward vs its V4R1 kernel (1.55x), stride-1 3x3 where Winograd (K5) or direct (K2) win, strided NCHW bwd-data where K7 wins.
+- **Precision:** fp32 accumulation, one rounding (split-K partials in fp32, summed in split order). Deterministic. No numerical notes.
+- **Instances:** 905 fwd + 817 bwd configs, all runtime-geometry (no compile-time shape tier); 37 large-image twins and 39 TF32-class configs per direction.
+- **vs MIOpen:** competes with CK grouped implicit GEMM (`ConvHipImplicitGemm{,3D}Group{Fwd,Bwd}Xdlops`), the older HIP and asm implicit GEMMs, and `GemmFwdRest`/`GemmBwdRest`. Call-weighted factor where K1 is our best: 0.93-1.44x fwd, 1.15-1.47x bwd on matrix-core GPUs; 3.0x / 1.8x on gfx906.
+
+## Why it exists
+
+- hipDNN needed one engine that serves every forward and backward-data convolution fast enough to replace MIOpen's GEMM-class solvers, on every architecture from gfx906 to gfx12, without CK and without per-shape compiles.
+- It is the floor of the fast engines: specialized engines (K2 direct, K5 Winograd, K7, K4, SMALLC, STEM_BWD, depthwise) only need to beat it in their regime; anything they decline still has K1.
+- Its atoms, buffer-load helpers and element conversions (`ConvIgemmCore.h`) are the shared core that K2, K3, K4, K7, SMALLC and STEM_BWD build on.
+
+## How it works
+
+Per group, forward is the GEMM `y[m][n] = sum_k A[m][k] B[n][k]` with `m` = (image, output position), `n` = output channel, `k` = (tap, input channel), tap outer so a k-step of `BK` channels stays within one tap and every row's tap offset is one add. `A` is never formed: each block gathers its A tile from x with per-row bounds checks.
+
+Backward data runs one GEMM per (group, stride phase): rows are the dx positions of one phase (`(i + pad) mod stride` fixed), columns the input channels, the reduction (taps that reach the phase, output channels). Within a phase the dy gather is the forward gather at stride 1 with an offset and a negative tap step, so the same kernel serves it without zero upsampling, and every dx element is written once. The phases ride on grid z next to the groups.
+
+```
+grid = (row tiles, column tiles, groups x stride phases x splits)
+block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-steps -> fp32 epilogue
+```
+
+## Implementation design
+
+**Kernel structure** (`k1ConvMma`, `k1ConvFma`):
+- Matrix-core block of `WM x WN` waves, tile `BM x BN`, k-step `BK`. One LDS buffer per operand: the next k-step's global loads are issued into registers before the current step's multiplies and stored after a barrier. gfx950 `dma` configs instead load straight into a ring of 2-4 swizzled LDS stages.
+- Atoms: MFMA 16x16 and 32x32 (wave64), gfx950 16x16x32 / 32x32x16, gfx908 bf16 forms, WMMA gfx11 (both half-waves hold all k) and gfx12 (half-waves split k), fp32 MFMA, and xf32 on gfx942.
+- FMA kernel: k-major LDS tiles, each thread a `TM x TN` register tile in runs of 4x4; fp16 multiplies pairs of k with `v_dot2_f32_f16`.
+- Epilogue: fp32 accumulators converted once and stored channels-last; `cf` configs write packed channels-first output directly; split configs write fp32 partials indexed like the output.
+
+**Knobs** (each a compile-time define; every config field is a knob so candidates are distinguishable):
+
+| Knob | Effect | Served where |
+|---|---|---|
+| `atom`, `bm/bn/bk`, `wm/wn`, `threads`, `vec` | atom, tile, waves, FMA block, channel vector | `vec` must divide the reduction channels |
+| `halo` | stage `BM` + shift-range rows once per channel chunk; every tap reads them at an offset | stride 1, output extents equal input ("same"), shift range within 64 rows |
+| `xcd` | XCD-contiguous block order (blocks sharing an A tile land on one L2) | gfx942, gfx950 only |
+| `swz` | XOR-swizzled unpadded LDS read in 16-byte chunks (no bank conflicts) | 16-bit, `vec` 8 |
+| `dma` 2-4 | gfx950 buffer loads straight into LDS stages | gfx950, 32-bit-addressable problems |
+| `wdirect` | bwd-data reads the K T R S C/g filter in place (no transposed copy) | packed KRSC, unreflected filter |
+| `pack` 1 / 2 | 1: k-steps of whole taps for groups narrower than `BK`; 2: flat (taps x channels end to end) for channel counts `BK` does not divide | as named |
+| `cf` | channels-first output from the epilogue | packed NCHW/NCDHW output |
+| `fuse` 2-16 | run F small groups as one block-diagonal group (filter expanded in the workspace) | fused group <= 64 channels each way |
+| `large` | 64-bit positions within an image | only images past 2^31 - 1 pixels (and only them) |
+| `math` `bf16x3` | three-bf16 TF32 form | fp32 graphs, TF32 permitted |
+
+**Host side:**
+- Gates: everything the naive parser gates (`parseConvNaiveProblem`, every graph, node and tensor field), plus `N`, `C`, `K`, groups, extents, padding, stride and dilation within 32 bits, row tiles and grid y/z within launch limits. Fwd and bwd only.
+- Staging: activations that are not packed channels-last are staged into the workspace (packed channels-first by a batched 64x64 LDS transpose, other strides by a strided copy). The filter is staged to K T R S C/g (forward) or `[g][tap][c][k]` (backward data) unless `wdirect` applies; true convolution reflects it through negative strides in the same copy.
+- Split-K (`splitPlanFor`): only when the tiles under-fill the device: fewer than 2 blocks per CU on gfx9 (keeping at least 2 k-iterations per split), fewer than 1 per WGP on gfx10+ (keeping at least 64, since a split costs about 50 k-steps of partial store there); at most 16 splits; partials at most 1 GiB. A reduce kernel adds them in split order. The split is analytic; there is no split knob.
+- Addressing: buffer loads with 32-bit offsets from a per-block 64-bit base (out-of-range reads return zero, so padding needs no branch); `K1_BUFFER=0` switches to 64-bit global loads when a block's rows or the filter could span 2^31 bytes. A grid past 2^32 work items runs as consecutive launches (`tileBase`).
+- Occupancy: the swizzled 128x128x64 WMMA tile with 4x2 waves gets `waves_per_eu` 4 on gfx1100, gfx1101 and gfx1151 (1.5x VGPR file), where the compiler otherwise spills it and runs 1.6x slower.
+- Workspace: staged operands plus split partials; nothing when the graph is NHWC/KRSC (fwd) or NHWC with `wdirect` (bwd) and unsplit.
+
+**Notable codegen choices:**
+- Buffer descriptors pass through `readfirstlane`. Without it the current HIPRTC keeps a descriptor derived from a 64-bit division in VGPRs and wraps every load in a waterfall loop (the pattern appears in 93-95% of K1 code objects compiled without it and costs about 7% geomean on gfx950 and gfx1201).
+- LDS-only barriers in the matrix-core kernel: `__syncthreads()` on gfx12 adds an L0 invalidate after each barrier.
+- Branch-free `&` load predicates, a decode-once cursor stepped by additions, and magic division for the flat (`pack` 2) cursor (32-45% faster on C=3 stems than a subtract loop).
+- bf16 stores use the hardware conversion on gfx950, software round-to-nearest-even elsewhere.
+- RDNA family macros (`ConvArchFamily.h`) so gfx11-generic and gfx12-generic compiles keep their WMMA atoms.
+
+**Catalog:** per atom family a handful of tiles (for example MFMA 32x32: 128x128, 256x128, 128x64, 64x128, 256x256; MFMA 16x16: 128x64, 64x64, 128x32, 256x16 and a `vec` 1 tile; WMMA: 13 tiles plus direct-filter and tap-packing variants; FMA: 3 per dtype), then generated twins: `flat`, `fuse`, `swz`, `cf`, `large`. Each config is admitted on correctness alone; priority (larger matrix-core tiles first, FMA last) is the declared order out of the box, and autotune picks.
+
+## Strengths and weaknesses
+
+Latest autotuned conv-kpi 2K-subset sweeps (1998 shapes from 31 models; tip6 on gfx90a, gfx1201, gfx1100; tip5 on gfx950, gfx942 MI325X, gfx908, gfx906) vs MIOpen in search mode. Counted over the graphs where K1 is our autotuned best; W/L = faster / slower by more than 5%; factor = call-weighted MIOpen time / K1 time.
+
+| GPU | fwd best on | fwd W/L | fwd factor | bwd best on | bwd W/L | bwd factor |
+|---|---|---|---|---|---|---|
+| gfx950 | 180 | 99/47 | 1.21x | 102 | 80/9 | 1.26x |
+| gfx942 (MI325X) | 205 | 120/47 | 1.13x | 96 | 69/15 | 1.17x |
+| gfx90a | 228 | 62/125 | 0.93x | 122 | 64/30 | 1.15x |
+| gfx908 | 303 | 68/183 | 0.93x | 140 | 73/45 | 1.18x |
+| gfx906 | 380 | 245/122 | 2.99x | 165 | 126/30 | 1.76x |
+| gfx1201 | 220 | 132/49 | 1.29x | 116 | 89/18 | 1.47x |
+| gfx1100 | 203 | 123/43 | 1.44x | 129 | 102/12 | 1.43x |
+
+- **Largest wins** (weighted time saved): NCHW fp16 dense bwd vs CK grouped bwd (1.2-1.6x, every GPU), NCHW fp16 dense fwd vs CK grouped fwd (1.3-1.4x on gfx950/942/RDNA), 3-D NCHW fp32 fwd/bwd vs CK 3-D or `GemmFwdRest` (1.15-2.5x), and gfx906 bf16, NHWC and NCHW fp16 bwd layers vs `GemmFwdRest`/`GemmBwdRest` (1.5-5x).
+- **Largest losses:** gfx90a NCHW fp16 fwd vs `ConvHipImplicitGemmForwardV4R4/V4R5Xdlops` (1.2-1.4x); gfx908 Wan-VAE 3-D NHWC bf16 fwd vs CK 3-D (1.08x, but the heaviest weighted loss of any engine there) and NCHW fp16 vs the asm `ConvAsmImplicitGemmGTCDynamicFwdXdlops` (1.18x); gfx906 NCHW fp16 fwd vs `ConvHipImplicitGemmV4R1Fwd` (1.55x over 65 graphs).
+- Call-weighted excess over MIOpen on K1's losing graphs (per run of every captured model): 1.4 ms gfx950, 3.4 ms gfx942, 14-19 ms RDNA, 54 ms gfx90a, about 630 ms each on gfx908 (mostly the Wan-VAE 3-D layers) and gfx906 (NCHW fp16 fwd). Against that, K1's wins save 48 ms (gfx950, gfx942) to 660 ms (gfx1100).
+- **Compile cost:** a graph admits many K1 configs; the worst measured graph (ResNeXt-50 grouped NCHW bwd) admits 91-131, and compiling them all for autotune took 134 s on gfx942 and 224 s on gfx950. Median cold compile is 0.3-0.8 s per config on CDNA, 0.4-1.5 s on RDNA.
+- Against straight ports of the same configs to rocKE and FlyDSL (12 forward NHWC shapes, gfx950/gfx942/gfx1201), K1 after its port-back is within about 1% of rocKE on gfx950, at parity on gfx942 and 2-4% behind on gfx1201; the C=3 stem (1.4x) and BK-64 fragment scheduling on gfx1201 remain.
+
+## Numerical precision
+
+- fp32 accumulation on every path: fp16/bf16 products on MFMA/WMMA accumulate in fp32; fp32 runs on fp32 MFMA (exact products) or FMA; one rounding to the output type. Split-K writes fp32 partials and adds them in split order before that rounding.
+- Deterministic: fixed tile order, no atomics; the device suite relaunches every admitted config and compares bits.
+- Tested against hipDNN's CPU reference with 2e-6 per reduction term (times the reduction length) plus 2 storage epsilons; TF32 forms at 1e-3 (xf32) and 3e-5 (three-bf16) per term.
+- **TF32 forms** (`HIP_KERNEL_PROVIDER_CONV_TF32` only, fp32 graphs only): three-bf16 on every matrix-core arch (operands split into hi + lo bf16 at the LDS store; lo·hi, hi·lo and hi·hi accumulated in fp32; about 2^-16 per product), and xf32 on gfx942 (operands rounded to nearest-even TF32 at fragment load, not truncated by the hardware). Infinities stay infinite in both. Measured against the best exact config on top fp32 shapes: xf32 1.07-1.27x faster on MI325X (7 of 8 shapes); three-bf16 0.5-0.7x on gfx950 and gfx942. No numerical note is reported for these configs (a note is per engine).
+- **inf/NaN:** ±inf inputs give the fp32 result on native and TF32 configs (tested), except group-fusion configs: the zero blocks of the expanded filter turn another group's infinity into NaN (0 x inf). Those configs are excluded from the infinity test; it is an open parity item. Padding is read as zeros and multiplied, as in a zero-padded reference; no test covers infinite filter values.
+
+## Comparison with MIOpen
+
+| MIOpen solver | Where | Approach | Measured (subset, where K1 is our best) |
+|---|---|---|---|
+| `ConvHipImplicitGemm{,3D}Group{Fwd,Bwd}Xdlops` (CK) | gfx90a+, RDNA | AOT template instances per tile, grouped GEMM | K1 1.2-1.6x faster on NCHW fp16 bwd and fwd on gfx950/942/RDNA; 1.1-1.2x behind on some gfx90a/908 fp16 shapes |
+| `ConvHipImplicitGemmForwardV4R4/V4R5Xdlops`, `ConvAsmImplicitGemmGTCDynamic{Fwd,Bwd}Xdlops` | gfx908, gfx90a | older HIP and hand-written asm implicit GEMMs | K1 1.2-1.4x behind on NCHW fp16 fwd; ahead on bwd (asm GTC bwd 1.23x) |
+| `ConvHipImplicitGemmV4R1Fwd`, `V4R4Fwd` | gfx906 | VALU implicit GEMM | K1 FMA 1.25-1.55x behind on NCHW fp16 fwd and 3-D fp32 |
+| `GemmFwdRest`, `GemmBwdRest` | all | im2col/col2im + rocBLAS | K1 1.5-5x faster where they are MIOpen's best (gfx906, 3-D, RDNA) |
+
+K1 differs in kind: one source compiled at first use for the device in hand, runtime shapes (no per-shape compile), bwd-data by stride phases rather than col2im, NCHW served without MIOpen's transpose solvers, and three dtypes on every arch including fp32 and bf16 where MIOpen has no matrix-core path.
+
+## Prior art considered
+
+- **rocKE's implicit GEMM:** same main loop as K1; its dgrad techniques were taken: decode once per tap, halo rows staged once per channel chunk (`halo`), XCD-contiguous block order (`xcd`), occupancy-driven 4x1 tiles, no two-stage LDS on 64 KiB parts.
+- **hipconv:** its swizzled LDS tiles and its merging of small groups suggested `swz` and `fuse`.
+- **CK:** studied as the reference for tile shapes and pipelining; not linked, ported or used.
+- **rocKE and FlyDSL straight ports of K1** (a three-language comparison): their ISA showed the waterfall descriptor, the gfx12 barrier invalidate, branchy predicates and the stem cursor as HIP-side costs; K1 carries the fixes. No code was copied.
+
+## Next steps and deferred ideas
+
+1. **Fragment read-ahead for BK-64 tiles** (load a k-step's fragments before its MMA loop): the largest same-config residual to the rocKE port (1.20x on gfx1201 BK-64). Gain bounded by that residual on the BK-64 picks.
+2. **gfx90a/gfx908 forward pipeline** (more work per barrier, deeper load/LDS/MMA overlap) for NCHW fp16 and the Wan-VAE 3-D bf16 layers, the heaviest K1 losses on those GPUs; earlier time-boxed RDNA pipelining (ring, register prefetch) gave no gain, so this needs a structural change.
+3. **gfx906 FMA forward for NCHW fp16** (1.55x behind V4R1 on 65 graphs, the largest K1 weighted loss anywhere); `v_dot2` already gave 1.29x.
+4. **Out-of-the-box selection and compile cost:** the declared order takes the first admitted config; a native per-config scorer from tile fit, waves, split plan and occupancy, plus a precompiled code-object store, would avoid compiling 90-130 candidates on grouped graphs.
+5. **Group-fusion inf parity:** mask the structural zeros of the expanded filter, A/B'd against the compiled-out build.
+6. **Split knob:** expose the split count so autotune can override the analytic plan on shapes where it guesses wrong.
+7. **TF32 as tagged sibling engines** once hipDNN can filter by numerical note; three-bf16 does not pay on CDNA today and stays only as an autotune candidate.
+8. **Workspace limits:** a per-family test that a caller's workspace cap declines at plan time, never at execute.
+
+## Tests
+
+- `src/tests/engines/kernel_ingestor_engine/packs/TestGpuConvIgemm.cpp`, device: every admitted config of each case in fp32, fp16 and bf16, fwd and bwd: NHWC/NCHW 3x3, small groups, grouped stride 2 (both layouts), 1x1, small channels, 1-D dilated and strided (k4 s2, k8 s4), NCDHW/NDHWC 3x3x3, asymmetric padding with dilation and stride, convolution mode, groups of 8 and 4 channels, stride 2 to an output of extent 1. Each config is relaunched for bitwise determinism. TF32 cases (fp64 reference, TF32 bounds) and ±inf cases for TF32 and native configs.
+- Same file, host: catalog invariants (atoms known and run only where their instructions exist; knobs distinguish every config; halo configs single-stage, no two-stage tiles; `wdirect` bwd only; `cf`, `flat`, `swz`, `dma`, `fuse` twins and their gates; `xcd` only on multi-XCD devices), split plans (gfx9 below 2 blocks per CU, RDNA below 1 per WGP with 64 k-steps, no units no split), buffer span, large-image configs exactly past 2^31 pixels, occupancy target, multi-launch grids, compute types.
+- `IntegrationConvCoverageCensus.cpp`: fwd/bwd tiers per architecture and gate-boundary graphs, including large images.
