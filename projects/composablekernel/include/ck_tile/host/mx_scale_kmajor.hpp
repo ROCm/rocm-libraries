@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/host/mx_processing.hpp"
 
 /**
  * @file
@@ -23,7 +24,9 @@
  * Scales. One E8M0 byte per 32 K values of each A or B row. The natural layout is
  * [rows][ceil(K / 32)]; the kernel reads [ceil(K / 128)][rows][4]: K step s of row r is the int32
  * at (s * rows + r) * 4, its byte g the scale of K values s * 128 + g * 32 .. + 31. A K step past
- * ceil(K / 32) groups (a partial last K step) is zero-padded.
+ * ceil(K / 32) groups (a partial last K step) is zero-padded. This is the gfx1250 scale preshuffle
+ * (preShuffleScaleBuffer_gfx1250) with one row group spanning all rows, the same bytes as
+ * hipBLASLt's preSwizzleScalesGFX1250.
  *
  * Elements. A and B rows are K-contiguous bytes: FP4 two per byte (K even in the low nibble), FP8
  * E4M3 (OCP, no infinity) and BF8 E5M2 one per byte. C and D are row-major in the output type.
@@ -46,20 +49,25 @@ CK_TILE_HOST std::size_t mx_scale_kmajor_bytes(index_t rows, long_index_t K)
            4;
 }
 
-/// [rows][ceil(K / 32)] (row r at natural + r * row_stride) to [ceil(K / 128)][rows][4].
+/// [rows][ceil(K / 32)] (row r at natural + r * row_stride) to [ceil(K / 128)][rows][4]:
+/// preShuffleScaleBuffer_gfx1250 with MThreadPerXdl = rows, after a copy that drops the row
+/// stride and zero-pads the groups to a whole K step.
 CK_TILE_HOST std::vector<uint8_t>
 mx_scale_to_kmajor(const uint8_t* natural, index_t rows, long_index_t K, long_index_t row_stride)
 {
     const long_index_t groups = integer_divide_ceil(K, mx_tdm_scheduled::kScaleGroupK);
-    const long_index_t steps  = integer_divide_ceil(K, mx_tdm_scheduled::kScaleStepK);
+    const long_index_t padded = integer_divide_ceil(K, mx_tdm_scheduled::kScaleStepK) * 4;
     if(row_stride < groups)
         throw std::invalid_argument("mx_scale_to_kmajor: row_stride " + std::to_string(row_stride) +
                                     " < " + std::to_string(groups) + " scale groups");
     std::vector<uint8_t> out(mx_scale_kmajor_bytes(rows, K), 0);
-    for(long_index_t s = 0; s < steps; ++s)
-        for(index_t r = 0; r < rows; ++r)
-            for(long_index_t g = 0; g < 4 && s * 4 + g < groups; ++g)
-                out[(s * rows + r) * 4 + g] = natural[r * row_stride + s * 4 + g];
+    if(rows == 0)
+        return out;
+    std::vector<uint8_t> dense(out.size(), 0);
+    for(index_t r = 0; r < rows; ++r)
+        std::copy_n(natural + r * row_stride, groups, dense.begin() + r * padded);
+    preShuffleScaleBuffer_gfx1250<uint8_t, mx_tdm_scheduled::kScaleGroupK, true>(
+        dense.data(), out.data(), rows, static_cast<index_t>(padded), rows);
     return out;
 }
 
