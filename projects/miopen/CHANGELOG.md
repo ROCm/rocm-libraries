@@ -71,6 +71,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   held by a skipped evaluation is now released by a background thread as soon as its kernel
   finishes, rather than from a later kernel launch, so it is also released in workloads that only
   replay a captured graph.
+* Fixed kernel cache lookups and removals for kernels whose file name or compile options contain
+  a single quote. The key was spliced into the SQL text, so such a lookup failed with an SQLite
+  syntax error, and a crafted key could match another kernel's record. The key is now bound as
+  query parameters.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -113,6 +117,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
   split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
   between builds.
+* Optimized kernel cache lookups, inserts and removals by reusing one prepared SQLite statement of
+  each kind per database connection instead of preparing and finalizing a new statement for every
+  call. This mainly shortens the lookups that miss, which precede every kernel compilation.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
