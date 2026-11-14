@@ -88,6 +88,9 @@ repos:
         # otherwise pick these up from the top level exclude.
         exclude: &opted_out_but_scanned |
           (?x)
+          # Vendored FRUIT unit-test harness (third party, own LICENSE.txt):
+          # kept byte-identical to upstream so that re-vendoring is a plain copy.
+          bindings/fortran/hiprand/test/fruit/.*|
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
           shared/tensile/.*|
