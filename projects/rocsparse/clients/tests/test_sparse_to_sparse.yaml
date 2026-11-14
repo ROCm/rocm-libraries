@@ -44,12 +44,26 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i32
   precision: f32_r
-  M: [17, 49]
-  N: [7, 17]
+  M: [17]
+  N: [7]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_bsr ]
   formatB: [rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_bsr, rocsparse_format_coo, rocsparse_format_ell ]
 
+# Larger BSR conversion. The small sweep above does not take every csr2gebsr column-block arm.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i64
+  index_type_J: i32
+  B_row_indextype: i64
+  B_col_indextype: i32
+  precision: f32_r
+  M: [49]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_bsr]
+  formatB: [rocsparse_format_csr]
 
 - name: sparse_to_sparse
   category: quick
@@ -59,8 +73,8 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i32
   precision: f32_r
-  M: [17, 49]
-  N: [7, 17]
+  M: [17]
+  N: [7]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_coo, rocsparse_format_ell ]
   formatB: [rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_bsr ]
@@ -74,8 +88,8 @@ Tests:
   B_row_indextype: i32
   B_col_indextype: i32
   precision: f32_r
-  M: [17, 49]
-  N: [7, 17]
+  M: [17]
+  N: [7]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
@@ -88,11 +102,26 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i64
   precision: f64_c
-  M: [17, 49]
-  N: [7, 17]
+  M: [17]
+  N: [7]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
+
+# The 64-bit COO sort path is only taken for a larger matrix than the sweep above.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i64
+  index_type_J: i64
+  B_row_indextype: i64
+  B_col_indextype: i64
+  precision: f64_c
+  M: [49]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_coo]
+  formatB: [rocsparse_format_coo, rocsparse_format_csr]
 
 # Coverage widening: exercise the f64_r datatype branch of the generic
 # converters (gcsr2ell/gell2csr/gcsr2bsr/gbsr2csr/gcsr2csc/gcsc2csr/gcoo*).

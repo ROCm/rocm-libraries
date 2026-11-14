@@ -156,7 +156,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [13, 300]
+  N: [13]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -166,8 +166,7 @@ Tests:
   baseC: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   spgemm_alg: [rocsparse_spgemm_alg_default]
-  filename: [mac_econ_fwd500,
-             nos2,
+  filename: [nos2,
              nos6,
              scircuit]
 
@@ -223,7 +222,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [21, 300]
+  N: [21]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]

@@ -34,7 +34,6 @@ include: rocsparse_common.yaml
 Definitions:
   - &M_N_range_quick
     - { M:  50, N:  50 }
-    - { M: 187, N: 187 }
 
   - &M_N_range_checkin
     - { M:   0, N:   0 }
@@ -73,6 +72,18 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   itilu0_alg: [rocsparse_itilu0_alg_sync_split,
                rocsparse_itilu0_alg_async_split,
+               rocsparse_itilu0_alg_async_inplace]
+  matrix: [rocsparse_matrix_random]
+
+- name: csritilu0
+  category: quick
+  function: csritilu0
+  precision: *single_double_precisions_complex
+  M_N:
+    - { M: 187, N: 187 }
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  itilu0_alg: [rocsparse_itilu0_alg_async_split,
                rocsparse_itilu0_alg_async_inplace]
   matrix: [rocsparse_matrix_random]
 

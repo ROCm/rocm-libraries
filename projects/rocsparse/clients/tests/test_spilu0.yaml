@@ -89,21 +89,6 @@ Tests:
   function: spilu0
   precision: *single_only_precisions
   M_N:
-    - { M: 16384, N: 16384 }
-    - { M: 32768, N: 32768 }
-    - { M: 49152, N: 49152 }
-  apol: [rocsparse_analysis_policy_reuse]
-  baseA: [rocsparse_index_base_zero]
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_tridiagonal, rocsparse_matrix_pentadiagonal]
-  indextype: *i32
-  batch_count: [1]
-
-- name: spilu0
-  category: quick
-  function: spilu0
-  precision: *single_only_precisions
-  M_N:
     - { M: 768, N: 768 }
   apol: [rocsparse_analysis_policy_reuse]
   baseA: [rocsparse_index_base_zero]

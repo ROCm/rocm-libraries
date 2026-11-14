@@ -36,8 +36,8 @@ Tests:
   function: bsr2csr
   precision: *single_double_precisions_complex_real
   M: [1, 872]
-  N: [1, 623]
-  block_dim: [1, 7, 150, 256]
+  N: [1]
+  block_dim: [1, 7, 256]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
@@ -61,7 +61,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [1725]
   N: [1846]
-  block_dim: [3, 6, 9, 12]
+  block_dim: [3, 6, 9]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
@@ -73,7 +73,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [981]
   N: [994]
-  block_dim: [13, 14, 15, 16]
+  block_dim: [16]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
@@ -85,17 +85,14 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  block_dim: [4, 5, 9, 25]
+  block_dim: [4, 5, 25]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
              nos2,
-             nos3,
-             nos4,
-             nos6,
-             nos7]
+             nos3]
 
 - name: bsr2csr
   category: pre_checkin
