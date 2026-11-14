@@ -5965,7 +5965,7 @@ class KernelWriterAssembly(KernelWriter):
   # K_pad = 1 for A/B, 256 for MX scale (matches host rearrangePaddedMXScaleLayout).
   # Precondition: upstream Srd+2 is computeLoadSrd's tile-boundary limit
   # (useFixedSrd2 + non-isConstUnitStride); PGR/mainloop GR_INC only touch Srd+0/+1.
-  # tPs must share kPad and bpe_K_byteStride (delta emitted once, reused).
+  # tPs must share kPad (delta_K emitted once); bpe_K_byteStride may differ.
   ##############################################################################
   def computeTailLoopSrdLimit(self, kernel, tPs):
     module = Module("computeTailLoopSrdLimit")
@@ -5987,8 +5987,8 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
-    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad must agree across
+    # tPs, otherwise bail. kRowStride is None when K is the
     # contiguous dimension and the unroll stride when it is not (TLU=1), where
     # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
@@ -6027,11 +6027,13 @@ class KernelWriterAssembly(KernelWriter):
           kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Joint emission requires uniform kPad across all tPs (true for A/B and for
+    # MXSA/MXSB scale pairs). bpe may differ between A and B with mixed MX
+    # operands (e.g. MXFP4 x MXFP8); delta_K is shared and delta_bytes is
+    # computed per bpe.
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
+    if any(kp != kPad for _, kp, _, _ in tcKpadBpeList):
       return module
     tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
@@ -6060,15 +6062,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      for tc, _, _, kRowStride in tcKpadBpeList:
+      for tc, _, bpe, kRowStride in tcKpadBpeList:
         # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
         if kRowStride is None:
-          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpe,
                                        comment="delta_bytes"))
         else:
           module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
                              comment="delta_K rows * %s K-row stride" % tc))
-          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpe,
                                        comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
                            src1=sgpr(sbytes),
