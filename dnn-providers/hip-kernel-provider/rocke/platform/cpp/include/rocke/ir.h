@@ -1978,10 +1978,15 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
                                  const char* iv_name /* NULL=>"k0" */,
                                  bool unroll,
                                  bool elide_trailing_barrier);
+/* An scf.yield belongs directly in an scf.for body or in a branch of an
+ * scf.if_else with results; the verifier and the lowerings refuse one anywhere
+ * else (the kernel body, an scf.if, an scf.if_else without results). */
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values);
 rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else: both then and else converge at the same join block.
- * Use rocke_b_region_enter/leave to emit into then_region then else_region. */
+ * Use rocke_b_region_enter/leave to emit into then_region then else_region.
+ * Neither region holds an scf.yield, directly or in an scf.if within it: the
+ * verifier and the lowerings refuse one. */
 rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else that yields one value per type in `result_types` (Python
  * scf_if_else(cond, result_types)): each region ends in rocke_b_scf_yield of

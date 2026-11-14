@@ -1050,6 +1050,21 @@ def _reused_loop_name_message(name: str) -> str:
     )
 
 
+def _untyped_loop_value_message(name: str) -> str:
+    """The refusal for an ``scf.for`` induction variable or carried value named
+    ``name`` whose type attr (its loop's ``iv_type`` attr or its ``iter_args``
+    entry's ``type``) is not a type name.
+
+    The IR parser refuses such a value before it binds it, and the loop rule
+    (:func:`_scf_for_metadata_entry_error`) refuses such a carried value in IR
+    that reaches the verifier or a lowering without passing the parser.
+    """
+    return (
+        f"scf.for: the loop value '{name}' has no type name; its iv_type attr or "
+        "iter_args entry must name its type"
+    )
+
+
 def _first_reused_loop_name(taken: Sequence[str], names: Sequence[str]) -> str | None:
     """The first of ``names`` that is already taken, or None when all are free.
 
@@ -1106,21 +1121,21 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
 
     It checks each iter_arg's initial value (the operands after lower, upper
     and step) and each value an ``scf.yield`` directly in the loop body yields.
-    It only slices the operand and region lists, so it accepts any counts:
+    It only slices the operand list, so it accepts any operand count, as
     serialized IR reaches the verifier and the lowerings without passing the
-    builder. The verifier and every lowering of ``scf.for`` use it, and the C++
-    engine reports the same text (``rocke_i_scf_for_carried_descriptor_error``).
+    builder; the loop holds one body region (:func:`_scf_for_region_error`).
+    :func:`_scf_for_error` applies it, and the C++ engine reports the
+    same text (``rocke_i_scf_for_carried_descriptor_error``).
     """
     for index, init in enumerate(op.operands[3:]):
         if _is_buffer_descriptor(init):
             return _loop_carried_descriptor_message(index)
-    for body in op.regions[:1]:
-        for body_op in body.ops:
-            if body_op.name != "scf.yield":
-                continue
-            for index, value in enumerate(body_op.operands):
-                if _is_buffer_descriptor(value):
-                    return _loop_carried_descriptor_message(index)
+    for body_op in op.regions[0].ops:
+        if body_op.name != "scf.yield":
+            continue
+        for index, value in enumerate(body_op.operands):
+            if _is_buffer_descriptor(value):
+                return _loop_carried_descriptor_message(index)
     return None
 
 
@@ -1364,59 +1379,285 @@ def _gpu_check_failed_op_error(op: Op) -> str | None:
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
+# The refusal for an scf.yield that is not directly in a region that takes
+# yields: an scf.for body or a branch of an scf.if_else with results. The
+# verifier and both lowerings report it, in both engines (the C++ engine's
+# ROCKE_ORPHAN_YIELD_ERROR has the same text).
+_ORPHAN_YIELD_ERROR = (
+    "scf.yield must be directly in an scf.for body or in a branch of an "
+    "scf.if_else with results"
+)
 
-def _if_else_result_type_error(index: int, result_type: Type) -> Optional[str]:
-    """The refusal for an ``scf.if_else`` result ``index`` of type
-    ``result_type``, or None when an if/else can carry it.
+# The refusal for an scf.for body with an scf.yield before its last op: the loop
+# takes its carried values only from the yield that ends its body. The C++
+# engine's rocke_i_scf_for_error reports the same text.
+_LOOP_EARLY_YIELD_ERROR = (
+    "scf.for body yields before its last op; a loop takes its values only from "
+    "the scf.yield that ends its body"
+)
 
-    An LDS allocation is a name the lowerings resolve to its base, not a value:
-    neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
-    one. The builder and :func:`_if_else_branch_yield` use this rule, and the
-    C++ engine (``rocke_i_if_else_result_type_error``) reports the same text.
+# The ops whose regions take the scf.yield ops directly in them: an scf.for
+# carries its body's yield into the next trip, and an scf.if_else applies its own
+# rule (_if_else_yields) to its branches. Every other region, the kernel body
+# and an scf.if branch among them, passes a yield on to nothing.
+_YIELD_OWNING_OPS = ("scf.for", "scf.if_else")
+
+
+def _nested_orphan_yield(op: Op) -> Op | None:
+    """The first ``scf.yield`` in a region of ``op`` that takes no yields,
+    searched through every such region nested in it; None when there is none
+    or ``op`` owns its regions' yields (:data:`_YIELD_OWNING_OPS`).
+
+    The search stops at an owning op, whose own rule covers its regions.
     """
-    if isinstance(result_type, SmemType):
+    if op.name in _YIELD_OWNING_OPS:
+        return None
+    for region in op.regions:
+        found = _orphan_yield(region.ops)
+        if found is not None:
+            return found
+    return None
+
+
+def _orphan_yield(ops: Sequence[Op]) -> Op | None:
+    """The first ``scf.yield`` among ``ops``, or in a region nested in them that
+    takes no yields (:func:`_nested_orphan_yield`); None when there is none.
+
+    Called on the ops of a region that takes no yields (the kernel body), it
+    tells whether the region holds an orphan yield, and returns the first; the
+    if/else rule calls it on a branch's ops.
+    """
+    for op in ops:
+        if op.name == "scf.yield":
+            return op
+        found = _nested_orphan_yield(op)
+        if found is not None:
+            return found
+    return None
+
+
+def _scf_for_region_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when it does not hold exactly one
+    region, its body, or None when it does.
+
+    The loop rule and the lowerings read only the first region, so a second one
+    would be dropped unchecked, yields included. The verifier checks this
+    before it reads the body; :func:`_scf_for_error` checks it first.
+    """
+    if len(op.regions) != 1:
+        return f"scf.for: expected 1 body region, got {len(op.regions)}"
+    return None
+
+
+def _scf_for_carried_count_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when its counts of carried values
+    disagree, or None when they agree.
+
+    The ``num_iter_args`` attr (0 when absent) gives the count, and only a
+    plain int can give it (a bool, a float or a string is refused, as the C++
+    engine refuses any attr but an int one); the init operands (the operands after
+    lower, upper and step), the ``iter_args`` metadata list (empty when absent)
+    and the results each hold one entry per carried value.
+    """
+    count = op.attrs.get("num_iter_args", 0)
+    if not is_plain_int(count):
+        return "scf.for num_iter_args must be an integer count of carried values"
+    metadata = op.attrs.get("iter_args", [])
+    if not isinstance(metadata, list):
+        return "scf.for iter_args metadata must be a list"
+    for what, actual in (
+        ("init operands", len(op.operands[3:])),
+        ("metadata entries", len(metadata)),
+        ("results", len(op.results)),
+    ):
+        if actual != count:
+            return f"scf.for declares {count} iter_args but has {actual} {what}"
+    return None
+
+
+def _scf_for_metadata_entry_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when an ``iter_args`` metadata
+    entry does not describe its carried value, or None when every entry does.
+
+    The counts of carried values agree (:func:`_scf_for_carried_count_error`).
+    Entry ``i`` is a map whose ``name`` is a non-empty string and whose
+    ``type`` names the type of init operand ``i``; result ``i`` has that type
+    too. An entry with no type name gets the IR parser's refusal
+    (:func:`_untyped_loop_value_message`), so a loop gets one text whichever
+    of the two meets it first.
+    """
+    for index, (entry, init, result) in enumerate(
+        zip(op.attrs.get("iter_args", []), op.operands[3:], op.results)
+    ):
+        if not isinstance(entry, dict):
+            return f"scf.for iter_arg {index} metadata must be a map"
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            return f"scf.for iter_arg {index} metadata has no name"
+        type_name = entry.get("type")
+        if not isinstance(type_name, str):
+            return _untyped_loop_value_message(name)
+        if type_name != init.type.name:
+            return (
+                f"scf.for iter_arg {name} metadata type '{type_name}' "
+                f"does not match init type '{init.type.name}'"
+            )
+        if result.type != init.type:
+            return (
+                f"scf.for result type '{result.type.name}' does not match "
+                f"iter_arg {name} type '{init.type.name}'"
+            )
+    return None
+
+
+def _scf_for_yield_error(op: Op) -> str | None:
+    """The refusal for the ``scf.yield`` ops directly in the body of the
+    ``scf.for`` ``op``, whose carried-value counts agree
+    (:func:`_scf_for_carried_count_error`), or None when they are sound.
+
+    The loop takes its carried values from the one ``scf.yield`` that ends its
+    body, so the body yields only at its end; it ends in a yield of one value
+    per init operand, of that operand's type, whenever the loop carries any. A
+    loop that carries none may end in an empty yield or in none. The loop holds
+    one body region (:func:`_scf_for_region_error`).
+    """
+    body_ops = op.regions[0].ops
+    carried = op.operands[3:]
+    count = len(carried)
+    if any(body_op.name == "scf.yield" for body_op in body_ops[:-1]):
+        return _LOOP_EARLY_YIELD_ERROR
+    if not body_ops or body_ops[-1].name != "scf.yield":
+        if not count:
+            return None
         return (
+            f"scf.for carries {count} values, so its body must end in scf.yield "
+            f"of {count} values"
+        )
+    yielded = body_ops[-1].operands
+    if len(yielded) != count:
+        return (
+            f"scf.for carries {count} values, but its body yields {len(yielded)} values"
+        )
+    for index, (init, value) in enumerate(zip(carried, yielded)):
+        if value.type != init.type:
+            return (
+                f"scf.for iter_arg {index} is {init.type.name}, but its body "
+                f"yields {value.type.name}"
+            )
+    return None
+
+
+def _scf_for_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op``, or None when the loop is sound.
+
+    A loop holds exactly one region, its body
+    (:func:`_scf_for_region_error`); its counts of carried values agree
+    (:func:`_scf_for_carried_count_error`) and its ``iter_args`` metadata
+    describes them (:func:`_scf_for_metadata_entry_error`); it cannot carry a buffer
+    descriptor (:func:`_scf_for_carried_descriptor_error`); its body yields
+    once, at its end, the values it carries (:func:`_scf_for_yield_error`); and
+    it takes only the yields directly in its body, so its body nests none in a
+    region that takes no yields (an ``scf.if`` in the body, say;
+    :data:`_ORPHAN_YIELD_ERROR`). It accepts any operand count and refuses any
+    region count but one, as serialized IR reaches the verifier and the
+    lowerings without passing the builder. The verifier and every lowering of
+    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``).
+    """
+    error = _scf_for_region_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_carried_count_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_metadata_entry_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_carried_descriptor_error(op)
+    if error is not None:
+        return error
+    error = _scf_for_yield_error(op)
+    if error is not None:
+        return error
+    body = op.regions[0]
+    if any(_nested_orphan_yield(body_op) is not None for body_op in body.ops):
+        return _ORPHAN_YIELD_ERROR
+    return None
+
+
+def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
+    """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`) and every
+    ``scf.if_else`` (:func:`_if_else_yields`) among ``ops`` and nested in them.
+
+    A lowering calls it on a loop body it does not lower (an unrolled loop of
+    zero trips), so that body's malformed loop or if/else is refused as it is
+    wherever the body is lowered; the C++ engine's
+    ``rocke_i_check_control_flow`` is its twin.
+    """
+    for op in ops:
+        if op.name == "scf.for":
+            error = _scf_for_error(op)
+            if error is not None:
+                raise ValueError(error)
+        elif op.name == "scf.if_else":
+            _if_else_yields(op)
+        for region in op.regions:
+            _refuse_malformed_control_flow(region.ops)
+
+
+def _refuse_if_else_result_type(index: int, result_type: Type) -> None:
+    """Refuse an ``scf.if_else`` result ``index`` of type ``result_type`` that
+    an if/else cannot carry.
+
+    A packed-only type has no value form (:func:`_refuse_packed_only_value`,
+    ``TypeError``). An LDS allocation is a name the lowerings resolve to its
+    base, not a value: neither the phi (LLVM) nor the variable (HIP) that holds
+    a result can hold one (``ValueError``). The packed-only rule comes first, so
+    an LDS tile of i4 gets its ``TypeError``. The builder and
+    :func:`_if_else_yields` use this rule, and the C++ engine
+    (``rocke_i_check_if_else_result_type``) reports the same type and text.
+    """
+    _refuse_packed_only_value("scf.if_else", result_type)
+    if isinstance(result_type, SmemType):
+        raise ValueError(
             f"scf.if_else result {index} is an LDS allocation, which an if/else "
             "cannot carry; allocate before the if/else and yield an offset into "
             "the allocation instead"
         )
-    return None
 
 
-def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
-    """The ``scf.yield`` that gives ``op``'s results their values on branch
-    ``branch`` (0 then, 1 else), or None when the ``scf.if_else`` ``op`` has no
-    results.
+def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
+    """The ``scf.yield`` that ends branch ``branch`` (0 then, 1 else) of the
+    ``scf.if_else`` ``op``, whose condition and branch counts
+    :func:`_if_else_yields` has checked; None when ``op`` has no results.
 
-    Every ``scf.if_else`` has one condition and two branches. One with results
-    ends each branch in an ``scf.yield`` of one value per result, of the
-    result's type, and never a buffer descriptor
+    Only the ``scf.yield`` that ends a branch of an if/else with results has
+    its values taken, so a branch holds no other ``scf.yield``, directly or in
+    a region nested in it that does not take yields (an ``scf.if``,
+    :func:`_orphan_yield`); a nested ``scf.for`` or ``scf.if_else`` owns the
+    yields in its regions. That closing ``scf.yield`` gives
+    one value per result, of the result's type, and never a buffer descriptor
     (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
-    (HIP) that holds a result can hold the lowered descriptor. No result is an
-    LDS allocation (:func:`_if_else_result_type_error`). The builder, the
-    verifier and every lowering refuse anything else with these texts, in both
-    engines (``rocke_i_if_else_branch_yield``); the counts are checked first,
-    as serialized IR reaches the verifier and the lowerings without passing the
-    builder.
+    (HIP) that holds a result can hold the lowered descriptor.
     """
-    if len(op.operands) != 1 or len(op.regions) != 2:
-        raise ValueError(
-            f"scf.if_else: expected 1 condition / 2 branches, got "
-            f"{len(op.operands)} / {len(op.regions)}"
-        )
-    if not op.results:
-        return None
-    for index, result in enumerate(op.results):
-        error = _if_else_result_type_error(index, result.type)
-        if error is not None:
-            raise ValueError(error)
     name = _IF_ELSE_BRANCHES[branch]
     count = len(op.results)
     region = op.regions[branch]
+    if not count:
+        if _orphan_yield(region.ops) is not None:
+            raise ValueError(
+                f"scf.if_else has no results, so its {name} branch cannot "
+                "contain scf.yield"
+            )
+        return None
     if not region.ops or region.ops[-1].name != "scf.yield":
         raise ValueError(
             f"scf.if_else has {count} results, so its {name} branch must end in "
             f"scf.yield of {count} values"
+        )
+    if _orphan_yield(region.ops[:-1]) is not None:
+        raise ValueError(
+            f"scf.if_else has {count} results, so its {name} branch must yield "
+            "only at its end"
         )
     yld = region.ops[-1]
     if len(yld.operands) != count:
@@ -1437,6 +1678,28 @@ def _if_else_branch_yield(op: Op, branch: int) -> Optional[Op]:
                 f"branch yields {value.type.name}"
             )
     return yld
+
+
+def _if_else_yields(op: Op) -> tuple[Op | None, Op | None]:
+    """The ``scf.yield`` that ends the then and the else branch of the
+    ``scf.if_else`` ``op``; both None when ``op`` has no results.
+
+    Every ``scf.if_else`` has one condition and two branches, and each result
+    is a type an if/else can carry (:func:`_refuse_if_else_result_type`); each
+    branch then follows :func:`_if_else_branch_yield`. The builder, the
+    verifier and every lowering refuse anything else with these types and
+    texts, in both engines (``rocke_i_if_else_yields``). The counts are checked
+    first, as serialized IR reaches the verifier and the lowerings without
+    passing the builder.
+    """
+    if len(op.operands) != 1 or len(op.regions) != 2:
+        raise ValueError(
+            f"scf.if_else: expected 1 condition / 2 branches, got "
+            f"{len(op.operands)} / {len(op.regions)}"
+        )
+    for index, result in enumerate(op.results):
+        _refuse_if_else_result_type(index, result.type)
+    return _if_else_branch_yield(op, 0), _if_else_branch_yield(op, 1)
 
 
 # ----------------------------- Values / Ops ------------------------------
@@ -7245,9 +7508,12 @@ class IRBuilder:
     def scf_yield(self, *values: Value) -> None:
         """End the current region by yielding ``values`` to its owner.
 
-        In an ``scf.for`` body they become the next iteration's iter_args, so
-        none may be a buffer descriptor (see
-        :func:`_loop_carried_descriptor_message`).
+        The owner is an ``scf.for`` whose body the yield is directly in, or an
+        ``scf.if_else`` with results whose branch it ends; the verifier and the
+        lowerings refuse a yield anywhere else (the kernel body, an ``scf.if``,
+        an ``scf.if_else`` without results). In an ``scf.for`` body the values
+        become the next iteration's iter_args, so none may be a buffer
+        descriptor (see :func:`_loop_carried_descriptor_message`).
         """
         if self._current_region_is_loop_body():
             for index, value in enumerate(values):
@@ -7346,13 +7612,11 @@ class IRBuilder:
                     b.scf_yield(b.zero_vec_f16(8))
             (value,) = branch.results
 
-        Leaving the ``with`` refuses a branch that does not end that way.
+        Leaving the ``with`` refuses a branch that does not end that way, and
+        a branch of an if/else without results that holds an ``scf_yield``.
         """
-        for index, t in enumerate(result_types):
-            _refuse_packed_only_value("scf.if_else", t)
-            error = _if_else_result_type_error(index, t)
-            if error is not None:
-                raise ValueError(error)
+        for index, result_type in enumerate(result_types):
+            _refuse_if_else_result_type(index, result_type)
         results = [Value(self._fresh("if"), t) for t in result_types]
         then_r = Region("then")
         else_r = Region("else")
@@ -7593,8 +7857,7 @@ class _IfElseBuilder:
         # The regions were already popped by their own context managers. Once
         # both branches are built, refuse one that does not yield the results.
         if exc_type is None:
-            for branch in range(len(_IF_ELSE_BRANCHES)):
-                _if_else_branch_yield(self.op, branch)
+            _if_else_yields(self.op)
 
     @property
     def results(self) -> List[Value]:

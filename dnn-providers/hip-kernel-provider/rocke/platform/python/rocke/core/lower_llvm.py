@@ -46,8 +46,9 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _ORPHAN_YIELD_ERROR,
     _int_add_wrap_error,
-    _scf_for_carried_descriptor_error,
+    _scf_for_error,
     BF16,
     F32,
     F16,
@@ -69,8 +70,9 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_branch_yield,
+    _if_else_yields,
     _is_unsigned,
+    _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -1283,51 +1285,13 @@ def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
     return iv, carried
 
 
-def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
-    """Validate serialized loop metadata and render the real carry types."""
-    iter_inits = op.operands[3:]
-    iter_meta = op.attrs.get("iter_args", [])
-    if not isinstance(iter_meta, list):
-        raise ValueError("scf.for iter_args metadata must be a list")
-    if len(iter_inits) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has "
-            f"{len(iter_inits)} init operands"
-        )
-    if len(iter_meta) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has "
-            f"{len(iter_meta)} metadata entries"
-        )
-    if len(op.results) != num_iter:
-        raise ValueError(
-            f"scf.for declares {num_iter} iter_args but has {len(op.results)} results"
-        )
+def _scf_iter_llvm_types(op: Op) -> list[str]:
+    """Render the LLVM type of each value the ``scf.for`` ``op`` carries.
 
-    llvm_types: List[str] = []
-    for index, (meta, init, result) in enumerate(
-        zip(iter_meta, iter_inits, op.results)
-    ):
-        if not isinstance(meta, dict):
-            raise ValueError(f"scf.for iter_arg {index} metadata must be a map")
-        name = meta.get("name")
-        type_name = meta.get("type")
-        if not isinstance(name, str) or not name:
-            raise ValueError(f"scf.for iter_arg {index} metadata has no name")
-        if not isinstance(type_name, str):
-            raise ValueError(f"scf.for iter_arg {name} metadata has no type")
-        if type_name != init.type.name:
-            raise ValueError(
-                f"scf.for iter_arg {name} metadata type {type_name!r} "
-                f"does not match init type {init.type.name!r}"
-            )
-        if result.type != init.type:
-            raise ValueError(
-                f"scf.for result type {result.type.name!r} does not match "
-                f"iter_arg {name} type {init.type.name!r}"
-            )
-        llvm_types.append(_llvm_loop_carried_type(init.type))
-    return llvm_types
+    ``_scf_for_error`` has checked that the counts of carried values agree and
+    that the ``iter_args`` metadata describes them.
+    """
+    return [_llvm_loop_carried_type(init.type) for init in op.operands[3:]]
 
 
 def _param_llvm_type(p: Param) -> str:
@@ -7115,12 +7079,12 @@ class _Lowerer:
         """Lower scf.for to LLVM IR.
 
         Checks for 'unroll' hint and constant bounds to decide between
-        unrolled (straight-line) or normal (loop) lowering. Both refuse a
-        loop that carries a buffer descriptor.
+        unrolled (straight-line) or normal (loop) lowering. Both first refuse
+        a loop the loop rule (:func:`_scf_for_error`) refuses.
         """
-        descriptor_error = _scf_for_carried_descriptor_error(op)
-        if descriptor_error is not None:
-            raise ValueError(descriptor_error)
+        error = _scf_for_error(op)
+        if error is not None:
+            raise ValueError(error)
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 
@@ -7173,7 +7137,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
-        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
+        iter_llvm_types = _scf_iter_llvm_types(op)
         iv_ty = _llvm_type(lower.type)
 
         # Capture the predecessor block (for the from-entry edge of phis).
@@ -7234,11 +7198,8 @@ class _Lowerer:
         last_body.emit(f"  br label %{latch.label}")
         last_body.terminated = True
 
+        # The body yields num_iter values, once: _scf_for_error checked it.
         yielded = self._yield_stack.pop()
-        if len(yielded) != num_iter:
-            raise RuntimeError(
-                f"scf.for expected {num_iter} yielded values, got {len(yielded)}"
-            )
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
@@ -7282,7 +7243,6 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
-        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
 
         # Evaluate constant bounds
         lower_val = self._eval_constant(lower)
@@ -7291,6 +7251,10 @@ class _Lowerer:
 
         # Calculate trip count
         trip_count = (upper_val - lower_val) // step_val
+        if trip_count <= 0:
+            # No trip lowers the body, so apply the loop and if/else rules it
+            # would meet.
+            _refuse_malformed_control_flow(op.regions[0].ops)
 
         # Track current LLVM values of iteration variables
         # Start with init values (these are the LLVM operand strings)
@@ -7378,17 +7342,14 @@ class _Lowerer:
             # Clear elision marker
             self._unroll_elide_sync_op = None
 
-            # Verify yield count
-            if len(yielded) != num_iter:
-                raise RuntimeError(
-                    f"scf.for expected {num_iter} yielded values, got {len(yielded)}"
-                )
-
             # Update iteration variables with yielded values for next iteration
             for meta, yld in zip(iter_meta, yielded):
                 current_iter_values[meta["name"]] = yld
 
-        # After all iterations, bind results to final iter var values
+        # After all iterations, bind results to final iter var values. The
+        # carried types are rendered here, after the body, as the C++ engine
+        # does, so a loop with two faults gets the same refusal in both.
+        iter_llvm_types = _scf_iter_llvm_types(op)
         for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
             final_val = current_iter_values[meta["name"]]
             self._current().emit(
@@ -7446,8 +7407,7 @@ class _Lowerer:
         """
         # Refuse a malformed if/else, or a branch that does not yield the
         # results, before reading the op or emitting.
-        for branch in range(2):
-            _if_else_branch_yield(op, branch)
+        _if_else_yields(op)
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]
@@ -7509,7 +7469,7 @@ class _Lowerer:
 
     def _op_scf_yield(self, op: Op) -> None:
         if not self._yield_stack:
-            raise RuntimeError("scf.yield without enclosing scf.for")
+            raise ValueError(_ORPHAN_YIELD_ERROR)
         self._yield_stack[-1].extend(self._operand(v) for v in op.operands)
 
     def _op_cf_return(self, op: Op) -> None:

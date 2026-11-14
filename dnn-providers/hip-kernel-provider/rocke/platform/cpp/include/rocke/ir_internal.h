@@ -142,10 +142,18 @@ const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
  * not. */
 bool rocke_i_is_packed_only(const rocke_type_t* t);
 
-/* Throw ckc::TypeError when rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
- * which states the rule and the message. rocke_i_op calls it for every result
- * and rocke_b_param for every parameter, so no builder makes such a value.
- * NULL-safe. */
+/* The refusal of an `op_name` value of type `t` whose elements are packed-only
+ * (rocke_i_is_packed_only), written to `buf`, or NULL when `t` is not; the text
+ * of core/ir.py::_refuse_packed_only_value. NULL-safe. */
+const char* rocke_i_packed_only_value_error(const char* op_name,
+                                            const rocke_type_t* t,
+                                            char* buf,
+                                            size_t cap);
+
+/* Throw ckc::TypeError with rocke_i_packed_only_value_error's text when
+ * rocke_i_is_packed_only(t): the twin of core/ir.py::_refuse_packed_only_value,
+ * which states the rule. rocke_i_op calls it for every result and rocke_b_param
+ * for every parameter, so no builder makes such a value. NULL-safe. */
 void rocke_i_refuse_packed_only_value(const char* op_name, const rocke_type_t* t);
 
 /* Throw ckc::TypeError when `t` is unsigned (rocke_type_is_unsigned) and
@@ -296,23 +304,76 @@ bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
 #define ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT "launch it through KernelLauncher.from_artifact"
 
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
- * (Python core/ir.py::_if_else_result_type_error): not an LDS allocation.
- * Otherwise returns false and writes the Python engine's refusal into `err`.
- * The builder and rocke_i_if_else_branch_yield use it. */
-bool rocke_i_if_else_result_type_ok(int index,
-                                    const rocke_type_t* result_type,
-                                    char* err,
-                                    size_t err_cap);
+ * (Python core/ir.py::_refuse_if_else_result_type, which raises where this
+ * returns): ROCKE_OK, or the status of the Python exception with its text
+ * written to `err`. A packed-only type is refused first (ROCKE_ERR_TYPE), then
+ * an LDS allocation (ROCKE_ERR_VALUE). The builder and rocke_i_if_else_yields
+ * use it. */
+rocke_status_t rocke_i_check_if_else_result_type(int index,
+                                                 const rocke_type_t* result_type,
+                                                 char* err,
+                                                 size_t err_cap);
 
-/* The scf.yield that gives the scf.if_else `op`'s results their values on
- * branch `branch` (0 then, 1 else), in `*out_yield`; NULL when `op` has no
- * results (Python core/ir.py::_if_else_branch_yield). Every if/else has one
- * condition and two branches, checked first; no result is an LDS allocation;
- * a branch of an if/else with results ends in an scf.yield of one value per
- * result, of the result's type, and never a buffer descriptor. Otherwise
- * returns false and writes the Python engine's refusal into `err`. */
-bool rocke_i_if_else_branch_yield(
-    const rocke_op_t* op, int branch, const rocke_op_t** out_yield, char* err, size_t err_cap);
+/* The scf.yield that ends the then and the else branch of the scf.if_else `op`,
+ * in `out_yields[0]` and `out_yields[1]`; both NULL when `op` has no results
+ * (Python core/ir.py::_if_else_yields). Every if/else has one condition and two
+ * branches, checked first; each result passes rocke_i_check_if_else_result_type;
+ * a branch of an if/else without results holds no scf.yield, and a branch of
+ * one with results holds one, at its end, of one value per result, of the
+ * result's type, and never a buffer descriptor. A branch holds no other
+ * scf.yield, directly or in a nested region that takes no yields
+ * (rocke_i_orphan_yield); a NULL branch counts as missing. Returns ROCKE_OK, or the
+ * status of the Python engine's exception with its refusal written to `err`.
+ * The verifier and both lowerings use it. */
+rocke_status_t rocke_i_if_else_yields(const rocke_op_t* op,
+                                      const rocke_op_t* out_yields[2],
+                                      char* err,
+                                      size_t err_cap);
+
+/* The refusal for an scf.yield that is not directly in a region that takes
+ * yields: an scf.for body or a branch of an scf.if_else with results (Python
+ * core/ir.py::_ORPHAN_YIELD_ERROR, same text). The verifier and both lowerings
+ * report it. */
+extern const char* const ROCKE_ORPHAN_YIELD_ERROR;
+
+/* The first scf.yield among `ops`, or in a region nested in them that takes no
+ * yields: every region but an scf.for body or an scf.if_else branch, whose
+ * owners' rules cover them (Python core/ir.py::_orphan_yield). NULL when there
+ * is none; a NULL nested region holds no op. Called on the ops of a region that
+ * takes no yields (the kernel body), it tells whether the region holds an
+ * orphan yield, and returns the first; rocke_i_if_else_yields calls it on a
+ * branch's ops. */
+const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops);
+
+/* The refusal for the scf.for `op` when it does not hold exactly one region,
+ * its body, written into `buf`, or NULL when it does (Python
+ * core/ir.py::_scf_for_region_error, same text). A NULL region counts as
+ * missing. The loop rule and the lowerings read only the first region, so a
+ * second one would be dropped unchecked. The verifier checks it before it
+ * reads the body; rocke_i_scf_for_error checks it first. */
+const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
+ * is sound (Python core/ir.py::_scf_for_error, same text): it holds exactly
+ * one region, its body (rocke_i_scf_for_region_error); its num_iter_args,
+ * init operands, iter_args metadata list and results agree in count; each
+ * metadata entry names its carried value and that value's type, which its
+ * result shares; it carries no buffer descriptor
+ * (rocke_i_scf_for_carried_descriptor_error); its body yields only at its end,
+ * one value per init operand, of that operand's type, and ends in that yield
+ * whenever the loop carries any value; and it takes only the yields directly
+ * in its body, so the body nests none in a region that takes no yields
+ * (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand count. The verifier and
+ * both lowerings use it. */
+const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else
+ * (rocke_i_if_else_yields) in `region` and nested in it (Python
+ * core/ir.py::_refuse_malformed_control_flow). Returns ROCKE_OK, or the status
+ * of the Python engine's exception with its refusal written to `err`. The LLVM
+ * lowering calls it on a loop body it does not lower (an unrolled loop of zero
+ * trips). NULL-safe. */
+rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* err, size_t err_cap);
 
 /* Refuse a bitcast of a `source` value to `target` unless both are values of
  * the same bit width (Python core/ir.py::_check_bitcast_width). `verb` names
@@ -347,6 +408,22 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
  * builder, the IR parser and the verifier use it. */
 const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
 
+/* The IR parser reads a bare attr map ("{...}", which the Python parser reads
+ * as a dict) into a ROCKE_ATTR_LIST whose one item is the map, marked by a
+ * count of -1. rocke_i_attr_is_bare_map is true for that form, and
+ * rocke_i_attr_is_list for a ROCKE_ATTR_LIST that is a list (a Python list).
+ * The parser and every reader of a loop's iter_args tell the two apart with
+ * them. */
+bool rocke_i_attr_is_bare_map(const rocke_attr_value_t* v);
+bool rocke_i_attr_is_list(const rocke_attr_value_t* v);
+
+/* Mirrors ir._untyped_loop_value_message: writes into `buf` the refusal for an
+ * scf.for induction variable or carried value named `name` whose type attr (the
+ * loop's "iv_type" attr or its iter_args entry's "type") is not a type name,
+ * and returns `buf`. The IR parser and the loop rule (rocke_i_scf_for_error)
+ * use it, so a loop gets one text whichever of the two meets it first. */
+const char* rocke_i_untyped_loop_value_message(const char* name, char* buf, size_t cap);
+
 /* Mirrors ir._first_reused_loop_name: the first of `names` (the names an
  * scf.for gives its induction variable and carried values, in that order) that
  * is already taken, or NULL when all are free. `taken` are the names of the
@@ -369,8 +446,8 @@ int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out);
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
  * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.
- * Accepts any operand / region counts. The builder, the verifier and both
- * lowerings use it. */
+ * Accepts any operand count; the loop holds one body region
+ * (rocke_i_scf_for_region_error). rocke_i_scf_for_error applies it. */
 const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* ------------------------------------------------------------- attr helpers */

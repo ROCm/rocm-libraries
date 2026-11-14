@@ -1593,106 +1593,29 @@ static void _op_tile_gpu_check_failed(rocke_lower_t* L, const rocke_op_t* op)
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
 
-/* Validate counts before either lowering path emits or unrolls the body. */
-static int64_t ll_validate_iter_counts(rocke_lower_t* L, const rocke_op_t* op)
+/* The loop's num_iter_args, which rocke_i_scf_for_error (run by _op_scf_for
+ * before either lowering path) has checked against the init operands, the
+ * iter_args metadata list and the results. */
+static int64_t ll_num_iter_args(const rocke_op_t* op)
 {
     int64_t num_iter = 0;
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
-    if(num_iter < 0 || op->num_operands - 3 != num_iter || op->num_results != num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for declares %lld iter_args but has %d init operands and %d results",
-                      (long long)num_iter,
-                      op->num_operands - 3,
-                      op->num_results);
-    }
-    const rocke_attr_value_t* meta = rocke_attr_get(&op->attrs, "iter_args");
-    if(meta && meta->kind != ROCKE_ATTR_LIST)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_args metadata must be a list");
-    }
-    const int num_meta = meta ? meta->u.list.count : 0;
-    if(num_meta != num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for declares %lld iter_args but has %d metadata entries",
-                      (long long)num_iter,
-                      num_meta);
-    }
     return num_iter;
 }
 
-/* Fetch the i-th iter_args metadata map's "name"/"type" string fields. The
- * Python iter_meta is op.attrs["iter_args"], a list of {"name","type"} dicts;
- * here it is a ROCKE_ATTR_LIST whose items are small attr maps. Returns false if
- * the list is absent or i is out of range. */
-static bool ll_iter_meta(const rocke_op_t* op, int i, const char** out_name, const char** out_type)
+/* The "name" of the i-th iter_args metadata map: op.attrs["iter_args"][i]
+ * ["name"] in Python. rocke_i_scf_for_error (run by _op_scf_for before either
+ * lowering path) has checked that the list holds one map per carried value,
+ * each with a non-empty name. */
+static const char* ll_iter_name(const rocke_op_t* op, int i)
 {
-    const rocke_attr_value_t* v = rocke_attr_get(&op->attrs, "iter_args");
-    if(!v || v->kind != ROCKE_ATTR_LIST || i < 0 || i >= v->u.list.count)
-    {
-        return false;
-    }
-    const rocke_attr_map_t* m = v->u.list.items[i];
-    if(!m)
-    {
-        return false;
-    }
-    if(out_name)
-    {
-        *out_name = rocke_attr_get_str(m, "name");
-    }
-    if(out_type)
-    {
-        *out_type = rocke_attr_get_str(m, "type");
-    }
-    return true;
+    return rocke_attr_get_str(rocke_attr_get(&op->attrs, "iter_args")->u.list.items[i], "name");
 }
 
-/* Validate the serialized metadata against the typed operands/results, then
- * delegate rendering to the canonical recursive type renderer. */
-static const char*
-    ll_iter_llvm_type(rocke_lower_t* L, const rocke_op_t* op, int i, const char** out_name)
+/* Render the LLVM type of the value iter_arg `i` carries. */
+static const char* ll_iter_llvm_type(rocke_lower_t* L, const rocke_op_t* op, int i)
 {
-    const char *name = NULL, *type_name = NULL;
-    if(!ll_iter_meta(op, i, &name, &type_name) || !name || !*name || !type_name)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %d has incomplete metadata", i);
-    }
-    if(3 + i >= op->num_operands)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %d has no init operand", i);
-    }
-    if(i >= op->num_results)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %s has no result", name);
-    }
-
     const rocke_type_t* type = op->operands[3 + i]->type;
-    if(!type || !type->name)
-    {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "scf.for iter_arg %s has no init type", name);
-    }
-    if(strcmp(type_name, type->name) != 0)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for iter_arg %s metadata type '%s' does not match init type '%s'",
-                      name,
-                      type_name,
-                      type->name);
-    }
-    if(!rocke_type_eq(op->results[i]->type, type))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for result type '%s' does not match iter_arg %s type '%s'",
-                      op->results[i]->type ? op->results[i]->type->name : "(null)",
-                      name,
-                      type->name);
-    }
     if(type->kind == ROCKE_TYPE_VECTOR)
     {
         if(type->count <= 0)
@@ -1718,10 +1641,6 @@ static const char*
                       "scf.for loop-carried type '%s' is unsupported; expected a scalar or "
                       "vector of scalar values",
                       type->name);
-    }
-    if(out_name)
-    {
-        *out_name = name;
     }
     return rocke_ll_llvm_type(L, type);
 }
@@ -1810,9 +1729,7 @@ static bool ll_any_loop_header_name_defined(const rocke_lower_t* L,
     }
     for(int i = 0; i < (int)num_iter; i++)
     {
-        const char* mname = NULL;
-        if(ll_iter_meta(op, i, &mname, NULL) && mname
-           && ll_loop_header_name_defined(L, mname, suffix))
+        if(ll_loop_header_name_defined(L, ll_iter_name(op, i), suffix))
         {
             return true;
         }
@@ -1863,11 +1780,7 @@ static const char* ll_claim_loop_header_names(rocke_lower_t* L,
     ll_record_loop_header_name(L, iv_name, suffix);
     for(int i = 0; i < (int)num_iter; i++)
     {
-        const char* mname = NULL;
-        if(ll_iter_meta(op, i, &mname, NULL) && mname)
-        {
-            ll_record_loop_header_name(L, mname, suffix);
-        }
+        ll_record_loop_header_name(L, ll_iter_name(op, i), suffix);
     }
     return suffix;
 }
@@ -1940,10 +1853,6 @@ static int ll_loop_block_values(rocke_lower_t* L,
     const char* iv_name = rocke_attr_get_str(&loop->attrs, "iv");
     *out_iv = NULL;
     int n_carried = 0;
-    if(loop->num_regions < 1 || !loop->regions[0])
-    {
-        return 0;
-    }
     int n_ops = 0;
     const rocke_op_t** ops = ll_ops_in_region(L, loop->regions[0], &n_ops);
     for(int bi = 0; bi < n_ops; bi++)
@@ -1964,9 +1873,7 @@ static int ll_loop_block_values(rocke_lower_t* L,
             bool is_carried = false;
             for(int mi = 0; mi < (int)num_iter; mi++)
             {
-                const char* mname = NULL;
-                if(ll_iter_meta(loop, mi, &mname, NULL) && mname
-                   && strcmp(operand->name, mname) == 0)
+                if(strcmp(operand->name, ll_iter_name(loop, mi)) == 0)
                 {
                     is_carried = true;
                     break;
@@ -2012,7 +1919,7 @@ static int ll_loop_block_values(rocke_lower_t* L,
  *     self._yield_stack.append([]); self.lower_region(op.regions[0])
  *     last_body = self._current(); latch = self._new_block("for.latch")
  *     last_body.emit(f"  br label %{latch.label}"); last_body.terminated = True
- *     yielded = self._yield_stack.pop()  # len must == num_iter
+ *     yielded = self._yield_stack.pop()
  *     iv_next = f"%iv.next.{header.label}"
  *     latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {step}")
  *     for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
@@ -2033,7 +1940,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    const int64_t num_iter = ll_validate_iter_counts(L, op);
+    const int64_t num_iter = ll_num_iter_args(op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
@@ -2070,9 +1977,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
                          header->label);
     for(int i = 0; i < (int)num_iter; i++)
     {
-        const char* mname = NULL;
+        const char* mname = ll_iter_name(op, i);
         const rocke_value_t* init = op->operands[3 + i];
-        const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
+        const char* ll_ty = ll_iter_llvm_type(L, op, i);
         const char* name = rocke_arena_printf(&L->arena, "%s%s", mname, suffix);
         rocke_ll_block_emitf(L,
                              header,
@@ -2121,10 +2028,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     }
 
     rocke_ll_yield_push(L);
-    if(op->num_regions > 0 && op->regions[0])
-    {
-        rocke_ll_lower_region(L, op->regions[0]);
-    }
+    rocke_ll_lower_region(L, op->regions[0]);
     block_renames.restore();
 
     rocke_ll_block_t* last_body = rocke_ll_current(L);
@@ -2135,17 +2039,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         last_body->terminated = true;
     }
 
+    /* The body yields num_iter values, once: rocke_i_scf_for_error checked it. */
     const char* const* yielded = NULL;
-    int n_yield = 0;
-    rocke_ll_yield_pop(L, &yielded, &n_yield);
-    if(n_yield != (int)num_iter)
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "scf.for expected %d yielded values, got %d",
-                      (int)num_iter,
-                      n_yield);
-    }
+    rocke_ll_yield_pop(L, &yielded, NULL);
 
     rocke_ll_block_emitf(L,
                          latch,
@@ -2156,8 +2052,8 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
                          rocke_ll_operand(L, step));
     for(int i = 0; i < (int)num_iter; i++)
     {
-        const char* mname = NULL;
-        const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
+        const char* mname = ll_iter_name(op, i);
+        const char* ll_ty = ll_iter_llvm_type(L, op, i);
         rocke_ll_block_emitf(L,
                              latch,
                              "  %s%s.next.%s = bitcast %s %s to %s",
@@ -2178,10 +2074,10 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
         const char* exit_repl = rocke_arena_printf(&L->arena, "%%%s", exit_blk->label);
         ll_block_replace(L, header, "%FOR_LATCH", latch_repl);
         ll_block_replace(L, header, "%FOR_EXIT", exit_repl);
-        for(int i = 0; i < (int)num_iter && i < op->num_results; i++)
+        for(int i = 0; i < (int)num_iter; i++)
         {
-            const char* mname = NULL;
-            const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
+            const char* mname = ll_iter_name(op, i);
+            const char* ll_ty = ll_iter_llvm_type(L, op, i);
             const rocke_value_t* result = op->results[i];
             rocke_ll_block_emitf(L,
                                  exit_blk,
@@ -2199,7 +2095,9 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
  * constant bounds. See the Python source for the full strategy comment; the
  * mechanics ported here are:
  *
- *   - eval constant lower/upper/step -> trip_count = (upper-lower)//step
+ *   - eval constant lower/upper/step -> trip_count = (upper-lower)//step;
+ *     with no trip, apply the body's loop and if/else rules
+ *     (rocke_i_check_control_flow)
  *   - current_iter_values[meta.name] = operand(init)
  *   - find the IV + iter-arg Value objects by scanning the operands of every
  *     body op, nested regions included (ll_loop_block_values)
@@ -2216,11 +2114,11 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
  * we cast away const for the duration of each trip and restore afterwards. */
 void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || op->num_operands < 3 || op->num_regions < 1 || !op->regions[0])
+    if(!rocke_ll_live(L) || op->num_operands < 3)
     {
         return;
     }
-    const int64_t num_iter = ll_validate_iter_counts(L, op);
+    const int64_t num_iter = ll_num_iter_args(op);
     const rocke_value_t* lower = op->operands[0];
     const rocke_value_t* upper = op->operands[1];
     const rocke_value_t* step = op->operands[2];
@@ -2256,6 +2154,17 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "unrolled_for: zero step");
     }
     int64_t trip_count = (upper_val - lower_val) / step_val;
+    if(trip_count <= 0)
+    {
+        /* No trip lowers the body, so apply the loop and if/else rules it
+         * would meet. */
+        char err[ROCKE_ERR_MSG_CAP];
+        const rocke_status_t status = rocke_i_check_control_flow(body, err, sizeof err);
+        if(status != ROCKE_OK)
+        {
+            rocke_ll_fail(L, status, "%s", err);
+        }
+    }
 
     /* The IV + iter-arg Value objects the body reads, nested regions included. */
     rocke_value_t* iv_value_obj = NULL;
@@ -2305,11 +2214,7 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
             rocke_value_t* vo = iter_value_objs[k];
             for(int mi = 0; mi < (int)num_iter; mi++)
             {
-                const char* mname = NULL;
-                if(!ll_iter_meta(op, mi, &mname, NULL) || !mname)
-                {
-                    continue;
-                }
+                const char* mname = ll_iter_name(op, mi);
                 if(strcmp(vo->name, mname) == 0)
                 {
                     trip_renames.rename(vo, current_iter_values[mi]);
@@ -2348,49 +2253,39 @@ void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_yield_push(L);
         rocke_ll_lower_region(L, body);
         const char* const* yielded = NULL;
-        int n_yield = 0;
-        rocke_ll_yield_pop(L, &yielded, &n_yield);
+        rocke_ll_yield_pop(L, &yielded, NULL);
 
         L->unroll_elide_sync_op = NULL;
 
         trip_renames.restore();
 
-        if(n_yield != (int)num_iter)
-        {
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "scf.for expected %d yielded values, got %d",
-                          (int)num_iter,
-                          n_yield);
-        }
         for(int i = 0; i < (int)num_iter; i++)
         {
             current_iter_values[i] = rocke_arena_strdup(&L->arena, yielded ? yielded[i] : "");
         }
     }
 
-    for(int i = 0; i < (int)num_iter && i < op->num_results; i++)
+    for(int i = 0; i < (int)num_iter; i++)
     {
-        const char* mname = NULL;
-        const char* ll_ty = ll_iter_llvm_type(L, op, i, &mname);
+        const char* ll_ty = ll_iter_llvm_type(L, op, i);
         const rocke_value_t* result = op->results[i];
         rocke_ll_emitf(
             L, "  %s = bitcast %s %s to %s", result->name, ll_ty, current_iter_values[i], ll_ty);
     }
 }
 
-/* Python _op_scf_for: refuse a loop-carried buffer descriptor, then pick
- * unrolled vs normal lowering. */
+/* Python _op_scf_for: refuse a loop the loop rule refuses
+ * (rocke_i_scf_for_error), then pick unrolled vs normal lowering. */
 static void _op_scf_for(rocke_lower_t* L, const rocke_op_t* op)
 {
     if(!rocke_ll_live(L))
     {
         return;
     }
-    char descriptor_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+    char loop_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", descriptor_error);
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", loop_error);
     }
     if(op->num_operands < 3)
     {
@@ -2621,13 +2516,11 @@ static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
         return;
     /* Refuse a malformed if/else, or a branch that does not yield the results,
      * before reading the op or emitting. */
-    for(int branch = 0; branch < 2; branch++)
-    {
-        const rocke_op_t* yld = NULL;
-        char err[ROCKE_ERR_MSG_CAP];
-        if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof(err)))
-            rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", err);
-    }
+    const rocke_op_t* yields[2];
+    char err[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t status = rocke_i_if_else_yields(op, yields, err, sizeof(err));
+    if(status != ROCKE_OK)
+        rocke_ll_fail(L, status, "%s", err);
     const char* const* then_values = NULL;
     const char* const* else_values = NULL;
     int num_then_values = 0;
@@ -2693,12 +2586,17 @@ static void _op_scf_if_else(rocke_lower_t* L, const rocke_op_t* op)
     }
 }
 
-/* Python _op_scf_yield: record yielded operand strings into the top frame. */
+/* Python _op_scf_yield: record yielded operand strings into the top frame,
+ * which an scf.for or an scf.if_else with results pushed. */
 static void _op_scf_yield(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || L->yield_stack.len == 0)
+    if(!rocke_ll_live(L))
     {
         return;
+    }
+    if(L->yield_stack.len == 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", ROCKE_ORPHAN_YIELD_ERROR);
     }
     for(int i = 0; i < op->num_operands; i++)
     {
