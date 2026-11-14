@@ -23,6 +23,8 @@ def host(monkeypatch):
     """Sets the mocked host: affinity CPUs, loky cpu_count, environment and CpuThreads."""
     monkeypatch.delenv("KUBE_CPU_REQUEST", raising=False)
     monkeypatch.delenv("PYTEST_XDIST_WORKER_COUNT", raising=False)
+    # No cgroup memory limit: the runner's own limit must not shrink the CPU budget under test.
+    monkeypatch.setattr(P, "_cgroupMemoryLimit", lambda: None)
     monkeypatch.setitem(globalParameters, "CpuThreads", -1)
 
     def setHost(affinity, loky=None, kube=None, workers=None, cpuThreads=-1):

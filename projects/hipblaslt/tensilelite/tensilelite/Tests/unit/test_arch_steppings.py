@@ -2776,6 +2776,7 @@ def test_the_groups_share_the_pool_budget_of_one_process(
     Parallel = importlib.import_module("tensilelite.Common.Parallel")
     monkeypatch.setattr(Parallel.os, "sched_getaffinity", lambda pid: set(range(affinity)))
     monkeypatch.setattr(Parallel, "lokyCpuCount", lambda: affinity)
+    monkeypatch.setattr(Parallel, "_cgroupMemoryLimit", lambda: None)
     for name, value in (("PYTEST_XDIST_WORKER_COUNT", workers), ("KUBE_CPU_REQUEST", kube)):
         if value is None:
             monkeypatch.delenv(name, raising=False)

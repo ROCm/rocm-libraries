@@ -38,6 +38,11 @@ from .Utilities import tqdm
 # many processes per available CPU; a single process never uses more than one per CPU.
 OVERSUBSCRIPTION_FACTOR = 2
 
+# Peak memory of one pool process generating kernels (measured 250-300 MB), and the share of the
+# cgroup memory limit that the pools of all concurrent workers may use together.
+POOL_PROCESS_PEAK_BYTES = 300 * 2**20
+POOL_MEMORY_FRACTION = 0.8
+
 
 def joblibParallelSupportsGenerator():
     import joblib
@@ -88,11 +93,63 @@ def concurrentWorkerCount():
         return 1
 
 
+def _cgroupMemoryLimit(root="/sys/fs/cgroup", selfCgroup="/proc/self/cgroup"):
+    """Memory limit in bytes of this process's cgroup (v2 ``memory.max``, v1
+    ``memory.limit_in_bytes``); None when unlimited, unreadable or on Windows. A container sees
+    its own cgroup at ``root``, so that is the fallback when the /proc/self/cgroup path is absent."""
+    if os.name == "nt":
+        return None
+    candidates = []
+    try:
+        with open(selfCgroup) as f:
+            for line in f:
+                hierarchy, _, rest = line.rstrip("\n").partition(":")
+                controllers, _, path = rest.partition(":")
+                relative = path.lstrip("/")
+                if hierarchy == "0" and not controllers:
+                    candidates.append(os.path.join(root, relative, "memory.max"))
+                elif "memory" in controllers.split(","):
+                    candidates.append(os.path.join(root, "memory", relative, "memory.limit_in_bytes"))
+    except OSError:
+        pass
+    candidates += [
+        os.path.join(root, "memory.max"),
+        os.path.join(root, "memory", "memory.limit_in_bytes"),
+    ]
+    for path in candidates:
+        try:
+            with open(path) as f:
+                value = f.read().strip()
+        except OSError:
+            continue
+        try:
+            limit = int(value)
+        except ValueError:
+            return None  # "max": no limit
+        # cgroup v1 reports "no limit" as a value near 2**63.
+        return limit if 0 < limit < 2**62 else None
+    return None
+
+
+def memoryPoolSizeCap():
+    """Pool size per process that keeps the pools of all concurrent workers within
+    POOL_MEMORY_FRACTION of the cgroup memory limit, at POOL_PROCESS_PEAK_BYTES per pool process;
+    None without a limit. The CPU budget cannot see other containers sharing the machine's CPUs,
+    while the memory limit is per container."""
+    limit = _cgroupMemoryLimit()
+    if limit is None:
+        return None
+    perWorker = int(limit * POOL_MEMORY_FRACTION) // concurrentWorkerCount()
+    return max(1, perWorker // POOL_PROCESS_PEAK_BYTES)
+
+
 def poolSizeBudget():
     """Pool size for one process: OVERSUBSCRIPTION_FACTOR x the available CPUs shared among the
-    concurrent workers, at most the available CPUs, at least 1."""
+    concurrent workers, at most the available CPUs and the memory cap, at least 1."""
     cpus = availableCPUCount()
-    return max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
+    budget = max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
+    memoryCap = memoryPoolSizeCap()
+    return budget if memoryCap is None else min(budget, memoryCap)
 
 
 def CPUThreadCount(enable=True):
