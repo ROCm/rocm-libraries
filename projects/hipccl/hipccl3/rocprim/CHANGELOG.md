@@ -16,6 +16,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Resolved Issues
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
 
+### Fixed
+
+* OOB memory access in `device_batch_memcpy`.
+
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 
 ### Added
