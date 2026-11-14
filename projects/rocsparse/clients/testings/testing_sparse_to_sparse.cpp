@@ -2003,7 +2003,13 @@ void testing_sparse_to_sparse_template(const Arguments& arg)
         //
         // Compate A and C.
         //
-        if(arg.formatA != rocsparse_format_bsr && arg.formatB != rocsparse_format_bsr)
+        // BSR -> BSR -> BSR gives the arrays of A back when the block dimension of B
+        // divides the one of A; otherwise C can hold explicit zero blocks.
+        const bool bsr_round_trip = arg.formatA == rocsparse_format_bsr
+                                    && arg.formatB == rocsparse_format_bsr
+                                    && arg.block_dim % arg.row_block_dimB == 0;
+        if((arg.formatA != rocsparse_format_bsr && arg.formatB != rocsparse_format_bsr)
+           || bsr_round_trip)
         {
             if(verbose)
                 std::cout << "// TEST : check A and C " << std::endl;

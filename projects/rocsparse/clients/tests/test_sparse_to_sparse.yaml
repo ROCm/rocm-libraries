@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -212,6 +212,43 @@ Tests:
   baseB: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_ell, rocsparse_format_bsr ]
+
+# BSR -> BSR with a block dimension of B (row_block_dimB) that differs from the one of A
+# (block_dim) and divides it, so converting B back to the layout of A gives the arrays of A.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i32
+  index_type_J: i32
+  B_row_indextype: i32
+  B_col_indextype: i32
+  precision: *single_double_precisions_complex_real
+  M: [17, 49]
+  N: [7, 17]
+  block_dim: [2, 4]
+  row_block_dimB: [1]
+  col_block_dimB: [1]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_bsr]
+  formatB: [rocsparse_format_bsr]
+
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i64
+  index_type_J: i64
+  B_row_indextype: i64
+  B_col_indextype: i64
+  precision: *double_precision
+  M: [17, 49]
+  N: [7, 17]
+  block_dim: [4]
+  row_block_dimB: [2]
+  col_block_dimB: [2]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_bsr]
+  formatB: [rocsparse_format_bsr]
 
 - name: sparse_to_sparse
   category: pre_checkin

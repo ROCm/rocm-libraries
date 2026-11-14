@@ -50,6 +50,10 @@
 #include "rocsparse_sparse_to_csr_to_sparse.hpp"
 #include "rocsparse_sparse_to_sparse.hpp"
 #include "rocsparse_spmat_transfer_from.hpp"
+#include "rocsparse_valset.hpp"
+
+#include <algorithm>
+#include <limits>
 
 //
 // Define header of all the convert function.
@@ -873,6 +877,79 @@ FUNCTION_CONVERT(ell, ell)
 FUNCTION_CONVERT(bsr, bsr)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    // The block direction does not change the arrays of 1 x 1 blocks.
+    if(source_->block_dim != target_->block_dim
+       || (source_->block_dim > 1 && source_->block_dir != target_->block_dir))
+    {
+        // The intermediate CSR matrix has rows * block_dim rows and cols * block_dim columns.
+        const int64_t m = source_->rows * source_->block_dim;
+        const int64_t n = source_->cols * source_->block_dim;
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size,
+                                  target_->rows
+                                      != (m + target_->block_dim - 1) / target_->block_dim);
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size,
+                                  target_->cols
+                                      != (n + target_->block_dim - 1) / target_->block_dim);
+
+        // An empty source gives an empty target, without the intermediate CSR matrix.
+        if(source_->nnz == 0)
+        {
+            switch(stage_)
+            {
+            case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
+            case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
+            {
+                return rocsparse_status_success;
+            }
+            case _rocsparse_sparse_to_sparse_descr::stage_analysis:
+            {
+                target_->nnz = 0;
+                return rocsparse_status_success;
+            }
+            case _rocsparse_sparse_to_sparse_descr::stage_compute:
+            {
+                if(target_->row_data != nullptr)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(handle,
+                                                                target_->rows + 1,
+                                                                target_->idx_base,
+                                                                target_->row_type,
+                                                                target_->row_data));
+                }
+                return rocsparse_status_success;
+            }
+            }
+        }
+
+        // The conversion through CSR keeps the index and value types.
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                  source_->row_type != target_->row_type);
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                  source_->col_type != target_->col_type);
+        if(source_->const_val_data != nullptr && target_->val_data != nullptr)
+        {
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                      source_->data_type != target_->data_type);
+        }
+
+        // The conversion kernels need sorted blocks.
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                  source_->descr->storage_mode != rocsparse_storage_mode_sorted);
+
+        // The intermediate CSR matrix must fit the 32-bit index types of the source.
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
+                                  source_->col_type == rocsparse_indextype_i32
+                                      && std::max(m, n) > std::numeric_limits<int32_t>::max());
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
+                                  source_->row_type == rocsparse_indextype_i32
+                                      && source_->nnz * source_->block_dim * source_->block_dim
+                                             > std::numeric_limits<int32_t>::max());
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
+            handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
+        return rocsparse_status_success;
+    }
 
     switch(stage_)
     {

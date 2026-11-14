@@ -82,6 +82,20 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  \note
 *  This routine does not support batched computation.
 *
+*  \note
+*  A conversion from BSR to BSR with a different block dimension, or with a different block
+*  direction and blocks larger than 1 x 1, goes through an intermediate CSR matrix and requires
+*  \ref rocsparse_sparse_to_sparse_permissive, unless the source has no blocks. The target block
+*  row (column) count must be the source block row (column) count times the source block
+*  dimension, divided by the target block dimension and rounded up; otherwise
+*  \ref rocsparse_status_invalid_size is returned.
+*
+*  \note
+*  When the conversion goes through an intermediate CSR matrix, the source is read when
+*  \ref rocsparse_sparse_to_sparse_buffer_size is called for the
+*  \ref rocsparse_sparse_to_sparse_stage_analysis stage. The compute stage only converts the
+*  intermediate matrix, so it does not see changes made to the source after the analysis.
+*
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
