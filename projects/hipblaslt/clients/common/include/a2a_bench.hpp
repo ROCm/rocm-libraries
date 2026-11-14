@@ -20,9 +20,16 @@
 
 #include <SdmaQueue.hpp>
 
+#include <linux/mempolicy.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#include <cerrno>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_bench
@@ -32,6 +39,8 @@ namespace hipblaslt_bench
     constexpr uint32_t kCommChannels = 2;
 
     constexpr uint32_t kRecvSlices = 2;
+
+    constexpr int kSdmaRotateDefault = -1;
 
     struct RankResources
     {
@@ -117,6 +126,36 @@ namespace hipblaslt_bench
             return false;                                                         \
         }                                                                         \
     } while(0)
+
+    // Sets the calling thread's memory policy to MPOL_PREFERRED on `device`'s NUMA
+    // node, if it has one; threads created earlier, such as the HIP runtime's, keep
+    // theirs. Warns if the node cannot be read or the kernel refuses.
+    inline bool prefer_device_numa_node(int device)
+    {
+        char busId[64] = {};
+        CHECK_HIP_RC(hipDeviceGetPCIBusId(busId, sizeof(busId), device));
+        std::ifstream numaNode(std::string("/sys/bus/pci/devices/") + busId + "/numa_node");
+        int           node = -1;
+        if(!(numaNode >> node))
+        {
+            hipblaslt_cerr << "warning: cannot read " << busId
+                           << "'s NUMA node; memory is not bound\n";
+            return true;
+        }
+        if(node < 0)
+            return true;
+
+        std::vector<unsigned long> mask(node / 64 + 1);
+        mask[node / 64] = 1ul << (node % 64);
+        if(syscall(SYS_set_mempolicy, MPOL_PREFERRED, mask.data(), mask.size() * 64) != 0)
+        {
+            const int err = errno;
+            hipblaslt_cerr << "warning: set_mempolicy(MPOL_PREFERRED, node " << node
+                           << ") -> errno " << err
+                           << "; memory is not bound (in a container, add --cap-add SYS_NICE)\n";
+        }
+        return true;
+    }
 
     inline int64_t shard_of(const Arguments& arg)
     {
@@ -217,8 +256,10 @@ namespace hipblaslt_bench
     }
 
     // Reports only the local outcome.
-    inline bool
-        setup_rank_resources(const LauncherEnv& env, const Arguments& arg, RankResources& res)
+    inline bool setup_rank_resources(const LauncherEnv& env,
+                                     const Arguments&   arg,
+                                     RankResources&     res,
+                                     int                sdmaRotate)
     {
         CHECK_HIP_RC(hipSetDevice(env.local_rank));
         CHECK_HIP_RC(hipStreamCreate(&res.stream));
@@ -243,11 +284,15 @@ namespace hipblaslt_bench
         try
         {
             const uint32_t srcNode = TensileLite::Client::sdmaNodeIdForDevice(env.local_rank);
+            size_t         remote  = 0;
             for(uint32_t j = 0; j < arg.a2a_world; ++j)
             {
-                const uint32_t dstNode = TensileLite::Client::sdmaNodeIdForDevice(j);
+                const uint32_t dstNode
+                    = j == env.rank ? srcNode : TensileLite::Client::sdmaNodeIdForDevice(j);
                 res.ownedQueues.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
-                    srcNode, TensileLite::Client::sdmaSelectEngine(srcNode, dstNode)));
+                    srcNode,
+                    TensileLite::Client::sdmaQueueEngine(
+                        srcNode, dstNode, srcNode == dstNode ? 0 : remote++, sdmaRotate)));
                 const HsaQueueResource& q = res.ownedQueues.back()->queueResource();
                 res.queues[j] = {res.ownedQueues.back()->ringBase(),
                                  (void*)q.Queue_read_ptr_aql,
@@ -265,9 +310,12 @@ namespace hipblaslt_bench
         return true;
     }
 
-    inline bool setup_rank(const LauncherEnv& env, const Arguments& arg, RankResources& res)
+    inline bool setup_rank(const LauncherEnv& env,
+                           const Arguments&   arg,
+                           RankResources&     res,
+                           int                sdmaRotate = kSdmaRotateDefault)
     {
-        const bool ready = setup_rank_resources(env, arg, res);
+        const bool ready = setup_rank_resources(env, arg, res, sdmaRotate);
         if(!make_agreement(*res.rendezvous, env.world).agree(ready, std::logical_and<>{}))
         {
             hipblaslt_cerr << "error: rank-local setup failed on at least one rank\n";
