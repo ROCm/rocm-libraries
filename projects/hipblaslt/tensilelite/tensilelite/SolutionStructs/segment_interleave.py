@@ -448,13 +448,16 @@ def evaluate(state):
     # [2,2]: A uses adjacent rows, coarse tiles, or TDMSplit port-split tiles.
     _portSplit = _port_split_a(state)
     if not (_coarse(state, "A") or _portSplit or state.get("WaveTileContiguousA")):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
-    # Swizzle-B prototype: only the tight coarse case where B spans its whole LDS component (so the read's
-    # wtid0*strideWaveN term is a pure REPLACE by wtid0*writeStrideBytes). portSplit needs TDMSplit; defer.
+    # Swizzle-B: either B spans its whole LDS component (the read's wtid0*strideWaveN term is a pure
+    # REPLACE by wtid0*writeStrideBytes), or the vIdx groups split evenly over the components (the read
+    # adds the component jump per vIdx, like the normal reader). portSplit needs TDMSplit; defer.
     if _swzB:
         if _portSplit:                                        return _no("swizzle-B LSI: portSplit (TDMSplit) path unsupported")
         _compColsB = state["MacroTile1"] // (state["NumWaves"] // 2)
         if min(state["MatrixInstM"], state["MatrixInstN"]) * state["VectorWidthB"] < _compColsB:
-            return _no("swizzle-B LSI: B does not span its LDS component (increase VWB); read has no REPLACE branch")
+            _compNO = _compColsB // state["MatrixInstN"]
+            if _compNO % (state["VectorWidthB"] * state["MIWaveGroup"][1]) != 0:
+                return _no("swizzle-B LSI: a vIdx group straddles an LDS component (MIWaveTile[1]/VectorWidthB must be even)")
 
     bWhole = not _b_readable(state)
     if _swzB and bWhole:                                      return _no("swizzle-B LSI: B-not-readable (bcontig) path unsupported")
@@ -532,9 +535,9 @@ def b_rotate_reason(state, persistent=False):
         else:
             return "MX: needs MatrixInstN == WavefrontSize/2 or WavefrontSize"
     if pt.get("Sparse"):                                      return "sparse not supported"
-    # The swizzled-TDM B read (LocalRead._localReadSwizzledTDM) does not pick LocalReadAddrB+h per rotated
-    # half. Today swizzle-B LSI (VWB >= WaveTileB) already excludes B-rotate (WaveTileB/VWB even); keep it explicit.
-    if pt.get("SwizzleTensorA") or pt.get("SwizzleTensorB"): return "SwizzleTensor not supported"
+    # Swizzle-B: the swizzled read maps vIdx group h to component h through LocalReadAddrB+h
+    # (LocalRead._localReadSwizzledTDM), so the register swap applies as is. Swizzle-A has no LSI.
+    if pt.get("SwizzleTensorA"):                              return "SwizzleTensorA not supported"
     for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
                 "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
                 "PrefetchAcrossPersistent", "TDMFuse"):

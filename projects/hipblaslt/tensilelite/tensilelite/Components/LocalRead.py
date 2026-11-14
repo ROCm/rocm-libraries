@@ -884,15 +884,38 @@ class LocalReadMFMA(LocalRead):
         # lraFinalOffset. padElems==0 (VW==1) -> byte-identical to the unpadded reader.
         padElems       = kernel["LdsPad%s" % tc]
         nOStridePadded = nOStride + padElems
+        # LDSSegmentInterleave with B not spanning its LDS component (WaveTile/VW a multiple of the
+        # component count): like the normal reader, the vIdx group selects the component. Split the
+        # vIdx nO offset into a within-component nO and a component jump (readStride, post-pad), so
+        # vIdx group h lands at component h and therefore reads through LocalReadAddr+h (B-rotate
+        # relies on that). A wave's nO band stays within its component (lraTileAssignmentSwizzledTDM).
+        segOff     = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+        segVIdx    = bool(segOff) and segOff.get("footprintPacked", False) \
+            and not segOff.get("bBaseline", False) and numVecPerTile > 1
+        if segVIdx:
+            numComp    = kernel["NumWaves"] // 2
+            compNO     = (kernel["MacroTile%u" % tile01] // miN) // numComp   # nO rows per component
+            readStride = segOff.get("readStrideBytes" + tc, segOff["writeStrideBytes"])
+            assert compNO % (vw * nWaveN) == 0, "swizzled LSI: a vIdx group must not straddle a component"
         for nt in range(numNtile):
             vIdx = nt // vw
             eIdx = nt %  vw
+            vNO  = vIdx * vw * nWaveN                     # nO offset of this vIdx group (wave base excluded)
+            compByteOff = 0
+            if segVIdx:
+                comp, vNO   = vNO // compNO, vNO % compNO
+                compByteOff = comp * readStride
             for r in range(numKChunk):
                 # localReadOffset carries the K-sub-iteration progression in the immediate (like the
                 # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
                 # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
-                offElems = vIdx * vw * nWaveN * nOStridePadded + eIdx * innerK + r * kOStride + tP["localReadOffset"]
-                off = int(round(offElems * tP["bpeDS"])) + swapByteOff
+                offElems = vNO * nOStridePadded + eIdx * innerK + r * kOStride + tP["localReadOffset"]
+                off = int(round(offElems * tP["bpeDS"])) + compByteOff + swapByteOff
+                if segVIdx and tc == "B" and kernel.get("LDSSegmentBRotate"):
+                    # B-rotate swaps LocalReadAddrB+0/+1 per SIMD pair: register h must serve component h.
+                    assert off // maxLDSConstOffset == compByteOff // readStride, \
+                        "LDSSegmentBRotate: swizzled B vIdx=%u does not read through LocalReadAddrB+%u" \
+                        % (vIdx, compByteOff // readStride)
                 reg = nt * regsPerNtile + r * regsPerLoad
                 offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
                 ds = DSModifiers(na=1, offset=offSplit)
