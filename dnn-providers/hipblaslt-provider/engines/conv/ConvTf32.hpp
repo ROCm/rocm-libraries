@@ -19,10 +19,16 @@ inline constexpr const char* CONV_TF32_ENV_NAME = "HIPBLASLT_PROVIDER_CONV_TF32"
  *        (HIPBLASLT_CONV_TF32_ENGINE, ROCBLAS_CONV_TF32_ENGINE): HIPBLASLT_PROVIDER_CONV_TF32 set
  *        to 1, true, on or yes.
  *
- * Temporary. hipDNN has no way yet for a graph to permit TF32, or to exclude engines that use
- * it, so registering the engines unconditionally would let autotuning pick TF32 for any fp32
- * convolution. Behind the switch, autotuning times them beside the fp32 engines. Once hipDNN
- * carries numerical notes, the engines report DOWN_CONVERT_INPUTS instead and the switch goes.
+ * Temporary. hipDNN reports per-engine numerical notes (RFC 0025), but a caller cannot yet
+ * exclude an engine by a precision note: the native and Python frontends have no
+ * select_numeric_notes / deselect_numeric_notes, and the cuDNN v9 compatibility layer filters
+ * on NONDETERMINISTIC only (deselecting DOWN_CONVERT_INPUTS fails with GRAPH_NOT_SUPPORTED). So
+ * a graph has no way to permit TF32 or to keep it out, and registering the engines
+ * unconditionally would let autotuning pick TF32 for any fp32 convolution. Behind the switch,
+ * autotuning times them beside the fp32 engines. The engines report no numerical notes, so
+ * hipDNN reports them NONDETERMINISTIC. Follow-up: once a caller can exclude engines by a
+ * precision note, the engines report it (hip-kernel-provider/conv/README.md, "Lower-precision
+ * plans") and the switch goes.
  */
 inline bool convTf32EnginesEnabled()
 {

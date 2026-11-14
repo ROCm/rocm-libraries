@@ -67,9 +67,12 @@ Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOW
 |---|---|
 | `MIOPEN_ENGINE_DETERMINISTIC` | Explicit `[]` |
 | `MIOPEN_ENGINE` | Explicit `[NONDETERMINISTIC]` |
+| hip-kernel-provider `hipkernel:CONV_FFT_*` | Explicit `[FFT]` |
+| hip-kernel-provider `hipkernel:CONV_WINOGRAD_*` | Explicit `[WINOGRAD]` |
+| Every other hip-kernel-provider `hipkernel:CONV_*` engine | Explicit `[]` |
 | Every other engine | No tested claim: field absent, reported `{NONDETERMINISTIC}` |
 
-`MIOPEN_ENGINE_DETERMINISTIC` claims determinism for every graph it accepts; the claim is about the engine ID, not per-solver evidence. No in-tree provider reports a precision note. Precision claims, such as MIOpen's `FP16_ALT_IMPL` on gfx90a and hipBLASLt compute types, are future work.
+`MIOPEN_ENGINE_DETERMINISTIC` claims determinism for every graph it accepts; the claim is about the engine ID, not per-solver evidence. The hip-kernel-provider conv engines claim determinism in their UEDs; each family's device test launches every config it runs twice and compares the output bits (`dnn-providers/hip-kernel-provider/conv/README.md`, "Numerical notes"). No in-tree provider reports a precision note. Precision claims, such as MIOpen's `FP16_ALT_IMPL` on gfx90a and hipBLASLt compute types, are future work.
 
 ## 6. Compatibility layers
 
