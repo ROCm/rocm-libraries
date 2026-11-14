@@ -5661,21 +5661,48 @@ void testing_matmul_with_bias(const Arguments& arg,
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
     // A Stream-K case that got no Stream-K kernel (TileProcessingStrategy StreamK, "TPSSK" in the
-    // kernel name) would pass while testing none.
+    // kernel name, or a checked-in rocRoller Stream-K kernel, "RR_GEMM_..._SK_WGT_") would pass
+    // while testing none. Whether the heuristic offers one depends on the library, so the case
+    // is skipped, unless it names the kernel it expects: then the pick is wrong.
     if(arg.requires_streamk)
     {
         bool streamk = false;
         for(auto& r : heuristicResult)
-            streamk |= hipblaslt_ext::getKernelNameFromAlgo(handle, r.algo).find("_TPSSK_")
-                       != std::string::npos;
+        {
+            const std::string name = hipblaslt_ext::getKernelNameFromAlgo(handle, r.algo);
+            streamk |= name.find("_TPSSK_") != std::string::npos
+                       || (name.rfind("RR_GEMM_", 0) == 0
+                           && name.find("_SK_WGT_") != std::string::npos);
+        }
         if(!streamk)
         {
             const std::string why = "none of the " + std::to_string(heuristicResult.size())
                                     + " solutions for this case is a Stream-K kernel";
 #ifdef GOOGLE_TEST
+            if(arg.expected_kernel[0])
+                FAIL() << why;
             GTEST_SKIP() << why;
 #else
             hipblaslt_cout << why << std::endl;
+            return;
+#endif
+        }
+    }
+
+    // A correct result does not show that the intended kernel ran: another tile passes the
+    // norm check too.
+    if(arg.expected_kernel[0])
+    {
+        const std::string name
+            = hipblaslt_ext::getKernelNameFromAlgo(handle, heuristicResult[0].algo);
+        if(name != arg.expected_kernel)
+        {
+            const std::string why = std::string("the first solution runs ") + name
+                                    + ", and this case expects " + arg.expected_kernel;
+#ifdef GOOGLE_TEST
+            FAIL() << why;
+#else
+            hipblaslt_cerr << why << std::endl;
             return;
 #endif
         }
