@@ -362,7 +362,17 @@ struct K4RowsVector<K1AtomWmma11Bf16>
 // band and every output element written once. The filter is the A operand and the input the B
 // operand, so D is [output channel][output column]. Grid: (channel tiles) x (column tiles) x
 // (row bands) x output planes x images, flattened, as k4ConvMma.
-template <class T, class Atom, int FT, int R, int S, int TH, int CB>
+template <int A, int B>
+struct K4RowsLcm
+{
+    static constexpr int gcd(int x, int y)
+    {
+        return y == 0 ? x : gcd(y, x % y);
+    }
+    static constexpr int value = A / gcd(A, B) * B;
+};
+
+template <class T, class Atom, int FT, int R, int S, int TH, int CB, int DEPTH>
 __device__ void k4ConvMmaRows(const K4Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -430,28 +440,34 @@ __device__ void k4ConvMmaRows(const K4Args& a)
                     + static_cast<long long>(cbt) * CH + v * VEC;
         dstOff[l] = p * PITCH + v * VEC;
     }
-    // Step (t, ft): band input row t (input row oh0 - ph + t) of depth tap ft's plane. Outside
-    // the input it contributes nothing and loads nothing (uniform across the workgroup).
-    const auto stepBase = [&](int t, int ft, long long& base) {
+    // Step k = (t, ft) = (k / FT, k % FT): band input row t (input row oh0 - ph + t) of depth tap
+    // ft's plane. Outside the input it contributes nothing and loads nothing (uniform across the
+    // workgroup).
+    const int steps = band + R - 1; // band rows plus the rows below that finish them
+    const int total = steps * FT;
+    const auto stepBase = [&](int k, long long& base) {
+        const int t = k / FT, ft = k % FT;
         const int id = od * a.sd - a.pd + ft, ih = oh0 - a.ph + t;
         base = ((img * a.di + id) * a.hi + ih) * static_cast<long long>(a.wi) * a.c;
-        return static_cast<unsigned>(id) < static_cast<unsigned>(a.di)
+        return k < total && static_cast<unsigned>(id) < static_cast<unsigned>(a.di)
                && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi);
     };
-    Raw stage[LOADS];
-    const auto load = [&](long long base) {
+    // DEPTH steps in flight in registers: step k's row sits in stage[k % DEPTH] from its load
+    // (DEPTH steps ahead) until it is written to LDS, one step ahead of its multiplies.
+    Raw stage[DEPTH][LOADS];
+    const auto load = [&](Raw(&slot)[LOADS], long long base) {
 #pragma unroll
         for(int l = 0; l < LOADS; ++l)
         {
             Raw val = *reinterpret_cast<const Raw*>(in + base + srcOff[l]);
-            stage[l] = colOk[l] ? val : Raw{};
+            slot[l] = colOk[l] ? val : Raw{};
         }
     };
-    const auto put = [&](int buf) {
+    const auto put = [&](const Raw(&slot)[LOADS], int buf) {
 #pragma unroll
         for(int l = 0; l < LOADS; ++l)
             if(active[l])
-                *reinterpret_cast<Raw*>(rows + buf * HC * PITCH + dstOff[l]) = stage[l];
+                *reinterpret_cast<Raw*>(rows + buf * HC * PITCH + dstOff[l]) = slot[l];
     };
 
     const long long outPlane = img * a.outD + od * a.osd + a.ood;
@@ -490,20 +506,26 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     for(int r = 0; r < R; ++r)
         acc[r] = typename Atom::acc{};
 
-    const int steps = band + R - 1; // band rows plus the rows below that finish them
+        // Step 0 into LDS buffer 0, steps 1 to DEPTH in flight.
+#pragma unroll
+    for(int k = 0; k <= DEPTH; ++k)
     {
         long long base = 0;
-        if(stepBase(0, 0, base))
+        if(stepBase(k, base))
         {
-            load(base);
-            put(0);
+            load(stage[k % DEPTH], base);
+            if(k == 0)
+                put(stage[0], 0);
         }
     }
+    // Rows a pass of the unrolled loop: a multiple of R (static ring slots) and of DEPTH (static
+    // stage slots).
+    constexpr int U = K4RowsLcm<R, DEPTH>::value;
     int cur = 0;
-    for(int t0 = 0; t0 < steps; t0 += R)
+    for(int t0 = 0; t0 < steps; t0 += U)
     {
 #pragma unroll
-        for(int j = 0; j < R; ++j)
+        for(int j = 0; j < U; ++j)
         {
             const int t = t0 + j;
             if(t >= steps)
@@ -511,14 +533,17 @@ __device__ void k4ConvMmaRows(const K4Args& a)
 #pragma unroll
             for(int ft = 0; ft < FT; ++ft)
             {
-                __syncthreads(); // this step's row is staged; the other buffer is free
-                long long base = 0, next = 0;
-                const bool live = stepBase(t, ft, base);
-                const int nt = ft + 1 < FT ? t : t + 1, nft = ft + 1 < FT ? ft + 1 : 0;
-                const bool more = nt < steps && stepBase(nt, nft, next);
-                if(more)
-                    load(next);
-                if(live)
+                const int k = t * FT + ft;
+                __syncthreads(); // step k is staged; the other buffer is free
+                // Step k + 1 to the free LDS buffer, then step k + 1 + DEPTH into its register
+                // slot (static: U is a multiple of DEPTH).
+                const int slot = (j * FT + ft + 1) % DEPTH;
+                long long base = 0;
+                if(stepBase(k + 1, base))
+                    put(stage[slot], cur ^ 1);
+                if(stepBase(k + 1 + DEPTH, base))
+                    load(stage[slot], base);
+                if(stepBase(k, base))
                 {
                     const T* src = rows + cur * HC * PITCH + wave * 16 + kb;
 #pragma unroll
@@ -532,12 +557,10 @@ __device__ void k4ConvMmaRows(const K4Args& a)
                         for(int r = 0; r < R; ++r)
 #pragma unroll
                             for(int q = 0; q < KC; ++q)
-                                acc[(j - r + R) % R] = Atom::mma(
-                                    wf[(ft * R + r) * S + s][q], xf[q], acc[(j - r + R) % R]);
+                                acc[((j - r) % R + R) % R] = Atom::mma(
+                                    wf[(ft * R + r) * S + s][q], xf[q], acc[((j - r) % R + R) % R]);
                     }
                 }
-                if(more)
-                    put(cur ^ 1);
                 cur ^= 1;
             }
             // Output row t - (R - 1) has every tap row: store it, and free its slot.

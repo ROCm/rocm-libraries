@@ -105,19 +105,9 @@ WIDE_TILES = {
 }
 
 
-# Row streaming (rs 1): (th, cb) output rows a band and 16-channel blocks (waves) a workgroup.
-RS_TILES = [
-    (8, 2),
-    (16, 2),
-    (32, 2),
-    (8, 4),
-    (16, 4),
-    (32, 4),
-    (64, 4),
-    (16, 8),
-    (32, 8),
-    (64, 8),
-]
+# Row streaming (rs): (th, cb, rs) output rows a band, 16-channel blocks (waves) a workgroup and
+# input rows in flight.
+RS_TILES = [(th, cb, d) for th in (16, 32, 64) for cb in (4, 8, 16) for d in (1, 2, 3)]
 
 
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
@@ -302,7 +292,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         for atom in atoms:
             for t, r, s in FILTERS:
                 for st in (1,) if tag == "fwd" else (1, 2):
-                    for th, cb in RS_TILES:
+                    for th, cb, depth in RS_TILES:
                         c = dict(
                             atom=atom,
                             t=t,
@@ -322,10 +312,10 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             tw=0,
                             bpu=0,
                             math=0,
-                            rs=1,
+                            rs=depth,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
-                        name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.rs{th}x{cb}"
+                        name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.rs{th}x{cb}d{depth}"
                         kernels.append(
                             {
                                 "version": "1.0",

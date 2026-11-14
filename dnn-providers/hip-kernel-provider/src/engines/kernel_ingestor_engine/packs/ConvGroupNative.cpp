@@ -731,8 +731,9 @@ struct Tile
     int64_t bpu = 0;
     /// 1: the three-bf16 form (TF32 permission) of a bf16 matrix-core config, for fp32 graphs.
     int64_t math = 0;
-    /// 1: row streaming (k4ConvMmaRows): cb waves of one 16-channel block each, 16 output
-    /// columns (wp 1), a band of th output rows, unit gather stride, channels-last.
+    /// Row streaming (k4ConvMmaRows) with rs (1 to 4) input rows in flight: cb waves of one
+    /// 16-channel block each, 16 output columns (wp 1), a band of th output rows, unit gather
+    /// stride, channels-last. 0: the other kernels.
     int64_t rs = 0;
 };
 
@@ -784,10 +785,11 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
     tile.bpu = kernel.getIntMetadata("bpu");
     tile.math = kernel.getIntMetadata("math");
     tile.rs = kernel.getIntMetadata("rs");
-    // Row streaming: a matrix-core small-group config of cb waves (at most 1024 threads), one
+    // Row streaming: 1 to 4 rows in flight, a matrix-core small-group config of cb waves (at most
+    // 1024 threads), one
     // 16-column fragment, channels-last, not phase-fused; no other direction's knobs.
     if(tile.rs != 0
-       && (tile.rs != 1 || direction == ConvDirection::BACKWARD_WEIGHTS || tile.fma
+       && (tile.rs < 0 || tile.rs > 4 || direction == ConvDirection::BACKWARD_WEIGHTS || tile.fma
            || info->wave == 0 || tile.nbi != 0 || tile.nbo != 0 || tile.wp != 1 || tile.pf != 0
            || tile.cf != 0 || tile.math != 0 || tile.cb < 1 || tile.cb * info->wave > 1024
            || tile.th < 1 || tile.cg != 0 || tile.oc != 0 || tile.px != 0 || tw != 0
@@ -1405,7 +1407,7 @@ public:
 
         if(tile->rs != 0)
         {
-            options.add("CONV_GROUP_RS", std::string("1"));
+            options.add("CONV_GROUP_RS", std::to_string(tile->rs));
         }
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());
