@@ -1,0 +1,127 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the hipsparse C headers cannot express, beyond the defaults the generator
+# derives from them: one table per C function, and a key with braces names
+# several. A _64 or _spt variant without a table takes its base's. See "Fixing a
+# binding" in the generator README; `gen.sh --explain <function>` shows what
+# applies.
+
+format = 1
+# scalar-pointer-mode:
+#   A size query classifies the alpha/beta/threshold its compute twin classifies, so
+#   it takes the same _typed arguments (the pointer_mode default covers alpha and beta).
+
+[hipsparseXbsric02_zeroPivot]
+position = "scalar-pointer-mode"
+
+["hipsparse{S,D,C,Z}bsrilu02_numericBoost"]
+tol = ["scalar-pointer-mode", "nullable"]
+boost_val = ["scalar-pointer-mode", "nullable"]
+
+[hipsparseXbsrilu02_zeroPivot]
+position = "scalar-pointer-mode"
+
+[hipsparseXbsrsm2_zeroPivot]
+position = "scalar-pointer-mode"
+
+[hipsparseXbsrsv2_zeroPivot]
+position = "scalar-pointer-mode"
+
+[hipsparseXcsr2bsrNnz]
+bsrNnzb = "scalar-pointer-mode"
+
+[hipsparseXcsr2gebsrNnz]
+bsrNnzDevhost = "scalar-pointer-mode"
+
+["hipsparse{S,D,C,Z}csrcolor"]
+fractionToColor = "scalar-host"
+ncolors = "scalar-host"
+reordering = "devptr"
+
+[hipsparseXcsrgeam2Nnz]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+[hipsparseXcsrgeamNnz]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+[hipsparseXcsrgemm2Nnz]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+[hipsparseXcsrgemmNnz]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+[hipsparseXcsric02_zeroPivot]
+position = "scalar-pointer-mode"
+
+["hipsparse{S,D,C,Z}csrilu02_numericBoost"]
+tol = ["scalar-pointer-mode", "nullable"]
+boost_val = ["scalar-pointer-mode", "nullable"]
+
+[hipsparseXcsrilu02_zeroPivot]
+position = "scalar-pointer-mode"
+
+[hipsparseXcsrsm2_zeroPivot]
+position = "scalar-pointer-mode"
+
+[hipsparseXcsrsv2_zeroPivot]
+position = "scalar-pointer-mode"
+
+["hipsparse{C,Z}dotci"]
+result = "scalar-pointer-mode"
+
+["hipsparse{S,D,C,Z}doti"]
+result = "scalar-pointer-mode"
+
+[hipsparseXgebsr2gebsrNnz]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+["hipsparse{S,D,C,Z}nnz"]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+["hipsparse{S,D,C,Z}nnz_compress"]
+nnzC = "scalar-pointer-mode"
+
+[hipsparseSpGEMM_compute]
+bufferSize2 = "scalar-host"
+
+[hipsparseSpGEMM_workEstimation]
+bufferSize1 = "scalar-host"
+
+[hipsparseSpGEMMreuse_copy]
+bufferSize5 = "scalar-host"
+
+[hipsparseSpGEMMreuse_nnz]
+bufferSize2 = "scalar-host"
+bufferSize3 = "scalar-host"
+bufferSize4 = "scalar-host"
+
+[hipsparseSpGEMMreuse_workEstimation]
+bufferSize1 = "scalar-host"
+
+["hipsparse{S,D}pruneCsr2csr"]
+threshold = "scalar-pointer-mode"
+
+["hipsparse{S,D}pruneCsr2csrNnz"]
+threshold = "scalar-pointer-mode"
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+["hipsparse{S,D}pruneCsr2csrNnzByPercentage"]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+["hipsparse{S,D}pruneDense2csr"]
+threshold = "scalar-pointer-mode"
+
+["hipsparse{S,D}pruneDense2csrNnz"]
+threshold = "scalar-pointer-mode"
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+["hipsparse{S,D}pruneDense2csrNnzByPercentage"]
+nnzTotalDevHostPtr = "scalar-pointer-mode"
+
+["hipsparse{S,D}prune{Csr2csr,Dense2csr}_bufferSize{,Ext}"]
+threshold = "scalar-pointer-mode"
+
+["hipsparse{S,D}roti"]
+c = "scalar-pointer-mode"
+s = "scalar-pointer-mode"
