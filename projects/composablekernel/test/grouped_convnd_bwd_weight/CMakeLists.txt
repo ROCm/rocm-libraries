@@ -87,3 +87,7 @@ add_gtest_executable(test_grouped_convnd_bwd_weight_interface_wmma test_grouped_
 if(result EQUAL 0)
    target_link_libraries(test_grouped_convnd_bwd_weight_interface_wmma PRIVATE utility)
 endif()
+add_gtest_executable(test_grouped_convnd_bwd_weight_two_stage_splitk_wmma test_grouped_convnd_bwd_weight_two_stage_splitk_wmma.cpp)
+if(result EQUAL 0)
+   target_link_libraries(test_grouped_convnd_bwd_weight_two_stage_splitk_wmma PRIVATE utility)
+endif()
