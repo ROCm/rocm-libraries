@@ -697,6 +697,14 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
                     "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 )
+                # If the cross-provider target was absent, this is the first drain
+                # and therefore the first chance to categorize rocKE's staged
+                # CTests. When the first drain already ran, reapplying the same
+                # categories after late registration is harmless.
+                apply_ctest_category_labels(
+                    "${ROCKE_ENGINE_CTEST_CATEGORIES_YAML}"
+                    "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                )
             endif()
         endif()
     endif()

@@ -3805,6 +3805,20 @@ namespace
         return rocblaslt_status_invalid_value;
     }
 
+    // An algo index can name a solution of the other kind, grouped or not, whose
+    // kernel takes different arguments.
+    rocblaslt_status checkGroupedGemmMatch(const char*                             caller,
+                                           bool                                    grouped,
+                                           const TensileLite::ContractionSolution& solution)
+    {
+        if(solution.problemType.groupedGemm == grouped)
+            return rocblaslt_status_success;
+        log_error(caller,
+                  grouped ? "the algo's solution is not a grouped GEMM solution"
+                          : "the algo's solution is a grouped GEMM solution");
+        return rocblaslt_status_invalid_value;
+    }
+
     // A hand-written kernel may rely on its problem predicates to stay inside the
     // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
     // addresses, so an algo for one is refused once the problem it runs no longer
@@ -6447,6 +6461,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         auto solution = solutionAt(*solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
+        if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+           st != rocblaslt_status_success)
+            return st;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -6805,6 +6822,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+               st != rocblaslt_status_success)
+                return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
@@ -6886,6 +6906,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, true, *solution);
+               st != rocblaslt_status_success)
+                return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
@@ -6969,6 +6992,14 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                               "Device scalar alpha with device user args requires GSU=1.");
                     return rocblaslt_status_invalid_value;
                 }
+            }
+
+            // Clustered StreamK rejects grouped GEMM by throwing from workspace
+            // sizing. Report that as an unsupported solution instead.
+            if(solution->usesStreamKSpatialCluster())
+            {
+                log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
+                return rocblaslt_status_invalid_value;
             }
 
             // User-args workspace holds no host args, only per-problem workspaces.
@@ -8329,6 +8360,15 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
         if(!solution->deviceScalarAlphaSupported(tensile_prob.gemms))
         {
             log_error(__func__, "Unsupported or mixed grouped device scalar alpha modes.");
+            return rocblaslt_status_invalid_value;
+        }
+        // Workspace sizing for a clustered StreamK solution throws on a grouped
+        // problem. That rejection has to stay a skipped candidate: the throw
+        // would escape this search and fail the heuristic, including solutions
+        // already found.
+        if(solution->usesStreamKSpatialCluster())
+        {
+            log_error(__func__, "StreamK cluster multicast does not support grouped GEMM");
             return rocblaslt_status_invalid_value;
         }
 
