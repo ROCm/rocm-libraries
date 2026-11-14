@@ -47,8 +47,8 @@ cmake_dependent_option(TENSILELITE_ENABLE_MXDATAGENERATOR
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
 
 if(TENSILELITE_STANDALONE)
-    if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING OR TENSILELITE_ENABLE_AUTOBUILD OR BUILD_TESTING)
-        message(FATAL_ERROR "The TensileLite client, tests, and autobuild scripts require the hipBLASLt build.")
+    if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+        message(FATAL_ERROR "The TensileLite client and tests require the hipBLASLt build.")
     endif()
 
     find_package(hip REQUIRED)
@@ -119,11 +119,6 @@ set(TENSILELITE_HOST_MSGPACK_SOURCES
 )
 
 add_subdirectory(rocisa)
-
-if(TENSILELITE_ENABLE_AUTOBUILD)
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    include(tensilelite_auto_build)
-endif()
 
 if(TENSILELITE_ENABLE_HOST)
     find_package(ZLIB REQUIRED)

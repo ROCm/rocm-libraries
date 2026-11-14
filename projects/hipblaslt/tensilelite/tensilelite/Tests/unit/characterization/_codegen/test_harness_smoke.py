@@ -30,7 +30,7 @@ from config_harness import (
     golden_digest,
 )
 from tensilelite.Common.Architectures import gfxToIsa
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 

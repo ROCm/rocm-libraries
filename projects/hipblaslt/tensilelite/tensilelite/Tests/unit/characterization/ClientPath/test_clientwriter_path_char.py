@@ -78,37 +78,35 @@ def _default_globalParameters_overrides(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# getBuildClientLibraryScript (lines 268-297)
+# getBuildClientLibraryArguments
 # ---------------------------------------------------------------------------
 
-class TestGetBuildClientLibraryScript:
-    """Direct calls into getBuildClientLibraryScript exercise lines 268-297."""
+class TestGetBuildClientLibraryArguments:
+    """The in-process create-library call receives a safe argument list."""
 
     def test_default_returns_create_library_command(self, monkeypatch, tmp_path):
         """Lines 268-297: basic command structure is emitted."""
         _default_globalParameters_overrides(monkeypatch)
         # LazyLibraryLoading=True → no --no-lazy-library-loading
-        result = CW.getBuildClientLibraryScript(
+        result = CW.getBuildClientLibraryArguments(
             buildPath=str(tmp_path / "build"),
             libraryLogicPath=str(tmp_path / "logic"),
             cxxCompiler="/usr/bin/clang++",
             targetGfx="gfx942",
         )
-        assert "TensileCreateLibrary" in result
         assert "--architecture=gfx942" in result
         assert "--code-object-version=4" in result
         assert "--cxx-compiler=/usr/bin/clang++" in result
         assert "--library-format=yaml" in result
         # lazy loading on → flag absent
         assert "--no-lazy-library-loading" not in result
-        # line ends with "\n"
-        assert result.endswith("\n")
+        assert result[-1] == "HIP"
 
     def test_no_lazy_library_loading_flag(self, monkeypatch, tmp_path):
         """Line 274-275: --no-lazy-library-loading appended when flag is False."""
         _default_globalParameters_overrides(monkeypatch)
         monkeypatch.setitem(globalParameters, "LazyLibraryLoading", False)
-        result = CW.getBuildClientLibraryScript(
+        result = CW.getBuildClientLibraryArguments(
             buildPath=str(tmp_path),
             libraryLogicPath=str(tmp_path / "logic"),
             cxxCompiler="/usr/bin/hipcc",
@@ -120,7 +118,7 @@ class TestGetBuildClientLibraryScript:
         """Line 277-278: --asm-debug appended when AsmDebug is True."""
         _default_globalParameters_overrides(monkeypatch)
         monkeypatch.setitem(globalParameters, "AsmDebug", True)
-        result = CW.getBuildClientLibraryScript(
+        result = CW.getBuildClientLibraryArguments(
             buildPath=str(tmp_path),
             libraryLogicPath=str(tmp_path / "logic"),
             cxxCompiler="/usr/bin/hipcc",
@@ -132,7 +130,7 @@ class TestGetBuildClientLibraryScript:
         """Line 280-281: --keep-build-tmp appended when KeepBuildTmp is True."""
         _default_globalParameters_overrides(monkeypatch)
         monkeypatch.setitem(globalParameters, "KeepBuildTmp", True)
-        result = CW.getBuildClientLibraryScript(
+        result = CW.getBuildClientLibraryArguments(
             buildPath=str(tmp_path),
             libraryLogicPath=str(tmp_path / "logic"),
             cxxCompiler="/usr/bin/hipcc",
@@ -144,7 +142,7 @@ class TestGetBuildClientLibraryScript:
         """Line 283-284: --disable-asm-comments appended when DisableAsmComments is True."""
         _default_globalParameters_overrides(monkeypatch)
         monkeypatch.setitem(globalParameters, "DisableAsmComments", True)
-        result = CW.getBuildClientLibraryScript(
+        result = CW.getBuildClientLibraryArguments(
             buildPath=str(tmp_path),
             libraryLogicPath=str(tmp_path / "logic"),
             cxxCompiler="/usr/bin/hipcc",
@@ -157,7 +155,7 @@ class TestGetBuildClientLibraryScript:
         _default_globalParameters_overrides(monkeypatch)
         logic = str(tmp_path / "logic")
         build = str(tmp_path / "build")
-        result = CW.getBuildClientLibraryScript(
+        result = CW.getBuildClientLibraryArguments(
             buildPath=build,
             libraryLogicPath=logic,
             cxxCompiler="/usr/bin/hipcc",
