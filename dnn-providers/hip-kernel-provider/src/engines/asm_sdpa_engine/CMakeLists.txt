@@ -87,9 +87,12 @@ target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDP
 # Forward selector revision
 # ============================================================================
 # The `selector_revision` a deployed L1 model for this engine must record; inputs are
-# documented in AsmSdpaSelectorRevision.cmake.
+# documented in AsmSdpaSelectorRevision.cmake. The selector dump beside it is what
+# `uhd_gen restamp` reads as --selector-after, and what the L1 model gate in
+# TestAsmSdpaEngine.cpp points to when a shipped model no longer binds.
 include("${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevision.cmake")
-hkp_asm_sdpa_fwd_revision(_fwd_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS)
+hkp_asm_sdpa_fwd_revision(_fwd_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
+    MANIFEST "${CMAKE_BINARY_DIR}/selector_revisions/ASM_SDPA_ENGINE.selector.json")
 target_compile_definitions(hip_kernel_provider_impl PRIVATE
     HKP_ASM_SDPA_FWD_REVISION="${_fwd_revision}")
 message(STATUS "hip-kernel-provider: asm_sdpa forward selector revision ${_fwd_revision}")

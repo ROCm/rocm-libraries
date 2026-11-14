@@ -41,9 +41,12 @@ target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_HIP_MLO
 # Selector revision
 # ============================================================================
 # The `selector_revision` a deployed L1 model for this engine must record; inputs are
-# documented in HipMlopsSelectorRevision.cmake.
+# documented in HipMlopsSelectorRevision.cmake. The selector dump beside it is what
+# `uhd_gen restamp` reads as --selector-after, and what the L1 model gate in
+# TestHipMlopsEngine.cpp points to when a shipped model no longer binds.
 include("${CMAKE_CURRENT_SOURCE_DIR}/HipMlopsSelectorRevision.cmake")
-hkp_hip_mlops_revision(_hip_mlops_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS)
+hkp_hip_mlops_revision(_hip_mlops_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
+    MANIFEST "${CMAKE_BINARY_DIR}/selector_revisions/HIP_MLOPS_ENGINE.selector.json")
 target_compile_definitions(hip_kernel_provider_impl PRIVATE
     HKP_HIP_MLOPS_REVISION="${_hip_mlops_revision}")
 message(STATUS "hip-kernel-provider: hip_mlops selector revision ${_hip_mlops_revision}")

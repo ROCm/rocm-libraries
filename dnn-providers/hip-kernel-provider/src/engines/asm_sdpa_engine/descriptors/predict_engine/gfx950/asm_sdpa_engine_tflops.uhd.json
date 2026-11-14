@@ -260,8 +260,22 @@
   ],
   "features_hash": "sha256:ba4694f2ae35d7ce",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/d8a0ad8b4e8ddd5a",
-    "feature_semantics_revision": 1
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/b269f7e20e9b944d",
+    "feature_semantics_revision": 1,
+    "x-restamps": [
+      {
+        "from": "hip-kernel-provider/asm-sdpa-fwd/d8a0ad8b4e8ddd5a",
+        "to": "hip-kernel-provider/asm-sdpa-fwd/b269f7e20e9b944d",
+        "proof": "reviewed-diff",
+        "changes": [
+          "AsmSdpaEngine.cpp",
+          "AsmSdpaEngine.hpp",
+          "plans/SdpaFwdPlan.cpp",
+          "plans/SdpaFwdPlanBuilder.cpp",
+          "plans/SdpaPlanUtils.hpp"
+        ]
+      }
+    ]
   },
   "objective": "max",
   "score": {

@@ -1630,8 +1630,19 @@
   ],
   "features_hash": "sha256:44cfe25711d7b0ce",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/hip-mlops/dce4926a806e57e0",
-    "feature_semantics_revision": 1
+    "selector_revision": "hip-kernel-provider/hip-mlops/e6f0886a9f880f9e",
+    "feature_semantics_revision": 1,
+    "x-restamps": [
+      {
+        "from": "hip-kernel-provider/hip-mlops/dce4926a806e57e0",
+        "to": "hip-kernel-provider/hip-mlops/e6f0886a9f880f9e",
+        "proof": "recipe-narrowed",
+        "changes": [
+          "compilation/Program.cpp",
+          "compilation/Program.hpp"
+        ]
+      }
+    ]
   },
   "objective": "max",
   "score": {
