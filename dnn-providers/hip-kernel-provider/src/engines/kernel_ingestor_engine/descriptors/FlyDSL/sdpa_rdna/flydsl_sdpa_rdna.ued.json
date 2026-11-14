@@ -11,6 +11,12 @@
   },
   "predict_engine": {
     "default": "deafb91e-7100-5f5e-8de7-bccd0bfb5bb5",
+    "gfx1100": [
+      "cf2ec3ff-3519-460a-ae5a-d1a7b58353e8"
+    ],
+    "gfx1101": [
+      "7295d186-54fa-4f1d-a63e-7731fd1f504c"
+    ],
     "gfx1151": [
       "1663406e-d45c-431f-b2ad-437dbd440316"
     ],
