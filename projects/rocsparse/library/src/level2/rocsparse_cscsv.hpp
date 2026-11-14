@@ -42,14 +42,35 @@ namespace rocsparse
 
     // Square, general or triangular, sorted: the CSC solve without transpose does not go
     // through the csrsv checks.
-    rocsparse_status cscsv_check_matrix(rocsparse_const_spmat_descr A);
+    rocsparse_status cscsv_checkarg_matrix_properties(rocsparse_const_spmat_descr A);
+
+    // Buffer of the solve without transpose: ticket, remaining dependencies and partial sums of
+    // each batch instance.
+    struct cscsv_solve_buffer_layout_t
+    {
+        cscsv_solve_buffer_layout_t(int64_t             m,
+                                    int64_t             batch_count,
+                                    rocsparse_indextype j_type,
+                                    rocsparse_datatype  t_type);
+
+        size_t   size() const;
+        size_t   ticket_size() const;
+        int32_t* ticket(void* buffer) const;
+        void*    rem(void* buffer) const;
+        void*    sum(void* buffer) const;
+
+    private:
+        size_t m_ticket_size{};
+        size_t m_rem_size{};
+        size_t m_sum_size{};
+    };
 
     // CSC triangular solve. Without transpose, the system is solved on the columns of the matrix;
     // the other operations solve the transposed CSR system.
     rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                 rocsparse_operation         trans,
                                                 rocsparse_const_spmat_descr A,
-                                                size_t*                     buffer_size);
+                                                size_t*                     buffer_size_in_bytes);
 
     bool cscsv_is_analyzed(rocsparse_cscsv_info        info,
                            rocsparse_operation         trans,
@@ -60,7 +81,7 @@ namespace rocsparse
                                              rocsparse_const_spmat_descr A,
                                              rocsparse_const_dnvec_descr x,
                                              rocsparse_const_dnvec_descr y,
-                                             size_t*                     buffer_size);
+                                             size_t*                     buffer_size_in_bytes);
 
     rocsparse_status cscsv_analysis(rocsparse_handle            handle,
                                     rocsparse_operation         trans,
@@ -92,6 +113,14 @@ namespace rocsparse
                                           rocsparse_const_dnvec_descr x,
                                           rocsparse_dnvec_descr       y,
                                           rocsparse_cscsv_info        info);
+
+    // Each batch instance starts from the structural zero pivot of the analysis, or from
+    // no pivot if the diagonal is unit.
+    rocsparse_status cscsv_seed_zero_pivot(rocsparse_handle     handle,
+                                           rocsparse_indextype  indextype,
+                                           rocsparse_diag_type  diag_type,
+                                           int64_t              batch_count,
+                                           rocsparse_cscsv_info info);
 
     rocsparse_status cscsv_zero_pivot(rocsparse_handle     handle,
                                       rocsparse_cscsv_info info,

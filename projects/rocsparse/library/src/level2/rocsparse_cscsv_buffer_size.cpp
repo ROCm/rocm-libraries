@@ -23,32 +23,45 @@
  * ************************************************************************ */
 
 #include "rocsparse_cscsv.hpp"
-#include "rocsparse_cscsv_kernel.hpp"
+#include "rocsparse_cscsv_build_tasks_kernel.hpp"
 #include "rocsparse_utility.hpp"
 
-uint32_t rocsparse::cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size)
+rocsparse::cscsv_solve_buffer_layout_t::cscsv_solve_buffer_layout_t(int64_t             m,
+                                                                    int64_t             batch_count,
+                                                                    rocsparse_indextype j_type,
+                                                                    rocsparse_datatype  t_type)
+    : m_ticket_size(rocsparse::align_size(sizeof(int32_t) * batch_count))
+    , m_rem_size(rocsparse::align_size(rocsparse::indextype_sizeof(j_type) * m * batch_count))
+    , m_sum_size(rocsparse::align_size(rocsparse::datatype_sizeof(t_type) * m * batch_count))
 {
-    uint32_t num_lanes = 2;
-    while(static_cast<int64_t>(num_lanes) < min_lanes && num_lanes < wavefront_size)
-    {
-        num_lanes *= 2;
-    }
-    return num_lanes;
 }
 
-rocsparse::cscsv_solve_buffer_t rocsparse::cscsv_solve_buffer(int64_t             m,
-                                                              int64_t             batch_count,
-                                                              rocsparse_indextype j_type,
-                                                              rocsparse_datatype  t_type)
+size_t rocsparse::cscsv_solve_buffer_layout_t::size() const
 {
-    rocsparse::cscsv_solve_buffer_t buffer;
-    buffer.ticket_size = rocsparse::align_size(sizeof(int32_t) * batch_count);
-    buffer.rem_size = rocsparse::align_size(rocsparse::indextype_sizeof(j_type) * m * batch_count);
-    buffer.sum_size = rocsparse::align_size(rocsparse::datatype_sizeof(t_type) * m * batch_count);
-    return buffer;
+    return this->m_ticket_size + this->m_rem_size + this->m_sum_size;
 }
 
-rocsparse_status rocsparse::cscsv_check_matrix(rocsparse_const_spmat_descr A)
+size_t rocsparse::cscsv_solve_buffer_layout_t::ticket_size() const
+{
+    return this->m_ticket_size;
+}
+
+int32_t* rocsparse::cscsv_solve_buffer_layout_t::ticket(void* buffer) const
+{
+    return reinterpret_cast<int32_t*>(buffer);
+}
+
+void* rocsparse::cscsv_solve_buffer_layout_t::rem(void* buffer) const
+{
+    return reinterpret_cast<char*>(buffer) + this->m_ticket_size;
+}
+
+void* rocsparse::cscsv_solve_buffer_layout_t::sum(void* buffer) const
+{
+    return reinterpret_cast<char*>(buffer) + this->m_ticket_size + this->m_rem_size;
+}
+
+rocsparse_status rocsparse::cscsv_checkarg_matrix_properties(rocsparse_const_spmat_descr A)
 {
     ROCSPARSE_CHECKARG(0, A, A->descr == nullptr, rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(0, A, (A->rows != A->cols), rocsparse_status_invalid_size);
@@ -67,19 +80,19 @@ rocsparse_status rocsparse::cscsv_check_matrix(rocsparse_const_spmat_descr A)
 rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                        rocsparse_operation         trans,
                                                        rocsparse_const_spmat_descr A,
-                                                       size_t*                     buffer_size)
+                                                       size_t* buffer_size_in_bytes)
 {
     ROCSPARSE_ROUTINE_TRACE;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
     if(trans == rocsparse_operation_none)
     {
-        buffer_size[0] = 0;
+        buffer_size_in_bytes[0] = 0;
         if(A->cols > 0)
         {
             rocsparse::cscsv_build_tasks_buffer_size_t launch;
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::cscsv_build_tasks_buffer_size_find(&launch, A->col_type));
-            RETURN_IF_ROCSPARSE_ERROR(launch(handle, A->cols, buffer_size));
+            RETURN_IF_ROCSPARSE_ERROR(launch(handle, A->cols, buffer_size_in_bytes));
         }
         return rocsparse_status_success;
     }
@@ -88,7 +101,7 @@ rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle         
     rocsparse::build_csr_from_csc(*A, mat_csr, descr_csr);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis_buffer_size(
-        handle, rocsparse::cscsv_operation_to_csr(trans), &mat_csr, buffer_size));
+        handle, rocsparse::cscsv_operation_to_csr(trans), &mat_csr, buffer_size_in_bytes));
     return rocsparse_status_success;
 }
 
@@ -97,15 +110,15 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
                                                     rocsparse_const_spmat_descr A,
                                                     rocsparse_const_dnvec_descr x,
                                                     rocsparse_const_dnvec_descr y,
-                                                    size_t*                     buffer_size)
+                                                    size_t* buffer_size_in_bytes)
 {
     ROCSPARSE_ROUTINE_TRACE;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_check_matrix(A));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
     if(trans == rocsparse_operation_none)
     {
-        buffer_size[0]
-            = rocsparse::cscsv_solve_buffer(A->cols, y->batch_count, A->row_type, A->data_type)
-                  .size();
+        buffer_size_in_bytes[0] = rocsparse::cscsv_solve_buffer_layout_t(
+                                      A->cols, y->batch_count, A->row_type, A->data_type)
+                                      .size();
         return rocsparse_status_success;
     }
     _rocsparse_mat_descr   descr_csr;
@@ -114,7 +127,7 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
 
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_buffer_size(
-        handle, rocsparse::cscsv_operation_to_csr(trans), &mat_csr, x, y, buffer_size));
+        handle, rocsparse::cscsv_operation_to_csr(trans), &mat_csr, x, y, buffer_size_in_bytes));
 #else
     // conjugate_transpose runs as a non-transposed CSR solve with on-the-fly
     // conjugation, which needs the same extra buffer space as transposition.
@@ -122,8 +135,8 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
                                               ? rocsparse_operation_transpose
                                               : rocsparse::cscsv_operation_to_csr(trans);
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csrsv_solve_buffer_size(handle, trans_csr, &mat_csr, x, y, buffer_size));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve_buffer_size(
+        handle, trans_csr, &mat_csr, x, y, buffer_size_in_bytes));
 #endif
     return rocsparse_status_success;
 }

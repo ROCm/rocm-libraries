@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_singularity.hpp"
 #include "rocsparse_utility.hpp"
@@ -71,4 +72,31 @@ rocsparse_status rocsparse::cscsv_zero_pivot(rocsparse_handle     handle,
         return (p != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success;
     }
     return rocsparse::csrsv_zero_pivot(handle, info->get_csrsv_info(), indextype, position);
+}
+
+rocsparse_status rocsparse::cscsv_seed_zero_pivot(rocsparse_handle     handle,
+                                                  rocsparse_indextype  indextype,
+                                                  rocsparse_diag_type  diag_type,
+                                                  int64_t              batch_count,
+                                                  rocsparse_cscsv_info info)
+{
+    hipStream_t stream = handle->stream;
+    info->create_singularity_numeric_exact(batch_count, indextype, stream);
+    void* zero_pivot = info->get_singularity_numeric_exact()->get_position();
+    if(diag_type == rocsparse_diag_type_unit)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+            info->get_batch_count(), indextype, info->get_position(), stream));
+    }
+    if(indextype == rocsparse_indextype_i32)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+            batch_count, (int32_t*)zero_pivot, (const int32_t*)info->get_position(), stream));
+    }
+    else
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+            batch_count, (int64_t*)zero_pivot, (const int64_t*)info->get_position(), stream));
+    }
+    return rocsparse_status_success;
 }

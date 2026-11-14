@@ -144,6 +144,9 @@ set(rocsparse_source
   #
   src/level2/rocsparse_cscsv_analysis.cpp
   src/level2/rocsparse_cscsv_buffer_size.cpp
+  src/level2/rocsparse_cscsv_build_tasks.cpp
+  src/level2/rocsparse_cscsv_diagonal_solve.cpp
+  src/level2/rocsparse_cscsv_init.cpp
   src/level2/rocsparse_cscsv_solve.cpp
   src/level2/rocsparse_cscsv_zero_pivot.cpp
   src/level2/rocsparse_csrsv.cpp
