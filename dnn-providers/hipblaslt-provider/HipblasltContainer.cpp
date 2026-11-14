@@ -20,6 +20,7 @@
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 #include "engines/conv/ConvReducedPrecision.hpp"
+#include "engines/conv/ConvRepackWorkspaceCap.hpp"
 #include "engines/conv/ConvTf32.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
@@ -73,14 +74,21 @@ HipblasltContainer::HipblasltContainer()
         HIPDNN_PLUGIN_LOG_INFO(CONV_RPR_ENV_NAME << " set: registering the reduced-precision-"
                                                     "reduction explicit-GEMM convolution engines");
     }
-    const auto addConvEngine = [this](int64_t engineId,
-                                      ConvGemmPlanBuilder::PlanFactory factory,
-                                      bool tf32,
-                                      ConvGemmPlanBuilder::NarrowPartials narrowPartials,
-                                      bool reducedPrecisionReduction = false) {
+    const size_t repackCap = repackWorkspaceCapBytes();
+    if(repackCap != MAX_REPACK_WORKSPACE_BYTES)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(CONV_REPACK_WORKSPACE_CAP_ENV_NAME
+                               << " set: explicit-GEMM convolution repack workspace cap "
+                               << repackCap << " bytes");
+    }
+    const auto addConvEngine = [this, repackCap](int64_t engineId,
+                                                 ConvGemmPlanBuilder::PlanFactory factory,
+                                                 bool tf32,
+                                                 ConvGemmPlanBuilder::NarrowPartials narrowPartials,
+                                                 bool reducedPrecisionReduction = false) {
         auto engine = std::make_unique<PlanBuilderEngine>(engineId);
         engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
-                                                                     MAX_REPACK_WORKSPACE_BYTES,
+                                                                     repackCap,
                                                                      tf32,
                                                                      reducedPrecisionReduction,
                                                                      false,
