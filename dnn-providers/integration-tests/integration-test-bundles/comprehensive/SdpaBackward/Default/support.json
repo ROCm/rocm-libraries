@@ -163,6 +163,16 @@
     "hipkernel:flydsl_sdpa_bwd_merged": [
       {
         "cases": [
+          "ap003_b2h3k3v3_72x40_d128_bfp16_brw9r8_dobshd_s0p35_v0to1_tolp",
+          "ap004_b2h3k3v3_72x40_d192_fp16_brcausal_gradsbshd_sunset_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap005_b2h3k3v3_56x56_d128_bfp16_tlr8_rowpad8_sunset_v0to1_tolu",
+          "ap008_b2h3k3v3_56x56_d128_fp16_tlw16rinf_bshd_s0p35_qm4to4_km4to4_tolu",
+          "ap010_b2h3k3v3_56x56_d128_fp16_tlw9r8_bshd_sunset_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap013_b2h3k3v3_56x56_d128_fp16_tlw16rinf_dobshd_sunset_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap014_b2h3k3v3_72x40_d192_bfp16_tlcausal_rowpad8_s0p35_v0to1_tolp",
+          "ap015_b2h3k3v3_72x40_d128_fp16_tlr8_gradsbshd_s0p35_qm4to4_km4to4_tolu",
+          "ap019_b2h3k3v3_56x56_d128_bfp16_tlw16_dobshd_sunset_v0to1_tolu",
+          "ap020_b2h3k3v3_40x72_d128_fp16_tlw16_dobshd_s0p35_v0to1_tolp",
           "gl19_fp16_none_tolp",
           "gl21_bfp16_cm_tlw128rinf_tolp",
           "h05_b1h1k1v1_511x512_d128_bfp16_none_told",
@@ -319,6 +329,16 @@
     "hipkernel:flydsl_sdpa_bwd_split": [
       {
         "cases": [
+          "ap003_b2h3k3v3_72x40_d128_bfp16_brw9r8_dobshd_s0p35_v0to1_tolp",
+          "ap004_b2h3k3v3_72x40_d192_fp16_brcausal_gradsbshd_sunset_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap005_b2h3k3v3_56x56_d128_bfp16_tlr8_rowpad8_sunset_v0to1_tolu",
+          "ap008_b2h3k3v3_56x56_d128_fp16_tlw16rinf_bshd_s0p35_qm4to4_km4to4_tolu",
+          "ap010_b2h3k3v3_56x56_d128_fp16_tlw9r8_bshd_sunset_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap013_b2h3k3v3_56x56_d128_fp16_tlw16rinf_dobshd_sunset_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "ap014_b2h3k3v3_72x40_d192_bfp16_tlcausal_rowpad8_s0p35_v0to1_tolp",
+          "ap015_b2h3k3v3_72x40_d128_fp16_tlr8_gradsbshd_s0p35_qm4to4_km4to4_tolu",
+          "ap019_b2h3k3v3_56x56_d128_bfp16_tlw16_dobshd_sunset_v0to1_tolu",
+          "ap020_b2h3k3v3_40x72_d128_fp16_tlw16_dobshd_s0p35_v0to1_tolp",
           "gl19_fp16_none_tolp",
           "gl20_bfp16_tlcausal_tolp",
           "gl21_bfp16_cm_tlw128rinf_tolp",
