@@ -141,6 +141,7 @@ namespace hiptensor
             using hiptensor::HiptensorOptions;
             auto& options = HiptensorOptions::instance();
 
+            ContractionMetrics problemMetrics;
             auto [errorCode, time] = (*solution)(&alpha,
                                                  A_d,
                                                  B_d,
@@ -168,14 +169,14 @@ namespace hiptensor
                                                      0, // log_level
                                                      options->coldRuns(), // cold_niters
                                                      options->hotRuns(), // nrepeat
-                                                 });
+                                                 },
+                                                 &problemMetrics);
             if(errorCode == HIPTENSOR_STATUS_SUCCESS && time > 0)
             {
                 // Make sure to time the kernels
-                int32_t m, n, k;
-                std::tie(m, n, k) = solution->problemDims();
-                auto flops        = std::size_t(2) * m * n * k;
-                auto bytes        = solution->problemBytes();
+                auto flops
+                    = std::size_t(2) * problemMetrics.mM * problemMetrics.mN * problemMetrics.mK;
+                auto bytes = problemMetrics.mBytes;
 
                 PerfMetrics metrics = {
                     solution->uid(), // id

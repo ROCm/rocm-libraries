@@ -20,6 +20,10 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Reduced build time by compiling library, test, and sample sources that define no GPU kernels for the host only, and by removing the unused CPU reference implementations from `libhiptensor.so`. They are now built only into the test suite's host reference library.
 
 ### Resolved issues
+* Fixed concurrent calls to `hiptensorContract`, `hiptensorContractTrinary`, `hiptensorPermute`, `hiptensorElementwiseBinaryExecute`, `hiptensorElementwiseTrinaryExecute`, and `hiptensorReduce` that select the same kernel crashing, returning another call's result, or returning `HIPTENSOR_STATUS_CK_ERROR`. Plan creation, workspace estimation, and plan cache autotuning are also now safe to call concurrently, and a plan can be executed by several threads at once.
+* Fixed `hiptensorContractTrinary` returning `HIPTENSOR_STATUS_INTERNAL_ERROR` on the first call of a plan created after the same problem was already in the plan cache.
+* Fixed `hiptensorContract` and the other execute functions searching every candidate kernel on each call when the plan cache already holds the plan's kernel.
+* Fixed `hiptensorReduce` reporting 0 TFlops/s and 0 GB/s in `HIPTENSOR_LOG_LEVEL_PERF_TRACE` logs.
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
 
 ## hipTensor 2.5.0 for ROCm 10.2

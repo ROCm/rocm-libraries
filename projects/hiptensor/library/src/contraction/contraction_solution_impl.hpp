@@ -84,32 +84,31 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(void const*                alpha,
-                      void const*                A,
-                      void const*                B,
-                      void const*                beta,
-                      void const*                D,
-                      void*                      E,
-                      std::vector<std::size_t>   a_ms_ks_lengths,
-                      std::vector<std::size_t>   a_ms_ks_strides,
-                      std::vector<int32_t>       a_ms_ks_modes,
-                      std::vector<std::size_t>   b_ns_ks_lengths,
-                      std::vector<std::size_t>   b_ns_ks_strides,
-                      std::vector<int32_t>       b_ns_ks_modes,
-                      std::vector<std::size_t>   ds_ms_ns_lengths,
-                      std::vector<std::size_t>   ds_ms_ns_strides,
-                      std::vector<int32_t>       ds_ms_ns_modes,
-                      std::vector<std::size_t>   e_ms_ns_lengths,
-                      std::vector<std::size_t>   e_ms_ns_strides,
-                      std::vector<int32_t>       e_ms_ns_modes,
-                      ContractionUnaryOps const& unaryOps,
-                      void*                      workspacePtr) override
+        ContractionArgs makeArgs(void const*                alpha,
+                                 void const*                A,
+                                 void const*                B,
+                                 void const*                beta,
+                                 void const*                D,
+                                 void*                      E,
+                                 std::vector<std::size_t>   a_ms_ks_lengths,
+                                 std::vector<std::size_t>   a_ms_ks_strides,
+                                 std::vector<int32_t>       a_ms_ks_modes,
+                                 std::vector<std::size_t>   b_ns_ks_lengths,
+                                 std::vector<std::size_t>   b_ns_ks_strides,
+                                 std::vector<int32_t>       b_ns_ks_modes,
+                                 std::vector<std::size_t>   ds_ms_ns_lengths,
+                                 std::vector<std::size_t>   ds_ms_ns_strides,
+                                 std::vector<int32_t>       ds_ms_ns_modes,
+                                 std::vector<std::size_t>   e_ms_ns_lengths,
+                                 std::vector<std::size_t>   e_ms_ns_strides,
+                                 std::vector<int32_t>       e_ms_ns_modes,
+                                 ContractionUnaryOps const& unaryOps,
+                                 void*                      workspacePtr) const override
         {
             using Base   = ContractionSolution;
             using Traits = MetaTraits<DeviceOp>;
 
-            // Clear out the previous arguments
-            resetArgs();
+            ContractionArgs args;
 
             // Promote to derived class for necessary functions such as
             // MakeArgumentPointer and MakeInvokerPointer.
@@ -173,7 +172,7 @@ namespace hiptensor
                       && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough> 
                       &&(std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::Bilinear> || std::is_same_v<typename Traits::CDEOp, ck::tensor_operation::element_wise::BilinearComplex>))
             {
-                Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     A,
                     B,
                     std::array<const void*, 1>{D},
@@ -192,7 +191,7 @@ namespace hiptensor
             }
             else
             {
-                Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
+                args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     A,
                     B,
                     std::array<const void*, 1>{D},
@@ -213,42 +212,45 @@ namespace hiptensor
             }
 
             // Attach the workspace pointer
-            deviceOp->SetWorkSpacePointer(Base::mInvokerArgPtr.get(), workspacePtr);
+            deviceOp->SetWorkSpacePointer(args.mInvokerArgPtr.get(), workspacePtr);
 
             // Initialize the invoker
-            Base::mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
+            args.mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
 
             // Fill problem metrics
-            Base::mM = std::accumulate(normal_a_ms_ks_lengths.begin(),
-                                       normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
-                                       ck::index_t{1},
-                                       std::multiplies<ck::index_t>{});
+            args.mMetrics.mM = std::accumulate(normal_a_ms_ks_lengths.begin(),
+                                               normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
+                                               ck::index_t{1},
+                                               std::multiplies<ck::index_t>{});
 
-            Base::mN = std::accumulate(normal_b_ns_ks_lengths.begin(),
-                                       normal_b_ns_ks_lengths.begin() + MaxNumDimsN,
-                                       ck::index_t{1},
-                                       std::multiplies<ck::index_t>{});
+            args.mMetrics.mN = std::accumulate(normal_b_ns_ks_lengths.begin(),
+                                               normal_b_ns_ks_lengths.begin() + MaxNumDimsN,
+                                               ck::index_t{1},
+                                               std::multiplies<ck::index_t>{});
 
-            Base::mK = std::accumulate(normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
-                                       normal_a_ms_ks_lengths.end(),
-                                       ck::index_t{1},
-                                       std::multiplies<ck::index_t>{});
+            args.mMetrics.mK = std::accumulate(normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
+                                               normal_a_ms_ks_lengths.end(),
+                                               ck::index_t{1},
+                                               std::multiplies<ck::index_t>{});
 
             // Byte count
-            Base::mBytes = sizeof(typename Traits::ADataT) * Base::mM * Base::mK
-                           + sizeof(typename Traits::BDataT) * Base::mK * Base::mN
-                           + sizeof(typename Traits::DDataT) * Base::mM * Base::mN
-                           + sizeof(typename Traits::EDataT) * Base::mM * Base::mN;
+            args.mMetrics.mBytes
+                = sizeof(typename Traits::ADataT) * args.mMetrics.mM * args.mMetrics.mK
+                  + sizeof(typename Traits::BDataT) * args.mMetrics.mK * args.mMetrics.mN
+                  + sizeof(typename Traits::DDataT) * args.mMetrics.mM * args.mMetrics.mN
+                  + sizeof(typename Traits::EDataT) * args.mMetrics.mM * args.mMetrics.mN;
 
             // Arg test
-            Base::mValid = deviceOp->IsSupportedArgument(Base::mInvokerArgPtr.get());
+            args.mValid = deviceOp->IsSupportedArgument(args.mInvokerArgPtr.get());
 
-            if(!Base::mValid)
+            if(!args.mValid)
             {
-                resetArgs();
+                return {};
             }
 
-            return Base::mValid;
+            args.mMetrics.mWorkspaceSize = deviceOp->GetWorkSpaceSize(args.mInvokerArgPtr.get());
+
+            return args;
         }
     };
 
@@ -268,32 +270,31 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(void const*                alpha,
-                      void const*                A,
-                      void const*                B,
-                      void const*                beta,
-                      void const*                D,
-                      void*                      E,
-                      std::vector<std::size_t>   a_ms_ks_lengths,
-                      std::vector<std::size_t>   a_ms_ks_strides,
-                      std::vector<int32_t>       a_ms_ks_modes,
-                      std::vector<std::size_t>   b_ns_ks_lengths,
-                      std::vector<std::size_t>   b_ns_ks_strides,
-                      std::vector<int32_t>       b_ns_ks_modes,
-                      std::vector<std::size_t>   ds_ms_ns_lengths,
-                      std::vector<std::size_t>   ds_ms_ns_strides,
-                      std::vector<int32_t>       ds_ms_ns_modes,
-                      std::vector<std::size_t>   e_ms_ns_lengths,
-                      std::vector<std::size_t>   e_ms_ns_strides,
-                      std::vector<int32_t>       e_ms_ns_modes,
-                      ContractionUnaryOps const& unaryOps,
-                      void*                      workspacePtr) override
+        ContractionArgs makeArgs(void const*                alpha,
+                                 void const*                A,
+                                 void const*                B,
+                                 void const*                beta,
+                                 void const*                D,
+                                 void*                      E,
+                                 std::vector<std::size_t>   a_ms_ks_lengths,
+                                 std::vector<std::size_t>   a_ms_ks_strides,
+                                 std::vector<int32_t>       a_ms_ks_modes,
+                                 std::vector<std::size_t>   b_ns_ks_lengths,
+                                 std::vector<std::size_t>   b_ns_ks_strides,
+                                 std::vector<int32_t>       b_ns_ks_modes,
+                                 std::vector<std::size_t>   ds_ms_ns_lengths,
+                                 std::vector<std::size_t>   ds_ms_ns_strides,
+                                 std::vector<int32_t>       ds_ms_ns_modes,
+                                 std::vector<std::size_t>   e_ms_ns_lengths,
+                                 std::vector<std::size_t>   e_ms_ns_strides,
+                                 std::vector<int32_t>       e_ms_ns_modes,
+                                 ContractionUnaryOps const& unaryOps,
+                                 void*                      workspacePtr) const override
         {
             using Base   = ContractionSolution;
             using Traits = MetaTraits<DeviceOp>;
 
-            // Clear previous data
-            resetArgs();
+            ContractionArgs args;
 
             // Promote to derived class for necessary functions such as
             // MakeArgumentPointer and MakeInvokerPointer.
@@ -350,7 +351,7 @@ namespace hiptensor
                     ck::tensor_operation::element_wise::
                         PassThrough> && std::is_same_v<typename Traits::BOp, ck::tensor_operation::element_wise::PassThrough>)
             {
-                Base::mInvokerArgPtr = std::move(
+                args.mInvokerArgPtr = std::move(
                     deviceOp->MakeArgumentPointer(A,
                                                   B,
                                                   std::array<const void*, 0>{},
@@ -369,7 +370,7 @@ namespace hiptensor
             }
             else
             {
-                Base::mInvokerArgPtr = std::move(
+                args.mInvokerArgPtr = std::move(
                     deviceOp->MakeArgumentPointer(A,
                                                   B,
                                                   std::array<const void*, 0>{},
@@ -388,41 +389,44 @@ namespace hiptensor
             }
 
             // Attach the workspace pointer
-            deviceOp->SetWorkSpacePointer(Base::mInvokerArgPtr.get(), workspacePtr);
+            deviceOp->SetWorkSpacePointer(args.mInvokerArgPtr.get(), workspacePtr);
 
             // Initialize the invoker
-            Base::mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
+            args.mInvokerPtr = std::move(deviceOp->MakeInvokerPointer());
 
             // Fill problem metrics
-            Base::mM = std::accumulate(normal_a_ms_ks_lengths.begin(),
-                                       normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
-                                       ck::index_t{1},
-                                       std::multiplies<ck::index_t>{});
+            args.mMetrics.mM = std::accumulate(normal_a_ms_ks_lengths.begin(),
+                                               normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
+                                               ck::index_t{1},
+                                               std::multiplies<ck::index_t>{});
 
-            Base::mN = std::accumulate(normal_b_ns_ks_lengths.begin(),
-                                       normal_b_ns_ks_lengths.begin() + MaxNumDimsN,
-                                       ck::index_t{1},
-                                       std::multiplies<ck::index_t>{});
+            args.mMetrics.mN = std::accumulate(normal_b_ns_ks_lengths.begin(),
+                                               normal_b_ns_ks_lengths.begin() + MaxNumDimsN,
+                                               ck::index_t{1},
+                                               std::multiplies<ck::index_t>{});
 
-            Base::mK = std::accumulate(normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
-                                       normal_a_ms_ks_lengths.end(),
-                                       ck::index_t{1},
-                                       std::multiplies<ck::index_t>{});
+            args.mMetrics.mK = std::accumulate(normal_a_ms_ks_lengths.begin() + MaxNumDimsM,
+                                               normal_a_ms_ks_lengths.end(),
+                                               ck::index_t{1},
+                                               std::multiplies<ck::index_t>{});
 
             // Byte count
-            Base::mBytes = sizeof(typename Traits::ADataT) * Base::mM * Base::mK
-                           + sizeof(typename Traits::BDataT) * Base::mK * Base::mN
-                           + sizeof(typename Traits::EDataT) * Base::mM * Base::mN;
+            args.mMetrics.mBytes
+                = sizeof(typename Traits::ADataT) * args.mMetrics.mM * args.mMetrics.mK
+                  + sizeof(typename Traits::BDataT) * args.mMetrics.mK * args.mMetrics.mN
+                  + sizeof(typename Traits::EDataT) * args.mMetrics.mM * args.mMetrics.mN;
 
             // Arg test
-            Base::mValid = deviceOp->IsSupportedArgument(Base::mInvokerArgPtr.get());
+            args.mValid = deviceOp->IsSupportedArgument(args.mInvokerArgPtr.get());
 
-            if(!Base::mValid)
+            if(!args.mValid)
             {
-                resetArgs();
+                return {};
             }
 
-            return Base::mValid;
+            args.mMetrics.mWorkspaceSize = deviceOp->GetWorkSpaceSize(args.mInvokerArgPtr.get());
+
+            return args;
         }
     };
 

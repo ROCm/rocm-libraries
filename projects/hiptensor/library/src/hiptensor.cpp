@@ -796,7 +796,7 @@ hiptensorStatus_t hiptensorCreatePlanPreference(const hiptensorHandle_t    handl
     (*pref)->mJit              = jitMode;
 
     (*pref)->mSelectionAlgorithm = algo;
-    (*pref)->mSolution           = nullptr;
+    (*pref)->mSolution.store(nullptr);
 
     return HIPTENSOR_STATUS_SUCCESS;
 }

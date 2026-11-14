@@ -204,13 +204,8 @@ namespace hiptensor
     ContractionSolution::ContractionSolution(
         std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp,
         std::unique_ptr<ContractionSolutionParams>&&                  params)
-        : mM(0)
-        , mN(0)
-        , mK(0)
-        , mBytes(0)
-        , mValid(false)
+        : mParams(std::move(params))
         , mDeviceOp(std::move(deviceOp))
-        , mParams(std::move(params))
     {
     }
 
@@ -236,46 +231,48 @@ namespace hiptensor
                                         ContractionUnaryOps const& unaryOps,
                                         void*                      workspacePtr,
                                         unsigned long              workspaceSize,
-                                        StreamConfig const& streamConfig /*= StreamConfig{}*/)
+                                        StreamConfig const& streamConfig /*= StreamConfig{}*/,
+                                        ContractionMetrics* metrics /*= nullptr*/) const
     {
-        if(!initArgs(alpha,
-                     A,
-                     B,
-                     beta,
-                     D,
-                     E,
-                     a_ms_ns_lengths,
-                     a_ms_ks_strides,
-                     a_ms_ks_modes,
-                     b_ns_ks_lengths,
-                     b_ns_ks_strides,
-                     b_ns_ks_modes,
-                     ds_ms_ns_lengths,
-                     ds_ms_ns_strides,
-                     ds_ms_ns_modes,
-                     e_ms_ns_lengths,
-                     e_ms_ns_strides,
-                     e_ms_ns_modes,
-                     unaryOps,
-                     workspacePtr))
+        auto args = makeArgs(alpha,
+                             A,
+                             B,
+                             beta,
+                             D,
+                             E,
+                             a_ms_ns_lengths,
+                             a_ms_ks_strides,
+                             a_ms_ks_modes,
+                             b_ns_ks_lengths,
+                             b_ns_ks_strides,
+                             b_ns_ks_modes,
+                             ds_ms_ns_lengths,
+                             ds_ms_ns_strides,
+                             ds_ms_ns_modes,
+                             e_ms_ns_lengths,
+                             e_ms_ns_strides,
+                             e_ms_ns_modes,
+                             unaryOps,
+                             workspacePtr);
+
+        if(metrics != nullptr)
+        {
+            *metrics = args.mMetrics;
+        }
+
+        if(!args.mValid)
         {
             return {HIPTENSOR_STATUS_INTERNAL_ERROR, -1.0f};
         }
 
-        if(this->workspaceSize() > workspaceSize)
+        if(args.mMetrics.mWorkspaceSize > workspaceSize)
         {
-            resetInvokerArgs();
             return {HIPTENSOR_STATUS_INSUFFICIENT_WORKSPACE, -1.0f};
         }
-        auto time = mInvokerPtr->Run(mInvokerArgPtr.get(), streamConfig);
-        resetInvokerArgs();
+
+        auto time = args.mInvokerPtr->Run(args.mInvokerArgPtr.get(), streamConfig);
 
         return {HIPTENSOR_STATUS_SUCCESS, time};
-    }
-
-    bool ContractionSolution::isValid() const
-    {
-        return mValid;
     }
 
     std::unique_ptr<ContractionSolutionParams> const& ContractionSolution::params() const
@@ -301,48 +298,8 @@ namespace hiptensor
                       params->opCDE());
     }
 
-    std::tuple<ck::index_t, ck::index_t, ck::index_t> ContractionSolution::problemDims() const
-    {
-        return std::make_tuple(mM, mN, mK);
-    }
-
-    std::size_t ContractionSolution::problemBytes() const
-    {
-        return mBytes;
-    }
-
     std::string ContractionSolution::kernelName() const
     {
         return mDeviceOp->GetTypeString();
-    }
-
-    size_t ContractionSolution::workspaceSize() const
-    {
-        if(mValid)
-        {
-            return mDeviceOp->GetWorkSpaceSize(mInvokerArgPtr.get());
-        }
-        else
-        {
-            return 0;
-        }
-    }
-
-    void ContractionSolution::resetArgs()
-    {
-        mM     = 0;
-        mN     = 0;
-        mK     = 0;
-        mBytes = 0;
-
-        mInvokerArgPtr.reset(nullptr);
-        mInvokerPtr.reset(nullptr);
-
-        mValid = false;
-    }
-
-    void ContractionSolution::resetInvokerArgs()
-    {
-        mInvokerArgPtr.reset(nullptr);
     }
 } // namespace hiptensor
