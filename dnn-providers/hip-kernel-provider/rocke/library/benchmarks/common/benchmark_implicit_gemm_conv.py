@@ -5543,25 +5543,14 @@ def _fast_rank_candidates(
                 flush=True,
             )
             continue
-        if direction == "wgrad" and ident.streamk != "off":
-            # A stream-K binary partitions K over its CTA pool itself; the
-            # split-K kernarg is not its knob, so it ranks once.
-            degrees = (None,)
-        elif direction in ("wgrad", "fwd") and ident.split_k > 1:
-            # A split-K forward binary takes its degree as a kernarg too, so
-            # it ranks once per degree like wgrad's.
-            degrees = _runtime_split_ks(
-                problem, ident, args.split_k, args.split_k_degrees
+        degrees = _fast_rank_degrees(direction, problem, ident, args)
+        if not degrees:
+            print(
+                f"  [skip] {ident.label()}: no split-K degree fits this "
+                f"problem (see --split-k)",
+                flush=True,
             )
-            if not degrees:
-                print(
-                    f"  [skip] {ident.label()}: no split-K degree fits this "
-                    f"problem (see --split-k)",
-                    flush=True,
-                )
-                continue
-        else:
-            degrees = (None,)
+            continue
         for split_k in degrees:
             items.append((ident, hsaco_path, meta, split_k))
 
@@ -6245,6 +6234,25 @@ def _fwd_cluster_split_pays(problem, ident) -> bool:
         and tiles < _FWD_SPLIT_K_CLUSTER_MAX_TILES
         and args_.gemm_k >= _FWD_SPLIT_K_CLUSTER_MIN_GEMM_K
     )
+
+
+def _fast_rank_degrees(direction, problem, ident, args) -> tuple:
+    """Degrees ``--fast-rank`` ranks one cached binary at.
+
+    ``(None,)`` for a binary launched without a split-K degree; ``()`` when it
+    is a split-K binary no degree of which fits ``problem`` (the caller skips
+    it). A split-K wgrad or forward binary is one kernel for every degree > 1
+    (the degree is a kernarg), so it ranks at each degree it can use, as the
+    serial path times it. The forward one has no default degree to fall back
+    on: offered without one, its launch is refused and the binary skipped.
+    """
+    if direction == "wgrad" and ident.streamk != "off":
+        # A stream-K binary partitions K over its CTA pool itself; the
+        # split-K kernarg is not its knob, so it ranks once.
+        return (None,)
+    if direction in ("wgrad", "fwd") and ident.split_k > 1:
+        return _runtime_split_ks(problem, ident, args.split_k, args.split_k_degrees)
+    return (None,)
 
 
 def _runtime_split_ks(

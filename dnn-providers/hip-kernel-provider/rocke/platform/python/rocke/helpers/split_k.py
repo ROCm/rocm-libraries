@@ -51,11 +51,21 @@ GFX950_TARGET_CTAS = GFX950_NUM_XCDS * GFX950_CU_PER_XCD  # 256
 # ``ArchTarget``. Public: library kernels size their launches from it (conv
 # split-K, attention decode); read it through :func:`num_cus` unless "is the
 # arch in the table" is the question.
+# The other gfx11 processors (gfx1101, gfx1102, gfx1103, gfx1150, gfx1152,
+# gfx1153, gfx1154) are left out on purpose: the repo's arch data has no CU
+# count for them, so they take DEFAULT_NUM_CUS until a count is sourced.
+# base_arch_from_target_id keeps their own names (it does not map them to
+# gfx11-generic). The C++ mirror is wgrad_arch_num_cus.
 ARCH_NUM_CUS: Mapping[str, int] = MappingProxyType(
     {
         "gfx942": 304,  # MI300X: 8 XCDs * 38 CUs
         "gfx950": 256,  # MI350X: 8 XCDs * 32 CUs
         "gfx1151": 64,  # RDNA gfx1151 (WMMA)
+        "gfx1201": 64,  # RDNA4 Navi48
+        "gfx1200": 32,  # RDNA4 Navi44
+        "gfx12-generic": 64,  # one binary for gfx1200/gfx1201: the larger part
+        "gfx1100": 96,  # RDNA3 Navi31
+        "gfx11-generic": 96,  # one binary for gfx1100-gfx1153: the largest part
     }
 )
 # The count assumed for an arch the table does not list.

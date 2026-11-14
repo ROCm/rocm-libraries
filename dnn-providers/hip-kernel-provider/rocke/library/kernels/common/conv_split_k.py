@@ -138,6 +138,11 @@ _ARCH_NUM_XCDS: dict[str, int] = {
     "gfx942": 8,
     "gfx950": 8,
     "gfx1151": 1,
+    "gfx1201": 1,
+    "gfx1200": 1,
+    "gfx12-generic": 1,
+    "gfx1100": 1,
+    "gfx11-generic": 1,
 }
 _DEFAULT_NUM_XCDS = 1
 
