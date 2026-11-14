@@ -18,6 +18,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 | `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 | `hip/conv_dw3d_rdna/` | `hipkernel:hip_conv_fwd_dw3d_rdna` | `packs/HipConvFwdDw3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
+| `hip/conv_dw2d_rdna/` | `hipkernel:hip_conv_fwd_dw2d_rdna` | `packs/HipConvFwdDw2dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
@@ -45,6 +46,12 @@ regenerate rather than editing the JSON.
 specialized at compile time on the filter, H / W stride and output tile for common shapes,
 plus one generic variant per dtype and layout. Its descriptors are generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_dw3d_rdna.yaml`.
+
+`hip/conv_dw2d_rdna/` holds the depthwise 2-D kernel (`kernels/ConvFwdDepthwise2d.cpp`), which
+also serves 1-D convs as 1xK: variants specialized at compile time on the filter, padding,
+stride and dilation for common shapes. Its generic variants, one per dtype and layout, build
+the generic kernel of `hip/conv_dw3d_rdna/` with depth 1. Its descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_dw2d_rdna.yaml`.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in

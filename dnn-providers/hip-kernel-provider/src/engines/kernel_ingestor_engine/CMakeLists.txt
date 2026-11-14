@@ -22,6 +22,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvRdnaCommon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/HipConvFwdFmaIgemmRdnaNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/HipConvFwdDw3dRdnaNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/HipConvFwdDw2dRdnaNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx942AttentionUnified3dNative.cpp

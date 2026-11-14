@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "673f2a9d-2f4b-466c-bb0f-901727ad28cf",
+  "name": "hipkernel:hip_conv_fwd_dw2d_rdna",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.hip_conv_fwd_dw2d_rdna.graph_match"
+  },
+  "metadata": "34a5684d-a873-4e5d-a6cb-a02241d0b18c",
+  "sort_kernel_catalog": {
+    "default": "3abc7e64-5c10-4ed5-bafe-c33c64422433"
+  }
+}
