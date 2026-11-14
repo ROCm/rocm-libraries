@@ -64,19 +64,19 @@ This table lists all operations supported in hipDNN:
    * - Convolution Dgrad
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only², explicit ``dx`` dimensions⁶
+     - Cross-correlation only², explicit ``dx`` dimensions⁶, applicability limits⁸
    * - Convolution Forward
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only²
+     - Cross-correlation only², applicability limits⁸
    * - Convolution Forward + (Bias) + Activation⁵
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
-     - Fused graph²³
+     - Fused graph²³, applicability limits⁸
    * - Convolution Wgrad
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only², explicit ``dw`` dimensions⁶
+     - Cross-correlation only², explicit ``dw`` dimensions⁶, applicability limits⁸
    * - Pointwise Activation (standalone)
      - ``FP16``, ``FP32``
      - NCHW, NHWC
@@ -88,7 +88,7 @@ This table lists all operations supported in hipDNN:
 
 .. note::
 
-  - For annotations ¹ through ⁴, ⁶ and ⁷, see :ref:`operations`.
+  - For annotations ¹ through ⁴, ⁶, ⁷ and ⁸, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -116,6 +116,10 @@ Bias node (optional)
 - Output tensor
     - Virtual
     - Data type: ``FP32`` or the input data type
+- Bias operand (the ADD operand that is not the convolution output)
+
+    - Dims: ``[1, K, 1, ..]``, where K is the convolution output channel count and the rank equals the rank of the convolution output
+    - Data type: the input data type
 
 Activation node
 ~~~~~~~~~~~~~~~
@@ -148,6 +152,15 @@ Operation notes
 - **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
 - **ReLU Parameters**: An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope, so equivalent encodings select the same MIOpen activation. A non-zero ``relu_lower_clip`` without an upper clip is not supported.
 - ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
+- ⁸ **Convolution Applicability**: The plugin declines the convolution graphs below. A declined graph falls to another engine, or no engine is found for it. These are limits of the plugin's MIOpen-backed convolution engines, not errors in the graph: for these graphs MIOpen offers a solver that returns wrong output or faults.
+
+  - **Data type** (forward, backward data, backward weights): the three tensors (``x``, ``w``, ``y``; ``dy``, ``w``, ``dx``; ``x``, ``dy``, ``dw``) must share one data type, ``FP32``, ``FP16`` or ``BFP16``.
+  - **Layout** (forward, backward data, backward weights): the three tensors must share one layout: all channels-first (NCL, NCHW, NCDHW) or all channels-last (NLC, NHWC, NDHWC). A packed tensor is judged by its exact canonical strides, including those of extent-1 dimensions; a non-packed tensor is judged by its stride order.
+  - **Packing, forward**: all three tensors must be packed (the strides address exactly the element count).
+  - **Packing, backward data and backward weights**: a channels-first non-packed tensor is accepted; a channels-last non-packed tensor is declined.
+  - **Size, backward data**: ``dy`` and ``dx`` must each have at most 2^31 - 1 elements.
+  - **Fused Convolution Forward + (Bias) + Activation**: the bias operand must have dims ``[1, K, 1, ..]`` (K = convolution output channels, same rank as the output) and the data type of ``x``. An ADD with any other operand, for example a residual of the output's shape, is not treated as a bias and the graph is declined.
+
 - **Sparse Support**: All operations only work with dense tensors.
 
 Knobs

@@ -1,12 +1,16 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <exception>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "MiopenApi.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -18,8 +22,10 @@
 
 #include "HipdnnMiopenHandle.hpp"
 #include "common/ConvolutionCommon.hpp"
+#include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
+#include "engines/plans/MiopenConvWrwPlan.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
@@ -200,6 +206,522 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
         const bool applicable = _planBuilder.isApplicable(*_handle, graph);
         EXPECT_TRUE(applicable);
     }
+}
+
+// True when MIOpen itself reports a forward solution for the graph. The decline tests below only
+// mean something when it does: otherwise MIOpen rejects the graph on its own and the provider's
+// check is never exercised.
+static bool miopenReportsForwardSolution(const HipdnnMiopenHandle& handle, const IGraph& graph)
+{
+    try
+    {
+        const auto& attr
+            = graph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
+        const ConvFwdParams params(attr, graph.getTensorMap());
+
+        size_t solutionCount = 0;
+        const auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                                     params.w().tensorDescriptor(),
+                                                                     params.x().tensorDescriptor(),
+                                                                     params.conv().convDescriptor(),
+                                                                     params.y().tensorDescriptor(),
+                                                                     &solutionCount);
+        return status == miopenStatusSuccess && solutionCount != 0;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
+// The graph builders give all three tensors one data type; this sets them individually, in the
+// order the tensors appear in the graph.
+static void setConvTensorTypes(const flatbuffers::FlatBufferBuilder& builder,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType firstType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType secondType,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType thirdType)
+{
+    auto* mutableTensors
+        = hipdnn_flatbuffers_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer())
+              ->mutable_tensors();
+    EXPECT_TRUE(mutableTensors->GetMutableObject(0)->mutate_data_type(firstType));
+    EXPECT_TRUE(mutableTensors->GetMutableObject(1)->mutate_data_type(secondType));
+    EXPECT_TRUE(mutableTensors->GetMutableObject(2)->mutate_data_type(thirdType));
+}
+
+// Controls: a uniform packed forward convolution (one data type, x, w and y all channels-first or
+// all channels-last) stays applicable.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForwardTensors)
+{
+    const std::vector<int64_t> xDims = {2, 4, 8, 8};
+    const std::vector<int64_t> wDims = {4, 4, 3, 3};
+    const std::vector<int64_t> yDims = {2, 4, 6, 6};
+
+    // MIOpen offers no solution for some of these combinations on some architectures; such a
+    // combination says nothing about the provider and is left out (the test is skipped only when
+    // every combination is).
+    size_t checkedCount = 0;
+
+    for(const bool channelsLast : {false, true})
+    {
+        const auto strides = [channelsLast](const std::vector<int64_t>& dims) {
+            return channelsLast
+                       ? hipdnn_data_sdk::utilities::generateStrides(
+                             dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
+                       : hipdnn_data_sdk::utilities::generateStrides(dims);
+        };
+
+        for(const auto dataType : {hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16})
+        {
+            SCOPED_TRACE(std::string(channelsLast ? "channels-last " : "channels-first ")
+                         + hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
+
+            auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
+                                                                               strides(xDims),
+                                                                               wDims,
+                                                                               strides(wDims),
+                                                                               yDims,
+                                                                               strides(yDims),
+                                                                               {0, 0},
+                                                                               {0, 0},
+                                                                               {1, 1},
+                                                                               {1, 1},
+                                                                               dataType);
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                builder.GetBufferPointer(), builder.GetSize());
+
+            if(!miopenReportsForwardSolution(*_handle, graph))
+            {
+                continue;
+            }
+
+            ++checkedCount;
+            EXPECT_TRUE(_planBuilder.isApplicable(*_handle, graph));
+        }
+    }
+
+    if(checkedCount == 0)
+    {
+        GTEST_SKIP() << "MIOpen reports no solution for any uniform packed forward graph";
+    }
+}
+
+// ALMIOPEN-3017: x channels-first, w channels-last, y channels-first (the F15 1D bf16 shape).
+// MIOpen reports a solution and Find may pick a solver that computes this wrongly.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutForward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+        {8, 16, 16},
+        {256, 16, 1},
+        {32, 16, 1},
+        {16, 1, 16},
+        {8, 32, 16},
+        {512, 16, 1},
+        {0},
+        {0},
+        {1},
+        {1},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsForwardSolution(*_handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph));
+}
+
+// ALMIOPEN-3018: x with padded rows (strides keep the channels-first order, so the layout is
+// uniform) next to packed w and y.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedForward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph({2, 4, 8, 8},
+                                                                       {512, 128, 16, 1},
+                                                                       {4, 4, 3, 3},
+                                                                       {36, 9, 3, 1},
+                                                                       {2, 4, 6, 6},
+                                                                       {144, 36, 6, 1},
+                                                                       {0, 0},
+                                                                       {0, 0},
+                                                                       {1, 1},
+                                                                       {1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsForwardSolution(*_handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph));
+}
+
+// ALMIOPEN-3015: x and w HALF with y FLOAT, layouts uniform and packed. MIOpen reports a solution
+// and then fails at execution or returns garbage.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeForward)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+        {2, 4, 8, 8},
+        {256, 64, 8, 1},
+        {4, 4, 3, 3},
+        {36, 9, 3, 1},
+        {2, 4, 6, 6},
+        {144, 36, 6, 1},
+        {0, 0},
+        {0, 0},
+        {1, 1},
+        {1, 1},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    setConvTensorTypes(builder,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsForwardSolution(*_handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_handle, graph));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Backward data and backward weights
+// ---------------------------------------------------------------------------------------------
+
+using ConvDataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+enum class BackwardKind
+{
+    DATA,
+    WEIGHTS
+};
+
+struct BackwardTensor
+{
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+};
+
+// The tensors of a 2D backward convolution (unit stride, no padding, no dilation) in backward-data
+// roles. Backward weights poses the same problem: x has the shape of dx and dw the shape of w.
+struct BackwardGraphSpec
+{
+    BackwardTensor dy;
+    BackwardTensor w;
+    BackwardTensor dx;
+    ConvDataType dataType = ConvDataType::FLOAT;
+};
+
+static std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool channelsLastLayout)
+{
+    return channelsLastLayout ? hipdnn_data_sdk::utilities::generateStrides(
+                                    dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
+                              : hipdnn_data_sdk::utilities::generateStrides(dims);
+}
+
+static BackwardGraphSpec uniformPackedSpec(bool channelsLastLayout,
+                                           ConvDataType dataType = ConvDataType::FLOAT)
+{
+    const std::vector<int64_t> dyDims = {2, 4, 6, 6};
+    const std::vector<int64_t> wDims = {4, 4, 3, 3};
+    const std::vector<int64_t> dxDims = {2, 4, 8, 8};
+
+    return {{dyDims, packedStrides(dyDims, channelsLastLayout)},
+            {wDims, packedStrides(wDims, channelsLastLayout)},
+            {dxDims, packedStrides(dxDims, channelsLastLayout)},
+            dataType};
+}
+
+// dy and dx channels-first, w channels-last (the F15 2D bf16 shape).
+static BackwardGraphSpec mixedLayoutSpec()
+{
+    return {{{2, 32, 14, 14}, {6272, 196, 14, 1}},
+            {{32, 16, 3, 3}, {144, 1, 48, 16}},
+            {{2, 16, 16, 16}, {4096, 256, 16, 1}},
+            ConvDataType::BFLOAT16};
+}
+
+// All channels-last, dx with padded rows.
+static BackwardGraphSpec channelsLastNonPackedSpec()
+{
+    return {{{2, 4, 6, 6}, {144, 1, 24, 4}},
+            {{4, 4, 3, 3}, {36, 1, 12, 4}},
+            {{2, 4, 8, 8}, {320, 1, 40, 4}},
+            ConvDataType::FLOAT};
+}
+
+// All channels-first, dx with padded rows.
+static BackwardGraphSpec channelsFirstNonPackedSpec()
+{
+    return {{{2, 4, 6, 6}, {144, 36, 6, 1}},
+            {{4, 4, 3, 3}, {36, 9, 3, 1}},
+            {{2, 4, 8, 8}, {512, 128, 16, 1}},
+            ConvDataType::FLOAT};
+}
+
+// A single-channel 46341 x 46341 image as dy and dx (2,147,488,281 elements) with a 1x1 filter.
+static BackwardGraphSpec aboveSizeLimitSpec()
+{
+    const std::vector<int64_t> imageDims = {1, 1, 46341, 46341};
+    const std::vector<int64_t> filterDims = {1, 1, 1, 1};
+
+    return {{imageDims, packedStrides(imageDims, /*channelsLastLayout=*/false)},
+            {filterDims, packedStrides(filterDims, /*channelsLastLayout=*/false)},
+            {imageDims, packedStrides(imageDims, /*channelsLastLayout=*/false)},
+            ConvDataType::HALF};
+}
+
+static flatbuffers::FlatBufferBuilder createBackwardGraph(BackwardKind kind,
+                                                          const BackwardGraphSpec& spec)
+{
+    if(kind == BackwardKind::DATA)
+    {
+        return hipdnn_test_sdk::utilities::createValidConvBwdGraph(spec.dx.dims,
+                                                                   spec.dx.strides,
+                                                                   spec.w.dims,
+                                                                   spec.w.strides,
+                                                                   spec.dy.dims,
+                                                                   spec.dy.strides,
+                                                                   {0, 0},
+                                                                   {0, 0},
+                                                                   {1, 1},
+                                                                   {1, 1},
+                                                                   spec.dataType);
+    }
+    return hipdnn_test_sdk::utilities::createValidConvWrwGraph(spec.dx.dims,
+                                                               spec.dx.strides,
+                                                               spec.w.dims,
+                                                               spec.w.strides,
+                                                               spec.dy.dims,
+                                                               spec.dy.strides,
+                                                               {0, 0},
+                                                               {0, 0},
+                                                               {1, 1},
+                                                               {1, 1},
+                                                               spec.dataType);
+}
+
+// True when MIOpen itself reports a backward solution for the graph. The decline tests only mean
+// something when it does: otherwise MIOpen rejects the graph on its own and the provider's check
+// is never exercised.
+static bool miopenReportsBackwardSolution(BackwardKind kind,
+                                          const HipdnnMiopenHandle& handle,
+                                          const IGraph& graph)
+{
+    try
+    {
+        size_t solutionCount = 0;
+        if(kind == BackwardKind::DATA)
+        {
+            const auto& attr
+                = graph.getNodeWrapper(0)
+                      .attributesAs<
+                          hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
+            const ConvBwdParams params(attr, graph.getTensorMap());
+
+            const auto status
+                = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+                                                                params.dy().tensorDescriptor(),
+                                                                params.w().tensorDescriptor(),
+                                                                params.conv().convDescriptor(),
+                                                                params.dx().tensorDescriptor(),
+                                                                &solutionCount);
+            return status == miopenStatusSuccess && solutionCount != 0;
+        }
+
+        const auto& attr
+            = graph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
+        const ConvWrwParams params(attr, graph.getTensorMap());
+
+        const auto status
+            = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+                                                               params.dy().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.dw().tensorDescriptor(),
+                                                               &solutionCount);
+        return status == miopenStatusSuccess && solutionCount != 0;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
+// The provider must decline a graph MIOpen would otherwise run. Skipped when MIOpen declines it
+// by itself.
+static void expectBackwardDeclined(const MiopenConvPlanBuilder& planBuilder,
+                                   const HipdnnMiopenHandle& handle,
+                                   BackwardKind kind,
+                                   const flatbuffers::FlatBufferBuilder& builder)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsBackwardSolution(kind, handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(planBuilder.isApplicable(handle, graph));
+}
+
+// The provider must keep a graph MIOpen offers a solution for. Skipped when MIOpen has none, so a
+// MIOpen limitation is not reported as a provider failure.
+static void expectBackwardApplicable(const MiopenConvPlanBuilder& planBuilder,
+                                     const HipdnnMiopenHandle& handle,
+                                     BackwardKind kind,
+                                     const flatbuffers::FlatBufferBuilder& builder)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsBackwardSolution(kind, handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen reports no solution for this graph";
+    }
+
+    EXPECT_TRUE(planBuilder.isApplicable(handle, graph));
+}
+
+// Controls: a uniform packed backward convolution (one data type, all tensors channels-first or
+// all channels-last) stays applicable, for backward data and backward weights.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedBackwardTensors)
+{
+    // MIOpen offers no solution for some of these combinations on some architectures; such a
+    // combination says nothing about the provider and is left out (the test is skipped only when
+    // every combination is).
+    size_t checkedCount = 0;
+
+    for(const auto kind : {BackwardKind::DATA, BackwardKind::WEIGHTS})
+    {
+        for(const bool channelsLastLayout : {false, true})
+        {
+            for(const auto dataType :
+                {ConvDataType::FLOAT, ConvDataType::HALF, ConvDataType::BFLOAT16})
+            {
+                SCOPED_TRACE(
+                    std::string(kind == BackwardKind::DATA ? "backward data " : "backward weights ")
+                    + (channelsLastLayout ? "channels-last " : "channels-first ")
+                    + hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
+
+                auto builder
+                    = createBackwardGraph(kind, uniformPackedSpec(channelsLastLayout, dataType));
+                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                    builder.GetBufferPointer(), builder.GetSize());
+
+                if(!miopenReportsBackwardSolution(kind, *_handle, graph))
+                {
+                    continue;
+                }
+
+                ++checkedCount;
+                EXPECT_TRUE(_planBuilder.isApplicable(*_handle, graph));
+            }
+        }
+    }
+
+    if(checkedCount == 0)
+    {
+        GTEST_SKIP() << "MIOpen reports no solution for any uniform packed backward graph";
+    }
+}
+
+// ALMIOPEN-3299: dy and dx channels-first, w channels-last. MIOpen reports a solution and returns
+// wrong output.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutBackwardData)
+{
+    expectBackwardDeclined(_planBuilder,
+                           *_handle,
+                           BackwardKind::DATA,
+                           createBackwardGraph(BackwardKind::DATA, mixedLayoutSpec()));
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutBackwardWeights)
+{
+    expectBackwardDeclined(_planBuilder,
+                           *_handle,
+                           BackwardKind::WEIGHTS,
+                           createBackwardGraph(BackwardKind::WEIGHTS, mixedLayoutSpec()));
+}
+
+// ALMIOPEN-3301: channels-last tensors with padded rows (the layout stays uniform). MIOpen
+// returns wrong output, up to 1e38, infinities and NaN.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedChannelsLastBackwardData)
+{
+    expectBackwardDeclined(_planBuilder,
+                           *_handle,
+                           BackwardKind::DATA,
+                           createBackwardGraph(BackwardKind::DATA, channelsLastNonPackedSpec()));
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder,
+       IsApplicableReturnsFalseForNonPackedChannelsLastBackwardWeights)
+{
+    expectBackwardDeclined(_planBuilder,
+                           *_handle,
+                           BackwardKind::WEIGHTS,
+                           createBackwardGraph(BackwardKind::WEIGHTS, channelsLastNonPackedSpec()));
+}
+
+// Unlike forward, channels-first tensors with padded rows stay applicable: MIOpen computes them
+// correctly.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForNonPackedChannelsFirstBackwardData)
+{
+    expectBackwardApplicable(_planBuilder,
+                             *_handle,
+                             BackwardKind::DATA,
+                             createBackwardGraph(BackwardKind::DATA, channelsFirstNonPackedSpec()));
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder,
+       IsApplicableReturnsTrueForNonPackedChannelsFirstBackwardWeights)
+{
+    expectBackwardApplicable(
+        _planBuilder,
+        *_handle,
+        BackwardKind::WEIGHTS,
+        createBackwardGraph(BackwardKind::WEIGHTS, channelsFirstNonPackedSpec()));
+}
+
+// ALMIOPEN-3303: the first two tensors HALF and the last FLOAT, layouts uniform and packed. MIOpen
+// reports a solution and then fails at execution or returns garbage. The tensors are in the order
+// of the graph: dy, w, dx for backward data and x, dy, dw for backward weights.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeBackwardData)
+{
+    auto builder = createBackwardGraph(
+        BackwardKind::DATA, uniformPackedSpec(/*channelsLastLayout=*/false, ConvDataType::HALF));
+    setConvTensorTypes(builder, ConvDataType::HALF, ConvDataType::HALF, ConvDataType::FLOAT);
+
+    expectBackwardDeclined(_planBuilder, *_handle, BackwardKind::DATA, builder);
+}
+
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeBackwardWeights)
+{
+    auto builder = createBackwardGraph(
+        BackwardKind::WEIGHTS, uniformPackedSpec(/*channelsLastLayout=*/false, ConvDataType::HALF));
+    setConvTensorTypes(builder, ConvDataType::HALF, ConvDataType::HALF, ConvDataType::FLOAT);
+
+    expectBackwardDeclined(_planBuilder, *_handle, BackwardKind::WEIGHTS, builder);
+}
+
+// ALMIOPEN-3306: dy and dx of 2,147,488,281 elements. MIOpen offers a solver that faults on it
+// during Find. Descriptor creation allocates nothing, so the graph is cheap to build.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForBackwardDataAboveSizeLimit)
+{
+    expectBackwardDeclined(_planBuilder,
+                           *_handle,
+                           BackwardKind::DATA,
+                           createBackwardGraph(BackwardKind::DATA, aboveSizeLimitSpec()));
 }
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForMultiNodeGraph)

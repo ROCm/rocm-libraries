@@ -34,6 +34,7 @@ add_executable(
     engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdPlan.cpp
     engines/plans/TestMiopenConvPlanBuilder.cpp
+    engines/plans/TestMiopenConvTensorChecks.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
     engines/plans/TestMiopenPointwiseTensorChecks.cpp
     engines/plans/TestMiopenUnaryActivationPlanBuilder.cpp
