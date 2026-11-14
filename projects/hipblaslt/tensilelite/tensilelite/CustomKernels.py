@@ -383,21 +383,22 @@ _HEADER_SEMANTIC_ORDER = {
 def validateCustomPersistentArgs(kernelConfig):
     """Validate the scheduling payload of a versioned persistent descriptor."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
-    if type(version) is not int or version not in (0, 1, 2):
+    if type(version) is not int or version not in (0, 1, 2, 3):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     outer_version = kernelConfig.get("InternalSupportParams", {}).get("KernArgsVersion", 3)
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    if version in (1, 2) and outer_version != 3:
+    if version in (1, 2, 3) and outer_version != 3:
         raise ValueError(f"PersistentLoopArgsVersion={version} requires KernArgsVersion=3")
     descriptor = kernelConfig.get("CustomKernel")
     if not isinstance(descriptor, dict) or not descriptor.get("name"):
-        if version in (1, 2) and kernelConfig.get("CustomKernelName"):
+        if version in (1, 2, 3) and kernelConfig.get("CustomKernelName"):
             raise ValueError(f"Persistent argument layout version {version} requires a custom-kernel argument descriptor")
         return
     args = descriptor.get("args", [])
     persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
-    if version == 0:
+    # Version 3 is version 0 plus post kernels.
+    if version in (0, 3):
         if persistentGridArgIndices:
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
         return
@@ -437,6 +438,88 @@ def validateCustomPersistentArgs(kernelConfig):
             or descriptor.get("workspaceSizePerElemC", 0)
             or descriptor.get("workspaceSizePerElemBias", 0)):
         raise ValueError("DataParallel custom kernels with argument layout version 1 cannot require partial workspace")
+
+
+POST_KERNEL_KINDS = ("streamKReduce",)
+REDUCTION_MODES = ("tree", "parallel")
+_POST_KERNEL_KEYS = {"kind", "name", "args", "threads", "grid", "bands"}
+
+def validateCustomPostKernels(kernelConfig):
+    """Validate CustomKernel.reductions and CustomKernel.postKernels.
+
+    Post kernels are launched after the main kernel. They require
+    PersistentLoopArgsVersion 3, which older runtimes reject instead of
+    running the main kernel alone. A ``parallel`` reduction is performed by a
+    ``streamKReduce`` post kernel, so each requires the other.
+    """
+    isp = kernelConfig.get("InternalSupportParams", {})
+    version = isp.get("PersistentLoopArgsVersion", 0)
+    descriptor = kernelConfig.get("CustomKernel")
+    if not isinstance(descriptor, dict):
+        descriptor = {}
+
+    reductions = descriptor.get("reductions", ["tree"])
+    if (not isinstance(reductions, list) or not reductions
+            or any(mode not in REDUCTION_MODES for mode in reductions)
+            or len(set(reductions)) != len(reductions)):
+        raise ValueError(f"CustomKernel.reductions must be a non-empty list of distinct modes from {REDUCTION_MODES}")
+
+    postKernels = descriptor.get("postKernels", [])
+    if not isinstance(postKernels, list):
+        raise ValueError("CustomKernel.postKernels must be a list")
+    kinds = []
+    for post in postKernels:
+        if not isinstance(post, dict) or not _POST_KERNEL_KEYS.issuperset(post):
+            raise ValueError(f"Each post kernel must be a mapping with keys from {sorted(_POST_KERNEL_KEYS)}")
+        kind = post.get("kind")
+        if kind not in POST_KERNEL_KINDS:
+            raise ValueError(f"Unknown post kernel kind {kind!r}; expected one of {POST_KERNEL_KINDS}")
+        if kind in kinds:
+            raise ValueError(f"Duplicate post kernel kind {kind!r}")
+        kinds.append(kind)
+        expected = f"{descriptor.get('name')}_{kind}"
+        if post.get("name") != expected:
+            raise ValueError(f"Post kernel {post.get('name')!r} must be named {expected!r}")
+        args = post.get("args", [])
+        if not isinstance(args, list) or any(
+                not isinstance(arg, dict) or "type" not in arg or "semantic" not in arg for arg in args):
+            raise ValueError(f"Post kernel {expected!r} args must be a list of type/semantic mappings")
+        for key in ("threads", "grid"):
+            value = post.get(key)
+            if not isinstance(value, list) or len(value) != 3:
+                raise ValueError(f"Post kernel {expected!r} needs a three-element {key}")
+        if any(type(t) is not int or t < 1 for t in post["threads"]):
+            raise ValueError(f"Post kernel {expected!r} threads must be positive integers")
+        bands = post.setdefault("bands", 1)
+        if type(bands) is not int or bands < 1:
+            raise ValueError(f"Post kernel {expected!r} bands must be a positive integer")
+
+    if ("parallel" in reductions) != ("streamKReduce" in kinds):
+        raise ValueError("CustomKernel.reductions includes parallel if and only if a streamKReduce post kernel is declared")
+    if postKernels and version != 3:
+        raise ValueError("CustomKernel.postKernels requires PersistentLoopArgsVersion=3")
+    if version == 3 and not postKernels:
+        raise ValueError("PersistentLoopArgsVersion=3 requires CustomKernel.postKernels")
+
+
+def validatePostKernelSymbols(kernelName, postKernels, directory=None):
+    """Check that the main kernel comes first in its .s and each post kernel is present.
+
+    The occupancy and auto-inference paths read the first kernel descriptor, so
+    it must be the main kernel's.
+    """
+    contents = getCustomKernelContents(kernelName, directory)
+    first = re.search(r"^\s*\.amdhsa_kernel\s+(\S+)", contents, re.MULTILINE)
+    if first and first.group(1) != kernelName:
+        raise RuntimeError(f"Custom kernel '{kernelName}' must be the first .amdhsa_kernel, not '{first.group(1)}'")
+    fullYaml = _readEmbeddedYaml(kernelName, directory)
+    kernels = (fullYaml.get("amdhsa.kernels") if isinstance(fullYaml, dict) else None) or []
+    names = [k.get(".name") for k in kernels if isinstance(k, dict)]
+    if not names or names[0] != kernelName:
+        raise RuntimeError(f"Custom kernel '{kernelName}' must be the first amdhsa.kernels entry")
+    for post in postKernels:
+        if post["name"] not in names:
+            raise RuntimeError(f"Post kernel '{post['name']}' is not in the amdhsa.kernels of '{kernelName}'")
 
 
 def _hasRocRollerWgmArgs(args):
@@ -638,6 +721,9 @@ def getCustomKernelConfig(
     kernelConfig["CustomKernelName"] = kernelName
 
     validateCustomPersistentArgs(kernelConfig)
+    validateCustomPostKernels(kernelConfig)
+    if kernelConfig["CustomKernel"].get("postKernels"):
+        validatePostKernelSymbols(kernelName, kernelConfig["CustomKernel"]["postKernels"], directory)
 
     return kernelConfig
 

@@ -98,6 +98,25 @@ namespace TensileLite
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
                 iot::mapOptional(io, "generated", s.generated);
                 iot::mapOptional(io, "uniformSummationOrder", s.uniformSummationOrder);
+                iot::mapOptional(io, "reductions", s.reductions);
+                iot::mapOptional(io, "postKernels", s.postKernels);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<CustomPostKernel, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, CustomPostKernel& s)
+            {
+                iot::mapRequired(io, "kind", s.kind);
+                iot::mapRequired(io, "name", s.name);
+                iot::mapOptional(io, "args", s.args);
+                iot::mapOptional(io, "threads", s.threads);
+                iot::mapOptional(io, "grid", s.grid);
+                iot::mapOptional(io, "bands", s.bands);
             }
 
             const static bool flow = false;

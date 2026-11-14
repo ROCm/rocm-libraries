@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <utility>
@@ -81,6 +82,68 @@ TEST(CustomKernelTest, UniformSummationOrderDeserializes)
         EXPECT_EQ(kernel.name, "probe");
         EXPECT_EQ(kernel.uniformSummationOrder, declared);
     }
+}
+
+// Descriptors written before post kernels existed carry neither key and must
+// keep loading as tree-only kernels without post kernels.
+TEST(CustomKernelTest, PostKernelsDefaultWhenAbsent)
+{
+    msgpack::zone                          zone;
+    std::map<std::string, msgpack::object> fields{
+        {"name", msgpack::object(std::string("probe"), zone)}};
+    msgpack::sbuffer packed;
+    msgpack::pack(packed, fields);
+    auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+    CustomKernel                    kernel;
+    Serialization::MessagePackInput reader(unpacked.get());
+    reader.input(kernel);
+    ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+    EXPECT_EQ(kernel.reductions, std::vector<CustomReductionMode>{CustomReductionMode::Tree});
+    EXPECT_TRUE(kernel.postKernels.empty());
+}
+
+TEST(CustomKernelTest, PostKernelsRoundTrip)
+{
+    CustomKernel kernel;
+    kernel.name       = "probe";
+    kernel.reductions = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+
+    CustomPostKernel post;
+    post.name    = "probe_streamKReduce";
+    post.args    = {{CustomArgType::address, CustomArgSemantic::AddressWorkspace},
+                    {CustomArgType::uint32, CustomArgSemantic::SKSplitFactor},
+                    {CustomArgType::uint32, CustomArgSemantic::NumTiles},
+                    {CustomArgType::uint32, CustomArgSemantic::WorkspaceOffsetPartials}};
+    post.threads = TensileLite::dim3(256, 1, 1);
+    post.grid    = {CustomGridSize::TilesBands, CustomGridSize::One, CustomGridSize::One};
+    post.bands   = 4;
+
+    kernel.postKernels = {post};
+
+    Serialization::MessagePackOutput writer;
+    writer.output(kernel);
+    ASSERT_TRUE(writer.error.empty()) << writer.error.front();
+    auto unpacked = msgpack::unpack(writer.buffer.data(), writer.buffer.size());
+
+    CustomKernel                    loaded;
+    Serialization::MessagePackInput reader(unpacked.get());
+    reader.input(loaded);
+    ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+    EXPECT_EQ(loaded.reductions, kernel.reductions);
+    ASSERT_EQ(loaded.postKernels.size(), 1u);
+    auto const& got = loaded.postKernels[0];
+    EXPECT_EQ(got.kind, CustomPostKernelKind::StreamKReduce);
+    EXPECT_EQ(got.name, post.name);
+    ASSERT_EQ(got.args.size(), post.args.size());
+    for(size_t i = 0; i < post.args.size(); ++i)
+    {
+        EXPECT_EQ(got.args[i].type, post.args[i].type);
+        EXPECT_EQ(got.args[i].semantic, post.args[i].semantic);
+    }
+    EXPECT_EQ(got.threads.x, 256u);
+    EXPECT_EQ(got.grid.x, CustomGridSize::TilesBands);
+    EXPECT_EQ(got.bands, 4u);
 }
 #endif
 
@@ -562,4 +625,71 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
+}
+
+namespace
+{
+    void configurePostKernels(ContractionSolution& solution)
+    {
+        solution.internalArgsSupport.version                   = 3;
+        solution.internalArgsSupport.persistentLoopArgsVersion = 3;
+        solution.customKernel.name                             = "probe";
+        solution.customKernel.threads                          = TensileLite::dim3(256, 1, 1);
+        solution.customKernel.reductions
+            = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+
+        CustomPostKernel post;
+        post.name    = "probe_streamKReduce";
+        post.threads = TensileLite::dim3(256, 1, 1);
+
+        solution.customKernel.postKernels = {post};
+    }
+}
+
+// Layout 3 is what keeps a runtime without post-kernel support from running
+// the main kernel alone, so the two must always come together.
+TEST(CustomKernelTest, PostKernelsValidate)
+{
+    {
+        ContractionSolution solution;
+        configurePostKernels(solution);
+        EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
+    }
+
+    using Solution = ContractionSolution;
+    const std::vector<std::function<void(Solution&)>> invalid{
+        [](Solution& s) { s.internalArgsSupport.persistentLoopArgsVersion = 0; },
+        [](Solution& s) { s.internalArgsSupport.version = 2; },
+        [](Solution& s) {
+            s.customKernel.postKernels.clear();
+            s.customKernel.reductions = {CustomReductionMode::Tree};
+        },
+        [](Solution& s) { s.customKernel.reductions = {CustomReductionMode::Tree}; },
+        [](Solution& s) {
+            s.customKernel.postKernels.clear();
+            s.customKernel.reductions                       = {CustomReductionMode::Parallel};
+            s.internalArgsSupport.persistentLoopArgsVersion = 0;
+        },
+        [](Solution& s) { s.customKernel.reductions.push_back(CustomReductionMode::Tree); },
+        [](Solution& s) { s.customKernel.reductions.clear(); },
+        [](Solution& s) { s.customKernel.postKernels[0].name = "other_streamKReduce"; },
+        [](Solution& s) { s.customKernel.postKernels.push_back(s.customKernel.postKernels[0]); },
+        [](Solution& s) { s.customKernel.postKernels[0].bands = 0; },
+        [](Solution& s) { s.customKernel.generated = true; },
+    };
+    for(size_t i = 0; i < invalid.size(); ++i)
+    {
+        ContractionSolution solution;
+        configurePostKernels(solution);
+        invalid[i](solution);
+        EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error) << "case " << i;
+    }
+}
+
+TEST(CustomKernelTest, PostKernelsAreNotLaunchedYet)
+{
+    ContractionSolution solution;
+    configurePostKernels(solution);
+    EXPECT_THROW(solution.solve(dummyProblem(), ContractionInputs(), probeDevice()),
+                 std::runtime_error);
 }

@@ -88,6 +88,20 @@ TEST(HashmapEnumLookupTest, CustomWorkspaceTypeAllStrings)
         [](int i) { return toString(static_cast<CustomWorkspaceType>(i)); });
 }
 
+TEST(HashmapEnumLookupTest, CustomReductionModeAllStrings)
+{
+    verifyAllStringValues<CustomReductionMode>(
+        static_cast<int>(CustomReductionMode::Count),
+        [](int i) { return toString(static_cast<CustomReductionMode>(i)); });
+}
+
+TEST(HashmapEnumLookupTest, CustomPostKernelKindAllStrings)
+{
+    verifyAllStringValues<CustomPostKernelKind>(
+        static_cast<int>(CustomPostKernelKind::Count),
+        [](int i) { return toString(static_cast<CustomPostKernelKind>(i)); });
+}
+
 TEST(HashmapEnumLookupTest, IntegerStillDecodes)
 {
     msgpack::zone   zone;
@@ -106,4 +120,6 @@ TEST(HashmapEnumLookupTest, UnknownStringGivesError)
     EXPECT_TRUE(decodeEnumHasError<CustomArgType>(obj));
     EXPECT_TRUE(decodeEnumHasError<CustomGridSize>(obj));
     EXPECT_TRUE(decodeEnumHasError<CustomWorkspaceType>(obj));
+    EXPECT_TRUE(decodeEnumHasError<CustomReductionMode>(obj));
+    EXPECT_TRUE(decodeEnumHasError<CustomPostKernelKind>(obj));
 }

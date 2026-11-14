@@ -185,7 +185,11 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        /* Stream-K post-kernel args */ \
+        X_MACRO(SKSplitFactor) \
+        X_MACRO(NumTiles) \
+        X_MACRO(WorkspaceOffsetPartials)
 
     enum class CustomArgSemantic
     {
@@ -228,6 +232,8 @@ namespace TensileLite
         PersistentNoBatch,
         TilesYGSU,
         ComputeUnits,
+        // One workgroup per (tile, band) of a post kernel.
+        TilesBands,
         CustomGridSize_Count,
     };
 
@@ -250,6 +256,40 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomWorkspaceType& t);
     TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomWorkspaceType& t);
 
+    enum class CustomReductionMode
+    {
+        Tree,
+        Parallel,
+        Count,
+    };
+
+    TENSILELITEHOST_EXPORT std::string toString(CustomReductionMode mode);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&              stream,
+                                                    const CustomReductionMode& t);
+
+    // Role of a post kernel: when it is launched and which arguments it may take.
+    enum class CustomPostKernelKind
+    {
+        StreamKReduce,
+        Count,
+    };
+
+    TENSILELITEHOST_EXPORT std::string toString(CustomPostKernelKind kind);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&               stream,
+                                                    const CustomPostKernelKind& t);
+
+    // A kernel in the main kernel's code object, named <main>_<kind>.
+    struct CustomPostKernel
+    {
+        CustomPostKernelKind             kind = CustomPostKernelKind::StreamKReduce;
+        std::string                      name;
+        std::vector<CustomArgDefinition> args;
+        dim3                             threads{0, 0, 0};
+        vector3<CustomGridSize> grid{CustomGridSize::One, CustomGridSize::One, CustomGridSize::One};
+        // Workgroups per tile for the TilesBands grid.
+        size_t bands = 1;
+    };
+
     struct CustomKernel
     {
         // Every member needs a default: mapOptional leaves absent keys untouched, so an
@@ -271,6 +311,11 @@ namespace TensileLite
         // same order, so identical rows of A give bitwise-identical rows of D.
         // Uniform summation order refuses hand-written kernels without it.
         bool uniformSummationOrder = false;
+        // Stream-K reduction modes the kernel implements.
+        std::vector<CustomReductionMode> reductions{CustomReductionMode::Tree};
+        // Kernels launched after this one, in order. Requires persistent loop
+        // argument layout 3.
+        std::vector<CustomPostKernel> postKernels;
     };
   
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
@@ -1227,6 +1272,8 @@ namespace TensileLite
         // Validate the complete descriptor when loading a solution. Programmatic
         // callers must also validate after constructing or changing a descriptor.
         void validatePersistentLoopArgs() const;
+        // Reduction modes and post kernels of the custom kernel descriptor.
+        void validateCustomPostKernels() const;
 
         // Prebuilt kernels retain their declared scheduling ABI even when their
         // cluster geometry also supports the spatial schedule. Policy and shape

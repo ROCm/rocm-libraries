@@ -480,6 +480,37 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct EnumTraits<CustomReductionMode, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void enumeration(IO& io, CustomReductionMode& value)
+            {
+                static const auto names = enumNames<CustomReductionMode>(
+                    static_cast<int>(CustomReductionMode::Count),
+                    [](CustomReductionMode v) { return TensileLite::toString(v); });
+
+                for(size_t i = 0; i < names.size(); i++)
+                    iot::enumCase(io, value, names[i].c_str(), static_cast<CustomReductionMode>(i));
+            }
+        };
+
+        template <typename IO>
+        struct EnumTraits<CustomPostKernelKind, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void enumeration(IO& io, CustomPostKernelKind& value)
+            {
+                static const auto names = enumNames<CustomPostKernelKind>(
+                    static_cast<int>(CustomPostKernelKind::Count),
+                    [](CustomPostKernelKind v) { return TensileLite::toString(v); });
+
+                for(size_t i = 0; i < names.size(); i++)
+                    iot::enumCase(
+                        io, value, names[i].c_str(), static_cast<CustomPostKernelKind>(i));
+            }
+        };
+
+        template <typename IO>
         struct EnumTraits<ActivationType, IO>
         {
             using iot = IOTraits<IO>;

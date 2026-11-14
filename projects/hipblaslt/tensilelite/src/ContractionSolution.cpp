@@ -187,6 +187,7 @@ namespace TensileLite
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
         case CustomGridSize::TilesYGSU:        return "TilesYGSU";
         case CustomGridSize::ComputeUnits:     return "ComputeUnits";
+        case CustomGridSize::TilesBands:       return "TilesBands";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -211,6 +212,7 @@ namespace TensileLite
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
             {"TilesYGSU",        CustomGridSize::TilesYGSU},
             {"ComputeUnits",     CustomGridSize::ComputeUnits},
+            {"TilesBands",       CustomGridSize::TilesBands},
         };
 
         auto it = lookup.find(str);
@@ -278,6 +280,46 @@ namespace TensileLite
         stream >> strValue;
         t = fromStringCustomWorkspaceType(strValue);
         return stream;
+    }
+
+    std::string toString(CustomReductionMode mode)
+    {
+        switch(mode)
+        {
+        case CustomReductionMode::Tree:
+            return "tree";
+        case CustomReductionMode::Parallel:
+            return "parallel";
+        case CustomReductionMode::Count:
+            break;
+        }
+
+        throw std::runtime_error(
+            concatenate("Invalid CustomReductionMode value: ", static_cast<int>(mode)));
+    }
+
+    std::ostream& operator<<(std::ostream& stream, const CustomReductionMode& t)
+    {
+        return stream << toString(t);
+    }
+
+    std::string toString(CustomPostKernelKind kind)
+    {
+        switch(kind)
+        {
+        case CustomPostKernelKind::StreamKReduce:
+            return "streamKReduce";
+        case CustomPostKernelKind::Count:
+            break;
+        }
+
+        throw std::runtime_error(
+            concatenate("Invalid CustomPostKernelKind value: ", static_cast<int>(kind)));
+    }
+
+    std::ostream& operator<<(std::ostream& stream, const CustomPostKernelKind& t)
+    {
+        return stream << toString(t);
     }
 
     namespace
@@ -3167,7 +3209,9 @@ namespace TensileLite
         uint32_t skMagicShiftItersPerTile  = 0;
         uint32_t skItersPerWG              = 0;
         uint32_t skTotalTiles              = 0;
-        if(launch.grid > 0 && internalArgsSupport.persistentLoopArgsVersion == 0)
+        if(launch.grid > 0
+           && (internalArgsSupport.persistentLoopArgsVersion == 0
+               || internalArgsSupport.persistentLoopArgsVersion == 3))
         {
             size_t numTiles = tiles.x * tiles.y * tiles.z;
             // Flat space and its tile division are measured in padded tiles; see
@@ -5458,13 +5502,55 @@ namespace TensileLite
         const int outerVersion = internalArgsSupport.version;
         if(outerVersion < 0 || outerVersion > 3)
             throw std::runtime_error("Unsupported kernel argument protocol version");
-        if(version < 0 || version > 2 || (version == 1 && !sizeMapping.isPersistentDataParallel())
+        if(version < 0 || version > 3 || (version == 1 && !sizeMapping.isPersistentDataParallel())
            || (version == 2 && !sizeMapping.isStreamK()))
             throw std::runtime_error("Invalid persistent loop argument layout for execution policy");
         if(version == 1 && outerVersion != 3)
             throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
         if(version == 2 && outerVersion != 3)
             throw std::runtime_error("StreamK cluster argument layout version 2 requires KernArgsVersion=3");
+        // Layout 3 is layout 0 plus post kernels. Runtimes without post-kernel
+        // support reject version 3, so they never launch the main kernel alone.
+        if(version == 3 && (outerVersion != 3 || customKernel.postKernels.empty()))
+            throw std::runtime_error(
+                "Argument layout version 3 requires KernArgsVersion=3 and post kernels");
+        if(version != 3 && !customKernel.postKernels.empty())
+            throw std::runtime_error("Post kernels require argument layout version 3");
+    }
+
+    void ContractionSolution::validateCustomPostKernels() const
+    {
+        std::array<bool, static_cast<size_t>(CustomReductionMode::Count)> modes{};
+        for(auto mode : customKernel.reductions)
+        {
+            const auto i = static_cast<size_t>(mode);
+            if(i >= modes.size() || modes[i])
+                throw std::runtime_error("Custom kernel reductions must be distinct known modes");
+            modes[i] = true;
+        }
+        if(customKernel.reductions.empty())
+            throw std::runtime_error("Custom kernel must support at least one reduction mode");
+        if(!customKernel.postKernels.empty() && !handwrittenCustomKernel())
+            throw std::runtime_error("Post kernels require a handwritten custom kernel");
+
+        std::array<bool, static_cast<size_t>(CustomPostKernelKind::Count)> kinds{};
+        for(auto const& post : customKernel.postKernels)
+        {
+            const auto i = static_cast<size_t>(post.kind);
+            if(i >= kinds.size() || kinds[i])
+                throw std::runtime_error("Post kernels must have distinct known kinds");
+            kinds[i]            = true;
+            const auto expected = concatenate(customKernel.name, "_", post.kind);
+            if(post.name != expected)
+                throw std::runtime_error(concatenate("Post kernel must be named ", expected));
+            if(post.threads.x == 0 || post.bands == 0)
+                throw std::runtime_error(
+                    concatenate("Post kernel ", post.name, " needs threads and bands"));
+        }
+        if(modes[static_cast<size_t>(CustomReductionMode::Parallel)]
+           != kinds[static_cast<size_t>(CustomPostKernelKind::StreamKReduce)])
+            throw std::runtime_error(
+                "Parallel reduction requires a streamKReduce post kernel and vice versa");
     }
 
     void ContractionSolution::validateStreamKClusterDescriptor() const
@@ -5494,6 +5580,7 @@ namespace TensileLite
             validateStreamKClusterDescriptor();
             return;
         }
+        validateCustomPostKernels();
         if(customKernel.name.empty())
             return;
 
@@ -5503,7 +5590,7 @@ namespace TensileLite
         for(size_t i = 0; i < customKernel.args.size(); ++i)
         {
             const auto& arg = customKernel.args[i];
-            if(version == 0)
+            if(version == 0 || version == 3)
             {
                 if(arg.semantic == CustomArgSemantic::PersistentGrid)
                     throw std::runtime_error("PersistentGrid requires persistent loop argument layout 1");
@@ -5584,6 +5671,8 @@ namespace TensileLite
                                    ContractionSolution::Inputs const&  inputs,
                                    Hardware const&                     hardware) const
     {
+        if(!customKernel.postKernels.empty())
+            throw std::runtime_error("postKernels launch not implemented");
         calculateAutoGSU(problem, &hardware);
         if(Debug::Instance().printWinningKernelName())
             std::cout << "Running kernel: " << this->KernelName()
@@ -5856,6 +5945,8 @@ namespace TensileLite
         size_t                                           hipHostMemorySize,
         hipStream_t                                      stream) const
     {
+        if(!customKernel.postKernels.empty())
+            throw std::runtime_error("postKernels launch not implemented");
         if(Debug::Instance().printWinningKernelName())
             std::cout << "Running kernel: " << this->KernelName()
                       << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
@@ -6007,6 +6098,8 @@ namespace TensileLite
                                                  const void*                 workspace,
                                                  hipStream_t                 stream) const
     {
+        if(!customKernel.postKernels.empty())
+            throw std::runtime_error("postKernels launch not implemented");
         if(!problemType.supportDeviceUserArguments)
         {
             throw std::runtime_error("Currently this solution does not support user args.");
