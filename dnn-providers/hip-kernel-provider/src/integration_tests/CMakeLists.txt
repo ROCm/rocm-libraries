@@ -126,6 +126,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
         )
     endif()
+    hkp_product_offers_engine(_hkp_gfx942_conv_dgrad_aot_bundle "hipkernel:Gfx942ConvDgradAot")
+    if(_hkp_gfx942_conv_dgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942ConvDgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX942_CONV_DGRAD_AOT=1
+        )
+    endif()
     hkp_product_offers_engine(_hkp_gfx1250_conv_dgrad_aot_bundle "hipkernel:Gfx1250ConvDgradAot")
     if(_hkp_gfx1250_conv_dgrad_aot_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE

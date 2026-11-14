@@ -25,8 +25,8 @@
 /// @file ConvDgradMatcherTestSupport.hpp
 /// What the dgrad AOT engines' matcher tests build their graphs and kernels from: a
 /// backward-data problem as hipDNN graph tensors and a node, and a catalog instance as
-/// the kpack kernel the descriptor loader delivers. Shared by the gfx950 and gfx1250
-/// suites; the arch-specific device properties and symbols stay in each.
+/// the kpack kernel the descriptor loader delivers. Shared by the gfx950, gfx942 and
+/// gfx1250 suites; the arch-specific device properties and symbols stay in each.
 namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test
 {
 

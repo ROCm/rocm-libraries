@@ -45,11 +45,12 @@
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvGraphPredicates.hpp"
 
 /// @file ConvDgradAotNative.cpp
-/// hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot: shape-generic AOT
+/// hipkernel:Gfx950ConvDgradAot, hipkernel:Gfx942ConvDgradAot and
+/// hipkernel:Gfx1250ConvDgradAot: shape-generic AOT
 /// instances of rocKE's backward-data (dgrad) convolution kernels, one engine per
 /// architecture (Engine; the hooks are templates over it). Each kernel is one rocKE dgrad
 /// KernelIdentity: an implicit-GEMM tile (kernel_family 0), one of rocKE's direct dgrad
-/// pipelines (kernel_family 1), or one of gfx950's MFMA pipelines' weight transforms
+/// pipelines (kernel_family 1), or one of the MFMA pipelines' weight transforms
 /// (kernel_family 2, never matched; an MFMA dispatch loads it beside its instance). Its metadata holds
 /// tuning and capability fields only and the problem reaches the kernel as AOT
 /// arguments, so matching is the launch plan of ConvDgradAotGeometry.hpp, not an
@@ -98,6 +99,17 @@ constexpr Engine GFX950_ENGINE{dgrad::GFX950,
                                "gfx950_conv_dgrad.dx.uid",
                                "_gfx950_conv_dgrad.problem",
                                &gfx950ConvDgradAotKpackModuleCache};
+constexpr Engine GFX942_ENGINE{dgrad::GFX942,
+                               "hipkernel:Gfx942ConvDgradAot",
+                               "hipkernel.gfx942_conv_dgrad_aot.graph_match",
+                               "hipkernel.gfx942_conv_dgrad_aot.kernel_match",
+                               "hipkernel.gfx942_conv_dgrad_aot.score",
+                               "hipkernel.gfx942_conv_dgrad_aot.dispatch",
+                               "gfx942_conv_dgrad.dy.uid",
+                               "gfx942_conv_dgrad.w.uid",
+                               "gfx942_conv_dgrad.dx.uid",
+                               "_gfx942_conv_dgrad.problem",
+                               &gfx942ConvDgradAotKpackModuleCache};
 constexpr Engine GFX1250_ENGINE{dgrad::GFX1250,
                                 "hipkernel:Gfx1250ConvDgradAot",
                                 "hipkernel.gfx1250_conv_dgrad_aot.graph_match",
@@ -1115,6 +1127,12 @@ compilation::KpackModuleCache& gfx950ConvDgradAotKpackModuleCache()
     return s_moduleCache;
 }
 
+compilation::KpackModuleCache& gfx942ConvDgradAotKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
 compilation::KpackModuleCache& gfx1250ConvDgradAotKpackModuleCache()
 {
     static compilation::KpackModuleCache s_moduleCache;
@@ -1126,6 +1144,11 @@ void registerGfx950ConvDgradAotSymbols(SymbolScope<Handle>& scope)
     registerSymbols<GFX950_ENGINE>(scope);
 }
 
+void registerGfx942ConvDgradAotSymbols(SymbolScope<Handle>& scope)
+{
+    registerSymbols<GFX942_ENGINE>(scope);
+}
+
 void registerGfx1250ConvDgradAotSymbols(SymbolScope<Handle>& scope)
 {
     registerSymbols<GFX1250_ENGINE>(scope);
@@ -1134,6 +1157,11 @@ void registerGfx1250ConvDgradAotSymbols(SymbolScope<Handle>& scope)
 void resetGfx950ConvDgradAotModuleCache()
 {
     gfx950ConvDgradAotKpackModuleCache().clear();
+}
+
+void resetGfx942ConvDgradAotModuleCache()
+{
+    gfx942ConvDgradAotKpackModuleCache().clear();
 }
 
 void resetGfx1250ConvDgradAotModuleCache()

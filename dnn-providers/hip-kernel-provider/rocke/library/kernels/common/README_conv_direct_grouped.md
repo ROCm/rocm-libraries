@@ -279,8 +279,8 @@ The single-kernel direct dgrad forms are AOT cache variants
 (`library/kernels/conv/direct_aot_jobs.py`); each cached binary is a variant
 plus a knob dict, and `make_direct_spec` in
 `library/kernels/conv/direct_variants.py` builds its spec. The grouped-convolution
-dispatcher serves them through its gfx950 backward-data instance list
-(`library/dispatch/grouped_convolution_instances/gfx950_dgrad.json`);
+dispatcher serves them through its gfx950 and gfx942 backward-data instance lists
+(`library/dispatch/grouped_convolution_instances/<arch>_dgrad.json`);
 `benchmark_direct_conv --run-from-cache <cache> --direction dgrad --variants
 <variant> --verify` runs one on a shape.
 
@@ -775,6 +775,7 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | Backward-data, gfx1250 | The gfx1250 backward-data instance list (`library/dispatch/grouped_convolution_instances/gfx1250_dgrad.json`): WMMA direct kernels, depthwise dgrad and implicit GEMM (`mem` and `wavelet` pipelines) |
 | Other directions, gfx1250 | Implicit-GEMM, or the WMMA direct kernels where they apply |
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
+| Backward-data, gfx942 | The gfx942 backward-data instance list (`library/dispatch/grouped_convolution_instances/gfx942_dgrad.json`): windowed and streaming depthwise, 4c / fused generic and MFMA direct dgrad, and implicit GEMM (`mem`, `compv3` and `compv4` pipelines) |
 | Backward-data, gfx950 | Run the cached candidates ([Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950)): windowed depthwise, 4c / fused generic direct, and implicit GEMM; keep the faster |
 | Backward-weights, gfx950, `cpg` and `kpg` ≥ 16, `stride = 1` | Direct-conv wgrad |
 | Backward-weights, anything else | Implicit-GEMM wgrad |

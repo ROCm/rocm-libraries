@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "e2ef3150-2965-4136-aa9a-906b842ca27d",
+  "name": "Gfx942ConvDgradAot selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx942_conv_dgrad_aot.score"
+  }
+}

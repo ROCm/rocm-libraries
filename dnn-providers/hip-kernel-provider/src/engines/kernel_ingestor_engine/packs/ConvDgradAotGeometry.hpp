@@ -61,6 +61,7 @@ struct Target
 };
 
 inline constexpr Target GFX950{"gfx950", 64, 163840};
+inline constexpr Target GFX942{"gfx942", 64, 65536};
 inline constexpr Target GFX1250{"gfx1250", 32, 327680};
 
 /// Record and magic-table widths of the implicit-GEMM sub_gemm_buf, in i32
@@ -766,7 +767,7 @@ inline bool targetPackages(const Target& target, DirectVariant variant)
     case DirectVariant::NONE:
         return false;
     default:
-        return target.arch == GFX950.arch;
+        return target.arch == GFX950.arch || target.arch == GFX942.arch;
     }
 }
 
@@ -908,6 +909,7 @@ constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 25> DI
 
 /// The knob fields gfx1250's KMD holds after DIRECT_KNOB_FIELDS, in KMD order
 /// (_GFX1250_KNOB_DEFAULTS), each with its member; "sched" is a string field of its own.
+/// gfx942's KMD holds only the first, cpl (_GFX942_KNOB_DEFAULTS).
 constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 16>
     GFX1250_DIRECT_KNOB_FIELDS{{
         {"cpl", &DirectKnobs::cpl},
@@ -928,6 +930,17 @@ constexpr std::array<std::pair<std::string_view, int64_t DirectKnobs::*>, 16>
         {"r_blk", &DirectKnobs::rBlk},
     }};
 
+/// How many of GFX1250_DIRECT_KNOB_FIELDS, from the first, @p target's KMD holds: every
+/// one on gfx1250, cpl on gfx942, none on gfx950.
+inline size_t targetExtraKnobFields(const Target& target)
+{
+    if(target.arch == GFX1250.arch)
+    {
+        return GFX1250_DIRECT_KNOB_FIELDS.size();
+    }
+    return target.arch == GFX942.arch ? 1 : 0;
+}
+
 /// The 0/1 knobs (_BOOL_KNOBS).
 constexpr std::array<std::string_view, 14> DIRECT_FLAG_KNOBS{"fold_k32",
                                                              "persistent_grid",
@@ -946,7 +959,8 @@ constexpr std::array<std::string_view, 14> DIRECT_FLAG_KNOBS{"fold_k32",
 
 /// Whether @p variant states @p knob (the spec class's DIRECT_KNOBS); every other knob
 /// holds 0 (sched ""). A transpose states fold_k32 too, always 0 (the helper lookup keys on
-/// it). Only gfx1250's depthwise dgrad states cpl, and only its KMD has the field.
+/// it). Only gfx942's and gfx1250's depthwise dgrad states cpl, and only their KMDs have
+/// the field.
 inline bool directVariantUses(DirectVariant variant, std::string_view knob)
 {
     const auto among = [&](std::initializer_list<std::string_view> knobs) {
@@ -1020,6 +1034,7 @@ struct DirectInstance
     DirectCapabilities compiled;
     DirectKnobs knobs{};
     int64_t waveSize = GFX950.waveSize;
+    int64_t ldsCapacityBytes = GFX950.ldsCapacityBytes;
 };
 
 /// A knob's value, or rocKE's spec default where the instance left it at 0.
@@ -1118,14 +1133,16 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Targ
         return std::nullopt;
     }
     const bool gfx1250 = target.arch == GFX1250.arch;
-    // gfx1250's knobs past the shared ones: a gfx950 kernel carries none of them, and a
-    // gfx1250 one holds every one (0 where its variant does not use it).
+    // The knobs past the shared ones: a gfx950 kernel carries none of them, a gfx942 one
+    // holds cpl and a gfx1250 one every one (0 where its variant does not use it).
+    const auto extraBegin = GFX1250_DIRECT_KNOB_FIELDS.begin();
+    const auto extraEnd = extraBegin + targetExtraKnobFields(target);
     const auto* sched = metadata.stringField("sched");
     if(gfx1250 ? sched == nullptr
                : (sched != nullptr
-                  || std::any_of(GFX1250_DIRECT_KNOB_FIELDS.begin(),
-                                 GFX1250_DIRECT_KNOB_FIELDS.end(),
-                                 [&](const auto& f) { return metadata.intField(f.first); })))
+                  || std::any_of(extraEnd, GFX1250_DIRECT_KNOB_FIELDS.end(), [&](const auto& f) {
+                         return metadata.intField(f.first);
+                     })))
     {
         return std::nullopt;
     }
@@ -1155,11 +1172,8 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Targ
            || !std::all_of(DIRECT_KNOB_FIELDS.begin(),
                            DIRECT_KNOB_FIELDS.end(),
                            [&](const auto& f) { return isZero(f.first); })
-           || (gfx1250
-               && (!sched->empty()
-                   || !std::all_of(GFX1250_DIRECT_KNOB_FIELDS.begin(),
-                                   GFX1250_DIRECT_KNOB_FIELDS.end(),
-                                   [&](const auto& f) { return isZero(f.first); }))))
+           || (gfx1250 && !sched->empty())
+           || !std::all_of(extraBegin, extraEnd, [&](const auto& f) { return isZero(f.first); }))
         {
             return std::nullopt;
         }
@@ -1350,15 +1364,15 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Targ
             return std::nullopt;
         }
     }
+    for(auto field = extraBegin; field != extraEnd; ++field)
+    {
+        if(!readKnob(field->first, field->second))
+        {
+            return std::nullopt;
+        }
+    }
     if(gfx1250)
     {
-        for(const auto& [field, member] : GFX1250_DIRECT_KNOB_FIELDS)
-        {
-            if(!readKnob(field, member))
-            {
-                return std::nullopt;
-            }
-        }
         // The schedule only selects emission; a variant without one holds "".
         if(!directVariantUses(*variant, "sched") && !sched->empty())
         {
@@ -1372,7 +1386,9 @@ std::optional<AotInstance> parseAotInstance(const Metadata& metadata, const Targ
         return std::nullopt;
     }
     return AotInstance{
-        *family, std::nullopt, DirectInstance{*variant, capabilities, knobs, target.waveSize}};
+        *family,
+        std::nullopt,
+        DirectInstance{*variant, capabilities, knobs, target.waveSize, target.ldsCapacityBytes}};
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2030,8 +2046,8 @@ inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
     const auto passes = ceilDiv(chunks, threads);
     const auto staging = passes * threads * loadVec * 2 * 2;
     const auto reduction = wavesK > 1 ? wavesQ * wavesK * instance.waveSize * 4 * 4 : 0;
-    // The forward-on-transposed pipelines are gfx950's.
-    if(staging + reduction > GFX950.ldsCapacityBytes)
+    // The forward-on-transposed pipelines are gfx950's and gfx942's.
+    if(staging + reduction > instance.ldsCapacityBytes)
     {
         return std::nullopt;
     }
@@ -2198,9 +2214,10 @@ inline std::optional<std::pair<std::array<int64_t, 3>, int64_t>>
 }
 
 /// _direct_plan: rocKE's offer for a direct instance and its plan_for steps.
-///   * depthwise_dgrad: groups a multiple of cpl (gfx1250's channels per lane, else 1),
-///     then one direct-dgrad launch, (ceil(Wi / block_w), ceil(groups / (64 * block_waves
-///     * cpl)), N) of 64 * block_waves threads (a logical wave64 on every target).
+///   * depthwise_dgrad: groups a multiple of cpl (gfx942's and gfx1250's channels per
+///     lane, else 1), then one direct-dgrad launch, (ceil(Wi / block_w),
+///     ceil(groups / (64 * block_waves * cpl)), N) of 64 * block_waves threads (a logical
+///     wave64 on every target).
 ///   * depthwise_dgrad_win: groups a multiple of ch_per_lane (of 8 in the MFMA form) and
 ///     dY and dX within the kernel's 2^30-byte sentinel range, then one direct-dgrad
 ///     launch of DirectDepthwiseDgradWindowedSpec.grid().
@@ -2244,7 +2261,8 @@ inline std::optional<Plan> directPlan(const Problem& problem, const DirectInstan
     {
         const auto blockW = knobOr(knobs.blockW, 8);
         const auto threads = knobOr(knobs.blockWaves, 1) * specWaveSize(instance);
-        // gfx1250's lanes may own cpl adjacent channels each (DirectDepthwiseDgradStreamSpec).
+        // gfx942's and gfx1250's lanes may own cpl adjacent channels each
+        // (DirectDepthwiseDgradStreamSpec).
         const auto cpl = knobOr(knobs.cpl, 1);
         const std::array<int64_t, 3> grid{
             ceilDiv(problem.wi, blockW), ceilDiv(problem.groups, threads * cpl), problem.n};
@@ -2466,15 +2484,15 @@ inline std::optional<Plan> instancePlan(const Problem& problem, const AotInstanc
 // ---- the deterministic fallback order --------------------------------------------------
 
 /// Deterministic order among the instances serving one problem, used only when nothing is
-/// benchmarked, recorded or trained; higher is better. Both engines share it; gfx1250's
-/// UED ranks tflops requests with its trained model, so there this decides only for
-/// other metrics or without the model. The
-/// direct pipelines rank above implicit GEMM (whose N tile is mostly idle at these few
-/// channels per group): the single-kernel ones (gfx950's windowed and streaming
-/// depthwise, fused, 4c; gfx1250's depthwise and WMMA dense, small-C and patch) in
-/// [3, 3.5], gfx950's MFMA pipelines in [2, 2.5); implicit GEMM in [0, 1.01) by the
-/// fraction of the launched tile area that is real output times how well the grid fills
-/// a device of 256 compute units, with wider vectors breaking ties.
+/// benchmarked, recorded or trained; higher is better. Every dgrad engine shares it; an
+/// engine whose UED binds a trained model ranks tflops requests with it, so there this
+/// decides only for other metrics or without the model. The direct pipelines rank above
+/// implicit GEMM (whose N tile is mostly idle at these few channels per group): the
+/// single-kernel ones (gfx950's and gfx942's windowed and streaming depthwise, fused, 4c;
+/// gfx1250's depthwise and WMMA dense, small-C and patch) in [3, 3.5], the MFMA pipelines
+/// (gfx950, gfx942) in [2, 2.5); implicit GEMM in [0, 1.01) by the fraction of the
+/// launched tile area that is real output times how well the grid fills a device of 256
+/// compute units (gfx950's; gfx942's 304 is not modeled), with wider vectors breaking ties.
 inline double planScore(const AotInstance& instance, const Plan& plan)
 {
     constexpr double CU_COUNT = 256.0;

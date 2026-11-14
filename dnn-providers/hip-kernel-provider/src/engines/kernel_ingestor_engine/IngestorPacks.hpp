@@ -140,15 +140,18 @@ void registerGfx1151WmmaAttentionDecodeSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionDecodeModuleCache();
 
-/// @see packs/ConvDgradAotNative.cpp, which serves both engines
-/// (hipkernel:Gfx950ConvDgradAot, hipkernel:Gfx1250ConvDgradAot)
+/// @see packs/ConvDgradAotNative.cpp, which serves every dgrad AOT engine
+/// (hipkernel:Gfx950ConvDgradAot, hipkernel:Gfx942ConvDgradAot,
+/// hipkernel:Gfx1250ConvDgradAot)
 void registerGfx950ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950ConvDgradAotModuleCache();
+void registerGfx942ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx942ConvDgradAotModuleCache();
 void registerGfx1250ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1250ConvDgradAotModuleCache();
 
-/// Sets the per-image byte limit conv_dgrad_aot::batchChunks() slices a batch at (both
-/// dgrad engines share it), in the provider's own loaded copy of that test seam -- see
+/// Sets the per-image byte limit conv_dgrad_aot::batchChunks() slices a batch at (every
+/// dgrad engine shares it), in the provider's own loaded copy of that test seam -- see
 /// ConvDgradAotGeometry.hpp::batchChunkByteLimitForTesting(). A test in another TU
 /// (an integration test that loads this engine as a separate plugin .so) mutating its
 /// own copy of that inline function's local static never reaches the one the plugin's

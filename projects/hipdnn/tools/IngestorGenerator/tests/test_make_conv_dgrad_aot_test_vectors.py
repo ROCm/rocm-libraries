@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The committed golden test-vector headers of both dgrad engines are what
+"""The committed golden test-vector headers of every dgrad engine are what
 tools/make_conv_dgrad_aot_test_vectors.py writes from the committed instance lists and
 the rocKE tree beside them, so the C++ geometry and matcher tests cannot drift from the
 Python adapter (no compile, no GPU)."""
@@ -36,6 +36,7 @@ _JOBS = min(16, os.cpu_count() or 1)
     "arch, header",
     [
         ("gfx950", "Gfx950ConvDgradTestVectors.hpp"),
+        ("gfx942", "Gfx942ConvDgradTestVectors.hpp"),
         ("gfx1250", "Gfx1250ConvDgradTestVectors.hpp"),
     ],
 )

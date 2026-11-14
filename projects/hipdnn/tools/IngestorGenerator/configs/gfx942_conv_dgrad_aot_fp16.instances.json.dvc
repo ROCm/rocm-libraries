@@ -1,0 +1,6 @@
+outs:
+- md5: 85e31f750fb594f2d21a9fad315e1414
+  size: 86153
+  hash: md5
+  path: gfx942_conv_dgrad_aot_fp16.instances.json
+  remote: ingestor
