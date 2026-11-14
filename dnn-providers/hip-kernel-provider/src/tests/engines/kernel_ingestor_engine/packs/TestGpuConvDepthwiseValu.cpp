@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -921,6 +922,151 @@ INSTANTIATE_TEST_SUITE_P(Multiplier,
                          ::testing::ValuesIn(multiplierCases()),
                          [](const auto& info) { return info.param.name; });
 
+/// An inf in x that some filter taps never pair with a dy element: a column past wo of the last
+/// tile, an image's first row under its bottom filter row, or (stride 2) a row or column of the
+/// other parity. Every matrix-core (hankel) config keeps those taps finite, as the reference does.
+struct InfCase
+{
+    std::string name;
+    ConvShape shape;
+    std::vector<int64_t> at; // (n, c, y, x)
+};
+
+std::vector<InfCase> infCases()
+{
+    std::vector<InfCase> cases;
+    // wo 21: the last 32- or 16-column tile runs past it; x column 20 under tap 0 meets ox 21.
+    cases.push_back(
+        {"Stride1RaggedColumn", depthwise(16, {9, 21}, {3, 3}, {1, 1}, true), {1, 3, 4, 20}});
+    // x row 0 under filter row 2 meets dy row -1.
+    cases.push_back(
+        {"Stride1FirstRow", depthwise(16, {9, 21}, {3, 3}, {1, 1}, true), {0, 5, 0, 10}});
+    // wo 32 (whole tiles), 7x7: the first row under filter rows 4 to 6.
+    cases.push_back(
+        {"Stride1FirstRow7x7", depthwise(16, {9, 32}, {7, 7}, {3, 3}, true), {1, 9, 0, 13}});
+    auto odd = depthwise(16, {13, 21}, {3, 3}, {1, 1}, true);
+    odd.stride = {2, 2};
+    // Stride 2: x row 1 under filter row 1 meets dy row 1/2.
+    cases.push_back({"Stride2OddRow", odd, {1, 7, 1, 10}});
+    auto ragged = depthwise(16, {13, 22}, {3, 3}, {1, 1}, true);
+    ragged.stride = {2, 2};
+    // Stride 2, wo 11: x column 21 under tap 0 meets ox 11.
+    cases.push_back({"Stride2RaggedColumn", ragged, {0, 2, 6, 21}});
+    return cases;
+}
+
+template <typename T>
+void runWrwInfCase(const InfCase& infCase)
+{
+    auto shape = infCase.shape;
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const auto pack = wrwPack();
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+
+    Tensor<T> x(spec.x.dims, spec.x.strides);
+    Tensor<T> w(spec.w.dims, spec.w.strides);
+    Tensor<T> y(spec.y.dims, spec.y.strides);
+    constexpr unsigned int SEED = 2468;
+    x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
+    y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    static_cast<T*>(x.rawHostData())[offsetOf(infCase.at, x.strides())]
+        = static_cast<T>(std::numeric_limits<float>::infinity());
+    x.markHostModified();
+    Tensor<T> reference(spec.w.dims, spec.w.strides);
+    CpuFpReferenceConvolution::wgrad(
+        x, reference, y, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
+    const auto* expected = static_cast<const T*>(reference.rawHostData());
+    int64_t finiteTaps = 0;
+    forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+        if(std::isfinite(static_cast<float>(expected[offsetOf(index, reference.strides())])))
+        {
+            ++finiteTaps;
+        }
+    });
+    // The case is only a test when the inf's channel has both finite and non-finite taps.
+    ASSERT_GT(finiteTaps, 0);
+    ASSERT_LT(finiteTaps, static_cast<int64_t>(w.elementCount()));
+
+    int64_t reduction = spec.y.dims[0];
+    for(size_t axis = 2; axis < spec.y.dims.size(); ++axis)
+    {
+        reduction *= spec.y.dims[axis];
+    }
+    const float accumulationBound = 1e-6f * static_cast<float>(reduction);
+    const auto& handler = dispatchHandler(pack);
+    int ran = 0;
+    for(const auto& config : wrwCatalog())
+    {
+        const auto kernel = wrwKernelFor(config, shape.dataType);
+        if(config.variant != "hankel" || !matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(config.tag());
+        ++ran;
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
+        void* workspace = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+        w.fillWithSentinelValue();
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+        const Handle handle;
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        ASSERT_EQ(hipFree(workspace), hipSuccess);
+        w.markDeviceModified();
+        const auto* actual = static_cast<const T*>(w.rawHostData());
+        int64_t mismatches = 0;
+        forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const bool ok = std::isfinite(want)
+                                ? std::fabs(got - want) <= accumulationBound
+                                                               + 2.0f * storageEpsilon<T>()
+                                                                     * (std::fabs(want) + 1e-3f)
+                                : !std::isfinite(got);
+            if(!ok && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
+                              << got << ", want " << want;
+            }
+        });
+        EXPECT_EQ(mismatches, 0);
+    }
+    if(ran == 0)
+    {
+        GTEST_SKIP() << "no matrix-core config serves this case on this device";
+    }
+}
+
+class TestGpuConvDepthwiseValuWrwHankelInf : public ::testing::TestWithParam<InfCase>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseValuWrwHankelInf, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwInfCase<Half>(GetParam());
+}
+
+TEST_P(TestGpuConvDepthwiseValuWrwHankelInf, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwInfCase<BFloat16>(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDepthwiseValuWrwHankelInf,
+                         ::testing::ValuesIn(infCases()),
+                         [](const auto& info) { return info.param.name; });
+
 // Host-only: the kernel's multiplier is the graph's; the graph's output channels a whole
 // multiple of its input channels; no matrix-core (hankel) config takes a multiplier.
 TEST(TestConvDepthwiseValuWrwMultiplier, KernelsServeTheirOwnMultiplier)
@@ -1670,6 +1816,31 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
             matchesKernel(pack, fixture.context(), wrwKernelFor(config, shape.dataType), *bound),
             c.admitted);
     }
+}
+
+// Host-only: the matrix-core configs load x and dy 16 bytes at a time, so each pointer must be
+// declared 16-byte aligned; an 8-byte one declines (to the VALU variants).
+TEST(TestConvDepthwiseValuWrwHankel, DeclinesPointersBelowSixteenBytes)
+{
+    const auto pack = wrwPack();
+    const WrwConfig config{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2, 1, 1};
+    const auto admits = [&](int64_t xAlign, int64_t yAlign) {
+        auto shape = depthwise(40, {13, 21}, {3, 3}, {1, 1}, true);
+        shape.dataType = DataType::HALF;
+        auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+        spec.x.alignment = xAlign;
+        spec.y.alignment = yAlign;
+        const GraphFixture fixture(buildGraph(spec), countedDevice(64, "gfx942"));
+        const auto bound = matchesGraph(pack, fixture.context());
+        return bound.has_value()
+               && matchesKernel(
+                   pack, fixture.context(), wrwKernelFor(config, DataType::HALF), *bound);
+    };
+    EXPECT_TRUE(admits(16, 16));
+    EXPECT_TRUE(admits(32, 64));
+    EXPECT_FALSE(admits(8, 16));
+    EXPECT_FALSE(admits(16, 8));
+    EXPECT_FALSE(admits(2, 2));
 }
 
 // Host-only: the vector-tile backward-weights gates, one field at a time from an admitted base
