@@ -56,6 +56,15 @@ class Installation:
 
 
 @dataclass(frozen=True)
+class ClientIdentity:
+    """What a validated client reports about itself."""
+
+    source_revision: str
+    # "<identity> <full|base|unknown>": the ROCm the client was compiled against.
+    build_rocm: str
+
+
+@dataclass(frozen=True)
 class ClientCandidate:
     path: Path
     source: str
@@ -166,7 +175,7 @@ def default_client_candidate(
     )
 
 
-def validate_client(client: Path, installation: Installation) -> None:
+def validate_client(client: Path, installation: Installation) -> ClientIdentity:
     """Verify that a client was built from the same rocm-libraries commit as this package.
 
     An installed package must match the client's ``--source-revision`` exactly,
@@ -222,7 +231,7 @@ def validate_client(client: Path, installation: Installation) -> None:
                 + details
                 + _rebuild_hint(installation)
             )
-        return
+        return ClientIdentity(client_revision, build_rocm)
 
     if client_commit != revisions["commit_of"](installation.source_revision):
         raise ClientBindingError(
@@ -239,6 +248,7 @@ def validate_client(client: Path, installation: Installation) -> None:
             ClientBindingWarning,
             stacklevel=2,
         )
+    return ClientIdentity(client_revision, build_rocm)
 
 
 def _query_client(client: Path, option: str) -> str:
