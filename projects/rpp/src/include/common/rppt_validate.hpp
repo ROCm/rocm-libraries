@@ -52,6 +52,10 @@ inline RppLayoutParams get_layout_params(RpptLayout layout, Rpp32u channels) {
     return layoutParams;
 }
 
+inline bool src_dst_channels_match(RpptDescPtr srcDescPtr, RpptDescPtr dstDescPtr) {
+    return srcDescPtr->c == dstDescPtr->c;
+}
+
 inline int check_roi_out_of_bounds(RpptROIPtr roiPtrImage, RpptDescPtr srcDescPtr,
                                    RpptRoiType type) {
     int x = 0, y = 0, w = 0, h = 0;

@@ -38,6 +38,7 @@ RppStatus rppt_brightness(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
                           RpptDescPtr dstDescPtr, Rpp32f* alphaTensor, Rpp32f* betaTensor,
                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                           RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -195,6 +196,7 @@ RppStatus rppt_gamma_correction(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
                                 RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
                                 RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                 rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
     if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
@@ -279,6 +281,7 @@ RppStatus rppt_gamma_correction(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
 RppStatus rppt_blend(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                      RpptDescPtr dstDescPtr, Rpp32f* alphaTensor, RpptROIPtr roiTensorPtrSrc,
                      RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -469,6 +472,7 @@ RppStatus rppt_color_twist(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                            Rpp32f* hueTensor, Rpp32f* saturationTensor, RpptROIPtr roiTensorPtrSrc,
                            RpptRoiType roiType, rppHandle_t rppHandle,
                            RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->c != 3) return RPP_ERROR_INVALID_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -562,6 +566,7 @@ RppStatus rppt_color_twist(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 RppStatus rppt_hue(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr, RpptDescPtr dstDescPtr,
                    Rpp32f* hueTensor, RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                    rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->c != 3) return RPP_ERROR_INVALID_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -649,6 +654,7 @@ RppStatus rppt_saturation(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
                           RpptDescPtr dstDescPtr, Rpp32f* saturationTensor,
                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                           RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->c != 3) return RPP_ERROR_INVALID_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -737,6 +743,7 @@ RppStatus rppt_color_jitter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t ds
                             Rpp32f* contrastTensor, Rpp32f* hueTensor, Rpp32f* saturationTensor,
                             RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                             RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
     if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
@@ -796,6 +803,7 @@ RppStatus rppt_color_cast(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstP
                           RpptDescPtr dstDescPtr, RpptRGB* rgbTensor, Rpp32f* alphaTensor,
                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                           RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->c != 3) return RPP_ERROR_INVALID_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -883,6 +891,7 @@ RppStatus rppt_exposure(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                         RpptDescPtr dstDescPtr, Rpp32f* exposureFactorTensor,
                         RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                         RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -969,6 +978,7 @@ RppStatus rppt_contrast(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                         RpptDescPtr dstDescPtr, Rpp32f* contrastFactorTensor,
                         Rpp32f* contrastCenterTensor, RpptROIPtr roiTensorPtrSrc,
                         RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -1060,6 +1070,7 @@ RppStatus rppt_contrast(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
 RppStatus rppt_lut(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr, RpptDescPtr dstDescPtr,
                    RppPtr_t lutPtr, RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                    rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != RpptDataType::U8 && srcDescPtr->dataType != RpptDataType::I8)
         return RPP_ERROR_INVALID_SRC_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -1143,6 +1154,7 @@ RppStatus rppt_color_temperature(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr
                                  RpptDescPtr dstDescPtr, Rpp32s* adjustmentValueTensor,
                                  RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                  rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->c != 3) return RPP_ERROR_INVALID_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -1230,6 +1242,7 @@ RppStatus rppt_histogram_equalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
                                   RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                                   RpptRoiType roiType, rppHandle_t rppHandle,
                                   RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_SRC_DATATYPE;
     if (dstDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_DST_DATATYPE;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
@@ -1279,6 +1292,7 @@ RppStatus rppt_histogram_equalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
 RppStatus rppt_tone_map(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                         RpptDescPtr dstDescPtr, Rpp32f* gammaTensor, RpptROIPtr roiTensorPtrSrc,
                         RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;

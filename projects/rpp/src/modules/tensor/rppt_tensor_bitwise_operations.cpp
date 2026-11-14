@@ -38,6 +38,7 @@ RppStatus rppt_bitwise_and(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
                            RppPtr_t dstPtr, RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                            RpptRoiType roiType, rppHandle_t rppHandle,
                            RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_SRC_DATATYPE;
     if (dstDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -83,6 +84,7 @@ RppStatus rppt_bitwise_xor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
                            RppPtr_t dstPtr, RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                            RpptRoiType roiType, rppHandle_t rppHandle,
                            RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_SRC_DATATYPE;
     if (dstDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -127,6 +129,7 @@ RppStatus rppt_bitwise_xor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
 RppStatus rppt_bitwise_or(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDescPtr,
                           RppPtr_t dstPtr, RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                           RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_SRC_DATATYPE;
     if (dstDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
@@ -171,6 +174,7 @@ RppStatus rppt_bitwise_or(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDes
 RppStatus rppt_bitwise_not(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                            RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                            rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_SRC_DATATYPE;
     if (dstDescPtr->dataType != RpptDataType::U8) return RPP_ERROR_INVALID_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))

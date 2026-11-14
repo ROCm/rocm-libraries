@@ -41,6 +41,7 @@ SOFTWARE.
 RppStatus rppt_crop(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                     RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                     rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -193,6 +194,7 @@ RppStatus rppt_crop_and_patch(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr sr
                               RppPtr_t dstPtr, RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrDst,
                               RpptROIPtr cropRoi, RpptROIPtr patchRoi, RpptRoiType roiType,
                               rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -288,6 +290,7 @@ RppStatus rppt_crop_mirror_normalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, Rp
                                      Rpp32f* multiplierTensor, Rpp32u* mirrorTensor,
                                      RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                      rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
     if ((dstDescPtr->layout != RpptLayout::NCHW) && (dstDescPtr->layout != RpptLayout::NHWC))
@@ -406,6 +409,7 @@ RppStatus rppt_warp_affine(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                            RpptInterpolationType interpolationType, RpptROIPtr roiTensorPtrSrc,
                            RpptRoiType roiType, rppHandle_t rppHandle,
                            RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((interpolationType != RpptInterpolationType::BILINEAR) &&
         (interpolationType != RpptInterpolationType::NEAREST_NEIGHBOR))
         return RPP_ERROR_NOT_IMPLEMENTED;
@@ -531,6 +535,7 @@ RppStatus rppt_flip(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                     RpptDescPtr dstDescPtr, Rpp32u* horizontalTensor, Rpp32u* verticalTensor,
                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                     RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -696,6 +701,7 @@ RppStatus rppt_resize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                       RpptDescPtr dstDescPtr, RpptImagePatchPtr dstImgSizes,
                       RpptInterpolationType interpolationType, RpptROIPtr roiTensorPtrSrc,
                       RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -972,6 +978,7 @@ RppStatus rppt_resize_mirror_normalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, 
                                        Rpp32f* stdDevTensor, Rpp32u* mirrorTensor,
                                        RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                        rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (interpolationType != RpptInterpolationType::BILINEAR) return RPP_ERROR_NOT_IMPLEMENTED;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -1094,6 +1101,7 @@ RppStatus rppt_resize_crop_mirror(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
                                   RpptInterpolationType interpolationType, Rpp32u* mirrorTensor,
                                   RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                   rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (interpolationType != RpptInterpolationType::BILINEAR) return RPP_ERROR_NOT_IMPLEMENTED;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -1182,6 +1190,7 @@ RppStatus rppt_rotate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                       RpptDescPtr dstDescPtr, Rpp32f* angle,
                       RpptInterpolationType interpolationType, RpptROIPtr roiTensorPtrSrc,
                       RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((interpolationType != RpptInterpolationType::BILINEAR) &&
         (interpolationType != RpptInterpolationType::NEAREST_NEIGHBOR))
         return RPP_ERROR_NOT_IMPLEMENTED;
@@ -1325,6 +1334,7 @@ RppStatus rppt_rotate(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
 RppStatus rppt_phase(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                      RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                      rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -1580,6 +1590,7 @@ RppStatus rppt_remap(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                      RpptDescPtr tableDescPtr, RpptInterpolationType interpolationType,
                      RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
                      RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (interpolationType != RpptInterpolationType::NEAREST_NEIGHBOR &&
         interpolationType != RpptInterpolationType::BILINEAR)
         return RPP_ERROR_NOT_IMPLEMENTED;
@@ -1717,6 +1728,7 @@ RppStatus rppt_lens_correction(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
                                Rpp32f* distortionCoeffsTensor, RpptROIPtr roiTensorPtrSrc,
                                RpptRoiType roiType, rppHandle_t rppHandle,
                                RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -1905,6 +1917,7 @@ RppStatus rppt_warp_perspective(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
                                 RpptInterpolationType interpolationType, RpptROIPtr roiTensorPtrSrc,
                                 RpptRoiType roiType, rppHandle_t rppHandle,
                                 RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if ((interpolationType != RpptInterpolationType::BILINEAR) &&
         (interpolationType != RpptInterpolationType::NEAREST_NEIGHBOR))
         return RPP_ERROR_NOT_IMPLEMENTED;
@@ -2030,6 +2043,7 @@ RppStatus rppt_jpeg_compression_distortion(RppPtr_t srcPtr, RpptDescPtr srcDescP
                                            RpptDescPtr dstDescPtr, Rpp32s* qualityTensor,
                                            RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                            rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -2253,6 +2267,7 @@ RppStatus rppt_concat(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptGenericDescPtr src
 RppStatus rppt_fisheye(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                        RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                        rppHandle_t rppHandle, RppBackend executionBackend) {
+    if (!src_dst_channels_match(srcDescPtr, dstDescPtr)) return RPP_ERROR_INVALID_DST_CHANNELS;
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
