@@ -43,7 +43,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_DEPTHWISE_ROWS_FWD/BWD` | Depthwise by channel rows: 1-D/vocoder depthwise, dilated, strided ConvTranspose1d | fwd, bwd-data | all (VALU) | 222 |
 | `CONV_DEPTHWISE_VALU_FWD/BWD` | General VALU depthwise, plus the strided bwd `phase` variant | fwd, bwd-data | all | 342 (162 fwd, 180 bwd) |
 | `CONV_DEPTHWISE_VALU_WRW` | Depthwise backward weights (register strips; NHWC and NCHW) | wrw | all | 222 |
-| `CONV_NAIVE_FWD/BWD/WRW` | Correctness floor: serves every graph | all | all | 9 |
+| `CONV_NAIVE_FWD/BWD/WRW` | Coverage-first production kernels: serve graphs no faster engine serves, within a workload budget | all | all | 9 |
 | `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` (hipblaslt-provider) | Explicit GEMM (im2col/col2im) | all | all | BLAS-internal |
 | `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE`; `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` (hipblaslt-provider) | Explicit GEMM with TF32 (numerical note `TENSOR_CORE`), and fp16 1x1 backward weights with a per-image rounded reduction (`REDUCED_PRECISION_REDUCTION`) | all; wrw | all (TF32 rounds only where the library has a TF32 path: hipBLASLt gfx942 / gfx950, rocBLAS gfx942) | BLAS-internal |
 
@@ -61,8 +61,8 @@ Measured against the BLAS path, 16-bit channels-last:
 - gfx950: 1.5-1.9x faster on 2-D 5x5/7x7 and 3-D 1x5x5.
 - gfx1201: 2.6-3.2x faster on the same shapes, and 1.7x on 1-D k3.
 - 1-D k9: 0.69x on gfx950 and 0.96x on gfx1201, so BLAS still wins there. Heuristics should rank BLAS above the generic tier for it.
-- ASPP-class filters (at most 9 taps, dilation 6 or more): BLAS won on every arch measured (d18 16-bit 0.6-0.7x, d6 fp32 0.6x). The generic tier declines them.
-- RDNA fp32 runs the generic tier's FMA form, because RDNA has no fp32 matrix core. On gfx1201, against BLAS, it was faster on 5x5 (1.6x), 1-D k9 (1.4x), 3x3 stride 3 (4.2x) and 5x5x5 (3.5x). It was slower on stems and patchify-class width strides (4.2-7.9x behind), so it declines fewer than 8 input channels per group and width strides of 4 or more.
+- ASPP-class filters (at most 9 taps, dilation 6 or more): BLAS wins on every arch measured (d18 16-bit 0.6-0.7x, d6 fp32 0.6x). The generic tier declines them.
+- RDNA fp32 runs the generic tier's FMA form, because RDNA has no fp32 matrix core. On gfx1201, against BLAS, it is faster on 5x5 (1.6x), 1-D k9 (1.4x), 3x3 stride 3 (4.2x) and 5x5x5 (3.5x). It is slower on stems and patchify-class width strides (4.2-7.9x behind), so it declines fewer than 8 input channels per group and width strides of 4 or more.
 
 ## What the knobs mean
 
@@ -92,13 +92,13 @@ Engine-specific knobs (`taps`, `stride`, `flat`, `ring`, `phase`, `fold`, ...) a
 
 ## Timing data
 
-**Per-config timings.** With autotune (`HIPDNN_FORCE_BENCHMARKING=1`), each ingestor engine times every admitted config on the first execute and keeps the fastest. Every candidate's time and its problem features are logged as a JSON record at INFO plugin log level (`BenchmarkPlan::logCandidateTiming`). That is the per-config training data the `hipdnn-uhd` skill's pipeline consumes. The BLAS engines tune internally and report only their best.
+**Per-config timings.** With autotune (`HIPDNN_FORCE_BENCHMARKING=1`), each ingestor engine times every admitted config on the first execute and keeps the fastest. Every candidate's time and its problem features are logged as a JSON record at INFO plugin log level (`BenchmarkPlan::logCandidateTiming`). That is the per-config training data for UHD heuristics. The BLAS engines tune internally and report only their best.
 
-**Problem sets in use for measuring this group**, as dnn-benchmarking graph JSON:
-- **conv-kpi subset:** 1998 shapes chosen from a 9471-shape real-model corpus to keep its range: every direction, dtype, layout, conv type and filter class. It covers 31 models.
-- **rapid:** 86 shapes. Every conv class, direction, dtype and layout.
-- **rdna_av:** 414 audio/video shapes (vocoders, video VAEs, conformer, segmentation).
-- **depthwise** and **pointwise** tiers.
+**Problem sets in use for measuring this group**, as hipDNN graph JSON:
+- **Model-corpus subset:** 1998 shapes chosen from an internal 9471-shape real-model corpus to keep its range: every direction, dtype, layout, conv type and filter class. It covers 31 models.
+- **Quick set:** 86 shapes. Every conv class, direction, dtype and layout.
+- **Audio/video set:** 414 shapes (vocoders, video VAEs, conformer, segmentation).
+- **Depthwise** and **pointwise** sets.
 
 Reference results per GPU are each engine's autotuned best time per graph, against MIOpen in search mode (gfx950, gfx942, gfx90a, gfx1201, gfx1100/gfx1101, gfx908, gfx906). They come as per-graph CSVs: MIOpen time, our best time, best engine, and MIOpen's solver.
 
@@ -107,13 +107,13 @@ Ask the conv owners for the graph sets and the latest results; they are not in t
 ## Things that bite
 
 - **First-run cost.** With autotune, every admitted config compiles through HIPRTC on first use. Measured median cold compiles are 0.3-0.8 s per config on CDNA and 0.4-1.5 s on RDNA. The only configs over 10 s are K7's fp32 FMA stride-8 configs (10-20 s). Summed over its admitted configs, a graph's median first-run cost is about 30 s. The worst measured graph is a ResNeXt-50 grouped NCHW bwd-data graph, where K1 alone admits 91-131 configs: 134 s on gfx942 and 224 s on gfx950. Good OOTB selection means picking well without compiling the whole candidate list. The HIPRTC disk cache lives under `<cache>/hip-kernel-provider/hiprtc/<key>.co`. The key is a sha256 over the HIPRTC version, the source, every embedded include and every option (architecture included). A pre-populated cache directory is how commonly needed instances can ship pre-compiled.
-- **Catalogs are still moving.** K5 `coop`, K1 core (`swz`, `dma`, `fuse`, `cf`), K3, K4 and the depthwise engines all change week to week. Models trained now will need retraining.
+- **Catalogs are not final.** K5 `coop`, K1 core (`swz`, `dma`, `fuse`, `cf`), K3, K4 and the depthwise engines are under active tuning. Retrain heuristic models whenever a catalog changes.
 - **Timing noise.** Jobs sharing a node can inflate times unevenly between engines; one shape read 0.85 sharing a node and 1.29 alone. Kernels under ~50 µs are noisy per shape. Measure isolated, and weigh by absolute time.
 - **Configs that spill registers still win in places.** Some RDNA K3 ring tiles spill and are still the fastest. Don't prune on spills.
 - **Lower-precision engines are offered by default.** The TF32 engines (`*_TF32`), the bf16 and F(4,3) Winograd engines and the BLAS reduced-precision-reduction engines serve by default, each reporting its numerical note. A caller that wants exact fp32 deselects `TENSOR_CORE` (and the Winograd notes) through the hipDNN API's cuDNN-compatible `deselect_numeric_notes`; heuristics trained for exact selection should drop those engines the same way.
 - **Winograd workspace.** `HIP_KERNEL_PROVIDER_CONV_WINOGRAD_WORKSPACE_MB` caps K5's workspace. `HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES` overrides the last-level-cache size its planner assumes; HIP doesn't report MALL.
 - **Winograd engines carry the `WINOGRAD` numerical note** with their tile note (`WINOGRAD_TILE_4x4` forward and backward data, `WINOGRAD_TILE_6x6` for F(4,3); backward weights mixes tiles and names none), so callers can opt out of them for numerical reasons.
-- **bf16 Winograd** (`CONV_WINOGRAD_FWD/BWD_BF16`): the matrix-core bf16 operands round the transformed tiles to bf16, past the precision model, and MIOpen has no bf16 Winograd to match. Measured on the full NCHW tier at 762934be264: bf16 Winograd was our fastest on 284 graphs on gfx1201 (503 ms call-weighted ahead of the next engine, of 4498 ms) and 73 on gfx1100 (440 ms). The NHWC tier has none.
-- **fp32 F(4,3) Winograd** (`CONV_WINOGRAD_FWD/BWD_F43`): its transforms put about 27 fp32 ulps of each tile's sum of |products| into the result on a 3x3 c128 layer (about 1 for F(2,3); MIOpen's fp32 Winograd needs a 5.7 coefficient). It was 25-36% faster than the best F(2,3) on fp32 mrcnn c256 layers on gfx1201 (200²: 19.1 vs 24.4 ms), about 300 ms call-weighted on gfx1201 NCHW (fp32 Winograd-best total 1120 ms), less on gfx1201 NHWC (210 ms total) and gfx1100 (147 ms NCHW, 155 ms NHWC). Better points (0, ±1, ±1/2) for less error are a follow-up.
+- **bf16 Winograd** (`CONV_WINOGRAD_FWD/BWD_BF16`): the matrix-core bf16 operands round the transformed tiles to bf16, past the precision model, and MIOpen has no bf16 Winograd to match. On the full corpus in NCHW, bf16 Winograd is our fastest on 284 graphs on gfx1201 (503 ms call-weighted ahead of the next engine, of 4498 ms) and 73 on gfx1100 (440 ms). In NHWC it is fastest on none.
+- **fp32 F(4,3) Winograd** (`CONV_WINOGRAD_FWD/BWD_F43`): its transforms put about 27 fp32 ulps of each tile's sum of |products| into the result on a 3x3 c128 layer (about 1 for F(2,3); MIOpen's fp32 Winograd needs a 5.7 coefficient). It is 25-36% faster than the best F(2,3) on fp32 mrcnn c256 layers on gfx1201 (200²: 19.1 vs 24.4 ms), about 300 ms call-weighted on gfx1201 NCHW (fp32 Winograd-best total 1120 ms), less on gfx1201 NHWC (210 ms total) and gfx1100 (147 ms NCHW, 155 ms NHWC). Better points (0, ±1, ±1/2) for less error are a follow-up.
 - **All conv engines here carry the `runtime_compilation` behavior note.**
 - **NCHW 1x1 half-precision wrw trails MIOpen by design.** MIOpen's `GemmWrw1x1_stride1` zeroes dw, then runs one rocBLAS GEMM per image with beta=1 and fp16/bf16 output (HHS), so dw is rounded to half precision after every image. The BLAS engines accumulate the whole reduction in fp32 (HSS) and round once. rocprofv3 on gfx1201, fp16: deeplab c256 k1024 128^2 n16 is 16 GEMMs of about 150 µs (2.47 ms) for MIOpen against 4 fp32-output calls of about 1.05 ms plus a 0.11 ms cast (4.45 ms) for us; unet c64 k2 512^2 n16 is 1.27 ms against about 1.85 ms (16 GEMMs plus a 0.25 ms cast). We don't match it because it rounds N times. The hipblaslt-provider's `ROCBLAS_CONV_RPR_ENGINE` and `HIPBLASLT_CONV_RPR_ENGINE` run that form and report `REDUCED_PRECISION_REDUCTION`, so callers can filter them out.

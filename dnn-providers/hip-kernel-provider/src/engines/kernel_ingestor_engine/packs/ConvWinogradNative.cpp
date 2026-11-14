@@ -1187,8 +1187,8 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         {
             // CDNA: the blocks a CU holds, by registers (the kernel's k5CoopCdnaWpe waves per
             // SIMD; gfx908 keeps 2 and the 1024-thread grid) and by LDS (160 KiB a CU on gfx950,
-            // 64 KiB before). A grid past that ran a second, partly empty round of persistent
-            // blocks: gfx950 hrnet c32 k32 56² n128 and yolo c32 160² 15-20% slower.
+            // 64 KiB on earlier CDNA). A grid past that runs a second, partly empty round of
+            // persistent blocks: gfx950 hrnet c32 k32 56² n128 and yolo c32 160² 15-20% slower.
             const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
             const int kw = std::max(1, config.waves / 4);
             const int mt = std::max(1, config.bk / (16 * kw));

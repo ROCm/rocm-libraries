@@ -69,7 +69,7 @@ After a change to a generator (a new config, a new family, a field):
 #     `dvc add` per catalog (rewrites its pointer), `remote: ingestor` on each pointer,
 #     and `git add` of the pointers, the .gitignore entries and the small descriptors.
 python3 dnn-providers/hip-kernel-provider/conv/generators/regen_all.py --dvc-add
-#     A catalog a generator no longer writes fails the run; --prune deletes it and its
+#     A catalog that no generator writes fails the run; --prune deletes it and its
 #     pointer. --families igemm,wrw restricts the run.
 
 # (2) The family's tests, as for any descriptor change (see ../README.md for the filters).
@@ -94,15 +94,14 @@ A **new family** is one more row in `FAMILIES` (`generators/regen_all.py`) and a
 `HIPDNN_ENGINE_CONV_<FAMILY>` row in `IngestorPacks.cpp` (`../README.md`, *Adding an engine
 family*); `--dvc-add` creates its pointers and `.gitignore`.
 
-## 4. Merging a branch that still writes catalogs into git
+## 4. Merging a branch that commits catalogs to git
 
-A branch cut before the catalogs moved to DVC still commits `*.kdp.json` as ordinary git
-files. Merging it conflicts on every catalog it touched (modify/delete: git sees the file
-deleted here, modified there). The catalogs are generated, so never resolve them by hand.
+A branch that commits `*.kdp.json` as ordinary git files conflicts, when merged, on every
+catalog it touches (modify/delete: git sees the file deleted here, modified there). The catalogs are generated, so never resolve them by hand.
 Take the code, rerun the generators, record:
 
 ```bash
-git merge <lead-branch>                 # conflicts in descriptors/conv/<family>/*.kdp.json
+git merge <branch>                      # conflicts in descriptors/conv/<family>/*.kdp.json
 # Resolve every non-catalog conflict (generators, kernels, packs, tests) as usual. Then
 # regenerate, which overwrites each catalog with what the merged generator writes,
 # untracks it from git, dvc-adds it and stages the pointers:
@@ -114,13 +113,13 @@ git commit                              # the merge commit
 # then upload (section 3, step 3) before pushing the branch.
 ```
 
-The same recipe covers a branch that added a family or split a catalog: the new catalogs get
-new pointers, and `--prune` removes the ones the merged generators no longer write. It is
+The same recipe covers a branch that adds a family or splits a catalog: the new catalogs get
+new pointers, and `--prune` removes the ones the merged generators do not write. It is
 safe to rerun: an unchanged catalog keeps its pointer byte for byte.
 
 ## 5. When the bytes differ
 
-`--check` reporting a difference on a tree nobody regenerated means a generator is no longer
+`--check` reporting a difference on a tree nobody regenerated means a generator is not
 deterministic (an unordered set or dict iteration, a timestamp, a float printed through a
 locale) or a catalog was edited by hand. Fix the generator and regenerate; never edit a
 catalog directly, since the next regeneration discards the edit.

@@ -671,7 +671,7 @@ FILTERS = [
     ("3x3g32", 3, 1, 1, 3, 1, [], [0], [CF]),
     # Channels-last pointwise on RDNA's output rows (diffusion VAE / UNet 1x1; EXTRA_TILES).
     ("1x1clr0", 1, 1, 1, 1, 0, [], [0], [CL]),
-    # 5-wide filters (3-D 5x5x5 volumes, AIPYTORCH-1356; EXTRA_TILES): stride 2 on the output
+    # 5-wide filters (3-D 5x5x5 volumes; EXTRA_TILES): stride 2 on the output
     # rows (every dtype), fp32 on the 16 x 16 fp32 ring (5x5f) and the FMA rows (5x5rf).
     ("5x5s2r1", 5, 2, 1, 1, 0, [], [0], [CF]),
     ("5x5f", 5, 1, 1, 5, 1, [], [0], [CF]),
@@ -977,7 +977,7 @@ SMALLC_FILTERS = [
     ("3x3", 3, 1, 3),
     ("5x5", 5, 1, 5),
 ]
-# 5x5 small-C rows (3-D 5x5x5 with 16 input channels, AIPYTORCH-1356): 16-bit, channels-first,
+# 5x5 small-C rows (3-D 5x5x5 with 16 input channels): 16-bit, channels-first,
 # the tile measured best per atom family (gfx950: 32 x 4 at 64 positions; gfx1201: 64 x 8 at 32).
 SMALLC_5X5_TILES = {"mfma": [(32, 4, 2, 64)], "wmma": [(64, 8, 4, 32)]}
 

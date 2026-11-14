@@ -1798,7 +1798,7 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
     // before the previous row's FMAs, two rows live; on wave32 (RDNA) after them, one row live,
     // which measured faster there (the f32 rows run at 85-92% of DRAM bandwidth on gfx1201, and
     // the second row costs waves). The prefetched row lands in its own array and is copied over:
-    // a two-slot ring indexed by r & 1 compiles to the same code but crashed instruction
+    // a two-slot ring indexed by r & 1 compiles to the same code but crashes instruction
     // selection in one config (f16 7x7 7x7 vec 2) with the pinned nightly HIPRTC.
     constexpr int R = (TH - 1) * S + KH;
     constexpr bool PREFETCH = DW_WAVE == 64;

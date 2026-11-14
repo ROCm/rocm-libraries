@@ -39,10 +39,10 @@
 #include "ConvIgemmCore.h"
 
 // Weight fragments by buffer load, the lane's column as the vector offset and the step's
-// wave-uniform offset as the scalar offset, where that measured faster than flat loads (spec
-// lead bench, 2026-11-12): the matrix-core kernel on gfx950 and RDNA, the FMA kernel also on
-// gfx90a. Elsewhere the flat loads stay (gfx90a's matrix-core kernel needs 20 more VGPRs in the
-// buffer form and loses a wave per SIMD; gfx906/908/942 are not measured).
+// wave-uniform offset as the scalar offset, where that measured faster than flat loads: the
+// matrix-core kernel on gfx950 and RDNA, the FMA kernel also on gfx90a. Elsewhere the flat
+// loads stay (gfx90a's matrix-core kernel needs 20 more VGPRs in the buffer form and loses a
+// wave per SIMD; gfx906/908/942 are not measured).
 #if K1_HAS_WMMA11 || K1_HAS_WMMA12 || defined(__gfx950__)
 #define K2_MMA_WBUF 1
 #else

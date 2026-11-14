@@ -15,7 +15,7 @@ the md5 every pointer records.
 Modes:
   (default)   regenerate into the tree. Each generator runs into a fresh scratch directory
               and its files are copied over the family's. A catalog the tree holds that the
-              generator no longer writes is reported and fails the run; --prune deletes it
+              generator does not write is reported and fails the run; --prune deletes it
               with its pointer.
   --check     write nothing: regenerate into scratch and require every generated file to
               equal the tree's byte for byte, and every catalog's pointer to record that
@@ -176,12 +176,12 @@ def check_family(script: str, family: str, scratch: Path) -> list[str]:
     for catalog in sorted(tree.glob("*" + CATALOG_SUFFIX)):
         if catalog.relative_to(tree) not in produced:
             problems.append(
-                f"{family}/{catalog.name}: stale, {script} no longer writes it"
+                f"{family}/{catalog.name}: stale, {script} does not write it"
             )
     for pointer in sorted(tree.glob("*" + CATALOG_SUFFIX + ".dvc")):
         if Path(pointer.name.removesuffix(".dvc")) not in produced:
             problems.append(
-                f"{family}/{pointer.name}: stale pointer, {script} no longer writes its catalog"
+                f"{family}/{pointer.name}: stale pointer, {script} does not write its catalog"
             )
     return problems
 
@@ -208,7 +208,7 @@ def regen_family(
         catalog = tree / name
         if not prune:
             stale.append(
-                f"{family}/{name}: stale, {script} no longer writes it (rerun with --prune)"
+                f"{family}/{name}: stale, {script} does not write it (rerun with --prune)"
             )
             continue
         pointer = pointer_of(catalog)

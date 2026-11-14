@@ -43,7 +43,7 @@
  *   m  only MIOpen; u  no engine at all; -  not recorded for that architecture.
  * Every graph is built and its engines are asked for (get_ranked_engine_ids); nothing is
  * compiled or executed, so the whole map takes seconds. The checks:
- *   (a) no graph is served below its mapped tier on this architecture (a regression);
+ *   (a) no graph is served below its mapped tier on this architecture (a coverage loss);
  *       a graph served above it is an intended upgrade, listed for the map refresh. An
  *       architecture the map has no column for skips this check;
  *   (b) the generic-tier engines a row names (those that served it on every architecture the
@@ -669,7 +669,7 @@ std::optional<Tier>
 }
 
 /// Whether the map records @p row as served by naive alone on this architecture and naive's
-/// budget declines it on this device: a smaller part than the map's, not a regression.
+/// budget declines it on this device: a smaller part than the map's, not a coverage loss.
 bool naiveSizedOut(const Census& c, const nlohmann::json& row)
 {
     return mappedTier(c.map, row, c.arch) == Tier::NAIVE && naiveOverBudget(row, c.computeUnits);
@@ -829,7 +829,7 @@ TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
 {
     SKIP_WITHOUT_CENSUS();
     const auto& c = census();
-    std::ostringstream regressions;
+    std::ostringstream downgrades;
     std::ostringstream upgrades;
     int worse = 0;
     int better = 0;
@@ -861,9 +861,9 @@ TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
         if(seen.tier > *expected)
         {
             ++worse;
-            regressions << "\n  " << describe(row) << ": mapped " << tierName(*expected)
-                        << ", served " << tierName(seen.tier)
-                        << (seen.error.empty() ? "" : " (" + seen.error + ")");
+            downgrades << "\n  " << describe(row) << ": mapped " << tierName(*expected)
+                       << ", served " << tierName(seen.tier)
+                       << (seen.error.empty() ? "" : " (" + seen.error + ")");
         }
         else if(seen.tier < *expected)
         {
@@ -888,7 +888,7 @@ TEST(IntegrationConvCoverageCensus, NoGraphIsServedBelowItsMappedTier)
     }
     EXPECT_EQ(worse, 0) << worse << " of " << checked << " graphs are served below their mapped "
                         << "tier on " << c.arch << " (" << unchecked
-                        << " unchecked):" << regressions.str();
+                        << " unchecked):" << downgrades.str();
 }
 
 TEST(IntegrationConvCoverageCensus, GenericTierEnginesServeTheirRegion)

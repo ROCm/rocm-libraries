@@ -228,7 +228,7 @@ struct K5CoopCfg
     // RDNA: waves per SIMD the kernel is built for (VGPR budget 1536 / WPE): the loop is
     // latency-bound, so the single-tile configs hold 8 (192 VGPRs); 2 x 2 tiles need the
     // registers. CDNA: k5CoopCdnaWpe, which the host's persistent grid counts on (a grid past
-    // what is resident ran a second, partly empty round: 5-20% on gfx950 small C); gfx908, whose
+    // what is resident runs a second, partly empty round: 5-20% on gfx950 small C); gfx908, whose
     // accumulators sit in a separate register file: 2.
 #if defined(__gfx908__)
     static constexpr int WPE_CDNA = 2;
@@ -1139,7 +1139,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         // A pass's channel kk = pi / BT, pi = tid + j THREADS: kk0 = tid / BT plus j ES. Where ES
         // divides 16, a thread's channels are k0 + kk0 plus a compile-time step, so its output
         // pointer is formed once per item and each store adds a uniform offset (the per-store
-        // 64-bit multiply was a large part of the epilogue's VALU on CDNA).
+        // 64-bit multiply is a large part of the epilogue's VALU on CDNA).
         constexpr int ES = THREADS / BT, EJ = (16 * KWP * BT + THREADS - 1) / THREADS;
         constexpr bool ESTEP = ES <= 16 && 16 % ES == 0;
         const int kk0 = tid / BT;

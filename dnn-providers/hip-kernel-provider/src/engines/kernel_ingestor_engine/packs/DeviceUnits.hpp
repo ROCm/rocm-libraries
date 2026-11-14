@@ -15,7 +15,7 @@
  *
  * On gfx9 (GCN, CDNA) multiProcessorCount is the compute-unit (CU) count. On gfx10, gfx11 and
  * gfx12 HIP reports work-group processors (WGPs), two CUs each: gfx1151 20 (rocminfo: 40 CUs),
- * gfx1100 W7900 48 (96), gfx1201 R9700 32 (64), measured 2026-11-09.
+ * gfx1100 W7900 48 (96), gfx1201 R9700 32 (64).
  *
  * Both are the unit a workgroup is dispatched onto (gfx10+ kernels run in WGP mode), and both
  * hold four SIMDs, so a planner that sizes a grid in blocks per unit reads dispatchUnits(). A
