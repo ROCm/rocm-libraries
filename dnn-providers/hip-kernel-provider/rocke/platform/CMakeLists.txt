@@ -153,14 +153,22 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
+# Every installed rocKE pytest entry except the explicit gates starts its
+# command with this text. The rocke.tests.ctest_shard plugin and its flag make
+# the entry run only the CI shard's share of its tests. The gates stop on a
+# partial run, so they keep their own command.
+set(_ROCKE_INSTALLED_PYTEST
+    "python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env")
+
 # Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
 # one part of the platform pytest suite. The remaining arguments are the part's
 # pytest path and option arguments. _ROCKE_PLATFORM_PYTEST_IGNORE_<part>, when
 # set, lists files under tests/ that the part must not collect (for example a
 # file that runs in its own CTest entry); each becomes an --ignore. Every
-# argument is quoted. Every part shares the marker filter, the per-test limit,
-# the labels, the CTest limit and the environment list that the installed
-# CTestTestfile defines as _rocke_platform_pytest_environment.
+# argument is quoted. Every part shares the installed pytest command, the
+# marker filter, the per-test limit, the labels, the CTest limit and the
+# environment list that the installed CTestTestfile defines as
+# _rocke_platform_pytest_environment.
 function(rocke_platform_pytest_entry out_var part)
   set(_test_name "rocke_pytest_${part}")
   set(_pytest_argument_list ${ARGN})
@@ -172,7 +180,7 @@ function(rocke_platform_pytest_entry out_var part)
     string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
   endforeach()
   string(CONCAT _entry
-         "add_test(${_test_name} python -m pytest${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
+         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
          "set_tests_properties(${_test_name} PROPERTIES\n"
          "  LABELS \"ckc\\;python\\;quick\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
@@ -727,19 +735,29 @@ if(ROCKE_INSTALL_TESTS)
       # per-directory times in CI logs; _ROCKE_PLATFORM_PYTEST_GROUP_<group>
       # lists the directories of rocke_pytest_<group>. rocke_pytest_other runs
       # the rest of tests/: the files at its top level and every directory no
-      # group names, so a new directory runs with no edit here. Together the
-      # entries collect what one entry over tests/ would. To keep a file out of
-      # every part, list(APPEND) it (a path under tests/) to
-      # _ROCKE_PLATFORM_PYTEST_IGNORE_<part> for the part whose directories hold
-      # it, or for "other"; APPEND keeps any value given on the configure line,
-      # which tests/test_engine_linkage.py uses. The rocke_pytest_ name prefix
-      # is reserved for these entries; the provider categories tier them by
-      # that prefix.
+      # group names, so a new directory runs with no edit here. Together with
+      # rocke_ctest_shard_pytest below, the entries collect what one entry over
+      # tests/ would. To keep a file out of every part, list(APPEND) it (a path
+      # under tests/) to _ROCKE_PLATFORM_PYTEST_IGNORE_<part> for the part whose
+      # directories hold it, or for "other"; APPEND keeps any value given on the
+      # configure line, which tests/test_engine_linkage.py uses. The
+      # rocke_pytest_ name prefix is reserved for these entries; the provider
+      # categories tier them by that prefix.
       set(_ROCKE_PLATFORM_PYTEST_GROUPS core instances_dispatch runtime_tools)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
           runtime portable_ir tools analysis in_tree)
+      # The tests of the rocke.tests.ctest_shard plugin start many child pytest
+      # and CTest runs. They run in rocke_ctest_shard_pytest, which the provider
+      # categories tier as standard, so the quick tier does not run them.
+      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_other test_ctest_shard.py)
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"not integration\" -v -rs --timeout=60)\n"
+             "set_tests_properties(rocke_ctest_shard_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;standard\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+             "  TIMEOUT 300)\n")
       set(_rocke_pytest_other_arguments
           "${ROCKE_TEST_CTEST_REL}tests" --ignore "${ROCKE_TEST_CTEST_REL}tests/library")
       foreach(_rocke_pytest_group IN LISTS _ROCKE_PLATFORM_PYTEST_GROUPS)
@@ -795,7 +813,7 @@ if(ROCKE_INSTALL_TESTS)
       # tests/pytest.ini, the configuration the rocke_pytest_* parts run under.
       set(_ROCKE_TILING_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling")
       set(_ROCKE_TILING_VISUALIZATION_TESTS "${_ROCKE_TILING_TESTS}/visualization")
-      set(_rocke_tiling_pytest_launcher "python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
+      set(_rocke_tiling_pytest_launcher "${_ROCKE_INSTALLED_PYTEST} -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
       set(_rocke_tiling_pytest_options "-v -rs --timeout=60")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
@@ -830,7 +848,7 @@ if(ROCKE_INSTALL_TESTS)
     foreach(_operation IN LISTS _ROCKE_REFERENCE_OPERATIONS)
       string(TOUPPER "${_operation}" _operation_upper)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_${_operation}_reference_unit_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
+             "add_test(rocke_${_operation}_reference_unit_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;${_operation}\\;host\\;quick\"\n"
@@ -845,7 +863,7 @@ if(ROCKE_INSTALL_TESTS)
         list(LENGTH _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS _variant_count)
         math(EXPR _timeout "300 * ${_variant_count}")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-               "add_test(rocke_${_operation}_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
+               "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
                "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
