@@ -22,6 +22,35 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "ap001_b2h3k3v3_72x40_d128_fp16_brw16rinf_rowpad8_sconst0p5_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "l20_b1h3k3v3_288x480_d128_bfp16_tlcausal_srt0p5_tolp"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "ap001_b2h3k3v3_72x40_d128_fp16_brw16rinf_rowpad8_sconst0p5_qm4to4_km4to4_dom0p0625to0p0625_tolu",
+          "l20_b1h3k3v3_288x480_d128_bfp16_tlcausal_srt0p5_tolp"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

@@ -174,12 +174,15 @@ std::optional<std::string>
 
     // Philox dropout draws its mask from an engine's random stream, which no reference
     // reproduces, and a backward graph has no RNG dump. A zero probability is no
-    // dropout, as the engines read it; an explicit mask carries its own dropout.
+    // dropout, as the plans read it: a seed or offset it names is not read. An explicit
+    // mask carries its own dropout.
+    const bool zeroProbability = attributes.dropout_probability().has_value()
+                                 && attributes.dropout_probability().value() == 0.f;
     const bool philox = (!attributes.dropout_mask_tensor_uid().has_value()
-                         && attributes.dropout_probability().has_value()
-                         && attributes.dropout_probability().value() != 0.f)
-                        || attributes.seed_tensor_uid().has_value()
-                        || attributes.offset_tensor_uid().has_value();
+                         && attributes.dropout_probability().has_value() && !zeroProbability)
+                        || (!zeroProbability
+                            && (attributes.seed_tensor_uid().has_value()
+                                || attributes.offset_tensor_uid().has_value()));
     if(philox)
     {
         return "Philox dropout: no reference reproduces an engine's random stream";

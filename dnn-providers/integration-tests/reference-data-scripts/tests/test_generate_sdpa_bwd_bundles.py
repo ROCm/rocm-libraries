@@ -7,7 +7,8 @@ They check that the checked-in SdpaBackward sweeps and the generated block
 of ASM_SDPA_ENGINE.toml are what the generator writes, that the generator is
 deterministic, that every written case is legal and traceable to the plan,
 that the cases up to nightly cover every required pair of axis values, and
-that every case id resolves to exactly one tolerance row."""
+that every case id resolves to exactly one tolerance row. The same generated
+block and its row resolution are checked in the FlyDSL backward engine TOML."""
 
 from __future__ import annotations
 
@@ -30,6 +31,12 @@ import sdpa_bwd_plan as P  # noqa: E402
 BUNDLES = SCRIPTS.parent / "integration-test-bundles"
 ENGINE_TOML = (
     SCRIPTS.parents[1] / "hip-kernel-provider" / "config" / "ASM_SDPA_ENGINE.toml"
+)
+FLYDSL_TOML = (
+    SCRIPTS.parents[1]
+    / "hip-kernel-provider"
+    / "config"
+    / "hipkernel_flydsl_sdpa_bwd.toml"
 )
 ENGINE_TIER_YAML = (
     SCRIPTS.parents[1]
@@ -94,8 +101,10 @@ def test_checked_in_sweeps_are_generated(files):
     ), f"stale generator files: {sorted(on_disk - set(files))}"
 
 
-def test_engine_toml_block_is_generated():
-    text = ENGINE_TOML.read_text(encoding="utf-8")
+@pytest.mark.parametrize("toml", [ENGINE_TOML, FLYDSL_TOML], ids=lambda p: p.name)
+def test_engine_toml_block_is_generated(toml):
+    text = toml.read_text(encoding="utf-8")
+    assert text.count(G.TOML_BEGIN) == 1
     i, j = text.index(G.TOML_BEGIN), text.index(G.TOML_END)
     assert text[i : j + len(G.TOML_END) + 1] == G.toml_block()
 
@@ -254,6 +263,58 @@ def test_every_case_id_matches_exactly_one_toml_row(cases):
     assert not [
         n for n in others for r in rows if any(fnmatch.fnmatchcase(n, f) for f in r[0])
     ]
+
+
+def _flydsl_rows():
+    """The FlyDSL engine TOML's rows split at the generated block: (before, block, after)."""
+    text = FLYDSL_TOML.read_text(encoding="utf-8")
+    i, j = text.index(G.TOML_BEGIN), text.index(G.TOML_END)
+    return (
+        _toml_rows(text[:i]),
+        _toml_rows(text[i:j]),
+        _toml_rows(text[j:]),
+    )
+
+
+def _row_hits(rows, name):
+    return [r for r in rows if any(fnmatch.fnmatchcase(name, f) for f in r[0])]
+
+
+def test_every_case_id_matches_one_flydsl_toml_class_row(cases):
+    """Each id takes exactly one generated row; the two flat single-graph rows
+    before the block name no case id, and only the class-U bf16 id is
+    overridden by the hand row after the block."""
+    before, block, after = _flydsl_rows()
+    assert before and block and after
+    for c in cases:
+        name = G.gtest_name(c)
+        assert not _row_hits(before, name), name
+        hits = _row_hits(block, name)
+        assert len(hits) == 1, (name, hits)
+        assert (hits[0][1], hits[0][2]) == P.tolerance(c["tol_class"], c["dtype"]), name
+        late = _row_hits(after, name)
+        if (c["tol_class"], c["dtype"]) == ("U", "bf16"):
+            assert len(late) == 1, name
+        else:
+            assert not late, (name, late)
+
+
+def test_flydsl_toml_fp16_golden_cases_take_the_flat_fp16_row():
+    """Golden ids have no class token and no "." after the dtype token: only the
+    flat fp16 row names them, and their bf16 ids take the engine default."""
+    before, _, _ = _flydsl_rows()
+    golden = [
+        f"quick_SdpaBackward_Golden_{suite.parent.parent.name}.{case.name}"
+        for suite in sorted(BUNDLES.glob("quick/SdpaBackward/Golden/*/golden"))
+        for case in sorted(suite.iterdir())
+    ]
+    assert golden
+    for name in golden:
+        hits = _row_hits(before, name)
+        if "_fp16_" in name:
+            assert [h[1] for h in hits] == [5e-3], name
+        else:
+            assert not hits, name
 
 
 def test_test_skips_match_written_cases(written):

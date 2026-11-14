@@ -735,7 +735,7 @@ hipdnn_data_sdk::utilities::TensorBase<T>& typedTensor(InputTensorMap& inputs, i
 // Q, O, dO, dQ [1, 2, 4, 8]; K, V, dK, dV [1, 2, 6, 8]. uids: q=1, k=2, v=3, o=4,
 // do=5, stats=6, dq=7, dk=8, dv=9, runtime scale=10, additive mask=11, seq_len_q=12,
 // seq_len_kv=13, dropout mask=14, dropout scale=15, ragged offsets of Q and O=16, of K
-// and V=17.
+// and V=17, dropout seed=18, dropout offset=19.
 
 constexpr int64_t kSdpaHeads = 2;
 constexpr int64_t kSdpaSeqQ = 4;
@@ -754,6 +754,8 @@ struct SdpaBwdOptions
     bool alibi = false;
     bool padding = false; // padding_mask with seq_len_q and seq_len_kv
     bool dropoutMask = false; // explicit dropout mask and scale
+    bool seed = false;
+    bool offset = false;
     // Q, K, V and O ragged (RFC-0014), each laid out as the dense tensor: one batch,
     // head-major, whose offsets the test fills.
     bool ragged = false;
@@ -825,6 +827,16 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
         tensors.push_back(
             CreateTensorAttributesDirect(b, 11, "mask", DataType::FLOAT, &maskStrides, &maskDims));
     }
+    if(opts.seed)
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 18, "seed", DataType::INT64, &scalarDims, &scalarDims));
+    }
+    if(opts.offset)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 19, "offset", DataType::INT64, &scalarDims, &scalarDims));
+    }
     const std::vector<int64_t> lenDims = {1, 1, 1, 1};
     if(opts.padding)
     {
@@ -891,6 +903,14 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
         attrs.add_padding_mask(true);
         attrs.add_seq_len_q_tensor_uid(12);
         attrs.add_seq_len_kv_tensor_uid(13);
+    }
+    if(opts.seed)
+    {
+        attrs.add_seed_tensor_uid(18);
+    }
+    if(opts.offset)
+    {
+        attrs.add_offset_tensor_uid(19);
     }
     if(opts.dropoutMask)
     {
@@ -1260,6 +1280,70 @@ TEST(TestFillInputs, SdpaBwdWithZeroDropoutIsDerived)
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
 
     expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+// A seed and offset the zero-probability node names are not read, so O and stats are still derived.
+TEST(TestFillInputs, SdpaBwdWithZeroDropoutAndSeedOffsetIsDerived)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutProbability = 0.0f;
+    opts.seed = true;
+    opts.offset = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+// Either of a seed and an offset alone is not read at probability zero either.
+TEST(TestFillInputs, SdpaBwdWithZeroDropoutAndOneOfSeedOrOffsetIsDerived)
+{
+    for(const bool seed : {true, false})
+    {
+        SCOPED_TRACE(seed ? "seed only" : "offset only");
+        SdpaBwdOptions opts;
+        opts.dropoutProbability = 0.0f;
+        opts.seed = seed;
+        opts.offset = !seed;
+        const auto gr = buildSdpaBwdGraph(opts);
+        auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+        expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+    }
+}
+
+// A seed and offset without a probability keep the dropout refusal.
+TEST(TestFillInputs, SdpaBwdWithSeedOffsetAndNoProbabilityIsRefused)
+{
+    SdpaBwdOptions opts;
+    opts.seed = true;
+    opts.offset = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = makeTensorsFromGraph(gr, gr.leafInputUids({7, 8, 9}));
+
+    const auto result = fillSdpaBwd(gr, inputs, gr.leafInputUids({7, 8, 9}));
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("dropout"), std::string::npos) << result.reason;
+}
+
+// Each of a seed and an offset alone keeps the dropout refusal when there is no probability.
+TEST(TestFillInputs, SdpaBwdWithOneOfSeedOrOffsetAndNoProbabilityIsRefused)
+{
+    for(const bool seed : {true, false})
+    {
+        SCOPED_TRACE(seed ? "seed only" : "offset only");
+        SdpaBwdOptions opts;
+        opts.seed = seed;
+        opts.offset = !seed;
+        const auto gr = buildSdpaBwdGraph(opts);
+        auto inputs = makeTensorsFromGraph(gr, gr.leafInputUids({7, 8, 9}));
+
+        const auto result = fillSdpaBwd(gr, inputs, gr.leafInputUids({7, 8, 9}));
+
+        EXPECT_FALSE(result.filled);
+        EXPECT_NE(result.reason.find("dropout"), std::string::npos) << result.reason;
+    }
 }
 
 // Unlike a fused graph, where neither O nor stats is an input, owning O and stats
