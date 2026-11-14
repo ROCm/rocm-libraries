@@ -230,7 +230,7 @@ struct DeviceCase
 /// (empty for a 1-D graph), filter S, stride, padding (pre, post).
 ConvShape upsample(int64_t c,
                    int64_t k,
-                   std::vector<int64_t> rows,
+                   const std::vector<int64_t>& rows,
                    int64_t width,
                    int64_t filter,
                    int64_t stride,
@@ -450,8 +450,8 @@ void runCase(ConvShape shape, Math math = Math::NATIVE, bool infinities = false)
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(x.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, x.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, x.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!conv_tf32_test::matches(got, want, tolerance) && ++mismatches <= 5)
@@ -668,6 +668,7 @@ TEST(TestConvIgemmNchwCatalog, KnobsTellApartEveryConfigOfAGraph)
         const auto dtype = stringOf(kernel, "dtype");
         const int slot = dtype == "FLOAT" ? 0 : dtype == "HALF" ? 1 : 2;
         std::vector<int64_t> tuple;
+        tuple.reserve(KNOBS.size());
         for(const char* knob : KNOBS)
         {
             tuple.push_back(kernel.getIntMetadata(knob));

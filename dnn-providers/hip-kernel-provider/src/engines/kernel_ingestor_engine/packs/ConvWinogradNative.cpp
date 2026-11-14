@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -411,7 +412,7 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     problem.activations = x == y ? x : Layout::OTHER;
     // Filter (k, c/g, r, s): KCRS packed is the channels-first order, KRSC the channels-last.
     problem.filter = layoutOf(a.wStrides, {a.k, a.c / a.groups, 1, 3, 3});
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -509,7 +510,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             const bool fma = config.arch == "any";
             const bool atom = config.arch == "gfx9" || config.arch == "gfx950"
                               || config.arch == "gfx11" || config.arch == "gfx12";
-            const int bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
+            const int bm = config.gemmBm;
+            const int bn = config.gemmBn;
+            const int bk = config.gemmBk;
             // The transforms read packed channels-first operands (channels-last ones are transposed
             // in): NCHW configs only.
             if((config.m != 2 && config.m != 4 && config.m != 6) || config.layout != Layout::NCHW
@@ -726,7 +729,9 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
                    : config.arch == "gfx12" ? 4
                                             : 5;
     const long long ob = plan.operandBytes;
-    const long long bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
+    const long long bm = config.gemmBm;
+    const long long bn = config.gemmBn;
+    const long long bk = config.gemmBk;
     plan.gemmThreads = static_cast<unsigned int>(
         fma ? (bm / config.tm) * (bn / config.tn)
             : config.waves * (config.arch == "gfx11" || config.arch == "gfx12" ? 32 : 64));
@@ -736,8 +741,12 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
         return std::nullopt;
     }
 
-    const long long r = config.m, positions = (r + 2) * (r + 2);
-    const long long n = w.n, groups = w.groups, cg = w.c / groups, kg = w.k / groups;
+    const long long r = config.m;
+    const long long positions = (r + 2) * (r + 2);
+    const long long n = w.n;
+    const long long groups = w.groups;
+    const long long cg = w.c / groups;
+    const long long kg = w.k / groups;
     const long long perImage = divUp(w.ho, r) * divUp(w.wo, r);
     const long long eb = problem.elementBytes;
     const long long xImage = static_cast<long long>(w.c) * w.hi * w.wi;
@@ -780,7 +789,8 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
 
     // Splits over the tiles: enough blocks for about 2048 threads per unit (one split where
     // the device reports no units).
-    const long long nbk = divUp(kg, bm), nbc = divUp(cg, bn);
+    const long long nbk = divUp(kg, bm);
+    const long long nbc = divUp(cg, bn);
     const long long blocks = nbk * nbc * groups * positions;
     const long long units = std::max<long long>(1, device_units::dispatchUnits(device));
     const long long target = units * std::max<long long>(1, 2048 / plan.gemmThreads);
@@ -855,7 +865,8 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
         return true;
     };
     // k5wTransform: 64 tiles x 4 channels.
-    const long long tb = 64, cb = 4;
+    const long long tb = 64;
+    const long long cb = 4;
     if(!grid(plan.inputBlocks, ldt / tb, divUp(cg, cb), groups)
        || !grid(plan.filterBlocks, ldt / tb, divUp(kg, cb), groups)
        || !grid(plan.gemmBlocks, blocks * splits, 1, 1)
@@ -888,20 +899,28 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     // A multipass config reads its own layout natively; anything but the other packed layout
     // is staged to channels-first. The fused kernels read channels-first and stage the rest.
     if(multipass && problem.activations != kernelLayout
-       && !(problem.activations == Layout::OTHER && kernelLayout == Layout::NCHW))
+       && (problem.activations != Layout::OTHER || kernelLayout != Layout::NCHW))
     {
         return std::nullopt;
     }
     const long long eb = problem.elementBytes;
-    const long long n = a.n, groups = a.groups, cgi = a.ci / groups, cgo = a.co / groups;
+    const long long n = a.n;
+    const long long groups = a.groups;
+    const long long cgi = a.ci / groups;
+    const long long cgo = a.co / groups;
     // F(m,3) has (m + 2)^2 positions, F(3,2) 16.
-    const long long m = config.m, positions = m == 3 ? 16 : (m + 2) * (m + 2);
-    const long long th = divUp(a.ho, m), tw = divUp(a.wo, m), tilesPerImage = th * tw;
+    const long long m = config.m;
+    const long long positions = m == 3 ? 16 : (m + 2) * (m + 2);
+    const long long th = divUp(a.ho, m);
+    const long long tw = divUp(a.wo, m);
+    const long long tilesPerImage = th * tw;
     // The operands as the graph holds them (stride 2 phases x or dx through 4x the channels).
-    const long long inC = a.mode == 1 ? a.ci / 4 : a.ci, inH = a.mode == 1 ? a.xh : a.hi,
-                    inW = a.mode == 1 ? a.xw : a.wi;
-    const long long outC = a.mode == 2 ? a.co / 4 : a.co, outH = a.mode == 2 ? a.xh : a.ho,
-                    outW = a.mode == 2 ? a.xw : a.wo;
+    const long long inC = a.mode == 1 ? a.ci / 4 : a.ci;
+    const long long inH = a.mode == 1 ? a.xh : a.hi;
+    const long long inW = a.mode == 1 ? a.xw : a.wi;
+    const long long outC = a.mode == 2 ? a.co / 4 : a.co;
+    const long long outH = a.mode == 2 ? a.xh : a.ho;
+    const long long outW = a.mode == 2 ? a.xw : a.wo;
     const long long inImage = inC * inH * inW;
     const long long outImage = outC * outH * outW;
     if(tilesPerImage < 1 || tilesPerImage > INT_LIMIT)
@@ -936,7 +955,8 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     if(problem.filter != kernelLayout)
     {
         // The graph's filter (k, c/g, r, s) to packed KCRS or KRSC.
-        const long long k = base.k, cg = base.c / base.groups;
+        const long long k = base.k;
+        const long long cg = base.c / base.groups;
         const std::array<long long, 4> graph{
             base.wStrides[0], base.wStrides[1], base.wStrides[3], base.wStrides[4]};
         plan.filter.needed = true;
@@ -1349,7 +1369,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
         {
             return std::nullopt;
         }
-        return Resolved{std::move(*problem), *config, *plan};
+        return Resolved{*problem, *config, *plan};
     }
     const bool wmmaFamily = config->variant == Variant::WMMA || config->variant == Variant::WREG
                             || config->variant == Variant::COOP;
@@ -1380,7 +1400,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
-    return Resolved{std::move(*problem), *config, *plan};
+    return Resolved{*problem, *config, *plan};
 }
 
 bool kernelMatches(const MatchContext& context,
@@ -1420,10 +1440,10 @@ class PreparedConvWinograd : public IngestorPreparedDispatch
 public:
     PreparedConvWinograd(std::vector<IngestorKernelCode> kernels,
                          std::optional<IngestorKernelCode> copy,
-                         const Resolved& resolved)
+                         Resolved resolved)
         : _kernels(std::move(kernels))
         , _copy(std::move(copy))
-        , _resolved(resolved)
+        , _resolved(std::move(resolved))
     {
     }
 
@@ -1790,7 +1810,8 @@ public:
             slice.out = static_cast<char*>(out) + n0 * outImage * eb;
             if(multipass)
             {
-                const int cgi = slice.ci / slice.groups, cgo = slice.co / slice.groups;
+                const int cgi = slice.ci / slice.groups;
+                const int cgo = slice.co / slice.groups;
                 K5GemmArgs gemm{};
                 gemm.a = slice.u;
                 gemm.b = slice.v;

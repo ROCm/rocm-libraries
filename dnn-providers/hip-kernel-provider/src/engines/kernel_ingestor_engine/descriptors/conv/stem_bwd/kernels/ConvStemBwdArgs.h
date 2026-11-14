@@ -7,6 +7,10 @@
 // constexpr functions only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// dx[n][c][y][x] for few input channels: super-pixel (i, j) stands for the sh x sw dx pixels
 /// (sh i + p, sw j + q) and reads dy rows i + oh - u, columns j + ow - v (u < U, v < V) against
 /// the transformed filter b. Element strides, ordered (n, k, h, w) for dy and (n, c, h, w) for
@@ -69,3 +73,5 @@ constexpr long long sbLdsBytes(int elementBytes, int u, int v, int nb, int kc, i
     return (static_cast<long long>(th + u - 1) * (tw + v - 1) + static_cast<long long>(nb) * u * v)
            * (kc + sbPad(elementBytes)) * elementBytes;
 }
+
+// NOLINTEND(modernize-avoid-c-arrays)

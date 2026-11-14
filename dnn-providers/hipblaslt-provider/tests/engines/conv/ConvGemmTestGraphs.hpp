@@ -122,7 +122,7 @@ inline flatbuffers::FlatBufferBuilder buildConvGemmGraph(const ConvGemmShape& sh
     yStrides[0] += shape.imagePadding;
 
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<conv_data_objects::TensorAttributes>> tensors{
+    std::vector<flatbuffers::Offset<conv_data_objects::TensorAttributes>> const tensors{
         conv_data_objects::CreateTensorAttributesDirect(
             builder, CONV_X_UID, nullptr, shape.dataType, &xStrides, &xDims),
         conv_data_objects::CreateTensorAttributesDirect(
@@ -177,7 +177,7 @@ inline flatbuffers::FlatBufferBuilder buildConvGemmGraph(const ConvGemmShape& sh
         break;
     }
 
-    std::vector<flatbuffers::Offset<conv_data_objects::Node>> nodes{
+    std::vector<flatbuffers::Offset<conv_data_objects::Node>> const nodes{
         conv_data_objects::CreateNodeDirect(builder, "conv", shape.computeType, type, attributes)};
     builder.Finish(conv_data_objects::CreateGraphDirect(builder,
                                                         "conv_gemm_test",

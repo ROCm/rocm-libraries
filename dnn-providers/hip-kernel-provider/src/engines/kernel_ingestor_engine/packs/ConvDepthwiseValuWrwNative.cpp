@@ -159,7 +159,7 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
     w.dw_ = static_cast<int>(a.dilation[2]);
     w.rows = static_cast<int>(rows);
     w.taps = static_cast<int>(taps);
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -214,7 +214,8 @@ int64_t hankelLdsBytes(const WrwConfig& config)
     const int64_t xWords = divUp(xg, 8) * 8;
     const int64_t dyWords = divUp(config.q / 4, 8) * 8;
     const int64_t channels = 64 * config.nwg;
-    const int64_t xPitch = 4 * xWords + 4, dyPitch = 4 * dyWords + 4;
+    const int64_t xPitch = 4 * xWords + 4;
+    const int64_t dyPitch = 4 * dyWords + 4;
     const int64_t slot = divUp(channels * dyPitch, 64) * 64 + 16;
     const int64_t slots = config.kh + config.g - 1;
     return (config.g * stride * channels * xPitch + (slots + 1) * slot) * 2;

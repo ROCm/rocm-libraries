@@ -6,6 +6,10 @@
 // as an embedded include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// One complex value of the frequency-domain workspace.
 struct ConvFftComplex
 {
@@ -79,3 +83,5 @@ struct ConvFftArgs
     const void* src2; ///< depthwise wgrad: dy
     long long src2Str[4]; ///< element strides of src2: n, channel, h, w
 };
+
+// NOLINTEND(modernize-avoid-c-arrays)

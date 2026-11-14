@@ -267,7 +267,7 @@ ConvShape dense(int64_t c,
                 int64_t k,
                 std::vector<int64_t> input,
                 std::vector<int64_t> filter,
-                std::vector<int64_t> pad,
+                const std::vector<int64_t>& pad,
                 bool channelsLast)
 {
     ConvShape shape;
@@ -563,8 +563,8 @@ void runCase(ConvShape shape,
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!conv_tf32_test::matches(got, want, tolerance) && ++mismatches <= 5)

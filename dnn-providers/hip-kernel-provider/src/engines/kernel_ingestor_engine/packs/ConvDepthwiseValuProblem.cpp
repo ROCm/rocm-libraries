@@ -202,9 +202,9 @@ std::optional<DepthwiseValuProblem>
     // gather variant serves it.
     if(!forward)
     {
-        for(int axis = 0; axis < SPATIAL; ++axis)
+        for(const long long stride : a.stride)
         {
-            if(a.stride[axis] != 1)
+            if(stride != 1)
             {
                 problem.gatherOnly = true;
             }
@@ -281,7 +281,7 @@ std::optional<DepthwiseValuProblem>
         g.pw = static_cast<int>(a.prePadding[2]);
     }
 
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 

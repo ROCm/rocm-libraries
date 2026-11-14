@@ -154,7 +154,9 @@ Staging activationStaging(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 {
     Staging staging;
     staging.needed = true;
-    const long long d = spatial[0], h = spatial[1], w = spatial[2];
+    const long long d = spatial[0];
+    const long long h = spatial[1];
+    const long long w = spatial[2];
     staging.bytes = static_cast<size_t>(n * d * h * w * c) * static_cast<size_t>(elementBytes);
     if(channelsFirst(strides, {n, c, d, h, w}))
     {
@@ -445,7 +447,7 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
         }
     }
     problem.stagingBytes = offset;
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -895,7 +897,7 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    return Admitted{std::move(*problem), *config, *plan};
+    return Admitted{*problem, *config, *plan};
 }
 
 /// Kernel-scoped applicability: the config's direction, dtype and filter are the graph's; its

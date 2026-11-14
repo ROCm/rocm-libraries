@@ -53,7 +53,6 @@ using namespace hipdnn_plugin_sdk::ingestor;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 using conv_depthwise_mfma::MfmaConfig;
 using conv_depthwise_mfma::MfmaLaunch;
-using conv_depthwise_valu::DepthwiseLayout;
 using conv_depthwise_valu::DepthwiseValuProblem;
 using conv_naive::ConvDirection;
 

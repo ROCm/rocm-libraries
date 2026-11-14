@@ -255,7 +255,7 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     problem.xUid = base->operands.x;
     problem.dyUid = base->operands.y;
     problem.dwUid = base->operands.w;
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -847,8 +847,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return std::nullopt;
     }
     // The vector and the tile: 16 bytes, or (FMA output rows) one element.
-    if((config.vec * eb != 16 && !(config.loop == LOOP_ROWS_FMA && config.vec == 1))
-       || config.bk < 1 || config.bc < 1 || config.bq < 1)
+    if((config.vec * eb != 16 && (config.loop != LOOP_ROWS_FMA || config.vec != 1)) || config.bk < 1
+       || config.bc < 1 || config.bq < 1)
     {
         return std::nullopt;
     }

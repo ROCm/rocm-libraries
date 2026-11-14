@@ -80,9 +80,9 @@ TEST(TestConvGemmFormulation, OneByOneChannelsFirstWithGroupsIsOneCallPerImage)
         const auto calls = resolve(shape, direction);
         ASSERT_TRUE(calls.has_value());
         ASSERT_EQ(calls->stages[0].calls.size(), 3u);
-        for(size_t image = 0; image < calls->stages[0].calls.size(); ++image)
+        for(const auto& call : calls->stages[0].calls)
         {
-            EXPECT_EQ(calls->stages[0].calls[image].batchCount, 2); // groups
+            EXPECT_EQ(call.batchCount, 2); // groups
         }
     }
 }
@@ -109,7 +109,7 @@ TEST(TestConvGemmFormulation, PointOutputInEveryLayoutWhoseColumnsAgree)
     shape.filter = {3, 4};
     for(const bool last : {false, true})
     {
-        ConvGemmShape layout = last ? channelsLast(shape) : shape;
+        ConvGemmShape const layout = last ? channelsLast(shape) : shape;
         for(const auto direction : ALL_DIRECTIONS)
         {
             const auto calls = resolve(layout, direction);

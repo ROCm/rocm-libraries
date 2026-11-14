@@ -18,6 +18,10 @@
 
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,modernize-macro-to-enum,readability-avoid-nested-conditional-operator,readability-isolate-declaration)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 #define K5_NCHW 0
 #define K5_NHWC 1
 #define K5_FORWARD 0
@@ -125,3 +129,5 @@ struct K5CopyArgs
     int rank;
     int elementBytes;
 };
+
+// NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum,readability-avoid-nested-conditional-operator,readability-isolate-declaration)

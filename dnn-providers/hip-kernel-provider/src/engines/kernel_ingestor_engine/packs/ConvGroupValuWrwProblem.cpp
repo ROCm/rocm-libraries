@@ -217,7 +217,7 @@ std::optional<GvwProblem> parseGvwProblem(const MatchContext& context)
     {
         return std::nullopt;
     }
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -501,7 +501,7 @@ std::optional<Plan>
         a.itemsPerSplit = static_cast<int>(itemsPerSplit);
     }
     // Whole passes a split, then the splits those take.
-    int64_t rowsPerSplit = divUp(divUp(rows, splits), rowsPerPass) * rowsPerPass;
+    int64_t const rowsPerSplit = divUp(divUp(rows, splits), rowsPerPass) * rowsPerPass;
     if(config.ring == 0)
     {
         splits = divUp(rows, rowsPerSplit);

@@ -121,7 +121,7 @@ inline void timeByForm(
         const auto bound = matchesGraph(pack, fixture.context());
         if(!bound.has_value())
         {
-            std::cout << "TF32BENCH|" << name << "|refused|-|-|0" << std::endl;
+            std::cout << "TF32BENCH|" << name << "|refused|-|-|0" << '\n';
             continue;
         }
         void* x = nullptr;
@@ -160,7 +160,7 @@ inline void timeByForm(
             if(workspaceBytes > 0 && hipMalloc(&workspace, workspaceBytes) != hipSuccess)
             {
                 std::cout << "TF32BENCH-SKIP|" << name << "|" << kernel.name << "|workspace "
-                          << workspaceBytes << std::endl;
+                          << workspaceBytes << '\n';
                 continue;
             }
             auto timed = [&] {
@@ -198,7 +198,7 @@ inline void timeByForm(
         for(const auto& [form, slot] : best)
         {
             std::cout << "TF32BENCH|" << name << "|" << form << "|" << slot.first << "|"
-                      << slot.second << "|" << counts[form] << std::endl;
+                      << slot.second << "|" << counts[form] << '\n';
         }
         EXPECT_EQ(hipEventDestroy(start), hipSuccess);
         EXPECT_EQ(hipEventDestroy(stop), hipSuccess);

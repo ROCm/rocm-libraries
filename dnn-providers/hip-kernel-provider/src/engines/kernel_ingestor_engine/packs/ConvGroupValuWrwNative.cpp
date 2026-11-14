@@ -127,7 +127,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
-    return Resolved{std::move(*problem), std::move(*plan)};
+    return Resolved{*problem, std::move(*plan)};
 }
 
 bool kernelMatches(const MatchContext& context,

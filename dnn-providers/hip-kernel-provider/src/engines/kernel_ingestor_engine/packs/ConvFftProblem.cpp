@@ -134,7 +134,7 @@ std::optional<FftProblem> parseFftProblem(const MatchContext& context, ConvDirec
         out[t][2] = strides[t][3];
         out[t][3] = strides[t][4];
     }
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -167,7 +167,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    if(config.tm != 4 && !(config.tm == 8 && config.gn == 64))
+    if(config.tm != 4 && (config.tm != 8 || config.gn != 64))
     {
         return std::nullopt;
     }
@@ -363,7 +363,7 @@ std::optional<Plan> planFor(const FftProblem& problem,
     plan.transformThreads = config.tb;
     if(depthwise)
     {
-        return depthwisePlan(std::move(plan), wrw, computeUnits);
+        return depthwisePlan(plan, wrw, computeUnits);
     }
 
     const int64_t groups = problem.groups;
@@ -382,7 +382,7 @@ std::optional<Plan> planFor(const FftProblem& problem,
     }
     const size_t perTile = static_cast<size_t>(*perTileElems) * 8;
     const size_t room = cap - alignUp(plan.fixedBytes) - 2 * ALIGN;
-    const int64_t fit = static_cast<int64_t>(room / perTile);
+    const auto fit = static_cast<int64_t>(room / perTile);
     // Chunks of fewer than 64 tiles (or the whole problem) would launch too often to pay.
     if(fit < std::min<int64_t>(plan.tiles, 64))
     {

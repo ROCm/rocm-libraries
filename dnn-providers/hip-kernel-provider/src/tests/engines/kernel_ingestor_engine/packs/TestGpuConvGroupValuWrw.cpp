@@ -219,7 +219,7 @@ void absolute(Tensor<T>& from, Tensor<T>& to)
     const auto* source = static_cast<const T*>(from.rawHostData());
     auto* target = static_cast<T*>(to.rawHostData());
     forEachIndex(from.dims(), [&](const std::vector<int64_t>& index) {
-        const float v = static_cast<float>(source[offsetOf(index, from.strides())]);
+        const auto v = static_cast<float>(source[offsetOf(index, from.strides())]);
         target[offsetOf(index, to.strides())] = static_cast<T>(std::fabs(v));
     });
     to.markHostModified();
@@ -271,7 +271,7 @@ ConvShape conv(int64_t n,
                int64_t groups,
                std::vector<int64_t> input,
                std::vector<int64_t> filter,
-               std::vector<int64_t> pad,
+               const std::vector<int64_t>& pad,
                std::vector<int64_t> stride,
                bool channelsLast)
 {
@@ -418,9 +418,9 @@ void runCase(ConvShape shape, bool infAtRowEnd = false)
         int64_t mismatches = 0;
         int64_t nonFinite = 0;
         forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
-            const float mag = static_cast<float>(bounds[offsetOf(index, magnitude.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto mag = static_cast<float>(bounds[offsetOf(index, magnitude.strides())]);
             if(!std::isfinite(want))
             {
                 // A tap the inf reaches: it must not come back finite.
@@ -527,7 +527,13 @@ TEST(TestGpuConvGroupValuWrwLarge, HalfPast2GiBSampled)
     const auto bound = matchesGraph(pack(), fixture.context());
     ASSERT_TRUE(bound.has_value());
 
-    const int64_t n = 4100, c = 16, k = 4, h = 128, wd = 128, ho = 64, wo = 64;
+    const int64_t n = 4100;
+    const int64_t c = 16;
+    const int64_t k = 4;
+    const int64_t h = 128;
+    const int64_t wd = 128;
+    const int64_t ho = 64;
+    const int64_t wo = 64;
     const int64_t xCount = n * c * h * wd;
     const int64_t yCount = n * k * ho * wo;
     // Exact in fp16 and in every fp32 partial sum: x integers in [-3, 3], dy in [-2, 1] / 128.
@@ -619,7 +625,7 @@ TEST(TestGpuConvGroupValuWrwLarge, HalfPast2GiBSampled)
                     }
                 }
             }
-            const float value
+            const auto value
                 = static_cast<float>(got[static_cast<size_t>(((kk * c + cc) * 3 + r) * 3 + s)]);
             EXPECT_NEAR(value, want, 2.0 * 9.8e-4 * std::fabs(want) + 1e-3)
                 << "dw[" << kk << "][" << cc << "][" << r << "][" << s << "]";

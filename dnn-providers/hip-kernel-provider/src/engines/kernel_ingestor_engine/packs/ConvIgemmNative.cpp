@@ -169,7 +169,9 @@ Staging activationStaging(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
 {
     Staging staging;
     staging.needed = true;
-    const long long d = spatial[0], h = spatial[1], w = spatial[2];
+    const long long d = spatial[0];
+    const long long h = spatial[1];
+    const long long w = spatial[2];
     staging.bytes = static_cast<size_t>(n * d * h * w * c) * static_cast<size_t>(elementBytes);
     if(channelsFirst(strides, {n, c, d, h, w}))
     {
@@ -417,7 +419,8 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     k1.m = a.n * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
 
     const bool forward = direction == ConvDirection::FORWARD;
-    const long long cg = a.c / a.groups, kg = a.k / a.groups;
+    const long long cg = a.c / a.groups;
+    const long long kg = a.k / a.groups;
     // Activations: forward stages x in and y out, backward data dy in and dx out.
     if(!channelsLast(a.xStrides, {a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}))
     {
@@ -429,7 +432,9 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     }
     // The filter: reflected through negative strides for true convolution.
     const bool flip = a.flipFilter != 0;
-    const long long t = a.filter[0], r = a.filter[1], s = a.filter[2];
+    const long long t = a.filter[0];
+    const long long r = a.filter[1];
+    const long long s = a.filter[2];
     const long long st = flip ? -a.wStrides[2] : a.wStrides[2];
     const long long sr = flip ? -a.wStrides[3] : a.wStrides[3];
     const long long ss = flip ? -a.wStrides[4] : a.wStrides[4];
@@ -550,7 +555,7 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     {
         return std::nullopt;
     }
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -575,7 +580,8 @@ std::optional<IgemmProblem> withFusedGroups(const IgemmProblem& problem, int64_t
     fused.args.groups = static_cast<int>(a.groups / fuse);
     fused.args.wRowStride = 0;
     fused.args.wTapStride = 0;
-    const long long cg = a.c / a.groups, kg = a.k / a.groups;
+    const long long cg = a.c / a.groups;
+    const long long kg = a.k / a.groups;
     const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
     Staging w;
     w.needed = true;
@@ -643,7 +649,9 @@ bool haloFits(const IgemmProblem& problem, int64_t bm)
     const std::array<long long, 3> pad{a.pd, a.ph, a.pw};
     const std::array<long long, 3> dilation{a.dd, a.dh, a.dw};
     const std::array<long long, 3> taps{a.ft, a.fr, a.fs};
-    long long lo = 0, hi = 0, pixelStride = 1;
+    long long lo = 0;
+    long long hi = 0;
+    long long pixelStride = 1;
     for(size_t i = 3; i-- > 0;)
     {
         if(stride[i] != 1 || in[i] != out[i])
@@ -677,7 +685,7 @@ bool hasXcds(std::string_view gcnArchName)
 bool blockOrderServes(int64_t bm, int64_t bn, int64_t xcd, std::string_view gcnArchName)
 {
     const bool xcds = hasXcds(gcnArchName);
-    return xcd != 0 ? xcds : !(xcds && bm == 256 && bn == 256);
+    return xcd != 0 ? xcds : !xcds || bm != 256 || bn != 256;
 }
 
 int occupancyTarget(std::string_view atom,
@@ -970,7 +978,8 @@ bool kernelMatches(const MatchContext& context,
         // Group fusion serves small groups (fused groups of at most 64 channels each way) whose
         // expanded filter forward or the direct-filter backward-data configs read.
         const auto& p = problem->args;
-        const long long cg = p.c / p.groups, kg = p.k / p.groups;
+        const long long cg = p.c / p.groups;
+        const long long kg = p.k / p.groups;
         if((*direction == ConvDirection::BACKWARD_DATA && tile->wdirect == 0)
            || cg * tile->fuse > 64 || kg * tile->fuse > 64)
         {

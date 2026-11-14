@@ -127,8 +127,10 @@ std::optional<NchwProblem>
     {
         return std::nullopt;
     }
-    const long long d = a.inSpatial[0], h = a.inSpatial[1];
-    const long long dyD = a.outSpatial[0], dyH = a.outSpatial[1];
+    const long long d = a.inSpatial[0];
+    const long long h = a.inSpatial[1];
+    const long long dyD = a.outSpatial[0];
+    const long long dyH = a.outSpatial[1];
     if(!channelsFirst(a.xStrides, {a.n, a.c, d, h, a.inSpatial[2]})
        || !channelsFirst(a.yStrides, {a.n, a.k, dyD, dyH, a.outSpatial[2]})
        || !channelsFirst(a.wStrides, {a.k, a.c, a.filter[0], a.filter[1], a.filter[2]}))
@@ -216,7 +218,7 @@ std::optional<NchwProblem>
     k7.dh = static_cast<int>(a.dilation[1]);
     k7.dyImage = *dyImage;
     k7.dxImage = *dxImage;
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 

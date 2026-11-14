@@ -6,6 +6,10 @@
 // embedded include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,readability-use-std-min-max)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// The convolution in its forward form: x (forward x, backward data dy) channels-last
 /// N D H W c, y (forward y, backward data dx) channels-last N D H W k, and the weights
 /// pre-formatted by ConvDirectFormat. Shapes are runtime; only the filter extent and the tile
@@ -93,3 +97,5 @@ constexpr int k2HaloMax(int bm, int r, int s)
     }
     return best;
 }
+
+// NOLINTEND(modernize-avoid-c-arrays,readability-use-std-min-max)

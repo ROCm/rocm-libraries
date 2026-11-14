@@ -6,6 +6,10 @@
 // embedded include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,modernize-macro-to-enum)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// Backward weights: dw[g][k][c][t][r][s] = sum over images and output positions of
 /// dy[n][g k][od][oh][ow] * x[n][g c][od sd + t dd - pd][oh sh + r dh - ph][ow sw + s dw - pw].
 /// x and dy are read in place through their element strides (one of the two packed layouts
@@ -101,3 +105,5 @@ struct K3SplitArgs
 /// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
 #define K3_REDUCE_ROW_CHANNELS 64
 #define K3_REDUCE_ROW_MAX_TAPS 64
+
+// NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

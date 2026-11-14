@@ -98,7 +98,8 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
         // Packs per dtype and atom family (conv_stem_bwd_<dtype>_<family>.kdp.json), all in the
         // first root that has any.
         const auto isPack = [](const std::string& name) {
-            const std::string prefix = "conv_stem_bwd_", suffix = ".kdp.json";
+            const std::string prefix = "conv_stem_bwd_";
+            const std::string suffix = ".kdp.json";
             return name.size() > prefix.size() + suffix.size()
                    && name.compare(0, prefix.size(), prefix) == 0
                    && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
@@ -523,8 +524,8 @@ void runCase(const DeviceCase& deviceCase)
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(x.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, x.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, x.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -581,6 +582,7 @@ TEST(TestConvStemBwdCatalog, KnobsTellApartEveryConfigOfAGraph)
         const auto dtype = kernel.getStringMetadata("dtype");
         const int slot = dtype == "FLOAT" ? 0 : dtype == "HALF" ? 1 : 2;
         std::vector<int64_t> tuple;
+        tuple.reserve(KNOBS.size());
         for(const char* knob : KNOBS)
         {
             tuple.push_back(kernel.getIntMetadata(knob));

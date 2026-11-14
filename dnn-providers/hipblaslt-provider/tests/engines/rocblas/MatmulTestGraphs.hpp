@@ -74,6 +74,7 @@ inline MatmulGraphSpec matmulSpec(int64_t m,
 {
     const auto shape = [&batch](bool broadcast, int64_t rows, int64_t cols) {
         std::vector<int64_t> dims;
+        dims.reserve(batch.size());
         for(const auto extent : batch)
         {
             dims.push_back(broadcast ? 1 : extent);

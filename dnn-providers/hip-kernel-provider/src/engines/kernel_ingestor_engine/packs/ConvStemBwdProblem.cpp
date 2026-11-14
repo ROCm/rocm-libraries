@@ -246,7 +246,7 @@ std::optional<StemBwdProblem>
     problem.dxUid = base->operands.x;
     problem.wUid = base->operands.w;
     problem.dyUid = base->operands.y;
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 

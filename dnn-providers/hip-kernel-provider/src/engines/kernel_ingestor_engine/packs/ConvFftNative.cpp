@@ -154,7 +154,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
-    return Resolved{*direction, std::move(*problem), std::move(*plan)};
+    return Resolved{*direction, *problem, *plan};
 }
 
 bool kernelMatches(const MatchContext& context,
@@ -178,7 +178,7 @@ class PreparedConvFft : public IngestorPreparedDispatch
 public:
     PreparedConvFft(std::vector<IngestorKernelCode> kernels, Resolved resolved)
         : _kernels(std::move(kernels))
-        , _resolved(std::move(resolved))
+        , _resolved(resolved)
     {
     }
 
@@ -293,7 +293,7 @@ public:
             code.setGridSize(static_cast<unsigned int>(launch.grid), 1, 1);
             kernels.push_back(std::move(code));
         }
-        return std::make_unique<PreparedConvFft>(std::move(kernels), std::move(*resolved));
+        return std::make_unique<PreparedConvFft>(std::move(kernels), *resolved);
     }
 
     void launch(const Handle& handle,

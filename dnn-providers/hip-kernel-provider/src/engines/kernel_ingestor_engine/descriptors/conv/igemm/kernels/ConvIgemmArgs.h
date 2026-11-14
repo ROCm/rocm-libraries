@@ -6,6 +6,10 @@
 // embedded include: builtin types only, no standard headers.
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,modernize-macro-to-enum)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// The convolution: channels-last x and y (N D H W C), filter K T R S C/g (forward) or, for
 /// backward data, transposed to [g][T R S][C/g][K/g]. Backward data reads y (dy) and writes x
 /// (dx). Shapes are runtime; only the tile config is compile-time.
@@ -122,3 +126,5 @@ struct K1Split3Args
 {
     K1Split3Tensor t[2];
 };
+
+// NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

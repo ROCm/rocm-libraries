@@ -276,15 +276,15 @@ bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArc
     const bool nt = !call.transposeA && call.transposeB;
     const bool tn = call.transposeA && !call.transposeB;
     bool gemv = false;
-    if(gfx11 && !(call.m == 1 && call.n == 1))
+    if(gfx11 && (call.m != 1 || call.n != 1))
     {
         gemv = true;
     }
     else if(gfx11 || gfx10 || cdnaGemv)
     {
-        gemv = !((call.n == 1 && (nn || tn))
-                 || (call.n == 1 && nt && (arch == "gfx908" || arch == "gfx90a"))
-                 || (call.n == 1 && call.b.leadingDimension > 8) || (call.m == 1 && (nn || tn)));
+        gemv = (call.n != 1 || (!nn && !tn))
+               && (call.n != 1 || !nt || (!arch == "gfx908" && !arch == "gfx90a"))
+               && (call.n != 1 || call.b.leadingDimension <= 8) && (call.m != 1 || (!nn && !tn));
     }
     if(!gemv)
     {
@@ -310,7 +310,7 @@ std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls)
             = call.batchCount > 1
               && std::max({call.a.batchStride, call.b.batchStride, call.d.batchStride})
                      > MAX_BATCH_STRIDE;
-        std::vector<GemmCall> pieces{std::move(call)};
+        std::vector<GemmCall> pieces{call};
         if(wideBatch)
         {
             pieces = splitAlong(std::move(pieces), SplitAxis::BATCH, 1);

@@ -412,8 +412,8 @@ void runCase(ConvShape shape, ConvDirection direction)
     const auto* expected = static_cast<const T*>(expectedTensor.rawHostData());
     int64_t mismatches = 0;
     forEachIndex(writtenTensor->dims(), [&](const std::vector<int64_t>& index) {
-        const float got = static_cast<float>(actual[offsetOf(index, writtenTensor->strides())]);
-        const float want = static_cast<float>(expected[offsetOf(index, expectedTensor.strides())]);
+        const auto got = static_cast<float>(actual[offsetOf(index, writtenTensor->strides())]);
+        const auto want = static_cast<float>(expected[offsetOf(index, expectedTensor.strides())]);
         const float tolerance
             = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
         if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)

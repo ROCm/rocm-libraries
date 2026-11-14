@@ -204,7 +204,7 @@ const std::vector<Config>& catalog()
         {
             for(const int64_t ndims : {2, 3})
             {
-                configs.push_back(Config{layout, ndims, "gather"});
+                configs.emplace_back(layout, ndims, "gather");
             }
         }
         // Backward data only: stride-2 phase blocks.
@@ -373,7 +373,7 @@ struct DeviceCase
 ConvShape depthwise(int64_t channels,
                     std::vector<int64_t> input,
                     std::vector<int64_t> filter,
-                    std::vector<int64_t> pad,
+                    const std::vector<int64_t>& pad,
                     bool channelsLast)
 {
     ConvShape shape;
@@ -573,8 +573,8 @@ void runCase(ConvShape shape, ConvDirection direction)
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -874,8 +874,8 @@ void runWrwCase(ConvShape shape)
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -1320,7 +1320,7 @@ void runRowtileBitwise(ConvShape shape,
         for(auto* tensor : {&x, &w})
         {
             auto* data = static_cast<Half*>(tensor->rawHostData());
-            const auto count = static_cast<size_t>(tensor->elementCount());
+            const auto count = tensor->elementCount();
             const uint32_t salt = tensor == &x ? 0x9e3779b9u : 0x85ebca6bu;
             for(size_t i = 0; i < count; ++i)
             {
@@ -1333,7 +1333,8 @@ void runRowtileBitwise(ConvShape shape,
     }
     const auto* xs = static_cast<const Half*>(x.rawHostData());
     const auto* ws = static_cast<const Half*>(w.rawHostData());
-    const int64_t kh = shape.filter[0], kw = shape.filter[1];
+    const int64_t kh = shape.filter[0];
+    const int64_t kw = shape.filter[1];
     const bool flip = shape.mode == ConvMode::CONVOLUTION;
     const auto expected = [&](const std::vector<int64_t>& o) {
         float acc = 0.0f;

@@ -263,7 +263,7 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
         args.xs[i] = inStrides[i];
         args.ys[i] = outStrides[i];
     }
-    problem.base = std::move(*base);
+    problem.base = *base;
     return problem;
 }
 
@@ -316,7 +316,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                                                              {"wave", &config.wave},
                                                              {"ka", &config.ka},
                                                              {"ep", &config.ep}}};
-    const int atomWave = config.wave, atomKa = config.ka;
+    const int atomWave = config.wave;
+    const int atomKa = config.ka;
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -360,7 +361,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     if(config.fma)
     {
         // 256 threads cover the tile exactly: NG = BN / FN channel groups x FM-column runs.
-        const int bn = config.blockColumns(), tw = config.wq * 16;
+        const int bn = config.blockColumns();
+        const int tw = config.wq * 16;
         if(bn % config.fn != 0 || FMA_THREADS % (bn / config.fn) != 0 || tw % config.fm != 0
            || FMA_THREADS / (bn / config.fn) * config.fm != config.wm * tw)
         {
@@ -537,7 +539,7 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    return Admitted{std::move(*problem), *config, *plan};
+    return Admitted{*problem, *config, *plan};
 }
 
 /// Kernel-scoped applicability: the config's direction, dtype, channel bound, filter, stride and

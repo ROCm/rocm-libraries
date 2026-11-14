@@ -7,6 +7,10 @@
 
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays,modernize-macro-to-enum)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 #define CONV_REPACK_MAX_RANK 6
 #define CONV_REPACK_SPATIAL_DIMS 3
 
@@ -135,3 +139,5 @@ inline bool convColumnsDisjoint(const ConvColumnGeometry& g)
     }
     return true;
 }
+
+// NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

@@ -7,6 +7,10 @@
 
 #pragma once
 
+// NOLINTBEGIN(modernize-avoid-c-arrays)
+// HIPRTC compiles this file as an embedded include, with no standard library: C arrays,
+// macros and C-style code are deliberate, and its arithmetic types are part of the kernels.
+
 /// One backward weights dw (k, c / groups, r, s) from x (n, c, hi, wi) and dy (n, k, ho, wo),
 /// 2-D (1-D problems run with hi = ho = 1). The reduction runs over the rows n * ho, cut into
 /// `splits` runs of `rowsPerSplit` rows: with one split the main kernel writes dw, otherwise it
@@ -50,3 +54,5 @@ struct ConvGroupValuWrwArgs
     int itemsPerSplit;
     int padding0;
 };
+
+// NOLINTEND(modernize-avoid-c-arrays)

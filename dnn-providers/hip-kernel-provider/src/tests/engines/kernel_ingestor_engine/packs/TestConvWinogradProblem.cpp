@@ -639,7 +639,7 @@ TEST(TestConvWinogradKernelMatch, F43IsDeclinedUnlessPermitted)
 {
     ConfigFields f4;
     f4.m = 4;
-    ConfigFields f2;
+    ConfigFields const f2;
     for(const auto direction : DIRECTIONS)
     {
         const auto pack = direction == ConvDirection::FORWARD ? PACK_FWD : PACK_BWD;
@@ -647,7 +647,7 @@ TEST(TestConvWinogradKernelMatch, F43IsDeclinedUnlessPermitted)
                                    testDeviceProperties());
         const auto bound = matchesGraph(pack, fixture.context());
         ASSERT_TRUE(bound.has_value());
-        const auto kernelFor = [&](ConfigFields fields) {
+        const auto kernelFor = [&](const ConfigFields& fields) {
             auto kernel = kernelOf(fields, "FLOAT");
             kernel.metadata["direction"]
                 = std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD");
@@ -691,7 +691,7 @@ bool admits(const ConfigFields& fields,
 
 TEST(TestConvWinogradKernelMatch, MultipassServesItsOwnLayoutAndStagesOthersToNchw)
 {
-    ConfigFields nchw;
+    ConfigFields const nchw;
     ConfigFields nhwc;
     nhwc.layout = "NHWC";
     auto channelsLast = baseShape();
@@ -768,7 +768,7 @@ ConvShape strideTwo()
 
 TEST(TestConvWinogradKernelMatch, ThreeByTwoTilesExactlyForStrideTwo)
 {
-    ConfigFields f2;
+    ConfigFields const f2;
     ConfigFields f3;
     f3.m = 3;
     ConfigFields f4;
@@ -1464,8 +1464,9 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
         const auto native = conv_winograd::planFor(*problem, *multipass, testDeviceProperties());
         ASSERT_TRUE(native.has_value());
         const auto& a = problem->args;
-        const auto cgi = static_cast<size_t>(a.ci), cgo = static_cast<size_t>(a.co),
-                   tiles = static_cast<size_t>(native->args.tiles);
+        const auto cgi = static_cast<size_t>(a.ci);
+        const auto cgo = static_cast<size_t>(a.co);
+        const auto tiles = static_cast<size_t>(native->args.tiles);
         EXPECT_EQ(native->slices, 1);
         EXPECT_FALSE(native->in.needed);
         EXPECT_EQ(native->uBytes, 16 * cgo * cgi * 4);
@@ -1478,7 +1479,8 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
             *problem, *conv_winograd::configOf(kernelOf(fused3, "FLOAT")), countedDevice());
         ASSERT_TRUE(staged.has_value());
         // NHWC staged to NCHW: x is 2 x 4 x 7 x 6, y 2 x 6 x 4 x 3, in their graph extents.
-        const size_t xBytes = 2 * 4 * 7 * 6 * 4, yBytes = 2 * 6 * 4 * 3 * 4;
+        const size_t xBytes = 2 * 4 * 7 * 6 * 4;
+        const size_t yBytes = 2 * 6 * 4 * 3 * 4;
         ASSERT_TRUE(staged->in.needed);
         EXPECT_EQ(staged->in.bytes, direction == ConvDirection::FORWARD ? xBytes : yBytes);
         EXPECT_EQ(staged->out.bytes, direction == ConvDirection::FORWARD ? yBytes : xBytes);

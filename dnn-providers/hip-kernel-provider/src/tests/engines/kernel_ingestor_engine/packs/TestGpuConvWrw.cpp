@@ -102,7 +102,8 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
         // Packs per dtype and kernel family (conv_wrw_<dtype>_<family>.kdp.json), all in the
         // first root that has any.
         const auto isPack = [](const std::string& name) {
-            const std::string prefix = "conv_wrw_", suffix = ".kdp.json";
+            const std::string prefix = "conv_wrw_";
+            const std::string suffix = ".kdp.json";
             return name.size() > prefix.size() + suffix.size()
                    && name.compare(0, prefix.size(), prefix) == 0
                    && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
@@ -305,7 +306,7 @@ struct DeviceCase
     /// and gfx12: skipped on gfx906 and gfx11.
     bool genericOnly = false;
     /// x's element strides (the generic loop's strided operands); empty: packed.
-    std::vector<int64_t> xStrides{};
+    std::vector<int64_t> xStrides;
 };
 
 ConvShape conv(int64_t c,
@@ -800,8 +801,8 @@ void runCase(const DeviceCase& deviceCase,
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
         forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!matches(got, want, tolerance) && ++mismatches <= 5)
@@ -1048,6 +1049,7 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
         const auto dtype = stringOf(kernel, "dtype");
         const int slot = dtype == "FLOAT" ? 0 : dtype == "HALF" ? 1 : 2;
         std::vector<int64_t> tuple;
+        tuple.reserve(KNOBS.size());
         for(const char* knob : KNOBS)
         {
             tuple.push_back(kernel.getIntMetadata(knob));

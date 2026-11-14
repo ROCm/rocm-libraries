@@ -481,7 +481,10 @@ TEST(TestGpuRepackKernels, WideCastSumsManyPartialsInAFixedTree)
     // follows the same order, so fp32 output matches it exactly.
     SKIP_IF_NO_DEVICES();
     const RepackProgram program;
-    constexpr int64_t ROWS = 12, COLS = 25, BATCHES = 200, PITCH = 32;
+    constexpr int64_t ROWS = 12;
+    constexpr int64_t COLS = 25;
+    constexpr int64_t BATCHES = 200;
+    constexpr int64_t PITCH = 32;
     std::mt19937 random(7);
     std::uniform_real_distribution<float> value(-1.0f, 1.0f);
     std::vector<float> src(static_cast<size_t>(ROWS * COLS * BATCHES));

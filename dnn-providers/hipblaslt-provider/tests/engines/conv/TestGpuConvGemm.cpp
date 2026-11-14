@@ -275,7 +275,7 @@ std::vector<ConvCase> convCases()
     add("Conv3dNcdhw", threeD);
     add("Conv3dNdhwc", channelsLast(threeD));
 
-    ConvGemmShape pointGroupedNhwc = channelsLast(pointGrouped);
+    ConvGemmShape const pointGroupedNhwc = channelsLast(pointGrouped);
     add("PointOutputNhwcGrouped", pointGroupedNhwc);
 
     // Images that do not nest into one stride: y is staged channels-last for the GEMM.
@@ -653,7 +653,7 @@ void runCase(ConvCase convCase,
     {
         reflectFilter(w, reflectedW);
     }
-    Tensor<T>& referenceW = reflect ? reflectedW : w;
+    Tensor<T> const& referenceW = reflect ? reflectedW : w;
     Tensor<T> reference(written->dims(), written->strides());
     switch(convCase.direction)
     {
@@ -711,8 +711,8 @@ void runCase(ConvCase convCase,
     float maxError = 0.0f;
     for(const auto& index : allIndices(written->dims()))
     {
-        const float got = static_cast<float>(written->getHostValue(index));
-        const float want = static_cast<float>(reference.getHostValue(index));
+        const auto got = static_cast<float>(written->getHostValue(index));
+        const auto want = static_cast<float>(reference.getHostValue(index));
         const float tolerance = bound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
         maxError = std::max(maxError, std::fabs(got - want));
         if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -1350,7 +1350,7 @@ void runRprCase(ConvCase convCase, Backend backend)
         static_cast<void>(tensor->rawHostData());
     }
 
-    std::vector<int64_t> spatial(shape.input.begin(), shape.input.end());
+    std::vector<int64_t> const spatial(shape.input.begin(), shape.input.end());
     const auto positions = allIndices(spatial);
     const int64_t cg = shape.c / shape.groups;
     const int64_t kg = shape.k / shape.groups;
@@ -1654,7 +1654,7 @@ TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
                             sizeof(Half),
                             hipMemcpyDeviceToHost),
                   hipSuccess);
-        const double got = static_cast<double>(static_cast<float>(gotBits));
+        const auto got = static_cast<double>(static_cast<float>(gotBits));
         const double tolerance
             = 1e-6 * static_cast<double>(reduction)
               + 2.0 * static_cast<double>(storageEpsilon<Half>()) * (std::fabs(want) + 1e-3);

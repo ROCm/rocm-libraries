@@ -513,8 +513,8 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
         int64_t mismatches = 0;
         size_t visited = 0;
         forEachIndex(written.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, written.strides())]);
-            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const auto got = static_cast<float>(actual[offsetOf(index, written.strides())]);
+            const auto want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance = relative * scale[visited++]
                                     + 2.0f * storageEpsilon<T>() * std::fabs(want) + 1e-6f;
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -670,7 +670,7 @@ void runWrwCase(const WrwCase& wrwCase)
         });
         return sum / static_cast<double>(count);
     };
-    const double reductions = static_cast<double>(spec.y.dims[0] * spec.y.dims[2] * spec.y.dims[3]);
+    const auto reductions = static_cast<double>(spec.y.dims[0] * spec.y.dims[2] * spec.y.dims[3]);
     const double sigma = std::sqrt(reductions * meanSquare(x) * meanSquare(y));
     constexpr bool FP32 = std::is_same_v<T, float>;
     const double eps = FP32
@@ -715,7 +715,8 @@ void runWrwCase(const WrwCase& wrwCase)
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
         // Deterministic: a second run over a re-poisoned workspace gives the same bits.
         const size_t dwBytes = static_cast<size_t>(w.elementCount()) * sizeof(T);
-        std::vector<unsigned char> first(dwBytes), second(dwBytes);
+        std::vector<unsigned char> first(dwBytes);
+        std::vector<unsigned char> second(dwBytes);
         ASSERT_EQ(hipMemcpy(first.data(), w.rawDeviceData(), dwBytes, hipMemcpyDeviceToHost),
                   hipSuccess);
         if(workspace != nullptr)

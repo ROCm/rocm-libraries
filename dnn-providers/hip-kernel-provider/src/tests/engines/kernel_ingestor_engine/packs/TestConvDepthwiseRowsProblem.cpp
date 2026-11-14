@@ -96,7 +96,7 @@ bool admits(const Fields& fields, const ConvShape& shape)
 ConvShape depthwise(int64_t channels,
                     std::vector<int64_t> input,
                     std::vector<int64_t> filter,
-                    std::vector<int64_t> pad,
+                    const std::vector<int64_t>& pad,
                     bool channelsLast = false)
 {
     ConvShape shape;
