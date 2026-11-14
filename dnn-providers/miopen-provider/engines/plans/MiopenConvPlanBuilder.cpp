@@ -15,6 +15,7 @@
 #include "engines/plans/MiopenConvApplicabilityChecks.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
+#include "engines/plans/MiopenConvTensorChecks.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
 namespace miopen_plugin
@@ -39,7 +40,14 @@ bool isApplicableFwd(const HipdnnMiopenHandle& handle,
     size_t solutionCount = 0;
     try
     {
-        const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
+        // Reject tensor combinations MIOpen mis-computes before any descriptor or MIOpen call.
+        const auto& tensorMap = opGraph.getTensorMap();
+        conv_applicability::validateConvFwdIoTensors(
+            miopen_utils::findTensorAttributes(tensorMap, attr.x_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid()),
+            miopen_utils::findTensorAttributes(tensorMap, attr.y_tensor_uid()));
+
+        const ConvFwdParams params(attr, tensorMap, deterministicEnabled);
 
         if(!params.validTensors())
         {
