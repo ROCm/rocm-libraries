@@ -1,0 +1,290 @@
+{
+  "version": "1.0",
+  "id": "8b61d0c9-24af-4d17-9e52-3a7c06b8f145",
+  "name": "ASM_SDPA_ENGINE (gfx950, 287 contribution(s))",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$device.memory_clock_rate",
+    "$device.peak_memory_bandwidth",
+    "$graph.arithmetic_intensity",
+    "$graph.flops",
+    "$graph.flops_by_type.SdpaAttributes",
+    "$graph.logical_bytes",
+    "$graph.nodes[0].diagonal_alignment",
+    "$graph.nodes[0].flops",
+    "$graph.nodes[0].generate_stats",
+    "$graph.nodes[0].k.dims[0]",
+    "$graph.nodes[0].k.dims[1]",
+    "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].k.numel",
+    "$graph.nodes[0].k.strides[0]",
+    "$graph.nodes[0].k.strides[2]",
+    "$graph.nodes[0].o.dims[0]",
+    "$graph.nodes[0].o.dims[1]",
+    "$graph.nodes[0].o.dims[2]",
+    "$graph.nodes[0].o.numel",
+    "$graph.nodes[0].o.strides[0]",
+    "$graph.nodes[0].o.strides[2]",
+    "$graph.nodes[0].q.dims[0]",
+    "$graph.nodes[0].q.dims[1]",
+    "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.numel",
+    "$graph.nodes[0].q.strides[0]",
+    "$graph.nodes[0].q.strides[2]",
+    "$graph.nodes[0].v.dims[0]",
+    "$graph.nodes[0].v.dims[1]",
+    "$graph.nodes[0].v.dims[2]",
+    "$graph.nodes[0].v.numel",
+    "$graph.nodes[0].v.strides[0]",
+    "$graph.nodes[0].v.strides[2]",
+    "$graph.tensor_count",
+    "$graph.tensors[0].dims[0]",
+    "$graph.tensors[0].dims[1]",
+    "$graph.tensors[0].dims[2]",
+    "$graph.tensors[0].strides[0]",
+    "$graph.tensors[0].strides[2]",
+    "$graph.tensors[1].dims[0]",
+    "$graph.tensors[1].dims[1]",
+    "$graph.tensors[1].dims[2]",
+    "$graph.tensors[1].strides[0]",
+    "$graph.tensors[1].strides[2]",
+    "$graph.tensors[2].dims[0]",
+    "$graph.tensors[2].dims[1]",
+    "$graph.tensors[2].dims[2]",
+    "$graph.tensors[2].strides[0]",
+    "$graph.tensors[2].strides[2]",
+    "$graph.tensors[3].dims[0]",
+    "$graph.tensors[3].dims[1]",
+    "$graph.tensors[3].dims[2]",
+    "$graph.tensors[3].strides[0]",
+    "$graph.tensors[3].strides[2]",
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].q.dims[1]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].q.dims[1]",
+            "$graph.nodes[0].k.dims[1]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            {
+              "*": [
+                "$graph.nodes[0].q.dims[0]",
+                "$graph.nodes[0].q.dims[1]"
+              ]
+            },
+            "$graph.nodes[0].q.dims[2]",
+            "$graph.nodes[0].k.dims[2]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].k.dims[2]",
+            "$graph.nodes[0].q.dims[2]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            {
+              "*": [
+                "$graph.nodes[0].q.dims[0]",
+                "$graph.nodes[0].q.dims[1]"
+              ]
+            },
+            {
+              "ceil_div": [
+                "$graph.nodes[0].q.dims[2]",
+                64
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            {
+              "*": [
+                "$graph.nodes[0].q.dims[0]",
+                "$graph.nodes[0].q.dims[1]"
+              ]
+            },
+            {
+              "ceil_div": [
+                "$graph.nodes[0].q.dims[2]",
+                128
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "ceil_div": [
+            "$graph.nodes[0].k.dims[2]",
+            128
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].q.dims[2]",
+            {
+              "*": [
+                {
+                  "ceil_div": [
+                    "$graph.nodes[0].q.dims[2]",
+                    128
+                  ]
+                },
+                128
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].k.dims[2]",
+            {
+              "*": [
+                {
+                  "ceil_div": [
+                    "$graph.nodes[0].k.dims[2]",
+                    128
+                  ]
+                },
+                128
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    }
+  ],
+  "features_hash": "sha256:ba4694f2ae35d7ce",
+  "trained_against": {
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/b269f7e20e9b944d",
+    "feature_semantics_revision": 1,
+    "x-restamps": [
+      {
+        "from": "hip-kernel-provider/asm-sdpa-fwd/d8a0ad8b4e8ddd5a",
+        "to": "hip-kernel-provider/asm-sdpa-fwd/b269f7e20e9b944d",
+        "proof": "reviewed-diff",
+        "changes": [
+          "AsmSdpaEngine.cpp",
+          "AsmSdpaEngine.hpp",
+          "plans/SdpaFwdPlan.cpp",
+          "plans/SdpaFwdPlanBuilder.cpp",
+          "plans/SdpaPlanUtils.hpp"
+        ]
+      }
+    ]
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "asm_sdpa_engine_tflops.bin",
+    "hash": "33e06430a4229ddc0d51af70a4f89b5934262160703a5b31a59a493bff9be8e0"
+  }
+}

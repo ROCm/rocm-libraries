@@ -238,6 +238,18 @@ target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
+
+# Engine-level (L1) models shipped for MIOpen's engines. MiopenContainer.cpp declares an id
+# per engine and architecture; `uhd_gen promote --descriptor-tree descriptors` writes each
+# model under descriptors/heuristics/<engine>/predict_engine/<arch>/<metric>/. They are
+# staged beside the plugin under arch_content/miopen-provider, where MiopenEngine.cpp reads
+# them (HIPDNN_DESCRIPTOR_DIR replaces that tree). The configure-time install path is the
+# fallback for a plugin linked into an executable, which has no module directory to measure from.
+set(MIOPENPROVIDER_DESCRIPTOR_SUBDIR "arch_content/miopen-provider")
+target_compile_definitions(miopen_plugin_impl PRIVATE
+    MIOPENPROVIDER_DESCRIPTOR_SUBDIR="${MIOPENPROVIDER_DESCRIPTOR_SUBDIR}"
+    MIOPENPROVIDER_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${MIOPENPROVIDER_DESCRIPTOR_SUBDIR}"
+)
 # When linking the private implementation library, force-include the symbol-rename
 # header so the provider's public C API calls bind the _impl entry points exported
 # by libMIOpen_private.so. The header is generated from MIOpen's
@@ -480,6 +492,38 @@ install(TARGETS miopen_plugin EXPORT miopen-plugin
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
+
+# Only an ingestor-enabled SDK reads the shipped models (MiopenEngine.cpp). Asked of the SDK
+# target, so a standalone build against an installed SDK decides the same way as a superbuild.
+get_target_property(_miopen_provider_sdk_definitions hipdnn_plugin_sdk INTERFACE_COMPILE_DEFINITIONS)
+if(_miopen_provider_sdk_definitions AND "HIPDNN_ENABLE_KERNEL_INGESTOR" IN_LIST _miopen_provider_sdk_definitions)
+    # A glob, so installing a model for another architecture needs no edit here; one list
+    # feeds staging and install, so the two cannot disagree about what ships.
+    set(_miopen_provider_descriptor_source "${CMAKE_CURRENT_SOURCE_DIR}/descriptors")
+    file(GLOB_RECURSE _miopen_provider_descriptors CONFIGURE_DEPENDS
+         RELATIVE "${_miopen_provider_descriptor_source}"
+         "${_miopen_provider_descriptor_source}/*.uhd.json"
+         "${_miopen_provider_descriptor_source}/*.bin")
+    set(_miopen_provider_staged)
+    foreach(_descriptor IN LISTS _miopen_provider_descriptors)
+        set(_staged "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${MIOPENPROVIDER_DESCRIPTOR_SUBDIR}/${_descriptor}")
+        add_custom_command(
+            OUTPUT "${_staged}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${_miopen_provider_descriptor_source}/${_descriptor}" "${_staged}"
+            DEPENDS "${_miopen_provider_descriptor_source}/${_descriptor}"
+            COMMENT "Staging miopen-provider model ${_descriptor}"
+            VERBATIM
+        )
+        list(APPEND _miopen_provider_staged "${_staged}")
+        get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
+        install(FILES "${_miopen_provider_descriptor_source}/${_descriptor}"
+                DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${MIOPENPROVIDER_DESCRIPTOR_SUBDIR}/${_descriptor_subdir}")
+    endforeach()
+    add_custom_target(miopen_provider_descriptors ALL DEPENDS ${_miopen_provider_staged}
+                      COMMENT "Staging miopen-provider engine-level models")
+    add_dependencies(miopen_plugin miopen_provider_descriptors)
+endif()
 
 add_clang_tidy_custom_target()
 

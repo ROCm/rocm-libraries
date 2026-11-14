@@ -23,6 +23,13 @@ engine:
   - block_m
   - block_n
   heuristic: native
+  heuristics:
+    sort_kernel_catalog:
+      gfx950: [73276c7b-f432-437b-9a06-8bb62920c823, 860fa9f8-8d52-40bd-a962-9414d6b926a4]
+    predict_engine:
+      gfx950: [c9139ee3-5f47-492b-948e-308ff0c22bcc, 7d6a062e-dc86-49e3-b47c-0dcb3b5795b9]
+  trained_catalog_sha256:
+    gfx950: cca15ac793d102eed789dbca03291eebe1d4ba53aa04ae7dd799c2861466a693
 kmd_fields:
 - name: dtype
   type: string

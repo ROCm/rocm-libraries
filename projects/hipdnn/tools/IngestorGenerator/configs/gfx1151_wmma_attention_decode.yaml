@@ -32,6 +32,11 @@ engine:
   # dv_split differs by arch, and a device holds one arch).
   knobs: [head_size]
   heuristic: native
+  heuristics:
+    predict_engine:
+      gfx1151: [011b9a83-7434-499a-a240-852370172d37]
+      gfx1100: [68638159-f391-43c5-83a6-85c9d41b0a39]
+      gfx1201: [651ddcc8-e0c3-4898-b71c-22452b86face]
 
 kmd_fields:
 - name: dtype

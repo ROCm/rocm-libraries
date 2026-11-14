@@ -9,6 +9,51 @@ The MIOpen Provider supports the following configuration knobs:
 | `global.benchmarking` | int64 | 0 (disabled) | Enable benchmarking for optimal kernel selection |
 | `global.workspace_size_limit` | int64 | Maximum | Limit workspace memory (convolution operations only) |
 
+## Engine predictions
+
+MIOpen exposes graph-only L1 predictions through the shared UHD runtime, without
+requiring kernel descriptors or an L2 catalog. Predictions describe ordinary
+untuned execution with `global.benchmarking=0`, not a separate cache-bypassing
+selection mode. Existing tuning results may still be reused, and the process-wide
+benchmarking override retains its normal precedence over the knob.
+
+Models are measured with `MIOPEN_FIND_MODE=FAST`, which `uhd_gen` pins for every collection
+run: MIOpen uses its installed find database and, on a miss, its immediate-mode choice
+without benchmarking candidates. Under the default mode (`DYNAMIC_HYBRID`), a find-database
+miss benchmarks the dynamic solvers instead and usually picks a faster one, so an estimate
+tends to under-estimate default-mode TFLOPS on shapes the find database does not cover.
+
+Missing or incompatible models leave ordinary engine execution available.
+The selector revision a model must record is
+`miopen-provider/<major.minor.patch>/<engine>-<policy revision>/miopen-<x.y.z>`: the
+provider's semantic version from `version.json`, the engine, the selector policy
+revision (`MIOPEN_SELECTOR_POLICY_REVISION`, bumped when what the provider asks MIOpen
+changes), and the MIOpen library version. It never contains the build's git commit, so
+rebuilding at another commit keeps deployed models valid; the commit remains provenance
+only, in the plugin's reported version. Models collected for the removed isolated
+cache-bypass path are not compatible.
+
+Each engine declares its model ids in `MiopenContainer.cpp`, keyed by architecture and
+ranking metric:
+
+- One `tflops` id per architecture (`gfx90a`, `gfx942`, `gfx950`, `gfx1030`, `gfx1100`,
+  `gfx1101`, `gfx1102`, `gfx1150`, `gfx1151`, `gfx1201`) for the model the provider ships.
+  `uhd_gen promote --descriptor-tree dnn-providers/miopen-provider/descriptors` writes a model
+  under `heuristics/<engine>/predict_engine/<arch>/<metric>/` there; the build stages that
+  tree beside the plugin under `arch_content/miopen-provider/` and installs it there, and the
+  engine reads it at load.
+- One id per metric (`tflops`, `time`) under `default`, for a model an operator deploys
+  through `HIPDNN_DESCRIPTOR_DIR`. That variable replaces the shipped tree, as it does for
+  every provider; additive roots keep it.
+
+The longest matching architecture wins and `default` answers only where no architecture
+key matches; a model also answers only on the architectures in its `training_arches`. A
+description (`--describe-engine-prediction`) names the id declared for the requested
+metric and the device's architecture as the binding's `uhd_id`, which is the id a first
+model is promoted under.
+See the [UHD generation guide](../../../projects/hipdnn/tools/uhd_gen/README.md)
+for collection, training, promotion, and Mode A/B selection.
+
 ## See Also
 
 - **[Knobs Documentation](./Knobs.md)** - Complete MIOpen knobs guide

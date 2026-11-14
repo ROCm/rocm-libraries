@@ -16,5 +16,16 @@
     ],
   "behavior_notes": [
     "supports_graph_capture"
-  ]
+  ],
+  "predict_engine": {
+    "gfx1151": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
+    "gfx1100": [
+      "876ede73-3898-4499-9702-02aaad4637be"
+    ],
+    "gfx1201": [
+      "86d7b10e-260a-4a23-ad7f-5e4c726796c8"
+    ]
+  }
 }

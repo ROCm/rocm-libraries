@@ -2,11 +2,18 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <memory>
 
+#include <algorithm>
+#include <memory>
+#include <set>
+#include <string>
+
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
@@ -14,7 +21,13 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "engines/hip_mlops_engine/HipMlopsEngine.hpp"
+#include "engines/hip_mlops_engine/HipMlopsL1Models.hpp"
 #include "mocks/MockPlanBuilder.hpp"
+#include "tests/engines/ShippedL1ModelGate.hpp"
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "HipMlopsShippedModels.hpp"
+#endif
 
 using namespace hip_kernel_provider;
 using namespace hipdnn_test_sdk::utilities;
@@ -423,4 +436,72 @@ TEST(TestHipMlopsEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppli
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+}
+
+// ============================================================================
+// L1 binding
+// ============================================================================
+
+/// A malformed or duplicated literal does not fail the build; it silently means "this
+/// architecture never binds a model", so the declared table is checked here.
+TEST(TestHipMlopsEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
+{
+    std::set<std::string> seenArch;
+    std::set<std::string> seenId;
+    EXPECT_FALSE(HIP_MLOPS_L1_MODEL_IDS.empty());
+    for(const auto& [arch, id] : HIP_MLOPS_L1_MODEL_IDS)
+    {
+        EXPECT_FALSE(arch.empty());
+        EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id))) << id;
+        EXPECT_TRUE(seenArch.insert(std::string(arch)).second) << arch;
+        EXPECT_TRUE(seenId.insert(std::string(id)).second) << "two architectures declare " << id;
+    }
+}
+
+/// Shipped models record the revision verbatim, so its form is a contract. "undetermined"
+/// here means the CMake wiring that computes the digest was dropped.
+TEST(TestHipMlopsEngineDeclaration, SelectorRevisionIsTheEnginePrefixAndSixteenHexDigits)
+{
+    const std::string revision = HipMlopsEngine::selectorRevision();
+    const std::string prefix = "hip-kernel-provider/hip-mlops/";
+    ASSERT_EQ(revision.rfind(prefix, 0), 0u) << revision;
+    const std::string digest = revision.substr(prefix.size());
+    EXPECT_EQ(digest.size(), 16u) << revision;
+    EXPECT_TRUE(std::all_of(digest.begin(), digest.end(), [](unsigned char character) {
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
+    })) << revision;
+}
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// A shipped model that records another revision is refused at load and the engine reports
+/// no estimate, silently; this is where that fails the build.
+TEST(TestHipMlopsEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
+{
+    EXPECT_TRUE(shipped_model_gate::shippedL1ModelsBindThisBuild(
+        hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME,
+        "hip_mlops",
+        hip_mlops_engine::shipped_models::MODELS,
+        HKP_SELECTOR_DUMP_DIR,
+        HIP_MLOPS_L1_MODEL_IDS,
+        HipMlopsEngine::selectorRevision()));
+}
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
+
+/// The engine has no knobs, so a configuration-level request is declined; the backend
+/// rejects a response whose metric differs from the request, so the decline carries it.
+TEST(TestHipMlopsEngine, ConfigurationPredictionIsDeclinedInTheRequestedMetric)
+{
+    const HipMlopsEngine engine(1);
+    Handle handle;
+    auto graphBuilder = createValidBatchnormInferenceGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const EngineConfigWrapper config(nullptr, 0);
+
+    const auto prediction
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_EQ(prediction.status,
+              hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::CONFIGURATION);
+    EXPECT_EQ(prediction.metric, "tflops");
+    EXPECT_EQ(prediction.engine_id, 1);
 }
