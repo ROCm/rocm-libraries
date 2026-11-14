@@ -82,6 +82,10 @@
     {
       "name": "math",
       "type": "int"
+    },
+    {
+      "name": "rs",
+      "type": "int"
     }
   ]
 }

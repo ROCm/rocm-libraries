@@ -36,6 +36,7 @@ FIELDS = [
     "tw",
     "bpu",
     "math",
+    "rs",
 ]
 KNOBS = [f for f in FIELDS if f not in ("direction", "dtype")]
 STRINGS = {"direction", "dtype", "atom"}
@@ -102,6 +103,21 @@ WIDE_TILES = {
     3: [(8, 1, 3), (4, 1, 3), (4, 2, 3)],
     4: [(4, 2, 4), (8, 2, 4), (8, 1, 4), (4, 1, 4)],
 }
+
+
+# Row streaming (rs 1): (th, cb) output rows a band and 16-channel blocks (waves) a workgroup.
+RS_TILES = [
+    (8, 2),
+    (16, 2),
+    (32, 2),
+    (8, 4),
+    (16, 4),
+    (32, 4),
+    (64, 4),
+    (16, 8),
+    (32, 8),
+    (64, 8),
+]
 
 
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
@@ -251,6 +267,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             tw=0,
                             bpu=0,
                             math=0,
+                            rs=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.t{th}x{wp}x{cb}"
@@ -271,6 +288,60 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                     **c,
                                 },
                                 "priority": 1000 - i,
+                            }
+                        )
+                        i += 1
+    # Row-streaming configs (rs 1, k4ConvMmaRows): (th, cb) a band of output rows and cb waves of
+    # one 16-channel block each, 16 output columns, channels-last, unit gather stride (forward at
+    # stride 1; backward data by stride phases).
+    i = 0
+    for dtype, atoms in ATOMS.items():
+        if dtype == "F32X3":
+            continue
+        dt = DT[dtype]
+        for atom in atoms:
+            for t, r, s in FILTERS:
+                for st in (1,) if tag == "fwd" else (1, 2):
+                    for th, cb in RS_TILES:
+                        c = dict(
+                            atom=atom,
+                            t=t,
+                            r=r,
+                            s=s,
+                            stride=st,
+                            th=th,
+                            wp=1,
+                            cb=cb,
+                            cf=0,
+                            cg=0,
+                            oc=0,
+                            px=0,
+                            pf=0,
+                            nbi=0,
+                            nbo=0,
+                            tw=0,
+                            bpu=0,
+                            math=0,
+                            rs=1,
+                        )
+                        f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
+                        name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.rs{th}x{cb}"
+                        kernels.append(
+                            {
+                                "version": "1.0",
+                                "id": U(name),
+                                "name": name,
+                                "kernel_source": {
+                                    "kind": "embedded_source",
+                                    "source_file": "kernels/ConvGroup.cpp",
+                                    "entry_point": "ConvGroup",
+                                },
+                                "metadata": {
+                                    "direction": direction,
+                                    "dtype": DTYPE[dtype],
+                                    **c,
+                                },
+                                "priority": 1100 - i,
                             }
                         )
                         i += 1
@@ -338,6 +409,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                     tw=0,
                                     bpu=0,
                                     math=1 if x3 else 0,
+                                    rs=0,
                                 )
                                 f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                                 name = (
@@ -401,6 +473,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             tw=0,
                             bpu=0,
                             math=0,
+                            rs=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = (
@@ -565,6 +638,7 @@ for dtype, atoms in WRW_ATOMS.items():
                                 tw=tw,
                                 bpu=bpu,
                                 math=0,
+                                rs=0,
                             )
                             f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                             name = (
@@ -624,6 +698,7 @@ for dtype, atoms in WRW_WIDE_ATOMS.items():
                                     tw=tw,
                                     bpu=bpu,
                                     math=0,
+                                    rs=0,
                                 )
                                 f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                                 name = (
@@ -677,6 +752,7 @@ for t, r, s in FILTERS:
                             tw=tw,
                             bpu=bpu,
                             math=0,
+                            rs=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = (

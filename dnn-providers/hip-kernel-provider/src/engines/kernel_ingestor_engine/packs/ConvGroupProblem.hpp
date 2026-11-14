@@ -93,6 +93,10 @@ bool fitsOneDispatch(long long blocks, long long threads);
 /// or dense per group, padded to nbi blocks each way (wide groups).
 size_t expandedElements(const GroupProblem& problem);
 
+/// LDS bytes of the row-streaming kernel: two row segments of 16 + s - 1 pixels, each 16 cb
+/// channels plus a 16-byte pad.
+long long groupRowsLdsBytes(int elementBytes, int s, int cb);
+
 /// LDS bytes of the input halo a config stages for a th x tw output tile (the kernel's static
 /// array).
 long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb);

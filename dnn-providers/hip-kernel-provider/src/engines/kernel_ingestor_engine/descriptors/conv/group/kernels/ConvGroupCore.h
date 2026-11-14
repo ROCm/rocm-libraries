@@ -332,6 +332,221 @@ __device__ void k4ConvMma(const K4Args& a)
     }
 }
 
+// Whether an atom's accumulator elements are consecutive D rows (dRow(lane, e) = dRow(lane, 0)
+// + e), so a lane's elements are adjacent output channels and go out as one vector store.
+template <class Atom>
+struct K4RowsVector
+{
+    static constexpr bool value = true;
+};
+template <>
+struct K4RowsVector<K1AtomWmma11F16>
+{
+    static constexpr bool value = false;
+};
+template <>
+struct K4RowsVector<K1AtomWmma11Bf16>
+{
+    static constexpr bool value = false;
+};
+
+// Row-streaming kernel (unit gather stride, channels-last). A workgroup of CB waves owns 16
+// output columns x a band of TH output rows x CB 16-channel blocks (one a wave) of one output
+// plane, and streams the band's input rows top to bottom: each (row, depth tap) step stages one
+// input row segment (16 + S - 1 pixels x 16 CB channels) in LDS, double-buffered, the next step's
+// global loads in flight under the current step's multiplies. A wave keeps its block's expanded
+// filter in registers for the whole band (every tap's A fragment) and its output rows in a ring
+// of R accumulators: input row t of the band adds tap row r into output row t - r, so after row
+// t the output row t - (R - 1) is complete and goes straight from registers to global memory
+// (a lane holds consecutive output channels of one pixel). Every input element is read once a
+// band and every output element written once. The filter is the A operand and the input the B
+// operand, so D is [output channel][output column]. Grid: (channel tiles) x (column tiles) x
+// (row bands) x output planes x images, flattened, as k4ConvMma.
+template <class T, class Atom, int FT, int R, int S, int TH, int CB>
+__device__ void k4ConvMmaRows(const K4Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = CB * WAVE;
+    constexpr int CH = 16 * CB;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int PITCH = CH + VEC; // elements a staged pixel takes (16-byte pad: no conflicts)
+    constexpr int HC = 16 + S - 1;
+    constexpr int VP = CH / VEC; // vectors a staged pixel takes
+    constexpr int LOADS = (HC * VP + THREADS - 1) / THREADS;
+    constexpr int TAPS = FT * R * S;
+    constexpr int KC = 16 / Atom::KA; // atom k-steps per tap
+    static_assert(Atom::DIM == 16 && 16 % Atom::KA == 0, "16x16 atoms with k-steps dividing 16");
+    typedef typename K1Raw<16>::type Raw;
+    __shared__ __attribute__((aligned(16))) T rows[2 * HC * PITCH];
+
+    const int blocks = a.c / CH;
+    long long b = blockIdx.x;
+    const int cbt = static_cast<int>(b % blocks);
+    b /= blocks;
+    const int tws = (a.wo + 15) / 16;
+    const int twi = static_cast<int>(b % tws);
+    b /= tws;
+    const int ths = (a.ho + TH - 1) / TH;
+    const int thi = static_cast<int>(b % ths);
+    b /= ths;
+    const int od = static_cast<int>(b % a.dout);
+    const long long img = b / a.dout;
+    const int oh0 = thi * TH;
+    const int band = a.ho - oh0 < TH ? a.ho - oh0 : TH;
+    const int ow0 = twi * 16;
+    const T* in = static_cast<const T*>(a.in);
+    const T* w = static_cast<const T*>(a.w);
+    T* out = static_cast<T*>(a.out);
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int col = lane % 16;
+    const int kb = Atom::template kBase<Atom::KPL>(lane);
+    const int cb = cbt * CB + wave;
+
+    // The block's expanded filter, every tap, held for the whole band.
+    typename Atom::frag wf[TAPS][KC];
+#pragma unroll
+    for(int tap = 0; tap < TAPS; ++tap)
+#pragma unroll
+        for(int q = 0; q < KC; ++q)
+            wf[tap][q]
+                = k1Frag<Atom>(w + ((static_cast<long long>(cb) * TAPS + tap) * 16 + col) * 16
+                               + q * Atom::KA + kb);
+
+    // This thread's staging slots: pixel p, vector v of a row segment; columns past the input
+    // load a clamped in-range address and keep zero.
+    long long srcOff[LOADS];
+    int dstOff[LOADS];
+    bool colOk[LOADS], active[LOADS];
+#pragma unroll
+    for(int l = 0; l < LOADS; ++l)
+    {
+        const int i = tid + l * THREADS;
+        const int v = i % VP, p = i / VP;
+        const int iw = ow0 - a.pw + p;
+        active[l] = i < HC * VP;
+        colOk[l] = active[l] && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi);
+        srcOff[l] = static_cast<long long>(colOk[l] ? iw : 0) * a.c
+                    + static_cast<long long>(cbt) * CH + v * VEC;
+        dstOff[l] = p * PITCH + v * VEC;
+    }
+    // Step (t, ft): band input row t (input row oh0 - ph + t) of depth tap ft's plane. Outside
+    // the input it contributes nothing and loads nothing (uniform across the workgroup).
+    const auto stepBase = [&](int t, int ft, long long& base) {
+        const int id = od * a.sd - a.pd + ft, ih = oh0 - a.ph + t;
+        base = ((img * a.di + id) * a.hi + ih) * static_cast<long long>(a.wi) * a.c;
+        return static_cast<unsigned>(id) < static_cast<unsigned>(a.di)
+               && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi);
+    };
+    Raw stage[LOADS];
+    const auto load = [&](long long base) {
+#pragma unroll
+        for(int l = 0; l < LOADS; ++l)
+        {
+            Raw val = *reinterpret_cast<const Raw*>(in + base + srcOff[l]);
+            stage[l] = colOk[l] ? val : Raw{};
+        }
+    };
+    const auto put = [&](int buf) {
+#pragma unroll
+        for(int l = 0; l < LOADS; ++l)
+            if(active[l])
+                *reinterpret_cast<Raw*>(rows + buf * HC * PITCH + dstOff[l]) = stage[l];
+    };
+
+    const long long outPlane = img * a.outD + od * a.osd + a.ood;
+    const auto flush = [&](const typename Atom::acc& acc, int u) {
+        const int ow = ow0 + col;
+        if(u < 0 || u >= band || ow >= a.wo)
+            return;
+        T* dst = out
+                 + ((outPlane * a.outH + static_cast<long long>(oh0 + u) * a.osh + a.ooh) * a.outW
+                    + static_cast<long long>(ow) * a.osw + a.oow)
+                       * a.c
+                 + cb * 16 + Atom::dRow(lane, 0);
+        if constexpr(K4RowsVector<Atom>::value)
+        {
+            typedef typename K1Raw<Atom::ACC* static_cast<int>(sizeof(T))>::type V;
+            union
+            {
+                V raw;
+                T e[Atom::ACC];
+            } val;
+#pragma unroll
+            for(int e = 0; e < Atom::ACC; ++e)
+                val.e[e] = K1Elem<T>::store(acc[e]);
+            *reinterpret_cast<V*>(dst) = val.raw;
+        }
+        else
+        {
+#pragma unroll
+            for(int e = 0; e < Atom::ACC; ++e)
+                dst[Atom::dRow(lane, e) - Atom::dRow(lane, 0)] = K1Elem<T>::store(acc[e]);
+        }
+    };
+
+    typename Atom::acc acc[R];
+#pragma unroll
+    for(int r = 0; r < R; ++r)
+        acc[r] = typename Atom::acc{};
+
+    const int steps = band + R - 1; // band rows plus the rows below that finish them
+    {
+        long long base = 0;
+        if(stepBase(0, 0, base))
+        {
+            load(base);
+            put(0);
+        }
+    }
+    int cur = 0;
+    for(int t0 = 0; t0 < steps; t0 += R)
+    {
+#pragma unroll
+        for(int j = 0; j < R; ++j)
+        {
+            const int t = t0 + j;
+            if(t >= steps)
+                break;
+#pragma unroll
+            for(int ft = 0; ft < FT; ++ft)
+            {
+                __syncthreads(); // this step's row is staged; the other buffer is free
+                long long base = 0, next = 0;
+                const bool live = stepBase(t, ft, base);
+                const int nt = ft + 1 < FT ? t : t + 1, nft = ft + 1 < FT ? ft + 1 : 0;
+                const bool more = nt < steps && stepBase(nt, nft, next);
+                if(more)
+                    load(next);
+                if(live)
+                {
+                    const T* src = rows + cur * HC * PITCH + wave * 16 + kb;
+#pragma unroll
+                    for(int s = 0; s < S; ++s)
+                    {
+                        typename Atom::frag xf[KC];
+#pragma unroll
+                        for(int q = 0; q < KC; ++q)
+                            xf[q] = k1Frag<Atom>(src + (col + s) * PITCH + q * Atom::KA);
+#pragma unroll
+                        for(int r = 0; r < R; ++r)
+#pragma unroll
+                            for(int q = 0; q < KC; ++q)
+                                acc[(j - r + R) % R] = Atom::mma(
+                                    wf[(ft * R + r) * S + s][q], xf[q], acc[(j - r + R) % R]);
+                    }
+                }
+                if(more)
+                    put(cur ^ 1);
+                cur ^= 1;
+            }
+            // Output row t - (R - 1) has every tap row: store it, and free its slot.
+            flush(acc[(j + 1) % R], t - (R - 1));
+            acc[(j + 1) % R] = typename Atom::acc{};
+        }
+    }
+}
+
 // Phase-fused backward data at stride 2 (rows and columns): one launch writes every dx pixel of a
 // depth phase. A workgroup owns 2 TH dx rows x 2 TW dx columns (TW = 16 WP) x CB channel blocks:
 // TH x TW positions j of each of the four (row, column) phases, dx[2 j + p]. It stages the dy halo

@@ -84,6 +84,12 @@ long long divUp(long long a, long long b)
 
 } // namespace
 
+long long groupRowsLdsBytes(int elementBytes, int s, int cb)
+{
+    const long long vec = 16 / elementBytes;
+    return 2LL * (16 + s - 1) * (16LL * cb + vec) * elementBytes;
+}
+
 long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb)
 {
     const long long vec = 16 / elementBytes;
@@ -725,6 +731,9 @@ struct Tile
     int64_t bpu = 0;
     /// 1: the three-bf16 form (TF32 permission) of a bf16 matrix-core config, for fp32 graphs.
     int64_t math = 0;
+    /// 1: row streaming (k4ConvMmaRows): cb waves of one 16-channel block each, 16 output
+    /// columns (wp 1), a band of th output rows, unit gather stride, channels-last.
+    int64_t rs = 0;
 };
 
 /// The 16x16 atoms the wrw kernel runs (its chunks flatten the tile's positions, so the k-step
@@ -774,6 +783,18 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
     const int64_t tw = kernel.getIntMetadata("tw");
     tile.bpu = kernel.getIntMetadata("bpu");
     tile.math = kernel.getIntMetadata("math");
+    tile.rs = kernel.getIntMetadata("rs");
+    // Row streaming: a matrix-core small-group config of cb waves (at most 1024 threads), one
+    // 16-column fragment, channels-last, not phase-fused; no other direction's knobs.
+    if(tile.rs != 0
+       && (tile.rs != 1 || direction == ConvDirection::BACKWARD_WEIGHTS || tile.fma
+           || info->wave == 0 || tile.nbi != 0 || tile.nbo != 0 || tile.wp != 1 || tile.pf != 0
+           || tile.cf != 0 || tile.math != 0 || tile.cb < 1 || tile.cb * info->wave > 1024
+           || tile.th < 1 || tile.cg != 0 || tile.oc != 0 || tile.px != 0 || tw != 0
+           || tile.bpu != 0))
+    {
+        return std::nullopt;
+    }
     // Three-bf16: a bf16 wide-group config, forward or backward data, not phase-fused.
     if(tile.math < 0 || tile.math > 1
        || (tile.math == 1
@@ -882,6 +903,10 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
 /// A config's threads per workgroup.
 long long blockThreads(const Tile& tile)
 {
+    if(tile.rs != 0)
+    {
+        return tile.cb * tile.info.wave;
+    }
     return tile.fma ? FMA_THREADS : 4LL * tile.info.wave;
 }
 
@@ -1026,6 +1051,11 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // Row streaming gathers at unit stride (forward at stride 1, backward data's phases).
+    if(tile->rs != 0 && problem->kernelStride != 1)
+    {
+        return false;
+    }
     // A phase-fused config: backward data at row and column stride 2 with all four phases.
     const auto launches = conv_group::groupLaunches(*problem, tile->pf != 0);
     if(!launches.has_value())
@@ -1043,7 +1073,9 @@ bool kernelMatches(const MatchContext& context,
     // Wide groups stage nbi blocks of a group's channels (cb's role).
     const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
     const long long lds
-        = tile->pf != 0
+        = tile->rs != 0
+              ? conv_group::groupRowsLdsBytes(bytes, problem->kernelS, static_cast<int>(tile->cb))
+          : tile->pf != 0
               ? conv_group::groupPhasedLdsBytes(bytes,
                                                 problem->kernelR,
                                                 problem->kernelS,
@@ -1371,12 +1403,13 @@ public:
         options.add("CONV_GROUP_CB", std::to_string(tile->cb));
         options.add("CONV_GROUP_CF", std::to_string(tile->cf));
 
+        if(tile->rs != 0)
+        {
+            options.add("CONV_GROUP_RS", std::string("1"));
+        }
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());
-        conv.setBlockSize(
-            static_cast<unsigned int>(tile->fma ? FMA_THREADS : int64_t{4} * tile->info.wave),
-            1,
-            1);
+        conv.setBlockSize(static_cast<unsigned int>(blockThreads(*tile)), 1, 1);
         conv.setGridSize(blocks.front(), 1, 1);
 
         KernelDefinition expandKernel = kernel;
