@@ -167,6 +167,8 @@ namespace
         std::optional<int64_t> cOffset; // C starts this many elements after D, in D's buffer
         bool                   negateC = false; // C is read through HIPTENSOR_OP_NEG
         hiptensorAlgo_t        algo    = HIPTENSOR_ALGO_DEFAULT;
+        bool                   aInD    = false; // A's data sits in D's buffer
+        bool                   bInD    = false; // B's data sits in D's buffer
     };
 
     int64_t offset(Tensor const& t, ModeMap const& idx)
@@ -421,11 +423,19 @@ namespace
                                 std::numeric_limits<float>::quiet_NaN());
                 initialD.insert(initialD.end(), p.c->data.begin(), p.c->data.end());
             }
+            // An input in D's buffer: the buffer starts with that input's values.
+            if(p.aInD || p.bInD)
+            {
+                initialD = p.aInD ? p.a.data : p.b.data;
+                initialD.resize(std::max(initialD.size(), sizeD));
+            }
             upload(&dD, initialD);
             if(ws > 0)
             {
                 EXPECT_EQ(hipMalloc(&dW, ws), hipSuccess);
             }
+            void* const inA = p.aInD ? dD : dA;
+            void* const inB = p.bInD ? dD : dB;
 
             void* added = p.inPlace ? dD : dC;
             if(p.cOffset)
@@ -435,12 +445,12 @@ namespace
             if(p.third)
             {
                 r.status = hiptensorContractTrinary(
-                    h, plan, &p.alpha, dA, dB, dT, &p.beta, added, dD, dW, ws, nullptr);
+                    h, plan, &p.alpha, inA, inB, dT, &p.beta, added, dD, dW, ws, nullptr);
             }
             else
             {
                 r.status = hiptensorContract(
-                    h, plan, &p.alpha, dA, dB, &p.beta, added, dD, dW, ws, nullptr);
+                    h, plan, &p.alpha, inA, inB, &p.beta, added, dD, dW, ws, nullptr);
             }
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 
@@ -968,6 +978,24 @@ TEST_F(ContractionCheckTest, CFollowsD)
     expectCorrect(mHandle, ext, p, separate);
 }
 
+// A or B in D's buffer: the kernel would read elements of the input that it
+// has already overwritten.
+TEST_F(ContractionCheckTest, AOverlapsD)
+{
+    auto const ext = extents(false);
+    auto       p   = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
+    p.aInD         = true;
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(ContractionCheckTest, BOverlapsD)
+{
+    auto const ext = extents(false);
+    auto       p   = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
+    p.bInD         = true;
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
 // Trinary: D must have E's modes. Here D lacks n.
 TEST_F(ContractionCheckTest, TrinaryDLacksMode)
 {
@@ -1027,6 +1055,15 @@ TEST_F(ContractionCheckTest, TrinaryDOverlapsE)
     auto const ext = extents(false);
     auto       p   = trinary(ext, kTrinaryCanonical);
     p.cOffset      = 1;
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// Trinary: an input in E's buffer.
+TEST_F(ContractionCheckTest, TrinaryAOverlapsE)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, kTrinaryCanonical);
+    p.aInD         = true;
     expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
