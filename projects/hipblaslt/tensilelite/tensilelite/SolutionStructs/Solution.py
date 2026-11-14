@@ -90,6 +90,7 @@ from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
+from ..Components.ScalarLoadB import scalarLoadBChunk
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
@@ -459,6 +460,60 @@ def _disableRuntimeStaggerU(state):
   state["StaggerUMapping"] = 0
   state["StaggerUStride"] = 0
   state["InternalSupportParams"]["SupportCustomStaggerU"] = False
+
+
+def _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
+  """Validate ScalarLoadB; returns False if the solution was rejected."""
+  depth = state["ScalarLoadB"]
+  if not depth:
+    state["ScalarLoadBPrefetch"] = 0
+    return True
+  pt = state["ProblemType"]
+  def no(why):
+    reject(state, printRejectionReason, "ScalarLoadB: " + why)
+    return False
+  if state["KernelLanguage"] != "Assembly" or state["EnableMatrixInstruction"]:
+    return no("assembly source (non-matrix-instruction) kernels only")
+  isXF32 = "F32XdlMathOp" in pt and not pt["F32XdlMathOp"].isSingle()
+  if not (pt["DataType"].isSingle() and pt["DataTypeB"].isSingle() and pt["ComputeDataType"].isSingle()) or isXF32:
+    return no("f32 only")
+  if pt["Sparse"] or pt["MXBlockA"] or pt["MXBlockB"] or pt["SwizzleTensorB"] or pt["NumIndicesSummation"] != 1:
+    return no("unsupported problem type")
+  if state["SubGroup0"] % state["WavefrontSize"] != 0:
+    return no("SubGroup0 (%u) must be a multiple of the wavefront size so B is uniform within a wave" % state["SubGroup0"])
+  if not state["BufferLoad"] or state["LocalSplitU"] != 1 or state["InnerUnroll"] != 1:
+    return no("requires BufferLoad, LocalSplitU=1 and InnerUnroll=1")
+  if state["GlobalSplitU"] != 1:
+    return no("requires GlobalSplitU=1 (the summation range of a workgroup must be contiguous)")
+  if state["StaggerU"] != 0:
+    return no("requires StaggerU=0")
+  if state["PrefetchLocalRead"] != 1 or state["PrefetchGlobalRead"] not in (1, 2) or state["1LDSBuffer"]:
+    return no("requires PrefetchLocalRead=1, PrefetchGlobalRead in (1,2) and two LDS buffers")
+  if state["DirectToVgprA"] or state["DirectToVgprB"] or state["DirectToLdsA"] or state["DirectToLdsB"]:
+    return no("no DirectToVgpr/DirectToLds")
+  if state["OptNoLoadLoop"]:
+    return no("requires OptNoLoadLoop=0")
+  if not state["NoTailLoop"]:
+    return no("no tail loop support: AssertSummationElementMultiple must be a multiple of DepthU")
+  if state["AssertFree1ElementMultiple"] % state["MacroTile1"] != 0:
+    return no("no partial tiles along B: AssertFree1ElementMultiple must be a multiple of MacroTile1")
+  if state["DepthU"] % depth != 0:
+    return no("must divide DepthU")
+  chunk = scalarLoadBChunk(state)
+  vwb = state["VectorWidthB"]
+  if vwb & (vwb - 1) or state["ThreadTile1"] % vwb:
+    return no("VectorWidthB must be a power of two that divides ThreadTile1")
+  if depth % chunk != 0:
+    return no("ring depth must be a multiple of the load chunk")
+  if depth < 2 * chunk:
+    return no("the ring must hold at least two load chunks")
+  if state["ScalarLoadBPrefetch"]:
+    cols = state["ThreadTile1"] // vwb if pt["TLUB"] else state["ThreadTile1"]
+    if cols & (cols - 1) or cols > state["WavefrontSize"]:
+      return no("ScalarLoadBPrefetch needs a power-of-two number of columns per wave")
+  # The stream of B is read in summation order, so the runtime StaggerU has to be off as well.
+  _disableRuntimeStaggerU(state)
+  return True
 
 
 def _disableUnsupportedRuntimeStaggerU(state):
@@ -4105,6 +4160,9 @@ class Solution(collections.abc.Mapping):
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0 or state.get("ReuseAcrossPersistent", 0):
       state["NoTailLoop"] = True
 
+    if not _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
+      return
+
     # TailloopInNll optimization check
     if state["TailloopInNll"]:
       # Disable TailloopInNll
@@ -5290,8 +5348,9 @@ class Solution(collections.abc.Mapping):
           else: # mac
             if state["LocalReadVectorWidth"] == -1:
               state["LocalReadVectorWidth"] = state["VectorWidthA"]
+            # With ScalarLoadB, B is never read from LDS: VectorWidthB only places the columns.
             if state["LocalReadVectorWidth"] != state["VectorWidthA"] or \
-               state["LocalReadVectorWidth"] != state["VectorWidthB"]:
+               (state["LocalReadVectorWidth"] != state["VectorWidthB"] and not state["ScalarLoadB"]):
               reject(state, printRejectionReason, "LocalReadVectorWidth must equal VectorWidthA/B for MAC kernels")
             if state["LocalReadVectorWidthA"] == -1:
               state["LocalReadVectorWidthA"] = state["VectorWidthA"]
@@ -5578,7 +5637,8 @@ class Solution(collections.abc.Mapping):
       # reject - VW too big
       if (state["VectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes()) > 16:
         reject(state, printRejectionReason, "VWA * MacDataTypeA.numBytes() > 16")
-      if (state["VectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes()) > 16:
+      # With ScalarLoadB, B is not read with vector loads: VectorWidthB is a scalar load width.
+      if (state["VectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes()) > 16 and not state["ScalarLoadB"]:
         reject(state, printRejectionReason, "VWB * MacDataTypeB.numBytes() > 16")
 
       # reject - GRVW too big
