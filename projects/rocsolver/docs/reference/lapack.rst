@@ -17,6 +17,7 @@ into the following categories:
 * :ref:`linears`: Based on triangular factorizations.
 * :ref:`leastsqr`: Based on orthogonal factorizations.
 * :ref:`eigens`: Eigenproblems for symmetric matrices.
+* :ref:`nonsymeigens`: Eigenproblems for nonsymmetric matrices.
 * :ref:`svds`: Singular values and related problems for general matrices.
 
 .. note::
@@ -957,6 +958,70 @@ rocsolver_<type>gehrd_strided_batched()
    :outline:
 .. doxygenfunction:: rocsolver_sgehrd_strided_batched
 
+.. _gebal:
+
+rocsolver_<type>gebal()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgebal
+   :outline:
+.. doxygenfunction:: rocsolver_cgebal
+   :outline:
+.. doxygenfunction:: rocsolver_dgebal
+   :outline:
+.. doxygenfunction:: rocsolver_sgebal
+
+rocsolver_<type>gebal_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgebal_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgebal_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgebal_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgebal_batched
+
+rocsolver_<type>gebal_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgebal_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgebal_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgebal_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgebal_strided_batched
+
+.. _gebak:
+
+rocsolver_<type>gebak()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgebak
+   :outline:
+.. doxygenfunction:: rocsolver_cgebak
+   :outline:
+.. doxygenfunction:: rocsolver_dgebak
+   :outline:
+.. doxygenfunction:: rocsolver_sgebak
+
+rocsolver_<type>gebak_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgebak_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgebak_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgebak_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgebak_batched
+
+rocsolver_<type>gebak_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgebak_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgebak_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dgebak_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_sgebak_strided_batched
+
 
 
 .. _linears:
@@ -1693,6 +1758,97 @@ rocsolver_<type>hegvx_strided_batched()
 .. doxygenfunction:: rocsolver_zhegvx_strided_batched
    :outline:
 .. doxygenfunction:: rocsolver_chegvx_strided_batched
+
+
+
+.. _nonsymeigens:
+
+Nonsymmetric eigensolvers
+================================
+
+.. contents:: List of nonsymmetric eigensolvers
+   :local:
+   :backlinks: top
+
+.. _hseqr:
+
+rocsolver_<type>hseqr()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zhseqr
+   :outline:
+.. doxygenfunction:: rocsolver_chseqr
+
+rocsolver_<type>hseqr_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zhseqr_batched
+   :outline:
+.. doxygenfunction:: rocsolver_chseqr_batched
+
+rocsolver_<type>hseqr_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zhseqr_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_chseqr_strided_batched
+
+.. _trexc:
+
+rocsolver_<type>trexc()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_ztrexc
+   :outline:
+.. doxygenfunction:: rocsolver_ctrexc
+
+rocsolver_<type>trexc_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_ztrexc_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ctrexc_batched
+
+rocsolver_<type>trexc_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_ztrexc_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ctrexc_strided_batched
+
+.. _trevc3:
+
+rocsolver_<type>trevc3()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_ztrevc3
+   :outline:
+.. doxygenfunction:: rocsolver_ctrevc3
+
+rocsolver_<type>trevc3_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_ztrevc3_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ctrevc3_batched
+
+rocsolver_<type>trevc3_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_ztrevc3_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ctrevc3_strided_batched
+
+.. _geev:
+
+rocsolver_<type>geev()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgeev
+   :outline:
+.. doxygenfunction:: rocsolver_cgeev
+
+rocsolver_<type>geev_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgeev_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgeev_batched
+
+rocsolver_<type>geev_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zgeev_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_cgeev_strided_batched
 
 
 
