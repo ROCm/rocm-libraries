@@ -24,7 +24,16 @@ from __future__ import annotations
 from typing import Literal
 
 from .arch import ArchTarget
-from .ir import Op, Type, Value, VectorType, dtype_to_ir_type, is_packed_only, type_bits
+from .ir import (
+    Op,
+    Type,
+    Value,
+    VectorType,
+    dtype_to_ir_type,
+    element_type,
+    is_packed_only,
+    type_bits,
+)
 
 MmaOperandRole = Literal["a", "b", "c"]
 
@@ -35,11 +44,6 @@ _OPERAND_INDEX = {"a": 0, "b": 1, "c": 2}
 def mma_operand_value(op: Op, role: MmaOperandRole) -> Value:
     """MMA operand ``role`` ("a", "b" or the accumulator "c") of ``op``."""
     return op.operands[_OPERAND_INDEX[role]]
-
-
-def _element_type(t: Type) -> Type:
-    """The element type of a vector type, or the type itself for a scalar."""
-    return t.elem if isinstance(t, VectorType) else t
 
 
 def _admitted_elements(
@@ -55,7 +59,7 @@ def _admitted_elements(
     packed-only (``i4`` for the iu4 instructions): no value has that element
     type, so its values arrive in the register type.
     """
-    elements = {_element_type(register_type)}
+    elements = {element_type(register_type)}
     if catalog_dtype is not None:
         catalog_element = dtype_to_ir_type(catalog_dtype)
         if not is_packed_only(catalog_element):
@@ -87,7 +91,7 @@ def _require_reshape(
     ``label`` names the value, ``verb`` says what the instruction does with the
     register ("takes" or "returns"), and each hint ends its refusal.
     """
-    element = _element_type(value_type)
+    element = element_type(value_type)
     if element not in admitted:
         names = " or ".join(sorted(t.name for t in admitted))
         raise ValueError(
