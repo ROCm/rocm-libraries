@@ -164,9 +164,10 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "chiplet_num_xcds",
     }
 )
-# Problem fields only some arches' dense specs declare (the band's right bound).
+# Problem fields only some arches' dense specs declare (the band's right bound, the
+# sink element type).
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"right_bound"}),
+    "gfx950": frozenset({"right_bound", "sink_dtype"}),
     "gfx942": frozenset(),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {

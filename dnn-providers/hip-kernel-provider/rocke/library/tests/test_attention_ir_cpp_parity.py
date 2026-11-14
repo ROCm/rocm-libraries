@@ -119,6 +119,27 @@ def test_attention_ir_cpp_python_byte_identity():
                 "use_sinks": True,
             },
         ),
+        (
+            "empty_window_sinks_f32",
+            {
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+                "sink_dtype": "f32",
+            },
+        ),
+        (
+            "persistent_empty_window_sinks_f32",
+            {
+                "persistent": True,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+                "use_sinks": True,
+                "sink_dtype": "f32",
+            },
+        ),
     ):
         cases.append(
             {

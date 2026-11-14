@@ -1007,6 +1007,159 @@ class TestSinksValidation(unittest.TestCase):
 
         self.assertEqual(str(cm.exception), "sinks must be a CUDA tensor")
 
+    def _sink_call(self, *, sink_dtype, sinks_dtype, q_dtype="bfloat16"):
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=64,
+            dtype="bf16",
+            use_sinks=True,
+            sink_dtype=sink_dtype,
+        )
+        qshape = (1, 512, 8, 64)
+        sinks = SimpleNamespace(
+            shape=(8,), dtype=sinks_dtype, is_contiguous=lambda: True, is_cuda=True
+        )
+        return lambda: run_attention_dense_torch(
+            spec=spec,
+            q=SimpleNamespace(shape=qshape, dtype=q_dtype),
+            k=SimpleNamespace(shape=qshape),
+            v=SimpleNamespace(shape=qshape),
+            out=SimpleNamespace(shape=qshape),
+            scale=0.125,
+            sinks=sinks,
+        )
+
+    def test_f32_sinks_reject_an_input_dtype_tensor(self):
+        call = self._sink_call(sink_dtype="f32", sinks_dtype="bfloat16")
+        with self.assertRaises(ValueError) as cm:
+            call()
+        self.assertEqual(
+            str(cm.exception),
+            "sinks dtype bfloat16 must be torch.float32 for sink_dtype='f32'",
+        )
+
+    def test_input_dtype_sinks_reject_a_float32_tensor(self):
+        call = self._sink_call(
+            sink_dtype="q", sinks_dtype="torch.float32", q_dtype="torch.bfloat16"
+        )
+        with self.assertRaises(ValueError) as cm:
+            call()
+        self.assertEqual(
+            str(cm.exception),
+            "sinks dtype torch.float32 must match q dtype torch.bfloat16",
+        )
+
+    def test_f32_sinks_with_a_float32_tensor_reach_compile(self):
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+
+        sentinel = RuntimeError("reached-compile")
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        call = self._sink_call(sink_dtype="f32", sinks_dtype="torch.float32")
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as cm:
+                call()
+        self.assertIs(cm.exception, sentinel)
+
+
+class TestFp32SinkWiring(unittest.TestCase):
+    """sink_dtype="f32" on the request: only gfx950 dense serves it."""
+
+    def _req(self, **kw):
+        base = dict(
+            use_sinks=True,
+            sink_dtype="f32",
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
+        )
+        base.update(kw)
+        return _gfx950_dense_req(**base)
+
+    def test_every_gfx950_dense_variant_builds_an_f32_sink_spec(self):
+        for variant in GFX950_DENSE_VARIANTS:
+            with self.subTest(spec_id=variant.spec_id):
+                result = dispatch_attention(
+                    replace(
+                        self._req(),
+                        algorithm=variant.algorithm,
+                        spec_id=variant.spec_id,
+                    )
+                )
+                spec = result.spec.kernel_spec
+                self.assertEqual(spec.sink_dtype, "f32")
+                self.assertIn("_sinkf32", spec.kernel_name())
+
+    def test_unpinned_dense_layout_reaches_gfx950_dense(self):
+        result = dispatch_attention(self._req(layout="dense"))
+        self.assertIn(
+            result.candidate.name, {v.candidate_name for v in GFX950_DENSE_VARIANTS}
+        )
+        self.assertEqual(result.spec.kernel_spec.sink_dtype, "f32")
+
+    def test_only_gfx950_dense_declares_sinks_f32(self):
+        dense = {v.candidate_name for v in GFX950_DENSE_VARIANTS}
+        for c in attention_candidates():
+            declared = c.capability is not None and (
+                "sinks_f32" in c.capability.supports_features
+            )
+            self.assertEqual(declared, c.name in dense, c.name)
+
+    def test_kernels_that_serve_q_sinks_refuse_f32_sinks(self):
+        from rocke.dispatch.core import PinRefused
+
+        for q_req in (
+            self._req(sink_dtype="q"),  # layout auto: the unified path
+            self._req(sink_dtype="q", arch="gfx942", layout="dense"),
+        ):
+            with self.subTest(arch=q_req.arch, layout=q_req.layout):
+                dispatch_attention(q_req)  # served with input-dtype sinks
+                with self.assertRaises((ValueError, PinRefused)) as cm:
+                    dispatch_attention(replace(q_req, sink_dtype="f32"))
+                self.assertIn("sinks_f32", str(cm.exception))
+
+    def test_request_validation(self):
+        from dispatch.attention.common import _request_errors
+
+        for bad in ("F32", "bf16", None, 1):
+            with self.subTest(bad=bad):
+                errors = _request_errors(self._req(sink_dtype=bad))
+                self.assertTrue(
+                    any("sink_dtype must be 'q' or 'f32'" in e for e in errors), errors
+                )
+        self.assertIn(
+            "sink_dtype='f32' requires use_sinks",
+            _request_errors(self._req(use_sinks=False)),
+        )
+
+    def test_default_sink_dtype_keeps_request_hashes(self):
+        from rocke.dispatch.core import stable_json_hash
+
+        sinks = _gfx950_dense_req(use_sinks=True)
+        plain = _gfx950_dense_req()
+        self.assertNotIn("sink_dtype", sinks.normalized())
+        # The hashes these two requests had before the field existed.
+        self.assertEqual(stable_json_hash(sinks.normalized(), n=16), "29e02fe49ba2134e")
+        self.assertEqual(stable_json_hash(plain.normalized(), n=16), "5c61d809c6a6a145")
+        f32 = replace(sinks, sink_dtype="f32")
+        self.assertEqual(f32.normalized()["sink_dtype"], "f32")
+        self.assertNotEqual(
+            stable_json_hash(f32.normalized(), n=16), "29e02fe49ba2134e"
+        )
+
 
 class TestGfx950DenseCandidates(unittest.TestCase):
     """Two algorithms (grid and persistent body); wide DMA is a persistent

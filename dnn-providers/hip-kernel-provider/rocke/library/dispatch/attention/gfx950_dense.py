@@ -49,7 +49,7 @@ _WINDOW_TILE = "bm128"
 _WINDOW_NUM_PERSISTENT = 2 * _DEFAULT_NUM_PERSISTENT
 _WINDOW_TILE_MAX_CTAS_PER_CU = 8
 _FEATURES = frozenset(
-    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+    {"causal", "sliding_window", "full_attention", "band", "sinks", "sinks_f32", "lse"}
 )
 
 
@@ -274,6 +274,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         ragged=ragged,
         sliding_window=window,
         use_sinks=bool(req.use_sinks),
+        sink_dtype=req.sink_dtype,
         wide_lds_dma=variant.wide_lds_dma,
         nonpersist_decode=variant.nonpersist_decode,
         causal_bottom_right=moving_bottom_right,
