@@ -817,6 +817,18 @@ _MX_CODEGEN_FLAGS = (
 # know -amdgpu-coerce-illegal-types). Mirror that probe so the bridge matches
 # Old-TE wherever the compiler accepts it and stays buildable where it does not.
 _MX_PROBED_CODEGEN_FLAGS = (("-mllvm", "-amdgpu-coerce-illegal-types=1"),)
+# comp_tdm_scheduled only, as its CMake targets (example 56, tests, tile_engine): its schedule is
+# written in the source, so the machine schedulers stay off.
+_MX_TDM_SCHEDULED_FLAGS = (
+    "-mllvm",
+    "-amdgpu-expert-scheduling-mode",
+    "-mllvm",
+    "-enable-misched=false",
+    "-mllvm",
+    "-enable-post-misched=false",
+    "-mllvm",
+    "-greedy-regclass-priority-trumps-globalness",
+)
 
 
 @functools.lru_cache(maxsize=None)
@@ -848,7 +860,7 @@ def _mx_codegen_flags() -> Tuple[str, ...]:
     return tuple(flags)
 
 
-def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
+def _compile_kernel(hpp: Path, so: Path, arch: str, pipeline: str = "") -> bool:
     inc = [
         f"-I{_CK_ROOT}/include",
         f"-I{_CK_ROOT}",
@@ -866,6 +878,7 @@ def _compile_kernel(hpp: Path, so: Path, arch: str) -> bool:
         "-O3",
         "-std=c++20",
         *_mx_codegen_flags(),
+        *(_MX_TDM_SCHEDULED_FLAGS if pipeline == "comp_tdm_scheduled" else ()),
         *inc,
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
         f"-include{hpp}",
@@ -935,7 +948,7 @@ def setup_multiple_mx_gemm_dispatchers(
         hpp = _generate_kernel(cfg, headers)
         if hpp is None:
             return idx, None
-        return idx, (so if _compile_kernel(hpp, so, arch) else None)
+        return idx, (so if _compile_kernel(hpp, so, arch, cfg.pipeline) else None)
 
     if parallel and len(deduped) > 1:
         workers = max_workers or min(len(deduped), os.cpu_count() or 4)

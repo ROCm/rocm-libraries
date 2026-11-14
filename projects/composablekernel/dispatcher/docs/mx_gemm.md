@@ -148,6 +148,21 @@ policy's rules (`mx_gemm/mx_tdm_scheduled.py`):
 
 Other pipelines reject tuning keys.
 
+`mx_gemm/configs/comp_tdm_scheduled_tuning_gfx1250.json` lists every key above, so a
+sweep is a matter of editing its values. To run it on your own shapes, copy
+`mx_gemm/configs/comp_tdm_scheduled_problems.json`, edit the M, N and K, and pass it to
+the sweep driver (see [Sweep a Tile Engine configuration](#sweep-a-tile-engine-configuration)):
+
+```bash
+cd projects/composablekernel/tile_engine/ops/gemm
+python3 mx_gemm_full_benchmark.py comp_tdm_scheduled_tuning_gfx1250.json \
+    --arch gfx1250 --dtype fp4 --problems mx_gemm/configs/comp_tdm_scheduled_problems.json \
+    --verify --csv comp_tdm_scheduled.csv
+```
+
+A kernel whose cluster does not divide the problem's grid, or whose shape traits do not
+cover the problem, is reported as `SKIPPED`.
+
 ## Run the bridge
 
 From `projects/composablekernel`, with NumPy installed and a matching ROCm
@@ -241,7 +256,8 @@ used as given.
 | --- | --- |
 | `bridge_ci_config_gfx950.json` | Default on gfx950. Small sweep covering all three gfx950 pipelines. |
 | `bridge_ci_config_gfx1250.json` | Default on gfx1250. Small sweep covering all six gfx1250 pipelines. |
-| `comp_tdm_scheduled_gfx1250.json` | `comp_tdm_scheduled` with a `tuning_config` product (20 FP4 kernels). |
+| `comp_tdm_scheduled_gfx1250.json` | `comp_tdm_scheduled` with a `tuning_config` product (10 FP4 kernels). |
+| `comp_tdm_scheduled_tuning_gfx1250.json` | `comp_tdm_scheduled` with every tuning key listed: both epilogues and a product of the five knobs (540 FP4 kernels). |
 | `default_ci_config.json` | Old-TE CI sweep: `comp_async`, with and without persistence. |
 | `default_config.json` | Old-TE full gfx950 sweep (194 FP4 / 150 FP8 kernels). |
 | `default_config_gfx1250.json` | Old-TE full gfx1250 sweep (64 kernels per input type). |

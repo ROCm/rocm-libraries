@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _DISP = Path(__file__).resolve().parent.parent
 _CK = _DISP.parent
@@ -478,6 +479,44 @@ class TestDispatcher(unittest.TestCase):
         self.assertEqual(cfg["epilogue"], "direct")
         self.assertEqual(cfg["cluster_dim"], [2, 2])
         self.assertTrue(codegen.kernel_name(cfg).endswith("_c2x2_pf2"))
+
+    def test_tuning_config(self):
+        path = _MX / "configs" / "comp_tdm_scheduled_tuning_gfx1250.json"
+        tuning_config = json.loads(path.read_text())["tuning_config"]
+        self.assertEqual(
+            set(tuning_config), {*sched.TUNING_DEFAULTS, *sched.SHAPE_DEFAULTS}
+        )
+        cfgs = mx.expand_mx_sweep(path, "gfx1250", "fp4")
+        self.assertTrue(cfgs)
+        self.assertEqual({c.pipeline for c in cfgs}, {"comp_tdm_scheduled"})
+        self.assertEqual({c.epilogue for c in cfgs}, {"direct", "tdm"})
+        names = [c.name for c in cfgs]
+        self.assertEqual(len(set(names)), len(names))
+        problems = json.loads(
+            (_MX / "configs" / "comp_tdm_scheduled_problems.json").read_text()
+        )["problems"]
+        self.assertTrue(problems)
+        for p in problems:
+            self.assertEqual(set(p), {"M", "N", "K"})
+
+
+class TestCompileFlags(unittest.TestCase):
+    def test_sched_flags_only_for_comp_tdm_scheduled(self):
+        flags = mx._MX_TDM_SCHEDULED_FLAGS
+        for pipeline, expect in (("comp_tdm_scheduled", True), ("comp_tdm", False)):
+            run_result = mock.Mock(returncode=0, stderr="")
+            with mock.patch.object(mx, "_mx_codegen_flags", return_value=()):
+                with mock.patch.object(
+                    mx.subprocess, "run", return_value=run_result
+                ) as run:
+                    self.assertTrue(
+                        mx._compile_kernel(
+                            Path("k.hpp"), Path("k.so"), "gfx1250", pipeline
+                        )
+                    )
+            cmd = run.call_args.args[0]
+            for flag in flags[1::2]:
+                self.assertEqual(flag in cmd, expect, (pipeline, flag))
 
 
 if __name__ == "__main__":
