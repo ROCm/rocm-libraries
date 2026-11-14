@@ -158,10 +158,6 @@ block()
 
     if(ROCISA_STANDALONE)
         set(STINKYTOFU_ENABLE_WERROR ON)
-        # gfx1250 codegen imports this module. TheRock publishes one generic
-        # artifact shared by every GPU family, so a gfx942-only build that
-        # skips it removes the module from the tree FFM actually runs.
-        set(STINKYTOFU_BUILD_PYTHON ON)
         add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         set(_stinkytofu_from_subdirectory TRUE)
     else()
@@ -169,8 +165,6 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            # See the standalone branch: every family build has to ship the module.
-            set(STINKYTOFU_BUILD_PYTHON ON)
             add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         endblock()
         set(_stinkytofu_from_subdirectory TRUE)
@@ -288,50 +282,6 @@ block()
         )
     endif()
 
-    # Stage the standalone stinkytofu Python module next to _rocisa so it
-    # resolves from the build tree at runtime.
-    if(TARGET stinkytofu_python)
-        add_dependencies(_rocisa stinkytofu_python)
-
-        set_target_properties(stinkytofu_python PROPERTIES
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
-            BUILD_RPATH "$ORIGIN"
-            INSTALL_RPATH "$ORIGIN"
-        )
-
-        configure_file(
-            "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
-            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
-            COPYONLY
-        )
-        # The staged _build_info.py drives the standalone _stinkytofu.so guard.
-        configure_file(
-            "${_stinkytofu_src_dir}/python_module/stinkytofu/_build_info.py.in"
-            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
-            @ONLY
-        )
-
-        # Stage intrinsics.st.bc next to _stinkytofu.so for runtime loading.
-        if(TARGET intrinsics_compiled)
-            add_dependencies(_rocisa intrinsics_compiled)
-
-            set(_intrinsics_bc_src "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
-            set(_intrinsics_bc_dst "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/intrinsics.st.bc")
-            add_custom_command(
-                OUTPUT "${_intrinsics_bc_dst}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${_intrinsics_bc_src}" "${_intrinsics_bc_dst}"
-                DEPENDS intrinsics_compiled "${_intrinsics_bc_src}"
-                COMMENT "Staging intrinsics.st.bc next to _stinkytofu.so"
-                VERBATIM
-            )
-            add_custom_target(rocisa_stage_intrinsics ALL
-                DEPENDS "${_intrinsics_bc_dst}")
-            add_dependencies(_rocisa rocisa_stage_intrinsics)
-        endif()
-
-    endif()
-
     if(ROCISA_STANDALONE)
         # scikit-build-core wheel install rules: place _rocisa and __init__.py into the
         # rocisa/ package directory in the wheel.
@@ -357,37 +307,6 @@ block()
         install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
             DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
-
-        # Ship the standalone stinkytofu backend as siblings of rocisa/ in the
-        # installed Python root (lib/hipblaslt). The block above only stages it
-        # into the *build tree*; downstream projects that codegen against the
-        # *installed* tensilelite -- e.g. hipSPARSELt's THEROCK build, which
-        # pulls hipBLASLt via find_package rather than add_subdirectory -- import
-        # from this install layout. Without these rules import stinkytofu fails
-        # there, rocisa/__init__.py silently falls back to native, and the
-        # per-ISA guard in create_library/run.py refuses to emit gfx1250
-        # kernels. STINKYTOFU_BUILD_PYTHON is on for every GPU family, because
-        # TheRock's generic artifact is shared and a family that skips the
-        # module removes it for the gfx1250 FFM run.
-        if(TARGET stinkytofu_python)
-            set(_stinkytofu_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/stinkytofu")
-            # _stinkytofu.so statically embeds libstinkytofu in the integrated
-            # build (stinkytofu is configured with BUILD_SHARED_LIBS OFF), so its
-            # INSTALL_RPATH of $ORIGIN is self-sufficient; mirror _rocisa's
-            # TheRock RPATH origin so packaging rewrites it consistently.
-            set_property(TARGET stinkytofu_python PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
-                "${_stinkytofu_install_dir}")
-            install(TARGETS stinkytofu_python
-                LIBRARY DESTINATION "${_stinkytofu_install_dir}"
-                COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
-            install(FILES "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
-                DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
-            # intrinsics.st.bc is loaded at runtime from next to _stinkytofu.so.
-            if(TARGET intrinsics_compiled)
-                install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
-                    DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
-            endif()
-        endif()
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with

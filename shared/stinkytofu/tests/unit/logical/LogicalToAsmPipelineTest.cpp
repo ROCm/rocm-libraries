@@ -152,13 +152,11 @@ TEST_F(IRToAsmPipelineTest, MXMFMAFP4BakesCostOverride) {
  * on through the logical IR, because op_sel would bypass stinkytofu's
  * true16-aware SSA/wait passes.
  *
- * Scope: this covers lowering and emission only. Producers are tested where
- * they live -- the pure-Python rocisa_stinkytofu_adaptor's
- * t16 -> _apply_true16 -> to_stinky_logical chain in its own
- * tests/test_true16.py and tests/test_emission_consistency.py (the t16-tagged
- * three-path cases), and the C++ bridge's
- * attachTrue16ModifiersFromOperands in the rocisa conversion tests. Do not
- * read a pass here as coverage of either.
+ * Scope: this covers lowering and emission only. It injects an
+ * already-derived True16Modifiers, so it says nothing about whether a
+ * producer tags its operands. That derivation lives in the rocisa->logical
+ * bridge, attachTrue16ModifiersFromOperands. Do not read a pass here as
+ * coverage of that bridge.
  */
 TEST_F(IRToAsmPipelineTest, True16HalfSelectSurvivesLowering) {
     using H = HighBitSel;
