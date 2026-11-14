@@ -464,11 +464,13 @@ enum class Math
     THREE_BF16,
 };
 
+/// rowsOnly: only the row-streaming configs (rs > 0) run.
 template <typename T>
 void runCase(ConvShape shape,
              ConvDirection direction,
              Math math = Math::NATIVE,
-             bool infinities = false)
+             bool infinities = false,
+             bool rowsOnly = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -571,7 +573,8 @@ void runCase(ConvShape shape,
     for(const auto& kernel : catalog(direction))
     {
         if(!matchesKernel(pack, fixture.context(), kernel, *bound)
-           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
+           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16)
+           || (rowsOnly && kernel.getIntMetadata("rs") == 0))
         {
             continue;
         }
@@ -631,12 +634,13 @@ void runCase(ConvShape shape,
         });
         EXPECT_EQ(mismatches, 0);
     }
-    if(math == Math::THREE_BF16)
+    if(math == Math::THREE_BF16 || rowsOnly)
     {
-        // The three-bf16 subset need not cover every case (the catalog test checks it serves).
+        // The three-bf16 and row-streaming subsets need not cover every case (the catalog tests
+        // check they serve).
         if(ran == 0)
         {
-            GTEST_SKIP() << "no three-bf16 config serves this case";
+            GTEST_SKIP() << "no config of the subset serves this case";
         }
         return;
     }
@@ -719,6 +723,62 @@ TEST_P(TestGpuConvGroupThreeBf16, FloatInfinities)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGroupThreeBf16,
                          ::testing::Combine(::testing::ValuesIn(deviceCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// The row-streaming configs with +inf and -inf in the kernel's input (x forward, dy backward
+/// data): each must reach exactly the outputs of its own group (the same infinity, or NaN where
+/// both meet), never another group's through the block-diagonal filter's zeros. Groups of 2, 4,
+/// 8 and 16 channels, channels-last, unit stride and backward data at stride 2.
+class TestGpuConvGroupRowsInfinities
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+std::vector<DeviceCase> rowsInfinityCases()
+{
+    std::vector<DeviceCase> cases;
+    for(const int64_t cg : {2, 4, 8, 16})
+    {
+        auto shape = dense(64, 64, {7, 37}, {3, 3}, {1, 1}, true);
+        shape.groups = 64 / cg;
+        cases.push_back({"Nhwc" + std::string("Groups") + std::to_string(cg), shape});
+    }
+    auto strided = dense(32, 32, {9, 21}, {3, 3}, {1, 1}, true);
+    strided.groups = 8;
+    strided.stride = {2, 2};
+    cases.push_back({"NhwcGroups4Stride2", strided});
+    return cases;
+}
+
+TEST_P(TestGpuConvGroupRowsInfinities, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, true);
+}
+
+TEST_P(TestGpuConvGroupRowsInfinities, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, true);
+}
+
+TEST_P(TestGpuConvGroupRowsInfinities, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupRowsInfinities,
+                         ::testing::Combine(::testing::ValuesIn(rowsInfinityCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {
@@ -1090,7 +1150,7 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
             return kernel.getStringMetadata("atom") == "mfma16_f16"
                    && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
-                   && kernel.getIntMetadata("cb") == 2;
+                   && kernel.getIntMetadata("cb") == 2 && kernel.getIntMetadata("rs") == 0;
         });
         ASSERT_NE(base, kernels.end());
         EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
@@ -1139,6 +1199,79 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         const auto& handler = dispatchHandler(pack);
         EXPECT_LT(handler.workspaceBytes(firstFixture.context(), *firstBound, inPlace),
                   handler.workspaceBytes(firstFixture.context(), *firstBound, *base));
+    }
+}
+
+TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
+{
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx942:sramecc+:xnack-";
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto shape = resnext(); // 64 channels, 4 a group
+        shape.dataType = DataType::HALF;
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+        const auto pack = packFor(direction);
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto& kernels = catalog(direction);
+        const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+            return kernel.getStringMetadata("atom") == "mfma16_f16"
+                   && kernel.getIntMetadata("rs") != 0 && kernel.getIntMetadata("t") == 1
+                   && kernel.getIntMetadata("stride") == 1 && kernel.getIntMetadata("cb") == 4
+                   && kernel.getIntMetadata("wp") == 1;
+        });
+        ASSERT_NE(base, kernels.end());
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+        const auto declines = [&](const char* field, const auto& value) {
+            auto kernel = *base;
+            kernel.metadata[field] = value;
+            return !matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
+        EXPECT_TRUE(declines("rs", int64_t{5})); // 1 to 4 rows in flight
+        EXPECT_TRUE(declines("rs", int64_t{-1}));
+        EXPECT_TRUE(declines("cf", int64_t{1})); // channels-last only
+        EXPECT_TRUE(declines("pf", int64_t{1}));
+        EXPECT_TRUE(declines("math", int64_t{1}));
+        EXPECT_TRUE(declines("nbi", int64_t{2}));
+        EXPECT_TRUE(declines("nbo", int64_t{1}));
+        EXPECT_TRUE(declines("wp", int64_t{3})); // 1, 2 or 4 fragments
+        EXPECT_TRUE(declines("wp", int64_t{0}));
+        EXPECT_TRUE(declines("cb", int64_t{32})); // past 1024 threads
+        EXPECT_TRUE(declines("cb", int64_t{8})); // 64 channels are not 8 blocks
+        EXPECT_TRUE(declines("th", int64_t{0}));
+        EXPECT_TRUE(declines("cg", int64_t{4}));
+        EXPECT_TRUE(declines("oc", int64_t{4}));
+        EXPECT_TRUE(declines("px", int64_t{2}));
+        EXPECT_TRUE(declines("tw", int64_t{16}));
+        EXPECT_TRUE(declines("bpu", int64_t{4}));
+        EXPECT_TRUE(declines("stride", int64_t{2}));
+        EXPECT_TRUE(declines("s", int64_t{5}));
+        EXPECT_TRUE(declines("atom", std::string("fma")));
+        EXPECT_TRUE(declines("atom", std::string("wmma12_f16"))); // not on gfx942
+        EXPECT_TRUE(declines("dtype", std::string("BFLOAT16")));
+        // Forward at stride 2 gathers at stride 2: declined. Backward data at stride 2 runs unit
+        // stride phases: admitted (a stride 2 config).
+        auto strided = resnext();
+        strided.dataType = DataType::HALF;
+        strided.stride = {2, 2};
+        const GraphFixture stridedFixture(buildGraph(specFor(strided, direction)), properties);
+        const auto stridedBound = matchesGraph(pack, stridedFixture.context());
+        ASSERT_TRUE(stridedBound.has_value());
+        auto stride2 = *base;
+        stride2.metadata["stride"] = int64_t{2};
+        EXPECT_EQ(matchesKernel(pack, stridedFixture.context(), stride2, *stridedBound),
+                  direction == ConvDirection::BACKWARD_DATA);
+        // An input or output row of 2 GiB or more: one buffer record per row cannot hold it.
+        auto wideRow = dense(1024, 1024, {1, int64_t{1} << 20}, {3, 3}, {1, 1}, true);
+        wideRow.groups = 64;
+        wideRow.dataType = DataType::HALF;
+        const GraphFixture wideFixture(buildGraph(specFor(wideRow, direction)), properties);
+        const auto wideBound = matchesGraph(pack, wideFixture.context());
+        ASSERT_TRUE(wideBound.has_value());
+        auto wide = *base;
+        wide.metadata["cb"] = int64_t{4};
+        EXPECT_FALSE(matchesKernel(pack, wideFixture.context(), wide, *wideBound));
     }
 }
 
@@ -1244,7 +1377,7 @@ TEST(TestConvGroupCatalog, WideKernelGatesBlocksTileAndForm)
 
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 18> KNOBS{"atom",
+    static constexpr std::array<const char*, 19> KNOBS{"atom",
                                                        "t",
                                                        "r",
                                                        "s",
@@ -1261,7 +1394,8 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                                                        "nbo",
                                                        "tw",
                                                        "bpu",
-                                                       "math"};
+                                                       "math",
+                                                       "rs"};
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
     {
@@ -1354,7 +1488,19 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 = fma ? static_cast<int>(256 * kernel.getIntMetadata("oc") / (int64_t{16} * cb) / th
                                          * kernel.getIntMetadata("px"))
                       : static_cast<int>(16 * kernel.getIntMetadata("wp"));
-            if(kernel.getIntMetadata("pf") != 0)
+            if(kernel.getIntMetadata("rs") != 0)
+            {
+                // Row streaming: channels-last, small groups, unit gather stride (forward at
+                // stride 1), 1 to 4 rows in flight, at most 1024 threads, two row segments in LDS.
+                EXPECT_TRUE(forward ? stride == 1 : stride <= 2);
+                EXPECT_LE(kernel.getIntMetadata("rs"), 4);
+                EXPECT_EQ(kernel.getIntMetadata("cf"), 0);
+                EXPECT_EQ(kernel.getIntMetadata("pf"), 0);
+                EXPECT_EQ(nbi, 0);
+                EXPECT_LE(cb * 64, 1024);
+                EXPECT_LE(conv_group::groupRowsLdsBytes(bytes, taps("s"), tw, cb), 64 * 1024);
+            }
+            else if(kernel.getIntMetadata("pf") != 0)
             {
                 // Phase-fused: backward data at stride 2 only, its output tile in LDS too.
                 EXPECT_FALSE(forward);

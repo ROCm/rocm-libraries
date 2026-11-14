@@ -1161,8 +1161,7 @@ public:
                       std::vector<conv_group::GroupLaunch> launches,
                       std::vector<unsigned int> blocks,
                       std::optional<IngestorKernelCode> split,
-                      conv_group::GroupSplit splitPlan,
-                      bool rows)
+                      conv_group::GroupSplit splitPlan)
         : _conv(std::move(conv))
         , _expand(std::move(expand))
         , _copies(std::move(copies))
@@ -1171,14 +1170,7 @@ public:
         , _blocks(std::move(blocks))
         , _split(std::move(split))
         , _splitPlan(splitPlan)
-        , _rows(rows)
     {
-    }
-
-    /// Row streaming: the kernel reads the graph's filter itself (no expansion launch).
-    bool rows() const
-    {
-        return _rows;
     }
 
     /// Three-bf16: the split kernel (nullopt otherwise) and its plan.
@@ -1243,7 +1235,6 @@ private:
     std::vector<unsigned int> _blocks;
     std::optional<IngestorKernelCode> _split;
     conv_group::GroupSplit _splitPlan;
-    bool _rows = false;
 };
 
 /// Backward weights: the kernel (partials) and the reduce (dw).
@@ -1324,11 +1315,6 @@ public:
         if(!problem.has_value())
         {
             return 0;
-        }
-        if(tile->rs != 0)
-        {
-            // The staged activations only: the kernel reads the graph's filter in place.
-            return problem->phases.front().expandOffset;
         }
         return tile->math == 1 ? conv_group::groupSplitOf(*problem).workspaceBytes
                                : problem->workspaceBytes;
@@ -1506,8 +1492,7 @@ public:
                                                    *launches,
                                                    std::move(blocks),
                                                    std::move(split),
-                                                   splitPlan,
-                                                   tile->rs != 0);
+                                                   splitPlan);
     }
 
     void launch(const Handle& handle,
@@ -1524,8 +1509,7 @@ public:
         const auto& dispatch = dynamic_cast<const PreparedConvGroup&>(prepared);
         const auto& problem = dispatch.problem();
         const auto& igemm = problem.igemm;
-        const bool staged = igemm.x.needed || igemm.y.needed;
-        if(workspace == nullptr && (staged || !dispatch.rows()))
+        if(workspace == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                            "conv_group needs its workspace");
@@ -1574,12 +1558,10 @@ public:
                 }
             }
         }
-        // Every phase's filter expansion (not for row streaming, whose kernel reads the graph's
-        // filter), then the gathers (one a phase, or one a depth phase for the phase-fused kernel,
-        // reading its four phases' filters from the first one's).
-        for(size_t i = 0; !dispatch.rows() && i < problem.phases.size(); ++i)
+        // Every phase's filter expansion, then the gathers (one a phase, or one a depth phase for
+        // the phase-fused kernel, reading its four phases' filters from the first one's).
+        for(const auto& phase : problem.phases)
         {
-            const auto& phase = problem.phases[i];
             K4ExpandArgs expand = phase.expand;
             expand.src = w;
             expand.dst = base + phase.expandOffset;
@@ -1615,14 +1597,6 @@ public:
                 args.wpt = plan.b.inner;
             }
             args.out = forward ? operand[1] : operand[0];
-            if(dispatch.rows())
-            {
-                // The kernel applies this phase's expansion to the graph's filter itself.
-                args.w = nullptr;
-                args.filter = problem.phases[launch.phase].expand;
-                args.filter.src = w;
-                args.filter.dst = nullptr;
-            }
             auto& conv = dispatch.convForStream(stream);
             conv.setGridSize(dispatch.blocks()[i], 1, 1);
             conv.launch(stream, args);
