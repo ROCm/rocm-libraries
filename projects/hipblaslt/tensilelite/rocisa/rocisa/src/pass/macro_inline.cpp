@@ -26,6 +26,7 @@
 
 #include <cassert>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -345,8 +346,8 @@ namespace rocisa
             else if(auto macroInst = std::dynamic_pointer_cast<MacroInstruction>(item))
             {
                 auto it = macros.find(macroInst->name);
-                assert(it != macros.end()
-                       && "macroToInstruction: MacroInstruction references undefined macro");
+                if(it == macros.end())
+                    throw std::runtime_error("macroToInstruction: undefined macro " + macroInst->name);
                 auto& macro      = std::get<0>(it->second);
                 auto& defaults   = std::get<1>(it->second);
                 auto  params     = std::make_shared<MacroParams>(*defaults);
@@ -368,8 +369,6 @@ namespace rocisa
     {
         MacroTable macros;
         collectMacros(module, macros);
-        if(macros.empty())
-            return;
         macroToInstructionImpl<Module>(module, macros);
     }
 } // namespace rocisa

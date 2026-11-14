@@ -84,6 +84,16 @@ def test_no_macros_is_noop():
     assert "Begin Kernel" in result
 
 
+@pytest.mark.parametrize("with_other_macro", [False, True])
+def test_missing_macro_reports_name(with_other_macro):
+    body = Module("body")
+    if with_other_macro:
+        body.add(Macro("DEFINED", []))
+    body.add(MacroInstruction(name="MISSING_TAIL_MACRO", args=[]))
+    with pytest.raises(RuntimeError, match="MISSING_TAIL_MACRO"):
+        _run_pass(body)
+
+
 def test_macro_in_submodule():
     body = Module("body")
     sub = body.add(Module("sub"))
