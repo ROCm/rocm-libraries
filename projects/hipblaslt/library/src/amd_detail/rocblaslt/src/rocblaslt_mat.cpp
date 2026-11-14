@@ -28,6 +28,7 @@
 #include "alpha_mode_logging.hpp"
 #include "check_synchronizer.hpp"
 #include "definitions.h"
+#include "emulation.hpp"
 #include "handle.h"
 #include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
@@ -124,7 +125,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     hipblasOperation_t opA           = matmul_descr->op_A;
     hipblasOperation_t opB           = matmul_descr->op_B;
     int                num_batches_a = matA->batch_count;
-    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;    
+    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;
     rocblaslt_epilogue epilogue      = matmul_descr->epilogue;
     void*              scaleA        = matmul_descr->scaleA;
     void*              scaleB        = matmul_descr->scaleB;
@@ -133,6 +134,112 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     void*              scaleE        = matmul_descr->scaleE;
     void*              amaxD         = matmul_descr->amaxD;
     hipDataType        scale_type    = matmul_descr->scale_type;
+
+    // -----------------------------------------------------------------------
+    // Emulation intercept via Ozaki Scheme II (fixed-point emulation)
+    //
+    // Conditions for emulation:
+    //   • Compute type is HIPBLAS_COMPUTE_{64F,32F}_EMULATED_FIXEDPOINT, or
+    //     plain 64F/32F with HIPBLAS_EMULATE_{DOUBLE,SINGLE}_PRECISION=1
+    //   • A, B, C and D are all of the emulated real type (FP64 / FP32); the
+    //     plain 64F/32F compute types are also used for complex and
+    //     mixed-precision (FP16 / BF16) GEMMs, which are never emulated
+    //   • Non-empty product (m, n, k > 0)
+    //   • Non-batched, strided layout (batch_count == 1, batch_mode == STRIDED)
+    //   • Plain GEMM epilogue (no activation, no bias, no auxiliary outputs)
+    //   • alpha/beta are host (non-device-pointer) scalars
+    //   • alpha != 0 (BLAS leaves A and B unreferenced when alpha == 0, so
+    //     callers may pass null A/B; the native path computes beta * C)
+    //   • Arithmetic intensity exceeds the threshold (compute-bound region),
+    //     unless the EAGER strategy is selected
+    // Invalid emulation environment variables are ignored.
+    //
+    // On success the emulated result is returned directly; the native path
+    // is used as fall-back when emulation returns non-success.
+    // -----------------------------------------------------------------------
+    if(bias          == nullptr
+       && scaleAlphaVec == nullptr
+       && E             == nullptr
+       && !matmul_descr->pointermode
+       && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT
+       && batch_mode    == HIPBLASLT_BATCH_MODE_STRIDED
+       // BLAS leaves A and B unreferenced when alpha == 0, so callers may pass
+       // null pointers; the native path computes beta * C without reading them.
+       // Evaluated after !pointermode, so alpha is a host pointer here.
+       && !hostScalarIsZero(alphaBetaScalarType(scale_type, compute_type, type_a), alpha))
+    {
+        FixedPointEmulationSettings emulDecision
+            = fixedPointEmulationDecision(handle,
+                                          matmul_descr,
+                                          compute_type,
+                                          type_a,
+                                          type_b,
+                                          type_c,
+                                          type_d,
+                                          m,
+                                          n,
+                                          k,
+                                          num_batches_a,
+                                          workspaceSizeInBytes);
+        if(emulDecision.status != rocblaslt_status_success)
+            return emulDecision.status;
+        if(emulDecision.apply)
+        {
+            /* Fill in the caller workspace pointer; all other fields are
+             * already resolved by fixedPointEmulationDecision(). */
+            emulDecision.workspace = workspace;
+
+            /* Dispatch on the emulated data type implied by the compute type. */
+            rocblaslt_status emulSt;
+            if(fixedPointEmulatedComputeDataType(compute_type) == HIP_R_32F)
+            {
+                emulSt = fp32EmulatedGemm(handle, opA, opB, m, n, k,
+                                          static_cast<const float*>(alpha),
+                                          static_cast<const float*>(A), lda,
+                                          static_cast<const float*>(B), ldb,
+                                          static_cast<const float*>(beta),
+                                          static_cast<const float*>(C), ldc,
+                                          static_cast<float*>(D), ldd,
+                                          stream, emulDecision);
+            }
+            else /* HIP_R_64F */
+            {
+                emulSt = fp64EmulatedGemm(handle, opA, opB, m, n, k,
+                                          static_cast<const double*>(alpha),
+                                          static_cast<const double*>(A), lda,
+                                          static_cast<const double*>(B), ldb,
+                                          static_cast<const double*>(beta),
+                                          static_cast<const double*>(C), ldc,
+                                          static_cast<double*>(D), ldd,
+                                          stream, emulDecision);
+            }
+            if(emulSt == rocblaslt_status_success)
+                return rocblaslt_status_success;
+            /* Non-success: fall through to native DGEMM.
+             * Emit a rate-limited warning so the caller knows emulation was skipped
+             * and the reason why.  Rate cap: ≤5 messages per process lifetime.   */
+            {
+                static std::atomic<unsigned> fallback_warns{0u};
+                if(fallback_warns.fetch_add(1u, std::memory_order_relaxed) < 5u) {
+                    const char* reason =
+                        (emulSt == rocblaslt_status_memory_error)  ?
+                            "workspace absent or too small (see stderr for details)" :
+                        (emulSt == rocblaslt_status_invalid_value)  ?
+                            "NaN/Inf detected in inputs or ADP precision overflow" :
+                            "INT8 GEMM failed (hipblasLtMatmul returned error)";
+                    std::fprintf(stderr,
+                        "[hipBLASLt emulation] INFO: falling back to native GEMM "
+                        "(m=%lld, n=%lld, k=%lld, reason: %s).\n",
+                        (long long)m, (long long)n, (long long)k, reason);
+                }
+            }
+        }
+    }
+
+
+    // Native (Tensile) path from here on: a fixed-point emulated compute type
+    // that was not emulated (or fell back) runs as plain FP64 / FP32.
+    compute_type = fixedPointEmulationNativeComputeType(compute_type);
 
     // Others
     // Use strided_batch=true for kernel selection (StridedBatched=true kernels with SupportUserArgs)
@@ -144,7 +251,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
     int8_t alpha_1[16] = {0}; // use dScaleAlphaVec instead, original alpha => 1.0
     if(scaleAlphaVec)
-        setTo1(matmul_descr->compute_type, alpha_1, &alpha);
+        setTo1(compute_type, alpha_1, &alpha);
 
     // FIXME: Is this still needed?
     // // check alignment of pointers before casting
@@ -155,9 +262,15 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //     return rocblaslt_status_invalid_size;
     // }
 
+    /* Clamp the workspace size for tensilelite kernels, which use 32-bit byte
+     * offsets and cannot address beyond 4 GiB.  The emulation path (above) uses
+     * standard 64-bit pointers and must not be constrained by this limit. */
+    const size_t native_workspace_bytes
+        = clampWorkspaceSize(__func__, workspaceSizeInBytes);
+    size_t clamped_ws = native_workspace_bytes;
     if(algo)
     {
-        workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
+        clamped_ws = std::min<size_t>(native_workspace_bytes, algo->max_workspace_bytes);
     }
 
     void*                  streamKFlags = nullptr;
@@ -225,7 +338,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         epilogue,
                                         amaxD,
                                         workspace,
-                                        workspaceSizeInBytes,
+                                        clamped_ws,
                                         matmul_descr->act0,
                                         matmul_descr->act1,
                                         stream,
@@ -906,7 +1019,6 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
         log_error(__func__, "invalid workspace pointer");
         return rocblaslt_status_invalid_pointer;
     }
-    workspaceSizeInBytes = clampWorkspaceSize(__func__, workspaceSizeInBytes);
 
     if(matC->type != matD->type)
     {

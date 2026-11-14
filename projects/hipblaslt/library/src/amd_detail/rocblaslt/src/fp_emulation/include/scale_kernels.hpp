@@ -1,0 +1,489 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+/*
+ * scale_kernels.hpp
+ *
+ * GPU kernels — multi-modulus scaling (separate per path).
+ *
+ * These kernels extract the per-modulus INT8 residue slices for the batched
+ * INT8 GEMM passes.
+ *
+ * Four kernels named by the transpose value they handle:
+ *   scale_A_T_kernel  TRANS_A=true  (k-fast coalesced, blockDim=512, TILE_M=8)
+ *   scale_A_N_kernel  TRANS_A=false (SHMEM transposition, blockDim=512, TILE_M=16)
+ *   scale_B_N_kernel  TRANS_B=false (j-fast coalesced, blockDim=512, TILE_M=8)
+ *   scale_B_T_kernel  TRANS_B=true  (SHMEM transposition, blockDim=512, TILE_M=16)
+ *
+ * Coalesced kernels: no SHMEM → low LDS → good latency hiding.
+ * SHMEM kernels: TILE_K=128, TILE_M=16, K_UNROLL=4 → blockDim=512; 16.5 KB LDS per block.
+ *
+ * This header must be compiled as HIP.
+ */
+
+#include "kernel_common.hpp" /* split_int88, scaled_residue */
+
+#include <hip/hip_runtime.h>
+
+#include <cstdint>
+#include <type_traits>
+
+namespace FixedPointEmulation
+{
+    /* ── A_T: TRANS_A=true, k-fast coalesced, blockDim=512, TILE_M=8, K_UNROLL=4 ──
+     * Each thread processes FOUR adjacent k-positions: j0..j0+3.
+     * j0 = blockIdx.x * 4*TILE_K + (t%TILE_K)*4  →  always 4-aligned.
+     * Loads:  two double2 reads (j0..j0+1 and j0+2..j0+3), each 128-bit, each aligned.
+     * Stores: one uint32_t NT store per modulus (packs INT8[j0..j0+3]) = 128 bytes/warp.
+     * Moduli loop is OUTER so the per-modulus constants are loaded once, and only
+     * TILE_M=8 NT write-combine buffers are needed simultaneously.               */
+    template <unsigned T_COUNT, typename T, bool INT_RES>
+    __global__ static void scale_A_T_kernel(const T* __restrict__ A,
+                                            int64_t m,
+                                            int64_t lda,
+                                            int8_t* __restrict__ A8i,
+                                            size_t lda8i,
+                                            size_t cola8i,
+                                            const int16_t* __restrict__ sftA,
+                                            int64_t  k,
+                                            unsigned t_start)
+    {
+        static constexpr int TILE_K = OZ2_SCALE_TILE_K; /* 64 */
+        static constexpr int TILE_M = OZ2_SCALE_COALESC_TILE_M; /* 8 */
+        const int            t      = static_cast<int>(threadIdx.x);
+        const int64_t        m_base = static_cast<int64_t>(blockIdx.y) * TILE_M;
+        /* j0 is always 4-aligned → both vector loads and the uint32_t store are aligned. */
+        const int64_t j0 = static_cast<int64_t>(blockIdx.x) * (TILE_K * 4)
+                           + static_cast<int64_t>(t % TILE_K) * 4;
+        const int64_t i = m_base + (t / TILE_K);
+        if(i >= m || j0 >= k)
+            return;
+        const int sft = static_cast<int>(sftA[i]);
+        /* Load, widen to double and scale; the residues are then computed from integer
+         * limbs of these values (split_int88).
+         * FP64: double2 (2 × 8 bytes = 128-bit).  FP32: float2 (2 × 4 bytes = 64-bit). */
+        double ival[4];
+        if constexpr(std::is_same_v<T, double>)
+        {
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
+            {
+                const double2 vv = *reinterpret_cast<const double2*>(A + i * lda + j0);
+                ival[0]          = trunc(ldexp(vv.x, sft));
+                ival[1]          = trunc(ldexp(vv.y, sft));
+            }
+            else
+            {
+                ival[0] = trunc(ldexp(A[i * lda + j0], sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
+            {
+                const double2 vv = *reinterpret_cast<const double2*>(A + i * lda + j0 + 2);
+                ival[2]          = trunc(ldexp(vv.x, sft));
+                ival[3]          = trunc(ldexp(vv.y, sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(A[i * lda + j0 + 2], sft));
+                ival[3] = 0.0;
+            }
+            else
+            {
+                ival[2] = 0.0;
+                ival[3] = 0.0;
+            }
+        }
+        else /* float: float2 (2 × 4 bytes = 64-bit), still coalesced */
+        {
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
+            {
+                const float2 vv = *reinterpret_cast<const float2*>(A + i * lda + j0);
+                ival[0]         = trunc(ldexp(static_cast<double>(vv.x), sft));
+                ival[1]         = trunc(ldexp(static_cast<double>(vv.y), sft));
+            }
+            else
+            {
+                ival[0] = trunc(ldexp(static_cast<double>(A[i * lda + j0]), sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
+            {
+                const float2 vv = *reinterpret_cast<const float2*>(A + i * lda + j0 + 2);
+                ival[2]         = trunc(ldexp(static_cast<double>(vv.x), sft));
+                ival[3]         = trunc(ldexp(static_cast<double>(vv.y), sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(static_cast<double>(A[i * lda + j0 + 2]), sft));
+                ival[3] = 0.0;
+            }
+            else
+            {
+                ival[2] = 0.0;
+                ival[3] = 0.0;
+            }
+        }
+        /* Integer residues: split each value into integer limbs once; the
+         * per-modulus residues then need only integer and FP32 arithmetic.     */
+        Int88Limbs lv[4];
+#pragma unroll
+        for(int p = 0; p < 4; ++p)
+            if constexpr(INT_RES)
+                lv[p] = split_int88(ival[p]);
+        const size_t stride   = lda8i * cola8i;
+        const size_t off_base = static_cast<size_t>(i) * lda8i;
+        const size_t off0 = static_cast<size_t>(j0) + off_base; /* 4-aligned → uint32_t aligned */
+        /* Outer loop over moduli — sequential (no unroll) so the per-modulus constants are
+         * loaded once per modulus, keeping register pressure low and WCB usage at TILE_M=8
+         * entries simultaneously.                                                         */
+        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
+        {
+            const unsigned tidx = t_start + t_local;
+            /* Compute INT8 residues for all four k-positions. */
+            int8_t b[4];
+#pragma unroll
+            for(int p = 0; p < 4; ++p)
+                b[p] = scaled_residue<INT_RES>(lv[p], ival[p], tidx);
+            /* Pack and store: always write 4 bytes as uint32_t.
+             * Out-of-bounds b[p] are zero (ival[p] was pre-zeroed for p >= valid count),
+             * so the extra bytes land harmlessly in the [k, lda8i) padding region.
+             * j0 is always 4-aligned, so dst is always uint32_t-aligned.
+             * This eliminates branch divergence in tail k-tiles.              */
+            int8_t* const  dst    = A8i + t_local * stride + off0;
+            const uint32_t packed = static_cast<uint8_t>(b[0])
+                                    | (static_cast<uint32_t>(static_cast<uint8_t>(b[1])) << 8)
+                                    | (static_cast<uint32_t>(static_cast<uint8_t>(b[2])) << 16)
+                                    | (static_cast<uint32_t>(static_cast<uint8_t>(b[3])) << 24);
+            __builtin_nontemporal_store(packed, reinterpret_cast<uint32_t*>(dst));
+        }
+    }
+
+    /* ── A_N: TRANS_A=false, SHMEM transposition, blockDim=512, TILE_M=16, K_UNROLL=4 ──
+     * Each thread loads K_UNROLL=4 consecutive k-positions into SHMEM, then in the
+     * write phase reads 4 SHMEM entries, computes 4 int8 residues, and stores them as a
+     * single uint32_t NT write (4 bytes per store instead of 1).
+     * blockDim = (TILE_K / K_UNROLL) * TILE_M = 32 * 16 = 512.
+     *
+     * The tile is stored row-major, shmem[m][k], so the write phase reads each
+     * thread's 4 k-positions as one contiguous 32-byte block; the +1 padding
+     * spreads the load-phase stores (16 rows apart) across LDS banks.
+     *
+     * Load phase: k_grp = t/TILE_M (0..31), m_loc = t%TILE_M (0..15).
+     *   Each thread fills shmem[m_loc][k_grp*4+p] for p=0..3 (4 coalesced column loads).
+     * Write phase: k_wb = (t%32)*4 (always 4-aligned), m_wr = t/32 (0..15).
+     *   Thread reads 4 shmem entries for the same row, packs 4 int8 → uint32_t; the 32
+     *   threads of a row write 128 contiguous bytes per modulus.
+     *   j_out = blockIdx.x*TILE_K + k_wb is always 4-aligned → uint32_t aligned.
+     *   Out-of-bounds shmem entries are pre-zeroed in the load phase (stored 0.0 for j≥k),
+     *   so the extra bytes in the padding region [k, lda8i) are harmlessly zero. */
+    template <unsigned T_COUNT, typename T, bool INT_RES>
+    __global__ static void scale_A_N_kernel(const T* __restrict__ A,
+                                            int64_t m,
+                                            int64_t lda,
+                                            int8_t* __restrict__ A8i,
+                                            size_t lda8i,
+                                            size_t cola8i,
+                                            const int16_t* __restrict__ sftA,
+                                            int64_t  k,
+                                            unsigned t_start)
+    {
+        static constexpr int TILE_K   = OZ2_SCALE_SHMEM_TILE_K; /* 128 */
+        static constexpr int TILE_M   = OZ2_SCALE_SHMEM_TILE_M; /* 16 */
+        static constexpr int K_UNROLL = 4;
+        /* blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 512 */
+        __shared__ double  shmem[TILE_M][TILE_K + 1]; /* always double — values widened at load */
+        __shared__ int16_t s_sft[TILE_M];
+
+        const int     t      = static_cast<int>(threadIdx.x);
+        const int64_t m_base = static_cast<int64_t>(blockIdx.y) * TILE_M;
+        const int     k_grp  = t / TILE_M; /* 0..TILE_K/K_UNROLL-1 = 0..31 */
+        const int     m_loc  = t % TILE_M; /* 0..TILE_M-1 = 0..15           */
+        const int64_t i      = m_base + m_loc;
+
+        /* Load phase: widen T→double immediately at load; SHMEM stays double.
+         * Access A[i + j*lda] (m-fast across m_loc) is coalesced within each
+         * group of TILE_M threads sharing the same k_grp.                   */
+#pragma unroll
+        for(int p = 0; p < K_UNROLL; p++)
+        {
+            const int64_t j = static_cast<int64_t>(blockIdx.x) * TILE_K + k_grp * K_UNROLL + p;
+            shmem[m_loc][k_grp * K_UNROLL + p]
+                = (i < m && j < k) ? static_cast<double>(A[i + j * lda]) : 0.0;
+        }
+        if(k_grp == 0 && i < m)
+            s_sft[m_loc] = sftA[i];
+        __syncthreads();
+
+        /* Write phase: k_wb is always K_UNROLL-aligned so j_out is always 4-aligned.
+         * lda8i = pad(k) is 128-aligned → offset is 4-aligned → uint32_t aligned.
+         * Out-of-bounds positions have shmem=0.0 → ival=0.0 → b[p]=0.            */
+        const int     k_wb  = (t % (TILE_K / K_UNROLL)) * K_UNROLL; /* 0,4,8,...,124 */
+        const int     m_wr  = t / (TILE_K / K_UNROLL); /* 0..15          */
+        const int64_t j_out = static_cast<int64_t>(blockIdx.x) * TILE_K + k_wb;
+        const int64_t i_out = m_base + m_wr;
+        if(i_out < m && j_out < k)
+        {
+            const int sft = static_cast<int>(s_sft[m_wr]);
+            /* Read K_UNROLL scaled values from SHMEM; shmem already contains 0.0 for
+             * out-of-bounds j≥k positions set during the load phase above.         */
+            double     ival[K_UNROLL];
+            Int88Limbs lv[K_UNROLL];
+#pragma unroll
+            for(int p = 0; p < K_UNROLL; p++)
+            {
+                ival[p] = trunc(ldexp(shmem[m_wr][k_wb + p], sft));
+                if constexpr(INT_RES)
+                    lv[p] = split_int88(ival[p]);
+            }
+
+            const size_t stride = lda8i * cola8i;
+            const size_t offset = static_cast<size_t>(j_out) + static_cast<size_t>(i_out) * lda8i;
+            /* Outer loop over moduli: per-modulus constants loaded once per modulus, reused
+             * for all K_UNROLL=4 k-positions.  Pack 4 int8 bytes as one uint32_t NT store. */
+            for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
+            {
+                const unsigned tidx = t_start + t_local;
+                int8_t         b[K_UNROLL];
+#pragma unroll
+                for(int p = 0; p < K_UNROLL; p++)
+                    b[p] = scaled_residue<INT_RES>(lv[p], ival[p], tidx);
+                /* Pack and store: always write 4 bytes as uint32_t.
+                 * Out-of-bounds b[p] are zero (ival[p]=0.0 from pre-zeroed shmem),
+                 * so extra bytes land harmlessly in the [k, lda8i) padding region. */
+                const uint32_t packed = static_cast<uint8_t>(b[0])
+                                        | (static_cast<uint32_t>(static_cast<uint8_t>(b[1])) << 8)
+                                        | (static_cast<uint32_t>(static_cast<uint8_t>(b[2])) << 16)
+                                        | (static_cast<uint32_t>(static_cast<uint8_t>(b[3])) << 24);
+                __builtin_nontemporal_store(
+                    packed, reinterpret_cast<uint32_t*>(A8i + t_local * stride + offset));
+            }
+        }
+    }
+
+    /* ── B_N: TRANS_B=false, j-fast coalesced, blockDim=512, TILE_M=8, K_UNROLL=4 ──
+     * Mirrors scale_A_T_kernel: two vector loads (j0..j0+1 and j0+2..j0+3) + uint32_t packed store.
+     * FP64: double2 (128-bit).  FP32: float2 (64-bit), widened to double before arithmetic. */
+    template <unsigned T_COUNT, typename T, bool INT_RES>
+    __global__ static void scale_B_N_kernel(const T* __restrict__ B,
+                                            int64_t n,
+                                            int64_t ldb,
+                                            int8_t* __restrict__ B8i,
+                                            size_t ldb8i,
+                                            const int16_t* __restrict__ sftB,
+                                            int64_t  k,
+                                            unsigned t_start)
+    {
+        static constexpr int TILE_K = OZ2_SCALE_TILE_K; /* 64 */
+        static constexpr int TILE_M = OZ2_SCALE_COALESC_TILE_M; /* 8 */
+        const int            t      = static_cast<int>(threadIdx.x);
+        const int64_t        n_base = static_cast<int64_t>(blockIdx.y) * TILE_M;
+        const int64_t        j0     = static_cast<int64_t>(blockIdx.x) * (TILE_K * 4)
+                           + static_cast<int64_t>(t % TILE_K) * 4;
+        const int64_t col = n_base + (t / TILE_K);
+        if(col >= n || j0 >= k)
+            return;
+        const int sft = static_cast<int>(sftB[col]);
+        /* Load, widen to double and scale; residues come from integer limbs (split_int88). */
+        double ival[4];
+        if constexpr(std::is_same_v<T, double>)
+        {
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
+            {
+                const double2 vv = *reinterpret_cast<const double2*>(B + col * ldb + j0);
+                ival[0]          = trunc(ldexp(vv.x, sft));
+                ival[1]          = trunc(ldexp(vv.y, sft));
+            }
+            else
+            {
+                ival[0] = trunc(ldexp(B[col * ldb + j0], sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
+            {
+                const double2 vv = *reinterpret_cast<const double2*>(B + col * ldb + j0 + 2);
+                ival[2]          = trunc(ldexp(vv.x, sft));
+                ival[3]          = trunc(ldexp(vv.y, sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(B[col * ldb + j0 + 2], sft));
+                ival[3] = 0.0;
+            }
+            else
+            {
+                ival[2] = 0.0;
+                ival[3] = 0.0;
+            }
+        }
+        else /* float: float2 (2 × 4 bytes = 64-bit), still coalesced */
+        {
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
+            {
+                const float2 vv = *reinterpret_cast<const float2*>(B + col * ldb + j0);
+                ival[0]         = trunc(ldexp(static_cast<double>(vv.x), sft));
+                ival[1]         = trunc(ldexp(static_cast<double>(vv.y), sft));
+            }
+            else
+            {
+                ival[0] = trunc(ldexp(static_cast<double>(B[col * ldb + j0]), sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
+            {
+                const float2 vv = *reinterpret_cast<const float2*>(B + col * ldb + j0 + 2);
+                ival[2]         = trunc(ldexp(static_cast<double>(vv.x), sft));
+                ival[3]         = trunc(ldexp(static_cast<double>(vv.y), sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(static_cast<double>(B[col * ldb + j0 + 2]), sft));
+                ival[3] = 0.0;
+            }
+            else
+            {
+                ival[2] = 0.0;
+                ival[3] = 0.0;
+            }
+        }
+        /* Split each value into integer limbs once (see scale_A_T_kernel). */
+        Int88Limbs lv[4];
+#pragma unroll
+        for(int p = 0; p < 4; ++p)
+            if constexpr(INT_RES)
+                lv[p] = split_int88(ival[p]);
+        const size_t stride   = ldb8i * static_cast<size_t>(n);
+        const size_t off_base = static_cast<size_t>(col) * ldb8i;
+        const size_t off0 = static_cast<size_t>(j0) + off_base; /* 4-aligned → uint32_t aligned */
+        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
+        {
+            const unsigned tidx = t_start + t_local;
+            int8_t         b[4];
+#pragma unroll
+            for(int p = 0; p < 4; ++p)
+                b[p] = scaled_residue<INT_RES>(lv[p], ival[p], tidx);
+            /* Pack and store: always write 4 bytes as uint32_t.
+             * Out-of-bounds b[p] are zero (ival[p] was pre-zeroed for p >= valid count),
+             * so the extra bytes land harmlessly in the [k, ldb8i) padding region.
+             * j0 is always 4-aligned, so dst is always uint32_t-aligned.
+             * This eliminates branch divergence in tail k-tiles.              */
+            int8_t* const  dst    = B8i + t_local * stride + off0;
+            const uint32_t packed = static_cast<uint8_t>(b[0])
+                                    | (static_cast<uint32_t>(static_cast<uint8_t>(b[1])) << 8)
+                                    | (static_cast<uint32_t>(static_cast<uint8_t>(b[2])) << 16)
+                                    | (static_cast<uint32_t>(static_cast<uint8_t>(b[3])) << 24);
+            __builtin_nontemporal_store(packed, reinterpret_cast<uint32_t*>(dst));
+        }
+    }
+
+    /* ── B_T: TRANS_B=true, SHMEM transposition, blockDim=512, TILE_M=16, K_UNROLL=4 ──
+     * Mirrors scale_A_N_kernel exactly, but operates on B (col-fast layout).
+     * Each thread loads K_UNROLL=4 consecutive k-positions for one column into SHMEM,
+     * then in the write phase reads 4 SHMEM entries and packs them as a uint32_t NT store.
+     * blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 512.
+     * The tile is stored per column, shmem[l][k] (see scale_A_N_kernel).
+     *
+     * Load phase: k_grp = t/TILE_M (0..31), l_loc = t%TILE_M (0..15).
+     *   Each thread fills shmem[l_loc][k_grp*4+p] for p=0..3 (coalesced col-fast loads).
+     * Write phase: k_wb = (t%32)*4 (always 4-aligned), l_wr = t/32 (0..15).
+     *   Thread reads 4 shmem entries for the same column, packs 4 int8 → uint32_t.
+     *   j_out = blockIdx.x*TILE_K + k_wb is always 4-aligned → uint32_t aligned.
+     *   Out-of-bounds shmem entries are pre-zeroed in the load phase (stored 0.0 for j≥k),
+     *   so extra bytes in the padding region [k, ldb8i) are harmlessly zero.           */
+    template <unsigned T_COUNT, typename T, bool INT_RES>
+    __global__ static void scale_B_T_kernel(const T* __restrict__ B,
+                                            int64_t n,
+                                            int64_t ldb,
+                                            int8_t* __restrict__ B8i,
+                                            size_t ldb8i,
+                                            const int16_t* __restrict__ sftB,
+                                            int64_t  k,
+                                            unsigned t_start)
+    {
+        static constexpr int TILE_K   = OZ2_SCALE_SHMEM_TILE_K; /* 128 */
+        static constexpr int TILE_M   = OZ2_SCALE_SHMEM_TILE_M; /* 16 */
+        static constexpr int K_UNROLL = 4;
+        /* blockDim = OZ2_SCALE_SHMEM_BLOCK_DIM = (TILE_K/K_UNROLL)*TILE_M = 512 */
+        __shared__ double  shmem[TILE_M][TILE_K + 1]; /* always double — values widened at load */
+        __shared__ int16_t s_sft[TILE_M];
+
+        const int     t      = static_cast<int>(threadIdx.x);
+        const int64_t n_base = static_cast<int64_t>(blockIdx.y) * TILE_M;
+        const int     k_grp  = t / TILE_M; /* 0..TILE_K/K_UNROLL-1 = 0..31 */
+        const int     l_loc  = t % TILE_M; /* 0..TILE_M-1 = 0..15           */
+        const int64_t col    = n_base + l_loc;
+
+        /* Load phase: widen T→double immediately at load; SHMEM stays double.
+         * Access B[col + j*ldb] (col-fast across l_loc) is coalesced within each
+         * group of TILE_M threads sharing the same k_grp.                   */
+#pragma unroll
+        for(int p = 0; p < K_UNROLL; p++)
+        {
+            const int64_t j = static_cast<int64_t>(blockIdx.x) * TILE_K + k_grp * K_UNROLL + p;
+            shmem[l_loc][k_grp * K_UNROLL + p]
+                = (col < n && j < k) ? static_cast<double>(B[col + j * ldb]) : 0.0;
+        }
+        if(k_grp == 0 && col < n)
+            s_sft[l_loc] = sftB[col];
+        __syncthreads();
+
+        /* Write phase: k_wb is always K_UNROLL-aligned so j_out is always 4-aligned.
+         * ldb8i = pad(k) is 128-aligned → offset is 4-aligned → uint32_t aligned.
+         * Out-of-bounds positions have shmem=0.0 → ival=0.0 → b[p]=0.            */
+        const int     k_wb  = (t % (TILE_K / K_UNROLL)) * K_UNROLL; /* 0,4,8,...,124 */
+        const int     l_wr  = t / (TILE_K / K_UNROLL); /* 0..15          */
+        const int64_t j_out = static_cast<int64_t>(blockIdx.x) * TILE_K + k_wb;
+        const int64_t c_out = n_base + l_wr;
+        if(c_out < n && j_out < k)
+        {
+            const int sft = static_cast<int>(s_sft[l_wr]);
+            /* Read K_UNROLL scaled values from SHMEM; shmem already contains 0.0 for
+             * out-of-bounds j≥k positions set during the load phase above.         */
+            double     ival[K_UNROLL];
+            Int88Limbs lv[K_UNROLL];
+#pragma unroll
+            for(int p = 0; p < K_UNROLL; p++)
+            {
+                ival[p] = trunc(ldexp(shmem[l_wr][k_wb + p], sft));
+                if constexpr(INT_RES)
+                    lv[p] = split_int88(ival[p]);
+            }
+
+            const size_t stride = ldb8i * static_cast<size_t>(n);
+            const size_t offset = static_cast<size_t>(j_out) + static_cast<size_t>(c_out) * ldb8i;
+            /* Outer loop over moduli: per-modulus constants loaded once per modulus, reused
+             * for all K_UNROLL=4 k-positions.  Pack 4 int8 bytes as one uint32_t NT store. */
+            for(unsigned t_local = 0; t_local < T_COUNT; ++t_local)
+            {
+                const unsigned tidx = t_start + t_local;
+                int8_t         b[K_UNROLL];
+#pragma unroll
+                for(int p = 0; p < K_UNROLL; p++)
+                    b[p] = scaled_residue<INT_RES>(lv[p], ival[p], tidx);
+                /* Pack and store: always write 4 bytes as uint32_t.
+                 * Out-of-bounds b[p] are zero (ival[p]=0.0 from pre-zeroed shmem),
+                 * so extra bytes land harmlessly in the [k, ldb8i) padding region. */
+                const uint32_t packed = static_cast<uint8_t>(b[0])
+                                        | (static_cast<uint32_t>(static_cast<uint8_t>(b[1])) << 8)
+                                        | (static_cast<uint32_t>(static_cast<uint8_t>(b[2])) << 16)
+                                        | (static_cast<uint32_t>(static_cast<uint8_t>(b[3])) << 24);
+                __builtin_nontemporal_store(
+                    packed, reinterpret_cast<uint32_t*>(B8i + t_local * stride + offset));
+            }
+        }
+    }
+
+} // namespace FixedPointEmulation
