@@ -344,6 +344,119 @@ class TestGrOffset:
 
         assert errors == 0, f"Config {cfg.label}: {errors} mismatches"
 
+def test_allocGROffsetRegs_TLU0_non_divisible_grid():
+    """_allocGROffsetRegs_TLU0 ceil in perpDimSize for non-divisible grid.
+
+    Covers SubtileGREmit.py:239-241 — the math.ceil() when localSubtileGrid[0]
+    is NOT a multiple of localGRGranularity[0].
+
+    When localSubtileGrid[0] % gran[0] != 0, the partial final row group needs
+    its own soffset RegList. perpDimSize uses math.ceil to account for this.
+    Without the ceil, the partial row would reuse the wrong offset or index
+    past localSubtilesRegister.
+
+    Also covers:
+      - TDM early return (lines 220-224): both enableTDMA/B set -> empty lists.
+      - One-row grid (perpDimSize=1): only row 0 exists (empty RegList).
+    """
+    from tensilelite.Components.Subtile.SubtileGREmit import _allocGROffsetRegs_TLU0, GRTag_TLU1
+    from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16
+
+    # Mock writer and pool
+    class _MockPool:
+        def __init__(self, start=0):
+            self._counter = start
+        def size(self):
+            return self._counter
+        def checkOut(self, n, align=None, tag=None, preventOverflow=True):
+            r = self._counter
+            self._counter += n
+            return r
+        def checkIn(self, v):
+            pass
+
+    class _MockStates:
+        regCaps = {"MaxSgpr": 256}
+
+    class _MockWriter:
+        def __init__(self, sgpr_start=0):
+            self.states = _MockStates()
+            self.vgprPool = _MockPool()
+            self.sgprPool = _MockPool(sgpr_start)
+
+    # Kernel dict for AB_B16
+    kernel = {
+        "MacroTileA": 128, "MacroTileB": 128,
+        "_DepthUA": 128, "_DepthUB": 128,
+        "MIWaveGroup": [2, 2], "WavefrontSize": 64,
+        "NonTemporalA": 0, "NonTemporalB": 0,
+        "ProblemType": {"SwizzleTensorA": False, "SwizzleTensorB": False},
+    }
+
+    # Mock tile with forced gran[0]=2
+    class _MockTile:
+        sharedVgprGROffset = []
+        def localGRGranularity(self, numWaves):
+            return (2, 1)  # Force gran[0]=2 for non-divisible test
+
+    # --- Scenario 1: Non-divisible grid (ceil coverage) ---
+    w = _MockWriter(sgpr_start=0)  # SGPR path
+    ti = TileInfo(AB_B16, "A", w, kernel)
+    original_grid = ti.localSubtileGrid
+    ti.localSubtileGrid = (5, original_grid[1])  # 5 % 2 != 0
+
+    mock_tile = _MockTile()
+    _allocGROffsetRegs_TLU0(GRTag_TLU1, mock_tile, ti, w, kernel)
+
+    # Verify: perpDimSize = ceil(5/2) = 3
+    expected_perp = math.ceil(5 / 2)
+    assert len(ti.localSubtilesRegister) == expected_perp, (
+        f"Non-divisible grid (5 % 2 != 0) must allocate ceil(5/2)={expected_perp} RegLists, "
+        f"got {len(ti.localSubtilesRegister)}"
+    )
+    # Row 0 empty, rows 1+ have 1 SGPR each (SGPR path, sgpr_start=0)
+    assert len(ti.localSubtilesRegister[0]) == 0, "Row 0 RegList must be empty"
+    for i in range(1, expected_perp):
+        assert len(ti.localSubtilesRegister[i]) == 1, (
+            f"Row {i} RegList must have 1 SGPR, got {len(ti.localSubtilesRegister[i])}"
+        )
+        assert ti.localSubtilesRegister[i].is_sgpr, f"Row {i} must use SGPR path"
+
+    # --- Scenario 2: VGPR fallback (high sgpr_start) ---
+    w2 = _MockWriter(sgpr_start=253)
+    ti2 = TileInfo(AB_B16, "A", w2, kernel)
+    ti2.localSubtileGrid = (5, original_grid[1])
+    mock_tile2 = _MockTile()
+    _allocGROffsetRegs_TLU0(GRTag_TLU1, mock_tile2, ti2, w2, kernel)
+    # numGRPerSubtile VGPRs per row for rows 1+
+    for i in range(1, expected_perp):
+        assert len(ti2.localSubtilesRegister[i]) == ti2.numGRPerSubtile, (
+            f"VGPR fallback row {i} must have {ti2.numGRPerSubtile} VGPRs"
+        )
+        assert not ti2.localSubtilesRegister[i].is_sgpr, f"Row {i} must use VGPR"
+
+    # --- Scenario 3: TDM early return (both enableTDMA/B set) ---
+    kernel_tdm = {**kernel, "enableTDMA": True, "enableTDMB": True}
+    w3 = _MockWriter()
+    ti3 = TileInfo(AB_B16, "A", w3, kernel_tdm)
+    ti3.localSubtileGrid = (5, original_grid[1])
+    mock_tile3 = _MockTile()
+    _allocGROffsetRegs_TLU0(GRTag_TLU1, mock_tile3, ti3, w3, kernel_tdm)
+    # TDM path: both lists empty
+    assert ti3.localSubtilesRegister == [], "TDM must have empty localSubtilesRegister"
+    assert mock_tile3.sharedVgprGROffset == [], "TDM must have empty sharedVgprGROffset"
+
+    # --- Scenario 4: One-row grid (perpDimSize=1) ---
+    w4 = _MockWriter()
+    ti4 = TileInfo(AB_B16, "A", w4, kernel)
+    ti4.localSubtileGrid = (1, original_grid[1])  # Single row
+    mock_tile4 = _MockTile()
+    _allocGROffsetRegs_TLU0(GRTag_TLU1, mock_tile4, ti4, w4, kernel)
+    # ceil(1/2) = 1, only row 0 exists (empty)
+    assert len(ti4.localSubtilesRegister) == 1, "One-row grid must have perpDimSize=1"
+    assert len(ti4.localSubtilesRegister[0]) == 0, "One-row grid row 0 must be empty"
+
+
 
 # ---------------------------------------------------------------------------
 # Standalone runner
