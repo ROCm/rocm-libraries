@@ -39,28 +39,34 @@
 namespace rocsparse
 {
     // Tasks per column: one per chunk of NUM_LANES * NUM_ITEMS entries, at least one.
-    template <uint32_t BLOCKSIZE, typename I>
+    template <uint32_t BLOCKSIZE, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void cscsv_count_tasks_kernel(int64_t m,
                                   const I* __restrict__ csc_col_ptr,
                                   int64_t chunk,
-                                  I* __restrict__ task_count)
+                                  I* __restrict__ task_count,
+                                  const J* __restrict__ col_order)
     {
-        for(int64_t col = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; col < m;
-            col += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        for(int64_t p = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; p < m;
+            p += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
+            const int64_t col = (col_order != nullptr) ? col_order[p] : p;
             const int64_t len = csc_col_ptr[col + 1] - csc_col_ptr[col];
-            task_count[col]   = static_cast<I>(
+            task_count[p]     = static_cast<I>(
                 rocsparse::max(static_cast<int64_t>(1), (len + chunk - 1) / chunk));
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I>
-    static rocsparse_status cscsv_count_tasks_launch(
-        rocsparse_handle handle, int64_t m, const I* csc_col_ptr, int64_t chunk, I* task_count)
+    template <uint32_t BLOCKSIZE, typename I, typename J>
+    static rocsparse_status cscsv_count_tasks_launch(rocsparse_handle handle,
+                                                     int64_t          m,
+                                                     const I*         csc_col_ptr,
+                                                     int64_t          chunk,
+                                                     I*               task_count,
+                                                     const J*         col_order)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::cscsv_count_tasks_kernel<BLOCKSIZE, I>),
+            (rocsparse::cscsv_count_tasks_kernel<BLOCKSIZE, I, J>),
             dim3(rocsparse::get_grid_size_x(
                 handle, rocsparse::ceil_div(m, static_cast<int64_t>(BLOCKSIZE)), BLOCKSIZE)),
             dim3(BLOCKSIZE),
@@ -69,7 +75,8 @@ namespace rocsparse
             m,
             csc_col_ptr,
             chunk,
-            task_count);
+            task_count,
+            col_order);
         return rocsparse_status_success;
     }
 
@@ -84,17 +91,19 @@ namespace rocsparse
                                    bool    reverse,
                                    J* __restrict__ task_col,
                                    I* __restrict__ task_begin,
-                                   rocsparse_index_base idx_base)
+                                   rocsparse_index_base idx_base,
+                                   const J* __restrict__ col_order)
     {
-        for(int64_t col = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; col < m;
-            col += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        for(int64_t p = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; p < m;
+            p += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
-            const I begin = csc_col_ptr[col] - idx_base;
-            for(I t = task_ptr[col]; t < task_ptr[col + 1]; ++t)
+            const int64_t col   = (col_order != nullptr) ? col_order[p] : p;
+            const I       begin = csc_col_ptr[col] - idx_base;
+            for(I t = task_ptr[p]; t < task_ptr[p + 1]; ++t)
             {
                 const int64_t pos = reverse ? (num_tasks - 1 - t) : t;
                 task_col[pos]     = static_cast<J>(col);
-                task_begin[pos]   = begin + static_cast<I>((t - task_ptr[col]) * chunk);
+                task_begin[pos]   = begin + static_cast<I>((t - task_ptr[p]) * chunk);
             }
         }
     }
@@ -109,7 +118,8 @@ namespace rocsparse
                                                       bool                 reverse,
                                                       J*                   task_col,
                                                       I*                   task_begin,
-                                                      rocsparse_index_base idx_base)
+                                                      rocsparse_index_base idx_base,
+                                                      const J*             col_order)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::cscsv_expand_tasks_kernel<BLOCKSIZE, I, J>),
@@ -126,7 +136,76 @@ namespace rocsparse
             reverse,
             task_col,
             task_begin,
-            idx_base);
+            idx_base,
+            col_order);
+        return rocsparse_status_success;
+    }
+
+    // PROTOTYPE: key last(c) + 1 of the columns in elimination order (0..m-1 lower, m-1..0 upper).
+    template <uint32_t BLOCKSIZE, typename J>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void cscsv_order_keys_kernel(int64_t m,
+                                 const J* __restrict__ last_dep,
+                                 int32_t* __restrict__ keys,
+                                 J* __restrict__ cols,
+                                 bool lower)
+    {
+        for(int64_t p = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; p < m;
+            p += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+        {
+            const int64_t col = lower ? p : m - 1 - p;
+            keys[p]           = static_cast<int32_t>(last_dep[col] + 1);
+            cols[p]           = static_cast<J>(col);
+        }
+    }
+
+    // PROTOTYPE: columns sorted by their last dependency (stable, so ties keep the elimination
+    // order); the key grows along every dependency, so the order is topological.
+    template <uint32_t BLOCKSIZE, typename J>
+    static rocsparse_status cscsv_order_columns(rocsparse_handle    handle,
+                                                int64_t             m,
+                                                const J*            last_dep,
+                                                rocsparse_fill_mode fill_mode,
+                                                J*                  col_order)
+    {
+        hipStream_t stream = handle->stream;
+        int32_t*    keys0{};
+        int32_t*    keys1{};
+        J*          cols1{};
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&keys0, sizeof(int32_t) * m, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&keys1, sizeof(int32_t) * m, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&cols1, sizeof(J) * m, stream));
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::cscsv_order_keys_kernel<BLOCKSIZE, J>),
+            dim3(rocsparse::get_grid_size_x(
+                handle, rocsparse::ceil_div(m, static_cast<int64_t>(BLOCKSIZE)), BLOCKSIZE)),
+            dim3(BLOCKSIZE),
+            0,
+            stream,
+            m,
+            last_dep,
+            keys0,
+            col_order,
+            fill_mode == rocsparse_fill_mode_lower);
+        const uint32_t endbit = rocsparse::clz(m + 1);
+        size_t         sort_size{};
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int32_t, J>(
+            handle, m, 0, endbit, &sort_size)));
+        void* sort_buffer{};
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&sort_buffer, sort_size, stream));
+        rocsparse::primitives::double_buffer<int32_t> keys(keys0, keys1);
+        rocsparse::primitives::double_buffer<J>       cols(col_order, cols1);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
+            handle, keys, cols, m, 0, endbit, sort_size, sort_buffer));
+        if(cols.current() != col_order)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                col_order, cols.current(), sizeof(J) * m, hipMemcpyDeviceToDevice, stream));
+        }
+        for(void* p : {(void*)keys0, (void*)keys1, (void*)cols1, sort_buffer})
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(p, stream));
+        }
         return rocsparse_status_success;
     }
 
@@ -154,7 +233,8 @@ namespace rocsparse
                                               rocsparse_fill_mode  fill_mode,
                                               uint32_t             num_lanes,
                                               rocsparse_cscsv_info info,
-                                              void*                buffer)
+                                              void*                buffer,
+                                              const void*          last_dep)
     {
         hipStream_t   stream      = handle->stream;
         const I*      csc_col_ptr = reinterpret_cast<const I*>(csc_col_ptr_);
@@ -168,9 +248,17 @@ namespace rocsparse
         ptr += rocsparse::align_size(sizeof(I) * (m + 1));
         void* scan_buffer = ptr;
 
+        J* col_order{};
+        if(last_dep != nullptr)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&col_order, sizeof(J) * m, stream));
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscsv_order_columns<BLOCKSIZE, J>(
+                handle, m, reinterpret_cast<const J*>(last_dep), fill_mode, col_order)));
+        }
+
         RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(task_count + m, 0, sizeof(I), stream));
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscsv_count_tasks_launch<BLOCKSIZE, I>(
-            handle, m, csc_col_ptr, chunk, task_count)));
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscsv_count_tasks_launch<BLOCKSIZE, I, J>(
+            handle, m, csc_col_ptr, chunk, task_count, col_order)));
 
         size_t scan_size{};
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::exclusive_scan_buffer_size<I, I>(
@@ -192,10 +280,12 @@ namespace rocsparse
             task_ptr,
             chunk,
             static_cast<int64_t>(num_tasks),
-            fill_mode == rocsparse_fill_mode_upper,
+            (col_order == nullptr) && (fill_mode == rocsparse_fill_mode_upper),
             reinterpret_cast<J*>(info->get_task_col(fill_mode)),
             reinterpret_cast<I*>(info->get_task_begin(fill_mode)),
-            idx_base)));
+            idx_base,
+            col_order)));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(col_order, stream));
         return rocsparse_status_success;
     }
     using cscsv_build_tasks_tpl_t = std::tuple<rocsparse_indextype, rocsparse_indextype>;

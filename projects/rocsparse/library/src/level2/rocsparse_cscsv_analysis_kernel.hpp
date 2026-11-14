@@ -37,6 +37,7 @@ namespace rocsparse
                                                         const void*          csc_row_ind,
                                                         void*                csc_diag_ind,
                                                         void*                dependency_count,
+                                                        void*                last_dep,
                                                         void*                zero_pivot,
                                                         rocsparse_index_base idx_base,
                                                         rocsparse_diag_type  diag_type,

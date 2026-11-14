@@ -33,8 +33,10 @@
 
 #include "rocsparse_dichotomic_search.hpp"
 
+#include <cstdlib>
 #include <map>
 #include <sstream>
+#include <string>
 #include <tuple>
 
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
@@ -60,6 +62,7 @@ namespace rocsparse
                                        const J* __restrict__ csc_row_ind,
                                        I* __restrict__ csc_diag_ind,
                                        J* __restrict__ dependency_count,
+                                       J* __restrict__ last_dep,
                                        rocsparse_index_base idx_base,
                                        rocsparse_fill_mode  fill_mode)
     {
@@ -83,6 +86,13 @@ namespace rocsparse
             else if(lower ? (row > col) : (row < col))
             {
                 rocsparse::atomic_add(&dependency_count[row], static_cast<J>(1));
+                if(last_dep != nullptr)
+                {
+                    // Upper: the last dependency in elimination order is the first column, stored as
+                    // m - 1 - col so that both cases take a maximum.
+                    rocsparse::atomic_max(&last_dep[row],
+                                          static_cast<J>(lower ? col : m - 1 - col));
+                }
             }
         }
     }
@@ -113,6 +123,7 @@ namespace rocsparse
                                                   const void*          csc_row_ind,
                                                   void*                csc_diag_ind,
                                                   void*                dependency_count,
+                                                  void*                last_dep,
                                                   void*                zero_pivot,
                                                   rocsparse_index_base idx_base,
                                                   rocsparse_diag_type  diag_type,
@@ -132,6 +143,7 @@ namespace rocsparse
                 reinterpret_cast<const J*>(csc_row_ind),
                 reinterpret_cast<I*>(csc_diag_ind),
                 reinterpret_cast<J*>(dependency_count),
+                reinterpret_cast<J*>(last_dep),
                 idx_base,
                 fill_mode);
         }
@@ -252,6 +264,15 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
             rocsparse_hipMemsetAsync(trm_info->get_diag_ind(), 0xFF, sizeof_I * m, stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(dependency_count, 0, sizeof_J * m, stream));
 
+        // PROTOTYPE: ROCSPARSE_CSCSV_ORDER=lastdep orders the columns by their last dependency.
+        const char* order_env = std::getenv("ROCSPARSE_CSCSV_ORDER");
+        void*       last_dep{};
+        if(order_env != nullptr && std::string(order_env) == "lastdep" && m > 0)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&last_dep, sizeof_J * m, stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(last_dep, 0xFF, sizeof_J * m, stream));
+        }
+
         if(m > 0)
         {
             rocsparse::cscsv_analysis_launch_t launch;
@@ -264,6 +285,7 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
                                              A->const_row_data,
                                              trm_info->get_diag_ind(),
                                              dependency_count,
+                                             last_dep,
                                              zero_pivot,
                                              descr->base,
                                              descr->diag_type,
@@ -287,7 +309,9 @@ rocsparse_status rocsparse::cscsv_analysis(rocsparse_handle            handle,
                                             descr->fill_mode,
                                             num_lanes,
                                             info,
-                                            buffer));
+                                            buffer,
+                                            last_dep));
+            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(last_dep, stream));
         }
         else
         {

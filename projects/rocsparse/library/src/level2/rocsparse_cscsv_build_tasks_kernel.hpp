@@ -37,7 +37,8 @@ namespace rocsparse
                                                     rocsparse_fill_mode  fill_mode,
                                                     uint32_t             num_lanes,
                                                     rocsparse_cscsv_info info,
-                                                    void*                buffer);
+                                                    void*                buffer,
+                                                    const void*          last_dep);
 
     rocsparse_status cscsv_build_tasks_find(rocsparse::cscsv_build_tasks_t* build,
                                             rocsparse_indextype             i_type,
