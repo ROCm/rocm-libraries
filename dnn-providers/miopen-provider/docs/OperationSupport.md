@@ -18,10 +18,10 @@ The following table lists all operations currently supported in hipDNN:
 | Batchnorm Training  | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
 | Batchnorm Training + Activation | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3,6</sup> |
 | Batchnorm Backward  | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1,6</sup> |
-| Convolution Dgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
-| Convolution Forward | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
-| Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3,6</sup>, Deterministic<sup>5</sup> |
-| Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
+| Convolution Dgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>9</sup> |
+| Convolution Forward | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>9</sup> |
+| Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>9</sup> |
+| Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup>, Applicability limits<sup>9</sup> |
 | Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
 | Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
 
@@ -33,6 +33,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁶ 3D tensors are internally padded to 4D for MIOpen compatibility. For convolution, the padding also extends the padding, stride and dilation vectors with a trailing spatial dimension of length 1.
 ⁷ See Standalone Activation note below
 ⁸ See Standalone Binary Elementwise note below
+⁹ See Convolution Applicability note below
 
 ## Detailed Requirements
 
@@ -47,6 +48,9 @@ The following table lists all operations currently supported in hipDNN:
 - Output tensor
     - Virtual
     - Data type: FP32 or the input data type
+- Bias operand (the ADD operand that is not the convolution output)
+    - Dims: `[1, K, 1, ..]`, where K is the convolution output channel count and the rank equals the rank of the convolution output
+    - Data type: the input data type
 #### Activation node
 - Compute data type: FP32
 - Activation mode: RELU_FORWARD
@@ -63,6 +67,15 @@ The following table lists all operations currently supported in hipDNN:
 
 > [!NOTE]
 > **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
+
+> [!NOTE]
+> **Convolution Applicability:** The plugin declines the convolution graphs below. A declined graph falls to another engine, or no engine is found for it. These are limits of the plugin's MIOpen-backed convolution engines, not errors in the graph: for these graphs MIOpen offers a solver that returns wrong output or faults.
+> - **Data type (forward, backward data, backward weights):** the three tensors (`x`, `w`, `y`; `dy`, `w`, `dx`; `x`, `dy`, `dw`) must share one data type, FP32, FP16 or BFP16.
+> - **Layout (forward, backward data, backward weights):** the three tensors must share one layout: all channels-first (NCL, NCHW, NCDHW) or all channels-last (NLC, NHWC, NDHWC). A packed tensor is judged by its exact canonical strides, including those of extent-1 dimensions; a non-packed tensor is judged by its stride order.
+> - **Packing, forward:** all three tensors must be packed (the strides address exactly the element count).
+> - **Packing, backward data and backward weights:** a channels-first non-packed tensor is accepted; a channels-last non-packed tensor is declined.
+> - **Size, backward data:** `dy` and `dx` must each have at most 2^31 - 1 elements.
+> - **Fused Convolution Forward + (Bias) + Activation:** the bias operand must have dims `[1, K, 1, ..]` (K = convolution output channels, same rank as the output) and the data type of `x`. An ADD with any other operand, for example a residual of the output's shape, is not treated as a bias and the graph is declined.
 
 > [!NOTE]
 > **Fused Operations:**
