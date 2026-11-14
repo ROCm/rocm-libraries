@@ -1431,6 +1431,57 @@ namespace TensileLite
                                                       KA&                         h_args,
                                                       uint32_t                    gsu) const;
 
+        // Launch values shared by a custom kernel and its post kernels.
+        struct CustomCallSchedule
+        {
+            int      computeUnits               = 1;
+            dim3     tiles                      = {0, 0, 0};
+            uint32_t autoGsuVal                 = 0;
+            uint32_t gsu                        = 0;
+            size_t   adaptiveGlobalAccumulation = 0;
+            uint32_t itersPerTile               = 0;
+            uint32_t skTotalIters               = 0;
+            uint32_t skMagicNumberItersPerTile  = 0;
+            uint32_t skMagicShiftItersPerTile   = 0;
+            uint32_t skItersPerWG               = 0;
+            uint32_t skTotalTiles               = 0;
+        };
+
+        // Kernel an argument list is packed for. In Stream-K parallel reduction the
+        // main kernel's AddressC/D and their strides point at the workspace partials;
+        // a post kernel's point at the real C and D.
+        enum class CustomArgRole
+        {
+            Main,
+            Post,
+        };
+
+        CustomCallSchedule customCallSchedule(Problem const&                  problem,
+                                              Hardware const&                 hardware,
+                                              PersistentLaunchSettings const& launch) const;
+
+        // Sets the workgroup size and count of a custom or post kernel launch.
+        // bands is the post kernel's TilesBands factor; the main kernel passes 0,
+        // which rejects a TilesBands grid.
+        void customCallGrid(KernelInvocation&                       rv,
+                            dim3 const&                             threads,
+                            vector3<CustomGridSize> const&          grid,
+                            size_t                                  bands,
+                            std::vector<CustomArgDefinition> const& args,
+                            CustomCallSchedule const&               schedule,
+                            PersistentLaunchSettings const&         launch) const;
+
+        // Appends args to rv.args; reads rv.numWorkGroups, so call customCallGrid first.
+        template <bool T_Debug>
+        void packCustomArgs(KernelInvocation&                       rv,
+                            std::vector<CustomArgDefinition> const& args,
+                            CustomArgRole                           role,
+                            Problem const&                          problem,
+                            ContractionInputs const&                inputs,
+                            Hardware const&                         hardware,
+                            PersistentLaunchSettings const&         launch,
+                            CustomCallSchedule const&               schedule) const;
+
         template <bool T_Debug>
         KernelInvocation generateCustomCall(Problem const&           problem,
                                             ContractionInputs const& inputs,

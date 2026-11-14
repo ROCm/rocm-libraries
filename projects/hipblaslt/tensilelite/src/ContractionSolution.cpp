@@ -3158,57 +3158,53 @@ namespace TensileLite
         return rv;
     }
 
-    template <bool T_Debug>
-    KernelInvocation ContractionSolution::generateCustomCall(ContractionSolution::Problem const& problem,
-                                                ContractionInputs const&            inputs,
-                                                Hardware const&                     hardware,
-                                                PersistentLaunchSettings const&              launch) const
+    ContractionSolution::CustomCallSchedule
+        ContractionSolution::customCallSchedule(Problem const&                  problem,
+                                                Hardware const&                 hardware,
+                                                PersistentLaunchSettings const& launch) const
     {
-        validatePersistentLoopArgsVersion();
-        if(usesStreamKSpatialCluster())
-            throw std::runtime_error("StreamK scheduling ABI 2 requires generated argument packing");
-        KernelInvocation rv;
-        rv.isSingleCall = true;
-        rv.args = KernelArguments(T_Debug);
-        rv.args.reserve(1024, 128);
-        rv.kernelName = kernelName;
-
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU);
+
+        CustomCallSchedule schedule;
+
+        int&      computeUnits               = schedule.computeUnits;
+        dim3&     tiles                      = schedule.tiles;
+        uint32_t& autoGsuVal                 = schedule.autoGsuVal;
+        uint32_t& gsu                        = schedule.gsu;
+        size_t&   adaptiveGlobalAccumulation = schedule.adaptiveGlobalAccumulation;
+        uint32_t& itersPerTile               = schedule.itersPerTile;
+        uint32_t& skTotalIters               = schedule.skTotalIters;
+        uint32_t& skMagicNumberItersPerTile  = schedule.skMagicNumberItersPerTile;
+        uint32_t& skMagicShiftItersPerTile   = schedule.skMagicShiftItersPerTile;
+        uint32_t& skItersPerWG               = schedule.skItersPerWG;
+        uint32_t& skTotalTiles               = schedule.skTotalTiles;
 
         // A persistent kernel strides by its ComputeUnits kernarg, so it and the
         // ComputeUnits grid must be the same value. Cap it like Tensile's persistent
         // grids, by the caller's SM-count target and persistentMaxCUs.
-        int computeUnits = pAMDGPU->computeUnitCount;
+        computeUnits = pAMDGPU->computeUnitCount;
         if(problem.getParams().smCountTarget() > 0)
             computeUnits = std::min(computeUnits, problem.getParams().smCountTarget());
         if(pAMDGPU->persistentMaxCUs > 0)
             computeUnits = std::min(computeUnits, pAMDGPU->persistentMaxCUs);
         computeUnits = std::max(1, computeUnits);
 
-        if(customKernel.threads.x == 0 || customKernel.macrotile.x == 0)
-            throw std::runtime_error(
-                concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
-
-        dim3 tiles;
         calculateTiles(tiles, problem);
 
-        uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
-        uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        autoGsuVal = calculateAutoGSU(problem, &hardware);
+        gsu        = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         // Runtime-effective accumulation mode; AdaptiveGemmGSUA can downgrade this from
         // the solution's compiled sizeMapping.globalAccumulation (e.g. MBSK -> MultipleBuffer
         // for small/low-tile problems).
-        size_t adaptiveGlobalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
+        adaptiveGlobalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        const uint32_t itersPerTile = launch.grid > 0
-            ? static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping))) : 0;
+        itersPerTile
+            = launch.grid > 0
+                  ? static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping)))
+                  : 0;
         // Legacy/custom scheduling adapter. DataParallel version-1 descriptors use only
         // ItersPerTile and PersistentGrid and never compute iteration splits.
-        uint32_t skTotalIters              = 0;
-        uint32_t skMagicNumberItersPerTile = 0;
-        uint32_t skMagicShiftItersPerTile  = 0;
-        uint32_t skItersPerWG              = 0;
-        uint32_t skTotalTiles              = 0;
         if(launch.grid > 0
            && (internalArgsSupport.persistentLoopArgsVersion == 0
                || internalArgsSupport.persistentLoopArgsVersion == 3))
@@ -3258,22 +3254,24 @@ namespace TensileLite
             }
         }
 
-        rv.workGroupSize.x = customKernel.threads.x;
-        rv.workGroupSize.y = customKernel.threads.y;
-        rv.workGroupSize.z = customKernel.threads.z;
+        return schedule;
+    }
 
-        if(T_Debug)
-        {
-            std::cout << "Wavefront size: " << pAMDGPU->wavefrontSize << std::endl;
-            std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
-            std::cout << "Work group size: " << rv.workGroupSize.x << ", " << rv.workGroupSize.y << ", " << rv.workGroupSize.z << std::endl;
-            std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
-        }
+    void ContractionSolution::customCallGrid(KernelInvocation&                       rv,
+                                             dim3 const&                             threads,
+                                             vector3<CustomGridSize> const&          grid,
+                                             size_t                                  bands,
+                                             std::vector<CustomArgDefinition> const& args,
+                                             CustomCallSchedule const&               schedule,
+                                             PersistentLaunchSettings const&         launch) const
+    {
+        auto const&    tiles        = schedule.tiles;
+        const uint32_t gsu          = schedule.gsu;
+        const int      computeUnits = schedule.computeUnits;
 
-        if(T_Debug)
-        {
-            std::cout << "Tiles: " << tiles.x << ", " << tiles.y << ", " << tiles.z << std::endl;
-        }
+        rv.workGroupSize.x = threads.x;
+        rv.workGroupSize.y = threads.y;
+        rv.workGroupSize.z = threads.z;
 
         auto assignGridSize = [&](size_t& dim, CustomGridSize size) {
             switch(size)
@@ -3319,46 +3317,21 @@ namespace TensileLite
                 case CustomGridSize::ComputeUnits:
                     dim = static_cast<size_t>(computeUnits);
                     break;
+                case CustomGridSize::TilesBands:
+                    if(bands == 0)
+                        throw std::runtime_error(
+                            "TilesBands grid needs bands > 0; the main kernel passes 0");
+                    dim = tiles.x * tiles.y * tiles.z * bands;
+                    break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
                     break;
             }
         };
 
-        assignGridSize(rv.numWorkGroups.x, customKernel.grid.x);
-        assignGridSize(rv.numWorkGroups.y, customKernel.grid.y);
-        assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
-
-        // A split-K kernel reduces into D only once every GSU slice of a tile has
-        // arrived, so a grid sized from tile counts alone would return success with
-        // D unwritten. GSU and persistent grids account for the split themselves.
-        auto tileCountOnly = [](CustomGridSize size) {
-            switch(size)
-            {
-            case CustomGridSize::One:
-            case CustomGridSize::TilesX:
-            case CustomGridSize::TilesY:
-            case CustomGridSize::Batch:
-            case CustomGridSize::TilesXY:
-            case CustomGridSize::TilesXYBatch:
-                return true;
-            default:
-                return false;
-            }
-        };
-        if(gsu > 1 && tileCountOnly(customKernel.grid.x) && tileCountOnly(customKernel.grid.y)
-           && tileCountOnly(customKernel.grid.z))
-            throw std::runtime_error(concatenate("Solution ",
-                                                 kernelName,
-                                                 " runs with GSU ",
-                                                 gsu,
-                                                 " but its custom-kernel grid [",
-                                                 customKernel.grid.x,
-                                                 ", ",
-                                                 customKernel.grid.y,
-                                                 ", ",
-                                                 customKernel.grid.z,
-                                                 "] launches one GSU slice per tile"));
+        assignGridSize(rv.numWorkGroups.x, grid.x);
+        assignGridSize(rv.numWorkGroups.y, grid.y);
+        assignGridSize(rv.numWorkGroups.z, grid.z);
 
         bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
         if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
@@ -3370,7 +3343,7 @@ namespace TensileLite
             rv.numWorkGroups = spatialClusterLaunch(clusters, sizeMapping.clusterDim);
         }
         bool hasNumWorkGroupsArg = std::any_of(
-            customKernel.args.begin(), customKernel.args.end(),
+            args.begin(), args.end(),
             [](auto const& a) { return a.semantic == CustomArgSemantic::NumWorkGroups; });
         if(!enableCluster && hasNumWorkGroupsArg && internalArgsSupport.version >= 1)
         {
@@ -3379,18 +3352,31 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        if(T_Debug)
-        {
-            std::cout << "Num work groups: " << rv.numWorkGroups.x << ", " << rv.numWorkGroups.y << ", " << rv.numWorkGroups.z << std::endl;
-        }
-
-        rv.clusterDim = sizeMapping.clusterDim;
-
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
+    }
 
-        rv.sharedMemBytes = 0;
+    template <bool T_Debug>
+    void ContractionSolution::packCustomArgs(KernelInvocation&                       rv,
+                                             std::vector<CustomArgDefinition> const& args,
+                                             CustomArgRole                           role,
+                                             Problem const&                          problem,
+                                             ContractionInputs const&                inputs,
+                                             Hardware const&                         hardware,
+                                             PersistentLaunchSettings const&         launch,
+                                             CustomCallSchedule const&               schedule) const
+    {
+        const int      computeUnits               = schedule.computeUnits;
+        const uint32_t autoGsuVal                 = schedule.autoGsuVal;
+        const uint32_t gsu                        = schedule.gsu;
+        const size_t   adaptiveGlobalAccumulation = schedule.adaptiveGlobalAccumulation;
+        const uint32_t itersPerTile               = schedule.itersPerTile;
+        const uint32_t skTotalIters               = schedule.skTotalIters;
+        const uint32_t skMagicNumberItersPerTile  = schedule.skMagicNumberItersPerTile;
+        const uint32_t skMagicShiftItersPerTile   = schedule.skMagicShiftItersPerTile;
+        const uint32_t skItersPerWG               = schedule.skItersPerWG;
+        const uint32_t skTotalTiles               = schedule.skTotalTiles;
 
         auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
             = calculateAutoWGM(problem, &hardware, launch.grid);
@@ -3410,9 +3396,9 @@ namespace TensileLite
         // tensor strides apply.
         bool gsuWSStride
             = gsu > 1 && sizeMapping.globalAccumulation != 3 && !sizeMapping.isStreamK();
-        bool skWSStride
-            = sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel;
-        bool useWSStride = gsuWSStride || skWSStride;
+        const bool skPartials = role == CustomArgRole::Main && sizeMapping.isStreamK()
+                                && launch.reduction == origami::reduction_t::parallel;
+        bool useWSStride = gsuWSStride || skPartials;
         size_t startStrideCD = problemType.useInitialStridesCD ? 0 : 1;
         const bool usesDataParallelArgsV1 = internalArgsSupport.persistentLoopArgsVersion == 1;
         const size_t descriptorStrideAB = usesDataParallelArgsV1 && problemType.useInitialStridesAB ? 0 : 1;
@@ -3490,7 +3476,7 @@ namespace TensileLite
             return *wgmKernargs;
         };
 
-        for(auto arg : customKernel.args)
+        for(auto const& arg : args)
         {
             if(T_Debug)
                 std::cout << "Type: " << toString(arg.type) << " Semantic: " << toString(arg.semantic) << std::endl;
@@ -3767,8 +3753,7 @@ namespace TensileLite
                             && sizeMapping.globalAccumulation != 3)
                             useWsC = true;
                     }
-                    if(sizeMapping.isStreamK()
-                       && launch.reduction == origami::reduction_t::parallel)
+                    if(skPartials)
                         useWsC = true;
                     if(useWsC)
                         rv.args.template append<void const*>("AddressC", inputs.ws);
@@ -3791,8 +3776,7 @@ namespace TensileLite
                            || sizeMapping.globalAccumulation == 3)
                             useWsD = true;
                     }
-                    if(sizeMapping.isStreamK()
-                       && launch.reduction == origami::reduction_t::parallel)
+                    if(skPartials)
                         useWsD = true;
                     if(useWsD)
                         rv.args.template append<void const*>("AddressD", inputs.ws);
@@ -4132,6 +4116,103 @@ namespace TensileLite
             if(arg.padding > 0)
                 rv.args.appendPadding(arg.padding);
         }
+    }
+
+    template <bool T_Debug>
+    KernelInvocation ContractionSolution::generateCustomCall(ContractionSolution::Problem const& problem,
+                                                ContractionInputs const&            inputs,
+                                                Hardware const&                     hardware,
+                                                PersistentLaunchSettings const&              launch) const
+    {
+        validatePersistentLoopArgsVersion();
+        if(usesStreamKSpatialCluster())
+            throw std::runtime_error("StreamK scheduling ABI 2 requires generated argument packing");
+        KernelInvocation rv;
+        rv.isSingleCall = true;
+        rv.args = KernelArguments(T_Debug);
+        rv.args.reserve(1024, 128);
+        rv.kernelName = kernelName;
+
+        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+        assert(pAMDGPU);
+
+        if(customKernel.threads.x == 0 || customKernel.macrotile.x == 0)
+            throw std::runtime_error(
+                concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
+
+        auto const     schedule = customCallSchedule(problem, hardware, launch);
+        auto const&    tiles    = schedule.tiles;
+        const uint32_t gsu      = schedule.gsu;
+
+        if(T_Debug)
+        {
+            std::cout << "Wavefront size: " << pAMDGPU->wavefrontSize << std::endl;
+            std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
+            std::cout << "Work group size: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
+            std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
+        }
+
+        if(T_Debug)
+        {
+            std::cout << "Tiles: " << tiles.x << ", " << tiles.y << ", " << tiles.z << std::endl;
+        }
+
+        // A split-K kernel reduces into D only once every GSU slice of a tile has
+        // arrived, so a grid sized from tile counts alone would return success with
+        // D unwritten. GSU and persistent grids account for the split themselves.
+        auto tileCountOnly = [](CustomGridSize size) {
+            switch(size)
+            {
+            case CustomGridSize::One:
+            case CustomGridSize::TilesX:
+            case CustomGridSize::TilesY:
+            case CustomGridSize::Batch:
+            case CustomGridSize::TilesXY:
+            case CustomGridSize::TilesXYBatch:
+                return true;
+            default:
+                return false;
+            }
+        };
+        if(gsu > 1 && tileCountOnly(customKernel.grid.x) && tileCountOnly(customKernel.grid.y)
+           && tileCountOnly(customKernel.grid.z))
+            throw std::runtime_error(concatenate("Solution ",
+                                                 kernelName,
+                                                 " runs with GSU ",
+                                                 gsu,
+                                                 " but its custom-kernel grid [",
+                                                 customKernel.grid.x,
+                                                 ", ",
+                                                 customKernel.grid.y,
+                                                 ", ",
+                                                 customKernel.grid.z,
+                                                 "] launches one GSU slice per tile"));
+
+        customCallGrid(rv,
+                       customKernel.threads,
+                       customKernel.grid,
+                       /*bands*/ 0,
+                       customKernel.args,
+                       schedule,
+                       launch);
+
+        if(T_Debug)
+        {
+            std::cout << "Num work groups: " << rv.numWorkGroups.x << ", " << rv.numWorkGroups.y << ", " << rv.numWorkGroups.z << std::endl;
+        }
+
+        rv.clusterDim = sizeMapping.clusterDim;
+
+        rv.sharedMemBytes = 0;
+
+        packCustomArgs<T_Debug>(rv,
+                                customKernel.args,
+                                CustomArgRole::Main,
+                                problem,
+                                inputs,
+                                hardware,
+                                launch,
+                                schedule);
 
         rv.codeObjectFile = codeObjectFilename.load();
         return rv;

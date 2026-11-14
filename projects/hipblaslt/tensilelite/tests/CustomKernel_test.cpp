@@ -1017,3 +1017,94 @@ TEST(CustomKernelTest, CustomCallMatchesGoldenDigest)
         call.expect(logged);
     }
 }
+
+// A post kernel's TilesBands grid launches one workgroup per (tile, band); the
+// main kernel has no bands and keeps rejecting it.
+TEST(CustomKernelTest, TilesBandsLaunchesBandsPerTile)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {});
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 768, 1024, 1024, 1024, 1024, 1.0, false, 3);
+    auto                     device = probeDevice();
+    PersistentLaunchSettings launch;
+    auto const               schedule = solution.customCallSchedule(problem, device, launch);
+    vector3<CustomGridSize>  grid{
+        CustomGridSize::TilesBands, CustomGridSize::One, CustomGridSize::One};
+
+    KernelInvocation post;
+    solution.customCallGrid(post, TensileLite::dim3(64, 1, 1), grid, 4, {}, schedule, launch);
+    EXPECT_EQ(post.workGroupSize.x, 64u);
+    EXPECT_EQ(post.numWorkGroups.x, 8u * 6u * 3u * 4u);
+    EXPECT_EQ(post.numWorkGroups.y, 1u);
+    EXPECT_EQ(post.numWorkItems.x, 64u * 8u * 6u * 3u * 4u);
+
+    EXPECT_THROW(
+        solution.customCallGrid(post, TensileLite::dim3(64, 1, 1), grid, 0, {}, schedule, launch),
+        std::runtime_error);
+    solution.customKernel.grid = grid;
+    EXPECT_THROW(solution.generateCustomCall<false>(problem, ContractionInputs(), device, launch),
+                 std::runtime_error);
+}
+
+// In Stream-K parallel reduction a post kernel's AddressC/D and strides name
+// the real C and D, while the main kernel's name the workspace partials.
+TEST(CustomKernelTest, PostRoleKeepsRealCAndD)
+{
+    using Role = ContractionSolution::CustomArgRole;
+    using S    = CustomArgSemantic;
+    using T    = CustomArgType;
+
+    ContractionSolution      solution;
+    PersistentLaunchSettings launch;
+    configureProbeKernel(solution, {});
+    configureStreamK(solution, launch);
+    launch.grid      = 128;
+    launch.reduction = origami::reduction_t::parallel;
+    // ldc > M, so the problem strides differ from the packed workspace strides.
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 768, 512, 1024, 512, 1536, 1.0, false, 2);
+    auto device = probeDevice();
+    auto inputs = representativeInputs();
+
+    std::vector<CustomArgDefinition> const args{
+        {T::address, S::AddressC},
+        {T::address, S::AddressD},
+        {T::uint32, S::StrideC0},
+        {T::uint32, S::StrideC1},
+        {T::uint32, S::StrideD0},
+        {T::uint32, S::StrideD1},
+        {T::address, S::AddressWorkspace},
+    };
+    auto const schedule = solution.customCallSchedule(problem, device, launch);
+    auto       pack     = [&](Role role) {
+        KernelInvocation rv;
+        solution.customCallGrid(rv,
+                                solution.customKernel.threads,
+                                solution.customKernel.grid,
+                                0,
+                                args,
+                                schedule,
+                                launch);
+        solution.packCustomArgs<false>(rv, args, role, problem, inputs, device, launch, schedule);
+        return rv;
+    };
+
+    auto const post = pack(Role::Post);
+    EXPECT_EQ(namedArg<void*>(post, "AddressC"), inputs.c);
+    EXPECT_EQ(namedArg<void*>(post, "AddressD"), inputs.d);
+    EXPECT_EQ(namedArg<uint32_t>(post, "StrideC0"), problem.c().strides()[1]);
+    EXPECT_EQ(namedArg<uint32_t>(post, "StrideC1"), problem.c().strides()[2]);
+    EXPECT_EQ(namedArg<uint32_t>(post, "StrideD0"), problem.d().strides()[1]);
+    EXPECT_EQ(namedArg<uint32_t>(post, "StrideD1"), problem.d().strides()[2]);
+    EXPECT_EQ(namedArg<void*>(post, "AddressWorkspace"), inputWs);
+
+    auto const main = pack(Role::Main);
+    EXPECT_EQ(namedArg<void*>(main, "AddressC"), inputWs);
+    EXPECT_EQ(namedArg<void*>(main, "AddressD"), inputWs);
+    EXPECT_EQ(namedArg<uint32_t>(main, "StrideC0"), 1024u);
+    EXPECT_EQ(namedArg<uint32_t>(main, "StrideC1"), 1024u * 768u);
+    EXPECT_EQ(namedArg<uint32_t>(main, "StrideD0"), 1024u);
+    EXPECT_EQ(namedArg<uint32_t>(main, "StrideD1"), 1024u * 768u);
+    EXPECT_EQ(namedArg<void*>(main, "AddressWorkspace"), inputWs);
+}
