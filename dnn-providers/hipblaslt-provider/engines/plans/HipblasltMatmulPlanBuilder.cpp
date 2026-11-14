@@ -194,6 +194,28 @@ void checkNodeAttrsTensors(
             "Matmul node input and output data types must be fp32, fp16 or bf16");
     }
 
+    // hipBLASLt documents only equal-typed A and B for the plain matmul tuples.
+    if(aType != bType)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Matmul: A and B data types must be equal");
+    }
+
+    // The plan writes the activation output, so its type is the output type.
+    if(activAttr != nullptr)
+    {
+        const auto& activOutType
+            = hipblaslt_utils::findTensorAttributes(tensorMap, activAttr->out_0_tensor_uid())
+                  .dataType();
+        if(std::find(VALID_DATA_TYPES.begin(), VALID_DATA_TYPES.end(), activOutType)
+           == VALID_DATA_TYPES.end())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Activation node output data type must be fp32, fp16 or bf16");
+        }
+    }
+
     // Check the connections between the matmul and bias/activation nodes
     if(biasAttr != nullptr)
     {
@@ -357,6 +379,46 @@ void checkVirtualTensors(
     }
 }
 
+// The plan reads A, B, the bias input and the final output from device buffers, so a
+// compile-time scalar on any of them has no buffer to resolve.
+void checkNoCompileTimeScalars(
+    const hipdnn_flatbuffers_sdk::data_objects::MatmulAttributes& matmulAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const auto rejectScalar = [&tensorMap](int64_t uid, const char* name) {
+        if(hipblaslt_utils::findTensorAttributes(tensorMap, uid).hasCompileTimeConstant())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Matmul: ") + name
+                    + " tensor must not be a compile-time scalar (it needs a device buffer)");
+        }
+    };
+
+    rejectScalar(matmulAttr.a_tensor_uid(), "A");
+    rejectScalar(matmulAttr.b_tensor_uid(), "B");
+
+    if(biasAttr != nullptr)
+    {
+        rejectScalar(biasOperandUid(*biasAttr, matmulAttr.c_tensor_uid()), "bias input");
+        rejectScalar(activAttr != nullptr ? activAttr->out_0_tensor_uid()
+                                          : biasAttr->out_0_tensor_uid(),
+                     activAttr != nullptr ? "activation output" : "bias output");
+    }
+    else if(activAttr != nullptr)
+    {
+        rejectScalar(activAttr->out_0_tensor_uid(), "activation output");
+    }
+    else
+    {
+        rejectScalar(matmulAttr.c_tensor_uid(), "matmul output");
+    }
+}
+
 } // namespace
 
 bool HipblasltMatmulPlanBuilder::isApplicable(
@@ -375,6 +437,11 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                             std::get<1>(nodeAttrs),
                             std::get<2>(nodeAttrs),
                             opGraph.getTensorMap());
+
+        checkNoCompileTimeScalars(std::get<0>(nodeAttrs),
+                                  std::get<1>(nodeAttrs),
+                                  std::get<2>(nodeAttrs),
+                                  opGraph.getTensorMap());
 
         checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
 

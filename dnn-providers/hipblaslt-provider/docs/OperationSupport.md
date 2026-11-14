@@ -13,10 +13,11 @@ hipBLASLt is **column-major**; hipDNN's output is **row-major**. To produce `C =
 ### Stand-alone Matmul (GEMM)
 
 hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix multiplication) operations with the following features and constraints:
-- Input and output data types: FP32, FP16, BF16
+- Input and output data types: FP32, FP16, BF16. A and B must have the same data type. With a fused activation, the activation output must be FP32, FP16 or BF16
 - Compute data type: FP32
 - Transposed inputs: supported
-- Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1)
+- Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1). hipBLASLt takes one flattened batch stride, so the batch axes of each tensor must nest contiguously (each axis with extent above one strides by the inner batch stride times the extents inside it). In a fused graph, the final output must have the same batch dimensions and batch stride as the matmul output
+- Compile-time scalars: A, B, the bias input and the output each need a device buffer, so none of them may be a compile-time scalar
 - Tensor roles: the plan writes only the final output, so every fused intermediate (the matmul output when a bias or activation follows, the bias output when an activation follows) must be `virtual`; all other tensors must not be. A graph with any other layout is declined
 - Bias: a bias tensor must have packed strides (hipBLASLt reads it as a vector; strides of size-1 dimensions are ignored) and data type FP32, FP16 or BF16, independent of the matmul output type
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).

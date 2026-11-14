@@ -344,7 +344,7 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextValid)
     hipdnnEnginePluginHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnEnginePluginCreateImpl(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t const opGraph
         = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
@@ -364,5 +364,33 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextValid)
 
     EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContextImpl(handle, executionContext),
               HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextFailsForUnservedGraph)
+{
+    SKIP_IF_NO_DEVICES();
+    hipdnnEnginePluginHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnEnginePluginCreateImpl(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    // No hipBLASLt plan builder serves batchnorm, so no context is created.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto serializedGraph = builder.Release();
+    hipdnnPluginConstData_t const opGraph
+        = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
+
+    auto engineConfigBuilder
+        = hipdnn_test_sdk::utilities::createValidEngineConfig(HIPBLASLT_ENGINE_ID);
+    auto serializedEngineConfig = engineConfigBuilder.Release();
+    hipdnnPluginConstData_t const engineConfig
+        = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
+
+    hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+    auto status = hipdnnEnginePluginCreateExecutionContextImpl(
+        handle, &engineConfig, &opGraph, &executionContext);
+
+    EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(executionContext, nullptr);
+
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }

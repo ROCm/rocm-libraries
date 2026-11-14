@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <limits>
@@ -27,6 +28,30 @@ inline int64_t getBatchCount(const std::vector<int64_t>& dims)
                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                          "Failed to calculate batch count:expected at least 2 dimensions");
     return std::accumulate(dims.begin(), dims.end() - 2, int64_t{1}, std::multiplies<>());
+}
+
+// hipBLASLt flattens all batch dimensions into one count and takes a single batch
+// stride, read from the innermost batch axis. That addresses the same elements as the
+// tensor only when the batch axes nest contiguously: each axis with extent above one
+// must stride by the inner axis stride times the extents inside it. A singleton
+// innermost axis can carry an arbitrary stride, which this check also rejects.
+void requireUniformBatchStride(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
+{
+    const auto& dims = t.dims();
+    const auto& strides = t.strides();
+    const size_t batchRank = dims.size() - 2;
+
+    int64_t expected = strides[batchRank - 1];
+    for(size_t i = batchRank - 1; i-- > 0;)
+    {
+        expected *= dims[i + 1];
+        PLUGIN_THROW_IF_TRUE(
+            dims[i] > 1 && strides[i] != expected,
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Matmul: batch strides of tensor " + t.name()
+                + " are not uniform; hipBLASLt supports one flattened batch stride");
+    }
 }
 } // namespace
 
@@ -92,20 +117,18 @@ MatmulParams::MatmulParams(
     _matrixLayoutA = HipblasltMatrixLayout(tA);
     _matrixLayoutB = HipblasltMatrixLayout(tB);
 
+    // The plan writes the final output of the fused chain; the matmul output is a virtual
+    // intermediate in a fused graph.
+    auto tFinal = tC;
     if(activAttr != nullptr)
     {
-        _matrixLayoutC = HipblasltMatrixLayout(
-            hipblaslt_utils::findTensorAttributes(tensorMap, activAttr->out_0_tensor_uid()));
+        tFinal = hipblaslt_utils::findTensorAttributes(tensorMap, activAttr->out_0_tensor_uid());
     }
     else if(biasAttr != nullptr)
     {
-        _matrixLayoutC = HipblasltMatrixLayout(
-            hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid()));
+        tFinal = hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid());
     }
-    else
-    {
-        _matrixLayoutC = HipblasltMatrixLayout(tC);
-    }
+    _matrixLayoutC = HipblasltMatrixLayout(tFinal);
 
     const auto& aDims = tA.dims();
     const auto& bDims = tB.dims();
@@ -164,14 +187,15 @@ MatmulParams::MatmulParams(
 
     if(aDims.size() > 2)
     {
-        setBatchInfo(tA, tB, tC);
+        setBatchInfo(tA, tB, tC, tFinal);
     }
 }
 
 void MatmulParams::setBatchInfo(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC)
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tFinal)
 {
     // Batch support: we flatten all batch dimensions (all except last two) into a single batch count.
     // hipBLASLt uses a single strided batch offset, so we can only support uniform batch strides.
@@ -179,7 +203,8 @@ void MatmulParams::setBatchInfo(
     // Not supported: [3, 1, M, K] x [1, 3, K, N] - would require non-uniform stride pattern for broadcasting.
     const int64_t aBatch = getBatchCount(tA.dims());
     const int64_t bBatch = getBatchCount(tB.dims());
-    const int64_t cBatch = getBatchCount(tC.dims());
+    const auto cDims = tC.dims();
+    const int64_t cBatch = getBatchCount(cDims);
 
     if(aBatch != bBatch && aBatch != 1 && bBatch != 1)
     {
@@ -199,6 +224,29 @@ void MatmulParams::setBatchInfo(
 
     if(cBatch > 1)
     {
+        // The layout takes its batch count and offset from the matmul output tensor but its
+        // strides from the final output, so the two must agree on both.
+        const auto finalDims = tFinal.dims();
+        PLUGIN_THROW_IF_TRUE(finalDims.size() != cDims.size()
+                                 || !std::equal(cDims.begin(), cDims.end() - 2, finalDims.begin()),
+                             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                             "Matmul: final output batch dimensions must equal the matmul output "
+                             "batch dimensions");
+        const size_t batchAxis = cDims.size() - 3;
+        PLUGIN_THROW_IF_TRUE(tFinal.strides()[batchAxis] != tC.strides()[batchAxis],
+                             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                             "Matmul: final output batch stride must equal the matmul output "
+                             "batch stride");
+        if(aBatch > 1)
+        {
+            requireUniformBatchStride(tA);
+        }
+        if(bBatch > 1)
+        {
+            requireUniformBatchStride(tB);
+        }
+        requireUniformBatchStride(tFinal);
+
         _matrixLayoutA.setBatchCount(cBatch);
         _matrixLayoutB.setBatchCount(cBatch);
         _matrixLayoutC.setBatchCount(cBatch);
