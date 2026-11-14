@@ -131,6 +131,11 @@ struct FmhaKernelKey
             << "_mq" << algorithm.max_seq_len_q << "_aq" << algorithm.hdim_q_alignment << "_av"
             << algorithm.hdim_v_alignment << "_r" << algorithm.selection_rank << "_rc"
             << signature.receipt;
+
+        // Guarded by has_logits_soft_cap so identifiers without one stay byte-identical.
+        if(signature.has_logits_soft_cap)
+            oss << "_sc";
+
         return oss.str();
     }
 
