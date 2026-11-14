@@ -5,8 +5,18 @@
 
 #include "hipdnn-gpu-ref/detail/GpuRefHipError.hpp"
 
+#include <cstdint>
+#include <functional>
+#include <numeric>
+#include <vector>
+
 namespace hipdnn_gpu_ref::detail
 {
+
+inline int64_t elementCount(const std::vector<int64_t>& dims)
+{
+    return std::accumulate(dims.begin(), dims.end(), int64_t{1}, std::multiplies<>());
+}
 
 inline void assertValidGridSize(int64_t xGridSize, int64_t yGridSize, int64_t zGridSize)
 {

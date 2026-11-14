@@ -47,6 +47,7 @@ namespace
 
 // Fixed seeds so every run sees the same inputs.
 constexpr unsigned int SEED_Q = 42;
+
 constexpr unsigned int SEED_K = 43;
 constexpr unsigned int SEED_V = 44;
 
@@ -772,7 +773,7 @@ TEST(TestGpuSdpaRaggedFwdFp8, ThrowsOnPerQueryHeadQDescaleUnderGqa)
                  std::invalid_argument);
 }
 
-// Checks the device fp8 decode table against the host fp8_e4m3 for all 256 byte values. With one
+// Checks the GPU reference fp8 decode against the host fp8_e4m3 for all 256 byte values. With one
 // key, the softmax weight is exactly 1, so the fp32 output is the decoded V. Only -0 can't be told
 // apart, because the P@V sum starts at +0.
 TEST(TestGpuSdpaRaggedFwdFp8, DecodesEveryFp8ValueExactly)

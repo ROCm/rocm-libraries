@@ -8,7 +8,12 @@
 
 #pragma once
 
+#include <hip/hip_fp4.h>
+#include <hip/hip_fp6.h>
+#include <hip/hip_fp8.h>
+
 #include "GpuRefBatchnormArgs.h"
+#include "GpuRefBlockScaleArgs.h"
 #include "GpuRefCommonArgs.h"
 #include "GpuRefConvArgs.h"
 #include "GpuRefLayernormArgs.h"
@@ -220,6 +225,31 @@ __device__ inline float roundToFp8(float x, int format)
     default:
         return x;
     }
+}
+
+template <typename T>
+__device__ inline T roundScaleUp(double value);
+
+template <>
+__device__ inline float roundScaleUp<float>(double value)
+{
+    float rounded = static_cast<float>(value);
+    if(static_cast<double>(rounded) < value)
+    {
+        rounded = nextafterf(rounded, __builtin_inff());
+    }
+    return rounded;
+}
+
+template <>
+__device__ inline __hip_fp8_e8m0 roundScaleUp<__hip_fp8_e8m0>(double value)
+{
+    __hip_fp8_e8m0 rounded(value);
+    if(static_cast<double>(static_cast<float>(rounded)) < value && rounded.__x < 0xFEu)
+    {
+        ++rounded.__x;
+    }
+    return rounded;
 }
 
 // --- safeConvert ---

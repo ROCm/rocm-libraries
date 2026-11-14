@@ -4,10 +4,21 @@
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 
 #include "GpuRefKernelSources.hpp"
+#include <array>
+#include <cstdlib>
+#include <filesystem>
 #include <hip/hiprtc.h>
 #include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace hipdnn_gpu_ref::detail
 {
@@ -21,6 +32,93 @@ void throwOnRtcError(hiprtcResult err, const char* call)
     {
         throw std::runtime_error(std::string(call) + " failed: " + hiprtcGetErrorString(err));
     }
+}
+
+bool hasLowPrecisionHeaders(const std::filesystem::path& includeDir)
+{
+    return std::filesystem::exists(includeDir / "hip" / "hip_fp4.h")
+           && std::filesystem::exists(includeDir / "hip" / "hip_fp6.h")
+           && std::filesystem::exists(includeDir / "hip" / "hip_fp8.h");
+}
+
+std::optional<std::filesystem::path> environmentPath(const char* variable)
+{
+#if defined(_WIN32)
+    char* value = nullptr;
+    size_t length = 0;
+    if(_dupenv_s(&value, &length, variable) != 0)
+    {
+        throw std::runtime_error(std::string("Failed to read environment variable ") + variable);
+    }
+    const std::unique_ptr<char, decltype(&std::free)> ownedValue(value, &std::free);
+    if(value == nullptr)
+    {
+        return std::nullopt;
+    }
+    return std::filesystem::path(value);
+#else
+    if(const char* value = std::getenv(variable))
+    {
+        return std::filesystem::path(value);
+    }
+    return std::nullopt;
+#endif
+}
+
+std::filesystem::path hipIncludeDir()
+{
+    for(const char* variable : {"HIP_PATH", "ROCM_PATH"})
+    {
+        if(const auto prefix = environmentPath(variable))
+        {
+            auto includeDir = *prefix / "include";
+            if(hasLowPrecisionHeaders(includeDir))
+            {
+                return includeDir;
+            }
+        }
+    }
+
+#if defined(_WIN32)
+    HMODULE module = nullptr;
+    if(GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                              | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<LPCSTR>(&hiprtcCompileProgram),
+                          &module)
+       != 0)
+    {
+        std::array<char, 32768> libraryPath{};
+        const auto length = GetModuleFileNameA(
+            module, libraryPath.data(), static_cast<DWORD>(libraryPath.size()));
+        if(length > 0 && length < libraryPath.size())
+        {
+            auto includeDir = std::filesystem::path(
+                                  std::string(libraryPath.data(), static_cast<size_t>(length)))
+                                  .parent_path()
+                                  .parent_path()
+                              / "include";
+            if(hasLowPrecisionHeaders(includeDir))
+            {
+                return includeDir;
+            }
+        }
+    }
+#else
+    Dl_info libraryInfo{};
+    if(dladdr(reinterpret_cast<const void*>(&hiprtcCompileProgram), &libraryInfo) != 0
+       && libraryInfo.dli_fname != nullptr)
+    {
+        auto includeDir
+            = std::filesystem::path(libraryInfo.dli_fname).parent_path().parent_path() / "include";
+        if(hasLowPrecisionHeaders(includeDir))
+        {
+            return includeDir;
+        }
+    }
+#endif
+
+    throw std::runtime_error(
+        "Unable to locate HIP FP4/FP6/FP8 headers next to hiprtc or via HIP_PATH/ROCM_PATH.");
 }
 
 } // namespace
@@ -62,13 +160,14 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
                                           headersData.data(),
                                           includeNames.data()));
 
-    // Build compile options from defines vector
+    const auto includeOption = std::string("-I") + hipIncludeDir().string();
     std::vector<const char*> optPtrs;
-    optPtrs.reserve(compileDefines.size());
-    for(const auto& def : compileDefines)
+    optPtrs.reserve(compileDefines.size() + 1);
+    for(const auto& define : compileDefines)
     {
-        optPtrs.push_back(def.c_str());
+        optPtrs.push_back(define.c_str());
     }
+    optPtrs.push_back(includeOption.c_str());
 
     auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
     if(result != HIPRTC_SUCCESS)
