@@ -3519,7 +3519,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           TiA,
                                           (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
                                                                              : stride_a[i],
-                                          1);
+                                          1,
+                                          -1,
+                                          batchCount);
                 }
             }
         }
@@ -3632,7 +3634,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           TiB,
                                           (do_swizzle_b && stride_b[i] != 0) ? B_row[i] * B_col[i]
                                                                              : stride_b[i],
-                                          1);
+                                          1,
+                                          -1,
+                                          batchCount);
                 }
             }
         }
@@ -3805,7 +3809,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
                || arg.scaleA == hipblaslt_scaling_format::Vector)
             {
-                if(arg.norm_check)
+                // MAF1.0 (as mblas-bench): a scalar or vector scale factor of 0.5.
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleA[i].buf(), size_scaleAVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
                 else
@@ -3816,7 +3823,10 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleB == hipblaslt_scaling_format::Scalar
                || arg.scaleB == hipblaslt_scaling_format::Vector)
             {
-                if(arg.norm_check)
+                // MAF1.0 (as mblas-bench): a scalar or vector scale factor of 0.5.
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleB[i].buf(), size_scaleBVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
                 else
@@ -4216,7 +4226,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       ldc[i],
                                       To,
                                       stride_c[i],
-                                      1);
+                                      1,
+                                      -1,
+                                      batchCount);
                 // broadcast first block
                 CHECK_HIP_ERROR(broadcast(dA[batchCount], block_count));
                 CHECK_HIP_ERROR(broadcast(dB[batchCount], block_count));
@@ -4302,7 +4314,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.norm_check)
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleA[i].buf(), size_scaleAVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
                 else
@@ -4312,7 +4326,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.scaleB == hipblaslt_scaling_format::Scalar)
             {
-                if(arg.norm_check)
+                if(arg.initialization == hipblaslt_initialization::maf1_0)
+                    hipblaslt_init_constant(hScaleB[i].buf(), size_scaleBVec[i], Talpha, 0.5);
+                else if(arg.norm_check)
                     hipblaslt_init_small(
                         hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
                 else
