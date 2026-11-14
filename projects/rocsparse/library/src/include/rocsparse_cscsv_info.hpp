@@ -36,7 +36,7 @@ struct _rocsparse_cscsv_info : rocsparse::trm_data_t
 {
 protected:
     rocsparse::singular_info_t m_singularity_numeric_exact{};
-    // Per fill mode, indexed by fill_index: number of unknowns each unknown depends on, and the
+    // Per fill mode, indexed by the fill mode: number of unknowns each unknown depends on, and the
     // tasks of the solve (column and first entry of each task).
     void*    m_dependency_count[2]{};
     int64_t  m_num_tasks[2]{};
@@ -50,10 +50,6 @@ protected:
 
     static_assert(rocsparse_fill_mode_lower == 0 && rocsparse_fill_mode_upper == 1,
                   "the fill mode indexes the per fill mode arrays");
-    static int fill_index(rocsparse_fill_mode fill_mode)
-    {
-        return static_cast<int>(fill_mode);
-    }
 
 public:
     _rocsparse_cscsv_info()                             = default;
@@ -90,27 +86,27 @@ public:
 
     void* get_dependency_count(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_dependency_count[fill_index(fill_mode)];
+        return this->m_dependency_count[fill_mode];
     }
 
     int64_t get_num_tasks(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_num_tasks[fill_index(fill_mode)];
+        return this->m_num_tasks[fill_mode];
     }
 
     uint32_t get_num_lanes(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_num_lanes[fill_index(fill_mode)];
+        return this->m_num_lanes[fill_mode];
     }
 
     void* get_task_col(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_task_col[fill_index(fill_mode)];
+        return this->m_task_col[fill_mode];
     }
 
     void* get_task_begin(rocsparse_fill_mode fill_mode) const
     {
-        return this->m_task_begin[fill_index(fill_mode)];
+        return this->m_task_begin[fill_mode];
     }
 
     rocsparse_csrsv_info get_csrsv_info()

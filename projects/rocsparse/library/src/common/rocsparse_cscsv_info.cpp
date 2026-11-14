@@ -26,40 +26,28 @@
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_utility.hpp"
 
-namespace
+namespace rocsparse
 {
-    // Frees an array of the analysis, after the work that may still use it.
-    void free_analysis_array(void** p)
+    // Replaces *p by an array of size bytes, allocated on the stream.
+    static rocsparse_status reallocate_async(void** p, size_t size, hipStream_t stream)
     {
-        if(*p != nullptr)
-        {
-            // hipFree does not wait for pending work on hipMallocAsync memory since HIP 7.0.
-            WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
-            WARNING_IF_HIP_ERROR(rocsparse_hipFree(*p));
-            *p = nullptr;
-        }
-    }
-
-    // Allocates dest and copies size bytes of src into it.
-    void duplicate_analysis_array(void** dest, const void* src, size_t size)
-    {
-        if(src != nullptr && size > 0)
-        {
-            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(dest, size));
-            THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(*dest, src, size, hipMemcpyDeviceToDevice));
-        }
-    }
-
-    rocsparse_status reallocate_async(void** p, size_t size, hipStream_t stream)
-    {
-        if(*p != nullptr)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(*p, stream));
-            *p = nullptr;
-        }
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(*p, stream));
+        *p = nullptr;
         if(size > 0)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(p, size, stream));
+        }
+        return rocsparse_status_success;
+    }
+
+    // Replaces *dest by a copy of the size bytes of src, on the stream.
+    static rocsparse_status
+        duplicate_async(void** dest, const void* src, size_t size, hipStream_t stream)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::reallocate_async(dest, size, stream));
+        if(size > 0)
+        {
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(*dest, src, size, hipMemcpyDeviceToDevice, stream));
         }
         return rocsparse_status_success;
     }
@@ -67,12 +55,13 @@ namespace
 
 _rocsparse_cscsv_info::~_rocsparse_cscsv_info()
 {
+    // hipFree does not wait for pending work on hipMallocAsync memory since HIP 7.0.
+    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
     for(auto fill_mode : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
     {
-        const int f = fill_index(fill_mode);
-        free_analysis_array(&this->m_dependency_count[f]);
-        free_analysis_array(&this->m_task_col[f]);
-        free_analysis_array(&this->m_task_begin[f]);
+        WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count[fill_mode]));
+        WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_task_col[fill_mode]));
+        WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_task_begin[fill_mode]));
     }
 }
 
@@ -82,27 +71,31 @@ void _rocsparse_cscsv_info::copy(const _rocsparse_cscsv_info* that, hipStream_t 
     this->m_csc_analysis = that->m_csc_analysis;
     for(auto fill_mode : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
     {
-        const int f          = fill_index(fill_mode);
-        this->m_num_tasks[f] = that->m_num_tasks[f];
-        this->m_num_lanes[f] = that->m_num_lanes[f];
-        free_analysis_array(&this->m_dependency_count[f]);
-        free_analysis_array(&this->m_task_col[f]);
-        free_analysis_array(&this->m_task_begin[f]);
-
         const rocsparse::trm_info_t* trm = that->get(rocsparse_operation_none, fill_mode);
-        if(trm == nullptr)
-        {
-            continue;
-        }
-        const size_t sizeof_I = rocsparse::indextype_sizeof(trm->get_offset_indextype());
-        const size_t sizeof_J = rocsparse::indextype_sizeof(trm->get_index_indextype());
-        duplicate_analysis_array(
-            &this->m_dependency_count[f], that->m_dependency_count[f], sizeof_J * trm->get_m());
-        duplicate_analysis_array(
-            &this->m_task_col[f], that->m_task_col[f], sizeof_J * that->m_num_tasks[f]);
-        duplicate_analysis_array(
-            &this->m_task_begin[f], that->m_task_begin[f], sizeof_I * that->m_num_tasks[f]);
+
+        const size_t m         = (trm != nullptr) ? trm->get_m() : 0;
+        const size_t num_tasks = (trm != nullptr) ? that->m_num_tasks[fill_mode] : 0;
+        const size_t sizeof_I
+            = (trm != nullptr) ? rocsparse::indextype_sizeof(trm->get_offset_indextype()) : 0;
+        const size_t sizeof_J
+            = (trm != nullptr) ? rocsparse::indextype_sizeof(trm->get_index_indextype()) : 0;
+
+        this->m_num_tasks[fill_mode] = that->m_num_tasks[fill_mode];
+        this->m_num_lanes[fill_mode] = that->m_num_lanes[fill_mode];
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::duplicate_async(&this->m_dependency_count[fill_mode],
+                                                            that->m_dependency_count[fill_mode],
+                                                            sizeof_J * m,
+                                                            stream));
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::duplicate_async(&this->m_task_col[fill_mode],
+                                                            that->m_task_col[fill_mode],
+                                                            sizeof_J * num_tasks,
+                                                            stream));
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::duplicate_async(&this->m_task_begin[fill_mode],
+                                                            that->m_task_begin[fill_mode],
+                                                            sizeof_I * num_tasks,
+                                                            stream));
     }
+    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 }
 
 rocsparse_status _rocsparse_cscsv_info::allocate_dependency_count(rocsparse_fill_mode fill_mode,
@@ -110,7 +103,7 @@ rocsparse_status _rocsparse_cscsv_info::allocate_dependency_count(rocsparse_fill
                                                                   hipStream_t         stream)
 {
     RETURN_IF_ROCSPARSE_ERROR(
-        reallocate_async(&this->m_dependency_count[fill_index(fill_mode)], size, stream));
+        rocsparse::reallocate_async(&this->m_dependency_count[fill_mode], size, stream));
     return rocsparse_status_success;
 }
 
@@ -121,13 +114,12 @@ rocsparse_status _rocsparse_cscsv_info::allocate_tasks(rocsparse_fill_mode fill_
                                                        size_t              sizeof_begin,
                                                        hipStream_t         stream)
 {
-    const int f          = fill_index(fill_mode);
-    this->m_num_tasks[f] = num_tasks;
-    this->m_num_lanes[f] = num_lanes;
+    this->m_num_tasks[fill_mode] = num_tasks;
+    this->m_num_lanes[fill_mode] = num_lanes;
     RETURN_IF_ROCSPARSE_ERROR(
-        reallocate_async(&this->m_task_col[f], sizeof_col * num_tasks, stream));
-    RETURN_IF_ROCSPARSE_ERROR(
-        reallocate_async(&this->m_task_begin[f], sizeof_begin * num_tasks, stream));
+        rocsparse::reallocate_async(&this->m_task_col[fill_mode], sizeof_col * num_tasks, stream));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::reallocate_async(
+        &this->m_task_begin[fill_mode], sizeof_begin * num_tasks, stream));
     return rocsparse_status_success;
 }
 
