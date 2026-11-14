@@ -12,7 +12,8 @@
 //   2. SchedulingKnobPolicy::propose() when main-loop wmma and ds_load counts
 //      are both > 0
 //   3. today's static defaults (HW / CDNA5 / Rule3=100 /
-//      ReduceClusterBarrierPerLoop=off) when the main loop is missing or
+//      ReduceClusterBarrierPerLoop=off / TensorLoadWmmaSpace=0 /
+//      TensorLoadDsLoadGapCycles=64) when the main loop is missing or
 //      degenerate (either count == 0)
 //
 // HeuristicSchedulingKnobPolicy is the current owner-tunable formula. A future
@@ -37,6 +38,19 @@ inline constexpr std::string_view kMainLoopGroupName = "loopWithPrefetch";
 
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
+
+/// Historical tensor-load spacing when the main loop is missing or degenerate.
+/// Space 0 leaves the exclusive-barrier thresholds unshifted. Gap 64 is the
+/// long-standing extra gap between an after-barrier and the before-side ds_loads.
+inline constexpr int kStaticDefaultTensorLoadWmmaSpace = 0;
+inline constexpr int kStaticDefaultTensorLoadDsLoadGapCycles = 64;
+
+/// Policy values when both main-loop counts are positive. Chosen on the
+/// K>=1024 OOB winners: space 6 with gap 64 beat space 0 by 1.66% geomean,
+/// and no case was more than 5% slower. Kernel features did not hold a
+/// stabler per-kernel split.
+inline constexpr int kPolicyTensorLoadWmmaSpace = 6;
+inline constexpr int kPolicyTensorLoadDsLoadGapCycles = 64;
 
 /// Static default when the main loop is missing or degenerate. The policy turns
 /// this on when sumWmmaLatencyCycles > 2500 and that sum covers at least 5
@@ -85,12 +99,21 @@ struct ResolvedSchedulingKnobs {
     /// Extra cycle slack after the critical ds_load returns and before its first matrix consumer.
     int queueFillSafetyMarginCycles = 0;
     SchedulingKnobSource queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
+    /// Exclusive after/before barrier separation, in WMMA windows. 0 leaves the
+    /// thresholds unshifted.
+    int tensorLoadWmmaSpace = kStaticDefaultTensorLoadWmmaSpace;
+    SchedulingKnobSource tensorLoadWmmaSpaceSource = SchedulingKnobSource::StaticDefault;
+    /// Extra cycles between an after-barrier and the before-side ds_loads. 0 disables.
+    int tensorLoadDsLoadGapCycles = kStaticDefaultTensorLoadDsLoadGapCycles;
+    SchedulingKnobSource tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::StaticDefault;
 };
 
 /// Per-knob user overrides. nullopt = unset (eligible for policy / static).
 struct SchedulingKnobOverrides {
     std::optional<int> clusterBarrierRule3SignalLeadCycles;
     std::optional<bool> reduceClusterBarrierPerLoop;
+    std::optional<int> tensorLoadWmmaSpace;
+    std::optional<int> tensorLoadDsLoadGapCycles;
 };
 
 struct SchedulingKnobPolicy {
@@ -118,6 +141,8 @@ STINKYTOFU_EXPORT SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyA
 /// Build overrides from ModuleOptions sentinels:
 ///   ClusterBarrierRule3SignalLeadCycles < 0       → unset
 ///   ReduceClusterBarrierPerLoop < 0                  → unset (0 off, >0 on)
+///   TensorLoadWmmaSpace < 0                          → unset (0 off, >0 space)
+///   TensorLoadDsLoadGapCycles < 0                    → unset (0 off, >0 cycles)
 STINKYTOFU_EXPORT SchedulingKnobOverrides
 schedulingKnobOverridesFromModuleOptions(const StinkyAsmModule::ModuleOptions& opts);
 

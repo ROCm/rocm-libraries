@@ -31,6 +31,10 @@ ResolvedSchedulingKnobs staticSchedulingKnobDefaults(const std::array<int, 3>&) 
     out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
     out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
     out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
+    out.tensorLoadWmmaSpace = kStaticDefaultTensorLoadWmmaSpace;
+    out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::StaticDefault;
+    out.tensorLoadDsLoadGapCycles = kStaticDefaultTensorLoadDsLoadGapCycles;
+    out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::StaticDefault;
     return out;
 }
 
@@ -62,6 +66,10 @@ SchedulingKnobOverrides schedulingKnobOverridesFromModuleOptions(
     // One handshake per loop: <0 unset; 0 off; >0 on.
     if (opts.ReduceClusterBarrierPerLoop >= 0)
         out.reduceClusterBarrierPerLoop = opts.ReduceClusterBarrierPerLoop != 0;
+    // Space and gap: <0 unset. 0 is an explicit off, not the unset sentinel.
+    if (opts.TensorLoadWmmaSpace >= 0) out.tensorLoadWmmaSpace = opts.TensorLoadWmmaSpace;
+    if (opts.TensorLoadDsLoadGapCycles >= 0)
+        out.tensorLoadDsLoadGapCycles = opts.TensorLoadDsLoadGapCycles;
     return out;
 }
 
@@ -97,6 +105,14 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::Policy;
     out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
     out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
+
+    // One pair for every schedulable main loop. A feature split (dtype, wave
+    // tile, cluster, estimated WMMA count) did not stay ahead of this constant
+    // once single-run spikes were removed.
+    out.tensorLoadWmmaSpace = kPolicyTensorLoadWmmaSpace;
+    out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::Policy;
+    out.tensorLoadDsLoadGapCycles = kPolicyTensorLoadDsLoadGapCycles;
+    out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::Policy;
 
     return out;
 }
@@ -144,6 +160,28 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
     }
 
+    if (overrides.tensorLoadWmmaSpace.has_value()) {
+        out.tensorLoadWmmaSpace = *overrides.tensorLoadWmmaSpace;
+        out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.tensorLoadWmmaSpace = proposed.tensorLoadWmmaSpace;
+        out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::Policy;
+    } else {
+        out.tensorLoadWmmaSpace = defaults.tensorLoadWmmaSpace;
+        out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::StaticDefault;
+    }
+
+    if (overrides.tensorLoadDsLoadGapCycles.has_value()) {
+        out.tensorLoadDsLoadGapCycles = *overrides.tensorLoadDsLoadGapCycles;
+        out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::User;
+    } else if (!features.stats.degenerate()) {
+        out.tensorLoadDsLoadGapCycles = proposed.tensorLoadDsLoadGapCycles;
+        out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::Policy;
+    } else {
+        out.tensorLoadDsLoadGapCycles = defaults.tensorLoadDsLoadGapCycles;
+        out.tensorLoadDsLoadGapCyclesSource = SchedulingKnobSource::StaticDefault;
+    }
+
     return out;
 }
 
@@ -182,7 +220,11 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << " reduceClusterBarrierPerLoop=" << resolved.reduceClusterBarrierPerLoop << "("
        << schedulingKnobSourceName(resolved.reduceClusterBarrierPerLoopSource) << ")"
        << " queueFillSafetyMarginCycles=" << resolved.queueFillSafetyMarginCycles << "("
-       << schedulingKnobSourceName(resolved.queueFillSafetyMarginCyclesSource) << ")";
+       << schedulingKnobSourceName(resolved.queueFillSafetyMarginCyclesSource) << ")"
+       << " tensorLoadWmmaSpace=" << resolved.tensorLoadWmmaSpace << "("
+       << schedulingKnobSourceName(resolved.tensorLoadWmmaSpaceSource) << ")"
+       << " tensorLoadDsLoadGapCycles=" << resolved.tensorLoadDsLoadGapCycles << "("
+       << schedulingKnobSourceName(resolved.tensorLoadDsLoadGapCyclesSource) << ")";
     os << "\n";
 }
 
