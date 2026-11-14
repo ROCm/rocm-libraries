@@ -100,7 +100,7 @@ namespace
         std::vector<int32_t> modes; // listed order
         std::vector<int64_t> lengths; // listed order
         std::vector<int64_t> strides; // listed order, in elements
-        int64_t              elements = 1;
+        int64_t              elements   = 1;
         int64_t              span       = 1; // positions from the first element to the last
         int                  components = kReal;
         std::vector<float>   data; // host values; empty for the output D
@@ -156,17 +156,17 @@ namespace
     // A, B and C, the added tensor D and the result E. Here they are a, b, third, c and d.
     struct Contraction
     {
-        std::complex<float>   alpha;
-        std::complex<float>   beta;
-        Tensor                a;
-        Tensor                b;
-        std::optional<Tensor> third; // present: trinary contraction
-        std::optional<Tensor> c; // absent: scale contraction
-        Tensor                d;
-        bool                  inPlace = false; // C and D are one buffer
+        std::complex<float>    alpha;
+        std::complex<float>    beta;
+        Tensor                 a;
+        Tensor                 b;
+        std::optional<Tensor>  third; // present: trinary contraction
+        std::optional<Tensor>  c; // absent: scale contraction
+        Tensor                 d;
+        bool                   inPlace = false; // C and D are one buffer
         std::optional<int64_t> cOffset; // C starts this many elements after D, in D's buffer
-        bool                  negateC = false; // C is read through HIPTENSOR_OP_NEG
-        hiptensorAlgo_t       algo    = HIPTENSOR_ALGO_DEFAULT;
+        bool                   negateC = false; // C is read through HIPTENSOR_OP_NEG
+        hiptensorAlgo_t        algo    = HIPTENSOR_ALGO_DEFAULT;
     };
 
     int64_t offset(Tensor const& t, ModeMap const& idx)
