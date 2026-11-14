@@ -1219,7 +1219,7 @@ TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
             return kernel.getStringMetadata("atom") == "mfma16_f16"
                    && kernel.getIntMetadata("rs") != 0 && kernel.getIntMetadata("t") == 1
                    && kernel.getIntMetadata("stride") == 1 && kernel.getIntMetadata("cb") == 4
-                   && kernel.getIntMetadata("wp") == 1;
+                   && kernel.getIntMetadata("wp") == 2;
         });
         ASSERT_NE(base, kernels.end());
         EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));

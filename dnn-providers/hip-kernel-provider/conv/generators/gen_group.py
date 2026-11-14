@@ -305,6 +305,12 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             for t, r, s in FILTERS:
                 for st in (1,) if tag == "fwd" else (1, 2):
                     for th, wp, cb, depth in RS_TILES:
+                        # Two row segments and a 16-byte slot within 64 KB of LDS.
+                        vec = 16 // EB[dtype]
+                        kws = s if tag == "fwd" else -(-s // st)
+                        rows = 2 * (16 * wp + kws - 1) * (16 * cb + vec) + vec
+                        if rows * EB[dtype] > 64 * 1024:
+                            continue
                         c = dict(
                             atom=atom,
                             t=t,
