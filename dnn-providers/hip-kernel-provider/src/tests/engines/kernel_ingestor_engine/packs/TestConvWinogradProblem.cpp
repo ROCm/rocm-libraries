@@ -1308,6 +1308,46 @@ TEST(TestConvWinogradPlan, CooperativeSixteenBinGridIsWhatTheUnitsHold)
     EXPECT_EQ(gridOn(coop("gfx11", 1), "gfx1100"), 32U * 2);
 }
 
+TEST(TestConvWinogradPlan, CooperativeCdnaGridIsWhatTheUnitsHold)
+{
+    // 16 x 128 x 128 images, 64 -> 128 channels: far more items than blocks.
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    shape.n = 16;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {128, 128};
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto gridOn = [&](int64_t bk, int64_t bt, int64_t waves, const char* arch) {
+        auto device = countedDevice(32);
+        device.gcnArchName = arch;
+        auto fields = coop("gfx9", 1);
+        fields.bk = bk;
+        fields.bt = bt;
+        fields.waves = waves;
+        const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
+        EXPECT_TRUE(config.has_value());
+        const auto plan = conv_winograd::planFor(*problem, *config, device);
+        EXPECT_TRUE(plan.has_value());
+        return plan ? plan->mainBlocks : 0U;
+    };
+    // 2 x 2 tiles, 4 waves (k5CoopCdnaWpe: 168 registers, 3 waves a SIMD), 32 KiB of LDS:
+    // 3 blocks a CU on gfx950 (160 KiB of LDS), 2 on the 64 KiB parts; gfx908 keeps its
+    // register bound (4) and takes the LDS one.
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx950"), 32U * 3);
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx942"), 32U * 2);
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx908"), 32U * 2);
+    // 2 x 4 tiles, 8 waves (2 a SIMD): one block.
+    EXPECT_EQ(gridOn(64, 64, 8, "gfx950"), 32U);
+    // 1 x 4 tiles, 4 waves, two transform jobs a lane (2 waves a SIMD), 64 KiB of LDS.
+    EXPECT_EQ(gridOn(16, 64, 4, "gfx950"), 32U * 2);
+    EXPECT_EQ(gridOn(16, 64, 4, "gfx942"), 32U);
+    // 16 waves (4 a SIMD): one block.
+    EXPECT_EQ(gridOn(64, 64, 16, "gfx950"), 32U);
+}
+
 TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)
 {
     // On RDNA a group's U of 4 MiB and up (16 positions x K x C x 2 bytes) is re-read per tile
