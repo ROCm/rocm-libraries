@@ -92,6 +92,21 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT 180)\n")
 
+# The forward AOT-packaging cross-check gets its own entry: it samples far more of
+# the sweep's identity space than the other conv files above, so its slowest cases
+# (building and comparing IR for a sampled instance) exceed both the shared entry's
+# per-test pytest-timeout and its cumulative CTest TIMEOUT, the dgrad twin above gets
+# the same shared budget only because its own sample is smaller.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest "
+       "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
+       "-v -rs --timeout=600)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv_fwd_aot_packaging_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+        "  TIMEOUT 900)\n")
+
 # Library conv IR golden, platform-regression, split-K planner, ceil_div and
 # conv doc-example (the conv part of dsl_docs' verify_dsl_docs.py) CPU tests
 # (no GPU). Their own entry, with the conv entry's arguments, labels and

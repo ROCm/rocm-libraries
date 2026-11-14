@@ -165,7 +165,9 @@ _BAD_SOURCES = "needs 'sources' to be a non-empty object"
         pytest.param(
             _dispatch_of_wrong_kind, "is not a udd descriptor", id="wrong-kind-dispatch"
         ),
-        pytest.param(_no_dispatch, "disagree on dispatch", id="no-dispatch"),
+        pytest.param(
+            _no_dispatch, "'dispatch' is not a non-empty string", id="no-dispatch"
+        ),
         pytest.param(
             _catalog_without_default,
             "must be an object with a 'default'",

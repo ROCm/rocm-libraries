@@ -556,6 +556,59 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "<snake slug>, so its companion census would never register.")
     endif()
 
+    # Census for the shape-generic AOT-instance pack, hipkernel:Gfx950ConvFwdAot.
+    hkp_gfx950_conv_fwd_aot_available(_hkp_gfx950_conv_fwd_aot)
+    if(_hkp_gfx950_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwdAot for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for hipkernel:Gfx950ConvFwdAotSeed, the test-only seed catalog the
+    # integration root carries. It reads that root's own shard, which this binary
+    # otherwise never loads, so it also needs that pack built.
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_gfx950_conv_fwd_aot_seed)
+    if(_hkp_gfx950_conv_fwd_aot_seed)
+        add_dependencies(hip_kernel_provider_census_tests hkp_packaging_integration)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME integration
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotSeedPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: the integration root does not ship hipkernel:Gfx950ConvFwdAotSeed "
+            "for gfx950, so its census is not registered.")
+    endif()
+
     # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
     # every 2D cell that rule hands off must have a 3D kernel.
     if(_hkp_gfx950_attention_unified_2d AND _hkp_gfx950_attention_unified_3d)

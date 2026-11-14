@@ -35,6 +35,9 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DSignature.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DDispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestUnifiedAttentionGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotSelection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradGeometry.cpp
@@ -107,6 +110,8 @@ set_property(
 target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwisePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDensePacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotSeedPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dModelBinding.cpp

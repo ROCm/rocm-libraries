@@ -123,6 +123,7 @@ test_categories:
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_fwd_aot_packaging_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
@@ -214,6 +215,7 @@ test_categories:
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_library_conv_fwd_aot_packaging_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the

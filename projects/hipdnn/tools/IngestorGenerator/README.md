@@ -838,6 +838,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
 | `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
+| `configs/gfx950_conv_fwd_aot_seed.yaml` | Sharded multi-pack engine: one pack per dtype and no `discriminator`, so no operation-scoped UMD. It is also an engine that names another engine's native symbols (`native_symbols_from`): the test-only seed of `hipkernel:Gfx950ConvFwdAot`, written by `tools/make_conv_aot_config.py` |
 | `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: rocKE prefill kernels per head/dtype/mask cell, served through a host-derived identity paged-KV block table. Kernel and geometry counts: the bundle README, `rocKE/gfx950_attention_unified_2d/README.md` |
 | `configs/gfx950_attention_unified_2d.engine.yaml` | That engine's manifest: the `unified_tuning` geometries, the batch capacity (`enumerate.fixed.batch` -> the spec's `num_seqs`, which bounds the sequences one launch resolves at `2^ceil(log2(num_seqs+1)) - 1`), `mask_type` as the KMD's mask field, and the `engine.slug` override |
 | `configs/gfx950_attention_unified_3d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified3D` descriptors: split-KV decode kernels, each one code object launched as a `segment` and a `reduce` launch (UKD 1.1 `sources`). Counts: the bundle README, `rocKE/gfx950_attention_unified_3d/README.md` |
@@ -984,6 +985,8 @@ packs:
     arch: [gfx942]                # optional; empty means arch-independent
     discriminator: add             # on every pack or none of a >1-pack engine; forbidden
                                     # for a single-pack engine
+    dispatch: split_c              # optional: a dispatch handler of its own (own UDD),
+                                    # for kernels of another launch set
     kernels:
       - name: my_engine.f32_block64
         kernel_source:
@@ -1191,16 +1194,22 @@ launches that report it (see the packaging reference).
 
 The descriptor only lists the launches: the pack's native dispatch handler declares the
 names it launches and owns their order, and the provider drops a kernel whose launch names
-differ from the handler's when it builds its catalog. One engine has one handler, so every
-kernel of an engine must name the same set of launches: a config mixing single- and
-multi-launch kernels, or two different sets, is a `ConfigError` (split the kernels into
-engines by launch set). In a slotted engine the rule holds per slot, because each slot has
-its own handler (see "Slotted engines"). An operation whose variants need different launch
+differ from the handler's when it builds its catalog. The packs of an unslotted engine
+share its handler, so every kernel launched through one handler must name the same set of
+launches: a config mixing single- and multi-launch kernels, or two different sets, on one
+handler is a `ConfigError`. A pack whose kernels launch another set names a handler of its
+own with `dispatch: <name>` (a lowercase identifier): the generator emits one more UDD,
+`<slug>_<name>.udd.json`, with the native symbol `<namespace>.<name>_dispatch`, and the
+pack's KDP references it. `hipkernel:Gfx950ConvFwdAot` does so for its split-C kernels
+(`dispatch: split_c`), which launch a conv pass and a fold. In a slotted engine the rule
+holds per slot instead, because each slot has its own handler (see "Slotted engines"), and
+there is no per-pack `dispatch` override. An operation whose variants need different launch
 counts, such as a single-launch prefill and a two-launch decode of SDPA forward, is
-therefore split into separate engines, one per launch set. The generated native stub
-declares `launchNames()` from the config's launches and notes in `prepare()` that each
-launch is built with `launchKernelDefinition`; the generated census test checks each
-kernel's `sources` entries against the emitted source kind. See the
+therefore split into separate slots (or separate engines, for an unslotted one), one per
+launch set. The generated native stub declares `launchNames()` from the config's launches
+and notes in `prepare()` that each launch is built with `launchKernelDefinition`; the
+generated census test checks each kernel's `sources` entries against the emitted source
+kind. See the
 [packaging reference](../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#multi-launch-kernels-sources).
 
 ## Slotted engines: `slots`

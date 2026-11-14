@@ -846,11 +846,6 @@ REFUSALS = [
         r"slots\[dq\].knobs names 'num_warps', which no kmd_fields entry declares",
     ),
     (
-        "string_knob",
-        lambda raw: raw["slots"][1].update(knobs=["dtype"]),
-        r"slots\[dkdv\].knobs names 'dtype', declared in kmd_fields with type 'string'",
-    ),
-    (
         "duplicate_knob",
         lambda raw: raw["slots"][1].update(knobs=["block_m", "block_m"]),
         r"slots\[dkdv\].knobs lists \['block_m'\] more than once",

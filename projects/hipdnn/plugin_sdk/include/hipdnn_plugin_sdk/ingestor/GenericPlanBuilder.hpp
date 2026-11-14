@@ -109,9 +109,10 @@ struct IngestorSettings
     KnobFilter knobFilter;
     bool benchmarkingEnabled = false;
     std::optional<int64_t> workspaceLimit;
-    /// How many of the best-ranked knob-filtered candidates buildPlan() considers; unset
-    /// considers all of them. Applied with benchmarking on or off, so a record benchmarked
-    /// under a limit covers the same candidates a later build under it walks.
+    /// How many of the best-ranked knob-filtered candidates buildPlan() (or, for a slotted
+    /// engine, slotCandidates()'s ranked path) considers; unset considers all of them.
+    /// Applied with benchmarking on or off, so a record benchmarked under a limit covers
+    /// the same candidates a later build under it walks.
     std::optional<size_t> shortlistLimit;
 };
 
@@ -1390,6 +1391,13 @@ private:
                             + std::to_string(selection.alignedSharedBytes) + " bytes)");
                 }
             }
+            // Only the ranked path feeds plan selection (buildSlottedPlan, predictSlotted):
+            // getMaxWorkspaceSize calls this unranked and must keep reporting the largest
+            // scratch any surviving kernel could need, not just the top-`limit` ranked ones.
+            if(ranked)
+            {
+                applyShortlistLimit(kept, settings.shortlistLimit);
+            }
             if(slot == 0)
             {
                 selection.bound = std::move(catalog.bound);
@@ -1498,8 +1506,9 @@ private:
 
     /// Plans the benchmark of a slotted engine's program (RFC 0021 §7) when one is due: some
     /// slot's catalog is not covered by a winner record, or the program record is not valid.
-    /// While a knob filter or workspace limit is active only an uncovered slot makes it due, and
-    /// nothing is recorded, since the records would describe a narrowed catalog.
+    /// While a knob filter, workspace limit or shortlist limit is active only an uncovered slot
+    /// makes it due, and nothing is recorded, since the records would describe a narrowed
+    /// catalog.
     /// @return false, leaving @p executionContext untouched, when nothing needs measuring.
     bool setSlotProgramBenchmark(const IGraph& opGraph,
                                  const MatchContext& context,
@@ -1507,7 +1516,8 @@ private:
                                  const SlotCandidates& selection,
                                  TContext& executionContext) const
     {
-        const bool narrowed = !settings.knobFilter.empty() || settings.workspaceLimit.has_value();
+        const bool narrowed = !settings.knobFilter.empty() || settings.workspaceLimit.has_value()
+                              || settings.shortlistLimit.has_value();
         const WinnerKey baseKey{
             hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
             DeviceKey{context.deviceProperties}};
@@ -1582,8 +1592,8 @@ private:
         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                << _engine.name << "' will benchmark its slot program: "
                                << timedKernels << " kernel(s) in uncovered slot(s)"
-                               << (narrowed ? "; a knob filter or workspace limit is active, "
-                                              "so no records will be written"
+                               << (narrowed ? "; a knob filter, workspace limit or shortlist "
+                                              "limit is active, so no records will be written"
                                             : ""));
 
         typename SlotProgramBenchmark<THandle>::RecordFn record;
