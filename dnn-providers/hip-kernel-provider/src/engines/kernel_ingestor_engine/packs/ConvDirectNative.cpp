@@ -398,7 +398,7 @@ std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
     problem.xUid = base->operands.x;
     problem.wUid = base->operands.w;
     problem.yUid = base->operands.y;
-    for(int i = 0; i < 5; ++i)
+    for(size_t i = 0; i < 5; ++i)
     {
         problem.wStrides[i] = a.wStrides[i];
     }
@@ -1274,7 +1274,7 @@ public:
         K2FormatArgs fmt{};
         fmt.w = w;
         fmt.wf = base + plan.weightOffset;
-        for(int i = 0; i < 5; ++i)
+        for(size_t i = 0; i < 5; ++i)
         {
             fmt.wStrides[i] = problem.wStrides[i];
         }

@@ -216,7 +216,7 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
     long long span = 1;
     const std::array<long long, 5> extents
         = {a.n, inChannels, inExtents[0], inExtents[1], inExtents[2]};
-    for(int i = 1; i < 5; ++i)
+    for(size_t i = 1; i < 5; ++i)
     {
         if(inStrides[i] < 0)
         {
@@ -243,7 +243,7 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
     args.ho = static_cast<int>(outExtents[1]);
     args.wo = static_cast<int>(outExtents[2]);
     std::array<int, 3> pads{};
-    for(int axis = 0; axis < 3; ++axis)
+    for(size_t axis = 0; axis < 3; ++axis)
     {
         // Backward: dx row i reads dy rows i + pre - f dil, i.e. the forward window from
         // i - ((filter - 1) dil - pre) over the reflected filter.

@@ -305,8 +305,10 @@ struct DeviceCase
     /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
     /// and gfx12: skipped on gfx906 and gfx11.
     bool genericOnly = false;
-    /// x's element strides (the generic loop's strided operands); empty: packed.
-    std::vector<int64_t> xStrides;
+    /// x's element strides (the generic loop's strided operands); empty: packed. The default
+    /// initializer lets the cases' aggregate initializations omit it without
+    /// -Wmissing-field-initializers.
+    std::vector<int64_t> xStrides{}; // NOLINT(readability-redundant-member-init)
 };
 
 ConvShape conv(int64_t c,

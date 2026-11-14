@@ -56,13 +56,13 @@ ConvColumnGeometry geometry(long long n, long long c, long long h, long long w, 
     return g;
 }
 
-alignas(16) unsigned char gBuffer[64];
+alignas(16) std::array<unsigned char, 64> gBuffer{};
 
 Im2ColArgs im2col(const ConvColumnGeometry& g)
 {
     Im2ColArgs args{};
-    args.x = gBuffer;
-    args.col = gBuffer;
+    args.x = gBuffer.data();
+    args.col = gBuffer.data();
     args.geometry = g;
     args.total = g.n * g.output[1] * g.output[2] * g.cPerGroup * 9;
     return args;
@@ -71,8 +71,8 @@ Im2ColArgs im2col(const ConvColumnGeometry& g)
 Col2ImArgs col2im(const ConvColumnGeometry& g)
 {
     Col2ImArgs args{};
-    args.col = reinterpret_cast<const float*>(gBuffer);
-    args.x = gBuffer;
+    args.col = reinterpret_cast<const float*>(gBuffer.data());
+    args.x = gBuffer.data();
     args.geometry = g;
     args.total = g.n * g.cPerGroup * g.input[1] * g.input[2];
     return args;
@@ -93,7 +93,7 @@ TEST(TestConvRepackLaunch, MisalignedChannelsFallBackToScalarRows)
     auto args = im2col(geometry(8, 20, 14, 14, true)); // 20 % 8 != 0
     EXPECT_EQ(im2colLaunch(args, 2).entry, "Im2ColRows2V1");
     args = im2col(geometry(8, 256, 14, 14, true));
-    args.x = gBuffer + 2; // not 16-byte aligned
+    args.x = gBuffer.data() + 2; // not 16-byte aligned
     EXPECT_EQ(im2colLaunch(args, 2).entry, "Im2ColRows2V1");
 }
 
@@ -108,7 +108,7 @@ TEST(TestConvRepackLaunch, FewChannelsPerTapTakeOneThreadPerTap)
 
     // Unaligned column storage keeps the direct per-tap stores.
     auto misaligned = im2col(geometry(8, 3, 112, 112, true));
-    misaligned.col = gBuffer + 2;
+    misaligned.col = gBuffer.data() + 2;
     EXPECT_EQ(im2colLaunch(misaligned, 2).entry, "Im2ColTaps2");
 }
 
@@ -372,7 +372,7 @@ TEST(TestConvRepackLaunch, ChannelsFirstToLastCopyIsATiledTranspose)
     const std::array<long long, 4> dims = {2, 8, 7, 7};
     const std::array<long long, 4> src = {392, 49, 7, 1};
     const std::array<long long, 4> dst = {392, 1, 56, 8};
-    for(int axis = 0; axis < 4; ++axis)
+    for(size_t axis = 0; axis < 4; ++axis)
     {
         args.dims[axis] = dims[axis];
         args.srcStrides[axis] = src[axis];
@@ -408,7 +408,7 @@ TEST(TestConvRepackLaunch, ContiguousCopyCollapsesToOneAxis)
     args.rank = 3;
     const std::array<long long, 3> dims = {4, 1, 10};
     const std::array<long long, 3> strides = {10, 10, 1};
-    for(int axis = 0; axis < 3; ++axis)
+    for(size_t axis = 0; axis < 3; ++axis)
     {
         args.dims[axis] = dims[axis];
         args.srcStrides[axis] = args.dstStrides[axis] = strides[axis];

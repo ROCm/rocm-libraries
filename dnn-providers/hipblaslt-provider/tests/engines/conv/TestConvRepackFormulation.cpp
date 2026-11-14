@@ -295,7 +295,7 @@ TEST(TestConvRepackFormulation, GroupedChannelsFirstBackwardWeightsBatchesTheLon
     const auto& stage = calls->stages.at(0);
     ASSERT_EQ(stage.calls.size(), 2u);
     ASSERT_EQ(calls->workspace.size(), 2u); // columns, partials
-    const int64_t perGroup = int64_t{3} * (2 * 9);
+    const int64_t perGroup = int64_t{3} * 2 * 9;
     EXPECT_EQ(calls->workspace[1].bytes, static_cast<size_t>(perGroup * 8 * 2) * sizeof(float));
     for(size_t g = 0; g < stage.calls.size(); ++g)
     {

@@ -130,7 +130,8 @@ std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int tw, int cb)
 size_t expandedElements(const GroupProblem& problem)
 {
     const auto& a = problem.igemm.args;
-    const auto taps = static_cast<size_t>(problem.kernelT) * problem.kernelR * problem.kernelS;
+    const auto taps = static_cast<size_t>(problem.kernelT) * static_cast<size_t>(problem.kernelR)
+                      * static_cast<size_t>(problem.kernelS);
     const auto nbi = static_cast<size_t>(problem.nbi);
     return problem.nbi > 0 ? static_cast<size_t>(a.groups) * nbi * nbi * taps * 256
                            : static_cast<size_t>(a.c / 16) * taps * 256;

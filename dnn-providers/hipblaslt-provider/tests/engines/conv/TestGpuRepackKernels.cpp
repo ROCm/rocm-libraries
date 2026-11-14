@@ -243,7 +243,7 @@ void disjointReference(const DisjointCase& caseData,
         std::array<long long, 3> position{};
         for(int axis = 2; axis >= 0; --axis)
         {
-            position[axis] = rest % g.input[axis];
+            position[static_cast<size_t>(axis)] = rest % g.input[axis];
             rest /= g.input[axis];
         }
         const long long c = rest % channels;
@@ -253,7 +253,7 @@ void disjointReference(const DisjointCase& caseData,
         bool read = true;
         for(int axis = 0; axis < 3; ++axis)
         {
-            const long long s = position[axis] + g.prePadding[axis];
+            const long long s = position[static_cast<size_t>(axis)] + g.prePadding[axis];
             const long long coordinate = s >= 0 ? s / g.stride[axis] : 0;
             const long long offset = s - coordinate * g.stride[axis];
             const long long tap = offset / g.dilation[axis];
@@ -266,7 +266,7 @@ void disjointReference(const DisjointCase& caseData,
         long long target = n * g.xStrides[0] + c * g.xStrides[1];
         for(int axis = 0; axis < 3; ++axis)
         {
-            target += position[axis] * g.xStrides[2 + axis];
+            target += position[static_cast<size_t>(axis)] * g.xStrides[2 + axis];
         }
         const long long group = c / g.cPerGroup;
         const long long column = g.channelsInner != 0 ? (group * taps + element) * g.cPerGroup

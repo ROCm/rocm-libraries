@@ -60,7 +60,8 @@ void ConvRepackPlan::execute(const HipdnnEnginePluginHandle& handle,
                              uint32_t numDeviceBuffers,
                              void* workspace) const
 {
-    PLUGIN_THROW_IF_FALSE(workspace != nullptr || _steps.workspaceBytes == 0,
+    const bool hasWorkspace = workspace != nullptr || _steps.workspaceBytes == 0;
+    PLUGIN_THROW_IF_FALSE(hasWorkspace,
                           HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                           "the explicit-GEMM convolution needs its workspace");
 
