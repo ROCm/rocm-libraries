@@ -58,6 +58,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
 
     wheel = next(tmp_path.glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
+        archived_names = set(archive.namelist())
         metadata = archive.read(
             next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
         ).decode("utf-8")
@@ -91,7 +92,17 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
         "TensileGetPath": "tensilelite:PrintTensileRoot",
         "TensileBenchmarkCluster": "tensilelite.benchmark_cluster:main",
         "TensileRetuneLibrary": "tensilelite.retune_library:main",
+        "tensilelite-configure-client": "tensilelite_configure_client:main",
     }
+    assert "_tensilelite_client_binding.py" in archived_names
+    assert "tensilelite_configure_client.py" in archived_names
+
+
+def test_installed_test_artifact_includes_client_binding_modules():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert '"${_tensilelite_src}/_tensilelite_client_binding.py"' in cmake
+    assert '"${_tensilelite_src}/tensilelite_configure_client.py"' in cmake
 
 
 def test_client_identity_is_scoped_and_checked_exactly():
