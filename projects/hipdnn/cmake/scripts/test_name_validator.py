@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -343,7 +344,7 @@ def main() -> int:
             print(f"{test_name:<50} {status:<10}")
             if issues:
                 for issue in issues:
-                    print(f"  → {issue}")
+                    print(f"  - {issue}")
 
     print(f"\nWarning: {invalid_count} test(s) have non-conforming names")
     print(
@@ -558,6 +559,34 @@ class TestTestNameValidator(unittest.TestCase):
                 self.assertEqual(
                     issues, [], f"Expected {name} to be valid, but got issues: {issues}"
                 )
+
+    def test_invalid_name_report_supports_cp1252(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            json_path = Path(temp_dir) / "tests.json"
+            json_path.write_text(
+                json.dumps({"tests": [{"name": "TestConvolutionGpu.Forward"}]})
+            )
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "cp1252"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--ctest-json",
+                    str(json_path),
+                    "--strict",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Invalid test names: 1", result.stdout)
+        self.assertIn("misplaced", result.stdout)
+        self.assertNotIn("UnicodeEncodeError", result.stderr)
 
 
 if __name__ == "__main__":
