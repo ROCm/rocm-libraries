@@ -129,6 +129,7 @@ TILE_MN = (16, 32, 64, 128, 256)
 TILE_K = (128, 256, 384, 512, 1024)
 K_READS = ("chunked", "contiguous")
 WMMA_REUSE = ("none", "b")
+K_ORDERS = ("linear", "even_odd")
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
@@ -229,6 +230,12 @@ class MxGemmSpec:
     next WMMA takes the same B fragment, so the hardware keeps that operand
     instead of reading it again from VGPRs (it keeps B, not A). ``"none"``
     issues them M-repeat outer, without flags.
+
+    ``k_order`` is the order of the full K tiles: ``"linear"`` in K order;
+    ``"even_odd"`` the even tiles, then the odd ones (the K tail stays last).
+    Tiles whose rows are not whole 256 B lines share a line with the next
+    tile; visited apart, the two tiles' loads of that line are not issued
+    back to back.
     """
 
     name: str
@@ -255,6 +262,7 @@ class MxGemmSpec:
     b_dtype: str = "fp4"
     k_reads: str = "chunked"
     wmma_reuse: str = "none"
+    k_order: str = "linear"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -527,6 +535,7 @@ class MxGemmSpec:
                 "mma16": self.mma == "16x16",
                 "kcont": self.contiguous_k,
                 "rb": self.wmma_reuse == "b",
+                "keo": self.k_order == "even_odd",
             },
         )
 
@@ -662,6 +671,15 @@ class MxGemmLdsLayout:
         return ops.add(self.component_base(ops, op, ops.div(row, op.rows)), linear)
 
 
+def visited_tile(k_order: str, full_tiles: int, position: int) -> int:
+    """Index of the K tile visited at ``position`` (``k_order``): positions
+    past the full tiles (the K tail, loads past the end) are themselves."""
+    if k_order == "linear" or position >= full_tiles:
+        return position
+    half = -(-full_tiles // 2)
+    return 2 * position if position < half else 2 * (position - half) + 1
+
+
 def _pad_period(block_bytes: int) -> bool:
     """The TDM pad_interval field encodes a pad after every ``block_bytes``:
     a power of two of 8..1024 B. Other blocks are TDM iterate mode."""
@@ -782,6 +800,8 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return "wmma_reuse 'b' needs local_prefetch 0"
     if spec.wmma_reuse != "none" and spec.mma != "16x16":
         return "wmma_reuse 'b' is for the 16x16 WMMA"
+    if spec.k_order not in K_ORDERS:
+        return f"k_order must be one of {K_ORDERS}"
     atom = spec.atom
     if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
         return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
@@ -950,6 +970,23 @@ class _Kernel:
         return b.select(
             b.cmp_lt(k, self.params["K"]), k, b.sub(self.params["K"], self.tile_k_v)
         )
+
+    def k_of(self, position):
+        """K offset of the tile at ``position`` in the visiting order (both
+        in units of K, multiples of ``tile_k``; see :func:`visited_tile`)."""
+        spec = self.spec
+        if spec.k_order == "linear":
+            return position
+        b, ops = self.b, self.ops
+        full = spec.K // spec.tile_k
+        half = -(-full // 2)
+        position = ops.v(position)
+        even = b.mul(position, b.const_i32(2))
+        odd = b.sub(even, b.const_i32((2 * half - 1) * spec.tile_k))
+        rest = b.select(
+            b.cmp_lt(position, b.const_i32(full * spec.tile_k)), odd, position
+        )
+        return b.select(b.cmp_lt(position, b.const_i32(half * spec.tile_k)), even, rest)
 
 
 class RowMaps:
@@ -1197,9 +1234,10 @@ class Gl2Prefetcher:
         self.k = k
 
     def prefetch(self, k_ahead, ahead_parity: int) -> None:
-        """``ahead_parity`` is the parity of the prefetched tile's index: with
-        128 B rows one line holds an even tile and the next one, so the data
-        lines are only prefetched for even tiles. Rows that neither hold
+        """``ahead_parity`` is the parity of the prefetched tile's position:
+        with 128 B rows one line holds an even tile and the next one, so in K
+        order the data lines are only prefetched for even tiles (in any
+        other ``k_order`` for every tile). Rows that neither hold
         whole lines nor divide one (FP6: 96 B per 128 K) take, per row, the
         ``ceil(row / line)`` lines that end at the tile's last byte: the
         tiles of a row then reach every line, a line two tiles share once
@@ -1226,7 +1264,7 @@ class Gl2Prefetcher:
                 last_byte = b.smin(ops.v(last_byte), b.sub(k.packed_k, k.c1))
         else:
             data_lines = row_bytes // _GL2_LINE_BYTES
-            if not data_lines and ahead_parity == 0:
+            if not data_lines and (ahead_parity == 0 or spec.k_order != "linear"):
                 data_lines = 1
         if spec.has_cluster:
             cluster_m0 = b.sub(
@@ -1773,7 +1811,8 @@ class Pipeline:
     K-step, with tile k+2's loads still in flight. Past the end the last
     tile is loaded again into a buffer nobody reads (SuppressNoLoadLoop).
     The loop runs tile pairs, one tile per buffer, so buffer offsets fold;
-    an odd tile count peels one tile."""
+    an odd tile count peels one tile. ``k0`` counts positions in the
+    visiting order (``k_order``); loads map them to K offsets."""
 
     def __init__(
         self, k: _Kernel, tdm: TdmLoader, gl2: Gl2Prefetcher, tile: TileCompute
@@ -1787,7 +1826,9 @@ class Pipeline:
         distance = self.k.spec.gl2_prefetch_distance
         if distance:
             self.gl2.prefetch(
-                self.k.ops.v(self.k.ops.add(k0, distance * self.k.spec.tile_k)),
+                self.k.k_of(
+                    self.k.ops.v(self.k.ops.add(k0, distance * self.k.spec.tile_k))
+                ),
                 (parity + distance) % 2,
             )
 
@@ -1820,7 +1861,7 @@ class Pipeline:
             pending = min(spec.late_pending_reads, _DSCNT_MAX)
             b.inline_asm(f"s_wait_dscnt {pending}", "~{memory}")
             b.s_barrier_bare()
-            self.tdm.issue(k.clamp_k(ops.v(ops.add(k0, two_tiles))), parity)
+            self.tdm.issue(k.clamp_k(k.k_of(ops.v(ops.add(k0, two_tiles)))), parity)
             k.fence()
 
         return _Hooks(
@@ -1846,9 +1887,9 @@ class Pipeline:
             # refill and GL2 prefetches load it again too; see validate().
             self.tdm.issue(k.clamp_k(k.tile_k_v), c1)
         else:
-            self.tdm.issue(k.tile_k_v, c1)
+            self.tdm.issue(k.k_of(k.tile_k_v), c1)
         for ahead in range(2, spec.gl2_prefetch_distance):
-            self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
+            self.gl2.prefetch(k.k_of(ops.v(ahead * spec.tile_k)), ahead % 2)
         if read_ahead:
             self.wait_next_tile()
         accumulators = [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
