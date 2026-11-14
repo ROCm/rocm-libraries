@@ -54,7 +54,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
             export PATH=/opt/rocm/bin:\$PATH
             export HOME=/home/jenkins
             export TENSILE_COMPILER=${compiler}
-            export HIPCC_COMPILE_FLAGS_APPEND='-O3 -Wno-format-nonliteral -parallel-jobs=4'
+            export HIPCC_COMPILE_FLAGS_APPEND='-O3 -Wno-format-nonliteral --offload-jobs=4'
 
             cmake --trace-expand \
                 -B build -S HostLibraryTests \
