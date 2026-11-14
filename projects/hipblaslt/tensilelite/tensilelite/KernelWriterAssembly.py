@@ -13236,8 +13236,15 @@ class KernelWriterAssembly(KernelWriter):
         nrc -= 1
       elif nrcv_div_nrcvpi > 1:
         nrcv_div_nrcvpi -= 1
-      else:
+      elif numLoadVectorComp > 1:
         numLoadVectorComp = numLoadVectorComp - 1
+      else:
+        # Cannot reduce further: insufficient VGPRs for optimization.
+        # Release borrowed registers and fall back to ordinary guarded tail read.
+        while VgprSlotBk:
+          tempVgpr = VgprSlotBk.pop(0)
+          self.vgprPool.checkIn(tempVgpr)
+        return self.globalReadDo(kernel, 2, tP)
       finalVgprNum = (nrp * nrpv * nrc * nrcv_div_nrcvpi) * (numLoadVectorComp)
 
     nrpLoopNum = ceil(tP["nrp"] / nrp)
