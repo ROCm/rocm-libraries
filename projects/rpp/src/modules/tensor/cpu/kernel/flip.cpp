@@ -851,7 +851,7 @@ static inline RppStatus flip_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr src
 
     // Compute constant increment, Decrement factors used in source pointer updation
     Rpp32s srcPtrIncrement = (horizontalFlag) ? -vectorIncrement : vectorIncrement;
-    Rpp32u hFlipFactor = (vectorIncrement - 1) * horizontalFlag;
+    Rpp32u hFlipFactor = (vectorIncrement - 3) * horizontalFlag;  // subtract 3 for RGB channels
     Rpp32s srcPtrIncrementPerChannel =
         (horizontalFlag) ? -vectorIncrementPerChannel : vectorIncrementPerChannel;
     Rpp32u hFlipFactorPerChannel = (vectorIncrementPerChannel - 1) * horizontalFlag;
@@ -1027,6 +1027,7 @@ static inline RppStatus flip_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr src
                     srcPtrTemp += srcPtrIncrementPerChannel;
                     dstPtrTemp += vectorIncrementPerChannel;
                 }
+                srcPtrTemp += hFlipFactorPerChannel;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8((Rpp32f)(*srcPtrTemp));
                     srcPtrTemp += srcPtrIncrementPerPixel;
