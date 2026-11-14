@@ -53,7 +53,8 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
 /// A kernel config, from its metadata. Variants: "floor" (any problem), "tile" (VALU register
 /// tile of a compile-time kd x kh x kw filter), "hankel" (matrix core, 4x4x4 MFMA: q output
 /// columns a tile, g input rows a step, nwg 16-channel groups a wave, bpc blocks per dispatch
-/// unit the partitions aim for, s the stride of both axes, 1 or 2), "vtile" (VALU, channels-last:
+/// unit the partitions aim for, s the stride of both axes, 1 or 2, form the kernel body, 0
+/// or 1), "vtile" (VALU, channels-last:
 /// cv channels a thread, read as one vector, strips of `strip` output columns, compile-time
 /// kh x kw). The hankel and vtile fields are 0 for the other variants.
 struct WrwConfig
@@ -72,6 +73,10 @@ struct WrwConfig
     /// The vector tile's ("vtile") channels a thread and output columns a strip; 0 otherwise.
     int64_t cv = 0;
     int64_t strip = 0;
+    /// The hankel kernel body: 0 stages any thread's work from any input row, 1 gives each
+    /// wave whole rows to stage (row buffer descriptors, per-lane offsets fixed for a tile);
+    /// 0 for the other variants.
+    int64_t form = 0;
 };
 
 /// The LDS a hankel config's partial kernel declares (ConvDepthwiseHankelWrw.h's arithmetic).
@@ -83,7 +88,8 @@ int64_t hankelLdsBytes(const WrwConfig& config);
  *        channels-last, 1-D or 2-D; the config's filter; the config's stride s (1 or 2) on both
  *        axes; unit dilation; channels a
  *        whole number of 8-channel vectors; q a multiple of 4 from 4 to 64, g 1 to 4, nwg 1, 2
- *        or 4, bpc 1, 2, 4 or 8; the LDS within the device's (160 KiB on gfx950, else 64 KiB);
+ *        or 4, bpc 1, 2, 4 or 8; form 0 or 1; the LDS within the device's (160 KiB on gfx950,
+ *        else 64 KiB);
  *        x and dy pointers declared 16-byte aligned (@p xAlign, @p dyAlign bytes).
  */
 bool hankelAdmits(const WrwProblem& problem,

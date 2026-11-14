@@ -56,6 +56,9 @@
 #ifndef CONV_DW_COLMASK
 #define CONV_DW_COLMASK 0
 #endif
+#ifndef CONV_DW_FORM
+#define CONV_DW_FORM 0
+#endif
 
 namespace hankel
 {
@@ -65,6 +68,11 @@ constexpr int RG = (KH + 3) / 4, SG = (KW + 3) / 4;
 constexpr int CB = 64 * NWG; // channels a block
 constexpr int S = CONV_DW_S; // stride, both axes
 constexpr bool COLMASK = CONV_DW_COLMASK != 0; // wo not whole tiles
+/// The kernel body: 0 = partial, 1 = partialRows (whole rows a wave staged through row buffer
+/// descriptors, the lanes' load and LDS offsets fixed for a tile, dy ring slots computed from
+/// wave-uniform values).
+constexpr int FORM = CONV_DW_FORM;
+static_assert(FORM == 0 || FORM == 1, "kernel body");
 constexpr int THREADS = 256;
 static_assert(CONV_DW_KD == 1, "2-D filters");
 static_assert(Q % 4 == 0 && Q >= 4, "whole 4-column steps");
@@ -440,6 +448,358 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
         }
     }
     // D: lane (channel b, j = lane % 4); VGPR v holds C[s = v][r = j].
+#pragma unroll
+    for(int cg = 0; cg < NWG; ++cg)
+    {
+        const int c = c0 + b + 64 * cg;
+        if(c >= a.c)
+        {
+            continue;
+        }
+        float* out = a.partial + ((long)partition * a.c + c) * a.taps;
+#pragma unroll
+        for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+            for(int sg = 0; sg < SG; ++sg)
+#pragma unroll
+                for(int v = 0; v < 4; ++v)
+                {
+                    const int r = 4 * rg + i, s = 4 * sg + v;
+                    if(r < KH && s < KW)
+                    {
+                        out[r * KW + s] = acc[cg][rg][sg][v];
+                    }
+                }
+    }
+}
+
+/// Form 1's staging plan for an operand whose rows are UNITS staging units (4 columns x 8
+/// channels) wide: a row takes CH wave tasks of 64 units; a step's G rows make G CH tasks, task t
+/// going to wave t % 4. A task's row is wave-uniform, so it loads through that row's own buffer
+/// descriptor, and a lane's column offsets and LDS offset are fixed for a tile. PHASED: the
+/// stride-2 x rows (a unit's 4 columns land 2 apart in each phase row).
+template <int UNITS, bool PHASED>
+struct RowPlan
+{
+    static constexpr int CH = (UNITS + 63) / 64;
+    static constexpr int TASKS = G * CH;
+    static constexpr int PER_WAVE = (TASKS + 3) / 4;
+
+    unsigned col[PER_WAVE][4]; // a lane's 16-byte load offsets (OOB: zeros)
+    int lds[PER_WAVE]; // a lane's LDS offset (halves) in its row, -1 for no unit
+
+    /// The plan of wave `wave` (uniform) for a tile starting at image column col0 of `width`;
+    /// channels c0 + cv of c.
+    __device__ void plan(int wave, int lane, int col0, int width, int c, int c0, int pitch)
+    {
+#pragma unroll
+        for(int it = 0; it < PER_WAVE; ++it)
+        {
+            const int t = wave + 4 * it;
+            const int unit = (t % CH) * 64 + lane;
+            const bool live = t < TASKS && unit < UNITS;
+            const int g = unit / (CB / 8), cv = (unit % (CB / 8)) * 8;
+#pragma unroll
+            for(int j = 0; j < 4; ++j)
+            {
+                const int ix = col0 + 4 * g + j;
+                col[it][j] = live && c0 + cv + 8 <= c && ix >= 0 && ix < width
+                                 ? static_cast<unsigned>((ix * c + c0 + cv) * 2)
+                                 : OOB;
+            }
+            lds[it] = live ? cv * pitch + skewOf(cv) + (PHASED ? 2 : 4) * g : -1;
+        }
+    }
+
+    /// The step's loads: task it's row (step row t / CH) through rsrcOf(row) when rowOk(row).
+    template <typename Rsrc>
+    __device__ void load(u4 (&v)[PER_WAVE][4], int wave, Rsrc rowRsrc) const
+    {
+#pragma unroll
+        for(int it = 0; it < PER_WAVE; ++it)
+        {
+            const int t = wave + 4 * it;
+            if(t < TASKS)
+            {
+                const auto r = rowRsrc(t / CH);
+#pragma unroll
+                for(int j = 0; j < 4; ++j)
+                {
+                    v[it][j] = __builtin_bit_cast(
+                        u4, __builtin_amdgcn_raw_buffer_load_b128(r, col[it][j], 0, 0));
+                }
+            }
+        }
+    }
+};
+
+/// Writes a unit's channel-major rows: per channel one 64-bit word of its 4 columns.
+__device__ inline void storeUnit(const u4 (&v)[4], u16* dst, int pitch)
+{
+#pragma unroll
+    for(int e = 0; e < 8; ++e)
+    {
+        const unsigned sel = e % 2 == 0 ? 0x05040100u : 0x07060302u;
+        const u64 w = (u64)__builtin_amdgcn_perm(v[1][e / 2], v[0][e / 2], sel)
+                      | ((u64)__builtin_amdgcn_perm(v[3][e / 2], v[2][e / 2], sel) << 32);
+        *reinterpret_cast<u64*>(dst + e * pitch) = w;
+    }
+}
+
+/// Stride 2: a unit's even columns to the phase-0 row, its odd ones `phase` halves on.
+__device__ inline void storeUnitPhases(const u4 (&v)[4], u16* dst, int pitch, int phase)
+{
+#pragma unroll
+    for(int e = 0; e < 8; ++e)
+    {
+        const unsigned sel = e % 2 == 0 ? 0x05040100u : 0x07060302u;
+        *reinterpret_cast<unsigned*>(dst + e * pitch)
+            = __builtin_amdgcn_perm(v[2][e / 2], v[0][e / 2], sel);
+        *reinterpret_cast<unsigned*>(dst + phase + e * pitch)
+            = __builtin_amdgcn_perm(v[3][e / 2], v[1][e / 2], sel);
+    }
+}
+
+/// Floor division and the matching non-negative remainder.
+__device__ inline int floorDiv(int n, int d)
+{
+    return (n >= 0 ? n : n - d + 1) / d;
+}
+
+/// Form 1 of the partial kernel: the same products, sums and parity masks as `partial`, with
+/// the staging and the dy ring addressing reorganized so that row- and step-wide values are
+/// computed once per wave (scalar) and per-lane values once per tile.
+template <bool BF16>
+__device__ void partialRows(const ConvDepthwiseValuWrwArgs& a)
+{
+    __shared__ __attribute__((aligned(16))) u16 xs[G * XB];
+    __shared__ __attribute__((aligned(16))) u16 ring[(SLOTS + 1) * SS];
+    const int tid = static_cast<int>(threadIdx.x), lane = tid % 64;
+    const int wave = __builtin_amdgcn_readfirstlane(tid / 64);
+    const int cBlocks = (a.c + CB - 1) / CB;
+    const int partition = static_cast<int>(blockIdx.x) / cBlocks;
+    const int c0 = (static_cast<int>(blockIdx.x) % cBlocks) * CB;
+    const int b = wave * 16 + lane / 4; // the lane's channel (of its first group) in the block
+    const int i = lane % 4; // its A row (s) and B column (r)
+    const auto* x = static_cast<const u16*>(a.x);
+    const auto* dy = static_cast<const u16*>(a.dy);
+    const int laneDword = S == 1 ? i >> 1 : 0;
+    const unsigned ab = S == 1 ? 2 * (i & 1) : 2 * (i >> 1);
+    // The lane's dy row in a ring slot (halves), and its B column's step back in dy rows from the
+    // freshest pairing: dy row (U - i) / S for U = y + ph - 4 rg.
+    const int laneB = b * DP + skewOf(b);
+    const int laneD = S == 1 ? i : (i >> 1);
+
+    for(int e = tid; e < SS; e += THREADS)
+    {
+        ring[SLOTS * SS + e] = 0;
+    }
+    f4 acc[NWG][RG][SG];
+#pragma unroll
+    for(int cg = 0; cg < NWG; ++cg)
+#pragma unroll
+        for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+            for(int sg = 0; sg < SG; ++sg)
+                acc[cg][rg][sg] = f4{0, 0, 0, 0};
+
+    RowPlan<XU, S == 2> px;
+    RowPlan<DU, false> pd;
+    u4 vx[RowPlan<XU, S == 2>::PER_WAVE][4];
+    u4 vd[RowPlan<DU, false>::PER_WAVE][4];
+    const int first = partition * a.rowsPerPartition;
+    const int last = min(a.rows, first + a.rowsPerPartition);
+    const long xRow = (long)a.wi * a.c, dRow = (long)a.wo * a.c;
+    for(int seg = first; seg < last;)
+    {
+        // An image's output rows [o0, o1) of the partition.
+        const int n = seg / a.ho, o0 = seg % a.ho;
+        const int o1 = min(a.ho, o0 + (last - seg));
+        seg += o1 - o0;
+        const u16* xImg = x + (long)n * a.hi * xRow;
+        const u16* dImg = dy + (long)n * a.ho * dRow;
+        for(int q0 = 0; q0 < a.wo; q0 += Q)
+        {
+            px.plan(wave, lane, q0 * S - a.pw, a.wi, a.c, c0, XP);
+            pd.plan(wave, lane, q0, a.wo, a.c, c0, DP);
+            const int y0 = o0 * S - a.ph, y1 = (o1 - 1) * S - a.ph + KH;
+            // Whether input row yy brings dy row oy into the ring (uniform).
+            auto entering = [&](int yy, int& oy) {
+                const int num = yy + a.ph;
+                oy = num / S;
+                return yy < y1 && num % S == 0 && oy >= o0 && oy < o1;
+            };
+            auto xLive = [&](int yy) { return yy < y1 && yy >= 0 && yy < a.hi; };
+            auto loadStep = [&](int y) {
+                px.load(vx, wave, [&](int gr) {
+                    const int yy = y + gr;
+                    const bool ok = xLive(yy);
+                    return rsrcOf(xImg + (ok ? yy : 0) * xRow, ok ? xRow * 2 : 0);
+                });
+                pd.load(vd, wave, [&](int gr) {
+                    int oy = 0;
+                    const bool ok = entering(y + gr, oy);
+                    return rsrcOf(dImg + (ok ? oy : 0) * dRow, ok ? dRow * 2 : 0);
+                });
+            };
+            auto storeStep = [&](int y) {
+#pragma unroll
+                for(int it = 0; it < RowPlan<XU, S == 2>::PER_WAVE; ++it)
+                {
+                    const int t = wave + 4 * it, gr = t / RowPlan<XU, S == 2>::CH;
+                    if(t < RowPlan<XU, S == 2>::TASKS && xLive(y + gr) && px.lds[it] >= 0)
+                    {
+                        u16* dst = xs + gr * XB + px.lds[it];
+                        if constexpr(S == 1)
+                        {
+                            storeUnit(vx[it], dst, XP);
+                        }
+                        else
+                        {
+                            storeUnitPhases(vx[it], dst, XP, PHASE);
+                        }
+                    }
+                }
+#pragma unroll
+                for(int it = 0; it < RowPlan<DU, false>::PER_WAVE; ++it)
+                {
+                    const int t = wave + 4 * it;
+                    int oy = 0;
+                    if(t < RowPlan<DU, false>::TASKS && entering(y + t / RowPlan<DU, false>::CH, oy)
+                       && pd.lds[it] >= 0)
+                    {
+                        storeUnit(vd[it], ring + (oy % SLOTS) * SS + pd.lds[it], DP);
+                    }
+                }
+            };
+            __syncthreads(); // the previous tile's reads are done
+            loadStep(y0);
+            storeStep(y0);
+            __syncthreads();
+            for(int y = y0; y < y1; y += G)
+            {
+                if(y + G < y1)
+                {
+                    loadStep(y + G);
+                }
+#pragma unroll
+                for(int g = 0; g < G; ++g)
+                {
+                    const int yy = y + g;
+                    if(yy >= y1 || yy < 0 || yy >= a.hi)
+                    {
+                        continue; // a padding row's window is zeros
+                    }
+                    // The lane's B rows r = 4 rg + i: dy row (U - i) / S for U = yy + ph - 4 rg,
+                    // where S divides it, or the zero slot. Its ring slot is the uniform slot of
+                    // floor(U / S) stepped back laneD rows (one compare-free wrap).
+                    const u16* bSlot[RG];
+                    bool keep[RG];
+#pragma unroll
+                    for(int rg = 0; rg < RG; ++rg)
+                    {
+                        const int u = yy + a.ph - 4 * rg;
+                        const int fu = floorDiv(u, S);
+                        const int fm = fu - floorDiv(fu, SLOTS) * SLOTS; // in [0, SLOTS)
+                        // At stride 2 the lanes of u's parity pair (i - (u & 1)) / 2 rows back.
+                        const int back = S == 1 ? i : (i - (u & 1)) >> 1;
+                        const unsigned v = static_cast<unsigned>(fm + SLOTS - back);
+                        const unsigned slot = min(v, v - SLOTS);
+                        const int oy = fu - back;
+                        const int r = 4 * rg + i;
+                        const bool ok
+                            = r < KH && (S == 1 || ((u ^ i) & 1) == 0) && oy >= o0 && oy < o1;
+                        // A 24-bit multiply: the slot offset is small (full-rate, not mul_lo).
+                        bSlot[rg]
+                            = ring + __umul24(ok ? slot : static_cast<unsigned>(SLOTS), SS) + laneB;
+                        keep[rg] = ok || r >= KH;
+                    }
+                    const bool careful
+                        = S != 1 || yy + a.ph - (KH - 1) < o0 * S || yy + a.ph >= o1 * S;
+                    f4 saved[NWG][RG][SG];
+                    if(careful)
+                    {
+#pragma unroll
+                        for(int cg = 0; cg < NWG; ++cg)
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    saved[cg][rg][sg] = acc[cg][rg][sg];
+                    }
+#pragma unroll
+                    for(int cg = 0; cg < NWG; ++cg)
+                    {
+                        const unsigned* aRow = reinterpret_cast<const unsigned*>(
+                                                   xs + g * XB + (S == 1 ? 0 : (i & 1) * PHASE)
+                                                   + (b + 64 * cg) * XP + skewOf(b + 64 * cg))
+                                               + laneDword;
+#pragma unroll
+                        for(int qq = 0; qq < Q; qq += 4)
+                        {
+                            constexpr int SPAN = S == 1 ? 2 * SG + 1 : SG + 2;
+                            unsigned d[SPAN];
+#pragma unroll
+                            for(int k = 0; k < SPAN; ++k)
+                            {
+                                d[k] = aRow[qq / 2 + k];
+                            }
+                            u64 av[SG], bv[RG];
+#pragma unroll
+                            for(int sg = 0; sg < SG; ++sg)
+                            {
+                                const int w0 = S == 1 ? 2 * sg : sg;
+                                av[sg]
+                                    = (u64)__builtin_amdgcn_alignbyte(d[w0 + 1], d[w0], ab)
+                                      | ((u64)__builtin_amdgcn_alignbyte(d[w0 + 2], d[w0 + 1], ab)
+                                         << 32);
+                            }
+                            if constexpr(COLMASK)
+                            {
+                                const int live = a.wo - (q0 + qq);
+                                const u64 mask = live >= 4   ? ~0ull
+                                                 : live <= 0 ? 0ull
+                                                             : (1ull << (16 * live)) - 1;
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                {
+                                    av[sg] &= mask;
+                                }
+                            }
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+                            {
+                                bv[rg] = *reinterpret_cast<const u64*>(bSlot[rg] + 64 * cg * DP
+                                                                       + 32 * cg + qq);
+                            }
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    acc[cg][rg][sg] = mma<BF16>(av[sg], bv[rg], acc[cg][rg][sg]);
+                        }
+                    }
+                    if(careful)
+                    {
+#pragma unroll
+                        for(int cg = 0; cg < NWG; ++cg)
+#pragma unroll
+                            for(int rg = 0; rg < RG; ++rg)
+#pragma unroll
+                                for(int sg = 0; sg < SG; ++sg)
+                                    acc[cg][rg][sg]
+                                        = keep[rg] ? acc[cg][rg][sg] : saved[cg][rg][sg];
+                    }
+                }
+                __syncthreads();
+                if(y + G < y1)
+                {
+                    storeStep(y + G);
+                }
+                __syncthreads();
+            }
+        }
+    }
 #pragma unroll
     for(int cg = 0; cg < NWG; ++cg)
     {

@@ -671,13 +671,16 @@ struct WrwConfig
     /// The vector tiles' channels a thread and output columns a strip; 0 otherwise.
     int64_t cv = 0;
     int64_t strip = 0;
+    /// The hankel configs' kernel body; 0 otherwise.
+    int64_t form = 0;
 
     std::string tag() const
     {
         return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
                + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult) + "s"
-               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip);
+               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip) + "f"
+               + std::to_string(form);
     }
 };
 
@@ -738,7 +741,12 @@ const std::vector<WrwConfig>& wrwCatalog()
             {
                 for(const auto& [q, g, nwg, bpc] : hankelSchedules())
                 {
-                    configs.push_back({"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride});
+                    for(const int64_t form : {0, 1})
+                    {
+                        WrwConfig config{"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride};
+                        config.form = form;
+                        configs.push_back(config);
+                    }
                 }
             }
         }
@@ -782,7 +790,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"mult", config.mult},
            {"s", config.s},
            {"cv", config.cv},
-           {"strip", config.strip}};
+           {"strip", config.strip},
+           {"form", config.form}};
     return kernel;
 }
 

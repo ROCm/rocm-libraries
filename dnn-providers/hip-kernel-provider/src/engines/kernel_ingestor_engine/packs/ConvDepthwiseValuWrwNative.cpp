@@ -267,7 +267,8 @@ bool hankelAdmits(const WrwProblem& problem,
     }
     if(config.q < 4 || config.q > 64 || config.q % 4 != 0 || config.g < 1 || config.g > 4
        || (config.nwg != 1 && config.nwg != 2 && config.nwg != 4)
-       || (config.bpc != 1 && config.bpc != 2 && config.bpc != 4 && config.bpc != 8))
+       || (config.bpc != 1 && config.bpc != 2 && config.bpc != 4 && config.bpc != 8)
+       || (config.form != 0 && config.form != 1))
     {
         return false;
     }
@@ -409,6 +410,7 @@ conv_depthwise_valu_wrw::WrwConfig configOf(const KernelDefinition& kernel)
     config.s = kernel.getIntMetadata("s");
     config.cv = kernel.getIntMetadata("cv");
     config.strip = kernel.getIntMetadata("strip");
+    config.form = kernel.getIntMetadata("form");
     return config;
 }
 
@@ -436,7 +438,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 /// Kernel-scoped applicability: the config computes this problem correctly and launches. The
 /// floor serves every problem; a register tile needs its compile-time filter (depth 1 for 1-D
 /// and 2-D); the matrix-core (hankel) configs pass hankelAdmits, and only they may set the
-/// q, g, nwg, bpc and s fields; the vector tiles pass vtileAdmits, and only they may set cv and
+/// q, g, nwg, bpc, s and form fields; the vector tiles pass vtileAdmits, and only they may set cv and
 /// strip. The partitions are sized from the device's units, so a device that
 /// reports none is declined.
 bool kernelMatches(const MatchContext& context,
@@ -462,7 +464,8 @@ bool kernelMatches(const MatchContext& context,
     }
     // The matrix-core fields are the hankel variant's alone.
     if(!hankel
-       && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0 || config.s != 0))
+       && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0 || config.s != 0
+           || config.form != 0))
     {
         return false;
     }
@@ -649,6 +652,11 @@ public:
             if(config.s != 1)
             {
                 options.add("CONV_DW_S", std::to_string(config.s));
+            }
+            // Defined only for the row-staging body, so the others compile as before.
+            if(config.form != 0)
+            {
+                options.add("CONV_DW_FORM", std::to_string(config.form));
             }
             // Only where the tiles pass wo, so the other programs compile as before.
             if(problem->args.wo % config.q != 0)

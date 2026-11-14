@@ -28,11 +28,13 @@ FIELDS = [
     "s",
     "cv",
     "strip",
+    "form",
 ]
 STRINGS = {"dtype", "layout", "variant"}
 # The matrix-core fields (q output columns a tile, g input rows a step, nwg 16-channel groups a
-# wave, bpc blocks per dispatch unit, s the stride of both axes) are 0 for the VALU variants.
-NO_MMA = dict(q=0, g=0, nwg=0, bpc=0, s=0, cv=0, strip=0)
+# wave, bpc blocks per dispatch unit, s the stride of both axes, form the kernel body) are 0
+# for the VALU variants.
+NO_MMA = dict(q=0, g=0, nwg=0, bpc=0, s=0, cv=0, strip=0, form=0)
 CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA, mult=1)] + [
     dict(variant="tile", kd=kd, kh=kh, kw=kw, **NO_MMA, mult=1)
     for kd, kh, kw in (
@@ -81,6 +83,7 @@ HANKEL = [
         s=s,
         cv=0,
         strip=0,
+        form=0,
     )
     for s in (1, 2)
     for k in (3, 5, 7)
@@ -109,6 +112,7 @@ VTILE = [
         s=0,
         cv=cv,
         strip=strip,
+        form=0,
     )
     for k, shapes in VTILE_SHAPES.items()
     for cv, strip in shapes
@@ -153,7 +157,18 @@ w(
         "name": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
         "graph_match": {"native": "hipkernel.conv_depthwise_valu_wrw.graph_match"},
         "metadata": kmd,
-        "knobs": ["variant", "q", "g", "nwg", "bpc", "mult", "s", "cv", "strip"],
+        "knobs": [
+            "variant",
+            "q",
+            "g",
+            "nwg",
+            "bpc",
+            "mult",
+            "s",
+            "cv",
+            "strip",
+            "form",
+        ],
         "behavior_notes": ["runtime_compilation"],
         # RFC 0025 numerical notes. No "nondeterministic": every config is
         # bitwise reproducible (fixed-order sums, no atomics), which the
@@ -191,6 +206,7 @@ for c in HANKEL:
     for dtype, dt in (("HALF", "f16"), ("BFLOAT16", "bf16")):
         tag = f"hankel_k{c['kh']}x{c['kw']}.q{c['q']}g{c['g']}w{c['nwg']}b{c['bpc']}"
         tag += f".s{c['s']}" if c["s"] != 1 else ""
+        tag += f".f{c['form']}" if c["form"] != 0 else ""
         name = f"conv_depthwise_valu_wrw.{dt}.nhwc.{tag}"
         kernels.append(
             {

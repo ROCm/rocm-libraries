@@ -444,7 +444,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
 {
 #if CONV_DW_VARIANT == 2
     static_assert(hankel::THREADS == BLOCK, "one block size");
+#if CONV_DW_FORM == 1
+    hankel::partialRows<__is_same(ElementType, __bf16)>(a);
+#else
     hankel::partial<__is_same(ElementType, __bf16)>(a);
+#endif
 #elif CONV_DW_VARIANT == 3
     vtile::partial(a);
 #else
