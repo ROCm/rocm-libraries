@@ -4184,21 +4184,17 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
         a, acc, g, t * R, a.ft * R, k0, c0, wk, wc, lane, bz);
 }
 
-/// A load of the partials. Non-temporal on gfx9 (measured faster there or even), plain on RDNA,
-/// where a non-temporal load misses the infinity cache that still holds the partials the main
-/// kernel just wrote (gfx1201: 3x the reduce's time). The quad reduce also loads plainly on
-/// gfx950, where its many-split, small-dw form waits on non-temporal latency (c64 at 150
-/// splits: 8.8 against 4.6 us).
-template <bool QUAD, class P>
+/// A load of the partials: non-temporal (NT) on gfx9, where it measured faster or even, and
+/// plain on RDNA, where a non-temporal load misses the infinity cache that still holds the
+/// partials the main kernel just wrote (gfx1201: 3x the reduce's time).
+template <bool NT, class P>
 __device__ inline P k3PartialLoad(const P* p)
 {
-#if defined(__GFX9__) && !defined(__gfx950__)
-    return __builtin_nontemporal_load(p);
-#elif defined(__gfx950__)
-    if constexpr(QUAD)
-        return *p;
-    else
+#if defined(__GFX9__)
+    if constexpr(NT)
         return __builtin_nontemporal_load(p);
+    else
+        return *p;
 #else
     return *p;
 #endif
@@ -4237,10 +4233,10 @@ __device__ inline void k3ReduceTile(const K3ReduceArgs& a)
     };
     const auto load = [&](const float* src, int sp, int c) -> f4 {
         if(vec)
-            return k3PartialLoad<false>(reinterpret_cast<const f4*>(src + sp * pe));
+            return k3PartialLoad<true>(reinterpret_cast<const f4*>(src + sp * pe));
         f4 v = {0.0f, 0.0f, 0.0f, 0.0f};
         for(int j = 0; j < 4 && c + j < cn; ++j)
-            v[j] = k3PartialLoad<false>(src + sp * pe + j);
+            v[j] = k3PartialLoad<true>(src + sp * pe + j);
         return v;
     };
     // dw's order in the tile: per output channel, channel by tap.
@@ -4369,20 +4365,34 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
     {
         if(vec)
         {
-            int sp = grp;
-            for(; sp + 12 < a.splits; sp += 16)
-            {
-                f4 v[4];
+            const auto add = [&](auto nt) {
+                constexpr bool NT = decltype(nt)::value != 0;
+                int sp = grp;
+                for(; sp + 12 < a.splits; sp += 16)
+                {
+                    f4 v[4];
 #pragma unroll
-                for(int j = 0; j < 4; ++j)
-                    v[j] = k3PartialLoad<true>(
-                        reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
+                    for(int j = 0; j < 4; ++j)
+                        v[j] = k3PartialLoad<NT>(
+                            reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
 #pragma unroll
-                for(int j = 0; j < 4; ++j)
-                    sum += v[j];
-            }
-            for(; sp < a.splits; sp += 4)
-                sum += k3PartialLoad<true>(reinterpret_cast<const f4*>(src + sp * a.partialElems));
+                    for(int j = 0; j < 4; ++j)
+                        sum += v[j];
+                }
+                for(; sp < a.splits; sp += 4)
+                    sum += k3PartialLoad<NT>(
+                        reinterpret_cast<const f4*>(src + sp * a.partialElems));
+            };
+#if defined(__gfx950__)
+            // Many splits of a small dw wait on non-temporal latency on gfx950 (c64 at 150
+            // splits: 8.8 against 4.6 us); fewer read faster non-temporally.
+            if(a.splits >= 64)
+                add(K3Int<0>{});
+            else
+                add(K3Int<1>{});
+#else
+            add(K3Int<1>{});
+#endif
         }
         else
         {
