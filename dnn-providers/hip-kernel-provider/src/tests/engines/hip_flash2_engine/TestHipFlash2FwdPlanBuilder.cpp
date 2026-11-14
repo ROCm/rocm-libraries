@@ -214,6 +214,58 @@ TEST_F(TestHipFlash2FwdPlanBuilder, RejectsBF16)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
+// cu_seq_len_* is unsupported. padding_mask stays false so only the cu_seq_len reject can
+// decline the graph; the same graph without cu_seq_len is accepted.
+TEST_F(TestHipFlash2FwdPlanBuilder, RejectsCuSeqLen)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    const std::vector<int64_t> dims{1, 32, 2048, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    using hipdnn_test_sdk::utilities::CuSeqLenSides;
+    const auto build = [&](CuSeqLenSides cuSeqLenSides) {
+        return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+            dims,
+            strides,
+            dims,
+            strides,
+            dims,
+            strides,
+            dims,
+            strides,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+            /*withAttnMask=*/false,
+            /*withScale=*/false,
+            /*withStats=*/false,
+            /*alibiMask=*/false,
+            /*paddingMask=*/false,
+            /*causalMask=*/false,
+            /*overrideShapeEnabled=*/false,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+            cuSeqLenSides);
+    };
+
+    auto baseline = build(CuSeqLenSides::NONE);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper baselineGraph(
+        baseline.GetBufferPointer(), baseline.GetSize());
+    ASSERT_TRUE(_builder.isApplicable(_handle, baselineGraph));
+
+    // Each side alone must decline the graph, not only both together.
+    for(const auto sides : {CuSeqLenSides::Q, CuSeqLenSides::KV, CuSeqLenSides::BOTH})
+    {
+        SCOPED_TRACE(static_cast<int>(sides));
+        auto withCuSeqLen = build(sides);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper cuGraph(
+            withCuSeqLen.GetBufferPointer(), withCuSeqLen.GetSize());
+        EXPECT_FALSE(_builder.isApplicable(_handle, cuGraph));
+    }
+}
+
 TEST_F(TestHipFlash2FwdPlanBuilder, RejectsUnsupportedHeadDim256)
 {
     SKIP_IF_NO_DEVICES();

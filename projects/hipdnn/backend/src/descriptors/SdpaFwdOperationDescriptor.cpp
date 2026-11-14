@@ -111,6 +111,22 @@ void SdpaFwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                                     arrayOfElements,
                                     "SdpaFwdOperationDescriptor::setAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC:
+        setOptionalTensorDescriptor(_cuSeqLenQDesc,
+                                    _data.cu_seq_len_q_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFwdOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC:
+        setOptionalTensorDescriptor(_cuSeqLenKvDesc,
+                                    _data.cu_seq_len_kv_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFwdOperationDescriptor::setAttribute()");
+        break;
     case HIPDNN_ATTR_OPERATION_SDPA_FWD_SEED_EXT:
         setOptionalTensorDescriptor(_seedDesc,
                                     _data.seed_tensor_uid,
@@ -467,6 +483,22 @@ void SdpaFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                                     arrayOfElements,
                                     "SdpaFwdOperationDescriptor::getAttribute()");
         break;
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC:
+        getOptionalTensorDescriptor(_cuSeqLenQDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFwdOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC:
+        getOptionalTensorDescriptor(_cuSeqLenKvDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFwdOperationDescriptor::getAttribute()");
+        break;
     case HIPDNN_ATTR_OPERATION_SDPA_FWD_SEED_EXT:
         getOptionalTensorDescriptor(_seedDesc,
                                     attributeType,
@@ -804,6 +836,8 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     addIfSet(tensors, _rngDumpDesc);
     addIfSet(tensors, _amaxSDesc);
     addIfSet(tensors, _amaxODesc);
+    addIfSet(tensors, _cuSeqLenQDesc);
+    addIfSet(tensors, _cuSeqLenKvDesc);
     return tensors;
 }
 
@@ -834,6 +868,8 @@ std::string SdpaFwdOperationDescriptor::toString() const
     str += ", scale_uid=" + optionalToString(_data.scale_tensor_uid);
     str += ", seq_len_q_uid=" + optionalToString(_data.seq_len_q_tensor_uid);
     str += ", seq_len_kv_uid=" + optionalToString(_data.seq_len_kv_tensor_uid);
+    str += ", cu_seq_len_q_uid=" + optionalToString(_data.cu_seq_len_q_tensor_uid);
+    str += ", cu_seq_len_kv_uid=" + optionalToString(_data.cu_seq_len_kv_tensor_uid);
     str += ", seed_uid=" + optionalToString(_data.seed_tensor_uid);
     str += ", offset_uid=" + optionalToString(_data.offset_tensor_uid);
     str += ", dropout_mask_uid=" + optionalToString(_data.dropout_mask_tensor_uid);
@@ -926,6 +962,8 @@ std::shared_ptr<SdpaFwdOperationDescriptor> SdpaFwdOperationDescriptor::fromNode
     desc->_rngDumpDesc = findOptionalTensor(tensorMap, attrs->rng_dump_tensor_uid);
     desc->_amaxSDesc = findOptionalTensor(tensorMap, attrs->amax_s_tensor_uid);
     desc->_amaxODesc = findOptionalTensor(tensorMap, attrs->amax_o_tensor_uid);
+    desc->_cuSeqLenQDesc = findOptionalTensor(tensorMap, attrs->cu_seq_len_q_tensor_uid);
+    desc->_cuSeqLenKvDesc = findOptionalTensor(tensorMap, attrs->cu_seq_len_kv_tensor_uid);
 
     desc->finalize();
     return desc;

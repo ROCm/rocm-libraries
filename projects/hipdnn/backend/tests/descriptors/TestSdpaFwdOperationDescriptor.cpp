@@ -75,6 +75,8 @@ public:
         setIf(HIPDNN_ATTR_OPERATION_SDPA_FWD_RNG_DUMP_EXT, _rngDumpDesc);
         setIf(HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_S_EXT, _amaxSDesc);
         setIf(HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_O_EXT, _amaxODesc);
+        setIf(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC, _cuSeqLenQDesc);
+        setIf(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC, _cuSeqLenKvDesc);
         // Compute data type
         if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT) == skip.end())
         {
@@ -120,6 +122,8 @@ protected:
     std::unique_ptr<HipdnnBackendDescriptor> _rngDumpDesc = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _amaxSDesc = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _amaxODesc = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _cuSeqLenQDesc = nullptr;
+    std::unique_ptr<HipdnnBackendDescriptor> _cuSeqLenKvDesc = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _unfinalizedTensor = nullptr;
 
     void SetUp() override
@@ -161,6 +165,8 @@ protected:
         _rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
         _amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
         _amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
+        _cuSeqLenQDesc = createFinalizedTensor(K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID);
+        _cuSeqLenKvDesc = createFinalizedTensor(K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID);
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 };
@@ -533,6 +539,35 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetTensorDescriptorAmaxO)
 
     ASSERT_EQ(desc->getData().amax_o_tensor_uid, K_SDPA_TENSOR_AMAX_O_UID);
     ASSERT_NE(desc->getAmaxODesc(), nullptr);
+}
+
+TEST_F(TestSdpaFwdOperationDescriptor, SetTensorDescriptorCuSeqLenQ)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &_cuSeqLenQDesc));
+
+    ASSERT_EQ(desc->getData().cu_seq_len_q_tensor_uid, K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID);
+    ASSERT_NE(desc->getCuSeqLenQDesc(), nullptr);
+    // cu_seq_len_q must not alias the per-batch seq_len_q slot
+    ASSERT_FALSE(desc->getData().seq_len_q_tensor_uid.has_value());
+    ASSERT_EQ(desc->getSeqLenQDesc(), nullptr);
+}
+
+TEST_F(TestSdpaFwdOperationDescriptor, SetTensorDescriptorCuSeqLenKv)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &_cuSeqLenKvDesc));
+
+    ASSERT_EQ(desc->getData().cu_seq_len_kv_tensor_uid, K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID);
+    ASSERT_NE(desc->getCuSeqLenKVDesc(), nullptr);
+    ASSERT_FALSE(desc->getData().seq_len_kv_tensor_uid.has_value());
+    ASSERT_EQ(desc->getSeqLenKvDesc(), nullptr);
 }
 
 TEST_F(TestSdpaFwdOperationDescriptor, SetTensorFailsNotFinalized)
@@ -995,6 +1030,10 @@ INSTANTIATE_TEST_SUITE_P(
         QueryModeParam{
             HIPDNN_ATTR_OPERATION_SDPA_FWD_AMAX_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
         QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
             HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, 1},
         // mma_core_mode is not set by setAllAttributesExcept; UNSET DataType
         // reports count=0 via the count-query path (the same contract as graph
@@ -1072,6 +1111,8 @@ TEST_F(TestSdpaFwdOperationDescriptor, FinalizePreservesTensorReferences)
     ASSERT_EQ(desc->getRngDumpDesc()->getData().uid, K_SDPA_TENSOR_RNG_DUMP_UID);
     ASSERT_EQ(desc->getAmaxSDesc()->getData().uid, K_SDPA_TENSOR_AMAX_S_UID);
     ASSERT_EQ(desc->getAmaxODesc()->getData().uid, K_SDPA_TENSOR_AMAX_O_UID);
+    ASSERT_EQ(desc->getCuSeqLenQDesc()->getData().uid, K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID);
+    ASSERT_EQ(desc->getCuSeqLenKVDesc()->getData().uid, K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID);
 }
 
 // =============================================================================
@@ -1133,6 +1174,10 @@ TEST_F(TestSdpaFwdOperationDescriptor, ToStringContainsExpectedInfo)
               std::string::npos);
     ASSERT_NE(str.find("amax_o_uid=" + std::to_string(K_SDPA_TENSOR_AMAX_O_UID)),
               std::string::npos);
+    ASSERT_NE(str.find("cu_seq_len_q_uid=" + std::to_string(K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("cu_seq_len_kv_uid=" + std::to_string(K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID)),
+              std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -1184,6 +1229,8 @@ TEST_F(TestSdpaFwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
     ASSERT_EQ(attrs->rng_dump_tensor_uid, K_SDPA_TENSOR_RNG_DUMP_UID);
     ASSERT_EQ(attrs->amax_s_tensor_uid, K_SDPA_TENSOR_AMAX_S_UID);
     ASSERT_EQ(attrs->amax_o_tensor_uid, K_SDPA_TENSOR_AMAX_O_UID);
+    ASSERT_EQ(attrs->cu_seq_len_q_tensor_uid, K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID);
+    ASSERT_EQ(attrs->cu_seq_len_kv_tensor_uid, K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID);
 }
 
 TEST_F(TestSdpaFwdOperationDescriptor, BuildNodeProducesCorrectNodeTNonDefaults)
@@ -1275,7 +1322,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, GetTensorDescriptorsReturnsExpectedOrder)
     auto desc = getDescriptor();
 
     auto tensors = desc->getTensorDescriptors();
-    ASSERT_EQ(tensors.size(), 28);
+    ASSERT_EQ(tensors.size(), 30);
     // Verify ordering: [Q, K, V, O, ATTN_MASK, SCALE, SEQ_LEN_Q, SEQ_LEN_KV, SEED, OFFSET, DROPOUT_MASK, DROPOUT_SCALE, PAGE_TABLE_K, PAGE_TABLE_V, BLOCK_MASK, SINK_TOKEN, DESCALE_Q, DESCALE_K, DESCALE_V, DESCALE_S, SCALE_S, SCALE_O, STATS, MAX, SUM_EXP, RNG_DUMP, AMAX_S, AMAX_O] matches UIDs [40, 41, 42, 43, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
     EXPECT_EQ(tensors[0], desc->getQDesc());
     EXPECT_EQ(tensors[1], desc->getKDesc());
@@ -1305,6 +1352,8 @@ TEST_F(TestSdpaFwdOperationDescriptor, GetTensorDescriptorsReturnsExpectedOrder)
     EXPECT_EQ(tensors[25], desc->getRngDumpDesc());
     EXPECT_EQ(tensors[26], desc->getAmaxSDesc());
     EXPECT_EQ(tensors[27], desc->getAmaxODesc());
+    EXPECT_EQ(tensors[28], desc->getCuSeqLenQDesc());
+    EXPECT_EQ(tensors[29], desc->getCuSeqLenKVDesc());
 }
 
 TEST_F(TestSdpaFwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
@@ -1316,7 +1365,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
-    ASSERT_EQ(tensors.size(), 28);
+    ASSERT_EQ(tensors.size(), 30);
     ASSERT_EQ(tensors[0]->getData().uid, K_SDPA_TENSOR_Q_UID);
 }
 

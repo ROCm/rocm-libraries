@@ -504,11 +504,13 @@ inline std::optional<MatchedAttributes>
     // Ragged operands: the engine derives query_start_len and seq_lens itself, from uniform
     // lengths.
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "varlen"})
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not supported");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not supported");
         return std::nullopt;
     }
     // Dropout.

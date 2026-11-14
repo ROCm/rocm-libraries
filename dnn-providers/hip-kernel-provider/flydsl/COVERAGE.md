@@ -504,7 +504,7 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 
 **Graph schema.** Before a matcher runs, the ingestor declines a graph whose schema floor
 (hipDNN's `computeMinimumEnginePluginApiVersion`) is above the engine's UED `sdk_version`.
-Every FlyDSL SDPA engine (RDNA, aiw and CDNA alike) claims **1.4.0**, the newest version
+Every FlyDSL SDPA engine (RDNA, aiw and CDNA alike) claims **1.6.0**, the newest version
 the SDK defines (`K_MAX_SUPPORTED_API_VERSION`), so ragged graphs reach the matchers; each
 field the schema added up to it is gated:
 
@@ -515,10 +515,11 @@ field the schema added up to it is gated:
 | 1.3.0 | tensor `ragged_offset_tensor_uid` | Q/K/V/O: compact THD or cuDNN's packed form, else declined (§5.9, §7.10); the LSE: packed through Q's table or dense; every other tensor declines it |
 | 1.3.0 | tensor `alignment` | `declaresAlignment` wherever a device tensor is read: Q/K/V/O and the bias 16 bytes, LSE, lengths, offset tables, RNG dump and the (FLOAT) sink 4, seed and offset on the device 8 |
 | 1.4.0 | tensor `ragged_offset_multiplier` | a ragged tensor's must be its own sequence stride (`isPackedThrough`); on a tensor that is not ragged anything but 1 declines (`usesUnreadSchemaFields`) |
+| 1.6.0 | SDPA `cu_seq_len_q` / `cu_seq_len_kv` | declined in the CDNA and RDNA matchers before the varlen rules read the graph: the kernels read per-batch lengths (`seq_len_*`), not cumulative ones |
 
 `TestFlydslSdpaGraphSchema` pins the claim to the SDK's newest version: an SDK that adds one
 fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2). **Through
-hipDNN's backend:** the provider declares engine plugin API 1.4.0, the SDK's newest
+hipDNN's backend:** the provider declares engine plugin API 1.6.0, the SDK's newest
 (`src/core/PluginPublic.cpp`), so the backend routes it ragged graphs; its schema guard
 (`src/core/GraphSchema.hpp`) declines a graph for every engine whose declared schema is below
 the graph's floor: built-in engines declare theirs in `Container.cpp`, ingestor engines their

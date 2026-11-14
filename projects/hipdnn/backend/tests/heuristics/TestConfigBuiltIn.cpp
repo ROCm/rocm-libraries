@@ -124,6 +124,46 @@ std::vector<uint8_t> buildConvFwdGraphBuffer(const std::vector<int64_t>& xDims,
     return {data, data + builder.GetSize()};
 }
 
+/// Build a serialized SDPA forward Graph whose optional cu_seq_len_q / cu_seq_len_kv tensors are
+/// present as requested. Every tensor is [2, 1, 1, 1] so rules can tell them apart by id alone.
+std::vector<uint8_t> buildSdpaFwdGraphBuffer(bool withCuSeqLenQ, bool withCuSeqLenKv)
+{
+    fb::GraphT graph;
+    int64_t nextUid = 1;
+    const auto addTensor = [&](const char* name) {
+        auto tensor = std::make_unique<fb::TensorAttributesT>();
+        tensor->uid = nextUid++;
+        tensor->name = name;
+        tensor->data_type = fb::DataType::HALF;
+        tensor->dims = {2, 1, 1, 1};
+        tensor->strides = {1, 1, 1, 1};
+        graph.tensors.push_back(std::move(tensor));
+        return graph.tensors.back()->uid;
+    };
+
+    fb::SdpaAttributesT sdpa;
+    sdpa.q_tensor_uid = addTensor("q");
+    sdpa.k_tensor_uid = addTensor("k");
+    sdpa.v_tensor_uid = addTensor("v");
+    sdpa.o_tensor_uid = addTensor("o");
+    if(withCuSeqLenQ)
+    {
+        sdpa.cu_seq_len_q_tensor_uid = addTensor("cu_seq_len_q");
+    }
+    if(withCuSeqLenKv)
+    {
+        sdpa.cu_seq_len_kv_tensor_uid = addTensor("cu_seq_len_kv");
+    }
+    auto node = std::make_unique<fb::NodeT>();
+    node->attributes.Set(sdpa);
+    graph.nodes.push_back(std::move(node));
+
+    flatbuffers::FlatBufferBuilder builder;
+    fb::FinishGraphBuffer(builder, fb::Graph::Pack(builder, &graph));
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
 /// Build a serialized Graph with two same-priority ConvolutionFwd nodes; only the
 /// second node's shapes match the common test override.
 std::vector<uint8_t> buildTwoConvFwdGraphBuffer()
@@ -889,6 +929,63 @@ TEST_F(TestConfigBuiltIn, FinalizeLegacyRuleWithoutTensorIdsUsesPositionalFallba
     const auto sorted = _plugin->getSortedEngineIds(_desc);
     ASSERT_EQ(sorted.size(), 3u);
     EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+}
+
+// A rule lists every tensor of the node's match key, so the key must carry each cumulative
+// sequence length tensor that the node has: dropping either from the key leaves a rule that names
+// it (or a rule that does not, for a graph that has it) mismatched in tensor count.
+TEST_F(TestConfigBuiltIn, FinalizeMatchesRuleNamingEveryCuSeqLenTensorOfTheNode)
+{
+    const auto ruleNaming = [](const std::vector<const char*>& cuTensorIds) {
+        std::string tensors;
+        for(const char* tensorId : {config_tensor::Q, config_tensor::K, config_tensor::V})
+        {
+            tensors
+                += std::string(R"({ "tensor_id": ")") + tensorId + R"(", "dim": [2, 1, 1, 1] },)";
+        }
+        for(const char* tensorId : cuTensorIds)
+        {
+            tensors
+                += std::string(R"({ "tensor_id": ")") + tensorId + R"(", "dim": [2, 1, 1, 1] },)";
+        }
+        tensors.pop_back(); // trailing comma
+        return std::string(R"({
+          "version": 2,
+          "engine_overrides": [
+            {
+              "op": "sdpa_fwd",
+              "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+              "tensors": [)")
+               + tensors + R"(]
+            }
+          ]
+        })";
+    };
+
+    struct Case
+    {
+        const char* name;
+        bool cuQ;
+        bool cuKv;
+        std::vector<const char*> ruleCuTensors;
+    };
+    const std::vector<Case> cases{
+        {"cu_seq_len_q only", true, false, {config_tensor::CU_SEQ_LEN_Q}},
+        {"cu_seq_len_kv only", false, true, {config_tensor::CU_SEQ_LEN_KV}},
+        {"both", true, true, {config_tensor::CU_SEQ_LEN_Q, config_tensor::CU_SEQ_LEN_KV}},
+    };
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const TempJsonOverrideFile json(ruleNaming(testCase.ruleCuTensors));
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                              json.path());
+
+        setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+        setSerializedGraph(buildSdpaFwdGraphBuffer(testCase.cuQ, testCase.cuKv));
+        ASSERT_TRUE(_plugin->finalize(_desc));
+        EXPECT_EQ(_plugin->getSortedEngineIds(_desc).front(), MIOPEN_DETERMINISTIC_ID);
+    }
 }
 
 TEST_F(TestConfigBuiltIn, FinalizeTriesLaterSamePriorityNodeAfterFirstMiss)

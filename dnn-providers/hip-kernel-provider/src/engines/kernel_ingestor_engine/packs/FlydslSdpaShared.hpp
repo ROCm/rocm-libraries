@@ -106,10 +106,11 @@ using sdpa_graph::computesInFloat;
  *        matcher has seen; and a ragged offset multiplier (1.4.0) on a tensor with no ragged
  *        offset, which no dense tensor can mean.
  *
- * The engines claim every graph schema through 1.4.0 (their UEDs' `sdk_version`), so every
+ * The engines claim every graph schema through 1.6.0 (their UEDs' `sdk_version`), so every
  * field up to it is gated: these two here, and the rest where each tensor is read --
  * pass-by-value (1.2.0), ragged offsets and declared alignments (1.3.0), and a ragged
- * tensor's multiplier (1.4.0, isPackedThrough).
+ * tensor's multiplier (1.4.0, isPackedThrough); cumulative sequence lengths (1.6.0) are declined
+ * in the CDNA and RDNA matchers.
  */
 inline bool usesUnreadSchemaFields(const MatchContext& context)
 {

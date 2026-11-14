@@ -1489,6 +1489,15 @@ TEST_F(TestApplicabilityManager, TwoCallersShareOnePoolAndEachGetTheSequentialAn
 namespace
 {
 
+/// Which cumulative-length tensors a test graph's SDPA node names.
+enum class CuSides
+{
+    NONE,
+    Q,
+    KV,
+    BOTH
+};
+
 /// The graph-schema fields a test graph uses: one FLOAT tensor carrying them.
 struct SchemaFields
 {
@@ -1497,6 +1506,8 @@ struct SchemaFields
     int64_t multiplier = 1;
     bool overrideShape = false;
     bool runtimePassByValue = false;
+    /// The cumulative-length tensors an SDPA node carries.
+    CuSides cuSeqLen = CuSides::NONE;
     /// A floor the writer stamped, when set.
     std::optional<hipdnn_data_sdk::utilities::Version> stamp;
 };
@@ -1523,8 +1534,29 @@ flatbuffers::FlatBufferBuilder schemaGraph(const SchemaFields& fields)
         fields.alignment,
         fields.multiplier));
     const auto tensorsVector = builder.CreateVector(tensors);
+    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    if(fields.cuSeqLen != CuSides::NONE)
+    {
+        data_objects::SdpaAttributesBuilder sdpa(builder);
+        if(fields.cuSeqLen == CuSides::Q || fields.cuSeqLen == CuSides::BOTH)
+        {
+            sdpa.add_cu_seq_len_q_tensor_uid(1);
+        }
+        if(fields.cuSeqLen == CuSides::KV || fields.cuSeqLen == CuSides::BOTH)
+        {
+            sdpa.add_cu_seq_len_kv_tensor_uid(1);
+        }
+        const auto attributes = sdpa.Finish();
+        nodes.push_back(data_objects::CreateNodeDirect(builder,
+                                                       "sdpa_fwd",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::NodeAttributes::SdpaAttributes,
+                                                       attributes.Union()));
+    }
+    const auto nodesVector = builder.CreateVector(nodes);
     data_objects::GraphBuilder graph(builder);
     graph.add_tensors(tensorsVector);
+    graph.add_nodes(nodesVector);
     graph.add_is_override_shape_enabled(fields.overrideShape);
     std::optional<data_objects::EngineApiVersion> stamp;
     if(fields.stamp.has_value())
@@ -1548,6 +1580,13 @@ SchemaFields withRagged(int64_t multiplier = 1)
     SchemaFields fields;
     fields.ragged = true;
     fields.multiplier = multiplier;
+    return fields;
+}
+
+SchemaFields withCuSeqLen(CuSides sides)
+{
+    SchemaFields fields;
+    fields.cuSeqLen = sides;
     return fields;
 }
 
@@ -1597,6 +1636,10 @@ TEST(TestGraphSchemaGuard, AGraphsFloorIsItsFieldsOrItsStampWhicheverIsNewer)
     EXPECT_EQ(floorOf(withAlignment(8)), "1.3.0");
     EXPECT_EQ(floorOf(withRagged()), "1.3.0");
     EXPECT_EQ(floorOf(withRagged(4)), "1.4.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::Q)), "1.6.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::KV)), "1.6.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::BOTH)), "1.6.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::NONE)), "1.0.0");
     EXPECT_EQ(floorOf(stamped("1.4.0")), "1.4.0");
     EXPECT_EQ(floorOf(stamped("1.2.0", withRagged())), "1.3.0");
 }

@@ -397,6 +397,25 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
         return bf16Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
     };
 
+    // Control: the unmodified ragged graph is accepted, so the rejects below are what decline it.
+    ASSERT_TRUE(isApplicableWith(SdpaAttributesT{}));
+
+    {
+        // ragged_offset with cu_seq_len is unsupported, on each side alone and on both.
+        // padding_mask stays false so only the cu_seq_len reject can decline this graph.
+        SdpaAttributesT onlyQ;
+        onlyQ.cu_seq_len_q_tensor_uid = UNUSED_UID;
+        EXPECT_FALSE(isApplicableWith(onlyQ));
+
+        SdpaAttributesT onlyKv;
+        onlyKv.cu_seq_len_kv_tensor_uid = UNUSED_UID;
+        EXPECT_FALSE(isApplicableWith(onlyKv));
+
+        SdpaAttributesT both;
+        both.cu_seq_len_q_tensor_uid = UNUSED_UID;
+        both.cu_seq_len_kv_tensor_uid = UNUSED_UID;
+        EXPECT_FALSE(isApplicableWith(both));
+    }
     {
         SdpaAttributesT attrs;
         attrs.alibi_mask = true;

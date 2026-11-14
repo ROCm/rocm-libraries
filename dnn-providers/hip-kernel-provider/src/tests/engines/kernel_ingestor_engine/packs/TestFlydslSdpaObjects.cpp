@@ -631,7 +631,7 @@ void expectStagedObjectsMatch(ObjectKind kind, ObjectSelection selection)
 // (gen_descriptors.py SDPA_SDK_VERSION).
 TEST(TestFlydslSdpaGraphSchema, EveryEngineClaimsTheReviewedSchema)
 {
-    const hipdnn_data_sdk::utilities::Version reviewed{std::string("1.4.0")};
+    const hipdnn_data_sdk::utilities::Version reviewed{std::string("1.6.0")};
     EXPECT_EQ(
         hipdnn_data_sdk::utilities::Version{
             std::string(hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION)}
@@ -640,8 +640,8 @@ TEST(TestFlydslSdpaGraphSchema, EveryEngineClaimsTheReviewedSchema)
         << "the SDK defines a graph schema the FlyDSL SDPA matchers were not reviewed against";
     // A packed graph with every 1.x feature: overridable shapes aside, which the matchers
     // decline themselves, it is within the claim.
-    const auto& packedFloor
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(false, true, true, true, true);
+    const auto& packedFloor = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
+        false, true, true, true, true, true);
     for(const auto op : {"sdpa_rdna",
                          "sdpa_rdna_decode",
                          "sdpa_aiw",

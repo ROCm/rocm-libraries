@@ -36,6 +36,7 @@ constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
 constexpr int64_t RAGGED_OFFSET_Q_UID = 10;
 constexpr int64_t RAGGED_OFFSET_KV_UID = 11;
+constexpr int64_t CU_SEQ_LEN_UID = 90;
 
 // [B = 1, H = 2, S = 4, D = 8]. Token-major strides are {64, 8, 16, 1}.
 const std::vector<int64_t> DIMS = raggedDims(1, 4, 2, 8);
@@ -310,6 +311,43 @@ TEST(TestRaggedSdpaFwdSupport, GateAppliesSdpaPaddingRule)
         tensorOf(g, SEQ_LEN_Q_UID).data_type = DataType::INT64;
     })));
     EXPECT_FALSE(nodeAccepted(makeStatsGraph([](GraphT& g) { addSeqLens(g, 2); })));
+}
+
+// The ragged references have no cumulative-length input, so each cu_seq_len side is declined alone
+// and together, with and without the seq_len pair that would otherwise be accepted.
+TEST(TestRaggedSdpaFwdSupport, GateDeclinesCuSeqLenOnEachSide)
+{
+    using Edit = std::function<void(SdpaAttributesT&)>;
+    const std::vector<Edit> edits
+        = {[](SdpaAttributesT& a) { a.cu_seq_len_q_tensor_uid = CU_SEQ_LEN_UID; },
+           [](SdpaAttributesT& a) { a.cu_seq_len_kv_tensor_uid = CU_SEQ_LEN_UID; },
+           [](SdpaAttributesT& a) {
+               a.cu_seq_len_q_tensor_uid = CU_SEQ_LEN_UID;
+               a.cu_seq_len_kv_tensor_uid = CU_SEQ_LEN_UID;
+           }};
+
+    for(const bool withSeqLens : {false, true})
+    {
+        ASSERT_TRUE(nodeAccepted(makeStatsGraph([&](GraphT& g) {
+            if(withSeqLens)
+            {
+                addSeqLens(g, 1);
+            }
+        }))) << "control, seq_lens="
+             << withSeqLens;
+
+        for(size_t i = 0; i < edits.size(); ++i)
+        {
+            EXPECT_FALSE(nodeAccepted(makeStatsGraph([&](GraphT& g) {
+                if(withSeqLens)
+                {
+                    addSeqLens(g, 1);
+                }
+                edits[i](*g.nodes.front()->attributes.AsSdpaAttributes());
+            }))) << "variant "
+                 << i << ", seq_lens=" << withSeqLens;
+        }
+    }
 }
 
 // Native ragged Max and Sum_exp stay declined (the executors serve them through densify).

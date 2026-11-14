@@ -45,10 +45,15 @@ inline constexpr std::string_view K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION
 // than this when the graph sets a custom multiplier.
 inline constexpr std::string_view K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION = "1.4.0";
 
+// Minimum engine plugin API version for SDPA forward graphs with cu_seq_len_q/kv (pure or
+// mixed with seq_len_*). Older plugins would silently ignore the fields and run full-length
+// attention, so the filter rejects them for such graphs.
+// Not 1.5.0: the UHD prediction entry points took it and carry no cu_seq_len support.
+inline constexpr std::string_view K_CU_SEQ_LEN_MIN_API_VERSION = "1.6.0";
+
 // Deserialize ceiling: a graph whose min_required_engine_api_version exceeds this
 // is rejected. Must equal the highest feature-gated version constant above.
-inline constexpr std::string_view K_MAX_SUPPORTED_API_VERSION
-    = K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION;
+inline constexpr std::string_view K_MAX_SUPPORTED_API_VERSION = K_CU_SEQ_LEN_MIN_API_VERSION;
 
 /// @brief Computes the minimum engine plugin API version a graph requires,
 /// from the graph-level feature flags gating additive plugin ABI surface.
@@ -67,7 +72,8 @@ inline const hipdnn_data_sdk::utilities::Version&
                                          bool isRuntimePassByValue,
                                          bool isRaggedTensorEnabled,
                                          bool hasNonDefaultTensorAlignment,
-                                         bool isRaggedOffsetMultiplier)
+                                         bool isRaggedOffsetMultiplier,
+                                         bool hasCuSeqLen)
 {
     static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
         K_ENGINE_PLUGIN_API_VERSION_BASELINE};
@@ -81,8 +87,14 @@ inline const hipdnn_data_sdk::utilities::Version&
         K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION};
     static const hipdnn_data_sdk::utilities::Version s_raggedOffsetMultiplierMinVersion{
         K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION};
+    static const hipdnn_data_sdk::utilities::Version s_cuSeqLenMinVersion{
+        K_CU_SEQ_LEN_MIN_API_VERSION};
 
     // NOTE: MUST be ordered by highest version to lowest
+    if(hasCuSeqLen)
+    {
+        return s_cuSeqLenMinVersion;
+    }
     if(isRaggedOffsetMultiplier)
     {
         return s_raggedOffsetMultiplierMinVersion;

@@ -76,6 +76,8 @@ _INPUT_KEYS = frozenset(
         "page_table_v_tensor_uid",
         "block_mask_tensor_uid",
         "sink_token_tensor_uid",
+        "cu_seq_len_q_tensor_uid",
+        "cu_seq_len_kv_tensor_uid",
         "descale_q_tensor_uid",
         "descale_k_tensor_uid",
         "descale_v_tensor_uid",
@@ -215,7 +217,9 @@ def from_hipdnn(
     ``tensors_json`` is the graph's ``tensors`` list, or a mapping from uid to
     tensor entry. Raises ``ValueError`` for anything the hipDNN frontend or
     mask resolver would also reject, and for any key hipDNN does not write.
-    An absent key reads as hipDNN's null.
+    Raises ``NotImplementedError`` for a field hipDNN writes that
+    :class:`SdpaRequest` cannot represent yet (``cu_seq_len_q_tensor_uid`` /
+    ``cu_seq_len_kv_tensor_uid``). An absent key reads as hipDNN's null.
     """
     if "type" not in node_json:
         raise ValueError("SDPA node is missing its 'type' key")
@@ -295,6 +299,13 @@ def from_hipdnn(
     kwargs["padding_mask"] = _flag(attrs, "padding_mask", "SDPA node")
     kwargs["seq_len_q"] = tensor(inputs, "seq_len_q_tensor_uid")
     kwargs["seq_len_kv"] = tensor(inputs, "seq_len_kv_tensor_uid")
+    # SdpaRequest has no cumulative-length field; dropping the tensor would run
+    # full-length attention, so a graph that carries one is declined.
+    for key in ("cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"):
+        if inputs.get(key) is not None:
+            raise NotImplementedError(
+                f"{key} (cumulative sequence lengths) is not supported"
+            )
 
     dropout = {
         "seed": tensor(inputs, "seed_tensor_uid"),

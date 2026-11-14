@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/detail/GraphMatchKey.hpp>
 #include <hipdnn_test_sdk/utilities/SelectorUnitGraph.hpp>
 
@@ -294,3 +295,49 @@ TEST_F(TestGraphMatchKey, PointwiseBinaryIncludesPointwiseModeCriterion)
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("y")});
     expectTensorIdOrder(*key, {config_tensor::IN_0, config_tensor::IN_1});
 }
+
+#ifdef HIPDNN_ENABLE_SDPA
+// The cumulative sequence length tensors are part of an SDPA forward match key, after the other
+// optional tensors, so a rule can name them and graphs differing only in them stay distinct.
+TEST_F(TestGraphMatchKey, SdpaFwdIncludesCuSeqLenTensors)
+{
+    const std::vector<int64_t> qkvDims = {2, 8, 32, 64};
+    const std::vector<int64_t> cuDims = {3, 1, 1, 1};
+    const auto makeTensor = [](const char* name, const std::vector<int64_t>& dims) {
+        return std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
+            name, dims, hipdnn_data_sdk::utilities::generateStrides(dims)));
+    };
+
+    graph::Graph graphObj;
+    graphObj.set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+    const auto q = makeTensor("Q", qkvDims);
+    const auto k = makeTensor("K", qkvDims);
+    const auto v = makeTensor("V", qkvDims);
+    const auto cuQ = makeTensor("cu_seq_len_q", cuDims);
+    const auto cuKv = makeTensor("cu_seq_len_kv", cuDims);
+
+    graph::SdpaAttributes attrs;
+    attrs.set_padding_mask(true).set_cu_seq_len_q(cuQ).set_cu_seq_len_kv(cuKv);
+    auto [o, stats] = graphObj.sdpa(q, k, v, attrs);
+    o->set_output(true);
+
+    int64_t uid = 1;
+    for(const auto& tensor : {q, k, v, cuQ, cuKv})
+    {
+        tensor->set_uid(uid++);
+    }
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(key->opName, config_op::SDPA_FWD);
+    expectTensorIdOrder(*key,
+                        {config_tensor::Q,
+                         config_tensor::K,
+                         config_tensor::V,
+                         config_tensor::CU_SEQ_LEN_Q,
+                         config_tensor::CU_SEQ_LEN_KV});
+    expectTensorUidOrder(*key, {q, k, v, cuQ, cuKv});
+}
+#endif

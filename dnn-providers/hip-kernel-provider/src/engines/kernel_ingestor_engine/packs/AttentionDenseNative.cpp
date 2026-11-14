@@ -679,13 +679,16 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                   "as a host value (attn_scale_value)");
         return std::nullopt;
     }
-    // varlen, both spellings.
+    // varlen: per-batch lengths (seq_len_*) and cumulative lengths (cu_seq_len_*).
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "varlen")
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not implemented in the kernel");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not implemented in the "
+                                  "kernel");
         return std::nullopt;
     }
     // Dropout.

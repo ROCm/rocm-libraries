@@ -105,6 +105,16 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 | `deselect_workspace_greater_than` | Forwarded; reapplied after plan creation. |
 | `deselect_shared_mem_greater_than` | `0`: no-op. Non-zero: records `GRAPH_NOT_SUPPORTED` (no shared-memory metadata). |
 
+## SDPA cumulative sequence lengths
+
+`SDPA_attributes` is hipDNN's `SdpaAttributes`, so it exposes `set_cu_seq_len_q` / `set_cu_seq_len_kv` and the getters although the shim targets v1.24.0, which has none (cuDNN added them in v1.25.0). They differ from cuDNN as follows:
+
+| Aspect | cuDNN (v1.25.0) | hipDNN |
+|---|---|---|
+| Data type | `INT32` or `INT64` | `INT32` only |
+| 1-D `(B+1)` tensor | Promoted to `(B+1,1,1,1)` in `infer_properties_node` | Promoted in place during validation, so either call order works; the tensor keeps its uid and handle |
+| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer; no in-tree engine or reference implements them yet |
+
 ## Build and execute
 
 - `build_operation_graph()` without a handle succeeds only for a graph with no nodes.

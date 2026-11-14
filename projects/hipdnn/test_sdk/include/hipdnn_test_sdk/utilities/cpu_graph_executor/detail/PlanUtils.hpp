@@ -701,6 +701,12 @@ bool isSupportedSdpaFwdNode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttr
         return false;
     }
 
+    // Cumulative sequence lengths (cu_seq_len_q / cu_seq_len_kv) are not implemented.
+    if(attrs.cu_seq_len_q_tensor_uid().has_value() || attrs.cu_seq_len_kv_tensor_uid().has_value())
+    {
+        return false;
+    }
+
     // Padding: both seq_len tensors (INT32, one value per batch) or neither.
     if(!isSupportedSdpaPadding(attrs, tensorMap))
     {

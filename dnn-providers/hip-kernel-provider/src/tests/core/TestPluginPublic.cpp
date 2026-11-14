@@ -47,7 +47,7 @@ TEST(TestPluginPublic, HipdnnPluginGetApiVersionSuccess)
     // The SDK's newest engine plugin API; the provider's schema guard keeps every engine that
     // has not opted in at the 1.2.0 it declared before
     // (TestContainer.PinsEveryEnginesDeclaredGraphSchema).
-    EXPECT_STREQ(version, "1.4.0");
+    EXPECT_STREQ(version, "1.6.0");
 }
 
 TEST(TestPluginPublic, HipdnnPluginGetApiVersionNullPtr)

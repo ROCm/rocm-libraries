@@ -70,6 +70,18 @@ inline Error
                                                      attributes.get_seq_len_kv(),
                                                      tensorDescs,
                                                      "SDPA fprop SEQ_LEN_KV"));
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC,
+                                      attributes.get_cu_seq_len_q(),
+                                      tensorDescs,
+                                      "SDPA fprop CU_SEQ_LEN_Q"));
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC,
+                                      attributes.get_cu_seq_len_kv(),
+                                      tensorDescs,
+                                      "SDPA fprop CU_SEQ_LEN_KV"));
     HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
                                                      HIPDNN_ATTR_OPERATION_SDPA_FWD_SEED_EXT,
                                                      attributes.get_seed(),

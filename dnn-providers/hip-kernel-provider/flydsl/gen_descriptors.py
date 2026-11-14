@@ -93,9 +93,10 @@ DESCRIPTOR_VERSION = "1.0"
 #
 # * RMSNorm reads a runtime pass-by-value epsilon: K_PASS_BY_VALUE_MIN_API_VERSION, 1.2.0.
 # * The SDPA engines read and gate every field the schema has added through
-#   K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION, 1.4.0, which is K_MAX_SUPPORTED_API_VERSION:
+#   K_CU_SEQ_LEN_MIN_API_VERSION, 1.6.0, which is K_MAX_SUPPORTED_API_VERSION:
 #   overridable shapes (1.1.0, declined), runtime pass-by-value tensors (1.2.0), ragged
-#   tensors and declared alignments (1.3.0), ragged offset multipliers (1.4.0). COVERAGE.md's
+#   tensors and declared alignments (1.3.0), ragged offset multipliers (1.4.0), cumulative
+#   sequence lengths (1.6.0, declined; 1.5.0 added no graph field). COVERAGE.md's
 #   "Graph schema" lists the gate for each; TestFlydslSdpaObjects pins the claim against the
 #   SDK's maximum, so an SDK that adds a version fails it until those fields are reviewed.
 SDPA_OPS = (
@@ -107,7 +108,7 @@ SDPA_OPS = (
     "sdpa_aiw",
 )
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
-SDPA_SDK_VERSION = "1.4.0"
+SDPA_SDK_VERSION = "1.6.0"
 SDK_VERSION_BY_OP: dict[str, str] = {
     "rmsnorm": PASS_BY_VALUE_SDK_VERSION,
     **{op: SDPA_SDK_VERSION for op in SDPA_OPS},

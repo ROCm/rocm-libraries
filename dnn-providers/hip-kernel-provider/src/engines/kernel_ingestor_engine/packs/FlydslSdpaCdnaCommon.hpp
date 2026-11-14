@@ -913,6 +913,13 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     // lengths, sequence b is its length's tokens from its table entry, wherever the table's next
     // entry lies (vendored-kernel modification 47): the kernel clamps the length to the launch's,
     // writes no token outside the sequence, and reads no key past its length.
+    // Cumulative lengths (cu_seq_len_*) are a different form from the per-batch lengths the
+    // varlen helpers read; the kernels do not implement them.
+    if(attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
     const auto varlen = hasRaggedOperand(context, attributes)
                             ? servablePackedVarlenWithLengths(context, attributes, problem.batch)
                             : servableVarlenAsReferenceReads(context, attributes, problem.batch);

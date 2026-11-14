@@ -1072,6 +1072,21 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesVarlen)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCuSeqLenOnEachSide)
+{
+    // Control: the unmodified graph matches. padding_mask stays false in GraphSpec, so only
+    // the cu_seq_len decline can reject the graphs below.
+    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
+
+    GraphSpec q;
+    q.cuSeqLenQUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(q).has_value());
+
+    GraphSpec kv;
+    kv.cuSeqLenKvUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(kv).has_value());
+}
+
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPagedKv)
 {
     GraphSpec spec;
@@ -1134,6 +1149,8 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryOtherSpellingOfEachDecline
     using UidField = std::optional<int64_t> GraphSpec::*;
     const std::vector<std::pair<const char*, UidField>> spellings{
         {"seq_len_kv", &GraphSpec::seqLenKvUid},
+        {"cu_seq_len_q", &GraphSpec::cuSeqLenQUid},
+        {"cu_seq_len_kv", &GraphSpec::cuSeqLenKvUid},
         {"seed", &GraphSpec::seedUid},
         {"offset", &GraphSpec::offsetUid},
         {"dropout_mask", &GraphSpec::dropoutMaskUid},
