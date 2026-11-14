@@ -82,13 +82,23 @@ constexpr int pitchOf(int dwords)
     return 2 * (((dwords + 2) / 2) % 2 == 1 ? dwords + 2 : dwords + 4);
 }
 constexpr int XP = pitchOf(2 * XG), DP = pitchOf(2 * DG);
-constexpr int SS = (CB * DP + 63) / 64 * 64 + 16; // ring slot stride (halves)
+/// A row's skew (halves): rows 8 apart (a staging thread's channel vectors) start two dwords
+/// further along, so they land on distinct banks; rows stay contiguous for the window reads.
+constexpr int skewOf(int row)
+{
+    return 4 * ((row >> 3) & 7);
+}
+constexpr int SKEW = 32; // halves past a buffer's rows the skews (and the phase shift) reach
+/// The stride-2 odd phase rows start a dword past the even ones (another bank).
+constexpr int PHASE = CB * XP + 2;
+constexpr int XB = S * CB * XP + SKEW; // an x row buffer (halves)
+constexpr int SS = (CB * DP + SKEW + 63) / 64 * 64 + 16; // ring slot stride (halves)
 constexpr int SLOTS = KH + G - 1; // ring slots; slot SLOTS is zeros
 // Staging units: 4 x columns x 8 channels. At stride 2 a phase row's XG words take 2 XG units.
 constexpr int XU = S * XG * (CB / 8), DU = DG * (CB / 8);
 constexpr int XPT = (G * XU + THREADS - 1) / THREADS, DPT = (G * DU + THREADS - 1) / THREADS;
 /// The LDS the kernel declares (bytes); the host gates it against the device's.
-constexpr int LDS_BYTES = (G * S * CB * XP + (SLOTS + 1) * SS) * 2;
+constexpr int LDS_BYTES = (G * XB + (SLOTS + 1) * SS) * 2;
 
 typedef _Float16 h4 __attribute__((ext_vector_type(4)));
 typedef short s4 __attribute__((ext_vector_type(4)));
@@ -183,7 +193,7 @@ struct Stage
                 const u64 w
                     = (u64)__builtin_amdgcn_perm(v[u][1][e / 2], v[u][0][e / 2], sel)
                       | ((u64)__builtin_amdgcn_perm(v[u][3][e / 2], v[u][2][e / 2], sel) << 32);
-                *reinterpret_cast<u64*>(dst[gr] + (cv + e) * pitch + 4 * g) = w;
+                *reinterpret_cast<u64*>(dst[gr] + (cv + e) * pitch + skewOf(cv + e) + 4 * g) = w;
             }
         }
     }
@@ -205,7 +215,7 @@ struct Stage
             for(int e = 0; e < 8; ++e)
             {
                 const unsigned sel = e % 2 == 0 ? 0x05040100u : 0x07060302u;
-                const int at = (cv + e) * pitch + 2 * g;
+                const int at = (cv + e) * pitch + skewOf(cv + e) + 2 * g;
                 *reinterpret_cast<unsigned*>(dst[gr] + at)
                     = __builtin_amdgcn_perm(v[u][2][e / 2], v[u][0][e / 2], sel);
                 *reinterpret_cast<unsigned*>(dst[gr] + phase + at)
@@ -218,7 +228,7 @@ struct Stage
 template <bool BF16>
 __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
 {
-    __shared__ __attribute__((aligned(16))) u16 xs[G][S * CB * XP];
+    __shared__ __attribute__((aligned(16))) u16 xs[G][XB];
     __shared__ __attribute__((aligned(16))) u16 ring[(SLOTS + 1) * SS];
     const int tid = static_cast<int>(threadIdx.x), wave = tid / 64, lane = tid % 64;
     const int cBlocks = (a.c + CB - 1) / CB;
@@ -299,7 +309,7 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                 }
                 else
                 {
-                    sx.storePhases(xd, XP, CB * XP, tid);
+                    sx.storePhases(xd, XP, PHASE, tid);
                 }
                 sd.store(dd, DP, tid);
             };
@@ -332,7 +342,7 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     {
                         const int r = 4 * rg + i, num = yy + a.ph - r, oy = num / S;
                         const bool ok = r < KH && num >= o0 * S && num % S == 0 && oy < o1;
-                        bSlot[rg] = ring + (ok ? oy % SLOTS : SLOTS) * SS + b * DP;
+                        bSlot[rg] = ring + (ok ? oy % SLOTS : SLOTS) * SS + b * DP + skewOf(b);
                         keep[rg] = ok || r >= KH;
                     }
                     const bool careful
@@ -352,10 +362,10 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     for(int cg = 0; cg < NWG; ++cg)
                     {
                         // The lane's channel row as dwords, from its window's first dword.
-                        const unsigned* aRow
-                            = reinterpret_cast<const unsigned*>(
-                                  xs[g] + (S == 1 ? 0 : (i & 1) * CB * XP) + (b + 64 * cg) * XP)
-                              + laneDword;
+                        const unsigned* aRow = reinterpret_cast<const unsigned*>(
+                                                   xs[g] + (S == 1 ? 0 : (i & 1) * PHASE)
+                                                   + (b + 64 * cg) * XP + skewOf(b))
+                                               + laneDword;
 #pragma unroll
                         for(int qq = 0; qq < Q; qq += 4)
                         {

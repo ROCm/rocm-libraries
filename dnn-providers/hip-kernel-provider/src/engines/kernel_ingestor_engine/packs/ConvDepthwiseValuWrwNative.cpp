@@ -156,7 +156,7 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
     w.sw = static_cast<int>(a.stride[2]);
     w.dd = static_cast<int>(a.dilation[0]);
     w.dh = static_cast<int>(a.dilation[1]);
-    w.dw_ = static_cast<int>(a.dilation[2]);
+    w.dilW = static_cast<int>(a.dilation[2]);
     w.rows = static_cast<int>(rows);
     w.taps = static_cast<int>(taps);
     problem.base = std::move(*base);
@@ -216,9 +216,10 @@ int64_t hankelLdsBytes(const WrwConfig& config)
         = [](int64_t dwords) { return 2 * ((dwords + 2) / 2 % 2 == 1 ? dwords + 2 : dwords + 4); };
     const int64_t channels = 64 * config.nwg;
     const int64_t xPitch = pitchOf(2 * xg), dyPitch = pitchOf(2 * (config.q / 4));
-    const int64_t slot = divUp(channels * dyPitch, 64) * 64 + 16;
+    // Plus 32 halves a buffer for the rows' skews (and the odd phase's shift).
+    const int64_t slot = divUp(channels * dyPitch + 32, 64) * 64 + 16;
     const int64_t slots = config.kh + config.g - 1;
-    return (config.g * stride * channels * xPitch + (slots + 1) * slot) * 2;
+    return (config.g * (stride * channels * xPitch + 32) + (slots + 1) * slot) * 2;
 }
 
 bool hankelAdmits(const WrwProblem& problem,
@@ -253,7 +254,7 @@ bool hankelAdmits(const WrwProblem& problem,
     {
         return false;
     }
-    if(a.sh != config.s || a.sw != config.s || a.dh != 1 || a.dw_ != 1 || a.c % 8 != 0)
+    if(a.sh != config.s || a.sw != config.s || a.dh != 1 || a.dilW != 1 || a.c % 8 != 0)
     {
         return false;
     }
@@ -278,7 +279,7 @@ bool vtileAdmits(const WrwProblem& problem, const WrwConfig& config, int xAlign,
     const auto& a = problem.args;
     if(config.mult != 1 || problem.mult != 1 || problem.layout != DepthwiseLayout::CHANNELS_LAST
        || problem.ndims != 2 || a.kd != 1 || config.kd != 1 || a.kh != config.kh
-       || a.kw != config.kw || a.sw != 1 || a.dw_ != 1)
+       || a.kw != config.kw || a.sw != 1 || a.dilW != 1)
     {
         return false;
     }
