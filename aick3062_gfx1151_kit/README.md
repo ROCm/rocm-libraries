@@ -24,17 +24,32 @@ cd rocm-libraries
 git sparse-checkout set dnn-providers/hip-kernel-provider/rocke aick3062_gfx1151_kit
 git checkout users/tlakshma/rocke/aick3062-gfx1151-kit
 
-# 2. one-time setup (~6 GB torch download); work dir defaults to ~/aick3062_gfx1151_work
-./aick3062_gfx1151_kit/setup.sh
+# 2. start: setup (first time, ~6 GB torch download) + the whole run, in tmux
+./aick3062_gfx1151_kit/start.sh --autostart     # --autostart: resume after a reboot
 
-# 3. run everything, detached from the terminal
-nohup ./aick3062_gfx1151_kit/run_all.sh > ~/aick3062_gfx1151_run.log 2>&1 &
-
-# 4. follow progress
-tail -f ~/aick3062_gfx1151_work/progress.txt
+# 3. check on it any time (or: tmux attach -t aick3062, then Ctrl-b d to detach)
+./aick3062_gfx1151_kit/start.sh --status
 ```
-`run_all.sh` can be resumed: if the machine reboots or the run stops, start step 3 again
-with the same command and it continues where it stopped.
+`tmux` is required (`sudo apt install tmux`). Work dir: `~/aick3062_gfx1151_work`.
+Running `start.sh` again is always safe: it resumes a stopped run and never starts a
+second copy.
+
+## If something stops abruptly
+Nothing measured is lost, at three levels:
+1. **Resume:** every step records each finished shape and stage as it goes, and a
+   restart skips work already recorded. Just run `./aick3062_gfx1151_kit/start.sh` again
+   (with `--autostart` this also happens by itself after a reboot).
+2. **Repair:** on every start, a record half-written at the moment of a crash is cut off
+   cleanly, so at most the one shape in flight is re-timed.
+3. **Checkpoints:** all results are snapshotted every 20 minutes and after every step to
+   `~/aick3062_gfx1151_work/checkpoints/` (the last 6 are kept). Set
+   `CHECKPOINT_DIR=/path/on/another/disk` before `start.sh` to also copy each snapshot
+   there. To recover a damaged work dir:
+   ```bash
+   cd ~/aick3062_gfx1151_work
+   tar xzf "$(ls -1t checkpoints/ckpt-*.tgz | head -1)"
+   ~/rocm-libraries/aick3062_gfx1151_kit/start.sh       # adjust to your clone path
+   ```
 
 ## What it does
 1. **Sweep** (~5-6 h): the general-family funnel sweep, stages `geometry` to `runtime`,
@@ -53,11 +68,12 @@ with the same command and it continues where it stopped.
 Teams or SharePoint, *not* through GitHub. It holds raw timing data, which the project
 keeps out of the repository.
 
-The work dir also holds `gate_constants_gfx1151.json`. Keep it private: don't commit it or
-post it publicly.
+The work dir (and its checkpoints) also holds `gate_constants_gfx1151.json`. Keep it
+private: don't commit it or post it publicly.
 
 ## If something goes wrong
 - `PROBE_FAIL no gfx1151`: `rocminfo` doesn't see a gfx1151 GPU (driver or groups).
 - `STOP sweep ...` / `STOP time ...`: see the matching `*.log` in the work dir, and send
   that log together with `progress.txt`.
-- A different work dir: set `AICK_WORK=/path` for both `setup.sh` and `run_all.sh`.
+- A different work dir: set `AICK_WORK=/path` before `start.sh`.
+- The tmux window stays open after the run ends; `tmux kill-session -t aick3062` closes it.
