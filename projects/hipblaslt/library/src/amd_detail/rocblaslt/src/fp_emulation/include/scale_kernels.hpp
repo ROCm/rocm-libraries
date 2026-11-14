@@ -67,18 +67,30 @@ namespace FixedPointEmulation
         double ival[4];
         if constexpr(std::is_same_v<T, double>)
         {
-            /* Load j0/j0+1 as double2 (j0 is 4-aligned → even → 16-byte aligned). */
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
             {
                 const double2 vv = *reinterpret_cast<const double2*>(A + i * lda + j0);
                 ival[0]          = trunc(ldexp(vv.x, sft));
-                ival[1]          = (j0 + 1 < k) ? trunc(ldexp(vv.y, sft)) : 0.0;
+                ival[1]          = trunc(ldexp(vv.y, sft));
             }
-            /* Load j0+2/j0+3 as double2 (j0+2 is even → aligned) only when valid. */
-            if(j0 + 2 < k)
+            else
+            {
+                ival[0] = trunc(ldexp(A[i * lda + j0], sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
             {
                 const double2 vv = *reinterpret_cast<const double2*>(A + i * lda + j0 + 2);
                 ival[2]          = trunc(ldexp(vv.x, sft));
-                ival[3]          = (j0 + 3 < k) ? trunc(ldexp(vv.y, sft)) : 0.0;
+                ival[3]          = trunc(ldexp(vv.y, sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(A[i * lda + j0 + 2], sft));
+                ival[3] = 0.0;
             }
             else
             {
@@ -88,18 +100,30 @@ namespace FixedPointEmulation
         }
         else /* float: float2 (2 × 4 bytes = 64-bit), still coalesced */
         {
-            /* Load j0/j0+1 as float2 (j0 is 4-aligned → 8-byte aligned). */
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
             {
                 const float2 vv = *reinterpret_cast<const float2*>(A + i * lda + j0);
                 ival[0]         = trunc(ldexp(static_cast<double>(vv.x), sft));
-                ival[1]         = (j0 + 1 < k) ? trunc(ldexp(static_cast<double>(vv.y), sft)) : 0.0;
+                ival[1]         = trunc(ldexp(static_cast<double>(vv.y), sft));
             }
-            /* Load j0+2/j0+3 as float2 (j0+2 is even → 8-byte aligned) only when valid. */
-            if(j0 + 2 < k)
+            else
+            {
+                ival[0] = trunc(ldexp(static_cast<double>(A[i * lda + j0]), sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
             {
                 const float2 vv = *reinterpret_cast<const float2*>(A + i * lda + j0 + 2);
                 ival[2]         = trunc(ldexp(static_cast<double>(vv.x), sft));
-                ival[3]         = (j0 + 3 < k) ? trunc(ldexp(static_cast<double>(vv.y), sft)) : 0.0;
+                ival[3]         = trunc(ldexp(static_cast<double>(vv.y), sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(static_cast<double>(A[i * lda + j0 + 2]), sft));
+                ival[3] = 0.0;
             }
             else
             {
@@ -271,16 +295,30 @@ namespace FixedPointEmulation
         double ival[4];
         if constexpr(std::is_same_v<T, double>)
         {
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
             {
                 const double2 vv = *reinterpret_cast<const double2*>(B + col * ldb + j0);
                 ival[0]          = trunc(ldexp(vv.x, sft));
-                ival[1]          = (j0 + 1 < k) ? trunc(ldexp(vv.y, sft)) : 0.0;
+                ival[1]          = trunc(ldexp(vv.y, sft));
             }
-            if(j0 + 2 < k)
+            else
+            {
+                ival[0] = trunc(ldexp(B[col * ldb + j0], sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
             {
                 const double2 vv = *reinterpret_cast<const double2*>(B + col * ldb + j0 + 2);
                 ival[2]          = trunc(ldexp(vv.x, sft));
-                ival[3]          = (j0 + 3 < k) ? trunc(ldexp(vv.y, sft)) : 0.0;
+                ival[3]          = trunc(ldexp(vv.y, sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(B[col * ldb + j0 + 2], sft));
+                ival[3] = 0.0;
             }
             else
             {
@@ -290,16 +328,30 @@ namespace FixedPointEmulation
         }
         else /* float: float2 (2 × 4 bytes = 64-bit), still coalesced */
         {
+            /* Vector-load a pair only when both of its elements are in range (index < k);
+             * otherwise load the in-range element alone. The other one would be past the end
+             * of this length-k vector, and for the last vector past the end of the matrix. */
+            if(j0 + 1 < k)
             {
                 const float2 vv = *reinterpret_cast<const float2*>(B + col * ldb + j0);
                 ival[0]         = trunc(ldexp(static_cast<double>(vv.x), sft));
-                ival[1]         = (j0 + 1 < k) ? trunc(ldexp(static_cast<double>(vv.y), sft)) : 0.0;
+                ival[1]         = trunc(ldexp(static_cast<double>(vv.y), sft));
             }
-            if(j0 + 2 < k)
+            else
+            {
+                ival[0] = trunc(ldexp(static_cast<double>(B[col * ldb + j0]), sft));
+                ival[1] = 0.0;
+            }
+            if(j0 + 3 < k)
             {
                 const float2 vv = *reinterpret_cast<const float2*>(B + col * ldb + j0 + 2);
                 ival[2]         = trunc(ldexp(static_cast<double>(vv.x), sft));
-                ival[3]         = (j0 + 3 < k) ? trunc(ldexp(static_cast<double>(vv.y), sft)) : 0.0;
+                ival[3]         = trunc(ldexp(static_cast<double>(vv.y), sft));
+            }
+            else if(j0 + 2 < k)
+            {
+                ival[2] = trunc(ldexp(static_cast<double>(B[col * ldb + j0 + 2]), sft));
+                ival[3] = 0.0;
             }
             else
             {
