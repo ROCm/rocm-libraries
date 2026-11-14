@@ -740,8 +740,8 @@ LOOP2_NS = 2
 
 # Catalog breadth: geometries the families' tiles and the planner's default blocks per unit
 # (with_bpu) miss, each the measured best on a corpus layer (fp16 and bf16, n128 unless noted;
-# the lang-compare geometry sweep around the top configs, compiled from this source and planned
-# by wrwLaunchFor). (atoms, filter tag) -> [(layout, tile (bk, bc, wk, wc, bq), bpus)]: the config
+# a geometry sweep around the top configs, compiled from this source and planned by
+# wrwLaunchFor). (atoms, filter tag) -> [(layout, tile (bk, bc, wk, wc, bq), bpus)]: the config
 # at exactly these bpus, added to the family's (a tile the family has gets the bpus too). Not
 # three-bf16 sources (build_x3): measured on 16-bit graphs only.
 GFX950_16 = ("mfma32x16_f16", "mfma32x16_bf16")

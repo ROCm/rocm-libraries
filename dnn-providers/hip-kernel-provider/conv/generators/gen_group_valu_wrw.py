@@ -37,8 +37,7 @@ F5 = (5, 5, 1, 1, 2)
 # pointwise layers (16 to 32 channels, or few rows): a large pointwise backward weights is a GEMM
 # whose operands every tile re-reads from memory here, the BLAS and K3 engines' work. The tiles
 # are the ones that
-# won somewhere in the gfx906 sweeps of ResNeXt / RegNet / HRNet / Real-ESRGAN / RetinaNet layers
-# (~/old-asic-hipdnn/oldcdna/REPORT.md).
+# won somewhere in the gfx906 sweeps of ResNeXt / RegNet / HRNet / Real-ESRGAN / RetinaNet layers.
 TILES = {
     F3: {
         "pass": [

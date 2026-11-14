@@ -1,7 +1,7 @@
 # Generates the CONV_DIRECT_FWD / CONV_DIRECT_BWD descriptors (stride-1 halo-tile direct
 # convolution, K2). Each config is admitted on correctness alone (its atom on the device, its
 # filter, its channel vector dividing the reduction channels) plus its ship list: the arch groups
-# whose autotuned sweeps it won (~/old-asic-hipdnn/k2/STATUS.md, round 2). FMA configs ship
+# whose autotuned sweeps it won. FMA configs ship
 # everywhere as the floor. Autotune (UHD later) ranks the admitted configs; priority orders the
 # declared fallback: the arch's measured winners first, FMA last.
 #

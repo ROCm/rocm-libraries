@@ -177,7 +177,7 @@ Config planeConfig(int64_t k, int64_t bh, int64_t bw, int64_t bk, int64_t rh, in
     return config;
 }
 
-// The catalog of descriptors/conv/depthwise_valu (~/scratch/conv-dw-gen/gen.py CONFIGS).
+// The catalog of descriptors/conv/depthwise_valu (conv/generators/gen_depthwise_valu.py).
 const std::vector<Config>& catalog()
 {
     static const std::vector<Config> s_configs = [] {

@@ -4,10 +4,9 @@
 // VALU depthwise convolution cores for the CONV_DEPTHWISE_VALU engines.
 //
 // The hand-written hipconv VALU depthwise kernels, as harvested into MIOpen's
-// ConvDepthwiseDirect solver (rocm-libraries PR #10945, branch
-// users/brpepers/conv-depthwise-direct). The compute is that validated code; the changes for
-// this home are the removed hip_runtime.h include (HIPRTC provides the builtins) and the filter
-// reads going through dwTap2 / dwTap3, so CONV_DW_FLIP can reflect the filter: true
+// ConvDepthwiseDirect solver (rocm-libraries PR #10945). The compute is that validated code;
+// the changes for this home are the removed hip_runtime.h include (HIPRTC provides the builtins)
+// and the filter reads going through dwTap2 / dwTap3, so CONV_DW_FLIP can reflect the filter: true
 // convolution, and backward data computed as the forward convolution of dy.
 //
 // Plain vector-ALU FMA with an fp32 accumulator: no wave-size intrinsics, so the cores run on
