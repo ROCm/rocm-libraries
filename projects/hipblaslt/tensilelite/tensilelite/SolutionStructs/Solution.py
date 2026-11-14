@@ -5414,6 +5414,43 @@ class Solution(collections.abc.Mapping):
 
       genGRVWA = False
       genGRVWB = False
+      # gfx1250 TDM swizzle (SwizzleTensor{A,B} + TDM + WMMA_V3): the operand is pre-swizzled in
+      # global memory and DMA'd to LDS by TDM, then read compactly by ds_load_b128. It uses the
+      # normal (non-swizzle) GRVW/read derivation and does NOT require DirectToVgpr, so it is
+      # excluded from the DTV-swizzle special width, consistency reject, and DTV gate below. The
+      # gfx942 DTV swizzle path (no TDM) is unaffected.
+      hasWmmaV3     = isaInfoMap[isa].asmCaps["HasWMMA_V3"]
+      swizzleAIsTDM = state["ProblemType"]["SwizzleTensorA"] and bool(state["TDMInst"] & 0x01) and hasWmmaV3
+      swizzleBIsTDM = state["ProblemType"]["SwizzleTensorB"] and bool(state["TDMInst"] & 0x02) and hasWmmaV3
+      # The swizzled-TDM read packs one 16-byte ds_load_b128 per lane-half (innerK = 16 / bpe), and the
+      # host swizzle and kernel geometry are built and validated for F4 (as packed bytes) and 1-/2-byte
+      # elements (F8/BF8, I8, F16, BF16). F6 (0.75B) does not fit the 16-byte K block.
+      for tc, swizzleTcIsTDM in (("A", swizzleAIsTDM), ("B", swizzleBIsTDM)):
+        if swizzleTcIsTDM and not state.get("UseSubtileImpl"):
+          bpeTc = state["ProblemType"][f"DataType{tc}"].numBytes()
+          if bpeTc not in (0.5, 1, 2):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports F4 and 1-/2-byte data types only (got {bpeTc} bytes)")
+            return
+          # StreamK starts a workgroup mid-tile in K; the swizzled operand's K start would need the
+          # MI-row scaling (see StreamK._preShuffleRows, subtile-only today). Not supported yet.
+          if isStreamK(state):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support StreamK yet")
+            return
+          # The swizzled read and host swizzle assume both operands are K-major (TN). Other layouts are
+          # also caught by the generic TDM TileMajor rule today; reject here so that does not stay implicit.
+          if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports TN only")
+            return
+          # LocalSplitU splits K across wave groups; the swizzled per-wave LDS read offsets do not
+          # account for it (validates wrong, while the same non-swizzled kernel passes).
+          if state["LocalSplitU"] > 1:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support LocalSplitU>1 (got {state['LocalSplitU']})")
+            return
+          # Sparse metadata/compressed-K handling is not threaded through the swizzled layout
+          # (validates wrong, while the same non-swizzled kernel passes).
+          if state["ProblemType"]["Sparse"]:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support Sparse")
+            return
       # Default GlobalReadVectorWidthA
       if state["EnableMatrixInstruction"]:
         if state["GlobalReadVectorWidthA"] < 0:
@@ -5424,7 +5461,7 @@ class Solution(collections.abc.Mapping):
             else:
               reject(state, printRejectionReason, "GRVWA=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthA"] == -1:
-            if state["ProblemType"]["SwizzleTensorA"]:
+            if state["ProblemType"]["SwizzleTensorA"] and not swizzleAIsTDM:
               state["GlobalReadVectorWidthA"] = swizzleGeometry(state, "A")["laneSize"]
             elif state["ProblemType"]["DataTypeA"].is6bitFloat():
               state["GlobalReadVectorWidthA"] = 32	  
@@ -5471,7 +5508,7 @@ class Solution(collections.abc.Mapping):
             else:
               reject(state, printRejectionReason, "GRVWB=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthB"] == -1:
-            if state["ProblemType"]["SwizzleTensorB"]:
+            if state["ProblemType"]["SwizzleTensorB"] and not swizzleBIsTDM:
               state["GlobalReadVectorWidthB"] = swizzleGeometry(state, "B")["laneSize"]
             elif state["ProblemType"]["DataTypeB"].is6bitFloat():
               state["GlobalReadVectorWidthB"] = 32
@@ -5532,7 +5569,8 @@ class Solution(collections.abc.Mapping):
 
       # One lane reads exactly one swizzle row per load, so GRVW is pinned to the lane size.
       for tc in ("A", "B",):
-        if state["ProblemType"][f"SwizzleTensor{tc}"]:
+        swizzleTcIsTDM = swizzleAIsTDM if tc == "A" else swizzleBIsTDM
+        if state["ProblemType"][f"SwizzleTensor{tc}"] and not swizzleTcIsTDM:
           if not state["EnableMatrixInstruction"]:
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
             continue
@@ -5546,28 +5584,94 @@ class Solution(collections.abc.Mapping):
           GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
           if GRVW_TC != laneSize:
             reject(state, printRejectionReason, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != swizzle lane size ({laneSize})")
+            return
 
+      # The gfx942 DirectToVgpr swizzle read delivers the swizzled tensor's fragments in a fixed
+      # lane->register layout, so its VectorWidth must be 1. The gfx1250 swizzled-TDM read
+      # re-decomposes a VW-strided free dimension (see _localReadSwizzledTDM), so VW>1 is allowed there.
       if state["ProblemType"]["SwizzleTensorA"]:
-        # The subtile global-read emitter walks the swizzled A layout itself, so it
-        # does not need A staged through DirectToVgpr the way the classic path does.
+        # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
         if not state["UseSubtileImpl"]:
-          if not state["DirectToVgprA"]:
+          if state["VectorWidthA"] != 1 and not swizzleAIsTDM:
+            reject(state, printRejectionReason, f"SwizzleTensorA requires VectorWidthA == 1 (got {state['VectorWidthA']})")
+            return
+          # VW>1 swizzle-A hits the same VWA-way LDS bank conflict as swizzle-B with VWB>1 (mOStride =
+          # MI_M*DepthU is a multiple of the 256B bank cycle). Break it the same way: a 16B pad per
+          # mO-tile, deposited through TDM iterate-mode. VW==1 stays unpadded and byte-identical.
+          # A tile of <= 1024B would need the descriptor pad_interval field instead, whose 16B pad is an
+          # odd-dword pad_amount (silently wrong on hardware), so small tiles stay unpadded (correct,
+          # just bank-conflicted).
+          bpeA = state["ProblemType"]["DataTypeA"].numBytes()                # 0.5 for F4 (packed bytes)
+          mOStrideBytes = int(state["MatrixInstM"] * state["_DepthUA"] * bpeA)  # per-mO LDS tile size
+          if swizzleAIsTDM and state["VectorWidthA"] > 1 and mOStrideBytes > 1024:
+            state["LdsBlockSizePerPadA"] = mOStrideBytes
+            state["LdsPadA"] = int(16 / bpeA)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
+            state["_TDMIterateModeA"] = True
+            state["TDMIterateMode"] = state["TDMIterateMode"] | 1              # kernel naming (bit0 = A)
+          else:
+            # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
+            # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
+            if state["LdsPadA"] != 0 or state["LdsBlockSizePerPadA"] != 0:
+              reject(state, printRejectionReason, f"SwizzleTensorA requires LdsPadA==0 and LdsBlockSizePerPadA==0 (got {state['LdsPadA']}, {state['LdsBlockSizePerPadA']})")
+              return
+            if state.get("_TDMIterateModeA", False):
+              reject(state, printRejectionReason, "SwizzleTensorA is incompatible with TDMIterateMode (A); swizzle uses its own TDM descriptor")
+              return
+          # The subtile global-read emitter walks the swizzled A layout itself, so it
+          # does not need A staged through DirectToVgpr the way the classic path does.
+          # gfx1250 swizzled-TDM stages A through LDS via tensor_load_to_lds instead.
+          if not state["DirectToVgprA"] and not swizzleAIsTDM:
             reject(state, printRejectionReason, f"Tensor A swizzling requires DirectToVgprA")
+            return
         if not state["ProblemType"]["TransposeA"]:
           reject(state, printRejectionReason, f"Tensor A swizzling supports TN or TT only")
+          return
 
       if state["ProblemType"]["SwizzleTensorB"]:
-        # The subtile global-read emitter walks the swizzled B layout itself, so it
-        # does not need B staged through DirectToVgpr the way the classic path does.
+        # The subtile path has its own layout rules; these guard the DTV and swizzled-TDM paths.
         if not state["UseSubtileImpl"]:
-          if not state["DirectToVgprB"]:
+          # VectorWidthB>1 is supported: _localReadSwizzledTDM + lraTileAssignmentSwizzledTDM decompose the
+          # VW-strided N into (nO,nI) so the swizzled read produces the VW-interleaved register layout the
+          # WMMA/acc expect (which also lets the MXSB scale loads widen via the tileSpan). VWB must still
+          # divide MIWaveTile[1] (enforced by the generic VW checks).
+          # VW>1 swizzle-B hits a VWB-way LDS bank conflict: nOStride = MI_N*DepthU is a multiple of
+          # the 256B/64-bank cycle, so a lane crossing into nO+1 aliases the nO lanes' banks. Break it
+          # with a 16B (4-bank) pad per nO-tile. The single-descriptor pad_interval field caps at a
+          # 1024B block, too small for the 4096B nO-tile, so apply the pad via TDM iterate-mode, which
+          # supplies it through the per-iteration LDS write stride (lds_inc = LdsBlockSizePerPad +
+          # LdsPad*bpe) and works for any block size. VW==1 stays unpadded (already conflict-free) and
+          # byte-identical to before. See initTDMDescriptor / _localReadSwizzledTDM for the read match.
+          # Tiles of <= 1024B stay unpadded (see swizzle-A above: the pad_interval route is an odd-dword pad).
+          bpeB = state["ProblemType"]["DataTypeB"].numBytes()                # 0.5 for F4 (packed bytes)
+          nOStrideBytes = int(state["MatrixInstN"] * state["_DepthUB"] * bpeB)  # per-nO LDS tile size
+          if swizzleBIsTDM and state["VectorWidthB"] > 1 and nOStrideBytes > 1024:
+            state["LdsBlockSizePerPadB"] = nOStrideBytes
+            state["LdsPadB"] = int(16 / bpeB)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
+            state["_TDMIterateModeB"] = True
+            state["TDMIterateMode"] = state["TDMIterateMode"] | 2              # kernel naming (bit1 = B)
+          else:
+            # Swizzle reads from a contiguous, unpadded LDS layout at fixed offsets; any LDS pad shifts
+            # the data out from under those offsets. And the swizzle builds its own TDM descriptor.
+            if state["LdsPadB"] != 0 or state["LdsBlockSizePerPadB"] != 0:
+              reject(state, printRejectionReason, f"SwizzleTensorB requires LdsPadB==0 and LdsBlockSizePerPadB==0 (got {state['LdsPadB']}, {state['LdsBlockSizePerPadB']})")
+              return
+            if state.get("_TDMIterateModeB", False):
+              reject(state, printRejectionReason, "SwizzleTensorB is incompatible with TDMIterateMode (B); swizzle uses its own TDM descriptor")
+              return
+          # The subtile global-read emitter walks the swizzled B layout itself, so it
+          # does not need B staged through DirectToVgpr the way the classic path does.
+          # gfx1250 swizzled-TDM stages B through LDS via tensor_load_to_lds instead.
+          if not state["DirectToVgprB"] and not swizzleBIsTDM:
             reject(state, printRejectionReason, f"Tensor B swizzling requires DirectToVgprB")
+            return
         if state["ProblemType"]["TransposeB"]:
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN or NN only")
+          return
 
         # TODO- NN fails validation due to DTVB + Tail-Loop is not working correctly
         if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN only")
+          return
 
       # Force GRVW the same when UnrollLoopSwapGlobalReadOrder = 1.
       if genGRVWA and state["UnrollLoopSwapGlobalReadOrder"] == 1:
@@ -6777,6 +6881,13 @@ class Solution(collections.abc.Mapping):
     # Subtile builds its descriptors elsewhere, so it is not described by this.
     for tc, freeIdx in (("A", 0), ("B", 1)):
       if state["UseSubtileImpl"] or not state.get("_TDMIterateMode%s" % tc, False):
+        continue
+      # A swizzled-TDM operand iterates one MI-row tile at a time (see _emitSwizzleTdmIterateInit),
+      # not tile_dim1 DepthU rows, and the host pads its free dimension to whole MI rows, so this
+      # free-size multiple does not apply.
+      if (state["ProblemType"]["SwizzleTensor%s" % tc]
+          and bool(state["TDMInst"] & (0x01 if tc == "A" else 0x02))
+          and isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         continue
       # tile_dim1 as the descriptor carries it: rows of DepthU input elements.
       bytesPerRow = int(round(state["DepthU"] * state["ProblemType"]["DataType%s" % tc].numBytes()))

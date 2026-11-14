@@ -1275,6 +1275,7 @@ namespace TensileLite
             /// runs identical A/B bytes.
             int m_mxDataGenerator = -1;
             MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+            bool m_isGfx1250 = false; // gfx1250 swizzle uses a 32-byte K block (vs gfx942 wider blocks)
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
             // hand back gpuInput.valid as-is rather than re-swizzling).

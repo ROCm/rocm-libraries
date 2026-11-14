@@ -7006,6 +7006,85 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Local Read Addresses: Tile Assignment
   ##############################################################################
+  def lraTileAssignmentSwizzledTDM(self, kernel, tP):
+    # gfx1250 F8 swizzled-B via TDM: per-lane local-read base into the contiguous off-order LDS
+    # (off = kO*512 + kM*256 + nI*16 + kI). The WMMA 16x16x128 f8f6f4 K->thread map is
+    # lane L -> n=L%16, k = kO*32 + (L//16)*16 + kI, so the lane-half (L//16) is the kM term (*256)
+    # and n=L%16 is the nI term (*16):  lro = (L//16)*256 + (L%16)*16. The kO term (per read-block)
+    # is added as the ds_load immediate in LocalRead._localReadSwizzledTDM. Pairs with LdsPad=0;
+    # wave/pad offsets are added later by lraFinalOffset (both 0 for the single-wave case).
+    module = Module("lraTileAssignmentSwizzledTDM")
+    module.addComment0("lr%s swizzled-TDM base" % tP["tileChar"])
+    waveWidth = kernel["WavefrontSize"]
+    miN       = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
+    innerK    = int(16 / kernel["ProblemType"]["DataType%s" % tP["tensorChar"]].numBytes())  # elems per ds_load_b128
+    blockOff  = miN * innerK                              # inner [nI,kI] block = kM stride
+    tile01    = tP["tile01Idx"]
+    miWaveGroup = kernel["MIWaveGroup"]
+    num1DWaves  = miWaveGroup[tile01]                     # N-axis wave count for B
+    tReg    = self.vgprPool.checkOut(1, "lroSwizTDM")     # result, kept for lraFinalOffset
+    lReg    = self.vgprPool.checkOut(1, "laneSwizTDM")
+    dummy   = self.vgprPool.checkOut(1, "dummySwizTDM")
+    tmpVgpr = self.vgprPool.checkOutAligned(2, 2, tag="lraSwizTDM_tmpVgpr")
+    tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
+    with self.allocTmpSgpr(1, tag="lraSwizTDM_sgpr") as tmpSgprInfo:
+      module.add(vectorStaticRemainder(dummy, lReg, "Serial", waveWidth, tmpVgprRes, tmpSgprInfo, "L = lane in wave"))
+      module.add(vectorStaticDivide(tReg, lReg, miN, tmpVgprRes, "kM = L // MI_N"))
+      module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), blockOff, tmpSgprInfo, "kM * (MI_N*innerK)"))
+      module.add(vectorStaticRemainder(dummy, lReg, lReg, miN, tmpVgprRes, tmpSgprInfo, "nIdx = L mod MI_N"))
+      vw = kernel["VectorWidth%s" % tP["tensorChar"]]
+      if vw > 1:
+        # VectorWidth>1: a lane's per-tile N stride is VW, so its 16 columns span VW nO-tiles. Decompose
+        # nVWB = VW*nIdx into nO_lane (//MI_N) and nI_lane (%MI_N):
+        #   lro += nO_lane*nOStride + nI_lane*innerK   (eIdx phase + vIdx group are in the ds_load imm).
+        depthU   = kernel["_DepthU%s" % tP["tensorChar"]]
+        nOStride = miN * depthU
+        nOReg    = self.vgprPool.checkOut(1, "nOLaneSwizTDM")
+        module.add(vectorStaticMultiply(vgpr(lReg), vgpr(lReg), vw, tmpSgprInfo, "nVWB = VW * nIdx"))
+        module.add(vectorStaticDivide(nOReg, lReg, miN, tmpVgprRes, "nO_lane = nVWB // MI_N"))
+        module.add(vectorStaticRemainder(dummy, lReg, lReg, miN, tmpVgprRes, tmpSgprInfo, "nI_lane = nVWB mod MI_N"))
+        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(nOReg), nOStride, vgpr(tReg), tmpSgprInfo, "lro += nO_lane*nOStride"))
+        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(lReg), innerK, vgpr(tReg), tmpSgprInfo, "lro += nI_lane*innerK"))
+        self.vgprPool.checkIn(nOReg)
+      else:
+        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(lReg), innerK, vgpr(tReg), tmpSgprInfo, "lro = nIdx*innerK + kM*blockOff"))
+      # Multi-wave N split: this wave's nO band. Mirror LraTileAssignment's wtid0 term.
+      # wtid0 = (Serial // (waveWidth*MIWaveGroup[0])) % MIWaveGroup[1]. N-waves interleave at
+      # MI_N granularity (strideWave == one nO), and a wave's MIWaveTile sub-tiles stride by
+      # MIWaveGroup[N] nO (applied in _localReadSwizzledTDM) -> lro += wtid0 * nOStride.
+      if num1DWaves > 1:
+        depthU   = kernel["_DepthU%s" % tP["tensorChar"]]
+        nOStride = miN * depthU
+        # VectorWidth>1 widens each wave's tile span to VW nO-tiles, so the N-waves interleave at
+        # VW*MI_N (VW nO-tiles) granularity -> the per-wave nO-band offset scales by VW. vw==1 -> nOStride.
+        strideWaveN = vw * nOStride
+        dividedForWaveId = waveWidth if tile01 == 0 else waveWidth * miWaveGroup[0]
+        wReg = self.vgprPool.checkOut(1, "waveSwizTDM")
+        module.add(vectorStaticDivide(wReg, "Serial", dividedForWaveId, tmpVgprRes, "wtid = Serial // (waveWidth*MIWaveGroup[0])"))
+        module.add(vectorStaticRemainder(dummy, wReg, wReg, num1DWaves, tmpVgprRes, tmpSgprInfo, "wtid0 = wtid %% MIWaveGroup[N]"))
+        # LDSSegmentInterleave: when B spans its whole LDS component (segment_interleave gates this to the
+        # tight MIWaveGroup=[2,2] case), the wave's segment jump REPLACES the swizzle nO-band term -- mirror
+        # LraTileAssignment's [2,2] branch: stash wtid0*writeStrideBytes, added post-pad in lraFinalOffset,
+        # and drop the wtid0*strideWaveN add. The write already deposits at wId*writeStrideBytes + ldsBaseB.
+        segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+        segSpansComp = bool(segOffAB) and segOffAB.get("footprintPacked", False) \
+            and not segOffAB.get("bBaseline", False) \
+            and min(kernel["MatrixInstM"], kernel["MatrixInstN"]) * vw \
+                >= kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
+        if segSpansComp:
+          segOff = self.vgprPool.checkOut(1, "segWaveByteOffSwizTDM")   # checked in by lraFinalOffset
+          module.add(vectorStaticMultiply(vgpr(segOff), vgpr(wReg), segOffAB["writeStrideBytes"], tmpSgprInfo,
+                                           "seg interleave: byte offset = wtid0 * writeStrideBytes (post-pad)"))
+          tP["gpr"]["segWaveByteOff"] = segOff
+        else:
+          module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(wReg), strideWaveN, vgpr(tReg), tmpSgprInfo, "lro += wtid0 * MIWaveTile[N]*nOStride"))
+        self.vgprPool.checkIn(wReg)
+    tP["gpr"]["lro"] = tReg
+    self.vgprPool.checkIn(dummy)
+    self.vgprPool.checkIn(lReg)
+    self.vgprPool.checkIn(tmpVgpr)
+    return module
+
   def lraTileAssignment(self, kernel, tPA, tPB):
     module = Module("lraTileAssignment")
 
@@ -7023,13 +7102,19 @@ class KernelWriterAssembly(KernelWriter):
       # do not generate local read code if DirectToVgpr is enabled
       tc = tP0["tensorChar"]
       if not kernel["DirectToVgpr%s"%tc]:
-        module.add(component(self, kernel, tP0))
+        if tP0.get("isSwizzledTDM"):
+          module.add(self.lraTileAssignmentSwizzledTDM(kernel, tP0))
+        else:
+          module.add(component(self, kernel, tP0))
         if tPMXS0:
           module.add(component(self, kernel, tPMXS0))
       # do not generate local read code if DirectToVgpr is enabled
       tc = tP1["tensorChar"]
       if not kernel["DirectToVgpr%s"%tc]:
-        module.add(component(self, kernel, tP1))
+        if tP1.get("isSwizzledTDM"):
+          module.add(self.lraTileAssignmentSwizzledTDM(kernel, tP1))
+        else:
+          module.add(component(self, kernel, tP1))
         if tPMXS1:
           module.add(component(self, kernel, tPMXS1))
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
@@ -15423,6 +15508,30 @@ class KernelWriterAssembly(KernelWriter):
     if (not self.do["LocalRead%s" % tc]) or ((tc in ("A", "MXSA", "B", "MXSB")) and kernel["DirectToVgpr%s"%tc]): # no local read code if DirectToVgpr is enabled
       return Module("localReadInc (Empty)")
 
+    if tP.get("isSwizzledTDM"):
+      # Advance the swizzled-B local read by one WMMA-K worth of kO-blocks per K-sub-iteration
+      # (DepthU/MatrixInstK sub-iters read the same LDS tile at successive K). Contiguous off-order LDS:
+      #   inc = numKChunk * kOStride, kOStride = (wave//MI_N)*MI_N*innerK, innerK = 16//bpe (elems=bytes fp8).
+      # Carry it in the Python-side localReadOffset (folded into the ds_load immediate by
+      # _localReadSwizzledTDM), NOT in the LocalReadAddr VGPR, so localReadInitPointers resets it to 0 at
+      # every DepthU boundary — required for correct multi-main-loop-iteration (K>DepthU) reads.
+      module   = Module("localReadInc swizzledTDM")
+      innerK   = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      miN      = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
+      kOStride = (kernel["WavefrontSize"] // miN) * miN * innerK
+      inc      = (kernel["MIInputPerThread%s" % tc] // innerK) * kOStride
+      if self.states.inTailLoop:
+        # The tail loop is a runtime loop: one emitted body runs once per remaining MI-K step, so a
+        # compile-time immediate would re-read the same K block every trip. Advance the address VGPR
+        # instead (like the normal reader); nothing reads it after the tail loop.
+        incBytes = int(round(inc * tP["bpeDS"]))
+        module.add(VAddU32(dst=vgpr("LocalReadAddr%s" % tc), src0=incBytes, src1=vgpr("LocalReadAddr%s" % tc),
+                           comment="lr%s += %u (swizzledTDM tail K-step, bytes)" % (tc, incBytes)))
+        return module
+      tP["localReadOffset"] += inc
+      module.addComment0("lr%s localReadOffset -> %d (swizzledTDM K-sub-iter inc)" % (tc, tP["localReadOffset"]))
+      return module
+
     module = Module("localReadInc")
 
     offsetInc = 0
@@ -23175,6 +23284,61 @@ class KernelWriterAssembly(KernelWriter):
       self._emitTdmIterCount(mod, sIter, remainRowsSgpr, rows_per_il, tile_dim1)
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
+  def _swizzledTdmRemainRows(self, kernel, tP, mt, dstSgpr, tmpSgpr, comp):
+    """dim1 for a swizzled-TDM descriptor: the MI rows left from this load's base.
+
+    The host pads the free dimension to whole MI rows, so the buffer holds
+    ceil(Size/MI) rows. The last macro-tile (and, wave-separated, a later
+    component) can start fewer rows than it loads before that end; clamping dim1
+    makes TDM zero-fill those rows instead of reading past the buffer.
+    comp = (compShift, waveIdxSgpr, compOffset, rowsPerComp) for the wave-separated
+    builder, None when one load covers the whole macro-tile.
+    """
+    mod = Module("swizzled-TDM remaining rows")
+    tile01 = tP["tile01Idx"]
+    mi = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
+    size, wg = ("SizeI", "WorkGroup0") if tile01 == 0 else ("SizeJ", "WorkGroup1")
+    assert mi & (mi - 1) == 0 and mt % mi == 0
+    mod.add(SAddU32(sgpr(dstSgpr), sgpr(size), mi - 1, f"swizzled dim1: {size} + MI({mi})-1"))
+    mod.add(SLShiftRightB32(sgpr(dstSgpr), int(log2(mi)), sgpr(dstSgpr), "swizzled dim1: padded MI rows"))
+    mod.add(SMulI32(sgpr(tmpSgpr), sgpr(wg), mt // mi, f"swizzled dim1: tile start row = {wg} * MT/MI({mt // mi})"))
+    mod.add(SSubU32(sgpr(dstSgpr), sgpr(dstSgpr), sgpr(tmpSgpr), "swizzled dim1: rows left from the tile"))
+    mod.add(SCMovB32(sgpr(dstSgpr), 0, "swizzled dim1: none left"))
+    if comp is not None:
+      compShift, waveIdxSgpr, compOffset, rowsPerComp = comp
+      if compShift is not None:
+        mod.add(self.tdmEmitWaveCompId(tmpSgpr, compShift, waveIdxSgpr, "swizzled dim1: compId", compOffset))
+        mod.add(SMulI32(sgpr(tmpSgpr), sgpr(tmpSgpr), rowsPerComp, f"swizzled dim1: compId * rowsPerComp({rowsPerComp})"))
+        mod.add(SSubU32(sgpr(dstSgpr), sgpr(dstSgpr), sgpr(tmpSgpr), "swizzled dim1: rows left from this component"))
+        mod.add(SCMovB32(sgpr(dstSgpr), 0, "swizzled dim1: none left"))
+    return mod
+
+  def _emitSwizzleTdmIterateInit(self, mod, kernel, tc, dtype, descSgprName,
+                                 swzTile0, swzRows, bpe, globalIncSgpr):
+    """TDM iterate-mode init for the swizzled-B VW>1 LDS pad.
+
+    Unlike the generic _emitTdmIterateInit (which walks contiguous N-rows in pad-block
+    chunks), the swizzle descriptor's unit of iteration is one nO-tile: dim0 = swzTile0
+    already spans a full nO's DepthU slice, so each iteration deposits one nO-tile and
+    jumps the LDS write pointer by (nO-tile + LdsPad) to open a per-nO pad that breaks
+    the VW>1 bank conflict. iter_count = swzRows (#nO this wave/component holds);
+    global_inc = the nO global stride (MI_N*paddedK, already in globalIncSgpr, the same
+    value the 2-D dim1 walk used). Caller sets dim1/tile1 = 1 and setPadding(0,0)."""
+    comp = TensorDataMoverLoad.find(self)
+    dss = TensorDataMoverLoad.dataSizeShift(dtype)
+    pad_bytes = int(round(kernel["LdsPad%s" % tc] * bpe))
+    nOTileBytes = int(round(swzTile0 * bpe))
+    assert nOTileBytes == kernel["LdsBlockSizePerPad%s" % tc], \
+        "swizzle nO-tile (%d B) must equal LdsBlockSizePerPad%s (%d); read/LDS-size match" \
+        % (nOTileBytes, tc, kernel["LdsBlockSizePerPad%s" % tc])
+    assert 0 < swzRows <= 256, "swizzle TDM iter_count(%d) outside HW range 1..256" % swzRows
+    lds_inc = (nOTileBytes + pad_bytes) >> dss
+    mod.add(comp.setIterationEnabled(descSgprName(1), True))
+    with self.allocTmpSgpr(1, tag="swzTdmIterCount") as itTmp:
+      mod.add(SMovB32(sgpr(itTmp.idx), swzRows - 1, "TDM iterate: #nO(%d) - 1 (field = n-1)" % swzRows))
+      mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, globalIncSgpr))
+      mod.add(comp.setIterations(descSgprName(2), itTmp.idx))
+
   def _tdmParityNeedsTmp(self, kernel) -> bool:
     """True when Serial remat needs a dest SGPR (WaveIdx dead and ArgType unpacked)."""
     return not self.isTdmWaveIdxLive(kernel) and not self.states.tdmParityPackedInArgType
@@ -23553,7 +23717,51 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
     dim0Idx, dim1Idx = (3, ti) if unrolledMajor else (ti, 3)
 
-    if isMetadataML1:
+    # gfx1250 F8 swizzled-B: host pre-swizzles B into off(n,k) order, contiguous. That multi-dim
+    # tensor reshapes to a 2-D [tile1 rows x tile0 cols] contiguous block, so fill the 2-D descriptor
+    # with swizzle values (stride0 = tile0) => TDM copies it linearly => LDS = off order, matching
+    # _localReadSwizzledTDM. off = outer*256 + inner; inner = nI*16+kI (256, LDS-fast);
+    # outer = nO*(du/16) + kO*2 + kM.
+    swizzledTDM = bool(tP.get("isSwizzledTDM"))
+    if swizzledTDM:
+      # Host pre-swizzles B into off(n,k) order [nO, kO, kM, nI, kI], contiguous over the FULL K.
+      # Describe a 2-D tile so tensor_load_to_lds gathers one DepthU K-slice across all N-tiles:
+      #   tile0 = MI_N*DepthU   (one nO's DepthU slice, contiguous)
+      #   tile1 = #nO per wave  (= MacroTile/MI_N / numWaves)
+      #   stride0 = MI_N*paddedK (nO row stride in the host buffer; paddedK = roundup(SizeL, swzK))
+      # For #nO==1 or DepthU==K this reduces to a contiguous copy. GlobalReadIncsB (= MI_N*DepthU)
+      # advances the base to the next DepthU slice. Element counts; data_size handles fp8 width.
+      swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
+      swzInnerK = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
+      swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
+      # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
+      swzUnitShift = 1 if dtype.isFloat4() else 0
+      swzRows   = (mt // swzMiN) // numWaves              # nO rows per wave
+      # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
+      # stride (setPadding(0,0) already applied above for isTdmIter). dim1 stays the full
+      # nO extent (walk clamp); tile1 drops to 1 (one nO per iteration). Non-iterate (VW==1)
+      # keeps tile1 = swzRows (all nO in one contiguous 2-D issue).
+      swzTilePerIssue = 1 if isTdmIter else swzRows
+      with self.allocTmpSgpr(3, tag="swzTDM_desc") as swzTmp:
+        sIdx    = swzTmp.idx        # reused for dim/tile values
+        strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
+        rowTmp  = swzTmp.idx + 2
+        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN >> swzUnitShift, "stride0 = MI_N * paddedK (desc units)"))
+        mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
+        mod.add(SMovB32(sgpr(sIdx), swzTile0 >> swzUnitShift, "swizzled B: dim0 = tile0 = MI_N*DepthU (desc units)"))
+        mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
+        mod.add(self._swizzledTdmRemainRows(kernel, tP, mt, sIdx, rowTmp, None))
+        mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
+        if isTdmIter:
+          self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
+                                          swzTile0, swzRows, bpe, strideS)
+      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0 >> swzUnitShift, self, 0))
+      mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
+    elif isMetadataML1:
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, sizeShifter))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, sizeShifter, False, isSparseTrack=isSparseTrack, isMetadata=isMetadata))
       mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
@@ -23595,7 +23803,9 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
 
     # --- Tensor stride ---
-    if isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
+    if swizzledTDM:
+      pass  # stride0 already set to tile0 (contiguous) in the swizzled-B branch above
+    elif isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
       mod.add(comp.setTensorStride0Metadata(descSgprName(1), "SizeL"))
     elif isMetadataML1:
       ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]
@@ -23618,7 +23828,9 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), splitBoundary, comment=f"tdm{tc} Lds Split Incs({round(mt * du * bpe // dim1Divisor)})"))
       mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), strideRefG, globalIncConst, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
 
-    if isTdmIter:
+    if isTdmIter and not swizzledTDM:
+      # Swizzled-B runs its own iterate init in the branch above (nO-tile walk, not the
+      # generic contiguous-N-row walk); only the generic tensors reach here.
       # Solution.py rejects iterate mode on a tlu tensor, so dim1 is the tile height.
       assert unrolledMajor, "TDM iterate mode requires an unroll-major tensor"
       # TDMInst is limited to 0 or 3 and subtile has its own descriptor path, so the
@@ -23789,6 +24001,9 @@ class KernelWriterAssembly(KernelWriter):
           # and both components write the same LDS byte. 0 is still correct
           # when scaleRows*mxDU < numComp: extra comps share LDS+0 (dim0 idle).
           dataBytes = mxTdmTileM(mt, mxTileLds) * du // numComp * int(bpe * 4) // (4 * dim1Divisor)
+      if tP.get("isSwizzledTDM") and TensorDataMoverLoad.swizzledCompRows(
+          mt, kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"], numComp)[1]:
+        dataBytes = 0  # replicated swizzled tile: every component writes LDS+0 (see swizzledCompRows)
       mod.add(self.tdmWaveLdsAddr(kernel, tc, numComp, dataBytes,
                                   ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
                                   waveOffsetSgprIdx, tmpPadSgprIdx))
@@ -23801,6 +24016,52 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SXorB32(sgpr(swapMask), sgpr(swapMask), sgpr(waveOffsetSgprIdx),
                          "Per-wave paired TDM buffer swap mask"))
     if stashed:
+      return mod
+
+    # gfx1250 F8 swizzled-B in the wave-separated (parity) builder. Same 2-D swizzle descriptor
+    # as the single-wave path (initTDMDescriptor ~19626), but each component loads its nO band:
+    #   tile1 = swzRows = (MacroTile/MI_N) // numComp
+    # numComp=1 (M-only split) -> full nO band. Per-component global base comes from
+    # calculateStartAddrWaveSeparated; per-component LDS base is the wId*dataBytes above.
+    if bool(tP.get("isSwizzledTDM")):
+      swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
+      swzInnerK = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
+      swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
+      # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
+      swzUnitShift = 1 if dtype.isFloat4() else 0
+      # nO rows per component; an uneven split (e.g. MT=16 over 2 components) replicates the whole
+      # tile in every component instead (see TensorDataMoverLoad.swizzledCompRows).
+      swzRows, swzReplicate = TensorDataMoverLoad.swizzledCompRows(mt, swzMiN, numComp)
+      # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
+      # stride, and the pad_interval field (which cannot encode the 4096B nO block) is
+      # disabled. dim1 stays the full nO extent (walk clamp); tile1 drops to 1 (one nO per
+      # iteration). Non-iterate (VW==1) keeps tile1 = swzRows (all nO in one 2-D issue).
+      swzTilePerIssue = 1 if isTdmIter else swzRows
+      mod.add(comp.setIterationEnabled(descSgprName(1), False))
+      if isTdmIter:
+        mod.add(comp.setPadding(descSgprName(1), 0, 0))
+      else:
+        mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+      with self.allocTmpSgpr(3, tag="swzTDM_descWS") as swzTmp:
+        sIdx    = swzTmp.idx        # reused for dim/tile values
+        strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
+        rowTmp  = swzTmp.idx + 2
+        mod.add(SAddU32(sgpr(strideS), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+        mod.add(SAndB32(sgpr(strideS), sgpr(strideS), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SMulI32(sgpr(strideS), sgpr(strideS), swzMiN >> swzUnitShift, "stride0 = MI_N * paddedK (desc units)"))
+        mod.add(comp.setTensorStride0(descSgprName(1), strideS, 0))
+        mod.add(SMovB32(sgpr(sIdx), swzTile0 >> swzUnitShift, "swizzled B: dim0 = tile0 = MI_N*DepthU (desc units)"))
+        mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
+        mod.add(self._swizzledTdmRemainRows(kernel, tP, mt, sIdx, rowTmp,
+                                            (compShift, waveIdxSgpr, compOffset, 0 if swzReplicate else swzRows)))
+        mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
+        if isTdmIter:
+          self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
+                                          swzTile0, swzRows, bpe, strideS)
+      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0 >> swzUnitShift, self, 0))
+      mod.add(comp.setTensorTile1(descSgprName(1), swzTilePerIssue, self))
       return mod
 
     #TODO: refactor, currently special handling for FP4 along K-dim
@@ -25317,6 +25578,23 @@ class KernelWriterAssembly(KernelWriter):
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or \
                           (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])
     isMetadata: bool = tP["isM"]
+
+    if tP.get("isSwizzledTDM"):
+      # Swizzled A/B: dim0 is one nO row's contiguous DepthU slice, MI*DepthU elements (see the
+      # swizzled branch of initTDMDescriptor). The [kO,kM,nI,kI] layout makes a K prefix a memory
+      # prefix, so the tail clamps dim0 to the row's valid extent MI*alignUp(SizeL%DepthU, swzK):
+      # the host zero-pads K up to swzK, and TDM zero-fills the rest instead of reading the next
+      # nO row. Waves split nO rows, not K, so no per-wave K offset applies.
+      swzMi = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]
+      swzK = tP["swizzleK"]
+      swzUnitShift = 1 if dtype.isFloat4() else 0   # F4: descriptor counts bytes (see initTDMDescriptor)
+      with self.allocTmpSgpr(1, tag="resetTDMDescriptorForTail_swzTmpSgpr") as tmpSgpr:
+        mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1), "swizzled tail: K rem = SizeL % DepthU"))
+        mod.add(SAddU32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzK - 1, "swizzled tail: rem + swzK-1"))
+        mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), hex(0xFFFFFFFF & ~(swzK - 1)), "swizzled tail: alignUp(rem, swzK)"))
+        mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzMi >> swzUnitShift, f"swizzled tail: dim0 = MI({swzMi}) * alignUp(rem, swzK) (desc units)"))
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, 1, self))
+      return mod
 
     with self.allocTmpSgpr(1, tag="resetTDMDescriptorForTail_tmpSgpr") as tmpSgpr:
       mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1)))

@@ -801,6 +801,77 @@ class LocalReadMFMA(LocalRead):
         return imod, pack, packPre
 
 
+    def _localReadSwizzledTDM(self, writer, kernel, bufferIdx, iui, epsi, tP):
+        # gfx1250 F8 swizzled-B via TDM. B is pre-swizzled in global memory as
+        #   view(N/16,16,K/32,2,16).permute(0,2,3,1,4)
+        # and DMA'd to LDS by TDM (faithful contiguous copy), then read here with plain ds_load_b128
+        # from UNPADDED LDS (LdsPad=0). Bank-conflict-free (64 banks, 2-pass). LDS = off-order host
+        # buffer: off(n,k) = kO*kOStride + kM*blockOff + nI*innerK + kI. The WMMA 16x16x128 f8f6f4
+        # K->thread map is lane L -> n=L%MI_N, k = kO*(kMcount*innerK) + (L//MI_N)*innerK + kI, so the
+        # read-block index r == kO and the lane-half (L//MI_N) == kM (both set in
+        # lraTileAssignmentSwizzledTDM). All strides below are ELEMENT counts; the ds_load immediate is
+        # bytes, so the element offset is scaled by bpeDS (like the normal reader). fp8: elems == bytes.
+        imod        = Module("LocalReadDo%s_I%s_swizzledTDM" % (tP["tensorChar"], iui))
+        tc          = tP["tensorChar"]
+        tile01      = tP["tile01Idx"]
+        instruction = tP["localReadInstruction"]
+        blockWidth  = instruction.blockWidth
+        LocalReadX  = instruction.getInst(0)
+        maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
+        depthU      = kernel["_DepthU%s" % tc]
+        miN         = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
+        innerK      = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())  # elems per ds_load_b128
+        kMcount     = kernel["WavefrontSize"] // miN     # K-halves interleaved across lane-groups
+        blockOff    = miN * innerK                       # inner [nI,kI] block
+        kOStride    = kMcount * blockOff                 # read-block (kO) stride
+        nOStride    = miN * depthU                       # N-tile (nO) stride
+        numNtile    = kernel["MIWaveTile"][tile01]
+        # N-waves interleave at MI_N: a wave's sub-tiles stride by MIWaveGroup[N] nO rows
+        # (the per-wave base offset is added in lraTileAssignmentSwizzledTDM). ==1 -> single wave.
+        nWaveN      = kernel["MIWaveGroup"][tile01]
+        numKChunk   = kernel["MIInputPerThread%s" % tc] // innerK
+        regsPerLoad = int(blockWidth)                    # VGPRs per ds_load_b128
+        regsPerNtile = numKChunk * regsPerLoad
+        swapByteOff = tP["localReadSwapByteOffset"]
+        # HalfPLR splits the per-iteration Valu block into rotating half-block groups (G0/G1/G2);
+        # the WMMA consumer reads through the same getHalfPLRValuStr mapping, so the swizzled reader
+        # must target the group register too (else it fills Valu_X while WMMA reads Valu_G -> garbage).
+        halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c" % tc]
+        # VectorWidth>1: the WMMA/store interleave the free dim into VW column-phases. A logical MI-tile
+        # group vIdx (0..numVecPerTile) owns VW nO-tiles (strided by the wave interleave nWaveN); the eIdx
+        # phase (0..vw) shifts one column (+innerK) within that group. The per-lane N stride becomes VW
+        # (handled in lraTileAssignmentSwizzledTDM). Register block order stays nt=vIdx*vw+eIdx to match
+        # the acc->arch layout. vw==1 -> vIdx=nt, eIdx=0 -> byte-identical to the flat nt-major loop.
+        vw            = kernel["VectorWidth%s" % tc]
+        numVecPerTile = numNtile // vw
+        # VW>1 breaks the LDS bank conflict with a per-nO-tile pad, deposited by TDM iterate-mode
+        # (see initTDMDescriptor). The nO-crossing term must step by the PADDED nO stride to match;
+        # eIdx/kOStride/kI stay within one nO-tile (no pad). The per-lane base pad is applied by
+        # lraFinalOffset. padElems==0 (VW==1) -> byte-identical to the unpadded reader.
+        padElems       = kernel["LdsPad%s" % tc]
+        nOStridePadded = nOStride + padElems
+        for nt in range(numNtile):
+            vIdx = nt // vw
+            eIdx = nt %  vw
+            for r in range(numKChunk):
+                # localReadOffset carries the K-sub-iteration progression in the immediate (like the
+                # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
+                # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
+                offElems = vIdx * vw * nWaveN * nOStridePadded + eIdx * innerK + r * kOStride + tP["localReadOffset"]
+                off = int(round(offElems * tP["bpeDS"])) + swapByteOff
+                reg = nt * regsPerNtile + r * regsPerLoad
+                offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
+                ds = DSModifiers(na=1, offset=offSplit)
+                if halfPLR:
+                    destVgpr = vgpr(writer.getHalfPLRValuStr(writer.states.halfPLRGroups, reg, tc), blockWidth)
+                else:
+                    destVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, reg), blockWidth)
+                localReadCode = imod.add(Module("LocalRead%s swizzledTDM nt%u r%u" % (tc, nt, r)))
+                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds,
+                                  module=localReadCode, comment="swizzledTDM L->Reg nt=%u r=%u" % (nt, r))
+        return imod, Module(), Module()
+
+
     """
     Local Read: Do It A/B
     iui = Inner Unroll Idx
@@ -826,6 +897,9 @@ class LocalReadMFMA(LocalRead):
 
         isgfx950 = kernel["ISA"][:2] == (9, 5)
         isgfx950mx = isgfx950 and ("MXS" in tc)
+
+        if tP.get("isSwizzledTDM"):
+            return self._localReadSwizzledTDM(writer, kernel, bufferIdx, iui, epsi, tP)
 
         if ("MXS" in tc and writer.states.asmCaps["HasWMMA_V3"]
             and kernel["MXScaleFormat"] == "InMemorySwizzle"):

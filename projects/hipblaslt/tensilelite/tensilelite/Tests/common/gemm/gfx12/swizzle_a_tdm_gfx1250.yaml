@@ -1,0 +1,686 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# gfx1250 swizzled tensor-A via TDM (F8, TN). A is pre-swizzled into WMMA-optimal order,
+# loaded global->LDS by tensor_load_to_lds (TDMInst=3) with LdsPadA=0, then read by plain
+# ds_load_b128. B uses the normal TDM path. Distinct from the gfx942 DTV swizzle path.
+# Covers: single/multi M-tile (MIWaveTile[0]=1,2), single/multi K-iteration, and multi-wave
+# M split (MIWaveGroup=[2,2], numComp=2).
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+  CpuThreads: 1
+  PrintLevel: 2
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN, F8 swizzle-A, single M-tile
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  1, 1]
+        - DepthU: [128, 256]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [16, 16, 1, 256]
+  -
+    - # ProblemType, TN, F8 swizzle-A, multi M-tile (MIWaveTile[0]=2)
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 1,  1, 1]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 16, 1, 256]
+  -
+    - # ProblemType, TN, F8 swizzle-A, multi-wave M-split (MIWaveGroup=[2,2], numWaves=4, numComp=2)
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 1,  2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 32, 1, 256]
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, BF16 swizzle-A, multi-wave MIWaveGroup=[2,2] (M-split).
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DepthU: [64]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 512]
+  -
+    - # ProblemType, TN, BF16 swizzle-A, multi-wave, tail K and odd K with M/N edges.
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DepthU: [64]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 200]
+          - Exact: [200, 100, 1, 72]
+  -
+    - # ProblemType, TN, BF16 swizzle-A, multi-wave, batched (batch > 1). The client swizzles every batch and places it at the
+      # problem's batch stride, which the kernel also steps by; unaligned M/N/K need an explicit batch
+      # stride that holds one padded batch (alignUp(MN,16) x alignUp(K,swzK)).
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DepthU: [64]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 3, 512]
+          - Exact:
+              sizes: [200, 100, 2, 200]
+              stridesA: [1, 200, 45000]
+  -
+    - # ProblemType, TN, F8 swizzle-A, multi-wave, VectorWidthA = 2 and 4 (the swizzled read re-decomposes
+      # the VW-strided M into (mO, mI); same path as swizzle-B VWB>1). Includes a tail-K size.
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 2,  2, 2]
+        - DepthU: [128]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [2, 4]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 128, 1, 512]
+          - Exact: [200, 100, 1, 400]
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, F4 swizzle-A, multi-wave, tail K (K % DepthU != 0, K % 64 != 0), M/N edges, batched.
+      # F4 is handled as packed bytes: two F4 per byte give the F8 byte layout (BK=32B), so swzK=64
+      # elements and the TDM descriptor counts bytes (K extents halved). Sub-byte needs a packed ld.
+      # VW>1 (WT 2/4) exercises the 16B per-MI-tile LDS pad via TDM iterate-mode (tile > 1024B at DepthU 256).
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1, 2, 4]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 512]
+          - Exact: [100, 200, 1, 400]
+          - Exact:
+              sizes: [100, 200, 2, 400]
+              stridesA: [1, 400, 60000]
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, MXF4 swizzle-A, multi-wave, tail K (K % DepthU != 0), M/N edges.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+      MXBlockA: 32
+      MXBlockB: 32
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1, 2, 4]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 512]
+          - Exact: [100, 200, 1, 416]
+        - ActivationArgs:
+          - [Enum: none]
+  -
+    - # ProblemType, TN, F8 swizzle-A, MT M=16 with MIWaveGroup=[1,4] (MT16x64 / MT16x128), M edge, tail K.
+      # One MI row block (nO) per macro-tile in the swizzled free dim, split over 2 wave components:
+      # nO does not divide, so every component loads the whole tile (replicated, same LDS address).
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      SwizzleTensorA: True
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 4]
+          - [16, 16, 128, 1, 1, 1, 2, 1, 4]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - HalfPLR: [0]
+        - TDMIterateMode: [0]
+        - PrefetchGL2: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[1,1]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 256, 1, 512]
+          - Exact: [40, 256, 1, 400]
