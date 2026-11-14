@@ -99,6 +99,14 @@ def test_assign_custom_kernel_params_macrotile_wins_over_logic_file():
     assert [state["MacroTile0"], state["MacroTile1"], state["DepthU"]] == [128, 256, 64]
 
 
+def test_assign_custom_kernel_params_inherited_af0em_auto_raises():
+    # custom.config omits AF0EM, so the consuming logic's -1 survives the merge;
+    # handwritten kernels skip the derivation that would resolve it.
+    state = _ck_state(AssertFree0ElementMultiple=-1)
+    with pytest.raises(RuntimeError, match="AssertFree0ElementMultiple"):
+        Solution._assignCustomKernelParameters(state)
+
+
 def test_assign_custom_kernel_params_unresolvable_macrotile_raises():
     # Neither source supplies a tile: fail the build rather than emit a library
     # that divides by zero at solution-selection time.

@@ -95,7 +95,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import edgeStoreVectorWidthSupported, isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
 
 
 def _oneSidedMX(state):
@@ -2232,9 +2232,16 @@ class Solution(collections.abc.Mapping):
       RuntimeError: If a macrotile component is supplied by neither the
         CustomKernel block nor the consuming logic file, or if the solution
         can split K (GlobalSplitU other than 0 or 1) but its grid launches one
-        GSU slice per tile.
+        GSU slice per tile, or if AssertFree0ElementMultiple is -1 (auto).
     """
     ck = state["CustomKernel"]
+
+    # AF0EM -1 is resolved by derivation, which handwritten kernels skip. Checked on
+    # the merged state: the consuming logic can supply -1 when custom.config omits it.
+    if state.get("AssertFree0ElementMultiple", 1) == -1:
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}': AssertFree0ElementMultiple must be a "
+        f"concrete multiple, not -1 (auto)")
 
     # CustomKernels.py derives the macrotile from MatrixInstruction / MIWaveTile
     # in custom.config, then from an MTxxx token in the kernel name. Any kernel
@@ -2485,6 +2492,17 @@ class Solution(collections.abc.Mapping):
                  "a pair. Put MX scales on both tensors or on neither, or use %s=0"
                  % (_oneSidedMXHead(state), key, state[key], key))
           return
+    if dcpAutoSkip is None and state.get("AssertFree0ElementMultiple", 1) == -1:
+      # AF0EM -1: StoreVectorWidth where wide edge stores are supported (else 1).
+      # SVW is only known after derivation, so derive a probe first; the logic
+      # then stores the numeric AF0EM and rebuilds the same kernel.
+      # Packed AtomicDest stores need an even AF0EM, also in the probe.
+      state["AssertFree0ElementMultiple"] = 2 if state["GlobalSplitUAlgorithm"] == "AtomicDest" else 1
+      if tuple(state["ISA"])[:2] == (12, 5) and not state["ProblemType"]["Sparse"]:
+        probe = copy.deepcopy(state)
+        Solution.assignDerivedParameters(probe, splitGSU, False, False, isaInfoMap, rocmVersion)
+        if probe.get("Valid", True) and probe.get("_VectorStore", 1) and edgeStoreVectorWidthSupported(probe):
+          state["AssertFree0ElementMultiple"] = max(1, probe["StoreVectorWidth"])
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
