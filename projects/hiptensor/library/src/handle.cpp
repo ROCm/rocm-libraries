@@ -24,32 +24,49 @@
  *
  *******************************************************************************/
 
+#include <cstdio>
+
+#include <hip/hip_runtime_api.h>
+
+#include <hiptensor/hiptensor.h>
+
+#include "data_types.hpp"
 #include "handle.hpp"
+#include "logger.hpp"
 
 namespace hiptensor
 {
-    Handle Handle::createHandle(int64_t* buff)
+    hiptensorStatus_t checkHandleDevice(const hiptensorHandle_t handle, char const* apiFuncName)
     {
-        auto handle = toHandle(buff);
-        new(handle) Handle();
+        char msg[128];
+        int  currentDeviceId = -1;
 
-        return *handle;
+        auto hipStatus = hipGetDevice(&currentDeviceId);
+        if(hipStatus != hipSuccess)
+        {
+            auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+            snprintf(msg,
+                     sizeof(msg),
+                     "Cannot query current device: %s (%s)",
+                     hipGetErrorString(hipStatus),
+                     hiptensorGetErrorString(errorCode));
+            Logger::instance()->logError(apiFuncName, msg);
+            return errorCode;
+        }
+
+        if(currentDeviceId != handle->getDevice().getDeviceId())
+        {
+            auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+            snprintf(msg,
+                     sizeof(msg),
+                     "Device mismatch error: current device id: %d, handle device id: %d (%s)",
+                     currentDeviceId,
+                     (int)handle->getDevice().getDeviceId(),
+                     hiptensorGetErrorString(errorCode));
+            Logger::instance()->logError(apiFuncName, msg);
+            return errorCode;
+        }
+
+        return HIPTENSOR_STATUS_SUCCESS;
     }
-
-    void Handle::destroyHandle(int64_t* buff)
-    {
-        auto handle = toHandle(buff);
-        handle->~Handle();
-    }
-
-    Handle* Handle::toHandle(int64_t* buff)
-    {
-        return reinterpret_cast<Handle*>(buff);
-    }
-
-    HipDevice Handle::getDevice()
-    {
-        return mDevice;
-    }
-
 } // namespace hiptensor

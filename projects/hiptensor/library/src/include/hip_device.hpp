@@ -64,8 +64,14 @@ namespace hiptensor
             UNSUPPORTED_WARP_SIZE = 0u,
         };
 
+        // Does not query HIP; the object reports an unsupported device until initialize() succeeds.
         HipDevice();
         ~HipDevice() = default;
+
+        // Queries the properties of the given device. Leaves the object unchanged on failure.
+        hipError_t initialize(hipDevice_t deviceId);
+
+        hipDeviceProp_t const& getProperties() const;
 
         hipDevice_t  getDeviceId() const;
         hipGcnArch_t getGcnArch() const;

@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cstring>
 #include <vector>
 
 #include "../elementwise/elementwise_cpu_reference.hpp"
@@ -109,11 +110,10 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
         // Need to copy C to D if C != D
-        CHECK_HIP_ERROR(hipMemcpy(D,
-                                  C,
-                                  hiptensor::elementsFromLengths(descC->mLengths)
-                                      * hiptensor::hiptensorDataTypeSize(descC->mType),
-                                  hipMemcpyHostToHost));
+        std::memcpy(D,
+                    C,
+                    hiptensor::elementsFromLengths(descC->mLengths)
+                        * hiptensor::hiptensorDataTypeSize(descC->mType));
     }
 
     // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the

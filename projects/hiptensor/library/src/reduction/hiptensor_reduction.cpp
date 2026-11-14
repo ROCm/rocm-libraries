@@ -93,6 +93,12 @@ namespace
             return checkResult;
         }
 
+        checkResult = hiptensor::checkHandleDevice(handle, "hiptensorReduce");
+        if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return checkResult;
+        }
+
         const hiptensor::Hash            hashGenerator;
         const std::unordered_set<size_t> supportedTypes = {
             hashGenerator(
@@ -308,11 +314,22 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
         // Need to copy C to D if C != D
-        CHECK_HIP_ERROR(hipMemcpy(D,
-                                  C,
-                                  hiptensor::elementsFromLengths(descC->mLengths)
-                                      * hiptensor::hiptensorDataTypeSize(descC->mType),
-                                  hipMemcpyDeviceToDevice));
+        auto hipStatus = hipMemcpy(D,
+                                   C,
+                                   hiptensor::elementsFromLengths(descC->mLengths)
+                                       * hiptensor::hiptensorDataTypeSize(descC->mType),
+                                   hipMemcpyDeviceToDevice);
+        if(hipStatus != hipSuccess)
+        {
+            auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+            snprintf(msg,
+                     sizeof(msg),
+                     "Copy of C to D failed: %s (%s)",
+                     hipGetErrorString(hipStatus),
+                     hiptensorGetErrorString(errorCode));
+            logger->logError("hiptensorReduce", msg);
+            return errorCode;
+        }
     }
 
     // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the

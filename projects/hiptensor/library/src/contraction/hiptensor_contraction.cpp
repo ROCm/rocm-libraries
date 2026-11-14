@@ -61,6 +61,49 @@ static bool hasSharedBatchMode(std::vector<int32_t> const& modeA,
     return false;
 }
 
+// Measures kernel selection time for the performance log. The measurement is diagnostic only, so
+// a HIP failure here reports the time as unavailable (-1) instead of failing plan creation.
+class SelectionTimer
+{
+public:
+    SelectionTimer()
+    {
+        mValid = hipEventCreate(&mStart) == hipSuccess && hipEventCreate(&mStop) == hipSuccess
+                 && hipEventRecord(mStart) == hipSuccess;
+    }
+
+    ~SelectionTimer()
+    {
+        if(mStart != nullptr)
+        {
+            (void)hipEventDestroy(mStart);
+        }
+        if(mStop != nullptr)
+        {
+            (void)hipEventDestroy(mStop);
+        }
+    }
+
+    SelectionTimer(SelectionTimer const&)            = delete;
+    SelectionTimer& operator=(SelectionTimer const&) = delete;
+
+    float elapsedMs()
+    {
+        float elapsed = 0.0f;
+        if(mValid && hipEventRecord(mStop) == hipSuccess && hipEventSynchronize(mStop) == hipSuccess
+           && hipEventElapsedTime(&elapsed, mStart, mStop) == hipSuccess)
+        {
+            return elapsed;
+        }
+        return -1.0f;
+    }
+
+private:
+    hipEvent_t mStart = nullptr;
+    hipEvent_t mStop  = nullptr;
+    bool       mValid = false;
+};
+
 // Convert between vectors of void ptrs stored in opaque API objects
 // to vectors of ContractionSolution ptrs with simple cast.
 inline auto toContractionSolutionVec(std::vector<void*> const& v)
@@ -366,18 +409,10 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     }
 
     // Ensure current HIP device is same as the handle.
-    hiptensor::HipDevice currentDevice;
-    if((int)currentDevice.getDeviceId() != handle->getDevice().getDeviceId())
+    checkResult = hiptensor::checkHandleDevice(handle, "hiptensorContraction");
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
-        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Device mismatch error: current device id: %d, handle device id: %d (%s)",
-                 (int)currentDevice.getDeviceId(),
-                 (int)handle->getDevice().getDeviceId(),
-                 hiptensorGetErrorString(errorCode));
-        logger->logError("hiptensorContraction", msg);
-        return errorCode;
+        return checkResult;
     }
 
     auto*             cSolution = (hiptensor::ContractionSolution*)(plan->mPref->mSolution);
@@ -517,19 +552,10 @@ hiptensorStatus_t contractionCreatePlanPreference(const hiptensorHandle_t   hand
     }
 
     // Ensure current HIP device is same as the handle.
-    hiptensor::HipDevice currentDevice;
-    if((int)currentDevice.getDeviceId() != handle->getDevice().getDeviceId())
+    checkResult = hiptensor::checkHandleDevice(handle, "contractionCreatePlanPreference");
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
-        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Device mismatch error: current device id: %d, handle device id: %d (%s)",
-                 (int)currentDevice.getDeviceId(),
-                 (int)handle->getDevice().getDeviceId(),
-                 hiptensorGetErrorString(errorCode));
-
-        logger->logError("contractionCreatePlanPreference", msg);
-        return errorCode;
+        return checkResult;
     }
 
     if(algo == HIPTENSOR_ALGO_DEFAULT || algo == HIPTENSOR_ALGO_DEFAULT_PATIENT
@@ -595,18 +621,10 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     }
 
     // Ensure current HIP device is same as the handle.
-    hiptensor::HipDevice currentDevice;
-    if((int)currentDevice.getDeviceId() != handle->getDevice().getDeviceId())
+    checkResult = hiptensor::checkHandleDevice(handle, "contractionInitPlan");
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
-        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Device mismatch error: current device id: %d, handle device id: %d (%s)",
-                 (int)currentDevice.getDeviceId(),
-                 (int)handle->getDevice().getDeviceId(),
-                 hiptensorGetErrorString(errorCode));
-        logger->logError("contractionInitPlan", msg);
-        return HIPTENSOR_STATUS_ARCH_MISMATCH;
+        return checkResult;
     }
 
     // At this point, we need to format inputs for kernels as they will be tested via selection model.
@@ -655,11 +673,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
     candidates = toContractionSolutionVec(solutionQ.solutions());
 
     // Measure timing for solution selection
-    hipEvent_t startEvent, stopEvent;
-    CHECK_HIP_ERROR(hipEventCreate(&startEvent));
-    CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
-
-    CHECK_HIP_ERROR(hipEventRecord(startEvent));
+    SelectionTimer selectionTimer;
 
     // Launch selection algorithm
     hiptensor::ContractionSolution* winner = nullptr;
@@ -758,14 +772,7 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
         }
     }
 
-    CHECK_HIP_ERROR(hipEventRecord(stopEvent));
-    CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));
-
-    auto elapsedTimeMs = 0.0f;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
-
-    CHECK_HIP_ERROR(hipEventDestroy(startEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
+    auto elapsedTimeMs = selectionTimer.elapsedMs();
 
     if(result != HIPTENSOR_STATUS_SUCCESS)
     {
@@ -1199,17 +1206,10 @@ hiptensorStatus_t contractionTrinaryInitPlan(
         return checkResult;
     }
 
-    hiptensor::HipDevice currentDevice;
-    if((int)currentDevice.getDeviceId() != handle->getDevice().getDeviceId())
+    checkResult = hiptensor::checkHandleDevice(handle, "contractionTrinaryInitPlan");
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
-        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
-        snprintf(msg, sizeof(msg),
-                 "Device mismatch error: current device id: %d, handle device id: %d (%s)",
-                 (int)currentDevice.getDeviceId(),
-                 (int)handle->getDevice().getDeviceId(),
-                 hiptensorGetErrorString(errorCode));
-        logger->logError("contractionTrinaryInitPlan", msg);
-        return HIPTENSOR_STATUS_ARCH_MISMATCH;
+        return checkResult;
     }
 
     // --- Derive the intermediate tensor T from mode analysis ---
@@ -1271,10 +1271,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(
     // The winner is chosen using the step 2 problem shape (T * C -> E
     // with bias D).  The same kernel is reused for step 1 at execution
     // time with different alpha/beta and tensor arguments.
-    hipEvent_t startEvent, stopEvent;
-    CHECK_HIP_ERROR(hipEventCreate(&startEvent));
-    CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
-    CHECK_HIP_ERROR(hipEventRecord(startEvent));
+    SelectionTimer selectionTimer;
 
     hiptensor::ContractionSolution* winner = nullptr;
     auto                            result = HIPTENSOR_STATUS_INTERNAL_ERROR;
@@ -1367,13 +1364,7 @@ hiptensorStatus_t contractionTrinaryInitPlan(
         }
     }
 
-    CHECK_HIP_ERROR(hipEventRecord(stopEvent));
-    CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));
-
-    auto elapsedTimeMs = 0.0f;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(startEvent));
-    CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
+    auto elapsedTimeMs = selectionTimer.elapsedMs();
 
     if(result != HIPTENSOR_STATUS_SUCCESS || winner == nullptr)
     {
@@ -1506,17 +1497,10 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     }
 
     // Ensure current HIP device is same as the handle.
-    hiptensor::HipDevice currentDevice;
-    if((int)currentDevice.getDeviceId() != handle->getDevice().getDeviceId())
+    checkResult = hiptensor::checkHandleDevice(handle, "hiptensorContractTrinary");
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
-        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
-        snprintf(msg, sizeof(msg),
-                 "Device mismatch error: current device id: %d, handle device id: %d (%s)",
-                 (int)currentDevice.getDeviceId(),
-                 (int)handle->getDevice().getDeviceId(),
-                 hiptensorGetErrorString(errorCode));
-        logger->logError("hiptensorContractTrinary", msg);
-        return errorCode;
+        return checkResult;
     }
 
     auto* solution = (hiptensor::ContractionSolution*)(plan->mPref->mSolution);
