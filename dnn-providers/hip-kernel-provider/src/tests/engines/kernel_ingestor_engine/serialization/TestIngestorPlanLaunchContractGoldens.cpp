@@ -279,6 +279,7 @@ MetadataValues attentionPagedUnifiedSampleValues()
             {"kv_block_span_bytes", int64_t{131072}},
             {"q_block_grid", int64_t{21}},
             {"sink_is_f32", int64_t{1}},
+            {"num_kv_blocks", int64_t{8192}},
             {"block_threads", int64_t{128}}};
 }
 
@@ -1593,6 +1594,7 @@ TEST(TestIngestorPlanLaunchContractGoldens, AttentionPagedUnifiedV1SampleStillRe
     EXPECT_EQ(s.kvBlockSpanBytes, 131072);
     EXPECT_EQ(s.qBlockGrid, 21);
     EXPECT_EQ(s.sinkIsF32, 1);
+    EXPECT_EQ(s.numKvBlocks, 8192);
     EXPECT_EQ(launch.blockThreads, 128);
 }
 

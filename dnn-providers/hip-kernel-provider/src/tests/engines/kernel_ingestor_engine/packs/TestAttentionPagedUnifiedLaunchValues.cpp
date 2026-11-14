@@ -75,6 +75,7 @@ AttentionPagedUnifiedLaunchInputs denseInputs()
     s.kvHeadStride = 8192;
     s.kvBlockSpanBytes = 131072;
     s.qBlockGrid = 18;
+    s.numKvBlocks = 4096;
     launch.blockThreads = 256;
     return launch;
 }
@@ -165,6 +166,7 @@ void expectSameLaunch(const AttentionPagedUnifiedLaunchInputs& read,
     EXPECT_EQ(r.kvBlockSpanBytes, e.kvBlockSpanBytes);
     EXPECT_EQ(r.qBlockGrid, e.qBlockGrid);
     EXPECT_EQ(r.sinkIsF32, e.sinkIsF32);
+    EXPECT_EQ(r.numKvBlocks, e.numKvBlocks);
     EXPECT_EQ(read.blockThreads, expected.blockThreads);
 }
 
@@ -218,6 +220,7 @@ TEST(TestAttentionPagedUnifiedLaunchValues, ValuesMatchTheV1Contract)
                                   {"kv_block_span_bytes", int64_t{131072}},
                                   {"q_block_grid", int64_t{18}},
                                   {"sink_is_f32", int64_t{0}},
+                                  {"num_kv_blocks", int64_t{4096}},
                                   {"block_threads", int64_t{256}}};
     EXPECT_EQ(values, expected);
     EXPECT_EQ(ATTENTION_PAGED_UNIFIED_DISPATCH_SYMBOL_V1,
@@ -284,7 +287,7 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnotherContractName)
 
 TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAMissingOptionalOrFloatValue)
 {
-    for(const char* name : {"sink.uid", "ragged_offset.uid", "scale", "sink_is_f32"})
+    for(const char* name : {"sink.uid", "ragged_offset.uid", "scale", "sink_is_f32", "num_kv_blocks"})
     {
         SCOPED_TRACE(name);
         auto missing = saved(denseInputs());
@@ -328,6 +331,9 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnIntegerOutsideWhatTheKernel
         {&ragged, "q_uniform_len", -1},
         {&dense, "sink_is_f32", -1},
         {&dense, "sink_is_f32", 2},
+        {&dense, "num_kv_blocks", 0}, // a K/V container holds at least one block
+        {&dense, "num_kv_blocks", -1},
+        {&dense, "num_kv_blocks", int64_t{2147483648}},
         {&dense, "block_table_stride", -1},
         {&dense, "q_tok_stride", -1},
         {&dense, "o_head_stride", int64_t{2147483648}},
