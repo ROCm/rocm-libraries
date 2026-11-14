@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -376,6 +377,121 @@ TEST(TestTensorAttributes, ValidateFailsOnVirtualRuntimePassByValueTensor)
     EXPECT_EQ(
         tensor.validate(),
         Error(ErrorCode::INVALID_VALUE, "Tensor  cannot be virtual and runtime pass by value"));
+}
+
+namespace
+{
+TensorAttributes makeRaggedTensor(const std::vector<int64_t>& dims,
+                                  const std::vector<int64_t>& strides)
+{
+    TensorAttributes tensor;
+    tensor.set_name("Q").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+    auto offset = std::make_shared<TensorAttributes>();
+    offset->set_dim({dims[0] + 1, 1, 1, 1}).set_stride({1, 1, 1, 1}).set_data_type(DataType::INT32);
+    tensor.set_ragged_offset(offset);
+    return tensor;
+}
+} // namespace
+
+TEST(TestTensorAttributes, ValidateSucceedsOnPackedRaggedTensor)
+{
+    // BSHD packing of B = 2, H = 4, S = 64, D = 128.
+    const auto tensor = makeRaggedTensor({2, 4, 64, 128}, {32768, 128, 512, 1});
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateIgnoresRaggedBatchStride)
+{
+    const auto tensor = makeRaggedTensor({2, 4, 64, 128}, {1, 128, 512, 1});
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedZeroSequenceStride)
+{
+    const auto tensor = makeRaggedTensor({2, 4, 64, 128}, {32768, 128, 0, 1});
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_THAT(
+        err.get_message(),
+        ::testing::HasSubstr("Ragged tensor Q sequence stride (axis 2) must be positive, got 0"));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedNegativeSequenceStride)
+{
+    const auto tensor = makeRaggedTensor({2, 4, 64, 128}, {32768, 128, -512, 1});
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_THAT(err.get_message(), ::testing::HasSubstr("must be positive, got -512"));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedOverlappingTokenRows)
+{
+    // Token row t covers elements 64t to 64t + 127, so neighbouring rows share 64 elements.
+    const auto tensor = makeRaggedTensor({2, 1, 64, 128}, {8192, 8192, 64, 1});
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_THAT(err.get_message(),
+                ::testing::HasSubstr("Ragged tensor Q violates the sorted-stride rule: axis 2 "
+                                     "has stride 64, below the span 128"));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedOverlappingHeads)
+{
+    const auto tensor = makeRaggedTensor({2, 4, 64, 128}, {32768, 64, 512, 1});
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_THAT(err.get_message(),
+                ::testing::HasSubstr("axis 1 has stride 64, below the span 128"));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnRaggedHeadMajorStrideBelowSequenceSpan)
+{
+    // [H, T] layout with a head stride of 5 tokens and a declared sequence extent of 8.
+    const auto tensor = makeRaggedTensor({2, 4, 8, 1}, {5, 5, 1, 1});
+    const auto err = tensor.validate();
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
+    EXPECT_THAT(err.get_message(), ::testing::HasSubstr("axis 1 has stride 5, below the span 8"));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRaggedHeadMajorLayout)
+{
+    // [H, T] layout: B = 2, H = 4, S = 3, five tokens in total.
+    const auto tensor = makeRaggedTensor({2, 4, 3, 1}, {20, 5, 1, 1});
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRaggedZeroHeadStride)
+{
+    // Every head reads the same storage.
+    const auto tensor = makeRaggedTensor({2, 4, 64, 128}, {8192, 0, 128, 1});
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRaggedOverlapOnlyThroughSizeOneAxes)
+{
+    EXPECT_EQ(makeRaggedTensor({2, 1, 64, 1}, {64, 1, 1, 1}).validate(), Error(ErrorCode::OK, ""));
+    EXPECT_EQ(makeRaggedTensor({2, 1, 64, 8}, {512, 4, 8, 1}).validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateChecksRaggedLayoutFromRankThree)
+{
+    const auto rank3 = makeRaggedTensor({2, 4, 64}, {256, 64, 0});
+    EXPECT_EQ(rank3.validate().code, ErrorCode::INVALID_VALUE);
+
+    const auto rank2 = makeRaggedTensor({2, 64}, {0, 0});
+    EXPECT_EQ(rank2.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateIgnoresRaggedLayoutRulesOnNonRaggedTensor)
+{
+    for(const auto& strides : {std::vector<int64_t>{32768, 128, 0, 1},
+                               std::vector<int64_t>{32768, 64, 512, 1},
+                               std::vector<int64_t>{8192, 8192, 64, 1}})
+    {
+        TensorAttributes tensor;
+        tensor.set_dim({2, 4, 64, 128}).set_stride(strides).set_data_type(DataType::FLOAT);
+        EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+    }
 }
 
 TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)

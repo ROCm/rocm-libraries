@@ -15433,3 +15433,83 @@ TEST_F(TestGraph, GraphRankingMetricReachesExplicitEngineConfigs)
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(metric, "time");
 }
+
+#ifdef HIPDNN_ENABLE_SDPA
+namespace
+{
+enum class SdpaRole : size_t
+{
+    Q,
+    K,
+    V
+};
+
+Error validateSdpaWithRaggedTensor(SdpaRole role, const std::vector<int64_t>& strides)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    const std::array<std::string, 3> names = {"Q", "K", "V"};
+    std::array<std::shared_ptr<TensorAttributes>, 3> tensors;
+    for(size_t i = 0; i < tensors.size(); ++i)
+    {
+        auto offset = std::make_shared<TensorAttributes>();
+        offset->set_name(names[i] + "RaggedOffset")
+            .set_dim({3, 1, 1, 1})
+            .set_stride({1, 1, 1, 1})
+            .set_data_type(DataType::INT32);
+        tensors[i] = std::make_shared<TensorAttributes>();
+        tensors[i]
+            ->set_name(names[i])
+            .set_dim({2, 4, 64, 128})
+            .set_stride({32768, 128, 512, 1})
+            .set_data_type(DataType::FLOAT)
+            .set_ragged_offset(offset);
+    }
+    tensors[static_cast<size_t>(role)]->set_stride(strides);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNode");
+    graph.sdpa(tensors[0], tensors[1], tensors[2], attributes);
+    return graph.validate();
+}
+} // namespace
+
+TEST_F(TestGraph, SdpaFwdValidateSucceedsWithPackedRaggedQkv)
+{
+    const auto err = validateSdpaWithRaggedTensor(SdpaRole::Q, {32768, 128, 512, 1});
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+}
+
+TEST_F(TestGraph, SdpaFwdValidateSucceedsWithZeroHeadStrideRaggedK)
+{
+    const auto err = validateSdpaWithRaggedTensor(SdpaRole::K, {8192, 0, 128, 1});
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+}
+
+TEST_F(TestGraph, SdpaFwdValidateFailsZeroSequenceStrideRaggedQ)
+{
+    const auto err = validateSdpaWithRaggedTensor(SdpaRole::Q, {32768, 128, 0, 1});
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(),
+                ::testing::HasSubstr("Ragged tensor Q sequence stride (axis 2) must be positive"));
+}
+
+TEST_F(TestGraph, SdpaFwdValidateFailsOverlappingHeadsRaggedK)
+{
+    const auto err = validateSdpaWithRaggedTensor(SdpaRole::K, {32768, 64, 512, 1});
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(),
+                ::testing::HasSubstr("Ragged tensor K violates the sorted-stride rule"));
+}
+
+TEST_F(TestGraph, SdpaFwdValidateFailsOverlappingTokenRowsRaggedV)
+{
+    const auto err = validateSdpaWithRaggedTensor(SdpaRole::V, {32768, 128, 64, 1});
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_THAT(err.get_message(),
+                ::testing::HasSubstr("Ragged tensor V violates the sorted-stride rule: axis 2"));
+}
+#endif // HIPDNN_ENABLE_SDPA
