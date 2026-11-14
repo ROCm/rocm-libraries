@@ -21,9 +21,17 @@ namespace lgbm {
 // Bumped whenever the on-disk layout of the corresponding asset changes. A file
 // whose version does not match is rejected (the picker abstains) rather than
 // mis-parsed. Kept in lockstep with script/convert_lgbm_binary.py.
-inline constexpr std::uint32_t kRankFormatVersion = 1; // lgbm_rank.bin
+// lgbm_rank.bin. v2: compact FOREST block (exact f64 threshold table indexed by
+// u16, narrow node fields, f32 leaf values).
+inline constexpr std::uint32_t kRankFormatVersion = 2;
 // lgbm_pcfg.bin. v2: gfx_code solver sections carry their trained gfx_id vocab.
-inline constexpr std::uint32_t kPcfgFormatVersion = 2;
+// v3: compact FOREST block (as rank v2) and a deduplicated candidate catalog
+// with i16 args.
+// v4: each catalog stores its arg width (i16 or i32); ConvHipConv's arg_max_px
+// holds INT_MAX, which needs i32.
+// v5: column-wise catalog (dictionary + bit-packed args, descriptors stored as a
+// template plus numbers, front-coded keys, bit-packed bucket indices).
+inline constexpr std::uint32_t kPcfgFormatVersion = 5;
 
 // Cursor over an in-memory buffer holding one of the LGBM binary assets
 // (lgbm_rank.bin / lgbm_pcfg.bin). All multi-byte fields are little-endian,
@@ -41,6 +49,7 @@ public:
 
     bool Ok() const { return ok_; }
     std::size_t Pos() const { return pos_; }
+    std::size_t Remaining() const { return size_ - pos_; }
 
     template <typename T>
     T ReadScalar()
@@ -83,6 +92,67 @@ public:
         if(!Take(len))
             return {};
         return {data_ + pos_ - len, len};
+    }
+
+    // `len` raw bytes as a string (no length prefix).
+    std::string ReadChars(std::size_t len)
+    {
+        if(!Take(len))
+            return {};
+        return {data_ + pos_ - len, len};
+    }
+
+    // Unsigned LEB128 (at most 10 bytes).
+    std::uint64_t ReadVarint()
+    {
+        std::uint64_t v = 0;
+        for(unsigned shift = 0; shift < 64; shift += 7)
+        {
+            const std::uint8_t b = ReadU8();
+            v |= static_cast<std::uint64_t>(b & 0x7F) << shift;
+            if(!ok_ || (b & 0x80) == 0)
+                return v;
+        }
+        ok_ = false;
+        return 0;
+    }
+
+    // Signed varint: zigzag-mapped (0, -1, 1, -2, ... -> 0, 1, 2, 3, ...).
+    std::int64_t ReadZigzag()
+    {
+        const std::uint64_t u = ReadVarint();
+        return static_cast<std::int64_t>(u >> 1) ^ -static_cast<std::int64_t>(u & 1);
+    }
+
+    // `count` unsigned values of `width` bits (1..32), packed least significant
+    // bit first, then padded to a whole byte.
+    std::vector<std::uint32_t> ReadPacked(std::size_t count, unsigned width)
+    {
+        std::vector<std::uint32_t> out;
+        if(width == 0 || width > 32 || count > (size_ - pos_) * 8 / width)
+        {
+            ok_ = false;
+            return out;
+        }
+        const std::size_t start = pos_;
+        if(!Take((count * width + 7) / 8))
+            return out;
+        out.resize(count);
+        std::uint64_t acc = 0;
+        unsigned nbits    = 0;
+        std::size_t at    = start;
+        for(auto& v : out)
+        {
+            while(nbits < width)
+            {
+                acc |= static_cast<std::uint64_t>(static_cast<std::uint8_t>(data_[at++])) << nbits;
+                nbits += 8;
+            }
+            v = static_cast<std::uint32_t>(acc & ((std::uint64_t{1} << width) - 1));
+            acc >>= width;
+            nbits -= width;
+        }
+        return out;
     }
 
     // Compare the next `n` bytes against a magic literal without advancing on a

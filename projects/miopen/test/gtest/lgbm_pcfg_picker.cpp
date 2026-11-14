@@ -27,6 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <string>
 #include <unordered_set>
@@ -217,6 +218,207 @@ TEST(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
     ASSERT_GT(solvers_checked, 0) << "no pcfg model asset was found to check";
     MIOPEN_LOG_I2("lgbm_pcfg golden parity: " << solvers_checked << " solvers, max abs err "
                                               << max_abs_err);
+}
+
+// Hand-built solver sections for the metadata parser. They go through
+// ParseSolverSectionForTest, the same code Find() runs on a bundle section, so a
+// malformed or oversized field must make the parse fail (the picker abstains for
+// that solver) instead of allocating what the field claims.
+class SectionBytes
+{
+public:
+    SectionBytes& U8(unsigned v)
+    {
+        bytes.push_back(static_cast<char>(v));
+        return *this;
+    }
+    SectionBytes& U16(unsigned v) { return Le(v, 2); }
+    SectionBytes& U32(std::uint32_t v) { return Le(v, 4); }
+    SectionBytes& I32(std::int32_t v) { return Le(static_cast<std::uint32_t>(v), 4); }
+    SectionBytes& Varint(std::uint64_t v)
+    {
+        for(; v >= 0x80; v >>= 7)
+            U8(static_cast<unsigned>(v & 0x7F) | 0x80);
+        return U8(static_cast<unsigned>(v));
+    }
+    SectionBytes& Repeat(char c, std::size_t n)
+    {
+        bytes.append(n, c);
+        return *this;
+    }
+    SectionBytes& Chars(const std::string& s)
+    {
+        bytes += s;
+        return *this;
+    }
+
+    std::string bytes;
+
+private:
+    SectionBytes& Le(std::uint64_t v, unsigned n)
+    {
+        for(unsigned i = 0; i < n; ++i, v >>= 8)
+            U8(static_cast<unsigned>(v & 0xFF));
+        return *this;
+    }
+};
+
+// Section header (no gfx_code) followed by the smallest valid FOREST block: one
+// tree with no internal nodes and a single leaf.
+SectionBytes SectionPrefix(int arg_count, int feat_count)
+{
+    SectionBytes s;
+    s.I32(feat_count).I32(kNumBaseProbFeatures).I32(arg_count).U8(0);
+    s.U32(1).U32(0).U8(1).U8(4);   // 1 tree, 0 thresholds, child width 1, f32 leaves
+    s.U16(0);                      // 0 internal nodes
+    s.Chars(std::string(4, '\0')); // the one leaf value
+    s.U16(0).U16(0);               // no categorical bitset / offsets
+    return s;
+}
+
+bool Parse(const SectionBytes& s, miopen::ai::lgbm::pcfg::SolverModel& model)
+{
+    return miopen::ai::lgbm::pcfg::ParseSolverSectionForTest(s.bytes.data(), s.bytes.size(), model);
+}
+
+// Catalog with no templates, no candidates and no buckets.
+void EmptyCatalog(SectionBytes& s) { s.Varint(0).Varint(0).Varint(0).U8(1); }
+
+// A well-formed 2-arg section: four candidates "a0".."a3" (descriptor template
+// "a<slot>", the slot taken from arg column 1), and one bucket "k" listing them
+// in reverse. Proves the hand-built layout is one the parser accepts, so the
+// rejections below are due to the bound and not to a malformed fixture.
+TEST(CPU_LgbmPcfgMetadata_NONE, ParsesWellFormedSection)
+{
+    auto s = SectionPrefix(2, kNumBaseProbFeatures + 2);
+    s.Varint(4).Varint(1);                                    // 4 candidates, 1 template
+    s.Varint(0).Varint(2).Chars("a\x01");                     // template: no shared prefix, 2 bytes
+    s.Varint(4);                                              // candidates using that template
+    s.Varint(4).U8(0).Varint(2).Varint(2).Varint(2).U8(0xE4); // col 1: 0,1,2,3
+    s.Varint(1).Varint(14);                                   // col 2: constant 7
+    s.U8(1);                                                  // slot 0 reads arg column 1
+    s.Varint(1);                                              // 1 bucket
+    s.Varint(0).Varint(1).Chars("k");                         // its key
+    s.U8(2);                                                  // bucket index width
+    s.Varint(4).U8(0x1B);                                     // candidates 3,2,1,0
+
+    miopen::ai::lgbm::pcfg::SolverModel model;
+    ASSERT_TRUE(Parse(s, model));
+    ASSERT_EQ(model.buckets.size(), 1u);
+    const auto& cands = model.buckets.at("k");
+    ASSERT_EQ(cands.size(), 4u);
+    for(std::size_t i = 0; i < cands.size(); ++i)
+    {
+        const int v = 3 - static_cast<int>(i);
+        EXPECT_EQ(cands[i].desc, "a" + std::to_string(v));
+        ASSERT_EQ(cands[i].args.size(), 2u);
+        EXPECT_EQ(cands[i].args[0], v);
+        EXPECT_EQ(cands[i].args[1], 7.0);
+    }
+}
+
+// Every section of the shipped bundle must still parse, with the schema the
+// header check enforces.
+TEST_F(CPU_LgbmPcfgPicker_NONE, ShippedSectionsParse)
+{
+    const auto names = meta.SolverNames();
+    ASSERT_FALSE(names.empty());
+    for(const auto& name : names)
+    {
+        const auto* model = meta.Find(name);
+        ASSERT_NE(model, nullptr) << name << " section failed to parse";
+        EXPECT_EQ(model->prob_feat_count, kNumBaseProbFeatures + (model->has_gfx_code ? 1 : 0))
+            << name;
+        EXPECT_EQ(model->feat_count, model->prob_feat_count + model->arg_count) << name;
+        EXPECT_FALSE(model->buckets.empty()) << name;
+    }
+}
+
+// A section whose arg_count the format cannot express is rejected from the
+// header, before any column is allocated. 4096 is the case from review: 65,536
+// candidates and 4,096 constant arg columns take 8 KiB of input but would expand
+// to 2 GiB of columns and another 2 GiB of candidate args.
+TEST(CPU_LgbmPcfgMetadata_NONE, RejectsOversizedArgCount)
+{
+    constexpr int kArgs = 4096;
+    auto s              = SectionPrefix(kArgs, kNumBaseProbFeatures + kArgs);
+    s.Varint(65536).Varint(1).Varint(0).Varint(1).Chars("x").Varint(65536);
+    for(int i = 0; i < kArgs; ++i)
+        s.Varint(1).Varint(0); // constant-zero column
+    s.Varint(0).U8(1);         // no buckets
+    ASSERT_LT(s.bytes.size(), 16u * 1024);
+
+    miopen::ai::lgbm::pcfg::SolverModel model;
+    EXPECT_FALSE(Parse(s, model));
+}
+
+TEST(CPU_LgbmPcfgMetadata_NONE, RejectsInconsistentHeader)
+{
+    miopen::ai::lgbm::pcfg::SolverModel model;
+
+    // arg_count 2^31-1 (feat_count wraps to match), with an otherwise empty catalog.
+    auto huge = SectionPrefix(INT32_MAX, static_cast<int>(INT32_MIN + kNumBaseProbFeatures - 1));
+    EmptyCatalog(huge);
+    EXPECT_FALSE(Parse(huge, model));
+
+    auto negative = SectionPrefix(-1, kNumBaseProbFeatures - 1);
+    EmptyCatalog(negative);
+    EXPECT_FALSE(Parse(negative, model));
+
+    // feat_count disagrees with prob_feat_count + arg_count.
+    auto mismatch = SectionPrefix(2, kNumBaseProbFeatures + 3);
+    EmptyCatalog(mismatch);
+    EXPECT_FALSE(Parse(mismatch, model));
+}
+
+// The largest arg_count the format allows (255) still must not decode past the
+// section's memory budget: 65,536 candidates by 255 constant columns is 133 MB of
+// int64 columns plus 133 MB of double args, from 510 bytes of columns.
+TEST(CPU_LgbmPcfgMetadata_NONE, RejectsColumnsOverDecodedBudget)
+{
+    constexpr int kArgs = 255;
+    auto s              = SectionPrefix(kArgs, kNumBaseProbFeatures + kArgs);
+    s.Varint(65536).Varint(1).Varint(0).Varint(1).Chars("x").Varint(65536);
+    for(int i = 0; i < kArgs; ++i)
+        s.Varint(1).Varint(0);
+    s.Varint(0).U8(1);
+
+    miopen::ai::lgbm::pcfg::SolverModel model;
+    EXPECT_FALSE(Parse(s, model));
+}
+
+// A string stored as "share the previous string's whole prefix, add nothing"
+// costs two bytes however long the prefix is. 2,000 templates of 100,000 bytes
+// are 200 MB decoded from about 104 KB of input.
+TEST(CPU_LgbmPcfgMetadata_NONE, RejectsSharedPrefixStringsOverDecodedBudget)
+{
+    constexpr std::size_t kLen       = 100000;
+    constexpr std::uint64_t kStrings = 2000;
+    auto s                           = SectionPrefix(0, kNumBaseProbFeatures);
+    s.Varint(kStrings).Varint(kStrings);
+    s.Varint(0).Varint(kLen).Repeat('a', kLen);
+    for(std::uint64_t i = 1; i < kStrings; ++i)
+        s.Varint(kLen).Varint(0);
+    for(std::uint64_t i = 0; i < kStrings; ++i)
+        s.Varint(1); // one candidate per template
+    s.Varint(0).U8(1);
+
+    miopen::ai::lgbm::pcfg::SolverModel model;
+    EXPECT_FALSE(Parse(s, model));
+}
+
+// 200 bucket entries that all copy one 1 MiB descriptor are 200 MB, from a
+// 25-byte index.
+TEST(CPU_LgbmPcfgMetadata_NONE, RejectsBucketEntriesOverDecodedBudget)
+{
+    constexpr std::size_t kLen = 1u << 20;
+    auto s                     = SectionPrefix(0, kNumBaseProbFeatures);
+    s.Varint(1).Varint(1).Varint(0).Varint(kLen).Repeat('a', kLen).Varint(1);
+    s.Varint(1).Varint(0).Varint(1).Chars("k"); // one bucket "k"
+    s.U8(1).Varint(200).Repeat('\0', 25);       // 200 one-bit indices, all 0
+
+    miopen::ai::lgbm::pcfg::SolverModel model;
+    EXPECT_FALSE(Parse(s, model));
 }
 
 } // namespace
