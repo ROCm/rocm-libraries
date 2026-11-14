@@ -669,7 +669,7 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
         blocks = (batch_count - 1) / BS1 + 1;
         grid = dim3(blocks, 1, 1);
         threads = dim3(BS1, 1, 1);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, grid, threads, 0, stream, info, batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
         return rocblas_status_success;
     }
 

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -129,8 +129,7 @@ rocblas_status rocsolver_getri_outofplace_template(rocblas_handle handle,
     if(n == 0)
     {
         rocblas_int blocks = (batch_count - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocks, 1, 1), dim3(32, 1, 1), 0, stream, info,
-                                batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
         return rocblas_status_success;
     }
 
