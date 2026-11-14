@@ -231,6 +231,315 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlacgv_64(rocblas_handle handle,
 //! @}
 
 /*! @{
+    \brief GEEQU computes row and column scalings intended to equilibrate a general ``m``-by-``n``
+    matrix ``A`` and reduce its condition number.
+
+    \details
+    The scaling factors R and C are such that the largest absolute value of each row and column of
+    \f$B = \text{diag}(R)\, A\, \text{diag}(C)\f$ is 1.
+
+    ROWCND is the ratio of the smallest to the largest scaling factor of R; if ROWCND >= 0.1 and AMAX
+    is neither too large nor too small, it is not worth scaling by R. COLCND is the same ratio for C.
+    These values can be passed to LAQGE to apply the scaling.
+
+    For the complex versions, the absolute value of an element is measured as
+    \f$|\text{Re}(a)| + |\text{Im}(a)|\f$, as in LAPACK.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    m           rocblas_int. m >= 0.
+                The number of rows of the matrix A.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of columns of the matrix A.
+    @param[in]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                The matrix A.
+    @param[in]
+    lda         rocblas_int. lda >= m.
+                The leading dimension of A.
+    @param[out]
+    R           pointer to real type. Array on the GPU of dimension m.
+                If info = 0 or info > m, the row scale factors of A.
+    @param[out]
+    C           pointer to real type. Array on the GPU of dimension n.
+                If info = 0, the column scale factors of A.
+    @param[out]
+    rowcnd      pointer to real type. Scalar on the GPU.
+                If info = 0 or info > m, the ratio of the smallest to the largest row scale factor.
+                It is one if m = 0 or n = 0.
+    @param[out]
+    colcnd      pointer to real type. Scalar on the GPU.
+                If info = 0, the ratio of the smallest to the largest column scale factor.
+                It is one if m = 0 or n = 0.
+    @param[out]
+    amax        pointer to real type. Scalar on the GPU.
+                The largest absolute value of any element of A. It is zero if m = 0 or n = 0.
+    @param[out]
+    info        pointer to a rocblas_int on the GPU.
+                If info = 0, successful exit.
+                If info = i > 0 and i <= m, the i-th row of A is exactly zero (NaN elements are
+                not taken into account).
+                If info = i > m, the (i-m)-th column of A is exactly zero.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgeequ(rocblas_handle handle,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 float* R,
+                                                 float* C,
+                                                 float* rowcnd,
+                                                 float* colcnd,
+                                                 float* amax,
+                                                 rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgeequ(rocblas_handle handle,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 double* R,
+                                                 double* C,
+                                                 double* rowcnd,
+                                                 double* colcnd,
+                                                 double* amax,
+                                                 rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgeequ(rocblas_handle handle,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 float* R,
+                                                 float* C,
+                                                 float* rowcnd,
+                                                 float* colcnd,
+                                                 float* amax,
+                                                 rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgeequ(rocblas_handle handle,
+                                                 const rocblas_int m,
+                                                 const rocblas_int n,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 double* R,
+                                                 double* C,
+                                                 double* rowcnd,
+                                                 double* colcnd,
+                                                 double* amax,
+                                                 rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgeequ_64(rocblas_handle handle,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    float* R,
+                                                    float* C,
+                                                    float* rowcnd,
+                                                    float* colcnd,
+                                                    float* amax,
+                                                    int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgeequ_64(rocblas_handle handle,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    double* R,
+                                                    double* C,
+                                                    double* rowcnd,
+                                                    double* colcnd,
+                                                    double* amax,
+                                                    int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgeequ_64(rocblas_handle handle,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    float* R,
+                                                    float* C,
+                                                    float* rowcnd,
+                                                    float* colcnd,
+                                                    float* amax,
+                                                    int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgeequ_64(rocblas_handle handle,
+                                                    const int64_t m,
+                                                    const int64_t n,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    double* R,
+                                                    double* C,
+                                                    double* rowcnd,
+                                                    double* colcnd,
+                                                    double* amax,
+                                                    int64_t* info);
+//! @}
+
+/*! @{
+    \brief GEEQUB computes row and column scalings intended to equilibrate a general ``m``-by-``n``
+    matrix ``A``.
+
+    \details
+    The scaling factors R and C are such that the largest absolute value of each row and column of
+    \f$B = \text{diag}(R)\, A\, \text{diag}(C)\f$ is in the interval \f$(1/2, 2)\f$.
+    The scaling factors are powers of 2, so that the scaling does not introduce rounding errors.
+    Unlike \ref rocsolver_sgeequ "GEEQU", this does not necessarily make the largest elements equal to
+    1, but it reduces their range. The powers of 2 are computed with the formula of LAPACK's xGEEQUB,
+    2**INT(LOG(x)/LOG(2)) evaluated in floating point, so that the results are those of LAPACK: at
+    some exact powers of 2, the rounding of the quotient gives the neighbouring power of 2, and a row
+    or column whose largest element is subnormal can get a zero scaling factor (and info > 0).
+
+    ROWCND is the ratio of the smallest to the largest scaling factor of R; if ROWCND >= 0.1 and AMAX
+    is neither too large nor too small, it is not worth scaling by R. COLCND is the same ratio for C.
+    These values can be passed to LAQGE to apply the scaling.
+
+    For the complex versions, the absolute value of an element is measured as
+    \f$|\text{Re}(a)| + |\text{Im}(a)|\f$, as in LAPACK.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    m           rocblas_int. m >= 0.
+                The number of rows of the matrix A.
+    @param[in]
+    n           rocblas_int. n >= 0.
+                The number of columns of the matrix A.
+    @param[in]
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                The matrix A.
+    @param[in]
+    lda         rocblas_int. lda >= m.
+                The leading dimension of A.
+    @param[out]
+    R           pointer to real type. Array on the GPU of dimension m.
+                If info = 0 or info > m, the row scale factors of A.
+    @param[out]
+    C           pointer to real type. Array on the GPU of dimension n.
+                If info = 0, the column scale factors of A.
+    @param[out]
+    rowcnd      pointer to real type. Scalar on the GPU.
+                If info = 0 or info > m, the ratio of the smallest to the largest row scale factor.
+                It is one if m = 0 or n = 0.
+    @param[out]
+    colcnd      pointer to real type. Scalar on the GPU.
+                If info = 0, the ratio of the smallest to the largest column scale factor.
+                It is one if m = 0 or n = 0.
+    @param[out]
+    amax        pointer to real type. Scalar on the GPU.
+                The largest of the row maxima of A, each rounded to a power of 2 as the scaling
+                factors are (as in LAPACK). It is zero if m = 0 or n = 0.
+    @param[out]
+    info        pointer to a rocblas_int on the GPU.
+                If info = 0, successful exit.
+                If info = i > 0 and i <= m, the i-th row of A is exactly zero (NaN elements are
+                not taken into account).
+                If info = i > m, the (i-m)-th column of A is exactly zero.
+    *************************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgeequb(rocblas_handle handle,
+                                                  const rocblas_int m,
+                                                  const rocblas_int n,
+                                                  float* A,
+                                                  const rocblas_int lda,
+                                                  float* R,
+                                                  float* C,
+                                                  float* rowcnd,
+                                                  float* colcnd,
+                                                  float* amax,
+                                                  rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgeequb(rocblas_handle handle,
+                                                  const rocblas_int m,
+                                                  const rocblas_int n,
+                                                  double* A,
+                                                  const rocblas_int lda,
+                                                  double* R,
+                                                  double* C,
+                                                  double* rowcnd,
+                                                  double* colcnd,
+                                                  double* amax,
+                                                  rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgeequb(rocblas_handle handle,
+                                                  const rocblas_int m,
+                                                  const rocblas_int n,
+                                                  rocblas_float_complex* A,
+                                                  const rocblas_int lda,
+                                                  float* R,
+                                                  float* C,
+                                                  float* rowcnd,
+                                                  float* colcnd,
+                                                  float* amax,
+                                                  rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgeequb(rocblas_handle handle,
+                                                  const rocblas_int m,
+                                                  const rocblas_int n,
+                                                  rocblas_double_complex* A,
+                                                  const rocblas_int lda,
+                                                  double* R,
+                                                  double* C,
+                                                  double* rowcnd,
+                                                  double* colcnd,
+                                                  double* amax,
+                                                  rocblas_int* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgeequb_64(rocblas_handle handle,
+                                                     const int64_t m,
+                                                     const int64_t n,
+                                                     float* A,
+                                                     const int64_t lda,
+                                                     float* R,
+                                                     float* C,
+                                                     float* rowcnd,
+                                                     float* colcnd,
+                                                     float* amax,
+                                                     int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgeequb_64(rocblas_handle handle,
+                                                     const int64_t m,
+                                                     const int64_t n,
+                                                     double* A,
+                                                     const int64_t lda,
+                                                     double* R,
+                                                     double* C,
+                                                     double* rowcnd,
+                                                     double* colcnd,
+                                                     double* amax,
+                                                     int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgeequb_64(rocblas_handle handle,
+                                                     const int64_t m,
+                                                     const int64_t n,
+                                                     rocblas_float_complex* A,
+                                                     const int64_t lda,
+                                                     float* R,
+                                                     float* C,
+                                                     float* rowcnd,
+                                                     float* colcnd,
+                                                     float* amax,
+                                                     int64_t* info);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgeequb_64(rocblas_handle handle,
+                                                     const int64_t m,
+                                                     const int64_t n,
+                                                     rocblas_double_complex* A,
+                                                     const int64_t lda,
+                                                     double* R,
+                                                     double* C,
+                                                     double* rowcnd,
+                                                     double* colcnd,
+                                                     double* amax,
+                                                     int64_t* info);
+//! @}
+
+/*! @{
     \brief The LANGE functions compute the norm of a general ``m``-by-``n`` matrix ``A``.
 
     \details

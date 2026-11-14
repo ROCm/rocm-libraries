@@ -2169,6 +2169,145 @@ inline rocblas_status rocsolver_gecon(rocblas_handle handle,
 }
 /*****************************************************/
 
+/******************** GEEQU_GEEQUB ********************/
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             float* A,
+                                             rocblas_int lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_sgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_sgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             double* A,
+                                             rocblas_int lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_dgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_dgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             rocblas_float_complex* A,
+                                             rocblas_int lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_cgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_cgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             rocblas_int m,
+                                             rocblas_int n,
+                                             rocblas_double_complex* A,
+                                             rocblas_int lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             rocblas_int* info)
+{
+    return POW2 ? rocsolver_zgeequb(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_zgeequ(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             float* A,
+                                             int64_t lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_sgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_sgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             double* A,
+                                             int64_t lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_dgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_dgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             rocblas_float_complex* A,
+                                             int64_t lda,
+                                             float* R,
+                                             float* C,
+                                             float* rowcnd,
+                                             float* colcnd,
+                                             float* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_cgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_cgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+inline rocblas_status rocsolver_geequ_geequb(bool POW2,
+                                             rocblas_handle handle,
+                                             int64_t m,
+                                             int64_t n,
+                                             rocblas_double_complex* A,
+                                             int64_t lda,
+                                             double* R,
+                                             double* C,
+                                             double* rowcnd,
+                                             double* colcnd,
+                                             double* amax,
+                                             int64_t* info)
+{
+    return POW2 ? rocsolver_zgeequb_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info)
+                : rocsolver_zgeequ_64(handle, m, n, A, lda, R, C, rowcnd, colcnd, amax, info);
+}
+
+/*****************************************************/
+
 /******************** LACGV ********************/
 inline rocblas_status
     rocsolver_lacgv(rocblas_handle handle, rocblas_int n, rocblas_float_complex* x, rocblas_int incx)
