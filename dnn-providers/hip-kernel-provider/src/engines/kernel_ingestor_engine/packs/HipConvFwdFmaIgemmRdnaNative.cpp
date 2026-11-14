@@ -33,6 +33,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvRdnaCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvRdnaFmaIgemm.hpp"
 #include "engines/kernel_ingestor_engine/packs/HipConvFwdFmaIgemmRdnaLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
@@ -41,11 +42,10 @@
  * @brief The native half of `hipkernel:hip_conv_fwd_fma_igemm_rdna` (descriptors/hip/conv_rdna/):
  *        matching, scoring, dispatch, and the function that registers them.
  *
- * The engine serves a graph of exactly one conv-forward node on RDNA (gfx11-generic,
- * gfx12-generic). Its kernels use no matrix instructions. Kernel family `fma_igemm` is an
- * FMA implicit GEMM (kernels/ConvFwdFmaIgemm.cpp) for 1-D, 2-D and 3-D problems, packed
- * NC[D][H]W or N[D][H]WC, FLOAT / HALF / BFLOAT16, any stride, dilation and padding, and groups
- * with at least MIN_OUT_CHANNELS_PER_GROUP output channels each. The matcher refuses
+ * The engine serves a graph of exactly one conv-forward node on the gfx11 and gfx12 RDNA
+ * targets with the FMA implicit-GEMM kernel (ConvRdnaFmaIgemm.hpp, kernels/ConvFwdFmaIgemm.cpp):
+ * 1-D, 2-D and 3-D problems, packed NC[D][H]W or N[D][H]WC, FLOAT / HALF / BFLOAT16, any stride,
+ * dilation and padding, and groups of at least 16 output channels. The matcher refuses
  * everything else, so another engine gets the plan.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -58,9 +58,9 @@ namespace
 {
 
 using conv_rdna::ConvProblem;
-using conv_rdna::Layout;
+namespace fma_igemm = conv_rdna::fma_igemm;
 
-// The contract with conv_fwd_rdna.*.json.
+// The contract with hip_conv_fwd_fma_igemm_rdna.*.json.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL
     = "hipkernel.hip_conv_fwd_fma_igemm_rdna.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL
@@ -73,37 +73,11 @@ constexpr std::string_view DISPATCH_SYMBOL_V1 = HIP_CONV_FWD_FMA_IGEMM_RDNA_DISP
 constexpr std::string_view X_UID_VALUE = "x.uid";
 constexpr std::string_view W_UID_VALUE = "w.uid";
 constexpr std::string_view Y_UID_VALUE = "y.uid";
-constexpr std::string_view N_VALUE = "n";
-constexpr std::string_view C_VALUE = "c";
-constexpr std::string_view K_VALUE = "k";
-constexpr std::string_view GROUPS_VALUE = "groups";
-// Per spatial axis (depth, height, width); a 2-D plan saves depth 1.
-constexpr std::array<std::string_view, 3> IN_VALUES{"in_d", "in_h", "in_w"};
-constexpr std::array<std::string_view, 3> FILTER_VALUES{"filter_d", "filter_h", "filter_w"};
-constexpr std::array<std::string_view, 3> OUT_VALUES{"out_d", "out_h", "out_w"};
-constexpr std::array<std::string_view, 3> PAD_VALUES{"pad_d", "pad_h", "pad_w"};
-constexpr std::array<std::string_view, 3> STRIDE_VALUES{"stride_d", "stride_h", "stride_w"};
-constexpr std::array<std::string_view, 3> DILATION_VALUES{"dilation_d", "dilation_h", "dilation_w"};
-
-constexpr std::string_view FAMILY_FIELD = "kernel_family";
-constexpr std::string_view DTYPE_FIELD = "dtype";
-constexpr std::string_view LAYOUT_FIELD = "layout";
-constexpr std::string_view TILE_N_FIELD = "tile_n";
-constexpr std::string_view FMA_IGEMM_FAMILY = "fma_igemm";
 
 constexpr std::string_view TOKEN_PREFIX = "conv_fwd";
 constexpr std::string_view X_TOKEN = "conv_fwd.x.uid";
 constexpr std::string_view W_TOKEN = "conv_fwd.w.uid";
 constexpr std::string_view Y_TOKEN = "conv_fwd.y.uid";
-
-// Must match kernels/ConvFwdFmaIgemm.cpp.
-constexpr int64_t FMA_TILE_M = 128;
-constexpr unsigned int FMA_BLOCK_SIZE = 256;
-// Fewer output channels per group leave most of the (at least 32-wide) channel tile idle;
-// depthwise convolutions belong to a depthwise kernel family.
-constexpr int64_t MIN_OUT_CHANNELS_PER_GROUP = 16;
-constexpr int64_t MAX_GRID_X_BLOCKS = 0x7fffffff / FMA_BLOCK_SIZE;
-constexpr int64_t MAX_GRID_Y = 0xffff;
 
 using ConvBinding = HipConvFwdFmaIgemmRdnaBinding;
 using LaunchInputs = HipConvFwdFmaIgemmRdnaLaunchInputs;
@@ -111,39 +85,6 @@ using LaunchInputs = HipConvFwdFmaIgemmRdnaLaunchInputs;
 // ---------------------------------------------------------------------------
 // Matching
 // ---------------------------------------------------------------------------
-
-/// Output channels per workgroup: the narrowest tile that holds one group's channels.
-int64_t fmaTileN(const ConvProblem& problem)
-{
-    const int64_t kPerGroup = problem.outChannelsPerGroup();
-    if(kPerGroup <= 32)
-    {
-        return 32;
-    }
-    return kPerGroup <= 64 ? 64 : 128;
-}
-
-int64_t fmaGridXBlocks(const ConvProblem& problem)
-{
-    const int64_t m = int64_t{problem.n} * problem.out[0] * problem.out[1] * problem.out[2];
-    return (m + FMA_TILE_M - 1) / FMA_TILE_M;
-}
-
-int64_t fmaGridY(const ConvProblem& problem)
-{
-    const int64_t kPerGroup = problem.outChannelsPerGroup();
-    const int64_t tile = fmaTileN(problem);
-    return problem.groups * ((kPerGroup + tile - 1) / tile);
-}
-
-bool fmaServes(const ConvProblem& problem)
-{
-    if(problem.groups > 1 && problem.outChannelsPerGroup() < MIN_OUT_CHANNELS_PER_GROUP)
-    {
-        return false;
-    }
-    return fmaGridXBlocks(problem) <= MAX_GRID_X_BLOCKS && fmaGridY(problem) <= MAX_GRID_Y;
-}
 
 /// The single conv-forward node and the problem it poses, or nullopt for any other graph.
 struct MatchedConv
@@ -196,7 +137,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     const auto matched = matchConv(context);
     // Every family the engine ships must decline for the graph to be declined; fma_igemm is
     // the only one so far.
-    if(!matched || !fmaServes(matched->problem))
+    if(!matched || !fma_igemm::serves(matched->problem))
     {
         return std::nullopt;
     }
@@ -214,9 +155,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     return bound;
 }
 
-/// The kernel of the graph's family, dtype and layout, with the channel tile fmaTileN picks.
-/// A wrong dtype or layout would return wrong numbers; a wrong tile is only slower, but one
-/// tile per graph leaves exactly one candidate.
+/// The variant of the graph's problem (fma_igemm::isVariantOf).
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -226,14 +165,7 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    const auto& problem = matched->problem;
-    return kernel.getStringMetadata(std::string(FAMILY_FIELD)) == FMA_IGEMM_FAMILY
-           && fmaServes(problem)
-           && kernel.getStringMetadata(std::string(DTYPE_FIELD))
-                  == data_objects::EnumNameDataType(problem.dtype)
-           && kernel.getStringMetadata(std::string(LAYOUT_FIELD))
-                  == conv_rdna::layoutName(problem.layout)
-           && kernel.getIntMetadata(std::string(TILE_N_FIELD)) == fmaTileN(problem);
+    return fma_igemm::isVariantOf(kernel, matched->problem);
 }
 
 /// The kernel matcher leaves a single candidate to rank.
@@ -302,40 +234,15 @@ private:
     ConvProblem _problem;
 };
 
-/// The kernel's CONV_DTYPE for a dtype.
-int fmaDtypeCode(data_objects::DataType dtype)
-{
-    if(dtype == data_objects::DataType::FLOAT)
-    {
-        return 0;
-    }
-    return dtype == data_objects::DataType::HALF ? 1 : 2;
-}
-
-/// Mirrors the argument list of ConvFwdFmaIgemm and the launch() below one for one.
-const std::vector<KernelArgument>& fmaKernelSignature()
-{
-    static const KernelArgument s_buffer{
-        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
-    static const KernelArgument s_scalar{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
-    static const std::vector<KernelArgument> s_signature = [] {
-        std::vector<KernelArgument> signature{s_buffer, s_buffer, s_buffer};
-        // N, C, Di, Hi, Wi, K, Z, Y, X, Do, Ho, Wo, sd, sh, sw, pd, ph, pw, dd, dh, dw, groups.
-        signature.insert(signature.end(), 22, s_scalar);
-        return signature;
-    }();
-    return s_signature;
-}
-
 /// Applies the launch geometry to @p code and builds the prepared dispatch. A plan built from
 /// a graph and a plan restored from a saved payload both come through here.
 std::unique_ptr<PreparedDispatch>
     makePrepared(IngestorKernelCode code, const ConvBinding& binding, const ConvProblem& problem)
 {
-    // Both grid dimensions were bounded by fmaServes or by readLaunchInputs.
-    code.setBlockSize(FMA_BLOCK_SIZE, 1, 1);
-    code.setGridSize(static_cast<unsigned int>(fmaGridXBlocks(problem)),
-                     static_cast<unsigned int>(fmaGridY(problem)),
+    // Both grid dimensions were bounded by fma_igemm::serves or by readLaunchInputs.
+    code.setBlockSize(fma_igemm::BLOCK_SIZE, 1, 1);
+    code.setGridSize(static_cast<unsigned int>(fma_igemm::gridXBlocks(problem)),
+                     static_cast<unsigned int>(fma_igemm::gridY(problem)),
                      1);
     return std::make_unique<PreparedHipConvFwdFmaIgemmRdna>(std::move(code), binding, problem);
 }
@@ -345,20 +252,8 @@ MetadataValues launchValues(const ConvBinding& binding, const ConvProblem& probl
 {
     MetadataValues values{{std::string(X_UID_VALUE), binding.x},
                           {std::string(W_UID_VALUE), binding.w},
-                          {std::string(Y_UID_VALUE), binding.y},
-                          {std::string(N_VALUE), int64_t{problem.n}},
-                          {std::string(C_VALUE), int64_t{problem.c}},
-                          {std::string(K_VALUE), int64_t{problem.k}},
-                          {std::string(GROUPS_VALUE), int64_t{problem.groups}}};
-    for(size_t axis = 0; axis < 3; ++axis)
-    {
-        values[std::string(IN_VALUES[axis])] = int64_t{problem.in[axis]};
-        values[std::string(FILTER_VALUES[axis])] = int64_t{problem.filter[axis]};
-        values[std::string(OUT_VALUES[axis])] = int64_t{problem.out[axis]};
-        values[std::string(PAD_VALUES[axis])] = int64_t{problem.pad[axis]};
-        values[std::string(STRIDE_VALUES[axis])] = int64_t{problem.stride[axis]};
-        values[std::string(DILATION_VALUES[axis])] = int64_t{problem.dilation[axis]};
-    }
+                          {std::string(Y_UID_VALUE), binding.y}};
+    fma_igemm::addProblemLaunchValues(values, problem);
     return values;
 }
 
@@ -366,50 +261,16 @@ MetadataValues launchValues(const ConvBinding& binding, const ConvProblem& probl
 LaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs)
 {
     requireLaunchContract(inputs, DISPATCH_SYMBOL_V1);
-    std::vector<std::string_view> names{
-        X_UID_VALUE, W_UID_VALUE, Y_UID_VALUE, N_VALUE, C_VALUE, K_VALUE, GROUPS_VALUE};
-    for(const auto* axisNames :
-        {&IN_VALUES, &FILTER_VALUES, &OUT_VALUES, &PAD_VALUES, &STRIDE_VALUES, &DILATION_VALUES})
-    {
-        names.insert(names.end(), axisNames->begin(), axisNames->end());
-    }
+    std::vector<std::string_view> names{X_UID_VALUE, W_UID_VALUE, Y_UID_VALUE};
+    const auto problemNames = fma_igemm::problemLaunchValueNames();
+    names.insert(names.end(), problemNames.begin(), problemNames.end());
     requireOnlyLaunchValues(inputs, names);
-
-    constexpr int64_t INT_MAX_VALUE = std::numeric_limits<int>::max();
-    const auto positive = [&inputs](std::string_view name) {
-        return static_cast<int>(requireLaunchInt(inputs, name, 1, INT_MAX_VALUE));
-    };
 
     LaunchInputs launch;
     launch.binding.x = requireLaunchInt(inputs, X_UID_VALUE);
     launch.binding.w = requireLaunchInt(inputs, W_UID_VALUE);
     launch.binding.y = requireLaunchInt(inputs, Y_UID_VALUE);
-    auto& problem = launch.problem;
-    problem.n = positive(N_VALUE);
-    problem.c = positive(C_VALUE);
-    problem.k = positive(K_VALUE);
-    problem.groups = positive(GROUPS_VALUE);
-    for(size_t axis = 0; axis < 3; ++axis)
-    {
-        problem.in[axis] = positive(IN_VALUES[axis]);
-        problem.filter[axis] = positive(FILTER_VALUES[axis]);
-        problem.out[axis] = positive(OUT_VALUES[axis]);
-        problem.pad[axis]
-            = static_cast<int>(requireLaunchInt(inputs, PAD_VALUES[axis], 0, INT_MAX_VALUE));
-        problem.stride[axis] = positive(STRIDE_VALUES[axis]);
-        problem.dilation[axis] = positive(DILATION_VALUES[axis]);
-    }
-    problem.spatialRank = problem.in[0] == 1 && problem.filter[0] == 1 ? 2 : 3;
-
-    if(problem.c % problem.groups != 0 || problem.k % problem.groups != 0
-       || fmaGridXBlocks(problem) > MAX_GRID_X_BLOCKS || fmaGridY(problem) > MAX_GRID_Y)
-    {
-        serialization::refuseIngestorPlan(
-            serialization::IngestorPlanRefusal::INCOMPATIBLE,
-            "launch values of dispatch '" + inputs.dispatchSymbol
-                + "' give groups that do not divide 'c' and 'k', or a grid beyond the launch "
-                  "limits");
-    }
+    launch.problem = fma_igemm::readProblemLaunchValues(inputs);
     return launch;
 }
 
@@ -439,24 +300,24 @@ public:
     {
         const auto binding = convBinding(bound);
         const auto matched = matchConv(context);
-        if(!matched || !fmaServes(matched->problem))
+        if(!matched || !fma_igemm::serves(matched->problem))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "hip_conv_fwd_fma_igemm_rdna prepare() got a graph its matcher does not admit");
         }
         const auto& problem = matched->problem;
-        const int channelsLast = problem.layout == Layout::CHANNELS_LAST ? 1 : 0;
 
         // Same defines as the UKD's build, for a kernel compiled at run time.
         compilation::KernelCompileOptions options(matched->x, context.deviceProperties.gcnArchName);
-        options.add("CONV_DTYPE", fmaDtypeCode(problem.dtype));
-        options.add("CONV_CHANNELS_LAST", channelsLast);
-        options.add("CONV_WEI_KCZYX", 1 - channelsLast);
-        options.add("TILE_N", static_cast<int>(fmaTileN(problem)));
+        fma_igemm::addCompileOptions(options, problem, /*hasBias=*/false);
 
-        auto code = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, fmaKernelSignature());
+        auto code = buildIngestorKernelCode(_kernelCompiler,
+                                            _kpackLoader,
+                                            context,
+                                            kernel,
+                                            options,
+                                            fma_igemm::kernelSignature(/*hasBias=*/false));
         return makePrepared(std::move(code), binding, problem);
     }
 
@@ -464,8 +325,12 @@ public:
                                                     SavedKernelCode code,
                                                     int deviceOrdinal) const override
     {
-        auto restored = restoreIngestorLaunch<LaunchInputs>(
-            inputs, std::move(code), fmaKernelSignature(), &readLaunchInputs, deviceOrdinal);
+        auto restored
+            = restoreIngestorLaunch<LaunchInputs>(inputs,
+                                                  std::move(code),
+                                                  fma_igemm::kernelSignature(/*hasBias=*/false),
+                                                  &readLaunchInputs,
+                                                  deviceOrdinal);
         return makePrepared(
             std::move(restored.code), restored.launch.binding, restored.launch.problem);
     }
@@ -491,7 +356,6 @@ public:
     {
         const auto& conv = dynamic_cast<const PreparedHipConvFwdFmaIgemmRdna&>(prepared);
         const auto& binding = conv.binding();
-        const auto& p = conv.problem();
 
         const auto x
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.x, deviceBuffers, numDeviceBuffers);
@@ -500,34 +364,14 @@ public:
         const auto y
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.y, deviceBuffers, numDeviceBuffers);
 
-        // A 2-D problem carries depth 1, depth stride and dilation 1 and depth padding 0.
-        conv.kernelForStream(handle.getStream())
-            .launch(handle.getStream(),
-                    x.ptr,
-                    w.ptr,
-                    y.ptr,
-                    p.n,
-                    p.c,
-                    p.in[0],
-                    p.in[1],
-                    p.in[2],
-                    p.k,
-                    p.filter[0],
-                    p.filter[1],
-                    p.filter[2],
-                    p.out[0],
-                    p.out[1],
-                    p.out[2],
-                    p.stride[0],
-                    p.stride[1],
-                    p.stride[2],
-                    p.pad[0],
-                    p.pad[1],
-                    p.pad[2],
-                    p.dilation[0],
-                    p.dilation[1],
-                    p.dilation[2],
-                    p.groups);
+        fma_igemm::launch(conv.kernelForStream(handle.getStream()),
+                          handle.getStream(),
+                          x.ptr,
+                          w.ptr,
+                          y.ptr,
+                          nullptr,
+                          /*hasBias=*/false,
+                          conv.problem());
     }
 
 private:
