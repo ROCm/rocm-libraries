@@ -929,6 +929,269 @@ TEST(PersistentArgumentLayout, ClusterParallelEligibilityAndPackedOutputContract
     EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
 }
 
+namespace
+{
+    hip::HipAMDGPU kSplitAwareDevice(size_t fixedGrid = 128)
+    {
+        using arch_t = origami::hardware_t::architecture_t;
+        hip::HipAMDGPU device;
+        device.processor             = AMDGPU::Processor::gfx950;
+        device.computeUnitCount      = 256;
+        device.persistentDynamicGrid = 6;
+        device.persistentFixedGrid   = fixedGrid;
+        device.analyticalHardware
+            = std::make_shared<origami::hardware_t>(arch_t::gfx950,
+                                                    256,
+                                                    163840,
+                                                    262144,
+                                                    8,
+                                                    1.0,
+                                                    1.0,
+                                                    1.0,
+                                                    4000000,
+                                                    1.2,
+                                                    1,
+                                                    std::make_tuple(0.0, 0.008, 0.0));
+        return device;
+    }
+
+    // A handwritten static Stream-K kernel declaring the given reduction modes,
+    // with a streamKReduce post kernel when parallel is among them.
+    void configureHandwrittenStreamK(ContractionSolution&             solution,
+                                     std::vector<CustomReductionMode> reductions)
+    {
+        using S = CustomArgSemantic;
+        using T = CustomArgType;
+        configurePersistentSolution(solution, 3, 0);
+        solution.kernelName                         = "gfa_main";
+        solution.codeObjectFilename                 = "gfa.co";
+        solution.kernelArgsLog                      = true;
+        solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workspaceSizePerElemC  = 4;
+        auto& ck                                    = solution.customKernel;
+        ck.name                                     = "gfa_main";
+        ck.macrotile                                = TensileLite::dim3(128, 128, 64);
+        ck.threads                                  = TensileLite::dim3(256, 1, 1);
+        ck.grid = {CustomGridSize::StreamKNoBatch, CustomGridSize::One, CustomGridSize::One};
+        ck.workspaceType         = CustomWorkspaceType::StreamKWithReduction;
+        ck.workspaceSizePerElemC = 4;
+        ck.reductions            = reductions;
+        std::vector<CustomArgDefinition> const common{{T::address, S::AddressC},
+                                                      {T::address, S::AddressD},
+                                                      {T::address, S::AddressWorkspace},
+                                                      {T::uint32, S::SKSplitFactor},
+                                                      {T::uint32, S::NumTiles},
+                                                      {T::uint32, S::WorkspaceOffsetPartials}};
+        ck.args = common;
+        ck.args.push_back({T::address, S::AddressFlags});
+        ck.args.push_back({T::uint32, S::SKGrid});
+        ck.args.push_back({T::uint32, S::SKTilesAndSplit});
+        if(std::find(reductions.begin(), reductions.end(), CustomReductionMode::Parallel)
+           != reductions.end())
+        {
+            solution.internalArgsSupport.persistentLoopArgsVersion = 3;
+            CustomPostKernel post;
+            post.name      = "gfa_main_streamKReduce";
+            post.args      = common;
+            post.threads   = TensileLite::dim3(64, 1, 1);
+            post.grid      = {CustomGridSize::TilesBands, CustomGridSize::One, CustomGridSize::One};
+            post.bands     = 2;
+            ck.postKernels = {post};
+        }
+        solution.validatePersistentLoopArgs();
+    }
+
+    // Fake addresses: solve() packs them without dereferencing.
+    ContractionInputs solveInputs()
+    {
+        auto inputs = clusterInputs();
+        inputs.beta = 1.0f;
+        inputs.a    = reinterpret_cast<void*>(uintptr_t{0xa000});
+        inputs.b    = reinterpret_cast<void*>(uintptr_t{0xb000});
+        inputs.c    = reinterpret_cast<void*>(uintptr_t{0xc000});
+        inputs.d    = reinterpret_cast<void*>(uintptr_t{0xd000});
+        return inputs;
+    }
+
+    // kernelArgsLog keeps argument names for lookup and prints them.
+    std::vector<KernelInvocation> quietSolve(ContractionSolution const&    solution,
+                                             ContractionProblemGemm const& problem,
+                                             ContractionInputs const&      inputs,
+                                             Hardware const&               device)
+    {
+        ::testing::internal::CaptureStdout();
+        auto calls = solution.solve(problem, inputs, device);
+        ::testing::internal::GetCapturedStdout();
+        return calls;
+    }
+
+    void* namedAddress(KernelInvocation const& call, std::string const& name)
+    {
+        return value<void*>(call.args, name);
+    }
+}
+
+// Without post kernels a handwritten kernel keeps tree reduction.
+TEST(PersistentArgumentLayout, HandwrittenWithoutPostKernelsKeepsTree)
+{
+    const auto          device = kSplitAwareDevice();
+    ContractionSolution solution;
+    configureHandwrittenStreamK(solution, {CustomReductionMode::Tree});
+    auto problem = clusterProblem(257, 385, 65537, 2);
+    EXPECT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::tree);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::tree);
+    EXPECT_EQ(launch.grid, 128u);
+}
+
+// A kernel declaring tree and parallel takes origami's parallel choice, snaps the
+// grid to a whole split per tile, launches its reduce kernel after the main
+// kernel instead of the output conversion, and falls back to tree when the
+// workspace cannot hold the partials.
+TEST(PersistentArgumentLayout, HandwrittenParallelLaunchesPostKernel)
+{
+    const auto          device = kSplitAwareDevice();
+    ContractionSolution solution;
+    configureHandwrittenStreamK(solution,
+                                {CustomReductionMode::Tree, CustomReductionMode::Parallel});
+    auto         problem = clusterProblem(257, 385, 65537, 2);
+    const size_t tiles   = 3 * 4 * 2;
+    ASSERT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::parallel);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    ASSERT_EQ(launch.reduction, origami::reduction_t::parallel);
+    // The fixed grid of 128 snaps to 5 workgroups for each of the 24 tiles.
+    const size_t split = 5;
+    EXPECT_EQ(launch.grid, split * tiles);
+    EXPECT_EQ(launch.workspaceBytes, launch.grid * 128 * 128 * sizeof(float));
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), launch.workspaceBytes);
+
+    const auto inputs = solveInputs();
+    const auto calls  = quietSolve(solution, problem, inputs, device);
+    ASSERT_EQ(calls.size(), 2u);
+    auto const& main = calls[0];
+    auto const& post = calls[1];
+    EXPECT_EQ(main.kernelName, "gfa_main");
+    EXPECT_EQ(main.numWorkGroups.x, launch.grid);
+    EXPECT_EQ(value<uint32_t>(main.args, "SKSplitFactor"), split);
+    EXPECT_EQ(value<uint32_t>(main.args, "SKTilesAndSplit"), split);
+    EXPECT_EQ(namedAddress(main, "AddressFlags"), nullptr);
+    EXPECT_EQ(namedAddress(main, "AddressC"), inputs.c);
+    EXPECT_EQ(namedAddress(main, "AddressD"), inputs.d);
+    EXPECT_EQ(namedAddress(main, "AddressWorkspace"), inputs.ws);
+
+    EXPECT_EQ(post.kernelName, "gfa_main_streamKReduce");
+    EXPECT_EQ(post.codeObjectFile, "gfa.co");
+    EXPECT_FALSE(post.isSingleCall);
+    EXPECT_EQ(post.workGroupSize.x, 64u);
+    EXPECT_EQ(post.numWorkGroups.x, tiles * 2);
+    EXPECT_EQ(post.numWorkGroups.y, 1u);
+    EXPECT_EQ(namedAddress(post, "AddressC"), inputs.c);
+    EXPECT_EQ(namedAddress(post, "AddressD"), inputs.d);
+    EXPECT_EQ(namedAddress(post, "AddressWorkspace"), inputs.ws);
+    EXPECT_EQ(value<uint32_t>(post.args, "SKSplitFactor"), split);
+    EXPECT_EQ(value<uint32_t>(post.args, "NumTiles"), tiles);
+    EXPECT_EQ(value<uint32_t>(post.args, "WorkspaceOffsetPartials"), 0u);
+
+    problem.setWorkspaceSize(launch.workspaceBytes - 1);
+    const auto tree = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(tree.reduction, origami::reduction_t::tree);
+    EXPECT_EQ(tree.workspaceBytes, 0u);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+    const auto treeCalls = quietSolve(solution, problem, inputs, device);
+    ASSERT_EQ(treeCalls.size(), 1u);
+    EXPECT_EQ(value<uint32_t>(treeCalls[0].args, "SKSplitFactor"), 0u);
+    EXPECT_EQ(namedAddress(treeCalls[0], "AddressFlags"), inputs.Synchronizer);
+    EXPECT_EQ(namedAddress(treeCalls[0], "AddressD"), inputs.d);
+}
+
+// A kernel without tree support launches data parallel whenever the reduction
+// is not parallel: one workgroup per tile, a split of 1, no flags, no partials
+// and no post kernel.
+TEST(PersistentArgumentLayout, HandwrittenParallelOnlyClampsToDataParallel)
+{
+    const auto          device = kSplitAwareDevice();
+    ContractionSolution solution;
+    configureHandwrittenStreamK(solution, {CustomReductionMode::Parallel});
+    auto         problem = clusterProblem(257, 385, 65537, 2);
+    const size_t tiles   = 3 * 4 * 2;
+    ASSERT_EQ(solution.resolvePersistentSettings(problem, device).reduction,
+              origami::reduction_t::parallel);
+
+    problem.setWorkspaceSize(0);
+    const auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::none);
+    EXPECT_EQ(launch.grid, tiles);
+    EXPECT_EQ(launch.workspaceBytes, 0u);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+
+    const auto inputs = solveInputs();
+    const auto calls  = quietSolve(solution, problem, inputs, device);
+    ASSERT_EQ(calls.size(), 1u);
+    auto const& main = calls[0];
+    EXPECT_EQ(main.numWorkGroups.x, tiles);
+    EXPECT_EQ(value<uint32_t>(main.args, "SKGrid"), tiles);
+    EXPECT_EQ(value<uint32_t>(main.args, "SKSplitFactor"), 1u);
+    EXPECT_EQ(value<uint32_t>(main.args, "SKTilesAndSplit"), 1u);
+    EXPECT_EQ(value<uint32_t>(main.args, "NumTiles"), tiles);
+    EXPECT_EQ(namedAddress(main, "AddressFlags"), nullptr);
+    EXPECT_EQ(namedAddress(main, "AddressC"), inputs.c);
+    EXPECT_EQ(namedAddress(main, "AddressD"), inputs.d);
+}
+
+// Without k-split-aware grid selection the reduction is tree, so a kernel
+// without tree support clamps: the straddling grid reserves no partial tiles
+// in either the query or the launch. A tree-capable kernel reserves them.
+TEST(PersistentArgumentLayout, HandwrittenClampReservesNoTreeWorkspace)
+{
+    auto device                  = kSplitAwareDevice();
+    device.persistentDynamicGrid = 0;
+    auto         problem         = clusterProblem(257, 385, 65537, 2);
+    const size_t tiles           = 3 * 4 * 2;
+
+    ContractionSolution parallelOnly;
+    configureHandwrittenStreamK(parallelOnly, {CustomReductionMode::Parallel});
+    ASSERT_EQ(parallelOnly.getSKReduction(problem, device), origami::reduction_t::tree);
+    const auto clamp = parallelOnly.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(clamp.reduction, origami::reduction_t::none);
+    EXPECT_EQ(clamp.grid, tiles);
+    EXPECT_EQ(clamp.workspaceBytes, 0u);
+    EXPECT_EQ(parallelOnly.requiredWorkspaceSize(problem, device), 0u);
+
+    ContractionSolution both;
+    configureHandwrittenStreamK(both, {CustomReductionMode::Tree, CustomReductionMode::Parallel});
+    const auto tree = both.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(tree.reduction, origami::reduction_t::tree);
+    EXPECT_EQ(tree.grid, 128u);
+    EXPECT_EQ(tree.workspaceBytes, 128u * 128 * 128 * sizeof(float));
+    EXPECT_EQ(both.requiredWorkspaceSize(problem, device), tree.workspaceBytes);
+}
+
+// Parallel needs two workgroups per tile and a K unit per workgroup; a grid
+// short of either demotes, which clamps a kernel without tree support.
+TEST(PersistentArgumentLayout, HandwrittenParallelOnlyClampsUnusableSplits)
+{
+    auto problem = clusterProblem(257, 385, 65537, 2);
+    for(size_t fixedGrid : {size_t{30}, size_t{24 * 2000}})
+    {
+        SCOPED_TRACE(fixedGrid);
+        const auto          device = kSplitAwareDevice(fixedGrid);
+        ContractionSolution solution;
+        configureHandwrittenStreamK(solution, {CustomReductionMode::Parallel});
+        ASSERT_EQ(solution.getSKReduction(problem, device), origami::reduction_t::parallel);
+        const auto launch = solution.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(launch.reduction, origami::reduction_t::none);
+        EXPECT_EQ(launch.grid, 24u);
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0u);
+
+        ContractionSolution both;
+        configureHandwrittenStreamK(both,
+                                    {CustomReductionMode::Tree, CustomReductionMode::Parallel});
+        const auto tree = both.resolvePersistentSettings(problem, device);
+        EXPECT_EQ(tree.reduction, origami::reduction_t::tree);
+        EXPECT_EQ(tree.grid, fixedGrid);
+    }
+}
+
 TEST(PersistentArgumentLayout, ClusterParallelPreservesUsefulSplitsAtSpatialEdges)
 {
     using arch_t = origami::hardware_t::architecture_t;
