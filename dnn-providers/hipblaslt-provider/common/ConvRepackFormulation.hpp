@@ -77,7 +77,7 @@ inline constexpr int64_t SPLIT_TARGET_TILES = 512;
 
 /**
  * @brief The reduced-precision-reduction plan for @p problem, or nullopt when it has none: the
- *        plan of the ROCBLAS_CONV_RPR and HIPBLASLT_CONV_RPR engines (ConvReducedPrecision.hpp).
+ *        plan of the ROCBLAS_CONV_RPR and HIPBLASLT_CONV_RPR engines (REDUCED_PRECISION_REDUCTION).
  *
  * A 1x1, unit-stride, unpadded fp16 backward weights of several channels-first images, which no
  * single GEMM reads, as one GEMM per image into dw, each after the first adding to it (beta 1):

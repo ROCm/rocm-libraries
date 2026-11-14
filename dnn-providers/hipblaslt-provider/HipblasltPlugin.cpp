@@ -19,8 +19,6 @@
 #include "HipblasltPlugin.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
-#include "engines/conv/ConvReducedPrecision.hpp"
-#include "engines/conv/ConvTf32.hpp"
 #include "version.h"
 
 static const char* pluginName = "hipblaslt_plugin";
@@ -130,29 +128,15 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
         allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_MATMUL_ENGINE_ID);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
-        const bool tf32Engines = convTf32EnginesEnabled();
-        const bool rprEngines = convReducedPrecisionEnginesEnabled();
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
         allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID);
-        if(tf32Engines)
-        {
-            allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID);
-        }
-        if(rprEngines)
-        {
-            allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_RPR_ENGINE_ID);
-        }
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_RPR_ENGINE_ID);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
         allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID);
-        if(tf32Engines)
-        {
-            allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_ID);
-        }
-        if(rprEngines)
-        {
-            allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_RPR_ENGINE_ID);
-        }
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_ID);
+        allEngineIds.push_back(hipdnn_data_sdk::utilities::ROCBLAS_CONV_RPR_ENGINE_ID);
 #endif
 #endif
         if(allEngineIds.size() > std::numeric_limits<uint32_t>::max())

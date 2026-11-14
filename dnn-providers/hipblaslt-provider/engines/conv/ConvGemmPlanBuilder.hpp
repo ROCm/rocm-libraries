@@ -48,9 +48,10 @@ public:
     /// @p maxRepackWorkspaceBytes bounds the repack workspace of a plan (convGemmCalls); tests
     /// lower it to exercise image slicing on small shapes. @p tf32 lets every fp32 GEMM run as
     /// TF32 where the backend can (GemmCall::tf32), and declines convolutions with no fp32 GEMM:
-    /// the builder of a TF32 engine (ConvTf32.hpp). @p reducedPrecisionReduction builds only
-    /// reducedPrecisionGemmCalls plans, and only while the switch is set: the builder of a
-    /// reduced-precision-reduction engine (ConvReducedPrecision.hpp). @p splitReduction makes
+    /// the builder of a TF32 engine (HIPBLASLT_CONV_TF32, ROCBLAS_CONV_TF32, which report
+    /// TENSOR_CORE). @p reducedPrecisionReduction builds only reducedPrecisionGemmCalls plans:
+    /// the builder of a reduced-precision-reduction engine (HIPBLASLT_CONV_RPR, ROCBLAS_CONV_RPR,
+    /// which report REDUCED_PRECISION_REDUCTION). @p splitReduction makes
     /// the split reduction (convGemmCalls) the default plan rather than only a benchmarking
     /// candidate, and @p layout does the same for a layout candidate; tests use them to check
     /// those plans. @p narrowPartials: see NarrowPartials.

@@ -18,7 +18,6 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipblasltHandleFactory.hpp"
@@ -29,7 +28,6 @@
 #include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 #include "engines/conv/ConvGemmTestGraphs.hpp"
-#include "engines/conv/ConvReducedPrecision.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
 #endif
@@ -57,7 +55,6 @@ using namespace hipblaslt_plugin;
 using namespace hipblaslt_plugin::test;
 using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_test_sdk::utilities::CpuFpReferenceConvolution;
-using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 
 using Half = hipdnn_data_sdk::types::half;
 using BFloat16 = hipdnn_data_sdk::types::bfloat16;
@@ -86,8 +83,11 @@ ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend)
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     if(backend == Backend::ROCBLAS)
     {
+        // As the convolution engines build it (HipblasltContainer.cpp): atomics not allowed.
         return [](const HipdnnEnginePluginHandle& /*handle*/, const std::vector<GemmCall>& calls) {
-            return std::make_unique<RocblasGemmPlan>(calls);
+            auto plan = std::make_unique<RocblasGemmPlan>(calls);
+            plan->requireBitwiseReproducible();
+            return plan;
         };
     }
 #endif
@@ -617,16 +617,27 @@ void runCase(ConvCase convCase,
         *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
     std::vector<char> firstOutput;
-    if(benchmarked != nullptr)
+    // The rocBLAS engines claim bitwise-reproducible results (no NONDETERMINISTIC note): a
+    // second execute, over a re-filled workspace, gives the same bits.
+    const bool reproducible = backend == Backend::ROCBLAS;
+    if(benchmarked != nullptr || reproducible)
     {
-        // The first execute timed every candidate; the second runs only the winner. Both must
-        // leave the same, checked, result.
-        EXPECT_GE(benchmarked->winner(), 0);
+        // A benchmarked plan's first execute timed every candidate; the second runs only the
+        // winner. Both must leave the same, checked, result.
+        if(benchmarked != nullptr)
+        {
+            EXPECT_GE(benchmarked->winner(), 0);
+        }
         const size_t bytes = written->memory().count() * sizeof(T);
         firstOutput.resize(bytes);
         ASSERT_EQ(
             hipMemcpy(firstOutput.data(), written->rawDeviceData(), bytes, hipMemcpyDeviceToHost),
             hipSuccess);
+        if(reproducible && workspace != nullptr)
+        {
+            ASSERT_EQ(hipMemset(workspace, 0x5a, workspaceBytes), hipSuccess);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        }
         context.plan().execute(
             *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
@@ -634,7 +645,7 @@ void runCase(ConvCase convCase,
         ASSERT_EQ(
             hipMemcpy(secondOutput.data(), written->rawDeviceData(), bytes, hipMemcpyDeviceToHost),
             hipSuccess);
-        EXPECT_EQ(firstOutput, secondOutput) << "the winner's rerun changed the result";
+        EXPECT_EQ(firstOutput, secondOutput) << "a second execute changed the result";
     }
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
     if(workspace != nullptr)
@@ -1311,10 +1322,6 @@ void runRprCase(ConvCase convCase, Backend backend)
             delete owned;
         });
     const ConvGemmPlanBuilder builder(factoryFor(backend), MAX_REPACK_WORKSPACE_BYTES, false, true);
-    ScopedEnvironmentVariableSetter env(CONV_RPR_ENV_NAME);
-    ASSERT_FALSE(builder.isApplicable(*handle, graph.graph()))
-        << "a reduced-precision-reduction plan without the switch";
-    env.setValue("1");
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
@@ -1343,6 +1350,22 @@ void runRprCase(ConvCase convCase, Backend backend)
         hipdnnPluginDeviceBuffer_t{CONV_Y_UID, y.rawDeviceData()}};
     context.plan().execute(*handle, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    if(backend == Backend::ROCBLAS)
+    {
+        // ROCBLAS_CONV_RPR claims bitwise-reproducible results: a second execute gives the same
+        // bits.
+        const size_t bytes = w.memory().count() * sizeof(Half);
+        std::vector<char> first(bytes);
+        std::vector<char> second(bytes);
+        ASSERT_EQ(hipMemcpy(first.data(), w.rawDeviceData(), bytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        context.plan().execute(
+            *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
+        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        ASSERT_EQ(hipMemcpy(second.data(), w.rawDeviceData(), bytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        EXPECT_EQ(first, second) << "a second execute changed the result";
+    }
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
     w.markDeviceModified();
     for(auto* tensor : {&x, &w, &y})
