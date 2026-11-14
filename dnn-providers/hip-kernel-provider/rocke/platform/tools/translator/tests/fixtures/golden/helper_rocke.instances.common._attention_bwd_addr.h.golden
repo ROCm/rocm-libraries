@@ -1,0 +1,490 @@
+/* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ * rocke/helper_rocke.instances.common._attention_bwd_addr.h -- first draft by tr/abi.py from
+ * library/kernels/common/_attention_bwd_addr.py (sha256 cc834efe98d4);
+ * hand-maintained from here.
+ *
+ * Rules: designs/generated_abi.md of the translator. Lists a function
+ * returns are owned by the caller (free with free(); a list of strings:
+ * free each string, then the list); errors of entries
+ * that take the builder are recorded on it (false / NULL / -1), the
+ * others fill reason.
+ */
+#ifndef ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_ADDR_H
+#define ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_ADDR_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "rocke/ir.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+typedef struct rocke_attn_bwd_packed_rows rocke_attn_bwd_packed_rows_t;
+typedef struct rocke_attn_bwd_row_slab rocke_attn_bwd_row_slab_t;
+typedef struct rocke_attn_bwd_seq_info rocke_attn_bwd_seq_info_t;
+typedef struct rocke_attn_bwd_strided_batched_addr rocke_attn_bwd_strided_batched_addr_t;
+typedef struct rocke_attn_bwd_strided_tensor_addr rocke_attn_bwd_strided_tensor_addr_t;
+typedef struct rocke_attn_bwd_thd_offset_addr rocke_attn_bwd_thd_offset_addr_t;
+typedef struct rocke_attn_bwd_workspace_addr rocke_attn_bwd_workspace_addr_t;
+typedef struct rocke_attn_bwd_ws_slab rocke_attn_bwd_ws_slab_t;
+
+#ifndef ROCKE_ATTN_BWD_TUPLE_V_V_V_DEFINED
+#define ROCKE_ATTN_BWD_TUPLE_V_V_V_DEFINED
+typedef struct rocke_attn_bwd_tuple_v_v_v
+{
+    rocke_value_t* f0;
+    rocke_value_t* f1;
+    rocke_value_t* f2;
+} rocke_attn_bwd_tuple_v_v_v_t;
+#endif
+
+#ifndef ROCKE_ATTN_BWD_TUPLE_IV_IV_IV_DEFINED
+#define ROCKE_ATTN_BWD_TUPLE_IV_IV_IV_DEFINED
+typedef struct rocke_attn_bwd_tuple_iv_iv_iv
+{
+    rocke_attn_bwd_iv_t f0;
+    rocke_attn_bwd_iv_t f1;
+    rocke_attn_bwd_iv_t f2;
+} rocke_attn_bwd_tuple_iv_iv_iv_t;
+#endif
+
+#ifndef ROCKE_ATTN_BWD_TUPLE_IV_V_DEFINED
+#define ROCKE_ATTN_BWD_TUPLE_IV_V_DEFINED
+typedef struct rocke_attn_bwd_tuple_iv_v
+{
+    rocke_attn_bwd_iv_t f0;
+    rocke_value_t* f1;
+} rocke_attn_bwd_tuple_iv_v_t;
+#endif
+
+#ifndef ROCKE_ATTN_BWD_TUPLE_V_V_DEFINED
+#define ROCKE_ATTN_BWD_TUPLE_V_V_DEFINED
+typedef struct rocke_attn_bwd_tuple_v_v
+{
+    rocke_value_t* f0;
+    rocke_value_t* f1;
+} rocke_attn_bwd_tuple_v_v_t;
+#endif
+
+#ifndef ROCKE_ATTN_BWD_TUPLE_V_BOOL_DEFINED
+#define ROCKE_ATTN_BWD_TUPLE_V_BOOL_DEFINED
+typedef struct rocke_attn_bwd_tuple_v_bool
+{
+    rocke_value_t* f0;
+    bool f1;
+} rocke_attn_bwd_tuple_v_bool_t;
+#endif
+
+/* py: PackedRows */
+typedef struct rocke_attn_bwd_packed_rows
+{
+    rocke_value_t* head0;
+    rocke_value_t* n_heads;
+    rocke_value_t* rows_per_head;
+    rocke_value_t* row0;
+} rocke_attn_bwd_packed_rows_t;
+
+/* py: RowSlab */
+typedef enum rocke_attn_bwd_row_slab_kind
+{
+    ROCKE_ATTN_BWD_ROW_SLAB_KIND_ROW_SLAB = 0, /* RowSlab */
+    ROCKE_ATTN_BWD_ROW_SLAB_KIND_BUFFER_ROW_SLAB = 1 /* BufferRowSlab, a duck-typed peer */
+} rocke_attn_bwd_row_slab_kind_t;
+
+typedef struct rocke_attn_bwd_row_slab
+{
+    rocke_attn_bwd_row_slab_kind_t kind; /* the member class (tagged value) */
+    rocke_ir_builder_t* b;
+    rocke_value_t* ptr;
+    const rocke_type_t* dtype;
+    rocke_attn_bwd_iv_t t_stride;
+    rocke_value_t* base_row;
+    rocke_value_t* last;
+    int stage_vec;
+    int narrow;
+    rocke_attn_bwd_tuple_v_v_v_t parts;
+    rocke_value_t* rsrc;
+} rocke_attn_bwd_row_slab_t;
+
+/* py: SeqInfo */
+typedef struct rocke_attn_bwd_seq_info
+{
+    const char* mode;
+    rocke_value_t* batch;
+    rocke_value_t* length;
+    rocke_value_t* last;
+    rocke_value_t* s_max;
+    rocke_value_t* ws_row0;
+    rocke_value_t* tok0;
+} rocke_attn_bwd_seq_info_t;
+
+/* py: StridedBatchedAddr */
+typedef struct rocke_attn_bwd_strided_batched_addr
+{
+    int narrow_vec;
+    rocke_ir_builder_t* b;
+    rocke_value_t* ptr;
+    const rocke_type_t* dtype;
+    rocke_attn_bwd_tuple_iv_iv_iv_t strides;
+    rocke_attn_bwd_seq_info_t seq;
+    int stage_vec;
+    int esize;
+    rocke_value_t* base;
+    rocke_value_t* seq_base;
+} rocke_attn_bwd_strided_batched_addr_t;
+
+/* py: StridedTensorAddr */
+typedef struct rocke_attn_bwd_strided_tensor_addr
+{
+    int narrow_vec;
+    rocke_ir_builder_t* b;
+    rocke_value_t* ptr;
+    const rocke_type_t* dtype;
+    rocke_attn_bwd_tuple_iv_iv_iv_t strides;
+    rocke_attn_bwd_seq_info_t seq;
+    int stage_vec;
+    int esize;
+    rocke_value_t* base;
+    rocke_value_t* seq_base;
+} rocke_attn_bwd_strided_tensor_addr_t;
+
+/* py: ThdOffsetAddr */
+typedef struct rocke_attn_bwd_thd_offset_addr
+{
+    int narrow_vec;
+    rocke_ir_builder_t* b;
+    rocke_value_t* ptr;
+    const rocke_type_t* dtype;
+    rocke_attn_bwd_tuple_iv_iv_iv_t strides;
+    rocke_attn_bwd_seq_info_t seq;
+    int stage_vec;
+    int esize;
+    rocke_value_t* base;
+    rocke_value_t* seq_base;
+} rocke_attn_bwd_thd_offset_addr_t;
+
+/* py: WorkspaceAddr */
+typedef struct rocke_attn_bwd_workspace_addr
+{
+    rocke_ir_builder_t* b;
+    rocke_value_t* ptr;
+    rocke_value_t* ws_rows;
+    int width;
+    rocke_value_t* row0;
+    const char* layout;
+    bool has_n_heads;
+    rocke_attn_bwd_iv_t n_heads;
+} rocke_attn_bwd_workspace_addr_t;
+
+/* py: WsSlab */
+typedef struct rocke_attn_bwd_ws_slab
+{
+    rocke_ir_builder_t* b;
+    rocke_value_t* ptr;
+    rocke_value_t* rows_left;
+    rocke_attn_bwd_iv_t row_stride;
+    rocke_attn_bwd_tuple_v_v_v_t parts;
+} rocke_attn_bwd_ws_slab_t;
+
+/* py: PackedRows.locate. ``(head, row, ok)`` of M row ``r``; dead rows get the last valid head. */
+rocke_attn_bwd_tuple_v_v_v_t rocke_attn_bwd_packed_rows_locate(
+    const rocke_attn_bwd_packed_rows_t* self, rocke_ir_builder_t* b, rocke_attn_bwd_iv_t r);
+
+/* py: RowSlab.sgpr_ptr. ``ptr`` for an operand that must be in SGPRs (:func:`sgpr_ptr`). */
+rocke_value_t* rocke_attn_bwd_row_slab_sgpr_ptr(const rocke_attn_bwd_row_slab_t* self);
+
+/* py: RowSlab.local_row. i32 row offset from the slab base (clamped when the slab clamps). */
+rocke_value_t* rocke_attn_bwd_row_slab_local_row(const rocke_attn_bwd_row_slab_t* self,
+                                                 rocke_value_t* row);
+
+/* py: RowSlab.index. i32 element index of ``(row, col)`` relative to the rebased pointer. */
+rocke_value_t* rocke_attn_bwd_row_slab_index(const rocke_attn_bwd_row_slab_t* self,
+                                             rocke_value_t* row,
+                                             rocke_attn_bwd_iv_t col);
+
+/* py: RowSlab.load. One element (the tensor dtype). */
+rocke_value_t* rocke_attn_bwd_row_slab_load(const rocke_attn_bwd_row_slab_t* self,
+                                            rocke_value_t* row,
+                                            rocke_attn_bwd_iv_t col);
+
+/* py: RowSlab.store */
+bool rocke_attn_bwd_row_slab_store(const rocke_attn_bwd_row_slab_t* self,
+                                   rocke_value_t* row,
+                                   rocke_attn_bwd_iv_t col,
+                                   rocke_value_t* value,
+                                   char* reason,
+                                   size_t reason_cap);
+
+/* py: RowSlab.load_vec. ``n`` consecutive elements as ``<n x dtype>`` (``stage_vec`` width). */
+rocke_value_t* rocke_attn_bwd_row_slab_load_vec(const rocke_attn_bwd_row_slab_t* self,
+                                                rocke_value_t* row,
+                                                rocke_attn_bwd_iv_t col0,
+                                                int n);
+
+/* py: RowSlab.store_vec. Store ``<n x dtype>`` at ``(row, col0 .. col0 + n)`` (``stage_vec`` width). */
+bool rocke_attn_bwd_row_slab_store_vec(const rocke_attn_bwd_row_slab_t* self,
+                                       rocke_value_t* row,
+                                       rocke_attn_bwd_iv_t col0,
+                                       rocke_value_t* value,
+                                       char* reason,
+                                       size_t reason_cap);
+
+/* py: RowSlab<default>. Python's field defaults. */
+rocke_attn_bwd_row_slab_t rocke_attn_bwd_row_slab_default(void);
+
+/* py: SeqInfo<default>. Python's field defaults. */
+rocke_attn_bwd_seq_info_t rocke_attn_bwd_seq_info_default(void);
+
+/* py: StridedBatchedAddr.__init__ */
+bool rocke_attn_bwd_strided_batched_addr_init(rocke_attn_bwd_strided_batched_addr_t* self,
+                                              rocke_ir_builder_t* b,
+                                              rocke_value_t* ptr,
+                                              const rocke_attn_bwd_seq_info_t* seq,
+                                              const rocke_type_t* dtype,
+                                              rocke_attn_bwd_tuple_iv_iv_iv_t strides,
+                                              int stage_vec,
+                                              int narrow_vec);
+
+/* py: StridedTensorAddr.__init__ */
+bool rocke_attn_bwd_strided_tensor_addr_init(rocke_attn_bwd_strided_tensor_addr_t* self,
+                                             rocke_ir_builder_t* b,
+                                             rocke_value_t* ptr,
+                                             const rocke_type_t* dtype,
+                                             rocke_attn_bwd_tuple_iv_iv_iv_t strides,
+                                             const rocke_attn_bwd_seq_info_t* seq,
+                                             int stage_vec,
+                                             int narrow_vec);
+
+/* py: StridedTensorAddr.slab. Rebase to head ``h`` and tile row ``row0`` (i64 byte offset). */
+rocke_attn_bwd_row_slab_t
+    rocke_attn_bwd_strided_tensor_addr_slab(const rocke_attn_bwd_strided_tensor_addr_t* self,
+                                            rocke_attn_bwd_iv_t h,
+                                            rocke_attn_bwd_iv_t row0,
+                                            bool clamp);
+
+/* py: StridedTensorAddr.offset_bytes. The i64 byte offset :meth:`slab` adds to the base pointer for head ``h`` and (unclamped) row ``row0``. */
+rocke_value_t* rocke_attn_bwd_strided_tensor_addr_offset_bytes(
+    const rocke_attn_bwd_strided_tensor_addr_t* self,
+    rocke_attn_bwd_iv_t h,
+    rocke_attn_bwd_iv_t row0);
+
+/* py: StridedTensorAddr.stride_bytes. The i64 byte stride of one head (``"h"``) or one row (``"t"``). */
+rocke_value_t* rocke_attn_bwd_strided_tensor_addr_stride_bytes(
+    const rocke_attn_bwd_strided_tensor_addr_t* self, const char* which);
+
+/* py: StridedTensorAddr.slab_at. The slab whose pointer is the base plus the i64 byte offset ``off`` (:meth:`offset_bytes` of a head and of ``row0``, possibly carried across steps) at base row ``row0``. Equal to :meth:`slab` ``(h, row0, clamp=clamp)`` when ``row0 <= last`` (the clamp of the base row is then an identity), which holds for every q tile a q loop visits. */
+rocke_attn_bwd_row_slab_t
+    rocke_attn_bwd_strided_tensor_addr_slab_at(const rocke_attn_bwd_strided_tensor_addr_t* self,
+                                               rocke_value_t* off,
+                                               rocke_value_t* row0,
+                                               bool clamp);
+
+/* py: ThdOffsetAddr.__init__ */
+bool rocke_attn_bwd_thd_offset_addr_init(rocke_attn_bwd_thd_offset_addr_t* self,
+                                         rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         const rocke_attn_bwd_seq_info_t* seq,
+                                         const rocke_type_t* dtype,
+                                         rocke_attn_bwd_tuple_iv_iv_iv_t strides,
+                                         int stage_vec,
+                                         int narrow_vec);
+
+/* py: WorkspaceAddr.__init__ */
+bool rocke_attn_bwd_workspace_addr_init(rocke_attn_bwd_workspace_addr_t* self,
+                                        rocke_ir_builder_t* b,
+                                        rocke_value_t* ptr,
+                                        rocke_attn_bwd_iv_t ws_rows,
+                                        int width,
+                                        rocke_value_t* row0,
+                                        const char* layout,
+                                        bool has_n_heads,
+                                        rocke_attn_bwd_iv_t n_heads);
+
+/* py: WorkspaceAddr.slab. Rebase to head ``h`` and row ``row0 + tile_row0`` (i64 offsets). */
+rocke_attn_bwd_ws_slab_t
+    rocke_attn_bwd_workspace_addr_slab(const rocke_attn_bwd_workspace_addr_t* self,
+                                       rocke_attn_bwd_iv_t h,
+                                       rocke_attn_bwd_iv_t tile_row0);
+
+/* py: WsSlab.sgpr_ptr. ``ptr`` for an operand that must be in SGPRs (:func:`sgpr_ptr`). */
+rocke_value_t* rocke_attn_bwd_ws_slab_sgpr_ptr(const rocke_attn_bwd_ws_slab_t* self);
+
+/* py: WsSlab.row_ok */
+rocke_value_t* rocke_attn_bwd_ws_slab_row_ok(const rocke_attn_bwd_ws_slab_t* self,
+                                             rocke_value_t* r);
+
+/* py: WsSlab.local_row */
+rocke_value_t* rocke_attn_bwd_ws_slab_local_row(const rocke_attn_bwd_ws_slab_t* self,
+                                                rocke_value_t* r);
+
+/* py: WsSlab.index */
+rocke_value_t* rocke_attn_bwd_ws_slab_index(const rocke_attn_bwd_ws_slab_t* self,
+                                            rocke_value_t* r,
+                                            rocke_attn_bwd_iv_t x);
+
+/* py: WsSlab.load. f32 at ``(r, x)``; ``neutral`` for rows outside the workspace. */
+rocke_value_t* rocke_attn_bwd_ws_slab_load(const rocke_attn_bwd_ws_slab_t* self,
+                                           rocke_value_t* r,
+                                           rocke_attn_bwd_iv_t x,
+                                           double neutral);
+
+/* py: WsSlab.load_raw. f32 at the clamped address of ``(r, x)``, without the neutral value for rows outside the workspace (:meth:`neutral` applies it later). */
+rocke_value_t* rocke_attn_bwd_ws_slab_load_raw(const rocke_attn_bwd_ws_slab_t* self,
+                                               rocke_value_t* r,
+                                               rocke_attn_bwd_iv_t x);
+
+/* py: WsSlab.neutral. ``v`` (a :meth:`load_raw` of row ``r``) or ``neutral`` outside the workspace: :meth:`load` in two parts. */
+rocke_value_t* rocke_attn_bwd_ws_slab_neutral(const rocke_attn_bwd_ws_slab_t* self,
+                                              rocke_value_t* r,
+                                              rocke_value_t* v,
+                                              double neutral);
+
+/* py: WsSlab.atomic_add. Branch-free fp32 atomic add; rows outside the workspace add 0. */
+bool rocke_attn_bwd_ws_slab_atomic_add(const rocke_attn_bwd_ws_slab_t* self,
+                                       rocke_value_t* r,
+                                       rocke_attn_bwd_iv_t x,
+                                       rocke_value_t* v,
+                                       char* reason,
+                                       size_t reason_cap);
+
+/* py: WsSlab.atomic_add_row. fp32 atomic adds of ``(x, v)`` pairs into row ``r``, predicated. */
+bool rocke_attn_bwd_ws_slab_atomic_add_row(const rocke_attn_bwd_ws_slab_t* self,
+                                           rocke_value_t* r,
+                                           const rocke_attn_bwd_tuple_iv_v_t* items,
+                                           int n_items,
+                                           rocke_value_t* ok,
+                                           char* reason,
+                                           size_t reason_cap);
+
+/* py: WsSlab.atomic_add_row_select. Branch-free :meth:`atomic_add_row`: every ``(x, v)`` pair is added. */
+bool rocke_attn_bwd_ws_slab_atomic_add_row_select(const rocke_attn_bwd_ws_slab_t* self,
+                                                  rocke_value_t* r,
+                                                  const rocke_attn_bwd_tuple_iv_v_t* items,
+                                                  int n_items,
+                                                  rocke_value_t* ok,
+                                                  char* reason,
+                                                  size_t reason_cap);
+
+/* py: WsSlab.store_row. fp32 stores of ``(x, v)`` pairs into row ``r``, predicated. */
+bool rocke_attn_bwd_ws_slab_store_row(const rocke_attn_bwd_ws_slab_t* self,
+                                      rocke_value_t* r,
+                                      const rocke_attn_bwd_tuple_iv_v_t* items,
+                                      int n_items,
+                                      rocke_value_t* ok,
+                                      char* reason,
+                                      size_t reason_cap);
+
+/* py: WsSlab.store_vec_in_row. Store ``<n x f32>`` (``n`` in {1, 2, 4, 8}) at ``(r, x)`` with an unclamped index: the caller predicates on :meth:`row_ok`. ``x`` is a multiple of ``n``; every workspace row starts 16-byte aligned. */
+bool rocke_attn_bwd_ws_slab_store_vec_in_row(const rocke_attn_bwd_ws_slab_t* self,
+                                             rocke_value_t* r,
+                                             rocke_attn_bwd_iv_t x,
+                                             rocke_value_t* v,
+                                             char* reason,
+                                             size_t reason_cap);
+
+/* py: WsSlab.store. Store at a clamped address; the caller predicates on ``row_ok``. */
+bool rocke_attn_bwd_ws_slab_store(const rocke_attn_bwd_ws_slab_t* self,
+                                  rocke_value_t* r,
+                                  rocke_attn_bwd_iv_t x,
+                                  rocke_value_t* v,
+                                  char* reason,
+                                  size_t reason_cap);
+
+/* py: WsSlab.store_vec. Store ``<n x f32>`` (``n`` in {4, 8}) as 16-byte pieces. */
+bool rocke_attn_bwd_ws_slab_store_vec(const rocke_attn_bwd_ws_slab_t* self,
+                                      rocke_value_t* r,
+                                      rocke_attn_bwd_iv_t x,
+                                      rocke_value_t* v,
+                                      char* reason,
+                                      size_t reason_cap);
+
+/* py: WsSlab.load_vec4. ``<4 x f32>`` at ``(r, x)`` (clamped address, no masking). */
+rocke_value_t* rocke_attn_bwd_ws_slab_load_vec4(const rocke_attn_bwd_ws_slab_t* self,
+                                                rocke_value_t* r,
+                                                rocke_attn_bwd_iv_t x);
+
+/* py: WsSlab<default>. Python's field defaults. */
+rocke_attn_bwd_ws_slab_t rocke_attn_bwd_ws_slab_default(void);
+
+/* py: as_i32. An int as an i32 constant; an SSA value unchanged. */
+rocke_value_t* rocke_attn_bwd_as_i32(rocke_ir_builder_t* b, rocke_attn_bwd_iv_t x);
+
+/* py: as_i64. Widen an int or i32 value to i64 (``zext`` unless ``signed``). */
+rocke_value_t* rocke_attn_bwd_as_i64(rocke_ir_builder_t* b, rocke_attn_bwd_iv_t x, bool signed_);
+
+/* py: block_table_entry. ``block_table[seq_idx][j]`` (int32 table), with an i64 sequence rebase. */
+rocke_value_t* rocke_attn_bwd_block_table_entry(rocke_ir_builder_t* b,
+                                                rocke_value_t* bt_ptr,
+                                                rocke_value_t* seq_idx,
+                                                rocke_value_t* j,
+                                                rocke_attn_bwd_iv_t bt_stride);
+
+/* py: chunk_coords. ``(row, column)`` of a ``vec``-element chunk of rows of ``per_row`` chunks: ``(chunk / per_row, (chunk % per_row) * vec)``; ``(chunk, 0)`` with no division for one chunk per row. */
+rocke_attn_bwd_tuple_v_v_t
+    rocke_attn_bwd_chunk_coords(rocke_ir_builder_t* b, rocke_value_t* chunk, int per_row, int vec);
+
+/* py: deal_chunks. Thread ``tid``'s chunks of a ``total``-chunk tile dealt round-robin over ``threads`` threads: one ``(chunk, partial)`` per round, ``chunk = tid + round * threads`` (i32) and ``partial`` (a host bool) true for a round that reaches past ``total``, where the caller guards ``chunk < total``. */
+rocke_attn_bwd_tuple_v_bool_t
+    rocke_attn_bwd_deal_chunks(rocke_ir_builder_t* b, rocke_value_t* tid, int total, int threads);
+
+/* py: decode_batched. Valid length and bases of batch ``batch`` (fixed or padded lengths). */
+rocke_attn_bwd_seq_info_t rocke_attn_bwd_decode_batched(rocke_ir_builder_t* b,
+                                                        int* seq_guards,
+                                                        rocke_value_t* batch,
+                                                        rocke_attn_bwd_iv_t s_max,
+                                                        rocke_value_t* seq_ptr,
+                                                        rocke_attn_bwd_iv_t has_len,
+                                                        rocke_attn_bwd_iv_t len_stride);
+
+/* py: decode_thd. Valid length and token base of THD sequence ``batch``. */
+rocke_attn_bwd_seq_info_t rocke_attn_bwd_decode_thd(rocke_ir_builder_t* b,
+                                                    int* seq_guards,
+                                                    rocke_value_t* batch,
+                                                    rocke_attn_bwd_iv_t s_max,
+                                                    rocke_value_t* off_ptr,
+                                                    rocke_attn_bwd_iv_t off64,
+                                                    rocke_attn_bwd_iv_t mult,
+                                                    rocke_attn_bwd_iv_t div,
+                                                    rocke_value_t* seq_ptr,
+                                                    rocke_attn_bwd_iv_t has_len,
+                                                    rocke_attn_bwd_iv_t len_stride,
+                                                    rocke_attn_bwd_iv_t ws_seg);
+
+/* py: last_row. ``max(length - 1, 0)``: the clamp bound of a row index into ``length`` rows. */
+rocke_value_t* rocke_attn_bwd_last_row(rocke_ir_builder_t* b, rocke_value_t* length);
+
+/* py: load_offset. Entry ``idx`` of an int32 or int64 offset table, as i64. */
+rocke_value_t* rocke_attn_bwd_load_offset(rocke_ir_builder_t* b,
+                                          rocke_value_t* off_ptr,
+                                          rocke_value_t* idx,
+                                          rocke_attn_bwd_iv_t off64);
+
+/* py: _elem_bytes */
+int rocke_attn_bwd_elem_bytes(const rocke_type_t* dtype, char* reason, size_t reason_cap);
+
+/* py: _scaled32 */
+rocke_value_t*
+    rocke_attn_bwd_scaled32(rocke_ir_builder_t* b, rocke_value_t* idx, rocke_attn_bwd_iv_t stride);
+
+/* py: _scaled64 */
+rocke_value_t* rocke_attn_bwd_scaled64(rocke_ir_builder_t* b,
+                                       rocke_value_t* idx64,
+                                       rocke_attn_bwd_iv_t stride);
+
+/* py: _clamp64_to_i32. ``clamp(x, 0, hi)`` of an i64 value, returned as i32 (``hi`` is i32). */
+rocke_value_t*
+    rocke_attn_bwd_clamp64_to_i32(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* hi);
+
+/* py: _max64 */
+rocke_value_t* rocke_attn_bwd_max64(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y);
+
+/* py: _min64 */
+rocke_value_t* rocke_attn_bwd_min64(rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y);
+#ifdef __cplusplus
+}
+#endif
+#endif /* ROCKE_HELPER_ROCKE_INSTANCES_COMMON__ATTENTION_BWD_ADDR_H */

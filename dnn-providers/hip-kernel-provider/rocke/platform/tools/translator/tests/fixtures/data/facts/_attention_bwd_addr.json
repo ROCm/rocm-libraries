@@ -1,0 +1,1237 @@
+{
+ "attrs": {
+  "PackedRows": {
+   "head0": [
+    "Value"
+   ],
+   "n_heads": [
+    "Value"
+   ],
+   "row0": [
+    "Value"
+   ],
+   "rows_per_head": [
+    "Value"
+   ]
+  },
+  "RowSlab": {
+   "b": [
+    "IRBuilder"
+   ],
+   "base_row": [
+    "Value"
+   ],
+   "dtype": [
+    "Type"
+   ],
+   "last": [
+    "None",
+    "Value"
+   ],
+   "narrow": [
+    "int"
+   ],
+   "parts": [
+    "tuple[Value,Value,Value]"
+   ],
+   "ptr": [
+    "Value"
+   ],
+   "stage_vec": [
+    "int"
+   ],
+   "t_stride": [
+    "Value"
+   ]
+  },
+  "StridedTensorAddr": {
+   "_base": [
+    "Value"
+   ],
+   "_esize": [
+    "int"
+   ],
+   "_seq_base": [
+    "None",
+    "Value"
+   ],
+   "b": [
+    "IRBuilder"
+   ],
+   "dtype": [
+    "Type"
+   ],
+   "narrow_vec": [
+    "int"
+   ],
+   "ptr": [
+    "Value"
+   ],
+   "seq": [
+    "SeqInfo"
+   ],
+   "stage_vec": [
+    "int"
+   ],
+   "strides": [
+    "tuple[Value,Value,Value]"
+   ]
+  },
+  "WorkspaceAddr": {
+   "b": [
+    "IRBuilder"
+   ],
+   "layout": [
+    "str"
+   ],
+   "n_heads": [
+    "None",
+    "Value"
+   ],
+   "ptr": [
+    "Value"
+   ],
+   "row0": [
+    "Value"
+   ],
+   "width": [
+    "int"
+   ],
+   "ws_rows": [
+    "Value"
+   ]
+  },
+  "WsSlab": {
+   "b": [
+    "IRBuilder"
+   ],
+   "parts": [
+    "tuple[Value,Value,Value]"
+   ],
+   "ptr": [
+    "Value"
+   ],
+   "row_stride": [
+    "Value",
+    "int"
+   ],
+   "rows_left": [
+    "Value"
+   ]
+  }
+ },
+ "built": 206,
+ "configs": 214,
+ "driver": {},
+ "emit": "attention_bwd_main_emit",
+ "funcs": {
+  "PackedRows.locate": {
+   "args": [
+    "self",
+    "b",
+    "r"
+   ],
+   "calls": 702,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "PackedRows"
+    ]
+   },
+   "return": [
+    "tuple[Value,Value,Value]"
+   ],
+   "src": "1a0e7bdd5434"
+  },
+  "RowSlab.index": {
+   "args": [
+    "self",
+    "row",
+    "col"
+   ],
+   "calls": 4370,
+   "params": {
+    "col": [
+     "Value"
+    ],
+    "row": [
+     "Value"
+    ],
+    "self": [
+     "RowSlab"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "888bf3459e1e"
+  },
+  "RowSlab.load_vec": {
+   "args": [
+    "self",
+    "row",
+    "col0",
+    "n"
+   ],
+   "calls": 2104,
+   "params": {
+    "col0": [
+     "Value"
+    ],
+    "n": [
+     "int"
+    ],
+    "row": [
+     "Value"
+    ],
+    "self": [
+     "RowSlab"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "5a2d3c299bfb"
+  },
+  "RowSlab.local_row": {
+   "args": [
+    "self",
+    "row"
+   ],
+   "calls": 4370,
+   "params": {
+    "row": [
+     "Value"
+    ],
+    "self": [
+     "RowSlab"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "cac890733904"
+  },
+  "RowSlab.sgpr_ptr": {
+   "args": [
+    "self"
+   ],
+   "calls": 836,
+   "params": {
+    "self": [
+     "RowSlab"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "e678ea955ae2"
+  },
+  "RowSlab.store": {
+   "args": [
+    "self",
+    "row",
+    "col",
+    "value"
+   ],
+   "calls": 64,
+   "params": {
+    "col": [
+     "Value"
+    ],
+    "row": [
+     "Value"
+    ],
+    "self": [
+     "RowSlab"
+    ],
+    "value": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "1f6efc072608"
+  },
+  "RowSlab.store_vec": {
+   "args": [
+    "self",
+    "row",
+    "col0",
+    "value"
+   ],
+   "calls": 1366,
+   "params": {
+    "col0": [
+     "Value"
+    ],
+    "row": [
+     "Value"
+    ],
+    "self": [
+     "RowSlab"
+    ],
+    "value": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "e275b66e5306"
+  },
+  "StridedTensorAddr.__init__": {
+   "args": [
+    "self",
+    "b",
+    "ptr",
+    "dtype",
+    "strides",
+    "seq",
+    "stage_vec",
+    "narrow_vec"
+   ],
+   "calls": 1240,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "dtype": [
+     "Type"
+    ],
+    "narrow_vec": [
+     "int"
+    ],
+    "ptr": [
+     "Value"
+    ],
+    "self": [
+     "StridedTensorAddr"
+    ],
+    "seq": [
+     "SeqInfo"
+    ],
+    "stage_vec": [
+     "int"
+    ],
+    "strides": [
+     "tuple[Value,Value,Value]"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "38aceb87ef4f"
+  },
+  "StridedTensorAddr.offset_bytes": {
+   "args": [
+    "self",
+    "h",
+    "row0"
+   ],
+   "calls": 12,
+   "params": {
+    "h": [
+     "Value"
+    ],
+    "row0": [
+     "Value"
+    ],
+    "self": [
+     "StridedTensorAddr"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "8f83ed25729a"
+  },
+  "StridedTensorAddr.slab": {
+   "args": [
+    "self",
+    "h",
+    "row0",
+    "clamp"
+   ],
+   "calls": 1744,
+   "params": {
+    "clamp": [
+     "bool"
+    ],
+    "h": [
+     "Value"
+    ],
+    "row0": [
+     "Value",
+     "int"
+    ],
+    "self": [
+     "StridedTensorAddr"
+    ]
+   },
+   "return": [
+    "RowSlab"
+   ],
+   "src": "6947c0e2ccf9"
+  },
+  "StridedTensorAddr.slab_at": {
+   "args": [
+    "self",
+    "off",
+    "row0",
+    "clamp"
+   ],
+   "calls": 12,
+   "params": {
+    "clamp": [
+     "bool"
+    ],
+    "off": [
+     "Value"
+    ],
+    "row0": [
+     "Value"
+    ],
+    "self": [
+     "StridedTensorAddr"
+    ]
+   },
+   "return": [
+    "RowSlab"
+   ],
+   "src": "e7e33c76e414"
+  },
+  "StridedTensorAddr.stride_bytes": {
+   "args": [
+    "self",
+    "which"
+   ],
+   "calls": 16,
+   "params": {
+    "self": [
+     "StridedTensorAddr"
+    ],
+    "which": [
+     "str"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "50009e37452c"
+  },
+  "WorkspaceAddr.__init__": {
+   "args": [
+    "self",
+    "b",
+    "ptr",
+    "ws_rows",
+    "width",
+    "row0",
+    "layout",
+    "n_heads"
+   ],
+   "calls": 726,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "layout": [
+     "str"
+    ],
+    "n_heads": [
+     "None",
+     "Value"
+    ],
+    "ptr": [
+     "Value"
+    ],
+    "row0": [
+     "Value"
+    ],
+    "self": [
+     "WorkspaceAddr"
+    ],
+    "width": [
+     "int"
+    ],
+    "ws_rows": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "d9f960c52e30"
+  },
+  "WorkspaceAddr.slab": {
+   "args": [
+    "self",
+    "h",
+    "tile_row0"
+   ],
+   "calls": 1558,
+   "params": {
+    "h": [
+     "Value"
+    ],
+    "self": [
+     "WorkspaceAddr"
+    ],
+    "tile_row0": [
+     "Value",
+     "int"
+    ]
+   },
+   "return": [
+    "WsSlab"
+   ],
+   "src": "e8daec44ad30"
+  },
+  "WsSlab.atomic_add": {
+   "args": [
+    "self",
+    "r",
+    "x",
+    "v"
+   ],
+   "calls": 1376,
+   "params": {
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ],
+    "v": [
+     "Value"
+    ],
+    "x": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "7db79a8f7ee8"
+  },
+  "WsSlab.atomic_add_row": {
+   "args": [
+    "self",
+    "r",
+    "items",
+    "ok"
+   ],
+   "calls": 112,
+   "params": {
+    "items": [
+     "list[tuple[Value,Value]]"
+    ],
+    "ok": [
+     "Value"
+    ],
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "f6779b454cfd"
+  },
+  "WsSlab.atomic_add_row_select": {
+   "args": [
+    "self",
+    "r",
+    "items",
+    "ok"
+   ],
+   "calls": 8,
+   "params": {
+    "items": [
+     "list[tuple[Value,Value]]"
+    ],
+    "ok": [
+     "Value"
+    ],
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "b7e503aabf8f"
+  },
+  "WsSlab.index": {
+   "args": [
+    "self",
+    "r",
+    "x"
+   ],
+   "calls": 3820,
+   "params": {
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ],
+    "x": [
+     "Value",
+     "int"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "bdc4e417b9ba"
+  },
+  "WsSlab.load": {
+   "args": [
+    "self",
+    "r",
+    "x",
+    "neutral"
+   ],
+   "calls": 1946,
+   "params": {
+    "neutral": [
+     "float"
+    ],
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ],
+    "x": [
+     "int"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "040ea273d36d"
+  },
+  "WsSlab.load_raw": {
+   "args": [
+    "self",
+    "r",
+    "x"
+   ],
+   "calls": 304,
+   "params": {
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ],
+    "x": [
+     "int"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "66076f3dcf86"
+  },
+  "WsSlab.local_row": {
+   "args": [
+    "self",
+    "r"
+   ],
+   "calls": 3828,
+   "params": {
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "ff82048518f7"
+  },
+  "WsSlab.neutral": {
+   "args": [
+    "self",
+    "r",
+    "v",
+    "neutral"
+   ],
+   "calls": 152,
+   "params": {
+    "neutral": [
+     "float"
+    ],
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ],
+    "v": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "876fb77193df"
+  },
+  "WsSlab.row_ok": {
+   "args": [
+    "self",
+    "r"
+   ],
+   "calls": 3838,
+   "params": {
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "e4c030a03164"
+  },
+  "WsSlab.sgpr_ptr": {
+   "args": [
+    "self"
+   ],
+   "calls": 194,
+   "params": {
+    "self": [
+     "WsSlab"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "e678ea955ae2"
+  },
+  "WsSlab.store_row": {
+   "args": [
+    "self",
+    "r",
+    "items",
+    "ok"
+   ],
+   "calls": 16,
+   "params": {
+    "items": [
+     "list[tuple[Value,Value]]"
+    ],
+    "ok": [
+     "Value"
+    ],
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "3cee246c520d"
+  },
+  "WsSlab.store_vec_in_row": {
+   "args": [
+    "self",
+    "r",
+    "x",
+    "v"
+   ],
+   "calls": 68,
+   "params": {
+    "r": [
+     "Value"
+    ],
+    "self": [
+     "WsSlab"
+    ],
+    "v": [
+     "Value"
+    ],
+    "x": [
+     "Value"
+    ]
+   },
+   "return": [
+    "None"
+   ],
+   "src": "2d3bbc836070"
+  },
+  "_clamp64_to_i32": {
+   "args": [
+    "b",
+    "x",
+    "hi"
+   ],
+   "calls": 1594,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "hi": [
+     "Value"
+    ],
+    "x": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "192062383e20"
+  },
+  "_elem_bytes": {
+   "args": [
+    "dtype"
+   ],
+   "calls": 4774,
+   "params": {
+    "dtype": [
+     "Type"
+    ]
+   },
+   "return": [
+    "int"
+   ],
+   "src": "e64bbf1214b9"
+  },
+  "_max64": {
+   "args": [
+    "b",
+    "x",
+    "y"
+   ],
+   "calls": 3153,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "x": [
+     "Value"
+    ],
+    "y": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "d778045242ab"
+  },
+  "_min64": {
+   "args": [
+    "b",
+    "x",
+    "y"
+   ],
+   "calls": 3154,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "x": [
+     "Value"
+    ],
+    "y": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "b267d4e2b49a"
+  },
+  "_scaled32": {
+   "args": [
+    "b",
+    "idx",
+    "stride"
+   ],
+   "calls": 8842,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "idx": [
+     "Value"
+    ],
+    "stride": [
+     "Value",
+     "int"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "ae26c166d03f"
+  },
+  "_scaled64": {
+   "args": [
+    "b",
+    "idx64",
+    "stride"
+   ],
+   "calls": 6200,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "idx64": [
+     "Value"
+    ],
+    "stride": [
+     "Value",
+     "int"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "4dcfc57290dc"
+  },
+  "_seq_len_value": {
+   "args": [
+    "b",
+    "seq_ptr",
+    "batch",
+    "has_len",
+    "len_stride",
+    "s_max"
+   ],
+   "calls": 438,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "batch": [
+     "Value"
+    ],
+    "has_len": [
+     "Value"
+    ],
+    "len_stride": [
+     "Value"
+    ],
+    "s_max": [
+     "Value"
+    ],
+    "seq_ptr": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "0fb55bbf9660"
+  },
+  "_seq_len_value.<locals>.read": {
+   "args": [],
+   "calls": 438,
+   "params": {},
+   "return": [
+    "Value"
+   ],
+   "src": "9048dd2e650f"
+  },
+  "as_i32": {
+   "args": [
+    "b",
+    "x"
+   ],
+   "calls": 62906,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "x": [
+     "Value",
+     "int"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "1fd5bc365f53"
+  },
+  "as_i64": {
+   "args": [
+    "b",
+    "x",
+    "signed"
+   ],
+   "calls": 15619,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "signed": [
+     "bool"
+    ],
+    "x": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "e6a4835325cc"
+  },
+  "chunk_coords": {
+   "args": [
+    "b",
+    "chunk",
+    "per_row",
+    "vec"
+   ],
+   "calls": 3568,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "chunk": [
+     "Value"
+    ],
+    "per_row": [
+     "int"
+    ],
+    "vec": [
+     "int"
+    ]
+   },
+   "return": [
+    "tuple[Value,Value]"
+   ],
+   "src": "d540a47e500e"
+  },
+  "deal_chunks": {
+   "args": [
+    "b",
+    "tid",
+    "total",
+    "threads"
+   ],
+   "calls": 4808,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "threads": [
+     "int"
+    ],
+    "tid": [
+     "Value"
+    ],
+    "total": [
+     "int"
+    ]
+   },
+   "return": [
+    "None",
+    "tuple[Value,bool]"
+   ],
+   "src": "7bd915fd5811"
+  },
+  "decode_batched": {
+   "args": [
+    "b",
+    "batch",
+    "s_max",
+    "seq_ptr",
+    "has_len",
+    "len_stride"
+   ],
+   "calls": 404,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "batch": [
+     "Value"
+    ],
+    "has_len": [
+     "Value"
+    ],
+    "len_stride": [
+     "Value"
+    ],
+    "s_max": [
+     "Value"
+    ],
+    "seq_ptr": [
+     "Value"
+    ]
+   },
+   "return": [
+    "SeqInfo"
+   ],
+   "src": "972706279853"
+  },
+  "decode_thd": {
+   "args": [
+    "b",
+    "batch",
+    "s_max",
+    "off_ptr",
+    "off64",
+    "mult",
+    "div",
+    "seq_ptr",
+    "has_len",
+    "len_stride",
+    "ws_seg"
+   ],
+   "calls": 34,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "batch": [
+     "Value"
+    ],
+    "div": [
+     "Value"
+    ],
+    "has_len": [
+     "Value"
+    ],
+    "len_stride": [
+     "Value"
+    ],
+    "mult": [
+     "Value"
+    ],
+    "off64": [
+     "Value"
+    ],
+    "off_ptr": [
+     "Value"
+    ],
+    "s_max": [
+     "Value"
+    ],
+    "seq_ptr": [
+     "Value"
+    ],
+    "ws_seg": [
+     "Value"
+    ]
+   },
+   "return": [
+    "SeqInfo"
+   ],
+   "src": "679509344ea1"
+  },
+  "decode_thd.<locals>.to_tok": {
+   "args": [
+    "x"
+   ],
+   "calls": 68,
+   "params": {
+    "x": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "b7dec07ca2b5"
+  },
+  "last_row": {
+   "args": [
+    "b",
+    "length"
+   ],
+   "calls": 438,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "length": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "89dddf088510"
+  },
+  "load_offset": {
+   "args": [
+    "b",
+    "off_ptr",
+    "idx",
+    "off64"
+   ],
+   "calls": 68,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "idx": [
+     "Value"
+    ],
+    "off64": [
+     "Value"
+    ],
+    "off_ptr": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "24a86db565b6"
+  },
+  "sgpr_ptr": {
+   "args": [
+    "b",
+    "ptr",
+    "parts"
+   ],
+   "calls": 1030,
+   "params": {
+    "b": [
+     "IRBuilder"
+    ],
+    "parts": [
+     "tuple[Value,Value,Value]"
+    ],
+    "ptr": [
+     "Value"
+    ]
+   },
+   "return": [
+    "Value"
+   ],
+   "src": "3165f260fb55"
+  }
+ },
+ "rejected": 8,
+ "seconds": 21.91
+}
