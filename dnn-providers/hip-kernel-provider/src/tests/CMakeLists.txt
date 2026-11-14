@@ -159,9 +159,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
     # The production descriptor tree, as the same binary-relative offset the integration
-    # binary uses. Only TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad
-    # catalog's metadata through the real state manager; it skips when this configuration
-    # packs no production tree, so no dependency on hkp_packaging_product is added here.
+    # binary uses. TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad catalog's
+    # metadata through the real state manager, and TestConvEngineGroupGate, to withdraw the
+    # conv group from the shipped catalog; both skip when this configuration packs no
+    # production tree, so no dependency on hkp_packaging_product is added here.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
 

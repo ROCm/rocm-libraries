@@ -4,17 +4,19 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstddef>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
+#include "TestDescriptorRoot.hpp"
 #include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
  * @file TestConvEngineGroupGate.cpp
@@ -48,10 +50,18 @@ TEST(TestConvEngineGroupGate, EnabledOnlyByATrueValue)
     }
 }
 
+#ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
 TEST(TestConvEngineGroupGate, WithdrawingLeavesNoConvEngineAndEveryOtherEngine)
 {
-    auto catalog
-        = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(descriptorSearchDirectories());
+    // The production tree this build packed: the shipped engines, the conv group's included.
+    const auto root = hip_kernel_provider::testing::descriptorSetRoot(
+        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR);
+    std::error_code absent;
+    if(root.empty() || !std::filesystem::is_directory(root, absent))
+    {
+        GTEST_SKIP() << "no production descriptor tree under " << root;
+    }
+    auto catalog = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(root);
 
     std::size_t convEngines = 0;
     std::set<std::string> others;
@@ -91,6 +101,7 @@ TEST(TestConvEngineGroupGate, WithdrawingLeavesNoConvEngineAndEveryOtherEngine)
         EXPECT_EQ(catalog.packs.size(), packs);
     }
 }
+#endif // HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

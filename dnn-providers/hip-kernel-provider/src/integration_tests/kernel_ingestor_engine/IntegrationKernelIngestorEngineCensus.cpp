@@ -25,6 +25,9 @@
 
 #include "ScopedPluginLogCapture.hpp"
 #include "TestDescriptorRoot.hpp"
+#ifdef HIPDNN_ENGINE_CONV
+#include "engines/kernel_ingestor_engine/ConvEngineGroupGate.hpp"
+#endif
 
 /**
  * @file IntegrationKernelIngestorEngineCensus.cpp
@@ -154,6 +157,14 @@ TEST(IntegrationKernelIngestorEngineCensus, EveryEngineOfTheDeviceShardLoads)
     std::map<std::string, std::filesystem::path> expected;
     for(const auto& [name, file] : enginesNamedIn(shard))
     {
+#ifdef HIPDNN_ENGINE_CONV
+        // The conv engine group loads only when its opt-in is set (ConvEngineGroupGate.hpp).
+        namespace gate = hip_kernel_provider::kernel_ingestor_engine;
+        if(!gate::convEngineGroupEnabled() && name.rfind(gate::CONV_ENGINE_PREFIX, 0) == 0)
+        {
+            continue;
+        }
+#endif
         if(name.rfind(PROVIDER_ENGINE_PREFIX, 0) == 0)
         {
             expected.emplace(name, file);
