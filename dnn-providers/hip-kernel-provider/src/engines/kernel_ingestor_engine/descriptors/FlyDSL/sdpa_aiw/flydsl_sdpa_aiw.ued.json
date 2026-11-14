@@ -1,16 +1,22 @@
 {
   "version": "1.0",
-  "id": "9666a506-6f4a-51a6-a41b-6188d9a3f964",
+  "id": "552ce4e7-aa77-53ed-83e1-f8f8b613c51d",
   "name": "hipkernel:flydsl_sdpa_aiw",
   "sdk_version": "1.4.0",
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_aiw.graph_match"
   },
   "sort_kernel_catalog": {
-    "default": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328"
+    "default": "0e5fcbbc-c60b-5ee6-99b2-1908e1084328",
+    "gfx1201": [
+      "ee8890cb-317e-46f1-b6f7-cefbdd8224f7"
+    ]
   },
   "predict_engine": {
-    "default": "41b032fe-2ed7-5dda-9518-0324ca564af0"
+    "default": "41b032fe-2ed7-5dda-9518-0324ca564af0",
+    "gfx1201": [
+      "2942d618-8b32-43e2-a08d-7b57c759a673"
+    ]
   },
   "metadata": "1d65d36b-ced8-5d48-8fd9-8747969e0d2b",
   "knobs": [

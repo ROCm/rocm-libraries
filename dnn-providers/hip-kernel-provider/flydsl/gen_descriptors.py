@@ -288,9 +288,9 @@ def installed_models(
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
-# is itself derived from a URL rather than being a magic constant. The names are
-# unchanged from when these descriptors were emitted in shipped form, so the ids
-# the runtime sees did not move with the switch to authoring them.
+# is itself derived from a URL rather than being a magic constant. The engine's
+# (UED) id also carries a fingerprint of its kernel fields (`ued_id`), so it moves
+# exactly when they do; every other id is the op's name alone.
 _NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_URL,
     "https://github.com/ROCm/rocm-libraries/dnn-providers/hip-kernel-provider/flydsl",
@@ -299,6 +299,36 @@ _NAMESPACE = uuid.uuid5(
 
 def _uuid(name: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, name))
+
+
+def kmd_fields(fields: dict[str, str]) -> list[dict[str, Any]]:
+    """The KMD's field records for an op's knobs, in the order its instances declare them."""
+    records = []
+    for name, type_token in fields.items():
+        record: dict[str, Any] = {"name": name, "type": type_token}
+        # Only the tunable field carries a default. The rest are required:
+        # `coerceKernelMetadata` (DescriptorLoader.hpp:1291) drops the whole
+        # pack when a field with no default is missing, which is the loud
+        # failure we want if an instance ever ships without its dtype or N.
+        if name == "block_threads":
+            record["default_value"] = 256
+        records.append(record)
+    return records
+
+
+def ued_id(op: str, fields: dict[str, str]) -> str:
+    """The engine's id: its op name and a fingerprint of its KMD's field records.
+
+    Measurements are filed by engine id, and a model is trained against one field list
+    (the UHD pipeline keys each engine's datasets by this id and refuses a collection
+    whose fields differ from the ones its dataset holds). So an engine whose kernel
+    fields change gets a new id, and with it new datasets and a new selector revision,
+    rather than mixing measurements that disagree on what a kernel's fields are.
+    Unchanged fields keep the id, and with it every model trained against the engine.
+    """
+    canonical = json.dumps(kmd_fields(fields), sort_keys=True, separators=(",", ":"))
+    fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return _uuid(f"ued/{op}/fields-{fingerprint}")
 
 
 class KernelEntry(NamedTuple):
@@ -441,7 +471,7 @@ class OpDescriptors:
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
-        self.ued_id = _uuid(f"ued/{op}")
+        self.ued_id = ued_id(op, fields)
         self.umd_id = _uuid(f"umd/{op}/kernel")
         self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
 
@@ -455,16 +485,7 @@ class OpDescriptors:
         # ingestor declines any graph whose schema floor is above it.
         if self.op in SDK_VERSION_BY_OP:
             ued["sdk_version"] = SDK_VERSION_BY_OP[self.op]
-        kmd_fields = []
-        for name, type_token in self.fields.items():
-            field: dict[str, Any] = {"name": name, "type": type_token}
-            # Only the tunable field carries a default. The rest are required:
-            # `coerceKernelMetadata` (DescriptorLoader.hpp:1291) drops the whole
-            # pack when a field with no default is missing, which is the loud
-            # failure we want if an instance ever ships without its dtype or N.
-            if name == "block_threads":
-                field["default_value"] = 256
-            kmd_fields.append(field)
+        kmd = kmd_fields(self.fields)
 
         engine: dict[str, Any] = {
             **ued,
@@ -547,7 +568,7 @@ class OpDescriptors:
                 "version": DESCRIPTOR_VERSION,
                 "id": self.kmd_id,
                 "name": f"flydsl {self.op} variant fields",
-                "fields": kmd_fields,
+                "fields": kmd,
             },
             f"{self.stem}.uhd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -710,8 +731,9 @@ def build_documents(
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
     for op_name, op_entries in sorted(by_op.items()):
-        installed = installed_models(content_dir / op_name, _uuid(f"ued/{op_name}"))
-        op = OpDescriptors(op_name, _fields_for_op(op_entries), installed)
+        fields = _fields_for_op(op_entries)
+        installed = installed_models(content_dir / op_name, ued_id(op_name, fields))
+        op = OpDescriptors(op_name, fields, installed)
         folders[Path(op_name)] = op.documents()
         folders[Path(op_name) / arch] = _arch_documents(op_entries, op, arch)
     return folders

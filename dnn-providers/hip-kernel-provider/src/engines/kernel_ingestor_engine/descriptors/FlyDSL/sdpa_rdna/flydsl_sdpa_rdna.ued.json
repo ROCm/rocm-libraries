@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "a122a721-719a-5132-8cfe-97590e7485e7",
+  "id": "a03fe29e-61a4-5f70-9bc3-b43ec75b1530",
   "name": "hipkernel:flydsl_sdpa_rdna",
   "sdk_version": "1.4.0",
   "graph_match": {
@@ -10,7 +10,19 @@
     "default": "4757c57d-f563-5463-9b4a-d22d0c4e1332"
   },
   "predict_engine": {
-    "default": "deafb91e-7100-5f5e-8de7-bccd0bfb5bb5"
+    "default": "deafb91e-7100-5f5e-8de7-bccd0bfb5bb5",
+    "gfx1100": [
+      "cf2ec3ff-3519-460a-ae5a-d1a7b58353e8"
+    ],
+    "gfx1101": [
+      "7295d186-54fa-4f1d-a63e-7731fd1f504c"
+    ],
+    "gfx1151": [
+      "1663406e-d45c-431f-b2ad-437dbd440316"
+    ],
+    "gfx1201": [
+      "5fa7bc35-fc9f-4413-addf-d55a7e9def57"
+    ]
   },
   "metadata": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",
   "knobs": [

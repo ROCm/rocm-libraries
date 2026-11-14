@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "28b2f769-e3c4-57cd-91c8-3327594a0760",
+  "id": "4f09d8ef-1ed5-558d-bb8b-f48f10a337b3",
   "name": "hipkernel:flydsl_sdpa_cdna_dualwave",
   "sdk_version": "1.4.0",
   "graph_match": {
@@ -10,7 +10,10 @@
     "default": "314784cc-5d55-54b3-a5ce-160aeed54a19"
   },
   "predict_engine": {
-    "default": "5d156390-4d28-54bd-af50-8ac27bd21890"
+    "default": "5d156390-4d28-54bd-af50-8ac27bd21890",
+    "gfx950": [
+      "bb86d970-e496-47c3-af4e-ea8b7d803fd5"
+    ]
   },
   "metadata": "798ed3e1-93e3-5c95-8bab-c8c767225601",
   "knobs": [
