@@ -714,18 +714,25 @@ __device__ void partialRows(const ConvDepthwiseValuWrwArgs& a)
                             = ring + __umul24(ok ? slot : static_cast<unsigned>(SLOTS), SS) + laneB;
                         keep[rg] = ok || r >= KH;
                     }
-                    const bool careful
-                        = S != 1 || yy + a.ph - (KH - 1) < o0 * S || yy + a.ph >= o1 * S;
+                    // A tap group is careful when one of its filter rows has no dy row here
+                    // (block-uniform; at stride 2 every group, by parity): only its sums are
+                    // saved and restored.
+                    bool careful[RG];
                     f4 saved[NWG][RG][SG];
-                    if(careful)
+#pragma unroll
+                    for(int rg = 0; rg < RG; ++rg)
                     {
+                        const int rHi = min(4 * rg + 3, KH - 1);
+                        careful[rg]
+                            = S != 1 || yy + a.ph - rHi < o0 * S || yy + a.ph - 4 * rg >= o1 * S;
+                        if(careful[rg])
+                        {
 #pragma unroll
-                        for(int cg = 0; cg < NWG; ++cg)
-#pragma unroll
-                            for(int rg = 0; rg < RG; ++rg)
+                            for(int cg = 0; cg < NWG; ++cg)
 #pragma unroll
                                 for(int sg = 0; sg < SG; ++sg)
                                     saved[cg][rg][sg] = acc[cg][rg][sg];
+                        }
                     }
 #pragma unroll
                     for(int cg = 0; cg < NWG; ++cg)
@@ -779,16 +786,18 @@ __device__ void partialRows(const ConvDepthwiseValuWrwArgs& a)
                                     acc[cg][rg][sg] = mma<BF16>(av[sg], bv[rg], acc[cg][rg][sg]);
                         }
                     }
-                    if(careful)
+#pragma unroll
+                    for(int rg = 0; rg < RG; ++rg)
                     {
+                        if(careful[rg])
+                        {
 #pragma unroll
-                        for(int cg = 0; cg < NWG; ++cg)
-#pragma unroll
-                            for(int rg = 0; rg < RG; ++rg)
+                            for(int cg = 0; cg < NWG; ++cg)
 #pragma unroll
                                 for(int sg = 0; sg < SG; ++sg)
                                     acc[cg][rg][sg]
                                         = keep[rg] ? acc[cg][rg][sg] : saved[cg][rg][sg];
+                        }
                     }
                 }
                 __syncthreads();
