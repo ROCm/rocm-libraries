@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -87,6 +88,8 @@ struct RankedEngine
     bool available = false;
     double value = 0;
     flatbuffers::DetachedBuffer config;
+    /// Why an unscored engine has no usable estimate.
+    std::string why;
 };
 
 struct Descriptor
@@ -165,32 +168,59 @@ const RankingMetric* requestedMetric(const hipdnnHeuristicHostCallbacks_t& host)
     return host.ranking_metric == nullptr ? nullptr : findRankingMetric(host.ranking_metric);
 }
 
+/// @p engineId's usable estimate of @p kind in @p metric, or nullptr with @p why saying what
+/// made it unusable.
 const EnginePrediction* query(const hipdnnHeuristicHostCallbacks_t& host,
                               int64_t engineId,
                               hipdnnEnginePredictionKind_t kind,
-                              const RankingMetric& metric)
+                              const RankingMetric& metric,
+                              std::string& why)
 {
     hipdnnPluginConstData_t data{};
-    if(host.get_prediction(host.context, engineId, kind, &data) != HIPDNN_PLUGIN_STATUS_SUCCESS
-       || !verify<EnginePrediction>(&data))
+    if(host.get_prediction(host.context, engineId, kind, &data) != HIPDNN_PLUGIN_STATUS_SUCCESS)
     {
+        why = "the host returned no prediction";
+        return nullptr;
+    }
+    if(!verify<EnginePrediction>(&data))
+    {
+        why = "the prediction is malformed";
         return nullptr;
     }
     const auto* prediction = flatbuffers::GetRoot<EnginePrediction>(data.ptr);
     const auto expectedKind = kind == HIPDNN_ENGINE_PREDICTION_ENGINE
                                   ? PredictionKind::ENGINE
                                   : PredictionKind::CONFIGURATION;
-    // The host already rejects other metrics; re-check so different quantities never compare.
-    if(prediction->engine_id() != engineId || prediction->kind() != expectedKind
-       || prediction->status() != PredictionStatus::AVAILABLE || prediction->metric() == nullptr
-       || prediction->metric()->string_view() != metric.name
-       || !isValidMetricValue(metric, prediction->value()))
+    if(prediction->engine_id() != engineId || prediction->kind() != expectedKind)
     {
+        why = "the prediction answers for another engine or kind";
+        return nullptr;
+    }
+    if(prediction->status() != PredictionStatus::AVAILABLE)
+    {
+        // The provider's own reason, e.g. a model refused for another selector revision.
+        why = EnumNamePredictionStatus(prediction->status());
+        if(prediction->reason() != nullptr && prediction->reason()->size() != 0)
+        {
+            why += ": " + prediction->reason()->str();
+        }
+        return nullptr;
+    }
+    // The host already rejects other metrics; re-check so different quantities never compare.
+    if(prediction->metric() == nullptr || prediction->metric()->string_view() != metric.name)
+    {
+        why = "the prediction is in another metric";
+        return nullptr;
+    }
+    if(!isValidMetricValue(metric, prediction->value()))
+    {
+        why = "the predicted value is not one '" + std::string(metric.name) + "' can take";
         return nullptr;
     }
     if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
        && !usableConfig(prediction->engine_config(), engineId))
     {
+        why = "the predicted configuration is unusable";
         return nullptr;
     }
     return prediction;
@@ -204,6 +234,22 @@ std::string joinIds(const std::vector<int64_t>& ids)
         names += (names.empty() ? "" : ", ") + std::to_string(id);
     }
     return names;
+}
+
+/// Whether (@p engineId, @p why) is new to this process. Each finalize ranks one graph, and
+/// an engine's reason (a refused model, a missing one) rarely changes between graphs, so each
+/// is said once. Bounded, because a reason may name graph-specific values.
+bool firstReason(int64_t engineId, const std::string& why)
+{
+    constexpr std::size_t MAX_REMEMBERED = 1024;
+    static std::mutex s_mutex;
+    static std::unordered_set<std::string> s_said;
+    const std::lock_guard<std::mutex> lock(s_mutex);
+    if(s_said.size() >= MAX_REMEMBERED)
+    {
+        return false;
+    }
+    return s_said.insert(std::to_string(engineId) + '\n' + why).second;
 }
 } // namespace
 
@@ -492,15 +538,22 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
             {
                 continue;
             }
-            RankedEngine row{id, false, 0, {}};
+            RankedEngine row{id, false, 0, {}, {}};
             const EnginePrediction* estimate = nullptr;
             if(desc.modeB)
             {
-                estimate = query(*host, id, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, *metric);
+                estimate
+                    = query(*host, id, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, *metric, row.why);
+                if(estimate == nullptr)
+                {
+                    row.why = "L2: " + row.why + "; L1: ";
+                }
             }
             if(estimate == nullptr)
             {
-                estimate = query(*host, id, HIPDNN_ENGINE_PREDICTION_ENGINE, *metric);
+                std::string why;
+                estimate = query(*host, id, HIPDNN_ENGINE_PREDICTION_ENGINE, *metric, why);
+                row.why += why;
             }
             EngineConfigT config;
             config.engine_id = id;
@@ -523,13 +576,30 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
             row.config = builder.Release();
             desc.ranked.push_back(std::move(row));
         }
+        const auto policyName = desc.modeB ? MODE_B_POLICY_NAME : MODE_A_POLICY_NAME;
+        // Each unscored engine's own reason, once per process: the summary lines below say
+        // which engines went unscored, and this says why (a refused model names both
+        // selector revisions).
+        for(const auto& row : desc.ranked)
+        {
+            if(!row.available && firstReason(row.id, row.why))
+            {
+                PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
+                                       "%s: engine %lld has no usable '%.*s' prediction: %s",
+                                       policyName,
+                                       static_cast<long long>(row.id),
+                                       static_cast<int>(metric->name.size()),
+                                       metric->name.data(),
+                                       row.why.c_str());
+            }
+        }
         if(!available)
         {
             // Nothing scored: decline rather than return a static order that reads as a ranking
             // (RFC 0019 §11.2).
             PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
                                    "%s declined: no engine serves '%.*s' at %s",
-                                   desc.modeB ? MODE_B_POLICY_NAME : MODE_A_POLICY_NAME,
+                                   policyName,
                                    static_cast<int>(metric->name.size()),
                                    metric->name.data(),
                                    desc.modeB ? "L1 or L2" : "L1");
@@ -573,7 +643,7 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
                                    "%s ranked %zu of %zu engines by '%.*s' at %s; engine(s) %s "
                                    "had no usable '%.*s' prediction and were appended in static "
                                    "order without being scored.",
-                                   desc.modeB ? MODE_B_POLICY_NAME : MODE_A_POLICY_NAME,
+                                   policyName,
                                    desc.ranked.size() - unscored.size(),
                                    desc.ranked.size(),
                                    static_cast<int>(metric->name.size()),

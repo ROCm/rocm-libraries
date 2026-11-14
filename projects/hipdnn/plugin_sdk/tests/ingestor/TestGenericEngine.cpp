@@ -5,6 +5,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -23,6 +26,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -1064,6 +1068,32 @@ TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsTheSetWithAnd
     EXPECT_EQ(
         engineSelectorRevision(makeUnslottedGoldenSet(/*withRanker=*/true)),
         "generic-untuned-v1/08d0a086e080663548bcda1ae0e01b557cd58734e6d8281839e337ae6de179b2");
+}
+
+/// The written selector is what `uhd_gen restamp` diffs between a training build and this
+/// one, so it must reproduce the revision the engine reports, under a file name any
+/// filesystem accepts whatever the engine is called.
+TEST(TestIngestorGenericEngine, WrittenSelectorReproducesTheRevisionUnderAPortableFileName)
+{
+    auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+    set.engine.name = "hipkernel:golden/engine";
+    const auto dir
+        = std::filesystem::temp_directory_path()
+          / ("selector_dump_"
+             + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+    const hipdnn_test_sdk::utilities::ScopedDirectory scoped(dir);
+
+    const auto path = writeEngineSelector(set, dir);
+
+    EXPECT_EQ(path.filename().string(), "hipkernel_golden_engine.selector.json");
+    std::ifstream file(path);
+    const auto document = nlohmann::json::parse(file);
+    const auto revision = engineSelectorRevision(set);
+    EXPECT_EQ(document.at("engine").get<std::string>(), set.engine.name);
+    EXPECT_EQ(document.at("selector_revision").get<std::string>(), revision);
+    EXPECT_EQ(GENERIC_SELECTOR_REVISION_PREFIX
+                  + hipdnn_plugin_sdk::uhd::sha256(document.at("selector").dump()),
+              revision);
 }
 
 /// No ranker: no UHD id, no model hash, and nothing a cached ranking could be invalidated
