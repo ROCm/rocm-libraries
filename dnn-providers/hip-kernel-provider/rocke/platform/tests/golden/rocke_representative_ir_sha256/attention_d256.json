@@ -21,10 +21,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 534817,
+          "bytes": 536772,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_g8_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "37651d0984c18e6e54de8271c6e9bf515a4d28ddb9ce155f27192d14e6dde076",
+          "sha256": "56bb6608cba9bca2a73752426ad27b7255042b47753e523aa1e2951bc71cbd22",
           "status": "ok"
         }
       },
@@ -50,10 +50,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 534917,
+          "bytes": 536872,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_g8_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "9360a69ce33fdf232199b66c4487ae830bb903e144a5b1ec6cebba935243a5a2",
+          "sha256": "648bb6782e5387bd699363014326dfb88bc55e1f7c5a106cb7d91f22e5619a9f",
           "status": "ok"
         }
       },
@@ -79,10 +79,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 534981,
+          "bytes": 536936,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_g8_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "cac9740f074aaed79d86db8184a52ab16b9950600dc43dd631cc3e0f5667f603",
+          "sha256": "fdd95d47dfc94b03bce94452e5b4fae47a4fc8b7f9c5d155962a727426bef545",
           "status": "ok"
         }
       },
@@ -108,10 +108,10 @@
         },
         "attention_d256/gfx950/pad_interleave": {
           "arch": "gfx950",
-          "bytes": 534981,
+          "bytes": 536936,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t64_g8_bf16_w2_mw32_mfma32_stqk_s1_mask1_hlpv_mlim_ksb_mphsplit_smxil2g4_qdreg_qrev",
-          "sha256": "cac9740f074aaed79d86db8184a52ab16b9950600dc43dd631cc3e0f5667f603",
+          "sha256": "fdd95d47dfc94b03bce94452e5b4fae47a4fc8b7f9c5d155962a727426bef545",
           "status": "ok"
         }
       },

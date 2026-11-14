@@ -32,20 +32,12 @@ from __future__ import annotations
 
 import pytest
 
+from _gpu_gate import requires_gpu
+
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
 
-def _gpu_ready() -> bool:
-    """True on a gfx942 box with ROCm torch (gated on ``gcnArchName``, the ISA
-    target, as the dense numeric lane does)."""
-    if not torch.cuda.is_available():
-        return False
-    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
-
-
-requires_gfx942_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx942 GPU with ROCm torch"
-)
+requires_gfx942_gpu = requires_gpu("gfx942")
 
 # Scenario names come from the probe's table; spelled out here so the test ids
 # are collectable without importing kernel code on a CPU box.

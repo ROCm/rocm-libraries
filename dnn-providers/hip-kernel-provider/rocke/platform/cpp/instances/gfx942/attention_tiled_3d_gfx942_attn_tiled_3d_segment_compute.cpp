@@ -302,6 +302,15 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         rocke_value_t* nxt_page_id = NULL;
         rocke_value_t* nxt_page_id_window = NULL;
         rocke_value_t** S_n;
+        /* fp8 K/V: this tile's V and the next tile's K chunks. */
+        rocke_value_t* v_fp8_voff[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* v_fp8_row[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* v_fp8_col[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* v_fp8_loaded[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* k_fp8_voff[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* k_fp8_row[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* k_fp8_col[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
+        rocke_value_t* k_fp8_loaded[ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS];
         rocke_value_t* m_new;
         rocke_value_t* m_safe;
         rocke_value_t* l_local;
@@ -359,6 +368,15 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                 ctx, page_id_window, safe_next_tile);
         }
 
+        if(cfg->KV_FP8)
+        {
+            /* The offsets, and so the page lookups, ahead of QK: they overlap it. */
+            rocke_gfx942_attention_tiled_3d_fp8_chunk_offsets(
+                ctx, kv_tile_iv, v_fp8_voff, v_fp8_row, v_fp8_col);
+            rocke_gfx942_attention_tiled_3d_fp8_chunk_offsets(
+                ctx, safe_next_tile, k_fp8_voff, k_fp8_row, k_fp8_col);
+        }
+
         /* ---------------- QK: S^T = K Q^T (16x16x16, K-step 16) ---------------- */
         for(n = 0; n < cfg->QK_N_TILES; n++)
         {
@@ -380,8 +398,23 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
             S_n[n] = acc_v;
         }
 
-        rocke_gfx942_attention_tiled_3d_issue_v(ctx, kv_tile_iv, v_buf, cur_page_id);
-        rocke_gfx942_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf, nxt_page_id);
+        if(cfg->KV_FP8)
+        {
+            /* This tile's V and the next tile's K loads all in flight before any dequant. */
+            rocke_gfx942_attention_tiled_3d_issue_fp8_loads(ctx, true, v_fp8_voff, v_fp8_loaded);
+            rocke_gfx942_attention_tiled_3d_issue_fp8_loads(ctx, false, k_fp8_voff, k_fp8_loaded);
+            rocke_gfx942_attention_tiled_3d_store_fp8_dequant(
+                ctx, true, v_fp8_loaded, v_fp8_row, v_fp8_col, v_buf);
+            rocke_gfx942_attention_tiled_3d_store_fp8_dequant(
+                ctx, false, k_fp8_loaded, k_fp8_row, k_fp8_col, nxt_buf);
+            rocke_gfx942_attention_tiled_3d_zero_fp8_v_rows_past_sequence(
+                ctx, v_fp8_row, v_fp8_col, v_buf, kv_tile_iv);
+        }
+        else
+        {
+            rocke_gfx942_attention_tiled_3d_issue_v(ctx, kv_tile_iv, v_buf, cur_page_id);
+            rocke_gfx942_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf, nxt_page_id);
+        }
         if(cfg->WAVE_PAGE_ID_LOAD)
         {
             nxt_page_id_window = rocke_gfx942_attention_tiled_3d_refill_page_id_window(

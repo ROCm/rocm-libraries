@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* static tile distribution (32x32 C dist)        */
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_transpose_lds_reader_t (PV reader)         */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_paged_kv_copies_internal.h" /* rocke_kv_page_copies_t */
 #include "rocke/instance_gfx950_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -85,10 +86,11 @@ extern "C" {
  * (16 per-lane elems for the wide C dist) or HD=256 narrow (16 N-tiles * 2
  * atoms). 64 covers any buildable shape. */
 #define ROCKE_GFX950_ATTN2D_MAX_ACCS 64
-/* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS + cur_buf. */
-#define ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS 96
-/* Most pages per tile whose ids the KV loop carries; larger tiles read them in
- * place (Python's PAGE_PREFETCH applies the same bound). */
+/* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS + cur_buf,
+ * plus 2 carried page ids per page of a tile (MAX_PREFETCH_PAGES). */
+#define ROCKE_GFX950_ATTN2D_MAX_ITER_ARGS 128
+/* Most pages per tile whose ids the KV loop carries (Python's PAGE_PREFETCH has the
+ * same limit); tiles of more pages read their ids in place. */
 #define ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES 16
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE 16
@@ -266,17 +268,14 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
     rocke_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
     rocke_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
-    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
+    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(seq_base + ceil(seq_len/BS)) */
     rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES            */
     rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS            */
     rocke_value_t* kv_block_bytes_c_v; /* kv_stride_blk_b_v (one block)   */
-    /* bf16/fp16 loaders (!KV_FP8, !FAST_PAGED_KV_DESC): the lane's in-page byte
-     * offset, each copy's first-token offset in its page (indexed by that
-     * copy within the page, BS / copy tokens entries on the arena; [0] stays
-     * NULL), and the i64 page stride (I64_KV_ADDR). */
-    rocke_value_t* lane_within_b_v;
-    rocke_value_t** copy_tok_b;
-    rocke_value_t* kv_stride_blk_i64_v;
+    /* bf16/fp16 loaders addressing copies by page (Python page_copies,
+     * PAGE_COPIES; set up in emit_preloop). */
+    rocke_kv_page_copies_t page_copies;
+    bool PAGE_COPIES;
     /* Page ids the KV loop carries when page copies prefetch them (one per page
      * of a tile), with the tile index value each set belongs to: the first tile
      * and the one after it (prologue), the current and next tile, and the tile

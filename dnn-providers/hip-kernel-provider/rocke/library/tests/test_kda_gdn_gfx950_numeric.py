@@ -15,31 +15,9 @@ from __future__ import annotations
 
 import pytest
 
+from _gpu_gate import requires_gpu
 
-def _gpu_ready():
-    # rocke's own query, not torch's: `hip_module.get_device_arch` goes through
-    # hipDeviceGetAttribute and already strips the feature flags, returning
-    # "gfx950" rather than "gfx950:sramecc+:xnack-". Asking torch would mean a
-    # substring test against torch's formatting of the same string -- and the
-    # library layer is meant to work without torch, so a device question rocKE
-    # can answer itself should not route through it.
-    try:
-        import torch
-    except Exception:  # noqa: BLE001
-        return False
-    if not torch.cuda.is_available():
-        return False
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch() == "gfx950"
-    except Exception:  # noqa: BLE001
-        return False
-
-
-requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
-)
+requires_gfx950_gpu = requires_gpu("gfx950")
 
 
 @pytest.mark.gpu

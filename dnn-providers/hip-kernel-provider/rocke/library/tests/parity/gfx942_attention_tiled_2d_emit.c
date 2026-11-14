@@ -318,6 +318,42 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_conflict_free_v_store = true;
         s->use_i64_kv_addr = (idx == 19);
         break;
+    case 20: /* Fast paged-KV descriptor (bounded V tail per call). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 4;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_fast_paged_kv_desc = true;
+        break;
+    case 21: /* Page copies whose copy spans pages (blocks from the wave). */
+        s->head_size = 32;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 8;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+    case 22: /* cfg21 with i64 K/V. */
+        make_spec(21, s);
+        s->use_i64_kv_addr = true;
+        break;
+    case 23: /* cfg11 with i64 K/V (mid-row copies, per-page resource). */
+        make_spec(11, s);
+        s->use_i64_kv_addr = true;
+        break;
     default:
         return -1;
     }

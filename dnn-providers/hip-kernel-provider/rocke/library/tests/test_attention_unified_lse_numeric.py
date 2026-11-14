@@ -19,17 +19,14 @@ from kernels.common.attention_unified import (  # noqa: E402
 )
 from kernels.common import attention_unified as au  # noqa: E402
 
+from _gpu_gate import gpu_arch, requires_gpu
+
 
 def _arch():
-    if not torch.cuda.is_available():
-        return None
-    name = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return next((a for a in ("gfx942", "gfx950") if a in name), None)
+    return gpu_arch() if gpu_arch() in ("gfx942", "gfx950") else None
 
 
-requires_cdna3_or_4 = pytest.mark.skipif(
-    _arch() is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
-)
+requires_cdna3_or_4 = requires_gpu("gfx942", "gfx950")
 
 
 def _tolerance(dtype):
