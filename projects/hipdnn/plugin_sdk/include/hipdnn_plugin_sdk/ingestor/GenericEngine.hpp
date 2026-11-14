@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -24,6 +25,7 @@
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
@@ -34,6 +36,10 @@
 
 namespace hipdnn_plugin_sdk::ingestor
 {
+
+/// Names a directory into which makeEngine() writes each engine's selector, for comparing
+/// the selector an L1 model was trained against with the one a build serves.
+constexpr const char* SELECTOR_DUMP_DIR_ENV = "HIPDNN_UHD_SELECTOR_DUMP_DIR";
 
 /// The first of @p knobs that @p fields does not declare, or nullptr. RFC 0017
 /// §4 treats an undeclared knob as a load error, since the field supplies its type,
@@ -135,21 +141,22 @@ public:
                 if(descriptor.trainedAgainstSelectorRevision.empty())
                 {
                     // Nothing to match against: a contract failure, not a wrong build.
-                    _binding.markUnusable(
-                        metric,
-                        arch,
-                        hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID,
-                        "model records no trained_against.selector_revision, so it cannot be "
-                        "matched to a provider build");
+                    refuseModel(metric,
+                                arch,
+                                descriptor,
+                                hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID,
+                                "model records no trained_against.selector_revision, so it "
+                                "cannot be matched to a provider build");
                 }
                 else if(descriptor.trainedAgainstSelectorRevision != _selectorRevision)
                 {
-                    _binding.markUnusable(
-                        metric,
-                        arch,
-                        hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE,
-                        "model was trained against " + descriptor.trainedAgainstSelectorRevision
-                            + ", engine reports " + _selectorRevision);
+                    refuseModel(metric,
+                                arch,
+                                descriptor,
+                                hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE,
+                                "model was trained against "
+                                    + descriptor.trainedAgainstSelectorRevision
+                                    + ", engine reports " + _selectorRevision);
                 }
                 else
                 {
@@ -317,6 +324,7 @@ public:
                                        arch,
                                        features,
                                        evaluate && kind == HIPDNN_ENGINE_PREDICTION_ENGINE);
+        reportRefusal(metric, arch);
         if(!result.binding_json.empty())
         {
             auto binding = nlohmann::json::parse(result.binding_json);
@@ -374,6 +382,46 @@ public:
     }
 
 private:
+    /// Marks @p model unusable for (@p metric, @p arch) and keeps why, for reportRefusal().
+    void refuseModel(const std::string& metric,
+                     const std::string& arch,
+                     const HeuristicDescriptor& model,
+                     hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status,
+                     const std::string& reason)
+    {
+        _refusals[{metric, arch}] = "model=" + toString(model.id) + " disabled: " + reason;
+        _binding.markUnusable(metric, arch, status, reason);
+    }
+
+    /// Logs why the model for (@p metric, @p arch) was refused, once per process, when a
+    /// request on that architecture meets it: selection then ranks this engine in static order
+    /// without saying so. Not at construction, where every other architecture's model in the
+    /// set (each trained against its own architecture's selector) would be reported too.
+    void reportRefusal(const std::string& metric, const std::string& arch) const
+    {
+        const auto refusal = _refusals.find({metric, arch});
+        if(refusal == _refusals.end())
+        {
+            return;
+        }
+        static std::mutex s_mutex;
+        static std::set<std::string> s_logged;
+        {
+            const std::lock_guard<std::mutex> lock(s_mutex);
+            if(!s_logged.insert(_engine.name + '\n' + metric + '\n' + arch).second)
+            {
+                return;
+            }
+        }
+        HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
+                                << _engine.name << "' metric='" << metric << "' arch='" << arch
+                                << "' engine-prediction " << refusal->second
+                                << "; the engine is ranked without an estimate. Set "
+                                << SELECTOR_DUMP_DIR_ENV
+                                << " to write this build's selector and compare it with the "
+                                   "training build's.");
+    }
+
     EngineDescriptor _engine;
     std::unique_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     int64_t _id;
@@ -381,6 +429,8 @@ private:
     uhd::EngineModelBinding _binding;
     std::string _selectorRevision;
     nlohmann::json _provenance;
+    /// (metric, arch) -> why its model was refused at construction.
+    std::map<std::pair<std::string, std::string>, std::string> _refusals;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor
