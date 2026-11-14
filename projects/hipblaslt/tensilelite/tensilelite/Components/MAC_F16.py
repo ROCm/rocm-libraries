@@ -23,7 +23,9 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr, VOP3PModifiers
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VFmaPKF16
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
@@ -137,7 +139,7 @@ class FMA_F16_Packed(MAC):
                               "MacDataTypeB": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
 
         module = Module("FMA_F16_Packed")
@@ -145,41 +147,29 @@ class FMA_F16_Packed(MAC):
 
         priority = Component.Priority.find(writer)
 
-        vars = {}
-
-        vars["m"] = m
-        vars["kernel"] = kernel
-
-        vars["ThreadTile0"] = kernel["ThreadTile0"]
-        vars["ThreadTile1"] = kernel["ThreadTile1"]
-
-        vars["Half_ThreadTile0"] = kernel["ThreadTile0"] // 2
-        vars["Half_ThreadTile1"] = kernel["ThreadTile1"] // 2
 
         for blockB in range(0, kernel["ThreadTile1"]//2):
             for blockA in range(0, kernel["ThreadTile0"]//2):
                 for iui in range(0, innerUnroll):
-                    vars["blockA"] = blockA
-                    vars["blockB"] = blockB
-                    vars["iui"] = iui
+                    cIdx0 = blockA + blockB * kernel["ThreadTile0"]
+                    cIdx1 = cIdx0 + kernel["ThreadTile0"] // 2
+                    a = vgpr(f"ValuA_X{m}_I{iui}+{blockA}")
+                    b = vgpr(f"ValuB_X{m}_I{iui}+{blockB}")
+                    c0 = vgpr(f"ValuC+{cIdx0}")
+                    c1 = vgpr(f"ValuC+{cIdx1}")
+                    module.add(VFmaPKF16(
+                        dst=c0, src0=a, src1=b, src2=c0,
+                        vop3=VOP3PModifiers(op_sel=[0, 0, 0], op_sel_hi=[1, 0, 1]),
+                        comment=f"ValuC[{cIdx0}] iui={iui}"))
+                    prio = priority(writer, 1, "Raise priority while processing macs")
+                    if prio:
+                        module.add(prio)
+                    module.add(VFmaPKF16(
+                        dst=c1, src0=a, src1=b, src2=c1,
+                        vop3=VOP3PModifiers(op_sel=[0, 1, 0], op_sel_hi=[1, 1, 1]),
+                        comment=f"ValuC[{cIdx1}] iui={iui}"))
 
-                    cIdxExpr = "{blockA} + {blockB}*{ThreadTile0} + 0".format_map(vars)
-
-                    # /2 b/c of 2 f16's per 32-bit vgpr
-                    cStr = "v[vgprValuC + {}]".format(eval(cIdxExpr))
-
-                    aStr = "v[vgprValuA_X{m}_I{iui} + {blockA}]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui} + {blockB}]".format_map(vars)
-
-                    module.addInst("v_pk_fma_f16", cStr, aStr, bStr, cStr, "op_sel:[0,0,0]", "op_sel_hi:[1,0,1]", cIdxExpr)
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
-
-                    cIdxExpr = "{blockA} + {blockB}*{ThreadTile0} + {Half_ThreadTile0}".format_map(vars)
-                    cIdxVal  = eval(vars["cIdxExpr"])
-
-                    cStr = "v[vgprValuC + {cIdxExpr}]".format_map(vars)
-
-                    module.addInst("v_pk_fma_f16", cStr, aStr, bStr, cStr, "op_sel:[0,1,0]", "op_sel_hi:[1,1,1]", cIdxExpr)
-
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        prio = priority(writer, 0, "Reset priority after macs")
+        if prio:
+            module.add(prio)
         return module
