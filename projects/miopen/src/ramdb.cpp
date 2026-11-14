@@ -279,7 +279,10 @@ template <class TFunc>
 static void Measure(const std::string& funcName, TFunc&& func)
 {
     if(!miopen::IsLogging(LoggingLevel::Info))
+    {
         func();
+        return;
+    }
 
     const auto start = std::chrono::high_resolution_clock::now();
     func();
