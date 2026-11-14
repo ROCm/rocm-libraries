@@ -407,14 +407,16 @@ namespace
     }
 
     // Runs the analysis and the solve with x = 1. change_uplo is set on the matrix between the
-    // analysis and the solve. status is the first status that is not success.
-    void sptrsv_csc_run(const Arguments&     arg,
-                        const csc_case&      c,
-                        std::vector<double>& hy,
-                        int64_t&             symbolic,
-                        int64_t&             numeric,
-                        rocsparse_status&    status,
-                        bool                 change_uplo = false)
+    // analysis and the solve. With solve_diags, one solve per diagonal type, on the same
+    // descriptor. status is the first status that is not success.
+    void sptrsv_csc_run(const Arguments&                        arg,
+                        const csc_case&                         c,
+                        std::vector<double>&                    hy,
+                        int64_t&                                symbolic,
+                        int64_t&                                numeric,
+                        rocsparse_status&                       status,
+                        bool                                    change_uplo = false,
+                        const std::vector<rocsparse_diag_type>& solve_diags = {})
     {
         rocsparse_error*       p_error = nullptr;
         rocsparse_local_handle handle(arg);
@@ -482,8 +484,18 @@ namespace
         const double alpha  = 1.0;
         const void*  palpha = &alpha;
         status              = rocsparse_status_success;
-        for(auto stage : {rocsparse_sptrsv_stage_analysis, rocsparse_sptrsv_stage_compute})
+
+        std::vector<std::pair<rocsparse_sptrsv_stage, rocsparse_diag_type>> stages{
+            {rocsparse_sptrsv_stage_analysis, c.diag}};
+        for(auto diag :
+            solve_diags.empty() ? std::vector<rocsparse_diag_type>{c.diag} : solve_diags)
         {
+            stages.emplace_back(rocsparse_sptrsv_stage_compute, diag);
+        }
+        for(auto [stage, diag] : stages)
+        {
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
             if(stage == rocsparse_sptrsv_stage_compute)
             {
                 CHECK_ROCSPARSE_ERROR(
@@ -619,5 +631,26 @@ void testing_sptrsv_csc_extra(const Arguments& arg)
         csc_case c = banded_csc(8, -1, -1, rocsparse_index_base_zero);
         sptrsv_csc_run(arg, c, hy, symbolic, numeric, status, true);
         EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_pointer, status);
+    }
+    {
+        // A unit-diagonal solve between the analysis and a non-unit solve keeps the structural
+        // pivot of the analysis.
+        for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+        {
+            csc_case c = banded_csc(64, 17, -1, base);
+            sptrsv_csc_run(arg,
+                           c,
+                           hy,
+                           symbolic,
+                           numeric,
+                           status,
+                           false,
+                           {rocsparse_diag_type_non_unit,
+                            rocsparse_diag_type_unit,
+                            rocsparse_diag_type_non_unit});
+            CHECK_ROCSPARSE_ERROR(status);
+            unit_check_scalar<int64_t>(17 + base, symbolic);
+            unit_check_scalar<int64_t>(17 + base, numeric);
+        }
     }
 }
