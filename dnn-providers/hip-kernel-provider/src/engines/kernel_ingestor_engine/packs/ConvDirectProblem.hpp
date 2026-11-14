@@ -113,6 +113,9 @@ struct Config
     /// Rows batch unfold (2-D): an MFMA's 16 columns are 16 / un columns of
     /// each of un consecutive images; 1 is the plain tile.
     int un = 0;
+    /// Rows on packed channels-first activations in place (2-D, 16-bit, gfx950): the halo is
+    /// fetched as it lies and transposed in LDS, the output stored channels-first; no staging.
+    int cf = 0;
     std::string archs; ///< ship list: comma-separated arch groups, or "any"
 
     /// Output pixels per block (the planner's tile budget) and output channels per block.
@@ -154,7 +157,8 @@ int64_t ldsLimitOf(std::string_view gcnArchName);
 
 /// LDS a rows config's kernel declares: two halo stages of (wp pw + r - 1) x (16 wq + s - 1)
 /// pixels x bc channels of the atom's operand (ConvDirectRows.h; the staged epilogue reuses a
-/// stage). 0 for a config of another kind.
+/// stage); a channels-first config one such stage plus one raw stage of (wp pw + r - 1) x bc
+/// channel rows of 8-column runs. 0 for a config of another kind.
 int64_t rowsLdsBytes(const Config& config);
 
 /// Whether the device runs @p config: its atom exists there, its ship list names it, and (rows)

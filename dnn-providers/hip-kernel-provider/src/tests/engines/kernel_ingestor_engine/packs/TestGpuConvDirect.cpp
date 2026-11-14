@@ -338,6 +338,16 @@ std::vector<DeviceCase> deviceCases()
     // A grid of a few tiles over 4+ channel chunks: the rows split-C configs (fp32 partials and
     // the in-order reduce) serve it; 200 channels leave the last split a short chunk.
     cases.push_back({"Nhwc3x3SplitC", dense(200, 72, {9, 11}, {3, 3}, {1, 1}, true)});
+    // Channels-first rows of whole 16-byte runs (widths a multiple of 8): the in-place
+    // channels-first configs serve these; leading pads 2, 0 and 3 move the halo against its
+    // 8-aligned runs, 72 and 136 channels leave short chunks, and many tiles make blocks walk.
+    cases.push_back({"Nchw3x3Runs", dense(72, 136, {21, 40}, {3, 3}, {2, 2}, false)});
+    cases.push_back({"Nchw3x3RunsPad0", dense(40, 24, {9, 16}, {3, 3}, {0, 0}, false)});
+    cases.push_back({"Nchw3x3RunsAsymmetric",
+                     padded(dense(40, 24, {9, 16}, {3, 3}, {1, 1}, false), {0, 3}, {2, 1})});
+    auto manyRuns = dense(136, 40, {48, 64}, {3, 3}, {1, 1}, false);
+    manyRuns.n = 6;
+    cases.push_back({"Nchw3x3RunsManyTiles", manyRuns});
     return cases;
 }
 

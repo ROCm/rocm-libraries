@@ -365,7 +365,7 @@ struct ConfigFields
     int64_t bm = 128, bn = 64, bc = 32, wm = 2, wn = 2, vec = 8;
     int64_t ring = 1, bl = 0, split = 0;
     int64_t tm = 0, tn = 0, nt = 0, threads = 0, pipe = 0;
-    int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0;
+    int64_t rows = 0, pw = 0, fn = 0, wp = 0, wq = 0, wk = 0, pp = 0, epi = 0, un = 0, cf = 0;
 };
 
 /// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
@@ -445,7 +445,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"wk", f.wk},
                        {"pp", f.pp},
                        {"epi", f.epi},
-                       {"un", f.un}};
+                       {"un", f.un},
+                       {"cf", f.cf}};
     return kernel;
 }
 
@@ -670,6 +671,77 @@ TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx908OnItsAtoms)
     EXPECT_TRUE(admits(wide, "gfx908"));
 }
 
+/// A gfx950 channels-first rows config: 1 x 2 x 4 waves of 8 rows x 16 columns x 64 channels.
+ConfigFields rowsCfFields()
+{
+    auto f = rowsFields();
+    f.wp = 1;
+    f.wk = 4;
+    f.bm = 8;
+    f.bn = 256;
+    f.epi = 0;
+    f.cf = 1;
+    return f;
+}
+
+/// A packed channels-first 2-D shape whose rows are whole 16-byte runs of 16-bit elements.
+ConvShape cfShape()
+{
+    auto shape = baseShape();
+    shape.input = {7, 16};
+    return shape;
+}
+
+TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivationsOnGfx950)
+{
+    const auto f = rowsCfFields();
+    // Raw stage (10 halo rows x 64 channel rows x 6 runs of 16 bytes) plus one channels-last stage.
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(f, "HALF"))),
+              10 * 64 * 6 * 16 + 10 * 34 * 64 * 2);
+    EXPECT_TRUE(admits(f, "gfx950:sramecc+:xnack-", cfShape()));
+    auto bf = f;
+    bf.atom = "mfma16x32_bf16";
+    EXPECT_TRUE(admits(bf, "gfx950", cfShape(), "BFLOAT16"));
+    // Channels-last activations take the plain rows configs.
+    auto last = cfShape();
+    last.channelsLast = true;
+    EXPECT_FALSE(admits(f, "gfx950", last));
+    // Input rows must be whole 16-byte runs: width 6 is 12 bytes.
+    EXPECT_FALSE(admits(f, "gfx950", baseShape()));
+    // 16-byte LDS DMA and transpose reads: gfx950 only, even when the ship list names another.
+    auto other = f;
+    other.atom = "mfma16_f16";
+    other.archs = "gfx942";
+    other.bc = 32;
+    EXPECT_FALSE(admits(other, "gfx942", cfShape()));
+    other.cf = 0;
+    EXPECT_TRUE(admits(other, "gfx942", cfShape())) << "the same tile, staged";
+    // Not with the fp32 atom, ping-pong, batch unfold, split-C or the staged epilogue.
+    auto exact = f;
+    exact.atom = "mfma16_f32";
+    exact.vec = 4;
+    exact.bc = 32;
+    EXPECT_FALSE(admits(exact, "gfx950", cfShape(), "FLOAT"));
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"pp",
+         [](ConfigFields& f) {
+             f.pp = 1;
+             f.wk = 2;
+             f.fn = 4;
+             f.bn = 128;
+         }},
+        {"un", [](ConfigFields& f) { f.un = 2; }},
+        {"split", [](ConfigFields& f) { f.split = 1; }},
+        {"epi", [](ConfigFields& f) { f.epi = 1; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = rowsCfFields();
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx950", cfShape())) << name;
+    }
+}
+
 TEST(TestConvDirectKernelMatch, RowsConfigsDeclineHaloStagesPastTheDeviceLds)
 {
     EXPECT_EQ(conv_direct::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
@@ -741,6 +813,7 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
          }},
         {"epi", [](ConfigFields& f) { f.epi = 2; }},
         {"un", [](ConfigFields& f) { f.un = 3; }},
+        {"cf", [](ConfigFields& f) { f.cf = 2; }},
         {"un 0", [](ConfigFields& f) { f.un = 0; }},
         {"kd (no 2x3x3 filter)", [](ConfigFields& f) { f.kd = 2; }},
         {"ring", [](ConfigFields& f) { f.ring = 1; }},
@@ -763,14 +836,14 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
         EXPECT_FALSE(admits(f, "gfx950")) << name;
     }
     // The rows knobs belong to rows configs only.
-    for(int field = 0; field < 8; ++field)
+    for(int field = 0; field < 9; ++field)
     {
         ConfigFields mma;
         mma.atom = "mfma16x32_f16";
         mma.archs = "gfx950";
         ASSERT_TRUE(admits(mma, "gfx950"));
-        std::array<int64_t*, 8> knobs{
-            &mma.pw, &mma.fn, &mma.wp, &mma.wq, &mma.wk, &mma.pp, &mma.epi, &mma.un};
+        std::array<int64_t*, 9> knobs{
+            &mma.pw, &mma.fn, &mma.wp, &mma.wq, &mma.wk, &mma.pp, &mma.epi, &mma.un, &mma.cf};
         *knobs[static_cast<size_t>(field)] = 1;
         EXPECT_FALSE(admits(mma, "gfx950")) << "rows knob " << field << " on an mma config";
     }

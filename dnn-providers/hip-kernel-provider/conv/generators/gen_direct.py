@@ -68,8 +68,9 @@ INTS = [
     "pp",
     "epi",
     "un",
+    "cf",
 ]
-ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0)
+ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0)
 STRINGS = ["direction", "dtype", "kind", "atom", "archs"]
 F33, F55, F77, F17, F71, F333, F555 = (
     (1, 3, 3),
@@ -137,10 +138,11 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
     )
 
 
-def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0):
+def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0, cf=0):
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
-    (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images.
+    (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images. cf 1
+    (2-D, 16-bit, gfx950): packed channels-first activations read and written in place.
     """
     return dict(
         kind="rows",
@@ -173,6 +175,7 @@ def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0)
         pp=pp,
         epi=epi,
         un=un,
+        cf=cf,
     )
 
 
@@ -311,6 +314,12 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F333, 8, 2, 2, 3, 2, 32, 8),
             RW(f"mfma16x32_{e}", F333, 8, 2, 2, 2, 2, 64, 8),
             RW(f"mfma16x32_{e}", F333, 8, 4, 2, 2, 2, 64, 8),
+            # Packed channels-first activations in place (no staging transposes): the 256-wide K
+            # tile at 64- and 32-channel chunks, the 16 x 32 tile, and the 20-row tile for 40^2.
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 64, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 5, 4, 4, 1, 2, 64, 8, epi=0, cf=1),
         ],
     )
     add(
@@ -692,9 +701,18 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             if c["rows"]:
                 # ConvDirectRows.h's two halo stages; the pack gates the same (rowsLdsBytes).
                 eb = 4 if c["atom"] == "mfma16_f32" else 2
-                lds = 2 * (c["wp"] * c["pw"] + c["r"] - 1)
-                lds *= c["un"] * (c["wq"] * 16 // c["un"] + c["s"] - 1)
-                lds *= c["bc"] * eb
+                hh = c["wp"] * c["pw"] + c["r"] - 1
+                lds = (
+                    2
+                    * hh
+                    * c["un"]
+                    * (c["wq"] * 16 // c["un"] + c["s"] - 1)
+                    * c["bc"]
+                    * eb
+                )
+                if c["cf"]:
+                    runs = (7 + c["wq"] * 16 + c["s"] - 1 + 7) // 8
+                    lds = lds // 2 + hh * c["bc"] * runs * 16
                 limit = 160 * 1024 if archs <= {"gfx950"} else 64 * 1024
                 assert lds <= limit, (c, archs, lds)
                 name = (
@@ -703,6 +721,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     f".pp{c['pp']}.epi{c['epi']}"
                     + (f".u{c['un']}" if c["un"] > 1 else "")
                     + (".split" if c["split"] else "")
+                    + (".cf" if c["cf"] else "")
                 )
             else:
                 name = (
