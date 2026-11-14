@@ -40,6 +40,8 @@ subtrees:
     title: Use the find APIs and immediate mode
   - file: how-to/use-nhwc-batchnorm-in-pytorch.rst
     title: Use NHWC Batch Normalization with PyTorch
+  - file: how-to/use-hipdnn-forwarding.rst
+    title: Use hipDNN forwarding
 
 - caption: Samples
   entries:

@@ -73,6 +73,16 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   replay a captured graph.
 
 ### Added
+* [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
+  thin public `libMIOpen.so` over the new `libMIOpen_private.so`; set it to `Off` for the previous
+  single-library build.
+* [hipDNN] Added experimental hipDNN forwarding of `miopenConvolutionForward`,
+  `miopenConvolutionBackwardData`, `miopenConvolutionBackwardWeights` and
+  `miopenConvolutionBiasActivationForward`. It is off by default and not intended for production
+  use; enable it with `MIOPEN_HIPDNN_FORWARDING=1`. See `docs/how-to/use-hipdnn-forwarding.rst`.
+* [hipDNN] Added the experimental `miopenGetLastForwardedError` API, which reports whether the last
+  call failed in hipDNN.
+* [hipDNN] Added `stderr` logging for hipDNN forwarding. See `docs/how-to/debug-log.rst`.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.

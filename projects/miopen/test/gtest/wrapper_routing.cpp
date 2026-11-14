@@ -232,7 +232,9 @@ TEST(CPU_WrapperRoutingForwardingSet_NONE, EmptySetMatchesNothing)
 }
 
 // Adding an entry point to the build's forwarding set has to break this test,
-// so the addition is deliberate rather than silent.
+// so the addition is deliberate rather than silent. It cannot check that the new entry
+// point has a HipdnnShim test; the checklist above kForwardingEntries in
+// src/private/routing.cpp requires one, so review must check.
 TEST(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsTheConvolutionFamily)
 {
     EXPECT_EQ(DefaultForwardingSet().size(), 4u);

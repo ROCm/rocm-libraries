@@ -14,8 +14,14 @@ failed, but only on the devices each line names. A listed divergence that no
 longer matches what this device produced fails the comparison, so the list
 cannot go stale.
 
-Both runs execute the same binary from the same build, so any divergence is a
-behavioural difference introduced by forwarding.
+"Parity" here means no regression under tolerance, not bit-identical output. The two
+runs' numbers are never compared with each other: each test checks its own result
+against a CPU reference within a tolerance. This script checks that no test passes in
+one run and fails, is skipped, or takes a different path in the other.
+
+Both runs use the same binary from the same build, so a difference not listed in
+--known-divergences comes from forwarding. known_forwarding_divergences.txt holds the
+accepted ones, such as a call that forwarding serves and MIOpen declines, or the reverse.
 """
 
 import argparse
