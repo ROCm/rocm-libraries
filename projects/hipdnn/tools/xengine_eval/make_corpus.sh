@@ -18,6 +18,7 @@
 #                            (--also-engine-name each); needs CORPUS_GEN_ENGINE.
 #   CORPUS_GEN_PLUGIN_DIRS   colon-separated engine plugin dirs (--plugin-dir each); needed with
 #                            CORPUS_GEN_ENGINE.
+#   CORPUS_GEN_OPS           space-separated operations to generate instead of the default list.
 # Feed <out dir> to: xengine_eval.py run --graphs <out dir> ...
 set -euo pipefail
 
@@ -38,12 +39,16 @@ fi
 [[ $seed =~ ^[0-9]+$ ]] || { echo "error: seed must be a non-negative integer, got '$seed'" >&2; exit 64; }
 
 # Operations where engines compete (names are the *.opmeta.json "operation" values).
+# CORPUS_GEN_OPS (space-separated) generates only those, e.g. "sdpa_fwd sdpa_bwd".
 ops=(
     conv_fwd conv_bwd_data conv_bwd_weights
     sdpa_fwd sdpa_bwd
     batchnorm_fwd_training batchnorm_inference
     layernorm_fwd rmsnorm_fwd
 )
+if [[ -n ${CORPUS_GEN_OPS:-} ]]; then
+    read -r -a ops <<<"$CORPUS_GEN_OPS"
+fi
 
 engine_args=()
 if [[ -n ${CORPUS_GEN_ENGINE:-} ]]; then
