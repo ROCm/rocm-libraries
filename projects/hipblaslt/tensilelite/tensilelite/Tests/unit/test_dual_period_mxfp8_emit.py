@@ -189,6 +189,38 @@ def test_prefetch_local_read_is_name_only(dual_src):
 
     assert instructions(_emit_dual_period_kernel(plr=1)) == instructions(dual_src)
 
+def test_odd_phase_tail_rewinds_scale_srds_with_their_bounds(dual_src):
+    align_start = dual_src.index(
+        "dual-period tail: test completed-DepthU parity for scale SRDs")
+    align_end = dual_src.index("label_SubtileTailScaleSrdAligned:", align_start)
+    tail_start = dual_src.index("/* TAILLOOP */", align_end)
+    alignment = dual_src[align_start:align_end]
+
+    parity_test = next(
+        ln for ln in dual_src.splitlines()
+        if "dual-period tail: test completed-DepthU parity for scale SRDs" in ln)
+    assert parity_test.lstrip().startswith("s_bitcmp1_b32")
+    assert re.search(r",\s*7(?:\s|//)", parity_test), parity_test
+    assert "s_cbranch_scc0 label_SubtileTailScaleSrdAligned" in alignment
+
+    for tc in ("MXSA", "MXSB"):
+        rewind = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: rewind to odd-DU scale epoch" in ln)
+        borrow = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: scale SRD rewind borrow" in ln)
+        restore = next(
+            ln for ln in alignment.splitlines()
+            if f"{tc}: restore rewound num_records" in ln)
+        assert rewind.lstrip().startswith("s_sub_u32")
+        assert "256" in rewind
+        assert borrow.lstrip().startswith("s_subb_u32")
+        assert restore.lstrip().startswith("s_add_u32")
+        assert "256" in restore
+
+    assert align_start < align_end < tail_start
+
 
 def test_no_scale_local_read_in_preloop(dual_src):
     """The pre-loop prefetches data operands but not scales.

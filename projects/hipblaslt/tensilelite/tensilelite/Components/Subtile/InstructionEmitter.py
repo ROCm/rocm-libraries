@@ -21,13 +21,17 @@ from .SubtileScaleEmit import (
 )
 from rocisa.code import Module
 from rocisa.instruction import (
-    SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
-    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
+    SWaitCnt, SBarrier, DSLoadB32, SBitcmp1B32, SCmpEQU32, SCmpLeU32,
+    SCBranchSCC0, SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
 )
 from rocisa.instruction import SWaitTensorcnt
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.code import Label
+
+# A scale group packs this many adjacent subtiles into each scale dword, so it
+# is also the byte distance between consecutive K-phases within that dword.
+SCALE_SUBTILES_PER_GROUP = 2
 
 
 class SWaitCntEx(SWaitCnt):
@@ -128,7 +132,7 @@ class InstructionEmitter:
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':           lambda em, ui: self.emit_lr(em.source, ui),
             'gr':           lambda em, ui: self.emit_gr(em.source, ui),
-            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
+            'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source, ui),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
             'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source, ui),
@@ -301,9 +305,13 @@ class InstructionEmitter:
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_wait_gr(self, source):
+    def emit_wait_gr(self, source, unroll_iter=0):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
-        counts = source.wait_gr_counts
+        counts_by_unroll = getattr(source, 'wait_gr_counts_by_unroll', None)
+        if counts_by_unroll:
+            counts = counts_by_unroll[unroll_iter % len(counts_by_unroll)]
+        else:
+            counts = source.wait_gr_counts
         if counts is None:
             return []
 
@@ -739,20 +747,56 @@ class InstructionEmitter:
             # host zero-padding leaves OOB scale bytes at 0x00 (0x00
             # AND 0 = 0x00) but kept to stay explicit under any input
             # pattern.
+            # One scale dword serves scaleStride K-steps, which read it back
+            # through op_sel rather than reloading it, but each K-step takes a
+            # different lane mask because laneK_n grows with n. Masking only on
+            # the step that loads the dword therefore leaves the later steps'
+            # out-of-range lanes carrying live scale bytes. The masks nest -- a
+            # lane past the end at step n is past it at every later step -- so
+            # re-ANDing per step only ever clears more lanes.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
             if (not isBF16) and self.hasScale \
                     and (self.vgprTilesSA or self.vgprTilesSB) \
-                    and scaleStride > 0 and (subIterK % scaleStride == 0):
+                    and scaleStride > 0:
+                scaleVgprs = []
                 for tensor, tilesList in (('SA', self.vgprTilesSA),
                                           ('SB', self.vgprTilesSB)):
                     liveIds = sorted(set(
                         source.vgpr_tile_map.get(tensor, [{}])[0].values()))
                     for tid in liveIds:
                         for v in list(tilesList[tid]):
+                            scaleVgprs.append(v)
                             module.add(VAndB32(
                                 dst=vgpr(v), src0=vgpr(v),
                                 src1=vgpr(maskVgprs[0]),
                                 comment=f"mask scale vgpr (reuse A/B mask, subIterK={subIterK})"))
+
+                # The tail is populated with unroll_iter=0, so its MFMAs select
+                # scale byte 0 of the shared dword. That is the live K-phase
+                # only when the tail starts a fresh scale epoch; after an odd
+                # number of DepthU iterations the tail continues the epoch and
+                # owns byte 2. op_sel is encoded in the instruction, so shift
+                # the dword down by one phase instead -- byte 2 lands in byte 0
+                # for both subtiles the group packs.
+                # Unlike the mask above, this rewrites the dword itself, so it
+                # belongs to the step that loaded it and must not repeat.
+                if scaleVgprs and (subIterK % scaleStride == 0) \
+                        and getattr(self.config, 'dualPeriodScale', False):
+                    phaseBit = kernel["DepthU"].bit_length() - 1
+                    aligned = Label("SubtileTailScalePhase0_k%u" % subIterK, "")
+                    module.add(SBitcmp1B32(
+                        src0=sgpr(f"SizesSum+{writer.states.unrollIdx}"),
+                        src1=phaseBit,
+                        comment="dual-period tail: test completed-DepthU parity"))
+                    module.add(SCBranchSCC0(
+                        labelName=aligned.getLabelName(),
+                        comment="even completed DepthU count: tail owns phase 0"))
+                    for v in scaleVgprs:
+                        module.add(VLShiftRightB32(
+                            dst=vgpr(v), shiftHex=8 * SCALE_SUBTILES_PER_GROUP,
+                            src=vgpr(v),
+                            comment="odd count: advance scale dword to phase 1"))
+                    module.add(aligned)
 
         for m in set(maskVgprs):
             writer.vgprPool.checkIn(m)
