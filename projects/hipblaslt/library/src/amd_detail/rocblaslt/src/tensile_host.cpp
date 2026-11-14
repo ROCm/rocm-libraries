@@ -40,6 +40,7 @@
 #include "mx_scale_format.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
+#include "device_hardware_cache.hpp"
 #include "get_all_search_type_for_test.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
@@ -3135,120 +3136,6 @@ namespace
         return preceding == '_' || preceding == '-';
     }
 
-    TensileLite::LazyLoadingInit getLazyLoadingArch(int deviceID)
-    {
-        hipDeviceProp_t deviceProperties;
-        HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceID));
-        // strip out xnack/ecc from name
-        std::string deviceFullString(deviceProperties.gcnArchName);
-        std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
-
-        if(deviceString.find("gfx803") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx803;
-        }
-        else if(deviceString.find("gfx900") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx900;
-        }
-        else if(deviceString.find("gfx906") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx906;
-        }
-        else if(deviceString.find("gfx908") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx908;
-        }
-        else if(deviceString.find("gfx90a") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx90a;
-        }
-        else if(deviceString.find("gfx942") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx942;
-        }
-        else if(deviceString.find("gfx950") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx950;
-        }
-        else if(deviceString.find("gfx1010") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1010;
-        }
-        else if(deviceString.find("gfx1011") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1011;
-        }
-        else if(deviceString.find("gfx1012") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1012;
-        }
-        else if(deviceString.find("gfx1030") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1030;
-        }
-        else if(deviceString.find("gfx1100") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1100;
-        }
-        else if(deviceString.find("gfx1101") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1101;
-        }
-        else if(deviceString.find("gfx1102") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1102;
-        }
-        else if(deviceString.find("gfx1103") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1103;
-        }
-        else if(deviceString.find("gfx1150") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1150;
-        }
-        else if(deviceString.find("gfx1151") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1151;
-        }
-        else if(deviceString.find("gfx1152") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1152;
-        }
-        else if(deviceString.find("gfx1153") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1153;
-        }
-        else if(deviceString.find("gfx1170") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1170;
-        }
-        else if(deviceString.find("gfx1171") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1171;
-        }
-        else if(deviceString.find("gfx1200") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1200;
-        }
-        else if(deviceString.find("gfx1201") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1201;
-        }
-        // Must precede gfx1250, whose substring test this name also satisfies.
-        // The caller de-duplicates devices by this value, so sharing gfx1250's
-        // would drop the second stepping on a machine holding both.
-        else if(deviceString.find("gfx1250-strict") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1250_strict;
-        }
-        else if(deviceString.find("gfx1250") != std::string::npos)
-        {
-            return TensileLite::LazyLoadingInit::gfx1250;
-        }
-        return TensileLite::LazyLoadingInit::None;
-    }
-
     /**************************************************
  * The TensileHost struct interfaces with Tensile *
  **************************************************/
@@ -3258,9 +3145,7 @@ namespace
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
             m_library;
 #if ROCBLASLT_TENSILE_LAZY_LOAD
-        std::unordered_set<TensileLite::LazyLoadingInit>                  m_deviceSet;
-        std::unordered_map<int, std::shared_ptr<hipDeviceProp_t>> m_devicePropMap;
-        std::unordered_map<int, std::shared_ptr<TensileLite::Hardware>> m_hardwareMap;
+        rocblaslt::DeviceHardwareCache<TensileLite::Hardware> m_devices;
 #else
         std::shared_ptr<hipDeviceProp_t>       m_deviceProp;
         std::shared_ptr<TensileLite::Hardware> m_hardware;
@@ -3318,11 +3203,11 @@ namespace
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         auto& get_device_property(int deviceId) const
         {
-            return m_devicePropMap.at(deviceId);
+            return m_devices.properties(deviceId);
         }
         auto get_hardware(int deviceId) const
         {
-            return m_hardwareMap.at(deviceId);
+            return m_devices.hardware(deviceId);
         }
 #else
         auto& get_device_property() const
@@ -3501,17 +3386,18 @@ namespace
 
 #if ROCBLASLT_TENSILE_LAZY_LOAD
                 // Get devices
-                hipDeviceProp_t prop;
-                int             count;
+                int count;
                 HIP_CHECK_EXC(hipGetDeviceCount(&count));
-                for(int devId = 0; devId < count; devId++)
-                {
-                    m_deviceSet.insert(getLazyLoadingArch(devId));
-                    // Devices with the same architecture can have different CU counts.
-                    HIP_CHECK_EXC(hipGetDeviceProperties(&prop, devId));
-                    m_devicePropMap[devId] = std::make_shared<hipDeviceProp_t>(prop);
-                    m_hardwareMap[devId] = TensileLite::hip::GetDevice(devId);
-                }
+
+                // Devices with the same architecture can have different CU counts.
+                m_devices.populate(
+                    count,
+                    [](int devId) {
+                        hipDeviceProp_t prop;
+                        HIP_CHECK_EXC(hipGetDeviceProperties(&prop, devId));
+                        return prop;
+                    },
+                    [](int devId) { return TensileLite::hip::GetDevice(devId); });
 
                 // Load library
                 auto lib = TensileLite::LoadLibraryFilePreload<TensileLite::ContractionProblemGemm>(
