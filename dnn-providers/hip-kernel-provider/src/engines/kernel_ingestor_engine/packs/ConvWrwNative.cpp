@@ -72,9 +72,9 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.conv_wrw.graph_matc
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_wrw.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_wrw.dispatch";
 /// The reduce kernels: the same source as ConvWrw, under other entry points; the launch says
-/// which (the row reduce for K C T R S at few splits).
+/// which (the tile reduce for K C T R S at few splits).
 constexpr std::string_view REDUCE_ENTRY_POINT = "ConvWrwReduce";
-constexpr std::string_view REDUCE_ROWS_ENTRY_POINT = "ConvWrwReduceRows";
+constexpr std::string_view REDUCE_TILE_ENTRY_POINT = "ConvWrwReduceTile";
 /// Three-bf16's operand split (math 1), the same source again.
 constexpr std::string_view SPLIT_ENTRY_POINT = "ConvWrwSplit";
 
@@ -356,7 +356,7 @@ public:
             KernelDefinition reduceKernel = kernel;
             // The reduce is the same source under another entry point.
             reduceKernel.source.entryPoint = std::string(
-                launch->reduce.rows != 0 ? REDUCE_ROWS_ENTRY_POINT : REDUCE_ENTRY_POINT);
+                launch->reduce.tile != 0 ? REDUCE_TILE_ENTRY_POINT : REDUCE_ENTRY_POINT);
             reduce = buildIngestorKernelCode(
                 _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature());
             reduce->setBlockSize(launch->reduceBlock, 1, 1);

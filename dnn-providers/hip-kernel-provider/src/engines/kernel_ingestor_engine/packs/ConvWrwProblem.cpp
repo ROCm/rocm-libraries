@@ -50,9 +50,12 @@ constexpr int64_t GENERIC_FMA_MIN_CHANNELS = 8;
 constexpr int64_t GENERIC_FMA_MAX_STRIDE = 4;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
-/// The most splits the row reduce takes (measured on gfx942: rows win at 1 and 2 splits, tie
-/// at 3 and 4, lose from 8).
-constexpr int64_t REDUCE_ROWS_MAX_SPLITS = 2;
+/// The tile reduce's widest channel tile, its narrowest when shrunk for blocks, its most output
+/// channels a tile, and the blocks per dispatch unit it aims for.
+constexpr int64_t REDUCE_TILE_MAX_CHANNELS = 128;
+constexpr int64_t REDUCE_TILE_MIN_CHANNELS = 16;
+constexpr int64_t REDUCE_TILE_MAX_K = 4;
+constexpr int64_t REDUCE_TILE_BLOCKS_PER_UNIT = 2;
 
 int64_t divUp(int64_t value, int64_t divisor)
 {
@@ -600,6 +603,43 @@ int64_t splitsWanted(int64_t blocksXY,
         }
     }
     return best;
+}
+
+ReduceTile reduceTileFor(int64_t groups, int64_t kg, int64_t cg, int64_t taps, int64_t units)
+{
+    ReduceTile t;
+    // Whole quads a tile, all taps within the LDS.
+    const int64_t ldsChannels = K3_REDUCE_TILE_FLOATS / std::max<int64_t>(taps, 1) / 4 * 4;
+    int64_t tileC = std::min({divUp(cg, 4) * 4, REDUCE_TILE_MAX_CHANNELS, ldsChannels});
+    if(tileC < 4 || groups < 1 || kg < 1)
+    {
+        return t;
+    }
+    const int64_t wanted = REDUCE_TILE_BLOCKS_PER_UNIT * std::max<int64_t>(units, 1);
+    const auto blocksAt
+        = [&](int64_t k, int64_t c) { return groups * divUp(kg, k) * divUp(cg, c); };
+    // Narrower tiles (shorter runs) until the blocks fill the units, then as many output
+    // channels a tile as keep them filled.
+    while(tileC > REDUCE_TILE_MIN_CHANNELS && blocksAt(1, tileC) < wanted)
+    {
+        tileC = std::max(REDUCE_TILE_MIN_CHANNELS, tileC / 2 / 4 * 4);
+    }
+    int64_t tileK = 1;
+    for(int64_t k = REDUCE_TILE_MAX_K; k > 1; k /= 2)
+    {
+        if(k * tileC * taps <= K3_REDUCE_TILE_FLOATS && blocksAt(k, tileC) >= wanted)
+        {
+            tileK = k;
+            break;
+        }
+    }
+    tileK = std::min(tileK, kg);
+    t.tileK = tileK;
+    t.tileC = tileC;
+    t.tilesK = divUp(kg, tileK);
+    t.tilesC = divUp(cg, tileC);
+    t.blocks = blocksAt(tileK, tileC);
+    return t;
 }
 
 RingTrack ringTrackOf(int64_t ho, int64_t hi, int64_t ph, int64_t dh, int64_t filterRows)
@@ -1262,17 +1302,15 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const auto workspace
         = pack_features::checkedProduct({splits, *partialElems, int64_t{sizeof(float)}});
     const int64_t quads = a.groups * problem.taps * kg * divUp(cg, 4);
-    // K C T R S filters of several taps (up to the row reduce's LDS) and at most 2 splits: row
-    // blocks, one output channel's run of channels by every tap each, written contiguously
-    // (FCN-32s on gfx906: 16 of 23 ms went to the quad blocks' scattered writes). With more
-    // splits, the quad blocks' split groups read faster (gfx942: 38 splits 224 against 263 us,
-    // 8 splits 66 against 82).
-    const bool reduceRows = !problem.filterChannelsLast && problem.taps > 1
-                            && problem.taps <= K3_REDUCE_ROW_MAX_TAPS
-                            && splits <= REDUCE_ROWS_MAX_SPLITS;
-    const int64_t reduceGrid = reduceRows
-                                   ? a.groups * kg * divUp(cg, int64_t{K3_REDUCE_ROW_CHANNELS})
-                                   : divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    // K C T R S filters of several taps at few splits: tile blocks, which write each output
+    // channel's run of channels by every tap contiguously (reduceTileFor). With more splits, K T
+    // R S C or one tap (channels already contiguous), the quad blocks.
+    const ReduceTile reduceTile
+        = problem.filterChannelsLast || problem.taps < 2 || splits > K3_REDUCE_TILE_MAX_SPLITS
+              ? ReduceTile{}
+              : reduceTileFor(a.groups, kg, cg, problem.taps, units);
+    const int64_t reduceGrid
+        = reduceTile.blocks > 0 ? reduceTile.blocks : divUp(quads, REDUCE_QUADS_PER_BLOCK);
     if(splits > MAX_GRID_YZ || !workspace.has_value()
        || (direct && *workspace > MAX_WORKSPACE_BYTES) || reduceGrid > INT_LIMIT
        || (config.xcd != 0 && gridX * gridY * gridZ > UINT_LIMIT))
@@ -1360,7 +1398,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.wk = cg * problem.taps;
     r.wc = problem.filterChannelsLast ? 1 : problem.taps;
     r.wtap = problem.filterChannelsLast ? cg : 1;
-    r.rows = reduceRows ? 1 : 0;
+    r.tile = reduceTile.blocks > 0 ? 1 : 0;
+    r.tileK = static_cast<int>(reduceTile.tileK);
+    r.tileC = static_cast<int>(reduceTile.tileC);
+    r.tilesK = static_cast<int>(reduceTile.tilesK);
+    r.tilesC = static_cast<int>(reduceTile.tilesC);
     return launch;
 }
 

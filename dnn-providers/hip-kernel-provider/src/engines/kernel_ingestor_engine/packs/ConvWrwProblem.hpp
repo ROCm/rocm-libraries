@@ -266,6 +266,25 @@ int64_t splitsWanted(int64_t blocksXY,
                      int64_t partialElems,
                      int64_t dispatchUnits);
 
+/// The tile reduce's blocks (ConvWrwReduceTile): tiles of tileK output channels by tileC input
+/// channels (a multiple of 4) of one group, by all taps; tilesK x tilesC tiles a group. blocks 0:
+/// no tile fits (more taps than the LDS takes at 4 channels).
+struct ReduceTile
+{
+    int64_t tileK = 0;
+    int64_t tileC = 0;
+    int64_t tilesK = 0;
+    int64_t tilesC = 0;
+    int64_t blocks = 0;
+};
+
+/// The tile reduce's tiles for dw of @p groups groups of @p kg x @p cg channels and @p taps
+/// taps on @p units dispatch units: tileC the input channels (rounded up to quads), at most 128
+/// and within K3_REDUCE_TILE_FLOATS with all taps, halved (down to 16) while the tiles leave
+/// fewer than 2 blocks a unit; tileK the most output channels (4, 2 or 1) a tile within the LDS
+/// that keeps 2 blocks a unit.
+ReduceTile reduceTileFor(int64_t groups, int64_t kg, int64_t cg, int64_t taps, int64_t units);
+
 /// A row ring's tracks (loops 1, 2, 3 at height stride 1): `len` steps a track for the height
 /// classes rho < `longClasses`, len - 1 for the others (K3Track).
 struct RingTrack
