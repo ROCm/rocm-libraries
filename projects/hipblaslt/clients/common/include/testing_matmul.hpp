@@ -1167,8 +1167,6 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         if(char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T
            || char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N)
             return "fast_check with MX scales requires transA=T and transB=N";
-        // The reference recomputes each element's scale as its linear index over the block size,
-        // which holds only when no K block is partial.
         if(arg.K[0] % blockSize(arg.scaleA) != 0 || arg.K[0] % blockSize(arg.scaleB) != 0)
             return "fast_check supports MX scales only when K is a multiple of the scale block";
         if(arg.batch_count > 1)
