@@ -108,8 +108,18 @@ void rocfft_execution_info_internal::ensure_work_buffer_size(
                 << "user work buffer not specified for device " << device << ", allocating size "
                 << size_bytes << std::endl;
         rocfft_scoped_device dev(device);
-        if(execWorkBuffers[device].alloc(size_bytes) != hipSuccess)
-            throw std::runtime_error("work buffer allocation failure");
+        if(user_info && user_info->rocfft_streams[device])
+        {
+            if(execWorkBuffers[device].alloc_on_stream(size_bytes,
+                                                       user_info->rocfft_streams[device])
+               != hipSuccess)
+                throw std::runtime_error("stream-ordered work buffer allocation failure");
+        }
+        else
+        {
+            if(execWorkBuffers[device].alloc(size_bytes) != hipSuccess)
+                throw std::runtime_error("work buffer allocation failure");
+        }
     }
 }
 
