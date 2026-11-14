@@ -3259,8 +3259,8 @@ namespace
             m_library;
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         std::unordered_set<TensileLite::LazyLoadingInit>                  m_deviceSet;
-        std::unordered_map<std::string, std::shared_ptr<hipDeviceProp_t>> m_devicePropMap;
-        std::unordered_map<std::string, std::shared_ptr<TensileLite::Hardware>> m_hardwareMap;
+        std::unordered_map<int, std::shared_ptr<hipDeviceProp_t>> m_devicePropMap;
+        std::unordered_map<int, std::shared_ptr<TensileLite::Hardware>> m_hardwareMap;
 #else
         std::shared_ptr<hipDeviceProp_t>       m_deviceProp;
         std::shared_ptr<TensileLite::Hardware> m_hardware;
@@ -3316,13 +3316,13 @@ namespace
             return m_library;
         }
 #if ROCBLASLT_TENSILE_LAZY_LOAD
-        auto& get_device_property(const std::string& deviceName) const
+        auto& get_device_property(int deviceId) const
         {
-            return m_devicePropMap.at(deviceName);
+            return m_devicePropMap.at(deviceId);
         }
-        auto get_hardware(const std::string& deviceName) const
+        auto get_hardware(int deviceId) const
         {
-            return m_hardwareMap.at(deviceName);
+            return m_hardwareMap.at(deviceId);
         }
 #else
         auto& get_device_property() const
@@ -3506,20 +3506,11 @@ namespace
                 HIP_CHECK_EXC(hipGetDeviceCount(&count));
                 for(int devId = 0; devId < count; devId++)
                 {
-                    auto deviceArch = getLazyLoadingArch(devId);
-                    if(m_deviceSet.find(deviceArch) == m_deviceSet.end())
-                    {
-                        // populate the arch list for lazy loading
-                        m_deviceSet.insert(deviceArch);
-                        // populate device property map, used in finding solutions based on arch
-                        HIP_CHECK_EXC(hipGetDeviceProperties(&prop, devId));
-                        // strip out xnack/ecc from name
-                        std::string deviceFullString(prop.gcnArchName);
-                        std::string deviceString
-                            = deviceFullString.substr(0, deviceFullString.find(":"));
-                        m_devicePropMap[deviceString] = std::make_shared<hipDeviceProp_t>(prop);
-                        m_hardwareMap[deviceString] = TensileLite::hip::GetDevice(devId);
-                    }
+                    m_deviceSet.insert(getLazyLoadingArch(devId));
+                    // Devices with the same architecture can have different CU counts.
+                    HIP_CHECK_EXC(hipGetDeviceProperties(&prop, devId));
+                    m_devicePropMap[devId] = std::make_shared<hipDeviceProp_t>(prop);
+                    m_hardwareMap[devId] = TensileLite::hip::GetDevice(devId);
                 }
 
                 // Load library
@@ -3610,9 +3601,9 @@ namespace
             *library = host.get_library();
 #if ROCBLASLT_TENSILE_LAZY_LOAD
         if(deviceProp)
-            *deviceProp = host.get_device_property(rocblaslt_internal_get_arch_name());
+            *deviceProp = host.get_device_property(device);
         if(hardware)
-            *hardware = host.get_hardware(rocblaslt_internal_get_arch_name());
+            *hardware = host.get_hardware(device);
 #else
         if(deviceProp)
             *deviceProp = host.get_device_property();
