@@ -2620,16 +2620,15 @@ class KernelWriterAssembly(KernelWriter):
             macro.add(item)
         module.add(macro)
 
-      # dot2: oneIUI for tail loop
-      if kernel["UseDotInstruction"]:
-        macro = Macro("MAC_%ux%u_X%u_OneIUI" % (kernel["ThreadTile0"],kernel["ThreadTile1"], 0), [""])
-        component = Component.MAC.find(self)
-        if not component:
-          printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
-        innerModule = component(self, tPA, tPB, 0, 1)
-        for item in innerModule.items():
-            macro.add(item)
-        module.add(macro)
+      # The tail loop can request one inner unroll for any VALU MAC path.
+      macro = Macro("MAC_%ux%u_X%u_OneIUI" % (kernel["ThreadTile0"],kernel["ThreadTile1"], 0), [""])
+      component = Component.MAC.find(self)
+      if not component:
+        printExit("Assembly doesn't support datatype %s" % kernel["ProblemType"]["DataType"])
+      innerModule = component(self, tPA, tPB, 0, 1)
+      for item in innerModule.items():
+        macro.add(item)
+      module.add(macro)
 
     module.setNoOpt(True)
     return module
