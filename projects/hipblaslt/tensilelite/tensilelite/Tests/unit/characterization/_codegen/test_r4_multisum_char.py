@@ -26,9 +26,8 @@ triggers the "other summation" branch (loopIdx=0 != unrollIdx=1).
 Two sub-paths tested
 --------------------
 1. **SGPR path (BufferLoad=True, globalReadIncsUseVgpr=False):**
-   Lines 5026-5092.  Uses tP_B (``isA=False``) to avoid the ``None``-rReg bug
-   in the ``isA=True`` branch's ``scalarStaticDivideAndRemainder`` call at
-   line 5047.  The SGPR path emits SMulI32 + SSubI32 + SLShiftLeftB32.
+   Lines 5026-5092, on tP_B (``isA=False``) and tP_A (``isA=True``).  With
+   tP_B the SGPR path emits SMulI32 + SSubI32 + SLShiftLeftB32.
 
 2. **printExit path (BufferLoad=False, globalReadIncsUseVgpr=True):**
    Lines 5023-5025.  With non-buffer-load the code calls ``printExit``
@@ -130,6 +129,7 @@ _MULTISUM_KERNEL = {
         "UseInitialStridesAB": False,
         "IndexAssignmentsA": [0, 2, 3],
         "IndexAssignmentsB": [3, 1, 2],
+        "UseScaleAlphaVec": 0,
     },
     "DepthU": 16,
     "GlobalSplitU": 1,
@@ -137,12 +137,18 @@ _MULTISUM_KERNEL = {
     "GlobalSplitUAlgorithm": "MultipleBuffer",
 }
 
-# tP for the B tensor (isA=False skips the broken None-rReg arm at line 5047).
 _TP_B = {
     "tensorChar": "B",
     "isA": False,
     "isB": True,
     "idx": 1,
+}
+
+_TP_A = {
+    "tensorChar": "A",
+    "isA": True,
+    "isB": False,
+    "idx": 0,
 }
 
 
@@ -269,4 +275,22 @@ class TestMultiSumGraIncrementsVgprPrintExit:
         output = captured.getvalue()
         assert "2" in output, (
             f"Expected NumIndicesSummation=2 in printExit message; got: {output!r}"
+        )
+
+
+class TestMultiSumGraIncrementsSGPRTensorA:
+    """SGPR other-summation arm on the A tensor (isA=True)."""
+
+    def setup_method(self):
+        _init_rocisa_gfx942()
+
+    def test_tensor_a_emits_divide(self):
+        from rocisa.instruction import SLShiftRightB32
+
+        kwa = _build_minimal_kwa(_MULTISUM_KERNEL, globalReadIncsUseVgpr=False)
+        kwa.sgprs["LoopCounterL"] = 40
+        items = list(kwa.graIncrements(_MULTISUM_KERNEL, 0, _TP_A).flatitems())
+        assert any(isinstance(it, SLShiftRightB32) for it in items), (
+            f"Expected >=1 SLShiftRightB32 (SizesSum / DepthU); "
+            f"items: {[type(x).__name__ for x in items]}"
         )

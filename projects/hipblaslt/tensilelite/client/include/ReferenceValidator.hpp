@@ -140,6 +140,7 @@ namespace TensileLite
 
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
             std::vector<std::vector<uint8_t>>           m_referenceRecvs;
+            std::vector<std::vector<uint8_t>>           m_a2aGemmB;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
@@ -147,8 +148,8 @@ namespace TensileLite
             ContractionProblem* m_problem = nullptr;
 
             bool m_enabled;
-            bool m_fusedA2A              = false;
-            bool m_validateAfterEnqueues = false;
+            FusedA2A m_fusedA2A              = FusedA2A::Disabled;
+            bool     m_validateAfterEnqueues = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -175,6 +176,7 @@ namespace TensileLite
 
             bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
             void referenceRecvs(ContractionProblemGemm const& problem);
+            void interleaveA2AGemmReferences(ContractionProblemGemm const& problem);
         };
     } // namespace Client
 } // namespace TensileLite
