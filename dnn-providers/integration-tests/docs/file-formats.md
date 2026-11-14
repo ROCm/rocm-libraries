@@ -435,11 +435,13 @@ when:
 The offsets need not increase from batch to batch when the node has seq_len
 tensors.
 
-The harness compares a ragged output on the host only, as it compares a
-[`live_rows`](#outputs-with-rows-past-a-live-length--live_rows) output. Under
-`--validator auto` (the default) and `--validator cpu`, it copies output that a
-GPU reference left on the device to the host. Under `--validator gpu` the output
-fails with `Ragged output NOT COMPARABLE ON DEVICE`.
+Under `--validator auto` (the default) and `--validator cpu`, the harness
+compares a ragged output on the host, as it compares a
+[`live_rows`](#outputs-with-rows-past-a-live-length--live_rows) output, and
+copies output that a GPU reference left on the device to the host. Under
+`--validator gpu` the device `allclose` and integer exact validators compare a
+ragged output in place. The device `rms` validator is dense-only, so a ragged
+output under `rms` fails with `Ragged output NOT COMPARABLE ON DEVICE`.
 
 ### Tensors that share memory — `aliases`
 

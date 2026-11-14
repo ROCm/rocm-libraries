@@ -26,6 +26,15 @@ struct ValidatorArgs
     long long implStrides[8];
     long long dims[8];
     int ndim;
+
+    // Ragged layout (RFC 0014) shared by both tensors. origins == nullptr means dense.
+    // Otherwise ndim > 0, totalElements counts every padded logical position, origins holds
+    // the B element offsets each batch is based at, lengths the B live sequence-row counts,
+    // and positions past a batch's live sequence rows are skipped.
+    const long long* origins;
+    const long long* lengths;
+    int seqAxis;
+    int* comparedFlag; // ragged allClose only: set to 1 once any in-block element is compared
 };
 
 // Running totals for the relative-RMS validator, zero-initialised by the host and

@@ -70,15 +70,15 @@ std::string validatorNotApplicableAtSite(const std::string& label,
     return error.str();
 }
 
-/// The report for a ragged output whose comparison resolved to the device. No device
-/// validator understands ragged layouts.
-std::string raggedNotSupportedOnDevice(const std::string& label)
+/// The report for a ragged output whose RMS comparison resolved to the device. The device
+/// RMS validator does not understand ragged layouts.
+std::string raggedRmsNotSupportedOnDevice(const std::string& label)
 {
     std::ostringstream error;
     error << "\nRagged output NOT COMPARABLE ON DEVICE\n"
           << "  Tensor: " << label << "\n"
-          << "  Ragged outputs are compared on the host only, and this run asks for the\n"
-             "  comparison on the device.\n"
+          << "  Ragged outputs under the rms validator are compared on the host only, and\n"
+             "  this run asks for the comparison on the device.\n"
              "  Rerun with --validator cpu or --validator auto to compare it on the host.\n";
     return error.str();
 }
@@ -291,10 +291,10 @@ std::optional<TensorMismatch>
     const auto dataType = attrs.data_type();
     const auto label = tensorLabel(uid, attrs);
 
-    if(site == ValidationSite::DEVICE
+    if(site == ValidationSite::DEVICE && tolerance.kind == ValidatorKind::RMS
        && (expected.raggedIterationInfo().has_value() || actual.raggedIterationInfo().has_value()))
     {
-        return TensorMismatch{uid, label, raggedNotSupportedOnDevice(label)};
+        return TensorMismatch{uid, label, raggedRmsNotSupportedOnDevice(label)};
     }
 
     if(site == ValidationSite::HOST)

@@ -1273,10 +1273,12 @@ TEST(TestOutputComparison, RaggedHeadMajorOutputCompares)
             .has_value());
 }
 
-// The device validators index every padded position, which for a ragged tensor reads other
-// batches' rows, so a device-site ragged comparison is refused with a pointer to the host.
-TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
+// The device allclose validator understands ragged layouts, so a device-site ragged
+// comparison is graded there rather than refused.
+TEST(TestOutputComparison, RaggedAllCloseOutputComparesOnDevice)
 {
+    SKIP_IF_NO_DEVICES();
+
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
                                                                              buffer.size()};
@@ -1286,13 +1288,38 @@ TEST(TestOutputComparison, RaggedOutputOnDeviceIsReportedNotThrown)
     auto actual = raggedFloatTensor(3.5f);
 
     EXPECT_FALSE(
-        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
-            .has_value())
+        compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b")
+            .has_value());
+
+    overwriteOnDevice(*actual, 4.0f);
+    const auto mismatch
+        = compareTensor(K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b");
+    ASSERT_TRUE(mismatch.has_value());
+    EXPECT_EQ(mismatch->uid, K_UID_A);
+    EXPECT_EQ(mismatch->report.find("NOT COMPARABLE"), std::string::npos);
+}
+
+// The device RMS validator indexes every padded position, which for a ragged tensor reads
+// other batches' rows, so a device-site ragged RMS comparison is refused with a pointer to
+// the host.
+TEST(TestOutputComparison, RaggedRmsOutputOnDeviceIsReportedNotThrown)
+{
+    const auto buffer = makeGraphBuffer();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
+    const auto rms = ComparisonTolerance::rms(K_RMS_THRESHOLD);
+
+    auto expected = raggedFloatTensor(3.5f);
+    auto actual = raggedFloatTensor(3.5f);
+
+    EXPECT_FALSE(compareTensor(K_UID_A, attrs, *expected, *actual, rms, ValidationSite::HOST, "b")
+                     .has_value())
         << "on the host a ragged pair compares normally";
 
     std::optional<hipdnn_integration_tests::bundle::TensorMismatch> mismatch;
     ASSERT_NO_THROW(mismatch = compareTensor(
-                        K_UID_A, attrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b"));
+                        K_UID_A, attrs, *expected, *actual, rms, ValidationSite::DEVICE, "b"));
 
     ASSERT_TRUE(mismatch.has_value());
     EXPECT_EQ(mismatch->uid, K_UID_A);
@@ -1741,7 +1768,8 @@ std::vector<hipdnn_integration_tests::bundle::TensorMismatch>
                   const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& expected,
                   const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& actual,
                   ValidationSite site,
-                  std::optional<ValidationSite> hostOnlySite)
+                  std::optional<ValidationSite> hostOnlySite,
+                  const ComparisonTolerance& tolerance = exact())
 {
     OutputTensors actualOutputs;
     actualOutputs[K_UID_A] = actual;
@@ -1750,7 +1778,7 @@ std::vector<hipdnn_integration_tests::bundle::TensorMismatch>
         {K_UID_A},
         actualOutputs,
         [&](int64_t) -> hipdnn_data_sdk::utilities::ITensor& { return *expected; },
-        [](const std::string&, auto) { return exact(); },
+        [&](const std::string&, auto) { return tolerance; },
         site,
         "Bundle: b",
         {},
@@ -1775,7 +1803,9 @@ const std::vector<InfinityPair> K_INFINITY_PAIRS = {{"+inf/+inf", K_INF, K_INF, 
 } // namespace
 
 // A GPU reference leaves a ragged output on the device. With the host-only site set
-// (what --validator auto and cpu give), the ragged output is compared on the host.
+// (what --validator auto and cpu give), the ragged output is compared on the host. The
+// device RMS validator is dense-only, so a ragged RMS output left at the device site is
+// refused.
 TEST(TestOutputComparison, RaggedOutputIsComparedAtTheHostOnlySite)
 {
     const auto buffer = makeGraphBufferWithRaggedOutput();
@@ -1793,13 +1823,14 @@ TEST(TestOutputComparison, RaggedOutputIsComparedAtTheHostOnlySite)
             .size(),
         1u);
 
-    const auto refused
-        = compareRagged(wrapper, expected, same, ValidationSite::DEVICE, ValidationSite::DEVICE);
+    const auto rms = ComparisonTolerance::rms(K_RMS_THRESHOLD);
+    const auto refused = compareRagged(
+        wrapper, expected, same, ValidationSite::DEVICE, ValidationSite::DEVICE, rms);
     ASSERT_EQ(refused.size(), 1u);
     EXPECT_NE(refused[0].report.find("Ragged output NOT COMPARABLE ON DEVICE"), std::string::npos);
 
     const auto noHostOnlySite
-        = compareRagged(wrapper, expected, same, ValidationSite::DEVICE, std::nullopt);
+        = compareRagged(wrapper, expected, same, ValidationSite::DEVICE, std::nullopt, rms);
     ASSERT_EQ(noHostOnlySite.size(), 1u)
         << "without a host-only site the ragged output stays at the device site";
 }
