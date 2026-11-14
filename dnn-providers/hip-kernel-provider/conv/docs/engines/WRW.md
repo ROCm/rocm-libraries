@@ -1,0 +1,168 @@
+<!--
+Copyright © Advanced Micro Devices, Inc., or its affiliates.
+SPDX-License-Identifier:  MIT
+-->
+
+# CONV_WRW (K3) — backward weights as a row-direct implicit GEMM, deterministic split reduction
+
+> Engine id: `hipkernel:CONV_WRW` · Generator: `conv/generators/gen_conv_wrw.py` · Kernels: `src/engines/kernel_ingestor_engine/descriptors/conv/wrw/kernels/` (`ConvWrw.cpp`, `ConvWrwCore.h`, `ConvWrwDirect.h`, `ConvWrwGeom.h`, `ConvWrwArgs.h`) · Pack: `packs/ConvWrwNative.cpp`, `packs/ConvWrwProblem.{hpp,cpp}`
+
+## At a glance
+- **What:** dW[k][c][tap] = Σ dy·x over images and output positions, as an implicit GEMM. A block owns all filter-width taps of its filter rows in registers and stages each input window once for all of them. Nine loop bodies (`loop` 0-8) cover strides, rings, stems, narrow maps, gfx950 DMA / direct, exact-fp32 FMA, and a runtime-geometry generic tier.
+- **Covers:** backward weights. fp32, fp16 and bf16; a three-bf16 fp32 form exists only under `HIP_KERNEL_PROVIDER_CONV_TF32`, on the classes where it measured faster. x and dy both packed NCHW or both packed NHWC; the generic tier also reads any strides. dW is packed K C T R S or K T R S C. 1-D, 2-D and 3-D, groups, any stride, dilation and padding, both convolution modes.
+- **Large tensors:** the batch must fit 32 bits. Images past 2 GiB run on block-based-buffer configs (`pb 1`).
+- **Arches:** MFMA on gfx908-gfx950 and WMMA on gfx11/gfx12 (K1's atoms). FMA loops give exact fp32 on RDNA, and serve every dtype on gfx906. gfx950 extras: LDS DMA ring, LDS transpose reads, and the hipconv-class direct loop.
+- **Wins when:** most wrw on RDNA (MIOpen falls to universal GEMM or naive there), NHWC bf16 3x3 / 3x3x3 (VAE, Wan VAE), vocoder 1-D, small-C stems, dilated rows, narrow ResNet / Inception maps (packed rows), pointwise on RDNA and gfx950.
+- **Loses when:**
+  - gfx90a NHWC bf16 VAE 3x3 trails universal GEMM / CK by 1.11-1.28x;
+  - deeplab ASPP at large dilation on 65² maps and on gfx906/908;
+  - NCHW 1x1 fp16 on gfx942 / gfx90a, where MIOpen rounds per image;
+  - hifigan 1x16 stride-8 on gfx950.
+- **Precision:** fp32 accumulation. Split partials are fp32 and summed in a fixed order; dW is rounded once. Deterministic, no atomics, no numerical note.
+- **Instances:** 5,545 configs, 590 of them three-bf16, in per-dtype, per-arch-group packs (`cdna`, `cdnapk`, `gfx950`, `direct`, `rdna`, `fma`, `fmardna`, `fma906`/`fma906b`, `generic`, `genericfma`, `x3*`). Two tiers: specialized (geometry compile-time) and generic (`loop 8`, runtime geometry).
+- **vs MIOpen:** usage-weighted speedup on the subset graphs where K3 is our fastest engine: 1.67x gfx950, 1.43x gfx942, 1.33x gfx90a, 1.79x gfx908, 4.50x gfx1201, 17.95x gfx1100. MIOpen ran in search mode.
+
+## Why it exists
+- MIOpen's wrw is split across CK grouped implicit GEMM (NHWC only, NCHW through 3-5 transposes, atomic split-K), im2col + rocBLAS (`GemmWrwUniversal`), hipconv `direct_wgrad` (gfx950, NHWC 16-bit), and legacy asm/OpenCL kernels. On RDNA and old CDNA it often falls to universal GEMM or naive, at 10-1000x our time.
+- One HIP engine covers every layout, dtype, rank and stride on every arch, reads NCHW in place (positions are already the reduction axis), and stays deterministic. CK's and rocKE's split-K use atomics.
+- The `loop 8` generic tier exists so the long tail (any filter, stride, dilation and strided views) beats the BLAS / naive fallback without growing the specialized catalog.
+
+## How it works
+Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is a dy row chunk (BK x BQ positions), B is the x window under it, and the reduction runs over output positions q.
+
+**Width.** The window a chunk's taps reach, WIN = (BQ-1)·sw + (S-1)·dw + 1, is staged once and split into sw stride phases. Tap s reads phase (s·dw) mod sw, shifted by ⌊s·dw/sw⌋. Odd 16-bit shifts are built from aligned dword reads and `v_alignbyte`.
+
+**Loops** (the `loop` knob):
+
+| loop | name | what a step is | serves |
+|---|---|---|---|
+| 0 | output rows | one output-row chunk with FR filter rows' windows | any stride |
+| 1 | row ring | one input row; the last R dy rows' fragments stay in registers, so one window feeds all R x S taps | unit height stride (any dilation); height stride > 1 as one ring per phase |
+| 2 | DMA ring | loop 1 with 16-byte LDS DMA and 2-4 stages | gfx950, unit width stride |
+| 3 / 4 | FMA ring / FMA rows | loops 1 / 0 on FMA thread tiles (TK x TC for all taps) | exact fp32 on RDNA; every dtype on gfx906 |
+| 5 | direct | hipconv `direct_wgrad` class: a 32-column strip of one image plane over its rows, dy rows in a register ring, x read at every width tap | gfx950 16-bit NHWC, unit width stride and height dilation |
+| 6 | small-C rows | loop 0 with the GEMM's N axis the (input channel, width tap) pairs | stems, ≤ 16 input channels a group |
+| 7 | packed rows | several narrow output rows of one plane in one step, each padded to the taps' reach | narrow channels-first outputs (7², 14² s2, 35² s2) |
+| 8 | generic taps | runtime filter, strides and dilations; dy chunk once, then the x positions each tap reads | the long tail; strided views |
+
+**Ring tracks.** The ring walks tracks: (image, output depth, height class ρ mod dh, width chunk). A track ends at its last step that has both an x row in the image and a dy row for some tap. Trailing pad-only steps are trimmed: at dilation 36 on 128 rows they were a third of the steps.
+
+**Split and reduce.** Steps split evenly over grid z to fill the dispatch units. The count comes from `splitsWanted`: units x `bpu` blocks per unit, at most steps / 4, workspace ≤ 1 GiB, then the count that best fills the last round.
+- Each split writes fp32 partials [split][g][tap][k][c].
+- `ConvWrwReduce` adds them in a fixed order: 4 split groups of every-4th split, then the groups in order. It writes dW in its dtype and layout, reflected for true convolution.
+- K C T R S filters of 2-64 taps at one or two splits take a row reduce, which writes each output channel's run of 64 channels x taps contiguously.
+- At one split into K T R S C (or one tap), `dws 1` configs write dW directly: no workspace and no reduce.
+
+## Implementation design
+- **Layouts.**
+  - `layout 0`: NCHW read in place. `align 1` units start on vector boundaries, so a unit is wholly in or out of a row.
+  - `layout 1`: NHWC transposed into LDS on the store. `align 2` reads dy at any element, for VAE 3-channel heads.
+  - `layout 2`: NHWC kept channels-last on gfx950, with MFMA fragments by `ds_read_b64_tr_b16`.
+  - The channels-first LDS pitch is an odd number of 16-byte units at unit width stride, which removes bank conflicts (deeplab d24).
+- **gfx950 direct loop (5).**
+  - 8 waves; 16-byte DMA into 2-5 separate `__shared__` ring slots, with column-rotated channel groups. The rotation is chosen by a compile-time conflict check of the transpose-read lane map, and the DMA fetch address is its inverse.
+  - 8-wave ping-pong whose memory phase is transpose reads plus DMA issue.
+  - A persistent grid of one workgroup per CU, walking (tile, item) units in XCD-contiguous order, optionally `wq` items side by side.
+  - `directPlanFor` picks the walk (cells or equal runs), the row segments (1-64, minimizing modelled busiest-workgroup time plus partial traffic) and the splits.
+  - Ablation on Flux n8 c256 k128 768², in µs: ring 2317 → direct structure 2204 → +swizzle/DMA/transpose reads 1927 → +ping-pong 1874 → +XCD order 1833.
+- **Host gates.**
+  - Problem gates, everything the naive parser gates, plus: fp32/fp16/bf16; x/dy layouts as above; dW packed; batch and taps within 32 bits; per axis the reach of the 32-bit position math, (out + 512)·stride + filter·dilation + padding, within 32 bits.
+  - Config gates: `wrwLaunchFor` reads and gates every config field — atom on device and type, loop rules, layout, tile against atom, vector, s/sw/dw equal to the filter's, fr, xcd, align, ns, wq, dws, pb, bpu. LDS is gated by the kernels' own `k3LdsBytes`, and load passes must fit their 32-bit mask.
+  - The generic tier declines wherever a specialized class (its `spec` key list) serves the graph. It also declines ASPP-class filters (≤ 9 taps, dilation ≥ 6), where BLAS wins. Its FMA form declines fewer than 8 input channels a group, or width strides ≥ 4.
+- **Large images.** `pb 1` configs start their x and dy buffers at the block's first channel (channels-first loops 0, 1, 6) or at each step's first readable element (generic). An image may then pass 2^31 bytes as long as one block's planes or windows do not. These configs are admitted only for such images. Measured: 257³ stride 2 on gfx950, 2.08 ms against MIOpen's 6.70.
+- **Three-bf16 (`math 1`).** `ConvWrwSplit` writes x and dy as 3N bf16 images: x as [hi | hi' | lo] and dy as [hi | lo | hi'], where hi' is hi with infinities zeroed (the copy that meets the other operand's lo), so an infinity stays infinite instead of becoming NaN. The tuned bf16 config then runs on the 3N-image problem, and the reduce writes fp32 dW. `threeBf16Pays` admits it only where it measured faster than exact fp32 K3:
+  - gfx942 and gfx950: unit stride, ≥ 9 taps, ≥ 128 input and ≥ 64 output channels a group;
+  - gfx11 and gfx12: stems (≤ 4 input channels), or ≥ 256 channels with ≥ 9 taps;
+  - never on gfx90a.
+- **Catalog.** Families × filters: atoms per dtype × tiles × loops × layouts, crossed with a measured FILTERS list. That list covers 3x3 (all dilations up to 36), 1x1, 1-D 1x3-1x11 at dilations 1/3/5, stride-2 and 1x16 stride-8 rows, 7x1/3x1/5x5, packed rows, 32-channel-group rings and 5x5x5. Extra tiles are added where a family's list lacked a measured winner.
+  - Catalog breadth: neighbouring geometries of the top configs (halved or doubled blocks, 32/64 positions, `bpu`), found by a sweep around the shipped winners. They measured +10% on gfx950 and +17% on gfx1201 on a 12-shape set.
+  - Wide pointwise tiles: 256x128 on gfx950, and RDNA ring tiles for long reductions.
+  - `bpu` 1/2/4/8 variants exist so autotune can override the split model.
+- **Codegen choices.**
+  - Every barrier is LDS-only on gfx12.
+  - Per-lane load predicates use bitwise `&` (fewer spills, +1.4-2.3%).
+  - Channels-first edge fix-ups shift a whole 16-byte run as one 128-bit integer, then mask. Its share is +9-13% on narrow-row configs.
+  - Loads are issued straight-line, so the compiler's `vmcnt` waits stay exact.
+  - The ring, DMA-ring and direct loops fit 256 VGPRs only with the current (nightly) LLVM. Older compilers spill the same source heavily.
+
+## Strengths and weaknesses
+Measured: an autotuned sweep of the 1,998-shape conv-kpi subset, our engines only, against MIOpen in search mode. W/L counts shapes faster or slower by more than 5%.
+
+| GPU | graphs K3 is our best | W/L vs MIOpen | weighted speedup | MIOpen solver it mostly meets |
+|---|---|---|---|---|
+| gfx950 | 294 | 199/54 | 1.67x | `GemmWrwUniversal`, CK group wrw (2-D, 3-D) |
+| gfx942 (MI325X) | 266 | 203/31 | 1.43x | `GemmWrwUniversal`, CK 3-D group wrw |
+| gfx90a | 276 | 137/114 | 1.33x | `GemmWrwUniversal`, CK group wrw |
+| gfx908 | 259 | 125/96 | 1.79x | `GemmWrwUniversal`, CK group wrw |
+| gfx906 (FMA) | 226 | 164/51 | 15.6x | `GemmWrwUniversal`, `ConvHipImplicitGemmV4R1WrW`, naive |
+| gfx1201 | 326 | 284/26 | 4.50x | CK group wrw (WMMA), `GemmWrwUniversal` |
+| gfx1100 | 359 | 327/23 | 17.95x | CK group wrw, `GemmWrwUniversal` |
+
+- **Strong:**
+  - Wan VAE 3x3x3 bf16: 0.20-0.64x of MIOpen's time on gfx90a-gfx950.
+  - VAE NHWC bf16 on gfx908 / gfx942 and on RDNA, where MIOpen's universal GEMM is pathological.
+  - nnU-Net fp32 3-D on RDNA and gfx908, where MIOpen runs naive or atomic CK.
+  - Small-C stems: 7x7 s2 c3 0.62 ms against 0.87 on gfx950, 3.47 against 14.2 on gfx1201.
+  - VAE 3-channel heads (gfx1201 c128 k3 768²: 2.25 ms against 23.9).
+  - Deeplab dilated rows on gfx950 / gfx942 at d12 / d24 on 128² maps (0.68-0.95x of MIOpen's time).
+  - The gfx950 direct loop is at parity with `ConvHipConv` on Flux / SDXL VAE (0.96-1.06x).
+- **Weak:**
+  - gfx90a VAE NHWC bf16 3x3 at 96²-384²: 1.11-1.28x behind.
+  - nnU-Net fp32 NCHW 3-D on gfx90a: 1.73x.
+  - Deeplab 65² at dilation 36 (1.47-1.89x), and deeplab dilated on gfx906 / gfx908 (1.5-2.0x).
+  - 3x3 stride 2 on mid-size outputs (about 17²-40²) that packed rows do not take, where 32/64-position chunks run half empty.
+  - hifigan 1x16 stride-8 on gfx950 (4.2x).
+
+## Numerical precision
+- **Accumulation:** fp32. 16-bit products are exact in the atoms; fp32 runs on fp32 MFMA (CDNA) or FMA (RDNA, gfx906). Split partials stay fp32, and the reduce sums them in an order that depends only on the split count, then rounds once. The `dws` direct store rounds the fp32 accumulators once.
+- **Tolerance:** the device suite grades against hipDNN's CPU reference accumulated in fp64. The tolerance is 2e-6 x reduction length + 2 storage-eps x (|ref| + 1e-3); three-bf16 uses 3e-5 x reduction length.
+- **inf/NaN:** infinities in x propagate as in the reference, and a test pins it for exact fp32 and the three-bf16 split. Known open parity item: the gfx950 direct loop (5) can turn inf x structural zero into NaN.
+- **Determinism:** no atomics anywhere. The device suite relaunches each config over a re-filled workspace and compares bits.
+- **Reduced precision:** the three-bf16 form drops lo x lo, about 2^-16 of each product. It carries no precision note (notes are per engine) and moves to a sibling engine once callers can filter by note. MIOpen's `GemmWrw1x1_stride1` rounds dW to fp16 after every image. K3 does not; that form is the env-gated BLAS reduced-precision-reduction engine.
+
+## Comparison with MIOpen
+- **CK `ConvHipImplicitGemm{,3D}GroupWrwXdlops`:** M = K, N = C·taps via descriptor im2col, NHWC only. NCHW goes through 3-5 full-tensor transposes. Split-K uses fp32 or packed 16-bit atomics; deterministic mode forces split 1. K3 wins where CK transposes or runs one split, and loses on some large NHWC bf16 3x3 on gfx90a.
+- **`GemmWrwUniversal` / `GemmWrw1x1_stride1`:** im2col plus a BLAS GEMM per image. Strong on CDNA for large VAE layers and 1x1, and very slow on RDNA. The 1x1 form keeps an fp16 accumulator across images (see above).
+- **`ConvHipConv` (`direct_wgrad`, gfx950):** the design source of loop 5. It is NHWC 16-bit only, stride 1, filters 2²-5²; loop 5 is at parity with it.
+- **Legacy kernels:** `ConvAsmBwdWrW3x3/1x1`, `ConvOclBwdWrW2/53` and `ConvHipImplicitGemmV4R1WrW` serve gfx906 / gfx908. The dilated deeplab layers there are still MIOpen's.
+- **Winograd wrw** (`ConvBinWinogradRxSf3x2`, multipass `<3-x>`): our counterpart is `CONV_WINOGRAD_WRW`.
+
+## Prior art considered
+- **hipconv `direct_wgrad`:** all taps in registers, a kh-deep dy ring, 16-byte swizzled DMA, transpose reads, ping-pong, √H row segments, fp32 partials with a fixed-order reduce. Reimplemented as the ring (every arch) and loop 5 (gfx950).
+- **CK grouped wrw:** studied for mapping and split policy. Its atomic split-K was rejected for determinism.
+- **rocKE wgrad PRs:** an AOT implicit GEMM; a direct wgrad with all taps in registers and a dy ring; atomics or slab folds. Their "per-slice slabs, no atomics" note is K3's scheme.
+- **Language comparison** (K3 ported to rocKE and FlyDSL; 12 corpus shapes, fp16 / bf16, gfx950 / gfx1201 / gfx942):
+  - The best rocKE and FlyDSL flavours ran 1.09-1.25x faster than the K3 that was shipped before the comparison.
+  - The HIP iteration that followed ran 1.25x (gfx950) and 1.29x (gfx1201) faster than that same baseline, ahead of both.
+  - Each gap came from catalog breadth or an ISA-level idiom (128-bit edge shift, predicate form). Both are ported back.
+  - Spills depend on the compiler vintage, not the language.
+
+No code was copied.
+
+## Next steps and deferred ideas
+1. **Remaining language-comparison gaps:**
+   - loop 6 register pins and explicit waits cost 1.19x on gfx1201 stems;
+   - loop 7 live ranges allow one block per CU instead of two (1.20x on gfx950);
+   - a single branch-free ring multiply path (1.05-1.11x on gfx1201 NHWC).
+
+   Each is a measured, same-config gap.
+2. **65² at large dilation:** needs a tap-split / flattened-position loop. A tap-split prototype lost (5.5 against 4.2 ms), so the flattened form is next.
+3. **gfx90a NHWC bf16 VAE 3x3:** a ring ping-pong `pp` knob for CDNA2, whose long MFMA phase suits it (a projection only; needs a probe). Also: d24/d36 there run at 61% of MFMA peak against asm igemm's 70%.
+4. **Strided 3x3 on small maps:** a flattened-position variant of loop 1 phases, as K4 wrw does.
+5. **inf parity in loop 5:** a select for structural zeros, A/B-checked against the compiled-out build.
+6. **Three-bf16 as a tagged sibling engine** once note filtering lands.
+
+## Tests
+- `src/tests/engines/kernel_ingestor_engine/packs/TestConvWrwProblem.cpp` (host):
+  - **Gates:** one refusal per field (`RefusesOneFieldAtATime`, `OneField`); every loop's admission rules (ring phases, DMA ring gfx950-only, the direct loop and its plan, small-C, packed rows, unaligned dy).
+  - **Large images and layouts:** block-based buffers serve only images past the range; layouts are read from strides.
+  - **Generic tier:** spec keys, the ASPP decline, its FMA form.
+  - **Arithmetic and planning:** LDS and load-pass arithmetic against the kernels'; ring track trimming; the split planner and `bpu`; reduce layouts and reflection; the one-split direct store.
+  - **TF32:** three-bf16 admitted only with permission and only on paying classes.
+- `TestGpuConvWrw.cpp` (device), fp32/fp16/bf16 against an fp64-accumulated reference:
+  - every admitted config on NCHW and NHWC, 1-D/2-D/3-D, groups, stride 2, dilations 2/3/12;
+  - padding below, at and past the filter; odd channels and partial tiles; both dW layouts; true convolution;
+  - three-bf16 against exact fp32, and infinities;
+  - the determinism relaunch;
+  - knob uniqueness, generic spec keys, and atom ids and LDS fits per arch.
+- `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (none, deterministic).
