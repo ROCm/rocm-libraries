@@ -11,6 +11,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <random>
 #include <utility>
@@ -859,5 +860,273 @@ TEST(ReferenceFastPath, ComplexMatchesSlowPathExactly)
     {
         SCOPED_TRACE("ComplexDouble");
         checkComplexFastMatchesSlow<double>(rocisa::DataType::ComplexDouble);
+    }
+}
+
+namespace
+{
+    // Float M x N x K problem writing E (useE) of type typeE with strides strideE.
+    ContractionProblemGemm makeUseEProblem(size_t                     M,
+                                           size_t                     N,
+                                           size_t                     K,
+                                           rocisa::DataType           typeE,
+                                           std::vector<size_t> const& stridesE)
+    {
+        using DT     = rocisa::DataType;
+        auto problem = makePackedProblem(DT::Float, DT::Float, DT::Float, M, N, K);
+        problem.setUseE(true);
+        problem.setE(typeE, problem.d().sizes(), stridesE, /*isOutput=*/true);
+        return problem;
+    }
+} // namespace
+
+TEST(ReferenceFastPath, UseEEligibility)
+{
+    using DT = rocisa::DataType;
+    EXPECT_TRUE(isFastPathEligible(makeUseEProblem(4, 4, 4, DT::Float, {})));
+    EXPECT_TRUE(isFastPathEligible(makeUseEProblem(4, 4, 4, DT::Half, {})));
+
+    // With useE the slow path requires equal alpha and beta types and throws
+    // otherwise; the fast path leaves such problems to it. Without useE they are
+    // eligible.
+    auto mixedAlphaBeta = makeUseEProblem(4, 4, 4, DT::Float, {});
+    mixedAlphaBeta.setBetaType(DT::Double);
+    EXPECT_FALSE(isFastPathEligible(mixedAlphaBeta));
+    std::vector<float> a(16, 1.0f), b(16, 1.0f), c(16, 0.0f), d(16, 0.0f), e(16, 0.0f);
+    ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.e = e.data();
+    EXPECT_THROW(SolveGemmCPU(mixedAlphaBeta, inputs, /*elementsToValidate=*/-1, true),
+                 std::runtime_error);
+    auto mixedAlphaBetaNoE = makePackedProblem(DT::Float, DT::Float, DT::Float, 4, 4, 4);
+    mixedAlphaBetaNoE.setBetaType(DT::Double);
+    EXPECT_TRUE(isFastPathEligible(mixedAlphaBetaNoE));
+}
+
+// E receives the value before activation (after bias), converted to E's own type
+// (here Half, while D is Float) and stored at E's own strides (here a padded
+// leading dimension), on both paths; D receives relu of that value.
+TEST(ReferenceFastPath, UseEStoresPreActivationValue)
+{
+    using DT       = rocisa::DataType;
+    const size_t M = 3, N = 2, K = 1, ldE = M + 2;
+    auto problem   = makeUseEProblem(M, N, K, DT::Half, {1, ldE, ldE * N});
+    problem.setUseBias(1);
+    problem.setBias(DT::Float, M, M);
+    problem.setActivationType(ActivationType::Relu);
+    problem.setParams().setActivationEnum(ActivationType::Relu);
+    ASSERT_EQ(problem.e().totalAllocatedElements(), ldE + M);
+
+    // value(m, n) = a[m] * b[n] + bias[m]; 2049 is not a Half value (it rounds to
+    // the even neighbour 2048).
+    const std::vector<float> a    = {2049.0f, -3.0f, 0.5f};
+    const std::vector<float> b    = {1.0f, -1.0f};
+    const std::vector<float> bias = {0.0f, 1.0f, -2.0f};
+    const std::vector<float> c(M * N, 0.0f);
+    const std::vector<float> value = {2049.0f, -2.0f, -1.5f, -2049.0f, 4.0f, -2.5f};
+
+    // E padding (rows M .. ldE - 1 of column 0) must keep its initial value.
+    const Half sentinel(99.0f);
+
+    const std::vector<float> expectedE
+        = {2048.0f, -2.0f, -1.5f, 99.0f, 99.0f, -2048.0f, 4.0f, -2.5f};
+
+    for(bool fast : {true, false})
+    {
+        SCOPED_TRACE(fast ? "fast path" : "slow path");
+        if(fast)
+            ASSERT_TRUE(isFastPathEligible(problem));
+        std::vector<float> d(M * N, -1.0f);
+        std::vector<Half>  e(problem.e().totalAllocatedElements(), sentinel);
+        ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+        inputs.bias = bias.data();
+        inputs.e    = e.data();
+        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/fast);
+
+        for(size_t i = 0; i < M * N; ++i)
+            EXPECT_EQ(d[i], std::max(value[i], 0.0f)) << "D element " << i;
+        for(size_t i = 0; i < e.size(); ++i)
+            EXPECT_EQ(static_cast<float>(e[i]), expectedE[i]) << "E element " << i;
+    }
+}
+
+namespace
+{
+    // Float M x N x K gradient problem (useGradient) with batchCount batches.
+    ContractionProblemGemm makeGradientProblem(
+        size_t M, size_t N, size_t K, bool transA, bool transB, size_t batchCount = 1)
+    {
+        using DT     = rocisa::DataType;
+        auto problem = ContractionProblemGemm::GEMM_Strides(transA,
+                                                            transB,
+                                                            DT::Float,
+                                                            DT::Float,
+                                                            DT::Float,
+                                                            DT::Float,
+                                                            M,
+                                                            N,
+                                                            K,
+                                                            batchCount,
+                                                            transA ? K : M,
+                                                            -1,
+                                                            transB ? N : K,
+                                                            -1,
+                                                            M,
+                                                            -1,
+                                                            M,
+                                                            -1,
+                                                            0.0);
+        problem.setComputeInputTypeA(DT::Float);
+        problem.setComputeInputTypeB(DT::Float);
+        problem.setAlphaType(DT::Float);
+        problem.setBetaType(DT::Float);
+        problem.setUseGradient(true);
+        return problem;
+    }
+
+    // Adds a Float bias gradient (an output) reduced from src: length N for B, else M.
+    size_t setBiasGradient(ContractionProblemGemm& problem, ContractionProblemGemm::TENSOR src)
+    {
+        const size_t length
+            = (src == ContractionProblemGemm::B) ? problem.freeSizeB(0) : problem.freeSizeA(0);
+        problem.setUseBias(1);
+        problem.setBias(rocisa::DataType::Float, length, length, /*isOutput=*/true, src);
+        return length;
+    }
+} // namespace
+
+TEST(ReferenceFastPath, GradientEligibility)
+{
+    using DT = rocisa::DataType;
+    EXPECT_TRUE(isFastPathEligible(makeGradientProblem(4, 4, 4, false, false)));
+    EXPECT_TRUE(isFastPathEligible(makeGradientProblem(4, 4, 4, false, false, 2)));
+
+    auto withE = makeGradientProblem(4, 4, 4, false, false);
+    withE.setUseE(true);
+    withE.setE(DT::Half, withE.d().sizes(), {}, /*isOutput=*/false);
+    EXPECT_TRUE(isFastPathEligible(withE));
+
+    for(auto src :
+        {ContractionProblemGemm::A, ContractionProblemGemm::B, ContractionProblemGemm::D})
+    {
+        SCOPED_TRACE("bias source " + std::to_string(src));
+        auto single = makeGradientProblem(4, 4, 4, true, true);
+        setBiasGradient(single, src);
+        EXPECT_TRUE(isFastPathEligible(single));
+
+        // ReductionCPU reduces one batch only; the slow path keeps the others.
+        auto batched = makeGradientProblem(4, 4, 4, false, false, 2);
+        setBiasGradient(batched, src);
+        EXPECT_FALSE(isFastPathEligible(batched));
+    }
+}
+
+// Gradient on both paths: D = (alpha * A * B + beta * C) * activation(E) with E an
+// input (Half, at its own padded strides) that is left unchanged, and no bias added;
+// then gate residual (D = gate * D + gate, Half gate at padded strides). The bias
+// gradient is reduced from D (after the activation gradient, before gate residual), A
+// or B. The data are small integers (E: halves; gate: -1, 0.5, 2), so the paths agree
+// bit for bit.
+TEST(ReferenceFastPath, GradientMatchesSlowPathExactly)
+{
+    using DT = rocisa::DataType;
+    // Partial 32 x 32 tiles; K is not a multiple of the fast path's K block.
+    const size_t                       M = 37, N = 35, K = 19, ldE = M + 3;
+    std::mt19937                       gen(7);
+    std::uniform_int_distribution<int> dist(-3, 3);
+    auto                               fill = [&](auto& vec, float scale) {
+        using T = typename std::decay_t<decltype(vec)>::value_type;
+        for(auto& v : vec)
+            v = static_cast<T>(static_cast<float>(dist(gen)) * scale);
+    };
+
+    for(auto act : {ActivationType::DGelu, ActivationType::Relu, ActivationType::DRelu})
+    {
+        for(auto src :
+            {ContractionProblemGemm::A, ContractionProblemGemm::B, ContractionProblemGemm::D})
+        {
+            for(int trans = 0; trans < 4; ++trans)
+            {
+                const bool transA = trans & 1, transB = trans & 2;
+                SCOPED_TRACE(TensileLite::ToString(act) + ", bias source " + std::to_string(src)
+                             + ", transA " + std::to_string(transA) + ", transB "
+                             + std::to_string(transB));
+                auto problem = makeGradientProblem(M, N, K, transA, transB);
+                problem.setActivationType(ActivationType::All);
+                problem.setParams().setActivationEnum(act);
+                problem.setUseE(true);
+                problem.setE(DT::Half, problem.d().sizes(), {1, ldE, ldE * N}, false);
+                problem.setUseGateResidual(true);
+                problem.setGateResidual(DT::Half, problem.d().sizes(), {1, ldE, ldE * N});
+                const size_t biasLength = setBiasGradient(problem, src);
+                ASSERT_TRUE(isFastPathEligible(problem));
+
+                std::vector<float> a(M * K), b(K * N), c(M * N);
+                std::vector<Half>  e(problem.e().totalAllocatedElements());
+                std::vector<Half>  gate(problem.gateResidual().totalAllocatedElements());
+                fill(a, 1.0f);
+                fill(b, 1.0f);
+                fill(c, 1.0f);
+                fill(e, 0.5f);
+                const float gateValues[] = {-1.0f, 0.5f, 2.0f};
+                for(size_t i = 0; i < gate.size(); ++i)
+                    gate[i] = Half(gateValues[i % 3]);
+
+                std::vector<float> d[2], bias[2];
+                for(bool fast : {true, false})
+                {
+                    std::vector<float> dRun(M * N, -1.0f), biasRun(biasLength, -1.0f);
+                    std::vector<Half>  eRun = e;
+                    ContractionInputs  inputs(a.data(), b.data(), c.data(), dRun.data(), 2.0f, 0.5f);
+                    inputs.bias         = biasRun.data();
+                    inputs.e            = eRun.data();
+                    inputs.gateResidual = gate.data();
+                    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/fast);
+                    EXPECT_EQ(0, std::memcmp(eRun.data(), e.data(), e.size() * sizeof(Half)))
+                        << (fast ? "fast" : "slow") << " path changed E";
+                    d[fast]    = dRun;
+                    bias[fast] = biasRun;
+                }
+                EXPECT_EQ(d[true], d[false]);
+                EXPECT_EQ(bias[true], bias[false]);
+            }
+        }
+    }
+}
+
+// The bias gradient follows elementsToValidate as ReductionCPU does, on both paths:
+// with fewer elements to validate than bias elements (but enough for the fast path),
+// only every NextPrime(M / elementsToValidate)-th bias element is written.
+TEST(ReferenceFastPath, GradientBiasFollowsElementsToValidate)
+{
+    // 5 of 20 elements: the fast path takes >= 20%; bias stride NextPrime(10 / 5) = 2.
+    const size_t M = 10, N = 2, K = 3, elementsToValidate = 5;
+    for(auto src : {ContractionProblemGemm::A, ContractionProblemGemm::D})
+    {
+        SCOPED_TRACE("bias source " + std::to_string(src));
+        auto problem = makeGradientProblem(M, N, K, false, false);
+        setBiasGradient(problem, src);
+        ASSERT_TRUE(isFastPathEligible(problem));
+
+        std::vector<float> a(M * K), b(K * N, 1.0f), c(M * N, 0.0f);
+        for(size_t i = 0; i < a.size(); ++i)
+            a[i] = static_cast<float>(i % 7) - 3.0f;
+
+        std::vector<float> d[2], bias[2];
+        for(bool fast : {true, false})
+        {
+            std::vector<float> dRun(M * N, -1.0f), biasRun(M, 99.0f);
+            ContractionInputs  inputs(a.data(), b.data(), c.data(), dRun.data(), 1.0f, 0.0f);
+            inputs.bias = biasRun.data();
+            SolveGemmCPU(problem, inputs, elementsToValidate, /*tryFastPath=*/fast);
+            for(size_t i = 0; i < M; ++i)
+                EXPECT_EQ(biasRun[i] == 99.0f, i % 2 == 1)
+                    << (fast ? "fast" : "slow") << " path, bias element " << i;
+            d[fast]    = dRun;
+            bias[fast] = biasRun;
+        }
+        EXPECT_EQ(bias[true], bias[false]);
+        // From D the slow path computes every D element as well.
+        if(src == ContractionProblemGemm::D)
+            EXPECT_EQ(d[true], d[false]);
     }
 }
