@@ -81,6 +81,11 @@ target_link_libraries(
 # make it so tests inside folders can find files without having to use a relative path.
 target_include_directories(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_BINARY_DIR}/engines)
 
+# Where the engines' CMakeLists.txt write their selector dumps; the shipped-model gates
+# name this build's dump in their failure message.
+target_compile_definitions(hip_kernel_provider_tests PRIVATE
+    HKP_SELECTOR_DUMP_DIR="${CMAKE_BINARY_DIR}/selector_revisions")
+
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
         message(WARNING

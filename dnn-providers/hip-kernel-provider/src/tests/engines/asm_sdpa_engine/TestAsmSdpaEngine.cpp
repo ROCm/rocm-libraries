@@ -29,7 +29,12 @@
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
+#include "tests/engines/ShippedL1ModelGate.hpp"
 #include "version.h"
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "AsmSdpaShippedModels.hpp"
+#endif
 
 namespace asm_sdpa_engine
 {
@@ -185,7 +190,7 @@ TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
 }
 
 /// A model whose recorded revision mismatches is refused, so the revision must track the
-/// forward kernels and dispatch sources, not the provider release.
+/// forward kernels and selection sources, not the provider release.
 TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndNotTheRelease)
 {
     const std::string revision = AsmSdpaEngine::selectorRevision();
@@ -203,6 +208,21 @@ TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndN
     EXPECT_EQ(revision.find(HIP_KERNEL_PROVIDER_VERSION_STRING), std::string::npos) << revision;
     EXPECT_EQ(revision.find("0.2."), std::string::npos) << revision;
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// A shipped model that records another revision is refused at load and the engine reports
+/// no estimate, silently; this is where that fails the build.
+TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
+{
+    EXPECT_TRUE(hip_kernel_provider::shipped_model_gate::shippedL1ModelsBindThisBuild(
+        AsmSdpaEngine::engineName(),
+        "asm_sdpa_fwd",
+        shipped_models::MODELS,
+        HKP_SELECTOR_DUMP_DIR,
+        AsmSdpaEngine::L1_MODEL_IDS,
+        AsmSdpaEngine::selectorRevision()));
+}
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
 
 /// The backend rejects a response whose metric differs from the request, so even a decline
 /// must carry the requested metric.
