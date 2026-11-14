@@ -79,6 +79,9 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     for index, schedule in enumerate(schedules):
         mode = schedule["reduction"]
         assert mode in ("tree", "parallel", "whole"), mode
+        # Tile count -> parallel or clamp, for a handwritten kernel with a
+        # streamKReduce post kernel.
+        expect = schedule.get("expect")
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "TENSILE_DB": "0x200000",
                "TENSILE_PERSISTENT_FIXED_GRID": str(schedule["grid"]),
                "TENSILE_PERSISTENT_DYNAMIC_GRID": "6" if mode == "parallel" else "0"}
@@ -99,9 +102,26 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
                 if not block.startswith("StreamK LAUNCH SUMMARY"):
                     continue
                 fields = dict(re.findall(r"^ +(\w+) += (\S+)", block, re.MULTILINE))
-                if "physicalPartialSlots" in fields:
+                if expect is not None:
+                    records.setdefault(int(fields["tiles"]), []).append(fields)
+                elif "physicalPartialSlots" in fields:
                     kernel = re.search(r"kernel='([^']+)'", block).group(1)
                     records.setdefault(kernel, []).append(fields)
+        if expect is not None:
+            # Parallel launches F >= 2 workgroups per tile, then the post kernel;
+            # the clamp launches one workgroup per tile and no post kernel.
+            for tiles, outcome in expect.items():
+                assert outcome in ("parallel", "clamp"), outcome
+                assert records.get(tiles), f"No launch over {tiles} tiles: {log_path}"
+                for row in records[tiles]:
+                    grid = int(row["final"])
+                    if outcome == "parallel":
+                        assert row["reduction"].startswith("parallel") and grid % tiles == 0 \
+                            and grid // tiles > 1, (tiles, row, log_path)
+                    else:
+                        assert not row["reduction"].startswith("parallel") and grid == tiles, \
+                            (tiles, row, log_path)
+            continue
         assert records, f"No clustered StreamK launches observed: {log_path}"
         for kernel, launches in records.items():
             if mode == "whole":

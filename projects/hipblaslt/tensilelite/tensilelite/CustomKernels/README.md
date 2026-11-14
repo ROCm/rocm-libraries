@@ -25,6 +25,7 @@ external manifest.
 | `wave/`       | External: Wave (handwritten) kernels.             |
 | `triton/`     | External: Triton-compiled GEMM kernels.           |
 | `rocke/`      | External: rocKE GEMM kernels.                     |
+| `test/`       | Test-only kernels for runtime contracts.          |
 
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.
