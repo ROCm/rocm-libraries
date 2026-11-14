@@ -2232,7 +2232,8 @@ class Solution(collections.abc.Mapping):
       RuntimeError: If a macrotile component is supplied by neither the
         CustomKernel block nor the consuming logic file, or if the solution
         can split K (GlobalSplitU other than 0 or 1) but its grid launches one
-        GSU slice per tile.
+        GSU slice per tile, or if its post kernels meet OutputAmaxD or a bias
+        gradient, or its parallel reduction has no Stream-K workspace.
     """
     ck = state["CustomKernel"]
 
@@ -2323,6 +2324,20 @@ class Solution(collections.abc.Mapping):
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
       state["_WorkspaceSizePerElemBias"] = ck.get("workspaceSizePerElemBias", 0)
+
+    # Parallel partials start at the workspace base, where amax and
+    # bias-gradient scratch would also go.
+    if ck.get("postKernels") and (state["ProblemType"].get("OutputAmaxD", False)
+                                  or (state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"])):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' has post kernels, which do not support "
+        f"OutputAmaxD or a bias gradient.")
+    if "parallel" in ck.get("reductions", []) and (
+        ck.get("workspaceType") not in ("StreamK", "StreamKWithReduction")
+        or not ck.get("workspaceSizePerElemC")):
+      raise RuntimeError(
+        f"Custom kernel '{ck.get('name', '?')}' declares parallel reduction, which needs a "
+        f"Stream-K workspace with workspaceSizePerElemC.")
 
     mi = state.get("MatrixInstruction", [])
     state.setdefault("EnableMatrixInstruction", isinstance(mi, list) and len(mi) >= 4)
