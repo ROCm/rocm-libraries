@@ -460,11 +460,12 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
         {
             return false;
         }
-        if constexpr(GridwiseGemm64::PadN && PerTokenQuant && NumDTensor > 1)
+        if constexpr(GridwiseGemm64::PadN)
         {
-            // Per-channel B scales are indexed with the logical N; padded columns would read
-            // past them.
-            if(arg.N % NPerBlock != 0 && arg.p_ds_grid[Number<1>{}] != nullptr)
+            // B keeps its logical N x K in memory, and its rows are addressed in whole
+            // preshuffle row blocks of NPerXDL. The gate and up halves share a row block, so
+            // their combined rows must fill those blocks exactly.
+            if((arg.N * (IsInputGemm ? 2 : 1)) % NPerXDL != 0)
             {
                 return false;
             }

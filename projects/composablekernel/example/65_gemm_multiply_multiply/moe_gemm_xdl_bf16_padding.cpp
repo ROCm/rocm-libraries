@@ -3,8 +3,10 @@
 
 // bf16 MoE GEMM with a model dim that is not a multiple of the tile, using
 // GemmSpecialization::NKPadding. MOE_STAGE=1 is the gate/up GEMM (model dim is K), MOE_STAGE=2
-// the down GEMM (model dim is N). Each expert's B is zero-padded only to whole preshuffle tiles
-// (N to NPerXdl, K to KLane * KPack) before preshuffling; A and E keep their logical sizes.
+// the down GEMM (model dim is N). Each expert's B keeps its logical N x K size in memory and
+// the kernel pads N and K, so the padding costs LDS rather than HBM. N still has to fill whole
+// preshuffle row blocks: a multiple of NPerXdl, or of NPerXdl / 2 for the gate/up halves, and
+// K a multiple of KPack. A and E keep their logical sizes.
 
 #include <algorithm>
 #include <cmath>
@@ -85,9 +87,10 @@ static int round_up(int x, int m) { return (x + m - 1) / m * m; }
 static float to_f32(BF16 v) { return ck::type_convert<float>(v); }
 
 // [N][K] row-major -> B-preshuffle layout [N0][K0][KLane][NLane][KPack].
+// Each row block of NPerXdl rows occupies NPerXdl * K elements, so K only has to be a
+// multiple of KPack and the weights keep their logical N x K size in memory.
 static void preshuffle(const BF16* src, BF16* dst, int N, int K)
 {
-    const int K0 = K / (KLane * KPack);
     for(int n = 0; n < N; ++n)
     {
         for(int k = 0; k < K; ++k)
@@ -95,8 +98,8 @@ static void preshuffle(const BF16* src, BF16* dst, int N, int K)
             const int n0 = n / NPerXdl, n1 = n % NPerXdl;
             const int k0 = k / (KLane * KPack), kt = k % (KLane * KPack);
             const int k1 = kt / KPack, k2 = kt % KPack;
-            dst[n0 * KPack * NPerXdl * KLane * K0 + k0 * KPack * NPerXdl * KLane +
-                k1 * KPack * NPerXdl + n1 * KPack + k2] = src[n * K + k];
+            dst[n0 * NPerXdl * K + k0 * KPack * NPerXdl * KLane + k1 * KPack * NPerXdl +
+                n1 * KPack + k2] = src[n * K + k];
         }
     }
 }
@@ -106,7 +109,7 @@ int main(int argc, char* argv[])
     bool do_verification = true;
     bool time_kernel     = false;
     int tokens           = 333;
-    int model_dim        = 200; // not a multiple of the tile or of the preshuffle tile
+    int model_dim        = 208; // not a multiple of the tile, but whole preshuffle row blocks
     int inter            = 256;
     const int topk       = 2;
     const int experts    = 8;
@@ -130,8 +133,6 @@ int main(int argc, char* argv[])
     // Stage 1: N = inter (per gate/up half), K = model_dim. Stage 2: N = model_dim, K = inter.
     const int N      = IsStage1 ? inter : model_dim;
     const int K      = IsStage1 ? model_dim : inter;
-    const int NPad   = round_up(N, NPerXdl);
-    const int KPad   = round_up(K, KLane * KPack);
     const int halves = IsStage1 ? 2 : 1;
 
     std::mt19937 rng(2026);
@@ -191,20 +192,13 @@ int main(int argc, char* argv[])
     for(auto& v : b)
         v = ck::type_convert<BF16>(0.25f * uni(rng));
 
-    // Zero-pad each expert (and gate/up half) to NPad x KPad, then preshuffle.
-    std::vector<BF16> b_padded(static_cast<size_t>(experts) * halves * NPad * KPad,
-                               ck::type_convert<BF16>(0.f));
-    for(int eh = 0; eh < experts * halves; ++eh)
-        for(int n = 0; n < N; ++n)
-            std::memcpy(&b_padded[(static_cast<size_t>(eh) * NPad + n) * KPad],
-                        &b[(static_cast<size_t>(eh) * N + n) * K],
-                        K * sizeof(BF16));
-    std::vector<BF16> b_preshuffled(b_padded.size());
+    // Preshuffle each expert in place at its logical N x K; the kernel pads N and K.
+    std::vector<BF16> b_preshuffled(b.size());
     for(int e = 0; e < experts; ++e)
-        preshuffle(&b_padded[static_cast<size_t>(e) * halves * NPad * KPad],
-                   &b_preshuffled[static_cast<size_t>(e) * halves * NPad * KPad],
-                   halves * NPad,
-                   KPad);
+        preshuffle(&b[static_cast<size_t>(e) * halves * N * K],
+                   &b_preshuffled[static_cast<size_t>(e) * halves * N * K],
+                   halves * N,
+                   K);
 
     DeviceMem sorted_token_ids_dev(sizeof(ck::index_t) * sorted_token_ids.size());
     DeviceMem sorted_expert_ids_dev(sizeof(ck::index_t) * sorted_expert_ids.size());
