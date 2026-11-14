@@ -701,8 +701,10 @@ namespace
                       HIPBLAS_STATUS_SUCCESS);
         }
 
-        using Layout = std::unique_ptr<std::remove_pointer_t<hipblasLtMatrixLayout_t>,
-                                       decltype(&hipblasLtMatrixLayoutDestroy)>;
+        using MatmulDesc = std::unique_ptr<std::remove_pointer_t<hipblasLtMatmulDesc_t>,
+                                           decltype(&hipblasLtMatmulDescDestroy)>;
+        using Layout     = std::unique_ptr<std::remove_pointer_t<hipblasLtMatrixLayout_t>,
+                                           decltype(&hipblasLtMatrixLayoutDestroy)>;
 
         static Layout groupedLayout(hipDataType type, uint64_t rows, uint64_t cols)
         {
@@ -851,12 +853,13 @@ namespace
         completeAndAttach();
         makeD();
 
-        hipblasLtMatmulDesc_t plainDesc = nullptr;
-        ASSERT_EQ(hipblasLtMatmulDescCreate(&plainDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+        hipblasLtMatmulDesc_t created = nullptr;
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&created, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                   HIPBLAS_STATUS_SUCCESS);
+        const MatmulDesc         plainDesc(created, &hipblasLtMatmulDescDestroy);
         const hipblasOperation_t op = HIPBLAS_OP_T;
         EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
-                      plainDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &op, sizeof(op)),
+                      plainDesc.get(), HIPBLASLT_MATMUL_DESC_TRANSA, &op, sizeof(op)),
                   HIPBLAS_STATUS_SUCCESS);
 
         DeviceBuffer a(kK * kM * 2), b(kK * kN * 2), d(kLdd * kN * 2);
@@ -864,7 +867,7 @@ namespace
         float alpha = 1.f;
         float beta  = 0.f;
 
-        std::vector<hipblasLtMatmulDesc_t>   descs = {plainDesc, matmulDesc};
+        std::vector<hipblasLtMatmulDesc_t>   descs = {plainDesc.get(), matmulDesc};
         std::vector<void*>                   alphas(2, &alpha), betas(2, &beta);
         std::vector<void*>                   as(2, a.ptr), bs(2, b.ptr), ds(2, d.ptr);
         std::vector<hipblasLtMatrixLayout_t> matAs(2, Adesc), matBs(2, Bdesc), matDs(2, Ddesc);
@@ -880,8 +883,6 @@ namespace
         EXPECT_EQ(
             grouped.setProblem(descs, alphas, as, matAs, bs, matBs, betas, ds, matDs, ds, matDs),
             HIPBLAS_STATUS_INVALID_VALUE);
-
-        EXPECT_EQ(hipblasLtMatmulDescDestroy(plainDesc), HIPBLAS_STATUS_SUCCESS);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, GroupedHeuristicRejectsAFusedDescriptor)
