@@ -796,7 +796,6 @@ _AXES = {
     "b_dtype": ("b_dtype", str, "fp4"),
     "k_reads": ("k_reads", str, "chunked"),
     "wmma_reuse": ("wmma_reuse", str, "none"),
-    "k_order": ("k_order", str, "linear"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),

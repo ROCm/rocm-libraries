@@ -39,7 +39,6 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.instances.gfx1250.mx_gemm import (
-    K_ORDERS,
     K_READS,
     OUT_DTYPES,
     TILE_K,
@@ -49,11 +48,9 @@ from rocke.instances.gfx1250.mx_gemm import (
     IntOps,
     LdsPad,
     MxGemmSpec,
-    _Kernel,
     build_mx_gemm,
     derived_lds_pads,
     validate,
-    visited_tile,
 )
 from rocke.runtime.hip_module import get_device_arch
 
@@ -307,70 +304,6 @@ class MxGemmSpecTest(unittest.TestCase):
         for label, (spec, reason) in bad.items():
             with self.subTest(label):
                 self.assertIn(reason, validate(spec) or "")
-
-    def test_k_order_validates_and_names(self):
-        """Every type takes either K order; "even_odd" tags the kernel name."""
-        self.assertEqual(K_ORDERS, ("linear", "even_odd"))
-        for spec in (
-            _spec(k_order="even_odd"),
-            _spec6(k_order="even_odd"),
-            _spec8(k_order="even_odd"),
-        ):
-            with self.subTest(spec.kernel_name()):
-                self.assertIsNone(validate(spec))
-                self.assertIn("_keo", spec.kernel_name())
-        self.assertNotIn("_keo", _spec6().kernel_name())
-        self.assertIn("k_order must be one of", validate(_spec6(k_order="odd")) or "")
-
-    def test_even_odd_visits_every_tile_once(self):
-        """ "even_odd" visits each full tile once, the even ones first; from
-        five tiles on, consecutive positions are never neighbouring tiles.
-        Positions past the full tiles (the K tail, loads past the end) are
-        unchanged. The kernel's position-to-K arithmetic is the same map."""
-
-        class Ints:
-            @staticmethod
-            def v(x):
-                return x
-
-        class Build:
-            const_i32 = staticmethod(lambda x: x)
-            mul = staticmethod(lambda a, c: a * c)
-            sub = staticmethod(lambda a, c: a - c)
-            cmp_lt = staticmethod(lambda a, c: a < c)
-            select = staticmethod(lambda cond, a, c: a if cond else c)
-
-        for full in range(1, 13):
-            order = [visited_tile("even_odd", full, p) for p in range(full)]
-            with self.subTest(full=full):
-                self.assertEqual(sorted(order), list(range(full)))
-                half = -(-full // 2)
-                self.assertEqual(order[:half], list(range(0, full, 2)))
-                if full >= 5:
-                    self.assertTrue(
-                        all(abs(a - b) > 1 for a, b in itertools.pairwise(order))
-                    )
-                for tail in range(full, full + 3):
-                    self.assertEqual(visited_tile("even_odd", full, tail), tail)
-                self.assertEqual(
-                    [visited_tile("linear", full, p) for p in range(full + 2)],
-                    list(range(full + 2)),
-                )
-                spec = _spec6(1024, 1024, full * 256 + 128)
-                fake = type(
-                    "K",
-                    (),
-                    {
-                        "spec": replace(spec, k_order="even_odd"),
-                        "b": Build,
-                        "ops": Ints,
-                    },
-                )
-                for p in range(full + 2):
-                    k_off = _Kernel.k_of(fake, p * spec.tile_k)
-                    self.assertEqual(
-                        k_off, visited_tile("even_odd", full, p) * spec.tile_k
-                    )
 
     def test_i64_offsets_past_2_31(self):
         """A and B bytes and D elements past 2^31 switch that operand to i64
@@ -1003,23 +936,6 @@ class MxGemmIrTest(unittest.TestCase):
                 # accumulators directly.
                 zero_c = len(re.findall(_WMMA + r"[^\n]*<16 x float> %cz", llvm))
                 self.assertEqual(zero_c, 32 if tiles % 2 else 0)
-
-    def test_even_odd_order_builds_the_same_wmmas(self):
-        """With "even_odd" the kernel runs the same WMMAs as in K order (odd
-        tile counts, the K tail, 128 B rows); only the load addresses
-        change."""
-        for spec in (
-            _spec(1024, 1024, 5 * 512 + 128),
-            _spec6(1024, 1024, 5 * 384 + 256, tile_k=384, k_reads="contiguous"),
-            _spec8(1024, 1024, 4 * 128 + 96, tile_k=128),
-        ):
-            linear = _llvm(spec)
-            even_odd = _llvm(replace(spec, k_order="even_odd"))
-            with self.subTest(spec.kernel_name()):
-                self.assertEqual(
-                    len(re.findall(_WMMA, even_odd)), len(re.findall(_WMMA, linear))
-                )
-                self.assertNotEqual(even_odd, linear)
 
     def test_k_tail_tile(self):
         """K not a multiple of tile_k: the full tiles as before, then one
@@ -1661,10 +1577,6 @@ class MxGemmHostBuildTest(unittest.TestCase):
                 for make, f in (
                     (_spec6, {"tile_k": 384, "k_reads": "contiguous"}),
                     (_spec8, {}),
-                    (
-                        _spec6,
-                        {"tile_k": 384, "k_reads": "contiguous", "k_order": "even_odd"},
-                    ),
                 )
             ),
         ):
@@ -1732,8 +1644,6 @@ class MxGemmDeviceTest(unittest.TestCase):
                 _spec8(1000, 1000, 2048 + 96, tile_m=128, tile_n=128, b_dtype="bf8"),
                 _spec8(tile_m=128, out_dtype="bf16"),
                 _spec8(local_prefetch=0, half_plr="none", wmma_reuse="b"),
-                _spec8(1000, 1000, 4 * 128 + 96, tile_k=128, k_order="even_odd"),
-                _spec8(local_prefetch=0, half_plr="none", k_order="even_odd"),
             ]
             + list(_valid_geometries("16x16", a_dtype="fp6", b_dtype="fp6"))
             + [
@@ -1771,24 +1681,6 @@ class MxGemmDeviceTest(unittest.TestCase):
                     tile_n=128,
                     k_reads="contiguous",
                     out_dtype="bf16",
-                ),
-                _spec6(
-                    1000,
-                    1000,
-                    5 * 384 + 256,
-                    tile_m=128,
-                    tile_n=128,
-                    tile_k=384,
-                    k_reads="contiguous",
-                    k_order="even_odd",
-                ),
-                _spec6(
-                    tile_k=384,
-                    local_prefetch=0,
-                    half_plr="none",
-                    k_reads="contiguous",
-                    wmma_reuse="b",
-                    k_order="even_odd",
                 ),
             ]
         ):
