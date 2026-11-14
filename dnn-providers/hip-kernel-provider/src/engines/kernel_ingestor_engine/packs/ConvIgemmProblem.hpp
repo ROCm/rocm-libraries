@@ -108,7 +108,7 @@ struct AtomInfo
     std::string_view name;
     std::string_view kernelType; ///< K1Atom* type name; empty for the FMA kernel
     int wave = 0; ///< 64 MFMA, 32 WMMA, 0 FMA (block from `threads`)
-    bool tf32 = false; ///< Rounds fp32 operands (xf32): served only with TF32 permission
+    bool tf32 = false; ///< Rounds fp32 operands (xf32): a TF32 config
     /// 16-bit fragments of 8, 16 or 32 bytes, which the swizzled-tile (swz) configs read in
     /// 16-byte chunks: the k-step those reads span (8-byte fragments two atom k-steps), which
     /// the config's k-step must be a multiple of; 0: no swizzled tiles.
@@ -126,10 +126,6 @@ std::string_view dataElement(hipdnn_flatbuffers_sdk::data_objects::DataType data
 
 /// Whether the device @p gcnArchName (suffix intact) runs @p atom.
 bool atomRunsOn(std::string_view atom, std::string_view gcnArchName);
-
-/// TF32 permission: HIP_KERNEL_PROVIDER_CONV_TF32 set to a true value. Temporary, until
-/// hipDNN can express the permission on a graph.
-bool tf32Permitted();
 
 /// The launch grid of @p problem for a BM x BN tile, or nullopt past the launch limits.
 struct Grid

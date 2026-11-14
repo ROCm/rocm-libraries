@@ -467,8 +467,8 @@ def build_t1():
                 CATALOG[dtype] += t1_fma(dtype, stride, flat)
 
 
-# Three-bf16 (math 1): fp32 graphs under TF32 permission run a bf16 matrix-core config on dy and w
-# split along K into 3K channels (the kernel's ConvTf32Split), dx written in fp32. Per (atom,
+# Three-bf16 (math 1, CONV_IGEMM_NCHW_BWD_TF32's configs): fp32 graphs run a bf16 matrix-core
+# config on dy and w split along K into 3K channels (the kernel's ConvTf32Split), dx written in fp32. Per (atom,
 # stride, taps, flat) the bf16 catalog's first X3_TILES tiles whose LDS (fp32 output tile) fits.
 X3_ATOMS = {"mfma16_bf16", "wmma11_bf16", "wmma12_bf16"}
 X3_TILES = 2
@@ -546,6 +546,24 @@ def emit():
             "numerical_notes": [],
         },
     )
+    # The three-bf16 configs make an engine of their own, which reports the TENSOR_CORE
+    # numerical note (cuDNN's note for TF32 engines), so a caller can exclude them by note.
+    ued_tf32 = U("ued.bwd.tf32")
+    write(
+        "conv_igemm_nchw_bwd_tf32.ued.json",
+        {
+            "version": "1.0",
+            "id": ued_tf32,
+            "name": "hipkernel:CONV_IGEMM_NCHW_BWD_TF32",
+            "graph_match": {"native": "hipkernel.conv_igemm_nchw_bwd.graph_match"},
+            "metadata": kmd,
+            "knobs": INTS,
+            "behavior_notes": ["runtime_compilation"],
+            # RFC 0025 numerical notes: TENSOR_CORE (fp32 through bf16 operand parts).
+            # Deterministic as the exact engine.
+            "numerical_notes": ["tensor_core"],
+        },
+    )
     kernels = []
     x3 = []
     for dtype, cfgs in list(CATALOG.items()) + [("FLOATX3", CATALOGX3)]:
@@ -599,7 +617,7 @@ def emit():
             "name": "hipkernel:conv_igemm_nchw_bwd_f32x3",
             "arch": [],
             "matchers": [umd],
-            "engine": ued,
+            "engine": ued_tf32,
             "dispatch": udd,
             "kernelDescriptors": x3,
         },

@@ -304,7 +304,7 @@ std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwCo
         return launchCore(problem, config);
     }
     if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
-       || !conv_igemm::tf32Permitted() || conv_igemm::atomElement(config.atom) != "bf16")
+       || conv_igemm::atomElement(config.atom) != "bf16")
     {
         return std::nullopt;
     }

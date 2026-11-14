@@ -57,8 +57,9 @@
  *   (d) each gated engine serves the graph just below its limit on the architectures the
  *       map records;
  *   (e) every hipkernel:CONV_* engine offered for a graph reports, through the frontend's
- *       get_numerical_notes_for_engine, its RFC 0025 claim: FFT or WINOGRAD for those engines,
- *       nothing for the rest, and never NONDETERMINISTIC.
+ *       get_numerical_notes_for_engine, its RFC 0025 claim: TENSOR_CORE for the TF32 engines,
+ *       FFT, WINOGRAD and the Winograd tile note for those engines, nothing for the rest, and
+ *       never NONDETERMINISTIC.
  * The naive engines' workload budget counts the device's SIMD lanes, so parts of one
  * architecture with fewer compute units decline graphs a larger part's map records as naive
  * (s053w: 4750 multiply-accumulates a lane on a 64-CU gfx906, 5067 on a 60-CU one, against a
@@ -755,17 +756,36 @@ TEST(IntegrationConvCoverageCensus, NaiveBudgetArithmeticFollowsComputeUnits)
     } while(false)
 
 /// The numerical notes a hipkernel:CONV_* engine reports (RFC 0025): its algorithm class where
-/// cuDNN names one, and no NONDETERMINISTIC, since every engine claims bitwise-reproducible
-/// results (each family's device test launches every config twice and compares the bits).
+/// cuDNN names one (FFT; WINOGRAD with the tile note where one tile serves every config),
+/// TENSOR_CORE for the engines of TF32 configs, and no NONDETERMINISTIC, since every engine
+/// claims bitwise-reproducible results (each family's device test launches every config twice
+/// and compares the bits).
 std::vector<hipdnn_frontend::NumericalNote> expectedNumericalNotes(const std::string& engine)
 {
+    using hipdnn_frontend::NumericalNote;
+    const auto endsWith = [&engine](const std::string& suffix) {
+        return engine.size() >= suffix.size()
+               && engine.compare(engine.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    if(endsWith("_TF32"))
+    {
+        return {NumericalNote::TENSOR_CORE};
+    }
     if(engine.rfind("hipkernel:CONV_FFT_", 0) == 0)
     {
-        return {hipdnn_frontend::NumericalNote::FFT};
+        return {NumericalNote::FFT};
+    }
+    if(engine == "hipkernel:CONV_WINOGRAD_WRW")
+    {
+        return {NumericalNote::WINOGRAD};
+    }
+    if(endsWith("_F43"))
+    {
+        return {NumericalNote::WINOGRAD, NumericalNote::WINOGRAD_TILE_6x6};
     }
     if(engine.rfind("hipkernel:CONV_WINOGRAD_", 0) == 0)
     {
-        return {hipdnn_frontend::NumericalNote::WINOGRAD};
+        return {NumericalNote::WINOGRAD, NumericalNote::WINOGRAD_TILE_4x4};
     }
     return {};
 }

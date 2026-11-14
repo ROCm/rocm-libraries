@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmNchwProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
@@ -906,7 +905,7 @@ TEST(TestConvIgemmNchwLds, MirrorsTheKernelsArithmetic)
     EXPECT_EQ(conv_igemm_nchw::ldsBytesOf(fma, 4), 2 * 8 * (136 + 16 * 12 + 4) * 4);
 }
 
-/// Three-bf16 (math 1): a bf16 matrix config on an fp32 graph, TF32 permission only.
+/// Three-bf16 (math 1): a bf16 matrix config on an fp32 graph (CONV_IGEMM_NCHW_BWD_TF32's).
 ConfigFields threeBf16Fields()
 {
     ConfigFields f;
@@ -948,17 +947,10 @@ conv_igemm_nchw::NchwConfig threeBf16Config()
     return config;
 }
 
-TEST(TestConvIgemmNchwThreeBf16, OnlyUnderTf32PermissionForFloatProblems)
+TEST(TestConvIgemmNchwThreeBf16, OnlyForFloatProblems)
 {
     const auto fp32 = problemOf(DataType::FLOAT);
     ASSERT_TRUE(fp32.has_value());
-    {
-        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
-            "HIP_KERNEL_PROVIDER_CONV_TF32", "");
-        EXPECT_FALSE(conv_igemm_nchw::nchwLaunchFor(*fp32, threeBf16Config()).has_value());
-    }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     EXPECT_TRUE(conv_igemm_nchw::nchwLaunchFor(*fp32, threeBf16Config()).has_value());
     // 16-bit problems take the bf16 configs themselves.
     const auto bf16 = problemOf(DataType::BFLOAT16);
@@ -1017,8 +1009,6 @@ TEST(TestConvIgemmNchwThreeBf16, TheLaunchIsTheTripledProblemsWithItsSplit)
     EXPECT_EQ(tripled->args.dyImage, 3 * problem->args.dyImage);
     EXPECT_EQ(tripled->elementBytes, 2);
     EXPECT_EQ(tripled->base.dataType, DataType::BFLOAT16);
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     conv_igemm_nchw::NchwConfig config;
     config.atom = "wmma11_bf16";
     config.atomId = 8;

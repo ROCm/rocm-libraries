@@ -153,8 +153,8 @@ struct WrwConfig
     /// their block-based buffer forms, which serve large images alone (channels-first, each
     /// channel plane within the range); the upper-case kinds serve the other images.
     std::string spec;
-    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
-    /// (tf32Permitted): a bf16 config run on x and dy split into 3N bf16 images by
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph (a TF32 config,
+    /// CONV_WRW_TF32's): a bf16 config run on x and dy split into 3N bf16 images by
     /// ConvWrwSplit (K3SplitArgs), dw written in fp32 by the reduce.
     int64_t math = 0;
 };
@@ -382,7 +382,7 @@ DirectPlan directPlanFor(int64_t tiles,
  * loads a thread in flight; not for filters of at most 9 taps dilated 6 or more on a filter
  * axis (ASPP-class, where the BLAS path wins). Declined
  * wherever a key of its spec serves the problem (specServes): a specialized config's class.
- * math 0, or 1 (three-bf16): an fp32 graph, TF32 permitted (tf32Permitted), a bf16 atom, dws 0,
+ * math 0, or 1 (three-bf16): an fp32 graph, a bf16 atom, dws 0,
  * 3N within 32 bits; the launch is the config's on the bf16 problem of 3N images, with
  * ConvWrwSplit ahead of it and the split operands ahead of the partials in the workspace.
  */

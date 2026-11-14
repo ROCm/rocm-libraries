@@ -1387,7 +1387,7 @@ def build():
     return dropped
 
 
-# Three-bf16 (math 1): fp32 graphs under TF32 permission run a bf16 config on x and dy split
+# Three-bf16 (math 1, the CONV_WRW_TF32 engine's configs): fp32 graphs run a bf16 config on x and dy split
 # into 3N bf16 images (ConvWrwSplit), dw in fp32 through the reduce (so dws 0). The configs are
 # a subset of the bf16 catalog on the atoms where three bf16 products beat exact fp32: per
 # (atom, loop, layout, filter, align) its first two tiles, loops 0, 1, 5 (gfx950 direct) and 6
@@ -1524,8 +1524,27 @@ def emit():
             "numerical_notes": [],
         },
     )
+    # The three-bf16 configs make an engine of their own, which reports the TENSOR_CORE numerical
+    # note (cuDNN's note for TF32 engines), so a caller can exclude them by note.
+    ued_tf32 = U("ued.tf32")
+    write(
+        "conv_wrw_tf32.ued.json",
+        {
+            "version": "1.0",
+            "id": ued_tf32,
+            "name": "hipkernel:CONV_WRW_TF32",
+            "graph_match": {"native": "hipkernel.conv_wrw.graph_match"},
+            "metadata": kmd,
+            "knobs": INTS,
+            "behavior_notes": ["runtime_compilation"],
+            # RFC 0025 numerical notes: TENSOR_CORE (fp32 through bf16 operand parts).
+            # Deterministic as the exact engine.
+            "numerical_notes": ["tensor_core"],
+        },
+    )
     # One pack per dtype and kernel family (the repository caps a file at 500 KB); all serve the
-    # one engine. Priorities run over the dtype's whole list, as before the split.
+    # one engine but the three-bf16 packs, which serve CONV_WRW_TF32. Priorities run over the
+    # dtype's whole list, as before the split.
     for stale in out.glob("conv_wrw*.kdp.json"):
         stale.unlink()
     kernels = []
@@ -1544,7 +1563,7 @@ def emit():
                 for j, c in enumerate(CATALOG906[dtype])
             ]
             + [(c, "fmardna") for c in CATALOGRDNA.get(dtype, [])]
-            # Three-bf16 (TF32 permission only) in packs of their own, ahead of the generic tier.
+            # Three-bf16 in packs of their own (CONV_WRW_TF32's), ahead of the generic tier.
             + [
                 (c, "x3" + family_of(c))
                 for c in (CATALOGX3 if dtype == "FLOAT" else [])
@@ -1605,7 +1624,7 @@ def emit():
                         "genericfma": FMARDNA_ARCHS,
                     }.get(fam, []),
                     "matchers": [umd],
-                    "engine": ued,
+                    "engine": ued_tf32 if fam.startswith("x3") else ued,
                     "dispatch": udd,
                     "kernelDescriptors": pack,
                 },

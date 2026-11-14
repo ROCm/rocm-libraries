@@ -34,7 +34,7 @@
 // CONV_K3_SWZ (default 1: the ping-pong and the swizzled rows; 0 only for ablation).
 // ConvWrwReduce, the partials' fixed-order sum, shares the source, as does ConvWrwReduceRows, the
 // same sum by K C T R S rows (the host's choice for at most 2 splits).
-// Three-bf16 (fp32 graphs under TF32 permission) compiles the bf16 kernel (CONV_K3_T unsigned
+// Three-bf16 (fp32 graphs, the TF32 engine's configs) compiles the bf16 kernel (CONV_K3_T unsigned
 // short) with CONV_K3_MATH 1, which adds ConvWrwSplit (the operands split into 3N bf16 images,
 // K3SplitArgs), and CONV_K3_TO float, the reduces' dw element type. Neither is defined
 // otherwise, so every other config compiles exactly as before.

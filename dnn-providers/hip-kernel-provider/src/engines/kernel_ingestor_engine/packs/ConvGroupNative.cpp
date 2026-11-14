@@ -723,7 +723,7 @@ struct Tile
     /// planner's target workgroups a dispatch unit (1 to 16). 0 for the other directions'
     /// configs.
     int64_t bpu = 0;
-    /// 1: the three-bf16 form (TF32 permission) of a bf16 matrix-core config, for fp32 graphs.
+    /// 1: the three-bf16 form (a TF32 config) of a bf16 matrix-core config, for fp32 graphs.
     int64_t math = 0;
 };
 
@@ -995,7 +995,7 @@ bool kernelMatches(const MatchContext& context,
         return wrwFor(context, kernel, *tile).has_value();
     }
     const auto problem = problemFor(context, *direction, *tile);
-    // Three-bf16 (math 1): a bf16 atom for an fp32 graph, under TF32 permission only.
+    // Three-bf16 (math 1, the CONV_GROUP_*_TF32 engines' configs): a bf16 atom for an fp32 graph.
     const bool x3 = tile->math == 1;
     if(!problem.has_value()
        || kernel.getStringMetadata("dtype")
@@ -1010,7 +1010,6 @@ bool kernelMatches(const MatchContext& context,
     }
     if(x3
        && (problem->igemm.base.dataType != data_objects::DataType::FLOAT
-           || !conv_igemm::tf32Permitted()
            || !conv_group::threeBf16Pays(*problem, context.deviceProperties.gcnArchName)))
     {
         return false;

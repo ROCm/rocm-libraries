@@ -94,7 +94,7 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        // The native configs and the three-bf16 ones (TF32 permission), one pack each.
+        // The native configs and the three-bf16 ones (CONV_IGEMM_NCHW_BWD_TF32's), one pack each.
         std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
         for(const std::string file :
             {"conv_igemm_nchw_bwd.kdp.json", "conv_igemm_nchw_bwd_f32x3.kdp.json"})
@@ -370,7 +370,7 @@ bool everyCaseServed(DataType dataType)
     });
 }
 
-/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// The configs a run takes: the graph's own element type, or (fp32, the TF32 engine's) the
 /// three-bf16 ones.
 enum class Math
 {
@@ -514,7 +514,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
 
-/// The three-bf16 fp32 configs (TF32 permission) against the fp64 reference at three-bf16's bound,
+/// The three-bf16 fp32 configs (CONV_IGEMM_NCHW_BWD_TF32's) against the fp64 reference at three-bf16's bound,
 /// and with +inf and -inf in dy (each must reach dx as itself, NaN where both meet).
 class TestGpuConvIgemmNchwThreeBf16 : public ::testing::TestWithParam<DeviceCase>
 {
@@ -527,8 +527,6 @@ TEST_P(TestGpuConvIgemmNchwThreeBf16, Float)
     {
         GTEST_SKIP() << "no three-bf16 configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     runCase<float>(GetParam().shape, Math::THREE_BF16);
 }
 
@@ -539,8 +537,6 @@ TEST_P(TestGpuConvIgemmNchwThreeBf16, FloatInfinities)
     {
         GTEST_SKIP() << "no three-bf16 configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     runCase<float>(GetParam().shape, Math::THREE_BF16, true);
 }
 
@@ -549,22 +545,20 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
 
-/// Opt-in (K7_TF32_TIMING=<shape CSV>): the best exact and the best three-bf16 config per shape,
-/// TF32 permitted. See ConvTf32Timing.hpp.
+/// Opt-in (K7_TF32_TIMING=<shape CSV>): the best exact and the best three-bf16 config per shape.
+/// See ConvTf32Timing.hpp.
 TEST(TestGpuConvIgemmNchwTiming, ExactAgainstThreeBf16)
 {
     SKIP_IF_NO_DEVICES();
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     conv_tf32_timing::timeByForm(
         PACK, ConvDirection::BACKWARD_DATA, catalog(), "K7_TF32_TIMING", [](const auto& kernel) {
             return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
         });
 }
 
-/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some
-/// where threeBf16Pays (RDNA, 3-D 3x3x3 at stride 2), and 16-bit graphs none.
-TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyUnderTf32Permission)
+/// fp32 graphs admit three-bf16 configs where threeBf16Pays (RDNA, 3-D 3x3x3 at stride 2), and
+/// 16-bit graphs none.
+TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyForFloatWhereItPays)
 {
     ConvShape shape;
     for(const auto& deviceCase : deviceCases())
@@ -598,13 +592,6 @@ TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyUnderTf32Permission)
                 }
                 return count;
             };
-            {
-                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
-                    conv_tf32_test::TF32_ENV, "");
-                EXPECT_EQ(admitted(), 0);
-            }
-            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-                conv_tf32_test::TF32_ENV, "1");
             const auto problem = conv_igemm_nchw::parseNchwProblem(fixture.context());
             ASSERT_TRUE(problem.has_value());
             const bool expected

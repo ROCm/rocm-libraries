@@ -706,13 +706,13 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     if(config.math != 0)
     {
         // Three-bf16: the bf16 config on 3N images of split x and dy (x hi dy hi + x hi dy lo +
-        // x lo dy hi), partials and reduce as ever (the reduce writes fp32 dw). TF32 permission
-        // only, fp32 graphs only; the direct dw store would write bf16, so dws 0. The split
+        // x lo dy hi), partials and reduce as ever (the reduce writes fp32 dw). The
+        // CONV_WRW_TF32 engine's configs, fp32 graphs only; the direct dw store would write bf16, so dws 0. The split
         // copies x and dy whole, images outermost, so both must be packed (channels-first or
         // channels-last); not the generic tier (loop 8) or the block-based buffer forms (pb).
         if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
-           || !conv_igemm::tf32Permitted() || conv_igemm::atomElement(config.atom) != "bf16"
-           || config.dws != 0 || config.loop == LOOP_GENERIC || config.pb != 0
+           || conv_igemm::atomElement(config.atom) != "bf16" || config.dws != 0
+           || config.loop == LOOP_GENERIC || config.pb != 0
            || !(problem.channelsFirst || problem.channelsLast)
            || problem.base.args.n * 3 > INT_LIMIT || !threeBf16Pays(problem, device.gcnArchName))
         {

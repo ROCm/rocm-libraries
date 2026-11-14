@@ -88,7 +88,7 @@ struct K3ReduceArgs
     int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
 };
 
-/// Three-bf16 (an fp32 graph under TF32 permission, a config of math 1): ConvWrwSplit writes
+/// Three-bf16 (an fp32 graph, a config of math 1: the TF32 engine's): ConvWrwSplit writes
 /// x and dy, both packed, as 3N bf16 images each, xs = [x hi | x hi | x lo] and ys = [dy hi |
 /// dy lo | dy hi], so the bf16 kernel's sum over 3N images is x hi dy hi + x hi dy lo + x lo dy
 /// hi (lo * lo dropped), accumulated in fp32 like any other partials.

@@ -78,8 +78,8 @@ struct NchwConfig
     /// ((taps - 1) dilation, plus one at strides past 1). FMA: the vector (a register window,
     /// unit dilation), or wider at stride 1.
     int64_t halo = 0;
-    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
-    /// (conv_igemm::tf32Permitted): a bf16 matrix-core config on dy and w split along K into 3K
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph (a TF32 config,
+    /// CONV_IGEMM_NCHW_BWD_TF32's): a bf16 matrix-core config on dy and w split along K into 3K
     /// channels (ConvTf32Split.hpp), dx written in fp32.
     int64_t math = 0;
 };
@@ -158,7 +158,7 @@ bool threeBf16Pays(const NchwProblem& problem, std::string_view gcnArchName);
  * the grid within the launch limits. The device and dtype checks are the kernel
  * match's (atomRunsOn, the dtype string).
  *
- * math 0, or 1 (three-bf16): an fp32 problem, TF32 permitted, a bf16 matrix-core atom (the
+ * math 0, or 1 (three-bf16): an fp32 problem, a bf16 matrix-core atom (the
  * kernel match also requires threeBf16Pays for the device); the config is then gated on
  * threeBf16ProblemOf(problem), and the launch carries the split pre-pass (plan) and the 3K
  * problem's arguments.
