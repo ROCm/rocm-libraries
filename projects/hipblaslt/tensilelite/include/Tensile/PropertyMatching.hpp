@@ -979,7 +979,6 @@ namespace TensileLite
 
                 ptrdiff_t count = 0;
                 bool      Debug = T_Debug;
-                std::cout << std::setprecision(2) << std::fixed;
 
                 Key key = key_orig;
 

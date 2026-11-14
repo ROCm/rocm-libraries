@@ -693,7 +693,6 @@ namespace Tensile
 
                 ptrdiff_t count = 0;
                 bool      Debug = T_Debug;
-                std::cout << std::setprecision(2) << std::fixed;
 
                 auto compM = [&count, Debug](Entry const& e, long const M) {
                     if(Debug)
