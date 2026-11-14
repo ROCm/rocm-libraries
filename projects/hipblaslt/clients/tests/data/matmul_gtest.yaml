@@ -3150,7 +3150,9 @@ Tests:
 # and 0x75a3: on either a missing solution fails, and other parts decline. The K = 65536
 # entries are pre_checkin. The K = 131584 entries are nightly: their CPU reference is about
 # 2.2e12 multiply-adds, and each test peaks at about 12 GiB of host memory.
-# RowUniformityMXFp6_smoke runs every kernel at the quick tier.
+# integer_exact bounds every partial sum of D by K * 64, below 2^24 at both K, so every
+# fp32 sum is exact in any order and unit_check compares all of D exactly.
+# RowUniformityMXFp6_smoke runs every kernel at the quick tier, and checks sampled D exactly.
 - name: matmul_mx_fp6_tile128x4
   category: pre_checkin
   function:
@@ -3166,7 +3168,7 @@ Tests:
   beta: 0.0
   use_ext: 1
   use_ext_setproblem: 1
-  initialization: rand_int
+  initialization: integer_exact
   unit_check: 1
   norm_check: 1
   allow_no_solution: 1
@@ -3188,7 +3190,7 @@ Tests:
   beta: 0.0
   use_ext: 1
   use_ext_setproblem: 1
-  initialization: rand_int
+  initialization: integer_exact
   unit_check: 1
   norm_check: 1
   allow_no_solution: 1
@@ -3200,29 +3202,6 @@ Tests:
   function:
     matmul:
     - { a_type: f6_r, b_type: f6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
-  M: [4096]
-  N: [4096]
-  K: [131584]
-  transA: T
-  transB: N
-  alpha: 1.0
-  beta: 0.0
-  use_ext: 1
-  use_ext_setproblem: 1
-  initialization: rand_int
-  unit_check: 1
-  norm_check: 1
-  allow_no_solution: 1
-  require_solution_chip_ids: [0x75a0, 0x75a3]
-  gpu_arch: '950'
-
-# rand_int E3M2 data reaches |D| ~ 3.5e7 > 2^24 at this K, where fp32 sums depend on
-# their order, so the exact unit_check against the fp32 CPU reference does not apply;
-# norm_check and the elementwise allclose_check bound the error instead.
-- name: matmul_mx_bf6_tile128x4_k131584
-  category: nightly
-  function:
-    matmul:
     - { a_type: bf6_r, b_type: bf6_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1018, scaleB: 1018, scale_type: f32_r, swizzle_a: true, swizzle_b: true }
   M: [4096]
   N: [4096]
@@ -3233,10 +3212,9 @@ Tests:
   beta: 0.0
   use_ext: 1
   use_ext_setproblem: 1
-  initialization: trig_float
-  unit_check: 0
+  initialization: integer_exact
+  unit_check: 1
   norm_check: 1
-  allclose_check: 1
   allow_no_solution: 1
   require_solution_chip_ids: [0x75a0, 0x75a3]
   gpu_arch: '950'

@@ -1224,7 +1224,8 @@ namespace
     // depends on the summation order, by more than D's bf16 precision.
     // A second run on the same data lowers those two blocks' scales into the small
     // range. Every partial sum is then exact in fp32 in any order, so sampled D must
-    // equal the exact dot product rounded to bf16.
+    // equal the exact dot product rounded to bf16. The matmul_mx_fp6_tile128x4* entries
+    // of matmul_gtest.yaml check all of D exactly, in the pre_checkin and nightly tiers.
     TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
     {
         const MXFp6Case&  c       = GetParam();

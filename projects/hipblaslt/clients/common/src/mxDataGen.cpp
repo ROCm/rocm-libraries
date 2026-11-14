@@ -333,9 +333,14 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
     return refFloat;
 }
 
-// For fast_check: small integers in the fp8 elements (A in {0, 1, 2}, B in {-2, ..., 2}) and
-// E8M0 scales of 1, 2 or 4 chosen per block, so every dequantized value is an exact integer and a
-// read of the wrong scale changes the result.
+template <typename DT>
+constexpr bool isMXFp6
+    = std::is_same_v<DT, DGen::ocp_e2m3_mxfp6> || std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>;
+
+// Small integers in the fp8 or fp6 elements (A in {0, 1, 2}, B in {-2, ..., 2}) and E8M0 scales
+// of 1, 2 or 4 chosen per block, so every dequantized value is an exact integer and a read of the
+// wrong scale changes the result. The bounds are kIntegerExactMXMaxElement and
+// kIntegerExactMXMaxScale in mxDataGen.hpp.
 template <typename DT>
 void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
                         std::vector<uint8_t>& scaleBytes,
@@ -343,16 +348,20 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
 {
     constexpr bool e4m3 = std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>;
     constexpr bool e5m2 = std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>;
-    if constexpr(!e4m3 && !e5m2)
+    constexpr bool e2m3 = std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>;
+    if constexpr(!e4m3 && !e5m2 && !isMXFp6<DT>)
     {
-        throw std::runtime_error("integer_exact MX data supports fp8 (E4M3, E5M2) elements only");
+        throw std::runtime_error(
+            "integer_exact MX data supports fp8 (E4M3, E5M2) and fp6 (E2M3, E3M2) elements only");
     }
     else
     {
         // Encodings of -2, -1, 0, 1 and 2.
         constexpr uint8_t e4m3Codes[5] = {0xC0, 0xB8, 0x00, 0x38, 0x40};
         constexpr uint8_t e5m2Codes[5] = {0xC0, 0xBC, 0x00, 0x3C, 0x40};
-        const uint8_t*    codes        = e4m3 ? e4m3Codes : e5m2Codes;
+        constexpr uint8_t e2m3Codes[5] = {0x30, 0x28, 0x00, 0x08, 0x10};
+        constexpr uint8_t e3m2Codes[5] = {0x30, 0x2C, 0x00, 0x0C, 0x10};
+        const uint8_t* codes = e4m3 ? e4m3Codes : e5m2 ? e5m2Codes : e2m3 ? e2m3Codes : e3m2Codes;
         auto              mix          = [](uint64_t x) {
             x ^= x >> 33;
             x *= 0xff51afd7ed558ccdULL;
@@ -361,12 +370,17 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
             return x ^ (x >> 33);
         };
         const uint64_t salt = isMatrixA ? 0x41 : 0x42;
-        for(size_t i = 0; i < dataBytes.size(); i++)
+        // fp6 elements are packed four to three bytes, LSB first.
+        std::vector<uint8_t>  fp6Elements(isMXFp6<DT> ? dataBytes.size() * 8 / 6 : 0);
+        std::vector<uint8_t>& elements = isMXFp6<DT> ? fp6Elements : dataBytes;
+        for(size_t i = 0; i < elements.size(); i++)
         {
             const uint64_t h = mix(i * 131 + salt);
             const int      v = isMatrixA ? int(h % 3) : int(h % 5) - 2;
-            dataBytes[i]     = codes[v + 2];
+            elements[i]      = codes[v + 2];
         }
+        if constexpr(isMXFp6<DT>)
+            packData<DT>(fp6Elements, dataBytes.data());
         for(size_t i = 0; i < scaleBytes.size(); i++)
             scaleBytes[i] = uint8_t(127 + mix(i * 137 + salt + 2) % 3);
     }
@@ -526,14 +540,21 @@ std::vector<float> generateData(T                           dgen,
         if(!integerExact)
             return dgen.getReferenceFloat();
         // The generator's reference floats describe its own values, which integerExact replaced;
-        // recompute them from the bytes, where each run of elementsPerMXBlock shares a scale.
+        // recompute them from the bytes with the generator's scale mapping, in which each stored
+        // row starts a new block, so a partial block at the end of a row keeps its own scale.
         size_t const       count = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
         std::vector<float> ref(count);
         for(size_t idx = 0; idx < count; idx++)
-            ref[idx] = DGen::toFloat<DT>(scaleBytes.data(),
-                                         dataBytes.data(),
-                                         static_cast<DGen::index_t>(idx / elementsPerMXBlock),
-                                         static_cast<DGen::index_t>(idx));
+        {
+            auto const dataIndex  = static_cast<DGen::index_t>(idx);
+            auto const scaleIndex = dgen.scaleIndexForData(dataIndex);
+            if constexpr(isMXFp6<DT>)
+                ref[idx] = DGen::toFloatPacked<DT>(
+                    scaleBytes.data(), dataBytes.data(), scaleIndex, dataIndex);
+            else
+                ref[idx]
+                    = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scaleIndex, dataIndex);
+        }
         return ref;
     }
 
