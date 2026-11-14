@@ -41,12 +41,15 @@
 # turn on, together, the mask-limit stack (scalar state, invariant hoist, mask once, mask
 # limit), conflict-free V stores, a K ring or a single K buffer, `waves_per_eu` 2 and the
 # `all` KV cache policy; at D64 also a sliced-K ring of 16-wide slices and direct-global Q.
-# No registry sweep spec combines those, so four `enumerate.also` sections pin them with
-# `spec_overrides`, one per (dtype, head size), each on the geometry rocKE selects:
-# 4 warps x 32 rows, 64-token tile (D64, and fp16 D128 with a depth-2 ring) and 2 warps x
-# 32 rows with a single K buffer (bf16 D128). rocKE routes short prefill (seqlen_q <= 768) to
-# a light narrow geometry instead; those are the narrow geometries below. The five stack
-# fields that tell a production kernel from a geometry's default kernel are KMD fields,
+# No registry sweep spec combines those, so three `enumerate.also` sections pin them with
+# `spec_overrides`, each on the geometry rocKE selects: D64 (both dtypes in one section) and
+# fp16 D128 at 4 warps x 32 rows with a 64-token tile (fp16 D128 with a depth-2 ring), and
+# bf16 D128 at 2 warps x 32 rows with a single K buffer. The reduction kept no bf16 D128
+# production kernel. rocKE routes short prefill (seqlen_q <= 768) to a light narrow geometry
+# (16x16x16, 1 or 2 warps, 16 rows per warp, 64-token tile, register PV); this space has no
+# such geometry at D128. After the reduction, D64 and fp16 D128 keep a narrow kernel only in
+# their ratio-1 cells, and bf16 D128 keeps narrow kernels at ratios 1, 2, 4 and 8. The five
+# stack fields that tell a production kernel from a geometry's default kernel are KMD fields,
 # knobs and `reduction.fields.performance`, so the sweep ranks them and the catalog key never
 # collides; the rest are fixed by the stack and recorded in the kernel spec.
 #
