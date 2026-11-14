@@ -1103,7 +1103,150 @@ TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
     EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
 }
 
+TEST(VaryMXScaleFreeTiles, SkipsMafScales)
+{
+    using TensileLite::Client::InitMode;
+    // A random scale init varies the E8 tiles when the free-dim block is above one.
+    EXPECT_TRUE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 2, true));
+    EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 1, true));
+    EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(InitMode::Random, InitMode::Random, 2, false));
+    // MAF data keeps its prescribed scales (e.g. MAF1.0's 0x7E would become 0x7C).
+    for(auto mode : {InitMode::Maf1_0, InitMode::Maf2_0, InitMode::Maf2_0UnitScale})
+        EXPECT_FALSE(dt::shouldVaryMXScaleFreeTiles(mode, InitMode::Random, 2, true))
+            << TensileLite::Client::ToString(mode);
+}
+
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
+
+// Maf1_0 fills element (i, j, b) of a padded 3 x 4 x 2 tensor (ld 5, batch stride 23) with
+// sin (A) or cos (other tensors) of the logical index i + 3 * j + 12 * b, ScaleA/ScaleB with
+// 0.5, and leaves the padding alone.
+TEST(Maf1_0Init, LogicalIndexOverPaddedLayout)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 5, 23};
+    size_t const              allocated = 1 + 2 * 1 + 3 * 5 + 1 * 23;
+    for(size_t tensor : {size_t(ContractionProblemGemm::TENSOR::A),
+                         size_t(ContractionProblemGemm::TENSOR::B),
+                         size_t(ContractionProblemGemm::TENSOR::C),
+                         size_t(ContractionProblemGemm::TENSOR::SCALEA),
+                         size_t(ContractionProblemGemm::TENSOR::SCALEB)})
+    {
+        SCOPED_TRACE("tensor " + std::to_string(tensor));
+        std::vector<double> array(allocated, 42.0);
+        DataInitialization::initArrayMaf1_0(array.data(), sizes, strides, tensor);
+        std::vector<bool> written(allocated, false);
+        for(size_t b = 0; b < 2; b++)
+            for(size_t j = 0; j < 4; j++)
+                for(size_t i = 0; i < 3; i++)
+                {
+                    double const x = double(i + 3 * j + 12 * b);
+                    double const expected
+                        = tensor == ContractionProblemGemm::TENSOR::A ? std::sin(x)
+                          : tensor == ContractionProblemGemm::TENSOR::SCALEA
+                                  || tensor == ContractionProblemGemm::TENSOR::SCALEB
+                              ? 0.5
+                              : std::cos(x);
+                    size_t const offset = i + 5 * j + 23 * b;
+                    EXPECT_EQ(array[offset], expected) << i << "," << j << "," << b;
+                    written[offset] = true;
+                }
+        for(size_t k = 0; k < allocated; k++)
+            if(!written[k])
+                EXPECT_EQ(array[k], 42.0) << "padding " << k;
+    }
+}
+
+// A zero-stride batch dimension shares one matrix across batches. Maf1_0 must write it once, with
+// batch 0's values, rather than racing batches with different values into the same storage.
+TEST(Maf1_0Init, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 3, 0};
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<double> array(12, 42.0);
+        DataInitialization::initArrayMaf1_0(
+            array.data(), sizes, strides, ContractionProblemGemm::TENSOR::A);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], std::sin(double(k))) << "rep " << rep << ", element " << k;
+    }
+}
+
+// Overlapping nonzero strides: with sizes {3, 4, 2} and strides {1, 3, 6} batch 1 starts inside
+// batch 0, so indices 6 and 12 (and others) share an element. The fill must be deterministic, with
+// the later logical index winning, not a race between OpenMP workers.
+TEST(Maf1_0Init, OverlappingStridesKeepTheLastIndex)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 3, 6};
+    std::vector<double>       expected(18, 42.0);
+    for(size_t idx = 0; idx < 24; idx++)
+        expected[idx % 3 + (idx / 3) % 4 * 3 + idx / 12 * 6] = std::sin(double(idx));
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<double> array(18, 42.0);
+        DataInitialization::initArrayMaf1_0(
+            array.data(), sizes, strides, ContractionProblemGemm::TENSOR::A);
+        ASSERT_EQ(array, expected) << "rep " << rep;
+    }
+}
+
+// Each value is rounded once from double. sin(11446) = -0.923828140... lies just past the BF16
+// midpoint -0.923828125, which is where rounding to float first lands (and would then tie to
+// even, -0.921875).
+TEST(Maf1_0Init, RoundsOnceFromDouble)
+{
+    using TensileLite::Client::DataInitialization;
+    TensileLite::BFloat16 bf;
+    DataInitialization::initArrayMaf1_0(&bf, {1}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(bf.data, 0x0000);
+    std::vector<TensileLite::BFloat16> row(11447);
+    DataInitialization::initArrayMaf1_0(
+        row.data(), {row.size()}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(row[11446].data, 0xbf6d);
+    EXPECT_EQ(float(row[1]), 0.83984375f); // sin(1) = 0.84147 -> 0x3f57
+
+    // OCP E4M3: sin(1) -> 0.8125, sin(2) -> 0.9375; cos(0) = 1.
+    std::vector<TensileLite::Float8> f8(3);
+    DataInitialization::initArrayMaf1_0(f8.data(), {3}, {1}, ContractionProblemGemm::TENSOR::A);
+    EXPECT_EQ(float(f8[1]), 0.8125f);
+    EXPECT_EQ(float(f8[2]), 0.9375f);
+    DataInitialization::initArrayMaf1_0(f8.data(), {3}, {1}, ContractionProblemGemm::TENSOR::B);
+    EXPECT_EQ(float(f8[0]), 1.0f);
+
+    std::vector<float> f32(2);
+    DataInitialization::initArrayMaf1_0(f32.data(), {2}, {1}, ContractionProblemGemm::TENSOR::C);
+    EXPECT_EQ(f32[1], static_cast<float>(std::cos(1.0)));
+}
+
+TEST(Maf1_0Init, UnsupportedTypesThrow)
+{
+    using TensileLite::Client::DataInitialization;
+    int32_t i32 = 0;
+    EXPECT_THROW(DataInitialization::initArrayMaf1_0(&i32, {1}, {1}, 0), std::runtime_error);
+    std::complex<float> c32;
+    EXPECT_THROW(DataInitialization::initArrayMaf1_0(&c32, {1}, {1}, 0), std::runtime_error);
+    using TensileLite::Client::InitMode;
+    EXPECT_THROW(DataInitialization::getValue<float>(InitMode::Maf1_0), std::runtime_error);
+}
+
+TEST(Maf1_0Init, NameRoundTrips)
+{
+    using TensileLite::Client::InitMode;
+    EXPECT_EQ(static_cast<int>(InitMode::Maf1_0), 28);
+    EXPECT_EQ(TensileLite::Client::ToString(InitMode::Maf1_0), "Maf1_0");
+    InitMode           mode = InitMode::Zero;
+    std::istringstream in("Maf1_0");
+    in >> mode;
+    EXPECT_EQ(mode, InitMode::Maf1_0);
+    std::istringstream num("28");
+    num >> mode;
+    EXPECT_EQ(mode, InitMode::Maf1_0);
+}
 
 // =============================================================================
 //   Section 5 — TensileLite::hip::CopyTensorVoid
