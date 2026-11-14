@@ -1479,9 +1479,7 @@ def rounding_boundaries(bits: int, dtype: str) -> tuple[Fraction | None, Fractio
 
 
 @cache
-def certify_target(
-    dtype: str, exponent: int, item: CoordinateClass
-) -> CertifiedTarget:
+def certify_target(dtype: str, exponent: int, item: CoordinateClass) -> CertifiedTarget:
     """``q_T(2**h (m_c e^c + m_0) / (n_c e^c + n_0))``, certified.
 
     The value is rational when ``c = 0`` or the coordinate's class mix is
