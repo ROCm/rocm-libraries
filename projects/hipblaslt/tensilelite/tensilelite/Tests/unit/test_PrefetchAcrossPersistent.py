@@ -2239,11 +2239,14 @@ def test_cluster_close_handoff_covers_only_reachable_backedges(
 
 
 @pytest.mark.parametrize("assignment,tdma,tdmb,threads,drains,barriers", [
-    (StaticGrid, False, False, 64, 0, 0),
+    # Without TDM the next tile's local writes and DirectToLds loads reuse LDS too.
+    (StaticGrid, False, False, 32, 0, 0),
+    (StaticGrid, False, False, 64, 1, 1),
     (StaticGrid, True, False, 32, 0, 0),
     (StaticGrid, True, False, 64, 1, 1),
     (StaticGrid, False, True, 64, 1, 1),
-    (DynamicWorkQueue, False, False, 64, 0, 1),
+    (DynamicWorkQueue, False, False, 32, 0, 1),
+    (DynamicWorkQueue, False, False, 64, 1, 1),
 ])
 def test_persistent_handoff_scope(assignment, tdma, tdmb, threads, drains, barriers):
     from rocisa.instruction import SBarrier, SWaitCnt
@@ -2259,3 +2262,44 @@ def test_persistent_handoff_scope(assignment, tdma, tdmb, threads, drains, barri
     items = list(beforeReentry.flatitems())
     assert sum(isinstance(item, SWaitCnt) for item in items) == drains
     assert sum(isinstance(item, SBarrier) for item in items) == barriers
+
+
+@pytest.mark.parametrize("assignment,strategy", [
+    (StaticGrid, "DataParallel"),  # persistent data-parallel
+    (StaticGrid, "StreamK"),       # StreamK=3
+    (Hybrid, "StreamK"),           # StreamK=5, static and dynamic closes
+])
+def test_every_multi_wave_persistent_back_edge_is_fenced(monkeypatch, assignment, strategy):
+    """A wave must not branch back to the next tile while other waves still read LDS."""
+    from rocisa.container import ContinuousRegister
+    from rocisa.instruction import SBarrier, SGetPCB64, SWaitCnt
+    from tensilelite.Component import Component
+    from tensilelite.Components.WorkAssignment import StaticPartition
+
+    partition = StaticPartition("PersistentIteration", "PersistentIterationEnd", "skGrid", "Rank")
+    monkeypatch.setattr(Component.TileProcessingStrategy, "find",
+                        lambda writer: SimpleNamespace(staticPartition=lambda: partition))
+    names = iter(range(1000))
+
+    @contextmanager
+    def alloc_tmp_sgpr(size, alignment=1, tag=""):
+        yield ContinuousRegister(100, size)
+
+    writer = SimpleNamespace(
+        labels=SimpleNamespace(getNameInc=lambda name: "%s%d" % (name, next(names))),
+        allocTmpSgpr=alloc_tmp_sgpr,
+        rapPersistentLoopEntryLabel=lambda kernel: "PersistentLoopStart",
+    )
+    kernel = dict(TileProcessingStrategy=strategy, WorkAssignment=assignment.__name__,
+                  ClusterDim=[1, 1], enableTDMA=False, enableTDMB=False,
+                  NumThreads=256, WavefrontSize=64, ReuseAcrossPersistent=0)
+    items = list(assignment().closeLoop(writer, kernel).flatitems())
+    backEdges = [i for i, item in enumerate(items) if isinstance(item, SGetPCB64)]
+    assert backEdges
+    previous = 0
+    for edge in backEdges:
+        handoff = items[previous:edge]
+        drain = max((i for i, item in enumerate(handoff) if isinstance(item, SWaitCnt)), default=-1)
+        barrier = max((i for i, item in enumerate(handoff) if isinstance(item, SBarrier)), default=-1)
+        assert -1 < drain < barrier, "back-edge %d lacks an LDS drain and barrier" % edge
+        previous = edge + 1
