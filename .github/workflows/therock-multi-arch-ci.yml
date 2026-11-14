@@ -98,7 +98,7 @@ jobs:
       therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
     steps:
       - name: Checkout ci-env action
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/actions/ci-env
           sparse-checkout-cone-mode: true
@@ -126,14 +126,14 @@ jobs:
       family_overrides: ${{ steps.family-override.outputs.family_overrides }}
     steps:
       - name: Checkout repository config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             .github/repos-config.json
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/TheRock
           ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
@@ -178,7 +178,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@6b1f9c44307577082a250e45c7e7ae6e1b218dbc # 2026-11-11
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -253,7 +253,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@6b1f9c44307577082a250e45c7e7ae6e1b218dbc # 2026-11-11
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -280,7 +280,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@6b1f9c44307577082a250e45c7e7ae6e1b218dbc # 2026-11-11
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -365,7 +365,7 @@ jobs:
       HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
     steps:
       - name: Checkout notify script
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts/notify_teams.py
           sparse-checkout-cone-mode: false
@@ -397,7 +397,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.

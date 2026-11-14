@@ -50,7 +50,7 @@ jobs:
       timeouts: ${{ steps.matrix.outputs.timeouts }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
@@ -135,13 +135,13 @@ jobs:
     steps:
       - name: Checkout TheRock repository
         # TheRock is at the workspace root, so ./.github/actions/... uses its actions.
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           ref: ${{ needs.setup.outputs.therock_ref }}
 
       - name: "Check out rocm-libraries"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-libraries
 
@@ -255,14 +255,14 @@ jobs:
       TEST_COMPONENT: ${{ matrix.component }}
     steps:
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           ref: ${{ needs.setup.outputs.therock_ref }}
 
       - name: Checkout rocm-libraries repository for scripts
         timeout-minutes: 30
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-libraries
           sparse-checkout: |
@@ -271,7 +271,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
 
@@ -345,7 +345,7 @@ jobs:
 
       - name: Upload failed test logs
         if: ${{ failure() }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: asan-logs-${{ matrix.component }}-${{ matrix.family }}
           path: test_logs
