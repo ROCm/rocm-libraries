@@ -153,7 +153,7 @@ __device__ inline void accumulateTaps(float (&sum)[TAPS],
 #pragma unroll
             for(int kx = 0; kx < CONV_DW_KW; ++kx)
             {
-                const int ix = ox * a.sw - a.pw + kx * a.dw_;
+                const int ix = ox * a.sw - a.pw + kx * a.dilW;
                 if(rowInside && ix >= 0 && ix < a.wi)
                 {
                     sum[(kz * CONV_DW_KH + ky) * CONV_DW_KW + kx]
@@ -485,7 +485,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
                 }
                 for(int ox = 0; ox < a.wo; ++ox)
                 {
-                    const int ix = ox * a.sw - a.pw + kx * a.dw_;
+                    const int ix = ox * a.sw - a.pw + kx * a.dilW;
                     if(ix < 0 || ix >= a.wi)
                     {
                         continue;
@@ -506,7 +506,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     {
         sum[t] = 0.0f;
     }
-    if(c < channels && a.sw == 1 && a.dw_ == 1)
+    if(c < channels && a.sw == 1 && a.dilW == 1)
     {
         for(int row = first + lane; row < last; row += LANES)
         {
@@ -573,7 +573,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
             const int n = row / (a.ho * a.dOut);
             const int iz = oz * a.sd - a.pd + kz * a.dd;
             const int iy = oy * a.sh - a.ph + ky * a.dh;
-            const int ix = ox * a.sw - a.pw + kx * a.dw_;
+            const int ix = ox * a.sw - a.pw + kx * a.dilW;
             if(iz >= 0 && iz < a.di && iy >= 0 && iy < a.hi && ix >= 0 && ix < a.wi)
             {
                 sum += toFloat(dy[offsetOf(n, c, oz, oy, ox, outChannels(a), a.dOut, a.ho, a.wo)])
@@ -593,7 +593,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     {
         sum[t] = 0.0f;
     }
-    if(a.sw == 1 && a.dw_ == 1)
+    if(a.sw == 1 && a.dilW == 1)
     {
         // A thread takes strips of STRIP columns (accumulateStrips), consecutive threads
         // consecutive strips.
