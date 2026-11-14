@@ -20,15 +20,24 @@
 #   - tensilelite/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
 #
 # comprehensive/full reproduce that legacy set exactly (GPU tests included).
-# quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
-# the pre-commit / PR tiers stay fast and host-only.
+# quick stays host-only: it runs for TheRock-side changes, which Component CI
+# never sees. standard is the rocm-libraries PR tier, where the required
+# Component CI lanes already run the host-only tests on CPU (all of rocisa_tests
+# in component-ci-rocisa.yml, tensilelite/Tests/unit -m "not gpu" in
+# component-ci-tensilelite-unit.yml), so it runs only the GPU unit tests (marker
+# `gpu`). rocisa_tests is left out: its one `gpu`-marked module (test_cycle.py)
+# needs the assembler, not a GPU, and already runs in the rocISA lane.
+# A test that needs a GPU must carry the `gpu` marker (requires_gpu / GPU_MARKS in
+# gpu_test_helpers.py, or @pytest.mark.gpu next to its skipif): standard selects
+# by marker, and the CPU lane skips it, so an unmarked hardware test runs on no PR.
 #
 # test_paths are relative to the installed component root
 # (share/hipblaslt/tensilelite/), which is the pytest working directory.
 
 test_categories:
-  # The unit categories run a partial slice of the suite (quick/standard exclude
-  # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
+  # quick and standard run a partial slice of the suite (quick excludes the GPU
+  # tests, standard runs only them), so syrupy would flag the un-exercised
+  # snapshots as failures.
   # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
   #
   # The quick, standard and hw-common categories also pass `--dist=worksteal`. It
@@ -48,7 +57,7 @@ test_categories:
   # its "N snapshots passed" summary and cannot report unused snapshots. Mismatches
   # still fail the tests, and unused snapshots were only warnings here.
   #
-  # The quick and standard categories run eight xdist workers (parallel_workers:
+  # The quick category runs eight xdist workers (parallel_workers:
   # 8), overriding the global 1. The job's CPU allocation is 25 CPUs
   # (KUBE_CPU_REQUEST), which the host's CPU count does not reflect. Each worker
   # repeats its own startup (collecting the whole tree and priming ISA
@@ -58,9 +67,10 @@ test_categories:
   # CpuThreads to 1, so the tests no longer fan out their own process pools on
   # top of the xdist workers.
   #
-  # comprehensive and full stay at one worker: they also run the GPU unit tests
-  # (marker `gpu`), which take no per-GPU lock, so eight workers would all use
-  # the runner's one GPU. See execution_settings below.
+  # standard, comprehensive and full stay at one worker: they run the GPU unit
+  # tests (marker `gpu`), which take no per-GPU lock, so eight workers would all
+  # use the runner's one GPU. standard's `--dist=worksteal` is inert at one
+  # worker. See execution_settings below.
   quick:
     description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
     parallel_workers: 8
@@ -78,12 +88,10 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
-    parallel_workers: 8
+    description: "Pre-checkin validation (TensileLite unit, GPU tests only)"
     test_paths:
-      - "rocisa_tests"
       - "tensilelite/Tests/unit"
-    exclude_markers:
+    pytest_markers:
       - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
