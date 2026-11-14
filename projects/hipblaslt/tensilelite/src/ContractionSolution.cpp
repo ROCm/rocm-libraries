@@ -5590,11 +5590,16 @@ namespace TensileLite
             throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
         if(version == 2 && outerVersion != 3)
             throw std::runtime_error("StreamK cluster argument layout version 2 requires KernArgsVersion=3");
-        // Layout 3 is layout 0 plus post kernels. Runtimes without post-kernel
-        // support reject version 3, so they never launch the main kernel alone.
+        // Layout 3 is layout 0 plus Stream-K post kernels. Runtimes with the
+        // persistent-loop layout check (#12537, 812bcc660b5) reject version 3 at
+        // load, which drops the whole library file. Earlier runtimes ignore it
+        // and the post kernels but force tree reduction for handwritten kernels,
+        // so only a kernel without `tree` support computes wrong results there.
         if(version == 3 && (outerVersion != 3 || customKernel.postKernels.empty()))
             throw std::runtime_error(
                 "Argument layout version 3 requires KernArgsVersion=3 and post kernels");
+        if(version == 3 && !sizeMapping.isStreamK())
+            throw std::runtime_error("Argument layout version 3 requires a StreamK solution");
         if(version != 3 && !customKernel.postKernels.empty())
             throw std::runtime_error("Post kernels require argument layout version 3");
     }
@@ -5613,6 +5618,11 @@ namespace TensileLite
             throw std::runtime_error("Custom kernel must support at least one reduction mode");
         if(!customKernel.postKernels.empty() && !handwrittenCustomKernel())
             throw std::runtime_error("Post kernels require a handwritten custom kernel");
+        if((modes[static_cast<size_t>(CustomReductionMode::Parallel)]
+            || !customKernel.postKernels.empty())
+           && !sizeMapping.isStreamK())
+            throw std::runtime_error(
+                "Parallel reduction and post kernels require a StreamK solution");
 
         std::array<bool, static_cast<size_t>(CustomPostKernelKind::Count)> kinds{};
         for(auto const& post : customKernel.postKernels)
@@ -5624,7 +5634,11 @@ namespace TensileLite
             const auto expected = concatenate(customKernel.name, "_", post.kind);
             if(post.name != expected)
                 throw std::runtime_error(concatenate("Post kernel must be named ", expected));
-            if(post.threads.x == 0 || post.bands == 0)
+            if(post.version != 1)
+                throw std::runtime_error(
+                    concatenate("Post kernel ", post.name, " has unsupported version"));
+            if(post.threads.x == 0 || post.threads.y == 0 || post.threads.z == 0
+               || post.bands == 0)
                 throw std::runtime_error(
                     concatenate("Post kernel ", post.name, " needs threads and bands"));
         }

@@ -112,6 +112,7 @@ TEST(CustomKernelTest, PostKernelsRoundTrip)
     kernel.reductions = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
 
     CustomPostKernel post;
+    post.version = 1;
     post.name    = "probe_streamKReduce";
     post.args    = {{CustomArgType::address, CustomArgSemantic::AddressWorkspace},
                     {CustomArgType::uint32, CustomArgSemantic::SKSplitFactor},
@@ -136,6 +137,7 @@ TEST(CustomKernelTest, PostKernelsRoundTrip)
     ASSERT_EQ(loaded.postKernels.size(), 1u);
     auto const& got = loaded.postKernels[0];
     EXPECT_EQ(got.kind, CustomPostKernelKind::StreamKReduce);
+    EXPECT_EQ(got.version, 1);
     EXPECT_EQ(got.name, post.name);
     ASSERT_EQ(got.args.size(), post.args.size());
     for(size_t i = 0; i < post.args.size(); ++i)
@@ -633,6 +635,7 @@ namespace
 {
     void configurePostKernels(ContractionSolution& solution)
     {
+        solution.sizeMapping.tileProcessingStrategy            = TileProcessingStrategy::StreamK;
         solution.internalArgsSupport.version                   = 3;
         solution.internalArgsSupport.persistentLoopArgsVersion = 3;
         solution.customKernel.name                             = "probe";
@@ -659,41 +662,104 @@ TEST(CustomKernelTest, PostKernelsValidate)
     }
 
     using Solution = ContractionSolution;
-    const std::vector<std::function<void(Solution&)>> invalid{
-        [](Solution& s) { s.internalArgsSupport.persistentLoopArgsVersion = 0; },
-        [](Solution& s) { s.internalArgsSupport.version = 2; },
-        [](Solution& s) {
-            s.customKernel.postKernels.clear();
-            s.customKernel.reductions = {CustomReductionMode::Tree};
-        },
-        [](Solution& s) { s.customKernel.reductions = {CustomReductionMode::Tree}; },
-        [](Solution& s) {
-            s.customKernel.postKernels.clear();
-            s.customKernel.reductions                       = {CustomReductionMode::Parallel};
-            s.internalArgsSupport.persistentLoopArgsVersion = 0;
-        },
-        [](Solution& s) { s.customKernel.reductions.push_back(CustomReductionMode::Tree); },
-        [](Solution& s) { s.customKernel.reductions.clear(); },
-        [](Solution& s) { s.customKernel.postKernels[0].name = "other_streamKReduce"; },
-        [](Solution& s) { s.customKernel.postKernels.push_back(s.customKernel.postKernels[0]); },
-        [](Solution& s) { s.customKernel.postKernels[0].bands = 0; },
-        [](Solution& s) { s.customKernel.generated = true; },
+    const std::vector<std::pair<std::function<void(Solution&)>, std::string>> invalid{
+        {[](Solution& s) { s.internalArgsSupport.persistentLoopArgsVersion = 0; },
+         "Post kernels require argument layout version 3"},
+        {[](Solution& s) { s.internalArgsSupport.version = 2; },
+         "version 3 requires KernArgsVersion=3 and post kernels"},
+        {[](Solution& s) {
+             s.customKernel.postKernels.clear();
+             s.customKernel.reductions = {CustomReductionMode::Tree};
+         },
+         "version 3 requires KernArgsVersion=3 and post kernels"},
+        {[](Solution& s) { s.customKernel.reductions = {CustomReductionMode::Tree}; },
+         "Parallel reduction requires a streamKReduce post kernel"},
+        {[](Solution& s) {
+             s.customKernel.postKernels.clear();
+             s.customKernel.reductions                       = {CustomReductionMode::Parallel};
+             s.internalArgsSupport.persistentLoopArgsVersion = 0;
+         },
+         "Parallel reduction requires a streamKReduce post kernel"},
+        {[](Solution& s) { s.customKernel.reductions.push_back(CustomReductionMode::Tree); },
+         "distinct known modes"},
+        {[](Solution& s) { s.customKernel.reductions.clear(); }, "at least one reduction mode"},
+        {[](Solution& s) { s.customKernel.postKernels[0].name = "other_streamKReduce"; },
+         "Post kernel must be named probe_streamKReduce"},
+        {[](Solution& s) { s.customKernel.postKernels.push_back(s.customKernel.postKernels[0]); },
+         "distinct known kinds"},
+        {[](Solution& s) { s.customKernel.postKernels[0].bands = 0; }, "needs threads and bands"},
+        {[](Solution& s) { s.customKernel.postKernels[0].threads.y = 0; },
+         "needs threads and bands"},
+        {[](Solution& s) { s.customKernel.postKernels[0].threads.z = 0; },
+         "needs threads and bands"},
+        {[](Solution& s) { s.customKernel.postKernels[0].version = 2; }, "unsupported version"},
+        {[](Solution& s) { s.customKernel.generated = true; },
+         "require a handwritten custom kernel"},
+        {[](Solution& s) {
+             s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+         },
+         "version 3 requires a StreamK solution"},
+        {[](Solution& s) {
+             s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::None;
+         },
+         "version 3 requires a StreamK solution"},
     };
     for(size_t i = 0; i < invalid.size(); ++i)
     {
         ContractionSolution solution;
         configurePostKernels(solution);
-        invalid[i](solution);
-        EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error) << "case " << i;
+        invalid[i].first(solution);
+        try
+        {
+            solution.validatePersistentLoopArgs();
+            ADD_FAILURE() << "case " << i << " did not throw";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_NE(std::string(e.what()).find(invalid[i].second), std::string::npos)
+                << "case " << i << ": " << e.what();
+        }
     }
+}
+
+// Parallel reduction needs a Stream-K solution even without post kernels.
+TEST(CustomKernelTest, ParallelReductionRequiresStreamK)
+{
+    ContractionSolution solution;
+    solution.customKernel.name       = "probe";
+    solution.customKernel.reductions = {CustomReductionMode::Parallel};
+    EXPECT_THROW(solution.validateCustomPostKernels(), std::runtime_error);
 }
 
 TEST(CustomKernelTest, PostKernelsAreNotLaunchedYet)
 {
     ContractionSolution solution;
     configurePostKernels(solution);
-    EXPECT_THROW(solution.solve(dummyProblem(), ContractionInputs(), probeDevice()),
-                 std::runtime_error);
+    auto expectRefused = [](auto&& launch) {
+        try
+        {
+            launch();
+            ADD_FAILURE() << "launch did not throw";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_STREQ(e.what(), "postKernels launch not implemented");
+        }
+    };
+    expectRefused(
+        [&] { solution.solve(dummyProblem(), ContractionInputs(), probeDevice()); });
+    expectRefused([&] {
+        solution.solveGroupedGemm({dummyProblem()},
+                                  ContractionSolution::GroupedInputs(),
+                                  probeDevice(),
+                                  nullptr,
+                                  0,
+                                  nullptr);
+    });
+    expectRefused([&] {
+        solution.solveGroupedGemmGPU(
+            {dummyProblem()}, ContractionSolution::GroupedInputs(), probeDevice(), nullptr, nullptr, nullptr);
+    });
 }
 
 namespace

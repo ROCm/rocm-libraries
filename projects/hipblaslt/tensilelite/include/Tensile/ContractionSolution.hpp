@@ -282,6 +282,9 @@ namespace TensileLite
     struct CustomPostKernel
     {
         CustomPostKernelKind             kind = CustomPostKernelKind::StreamKReduce;
+        // New post-kernel fields or semantics need a version bump: the msgpack
+        // reader ignores unknown keys.
+        int                              version = 1;
         std::string                      name;
         std::vector<CustomArgDefinition> args;
         dim3                             threads{0, 0, 0};

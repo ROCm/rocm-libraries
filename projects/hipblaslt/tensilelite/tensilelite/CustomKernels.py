@@ -25,7 +25,7 @@
 from .resources import custom_kernel_names, custom_kernel_text
 from .Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel
+from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK
 
 import re
 import yaml
@@ -442,7 +442,8 @@ def validateCustomPersistentArgs(kernelConfig):
 
 POST_KERNEL_KINDS = ("streamKReduce",)
 REDUCTION_MODES = ("tree", "parallel")
-_POST_KERNEL_KEYS = {"kind", "name", "args", "threads", "grid", "bands"}
+_POST_KERNEL_KEYS = {"kind", "version", "name", "args", "threads", "grid", "bands"}
+_POST_KERNEL_VERSION = 1
 
 def validateCustomPostKernels(kernelConfig):
     """Validate CustomKernel.reductions and CustomKernel.postKernels.
@@ -450,7 +451,8 @@ def validateCustomPostKernels(kernelConfig):
     Post kernels are launched after the main kernel. They require
     PersistentLoopArgsVersion 3, which older runtimes reject instead of
     running the main kernel alone. A ``parallel`` reduction is performed by a
-    ``streamKReduce`` post kernel, so each requires the other.
+    ``streamKReduce`` post kernel, so each requires the other. All of these
+    require a Stream-K solution. Does not mutate the descriptor.
     """
     isp = kernelConfig.get("InternalSupportParams", {})
     version = isp.get("PersistentLoopArgsVersion", 0)
@@ -477,6 +479,8 @@ def validateCustomPostKernels(kernelConfig):
         if kind in kinds:
             raise ValueError(f"Duplicate post kernel kind {kind!r}")
         kinds.append(kind)
+        if post.get("version", _POST_KERNEL_VERSION) != _POST_KERNEL_VERSION:
+            raise ValueError(f"Post kernel kind {kind!r} version must be {_POST_KERNEL_VERSION}")
         expected = f"{descriptor.get('name')}_{kind}"
         if post.get("name") != expected:
             raise ValueError(f"Post kernel {post.get('name')!r} must be named {expected!r}")
@@ -485,15 +489,19 @@ def validateCustomPostKernels(kernelConfig):
                 not isinstance(arg, dict) or "type" not in arg or "semantic" not in arg for arg in args):
             raise ValueError(f"Post kernel {expected!r} args must be a list of type/semantic mappings")
         for key in ("threads", "grid"):
-            value = post.get(key)
+            value = post.get(key, ["One"] * 3 if key == "grid" else None)
             if not isinstance(value, list) or len(value) != 3:
                 raise ValueError(f"Post kernel {expected!r} needs a three-element {key}")
         if any(type(t) is not int or t < 1 for t in post["threads"]):
             raise ValueError(f"Post kernel {expected!r} threads must be positive integers")
-        bands = post.setdefault("bands", 1)
+        bands = post.get("bands", 1)
         if type(bands) is not int or bands < 1:
             raise ValueError(f"Post kernel {expected!r} bands must be a positive integer")
 
+    if postKernels and descriptor.get("generated", False):
+        raise ValueError("CustomKernel.postKernels require a handwritten custom kernel")
+    if ("parallel" in reductions or postKernels or version == 3) and not isStreamK(kernelConfig):
+        raise ValueError("Parallel reduction, post kernels and PersistentLoopArgsVersion=3 require TileProcessingStrategy=StreamK")
     if ("parallel" in reductions) != ("streamKReduce" in kinds):
         raise ValueError("CustomKernel.reductions includes parallel if and only if a streamKReduce post kernel is declared")
     if postKernels and version != 3:
@@ -719,6 +727,11 @@ def getCustomKernelConfig(
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemC", 0)
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemBias", 0)
     kernelConfig["CustomKernelName"] = kernelName
+    for post in kernelConfig["CustomKernel"].get("postKernels") or []:
+        if isinstance(post, dict):
+            post.setdefault("version", _POST_KERNEL_VERSION)
+            post.setdefault("bands", 1)
+            post.setdefault("grid", ["One"] * 3)
 
     validateCustomPersistentArgs(kernelConfig)
     validateCustomPostKernels(kernelConfig)
