@@ -67,8 +67,21 @@ HANKEL_SCHEDULES = (
     (16, 4, 1, 1),
     (32, 4, 1, 1),
 )
+# Schedules of the row-staging body (form 1) only: tiles that fit 7-, 24- and 28-column images
+# (ConvNeXt 7x7 at 7 and 28 columns, EfficientNet at 24) and four blocks a dispatch unit at two
+# rows a step, each the best form-1 schedule on some gfx950 ConvNeXt or EfficientNet shape.
+HANKEL_FORM1_SCHEDULES = (
+    (8, 4, 2, 2),
+    (8, 4, 1, 4),
+    (8, 4, 1, 1),
+    (16, 2, 1, 4),
+    (24, 4, 1, 2),
+    (28, 2, 1, 1),
+    (28, 4, 1, 1),
+)
 # Stride 2 (both axes; EfficientNet / MobileNet downsampling layers) stages each x row as its
-# even and odd columns: the same schedules.
+# even and odd columns: the same schedules. Every schedule ships in both bodies (form 0 and 1),
+# the form-1 schedules in form 1 alone.
 HANKEL = [
     dict(
         variant="hankel",
@@ -83,11 +96,13 @@ HANKEL = [
         s=s,
         cv=0,
         strip=0,
-        form=0,
+        form=form,
     )
     for s in (1, 2)
     for k in (3, 5, 7)
-    for q, g, nwg, bpc in HANKEL_SCHEDULES
+    for (q, g, nwg, bpc), forms in [(c, (0, 1)) for c in HANKEL_SCHEDULES]
+    + [(c, (1,)) for c in HANKEL_FORM1_SCHEDULES]
+    for form in forms
 ]
 
 # Vector tiles (VALU, channels-last, unit width stride, every type and architecture): cv

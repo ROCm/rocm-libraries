@@ -701,6 +701,19 @@ const std::vector<std::array<int64_t, 4>>& hankelSchedules()
     return s_schedules;
 }
 
+/// The schedules the generator ships in the row-staging body (form 1) alone.
+const std::vector<std::array<int64_t, 4>>& hankelForm1Schedules()
+{
+    static const std::vector<std::array<int64_t, 4>> s_schedules{{8, 4, 2, 2},
+                                                                 {8, 4, 1, 4},
+                                                                 {8, 4, 1, 1},
+                                                                 {16, 2, 1, 4},
+                                                                 {24, 4, 1, 2},
+                                                                 {28, 2, 1, 1},
+                                                                 {28, 4, 1, 1}};
+    return s_schedules;
+}
+
 const std::vector<WrwConfig>& wrwCatalog()
 {
     static const std::vector<WrwConfig> s_configs = [] {
@@ -747,6 +760,12 @@ const std::vector<WrwConfig>& wrwCatalog()
                         config.form = form;
                         configs.push_back(config);
                     }
+                }
+                for(const auto& [q, g, nwg, bpc] : hankelForm1Schedules())
+                {
+                    WrwConfig config{"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride};
+                    config.form = 1;
+                    configs.push_back(config);
                 }
             }
         }
@@ -1846,6 +1865,23 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
          [](ConvShape&, WrwConfig& c, std::string&) {
              c = {"NHWC", "tile", 1, 3, 3};
              c.s = 1;
+         },
+         false},
+        {"FormOne", [](ConvShape&, WrwConfig& c, std::string&) { c.form = 1; }, true},
+        {"FormTwo", [](ConvShape&, WrwConfig& c, std::string&) { c.form = 2; }, false},
+        {"FormNegative", [](ConvShape&, WrwConfig& c, std::string&) { c.form = -1; }, false},
+        {"ValuTileWithAForm",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.form = 1;
+         },
+         false},
+        {"VectorTileWithAForm",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "vtile", 1, 3, 3};
+             c.cv = 4;
+             c.strip = 8;
+             c.form = 1;
          },
          false},
     };
