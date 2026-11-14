@@ -65,7 +65,8 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          bool reducedPrecisionReduction,
                                          bool splitReduction,
                                          ColumnLayout layout,
-                                         NarrowPartials narrowPartials)
+                                         NarrowPartials narrowPartials,
+                                         std::optional<size_t> maxBackwardWeightsRepackBytes)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
@@ -73,6 +74,7 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
     , _splitReduction(splitReduction)
     , _layout(layout)
     , _narrowPartials(narrowPartials)
+    , _maxBackwardWeightsRepackBytes(maxBackwardWeightsRepackBytes)
 {
 }
 
@@ -99,11 +101,14 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
             }
             return reducedPrecisionGemmCalls(*problem);
         }
-        auto calls = convGemmCalls(*problem,
-                                   _maxRepackWorkspaceBytes,
-                                   layout,
-                                   splitReduction,
-                                   narrowPartials(_narrowPartials));
+        auto calls
+            = convGemmCalls(*problem,
+                            direction == ConvDirection::BACKWARD_WEIGHTS
+                                ? _maxBackwardWeightsRepackBytes.value_or(_maxRepackWorkspaceBytes)
+                                : _maxRepackWorkspaceBytes,
+                            layout,
+                            splitReduction,
+                            narrowPartials(_narrowPartials));
         if(calls.has_value() && _tf32)
         {
             // A TF32 engine serves only convolutions with an fp32 GEMM; for the rest it would

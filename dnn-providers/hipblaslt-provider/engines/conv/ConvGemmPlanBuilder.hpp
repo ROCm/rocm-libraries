@@ -53,14 +53,17 @@ public:
     /// reduced-precision-reduction engine (ConvReducedPrecision.hpp). @p splitReduction makes
     /// the split reduction (convGemmCalls) the default plan rather than only a benchmarking
     /// candidate, and @p layout does the same for a layout candidate; tests use them to check
-    /// those plans. @p narrowPartials: see NarrowPartials.
+    /// those plans. @p narrowPartials: see NarrowPartials. @p maxBackwardWeightsRepackBytes bounds
+    /// a backward weights plan's repack workspace instead, when set.
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
                                  bool tf32 = false,
                                  bool reducedPrecisionReduction = false,
                                  bool splitReduction = false,
                                  ColumnLayout layout = ColumnLayout::FOLLOW_Y,
-                                 NarrowPartials narrowPartials = NarrowPartials::NEVER);
+                                 NarrowPartials narrowPartials = NarrowPartials::NEVER,
+                                 std::optional<size_t> maxBackwardWeightsRepackBytes
+                                 = std::nullopt);
 
     bool isApplicable(
         const HipdnnEnginePluginHandle& handle,
@@ -92,6 +95,7 @@ private:
     bool _splitReduction;
     ColumnLayout _layout;
     NarrowPartials _narrowPartials;
+    std::optional<size_t> _maxBackwardWeightsRepackBytes;
 };
 
 } // namespace hipblaslt_plugin

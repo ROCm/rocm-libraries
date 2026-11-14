@@ -13,8 +13,19 @@ namespace hipblaslt_plugin
 
 /// The most workspace the repack steps of one plan take by default. A column matrix that needs
 /// more is built a slice of images at a time; a single image that needs more is a poor fit for
-/// explicit GEMM and is declined. To be calibrated from exit-suite data.
+/// explicit GEMM and is declined. Measured with dnnb autotune on the 134 2K conv-kpi subset graphs
+/// near the cap (gfx950, MI325X, gfx906): unsliced column matrices of several GiB run the
+/// explicit-GEMM engines 0.81x (gfx950, MI325X) to 0.94x (gfx906) as fast, down to 0.08x at 9 GiB,
+/// and a 256 MiB cap 0.96x (MI325X).
 inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 30;
+
+/// The backward weights engines' cap: slicing backward weights costs an accumulating GEMM per
+/// slice (and an fp32 accumulator for 16-bit w), where forward and backward data only gain from
+/// smaller column matrices. Measured with dnnb autotune on the 2K conv-kpi subset (the backward
+/// weights graphs whose explicit-GEMM plan is within 2x of the best engine): gfx906 explicit GEMM
+/// 1.19x geomean at 2 GiB, best engine 3.05x on a 7x7 fp32 stem and 1.17x on a 1x1 fp16 layer,
+/// no best-engine loss; MI325X 1.02x, best unchanged. 4 GiB adds nothing over 2 GiB.
+inline constexpr size_t MAX_BACKWARD_WEIGHTS_REPACK_WORKSPACE_BYTES = static_cast<size_t>(2) << 30;
 
 /// How a plan that has a choice lays out what it computes through: an IM2COL plan's column
 /// matrix, and a 1x1 channels-first backward weights of several images (batched fp32 partials

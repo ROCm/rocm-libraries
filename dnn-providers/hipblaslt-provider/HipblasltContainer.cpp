@@ -81,21 +81,27 @@ HipblasltContainer::HipblasltContainer()
                                << " set: explicit-GEMM convolution repack workspace cap "
                                << repackCap << " bytes");
     }
-    const auto addConvEngine = [this, repackCap](int64_t engineId,
-                                                 ConvGemmPlanBuilder::PlanFactory factory,
-                                                 bool tf32,
-                                                 ConvGemmPlanBuilder::NarrowPartials narrowPartials,
-                                                 bool reducedPrecisionReduction = false) {
-        auto engine = std::make_unique<PlanBuilderEngine>(engineId);
-        engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
-                                                                     repackCap,
-                                                                     tf32,
-                                                                     reducedPrecisionReduction,
-                                                                     false,
-                                                                     ColumnLayout::FOLLOW_Y,
-                                                                     narrowPartials));
-        _engineManager->addEngine(std::move(engine));
-    };
+    // The override sets both caps; by default backward weights gets its own, larger one.
+    const size_t wrwRepackCap = repackCap == MAX_REPACK_WORKSPACE_BYTES
+                                    ? MAX_BACKWARD_WEIGHTS_REPACK_WORKSPACE_BYTES
+                                    : repackCap;
+    const auto addConvEngine =
+        [this, repackCap, wrwRepackCap](int64_t engineId,
+                                        ConvGemmPlanBuilder::PlanFactory factory,
+                                        bool tf32,
+                                        ConvGemmPlanBuilder::NarrowPartials narrowPartials,
+                                        bool reducedPrecisionReduction = false) {
+            auto engine = std::make_unique<PlanBuilderEngine>(engineId);
+            engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
+                                                                         repackCap,
+                                                                         tf32,
+                                                                         reducedPrecisionReduction,
+                                                                         false,
+                                                                         ColumnLayout::FOLLOW_Y,
+                                                                         narrowPartials,
+                                                                         wrwRepackCap));
+            _engineManager->addEngine(std::move(engine));
+        };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     const auto hipblasltGemm = [](const HipdnnEnginePluginHandle& handle,
                                   const std::vector<GemmCall>& calls) -> std::unique_ptr<IPlan> {
