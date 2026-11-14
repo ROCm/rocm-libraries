@@ -40,6 +40,7 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.instances.gfx1250.mx_gemm import (
     K_READS,
+    LDS_BUFFERS,
     OUT_DTYPES,
     SCALES,
     TILE_K,
@@ -339,6 +340,33 @@ class MxGemmSpecTest(unittest.TestCase):
             "value": (_spec6(scales="vgpr", **direct), "scales must be one of"),
             "prefetch": (_spec6(scales="registers"), "needs local_prefetch 0"),
             "atom": (_spec(scales="registers", **direct), "is for the 16x16 WMMA"),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
+
+    def test_lds_buffers_validate_name_and_size(self):
+        """Three LDS buffers take three buffers' bytes, tag the kernel name
+        and need rows that are not a fraction of a GL2 line; the LDS must
+        still hold them."""
+        self.assertEqual(LDS_BUFFERS, (2, 3))
+        for spec in (
+            _spec6(tile_m=128, tile_n=128, tile_k=512, **_DIRECT),
+            _spec6(tile_m=128, tile_n=128, tile_k=512, half_b_order="late"),
+            _spec6(tile_m=128, tile_n=128, tile_k=256),
+            _spec8(tile_m=128, tile_n=128),
+        ):
+            three = replace(spec, lds_buffers=3)
+            with self.subTest(three.kernel_name()):
+                self.assertIsNone(validate(three))
+                self.assertTrue(three.kernel_name().endswith("_lb3"))
+                self.assertNotIn("_lb3", spec.kernel_name())
+                self.assertEqual(spec.lds_bytes, 2 * spec.lds_layout.buffer_bytes)
+                self.assertEqual(three.lds_bytes, 3 * spec.lds_layout.buffer_bytes)
+        bad = {
+            "value": (_spec6(lds_buffers=4), "lds_buffers must be one of"),
+            "row": (_spec8(tile_k=128, lds_buffers=3), "cannot take 128 B rows"),
+            "capacity": (_spec6(tile_k=384, lds_buffers=3), "exceeds"),
         }
         for label, (spec, reason) in bad.items():
             with self.subTest(label):
@@ -903,6 +931,35 @@ class MxGemmIrTest(unittest.TestCase):
                         r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)", llvm
                     )
                     self.assertEqual(len(swaps), groups * (rm + rn))
+
+    def test_three_buffers_issue_wait_and_peel(self):
+        """With three buffers the prologue loads three tiles and every tile
+        body one; a tile waits until at most the two tiles after it are in
+        flight (with read-ahead, the next tile's read waits for one); the
+        loop runs three tiles and peels the full tiles three does not
+        divide, then the K tail."""
+        tdm = r"call void @llvm\.amdgcn\.tensor\.load\.to\.lds\("
+        tile_wait = r"call void @llvm\.amdgcn\.s\.wait\.tensorcnt\(i16 ([1-9])\)"
+        geometry = {"tile_m": 128, "tile_n": 128, "tile_k": 512, "lds_buffers": 3}
+        for k_dim, fields in itertools.product(
+            (2048, 2560, 3072, 3072 + 256, 1024),
+            (_DIRECT, {"local_prefetch": 1, "half_plr": "b"}),
+        ):
+            spec = _spec6(1024, 1024, k_dim, **geometry, **fields)
+            with self.subTest(K=k_dim, local_prefetch=spec.local_prefetch):
+                self.assertIsNone(validate(spec))
+                llvm = _llvm(spec)
+                full = k_dim // spec.tile_k
+                bodies = full % 3 + 3
+                per_tile = spec.k_steps * spec.wave_repeat_m * spec.wave_repeat_n
+                tail = spec.tail_steps * spec.wave_repeat_m * spec.wave_repeat_n
+                self.assertEqual(len(re.findall(_WMMA, llvm)), bodies * per_tile + tail)
+                tiles = bodies + (1 if spec.tail_steps else 0)
+                self.assertEqual(
+                    len(re.findall(tdm, llvm)), spec.tdm_loads * (3 + tiles)
+                )
+                waits = {"4"} | ({"2"} if spec.local_prefetch else set())
+                self.assertEqual(set(re.findall(tile_wait, llvm)), waits)
 
     def test_wmma_reuse_orders(self):
         """The K-step order of each reuse option, and the operand each WMMA
@@ -1761,6 +1818,21 @@ class MxGemmHostBuildTest(unittest.TestCase):
                     (_spec8, {}),
                 )
             ),
+            # Three LDS buffers at the reference design's tile, with and
+            # without read-ahead.
+            *(
+                _spec6(
+                    *_MAF_MED[0],
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=512,
+                    cluster_dim=(2, 4, 1),
+                    k_reads="contiguous",
+                    lds_buffers=3,
+                    **f,
+                )
+                for f in (_DIRECT, {"half_plr": "b"})
+            ),
             # Register scales at the MAF/MED, MAB and SM tilings.
             *(
                 _spec6(
@@ -1914,6 +1986,26 @@ class MxGemmDeviceTest(unittest.TestCase):
                     k_reads="contiguous",
                     out_dtype="bf16",
                 ),
+            ]
+            # Three LDS buffers: every peel, a K tail, read-ahead, FP8.
+            + [
+                _spec6(1024, 1024, k_dim, **fields)
+                for k_dim in (2048, 2560, 3072, 3072 + 256)
+                for fields in (
+                    {"tile_m": 128, "tile_n": 128, "tile_k": 512, "lds_buffers": 3}
+                    | _DIRECT,
+                    {
+                        "tile_m": 128,
+                        "tile_n": 128,
+                        "tile_k": 512,
+                        "lds_buffers": 3,
+                        "k_reads": "contiguous",
+                    },
+                )
+            ]
+            + [
+                _spec8(tile_m=128, tile_n=128, lds_buffers=3),
+                _spec8(tile_m=128, tile_n=128, lds_buffers=3, **_DIRECT),
             ]
             # Register scales: every half packing, the reuse orders, edge
             # tiles and K tails.

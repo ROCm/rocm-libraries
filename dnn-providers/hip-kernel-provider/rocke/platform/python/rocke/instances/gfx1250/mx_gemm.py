@@ -130,6 +130,7 @@ TILE_K = (128, 256, 384, 512, 1024)
 K_READS = ("chunked", "contiguous")
 WMMA_REUSE = ("none", "a", "b", "ab")
 SCALES = ("lds", "registers")
+LDS_BUFFERS = (2, 3)
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
 _OUT_TYPES = {"fp8e4m3": FP8E4M3, "fp16": F16, "bf16": BF16}
@@ -241,6 +242,11 @@ class MxGemmSpec:
     scales of the first half of the wave's M-repeats (N-repeats) and lanes
     16-31 those of the second half, and each WMMA selects its half
     (:class:`ScaleRegisters`).
+
+    ``lds_buffers`` is how many tiles the shared memory holds, each in its
+    own buffer: the TDM loads tile ``k + lds_buffers`` into tile ``k``'s
+    buffer once the cluster has read it, so with 3 a tile load has two tiles
+    of compute to land instead of one (:class:`Pipeline`).
     """
 
     name: str
@@ -268,6 +274,7 @@ class MxGemmSpec:
     k_reads: str = "chunked"
     wmma_reuse: str = "none"
     scales: str = "lds"
+    lds_buffers: int = 2
     block_k: int = field(default=32, init=False)
 
     @property
@@ -514,7 +521,7 @@ class MxGemmSpec:
 
     @property
     def lds_bytes(self) -> int:
-        return 2 * self.lds_layout.buffer_bytes
+        return self.lds_buffers * self.lds_layout.buffer_bytes
 
     def kernel_name(self) -> str:
         cx, cy, _ = self.cluster_dim
@@ -553,6 +560,7 @@ class MxGemmSpec:
                 "rb": self.wmma_reuse == "b",
                 "rab": self.wmma_reuse == "ab",
                 "sreg": self.scale_regs,
+                "lb3": self.lds_buffers == 3,
             },
         )
 
@@ -816,6 +824,16 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return "scales 'registers' needs local_prefetch 0"
     if spec.scale_regs and spec.mma != "16x16":
         return "scales 'registers' is for the 16x16 WMMA"
+    if spec.lds_buffers not in LDS_BUFFERS:
+        return f"lds_buffers must be one of {LDS_BUFFERS}"
+    row = spec.k_bytes(spec.tile_k)
+    if spec.lds_buffers != 2 and row < _GL2_LINE_BYTES and _GL2_LINE_BYTES % row == 0:
+        # The GL2 prefetch of such rows follows the tile index's parity,
+        # which only two buffers keep static.
+        return (
+            f"lds_buffers {spec.lds_buffers} cannot take {row} B rows "
+            f"(a fraction of a {_GL2_LINE_BYTES} B line)"
+        )
     atom = spec.atom
     if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
         return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
@@ -1953,13 +1971,14 @@ class TileCompute:
 
 
 class Pipeline:
-    """PrefetchGlobalRead=2: the TDM runs two tiles ahead. Tile k refills its
-    own buffer with tile k+2 once every workgroup of the cluster has read
-    it; tile k+1 is waited for (and published) at the start of tile k's last
-    K-step, with tile k+2's loads still in flight. Past the end the last
-    tile is loaded again into a buffer nobody reads (SuppressNoLoadLoop).
-    The loop runs tile pairs, one tile per buffer, so buffer offsets fold;
-    an odd tile count peels one tile."""
+    """PrefetchGlobalRead=``lds_buffers``: the TDM runs that many tiles
+    ahead. Tile k refills its own buffer with tile k+B (B buffers) once
+    every workgroup of the cluster has read it; a tile is waited for (and
+    published) at its start, or with read-ahead at the start of the tile
+    before's last K-step, with the B-1 tiles after it still in flight. Past
+    the end the last tile is loaded again into a buffer nobody reads
+    (SuppressNoLoadLoop). The loop runs B tiles, one per buffer, so buffer
+    offsets fold; a tile count that B does not divide peels the rest."""
 
     def __init__(
         self, k: _Kernel, tdm: TdmLoader, gl2: Gl2Prefetcher, tile: TileCompute
@@ -1970,18 +1989,20 @@ class Pipeline:
         self.tile = tile
         self.scales = ScaleRegisters(k, tile.reader.rows) if k.spec.scale_regs else None
 
-    def _prefetch_ahead(self, k0, parity: int) -> None:
+    def _prefetch_ahead(self, k0, buffer: int) -> None:
+        # With two buffers the buffer is the tile index's parity; with more,
+        # validate() leaves only rows whose prefetch does not use it.
         distance = self.k.spec.gl2_prefetch_distance
         if distance:
             self.gl2.prefetch(
                 self.k.ops.v(self.k.ops.add(k0, distance * self.k.spec.tile_k)),
-                (parity + distance) % 2,
+                (buffer + distance) % 2,
             )
 
     def hooks(self, k0, parity, static_parity: int) -> _Hooks:
         k = self.k
         b, ops, spec = k.b, k.ops, k.spec
-        two_tiles = 2 * spec.tile_k
+        ahead = spec.lds_buffers * spec.tile_k
 
         def signal() -> None:
             k.fence()
@@ -1992,9 +2013,10 @@ class Pipeline:
             self._prefetch_ahead(k0, static_parity)
             k.fence()
             if spec.local_prefetch:
-                # Tile k+1 is read next, from this point: it is the only TDM
-                # load in flight, and the barrier below publishes it.
-                b.s_wait_tensorcnt(0)
+                # Tile k+1 is read next, from this point: only the tiles
+                # after it may still be loading, and the barrier below
+                # publishes it.
+                b.s_wait_tensorcnt((spec.lds_buffers - 2) * spec.tdm_loads)
                 b.s_barrier_bare()
                 k.fence()
 
@@ -2007,7 +2029,7 @@ class Pipeline:
             pending = min(spec.late_pending_reads, _DSCNT_MAX)
             b.inline_asm(f"s_wait_dscnt {pending}", "~{memory}")
             b.s_barrier_bare()
-            self.tdm.issue(k.clamp_k(ops.v(ops.add(k0, two_tiles))), parity)
+            self.tdm.issue(k.clamp_k(ops.v(ops.add(k0, ahead))), parity)
             k.fence()
 
         return _Hooks(
@@ -2015,9 +2037,9 @@ class Pipeline:
         )
 
     def wait_next_tile(self) -> None:
-        # The next tile's loads may stay in flight; this tile's must be done.
-        b = self.k.b
-        b.s_wait_tensorcnt(self.k.spec.tdm_loads)
+        # The later tiles' loads may stay in flight; this tile's must be done.
+        b, spec = self.k.b, self.k.spec
+        b.s_wait_tensorcnt((spec.lds_buffers - 1) * spec.tdm_loads)
         b.s_barrier_bare()
         b.inline_asm("", "~{memory}")
 
@@ -2027,15 +2049,18 @@ class Pipeline:
         n_acc = spec.wave_repeat_m * spec.wave_repeat_n
         read_ahead = spec.local_prefetch == 1
         tile = self.tile
+        buffers = spec.lds_buffers
         k.cluster_sync()
         self.tdm.issue(c0, c0)
-        if spec.K == spec.tile_k:
-            # One tile: buffer 1 gets tile 0 again and is never read. The
-            # refill and GL2 prefetches load it again too; see validate().
-            self.tdm.issue(k.clamp_k(k.tile_k_v), c1)
-        else:
-            self.tdm.issue(k.tile_k_v, c1)
-        for ahead in range(2, spec.gl2_prefetch_distance):
+        for index in range(1, buffers):
+            k_index = k.tile_k_v if index == 1 else ops.v(index * spec.tile_k)
+            if spec.K <= index * spec.tile_k:
+                # Fewer tiles than buffers: this buffer gets the last tile
+                # again and is never read. The refill and GL2 prefetches
+                # load it again too; see validate().
+                k_index = k.clamp_k(k_index)
+            self.tdm.issue(k_index, c1 if index == 1 else index)
+        for ahead in range(buffers, spec.gl2_prefetch_distance):
             self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
         if read_ahead:
             self.wait_next_tile()
@@ -2055,7 +2080,7 @@ class Pipeline:
                 acc,
                 hooks=self.hooks(k_tile, parity, parity),
                 head=tile.unflatten(head_vals) if read_ahead else None,
-                next_parity=1 - parity,
+                next_parity=(parity + 1) % buffers,
                 steps=steps,
                 scales=scale_vals,
             )
@@ -2069,16 +2094,16 @@ class Pipeline:
             )
 
         full_tiles = spec.K // spec.tile_k
-        if (full_tiles - start_parity) % 2:
+        for _ in range(full_tiles % buffers):
             accumulators, head_values, scale_values = loop_tile(
                 start, start_parity, accumulators, head_values, scale_values
             )
-            start, start_parity = ops.add(start, spec.tile_k), 1 - start_parity
+            start, start_parity = ops.add(start, spec.tile_k), start_parity + 1
         n_head = len(head_values)
         loop = b.scf_for_iter(
             ops.v(start),
             b.const_i32(full_tiles * spec.tile_k) if spec.tail_steps else k.params["K"],
-            b.const_i32(2 * spec.tile_k),
+            b.const_i32(buffers * spec.tile_k),
             carried(accumulators, head_values, scale_values),
             iv_name="k0",
             elide_trailing_barrier=False,
@@ -2087,10 +2112,10 @@ class Pipeline:
             acc = list(values[:n_acc])
             head_vals = list(values[n_acc : n_acc + n_head])
             scale_vals = list(values[n_acc + n_head :])
-            for pair_index, parity in enumerate((start_parity, 1 - start_parity)):
+            for index in range(buffers):
                 acc, head_vals, scale_vals = loop_tile(
-                    ops.add(k0, pair_index * spec.tile_k),
-                    parity,
+                    ops.add(k0, index * spec.tile_k),
+                    (start_parity + index) % buffers,
                     acc,
                     head_vals,
                     scale_vals,
@@ -2102,7 +2127,7 @@ class Pipeline:
             # only its first tail_steps K-steps are read.
             results, _, _ = loop_tile(
                 b.const_i32(full_tiles * spec.tile_k),
-                full_tiles % 2,
+                full_tiles % buffers,
                 list(results),
                 list(loop.results[n_acc : n_acc + n_head]),
                 list(loop.results[n_acc + n_head :]),
