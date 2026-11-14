@@ -208,6 +208,9 @@ typedef struct rocke_unified_attention_3d_tiled_spec
     /* gfx950 emit_lse (False, kw_only): the packaged module's reduce writes LSE.
      * The segment IR is unchanged; its kernel name gains a trailing "lse". */
     bool emit_lse;
+    /* gfx950 only (the gfx942 spec validator rejects it). Appends four kernel
+     * params. Kept last: inserting a field moves every later one (abi.h). */
+    bool use_additive_bias; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_default(void);

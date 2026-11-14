@@ -10,15 +10,8 @@ and Torch binding; admission, pin resolution and sweeping are shared.
 
 from __future__ import annotations
 
-import dataclasses
-
 from typing import Callable, Mapping, Optional
 
-from kernels.common.attention_unified import (
-    supports_native_unified_attention,
-    supports_native_unified_attention_3d_tiled,
-    supports_native_unified_attention_tiled,
-)
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
 
@@ -33,6 +26,7 @@ from .common import (
     _dense_kernel_module,
     _request_errors,
     _tuning_problem,
+    _unified_path_coverage,
 )
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
@@ -55,31 +49,24 @@ DENSE_ALGORITHMS = frozenset(
 
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
-    """Coverage for one geometry variant. The scalar coverage check refuses LSE
-    (the scalar kernel writes none), so it is asked about the LSE-off problem
-    and an LSE request must also pass the gate of the variant's own path: the
-    split-KV or tiled 2D gate owns which arches and features can write LSE."""
-    path_gate = (
-        supports_native_unified_attention_3d_tiled
-        if variant.path == "3d"
-        else supports_native_unified_attention_tiled
-    )
+    """Coverage for one geometry variant, judged by ``_unified_path_coverage``
+    on the variant's own path: the scalar check with the tiled-only features
+    (additive bias, LSE) stripped, then that path's gate for those features."""
 
     def precheck(req):
         problem = _tuning_problem(req)
-        if not problem.emit_lse:
-            return supports_native_unified_attention(problem, arch=variant.arch)
-        ok, why = supports_native_unified_attention(
-            dataclasses.replace(problem, emit_lse=False), arch=variant.arch
-        )
-        if ok:
-            return path_gate(problem, arch=variant.arch)
-        return ok, why
+        return _unified_path_coverage(req, problem, variant.path, variant.arch)
 
     return precheck
 
 
-def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
+def make_tuning_candidate(
+    variant: AttentionGeometryVariant, extra_features: frozenset = frozenset()
+) -> KernelCandidate:
+    """One unified tuning candidate. ``extra_features`` are request features the
+    arch module declares for this variant's geometry on top of the common ones
+    (e.g. ``attn_bias``)."""
+
     def build(spec, arch):
         from .tuning_specs import validate_explicit_fp8_encoding
 
@@ -96,16 +83,20 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
             _tiled_3d_signatures,
         )
 
+        # Only the gfx950 specs declare the field.
+        bias = bool(getattr(spec.kernel_spec, "use_additive_bias", False))
         if spec.path == "3d":
             segment, _ = _tiled_3d_signatures(
                 spec.arch,
                 spec.kernel_spec.dtype,
                 kv_dtype=spec.kernel_spec.kv_storage_dtype,
+                include_additive_bias=bias,
             )
             return segment
         return _tiled_2d_signature(
             spec.arch,
             spec.kernel_spec.dtype,
+            include_additive_bias=bias,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
             emit_lse=bool(getattr(spec.kernel_spec, "emit_lse", False)),
         )
@@ -138,7 +129,8 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 ATTENTION_FEATURES
                 if variant.builder_kind == "gfx942_4warp_gqa"
                 else ATTENTION_FEATURES | {"lse"}
-            ),
+            )
+            | frozenset(extra_features),
         ),
         space=unified_space(variant),
         base=_tuning_problem,

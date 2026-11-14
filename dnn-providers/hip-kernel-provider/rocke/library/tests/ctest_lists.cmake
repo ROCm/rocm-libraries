@@ -189,7 +189,8 @@ endif()
 # and K/V cache policy, the scalar fallback's cache key and block-table
 # stride kernarg, the unified attention running-max carry and keyless
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
-# gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
+# gfx950 additive-bias route and cohort-knob pins, the gfx942 cfvst V
+# loader's i64 K/V addressing on the emitted IR, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
 # host-side SDPA sequence-length and padding-mask adapters/specs, the
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
@@ -230,6 +231,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
     "tests/library/tests/test_attention_unified_masked_tile_ir.py"
     "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+    "tests/library/tests/test_attention_additive_bias_routes.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
     "tests/library/tests/test_d256_gfx942_fast_routing.py"
     "tests/library/tests/test_sdpa_seqlen.py"
@@ -507,13 +509,19 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  TIMEOUT 1800)\n")
 
 # gfx950 additive-bias numeric lane. Its own entry (selected by name, like the
-# one above) so its runtime does not eat into that entry's timeout.
+# one above) so its runtime does not eat into that entry's timeout. The torch
+# file skips where torch is missing (the installed tree); the device_numeric
+# file runs one case per path without torch. Both need a gfx950 device; on
+# any other device the entry reports skipped (77, below).
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" -v -rs)\n")
+       "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_device_numeric.py\" -v -rs --rocke-exit-77-if-gpu-skipped)\n")
+# Without a gfx950 GPU every gpu-marked case skips; report the entry as
+# skipped (77) rather than Passed on the host-only checks alone.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  SKIP_RETURN_CODE 77\n"
        "  TIMEOUT 1200)\n")
 
 # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950

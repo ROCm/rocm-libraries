@@ -18,6 +18,9 @@ from dispatch.attention import bindings as attention_bindings
 from dispatch.attention.common import AttentionTuningSpec, attention_problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 
+from ._fake_paged_tensors import FakeTensor as _Tensor
+from ._fake_paged_tensors import paged_tensors as _paged_tensors
+
 
 def _req(arch="gfx950", **kw) -> AttentionRequest:
     base = dict(
@@ -34,61 +37,6 @@ def _req(arch="gfx950", **kw) -> AttentionRequest:
     )
     base.update(kw)
     return AttentionRequest(**base)
-
-
-class _Tensor:
-    def __init__(
-        self,
-        shape,
-        dtype,
-        values=None,
-        *,
-        device="cuda:0",
-        contiguous=True,
-        strides=None,
-    ):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-        self.device = device
-        self._values = values
-        self._contiguous = contiguous
-        self._strides = strides
-
-    def is_contiguous(self):
-        return self._contiguous
-
-    def detach(self):
-        return self
-
-    def stride(self, dim):
-        if self._strides is not None:
-            return self._strides[dim]
-        stride = 1
-        values = [0] * len(self.shape)
-        for index in range(len(self.shape) - 1, -1, -1):
-            values[index] = stride
-            stride *= self.shape[index]
-        return values[dim]
-
-    def cpu(self):
-        return self
-
-    def tolist(self):
-        if self._values is None:
-            raise AssertionError("no host values")
-        return self._values
-
-
-def _paged_tensors(*, num_blocks=64):
-    return {
-        "q": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "out": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "k": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "v": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "cu_seqlens_q": _Tensor((2,), "torch.int32", [0, 1024]),
-        "seqused_k": _Tensor((1,), "torch.int32", [1024]),
-        "block_table": _Tensor((1, 64), "torch.int32", [list(range(64))]),
-    }
 
 
 class TestRegistrySplit(unittest.TestCase):
@@ -386,7 +334,9 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
         self.assertEqual(binding.grid, runtime_spec.launch_grid(attention_problem(req)))
 
-    def test_explicit_binding_rejects_additive_bias(self):
+    def test_explicit_binding_rejects_raw_additive_bias_inputs(self):
+        """The binding derives the bias kernargs from tensors["attn_bias"], so
+        the raw runner names are refused in tensors and launch kwargs."""
         candidate = next(
             c
             for c in attention_execution_candidates()
@@ -404,11 +354,6 @@ class TestRegistrySplit(unittest.TestCase):
             "kernels.common.attention_unified.run_unified_attention_torch",
             side_effect=fake_run,
         ):
-            tensors = _paged_tensors()
-            tensors["problem"] = replace(attention_problem(req), use_additive_bias=True)
-            with self.assertRaisesRegex(ValueError, "do not support additive bias"):
-                candidate.bound_torch(req, spec, tensors)
-
             for name in (
                 "additive_bias",
                 "additive_bias_batch_stride",

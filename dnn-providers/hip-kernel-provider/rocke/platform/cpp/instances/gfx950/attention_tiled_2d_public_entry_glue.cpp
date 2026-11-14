@@ -432,10 +432,39 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
                             "use_register_pv v1 requires no sinks, no sliding window, "
                             "and no softcap");
         }
-        if(spec->use_alibi || spec->use_qq_bias)
+        if(spec->use_alibi || spec->use_qq_bias || spec->use_additive_bias)
         {
-            rocke_g950_fail(
-                b, ROCKE_ERR_VALUE, "use_register_pv v1 does not support ALiBi or QQ bias");
+            rocke_g950_fail(b,
+                            ROCKE_ERR_VALUE,
+                            "use_register_pv v1 does not support ALiBi, QQ bias, or additive bias");
+        }
+    }
+
+    /* ---- additive-bias __post_init__ rejections. The bias is emitted only on
+     * the 16x16 and plain transposed 32x32 score paths. */
+    if(spec->use_additive_bias)
+    {
+        if(spec->use_transposed_mask_limit)
+        {
+            rocke_g950_fail(b,
+                            ROCKE_ERR_VALUE,
+                            "transposed softmax VALU opts do not support softcap, ALiBi, "
+                            "QQ bias, or additive bias");
+        }
+        if(spec->use_transposed_invariant_hoist || spec->use_transposed_mask_once
+           || (spec->use_mfma_32x32 && !spec->use_transposed_qk_32x32))
+        {
+            rocke_g950_fail(b,
+                            ROCKE_ERR_VALUE,
+                            "use_additive_bias does not support use_transposed_invariant_hoist, "
+                            "use_transposed_mask_once, or the non-transposed 32x32 path");
+        }
+        if(spec->use_grouped_kv2_softmax)
+        {
+            rocke_g950_fail(b,
+                            ROCKE_ERR_VALUE,
+                            "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, "
+                            "QQ bias, or additive bias");
         }
     }
 
@@ -587,6 +616,7 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->USE_SINKS = spec->use_sinks;
     ctx->USE_ALIBI = spec->use_alibi;
     ctx->USE_QQ_BIAS = spec->use_qq_bias;
+    ctx->USE_ADDITIVE_BIAS = spec->use_additive_bias;
 
     /* transposed-softmax + experimental predicate aliases (Py768-777). */
     ctx->TRANSPOSED_SCALAR_STATE = spec->use_transposed_scalar_state;
@@ -748,8 +778,11 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
         ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
         ctx->num_kv_p = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
         ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
-        /* Trailing LSE output (Python: after the optional additive-bias params,
-         * which this twin does not declare). Off -> no param, ABI unchanged. */
+        /* Appended only when on, so the bias-off ABI and IR are unchanged. */
+        if(spec->use_additive_bias)
+            ctx->additive_bias = rocke_declare_additive_bias_params(b);
+        /* Trailing LSE output, after the additive-bias params as in Python.
+         * Off -> no param, ABI unchanged. */
         if(spec->emit_lse)
         {
             memset(&o, 0, sizeof(o));
@@ -1129,6 +1162,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->has_softcap ? "softcap" : "",
             s->use_alibi ? "alibi" : "",
             s->use_qq_bias ? "qqb" : "",
+            s->use_additive_bias ? "addb" : "",
             w_buf,
             mw_buf,
             s->use_mfma_32x32 ? "mfma32" : "",

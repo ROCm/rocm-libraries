@@ -2,19 +2,34 @@
 # SPDX-License-Identifier: MIT
 
 """Paired paged/strided segment cases for both tiled decode targets, plus a
-strided case with swizzled K/V LDS tiles per target (12: gfx942, 13: gfx950)."""
+strided case with swizzled K/V LDS tiles per target (12: gfx942, 13: gfx950)
+and a strided case with additive bias per target, which both engines reject
+(14: gfx942, 15: gfx950)."""
 
 from importlib import import_module
 
 from _emit_common import run_emit
 
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    # The gfx942 spec has no bias field, so Python fails on the keyword.
+    14: (
+        r"unexpected keyword argument 'use_additive_bias'"
+        r"|use_additive_bias is not implemented on gfx942"
+    ),
+    15: r"strided KV does not support use_additive_bias",
+}
+
 
 def spec_for_index(idx):
-    if not 0 <= idx < 14:
+    if not 0 <= idx < 16:
         raise SystemExit(f"unknown config index {idx}")
-    swizzle = idx >= 12
-    if swizzle:
-        arch = "gfx942" if idx == 12 else "gfx950"
+    swizzle = 12 <= idx < 14
+    bias = idx >= 14
+    if swizzle or bias:
+        arch = "gfx942" if idx in (12, 14) else "gfx950"
         case = 1
     else:
         arch = "gfx942" if idx % 6 < 3 else "gfx950"
@@ -31,8 +46,11 @@ def spec_for_index(idx):
         has_softcap=False,
         num_segments=4,
         num_seqs=3,
-        kv_layout="strided" if idx < 6 or swizzle else "paged",
+        kv_layout="strided" if idx < 6 or swizzle or bias else "paged",
         use_kv_lds_swizzle=swizzle,
+        # The gfx942 spec has no use_additive_bias field; passing it is the
+        # rejection there.
+        **({"use_additive_bias": True} if bias else {}),
     )
     return spec, arch
 
