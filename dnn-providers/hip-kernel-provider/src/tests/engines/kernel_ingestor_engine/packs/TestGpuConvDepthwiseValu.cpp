@@ -1761,7 +1761,7 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
              arch = "gfx950";
          },
          false},
-        // 256 channels a block: 108672 bytes of LDS, gfx950's.
+        // 256 channels a block: 97664 bytes of LDS, gfx950's.
         {"NwgFour",
          [](ConvShape&, WrwConfig& c, std::string& arch) {
              c.nwg = 4;
@@ -1771,19 +1771,19 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         {"NwgFourPastGfx942", [](ConvShape&, WrwConfig& c, std::string&) { c.nwg = 4; }, false},
         {"BpcThree", [](ConvShape&, WrwConfig& c, std::string&) { c.bpc = 3; }, false},
         {"BpcSixteen", [](ConvShape&, WrwConfig& c, std::string&) { c.bpc = 16; }, false},
-        // 7x7, 16 columns, 2 rows a step, 2 groups a wave: 101664 bytes of LDS.
+        // 7x7, 16 columns, 4 rows a step, 2 groups a wave: 87264 bytes of LDS.
         {"LdsPastGfx942",
          [](ConvShape& s, WrwConfig& c, std::string&) {
              s.filter = {7, 7};
              s.prePadding = s.postPadding = {3, 3};
-             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1, 1, 1};
+             c = {"NHWC", "hankel", 1, 7, 7, 16, 4, 2, 1, 1, 1};
          },
          false},
         {"LdsWithinGfx950",
          [](ConvShape& s, WrwConfig& c, std::string& arch) {
              s.filter = {7, 7};
              s.prePadding = s.postPadding = {3, 3};
-             c = {"NHWC", "hankel", 1, 7, 7, 16, 2, 2, 1, 1, 1};
+             c = {"NHWC", "hankel", 1, 7, 7, 16, 4, 2, 1, 1, 1};
              arch = "gfx950";
          },
          true},
