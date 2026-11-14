@@ -7,7 +7,6 @@
 // Every partition is one HIP device (0..partitions-1) with its own handle, stream and workspace.
 // The time reported is the full span: the first launch to the last partition done.
 
-#include "flops.hpp"
 #include "program_options.hpp"
 #include "utility.hpp"
 
@@ -332,7 +331,7 @@ namespace
             }
         }
 
-        const double gflops = gemm_gflop_count<float>(m, n, k) / (us * 1e-6);
+        const double gflops = 2.0 * double(m) * double(n) * double(k) / 1e9 / (us * 1e-6);
         hipblaslt_cout << "partitions,split_dim,M,N,K,transA,transB,type,placement_a,placement_b,placement_c,"
                           "placement_d,hipblaslt-Gflops,us,single_device_us,verify\n";
         hipblaslt_cout << P << "," << (dim == SplitDim::M ? "M" : "N") << "," << m << "," << n << "," << k << ","
