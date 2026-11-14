@@ -35,9 +35,9 @@ struct HazardRule {
     bool (*isPipeOp)(const StinkyInstruction&);
 };
 
-// SALU sgpr -> any SMEM/tensor_load/VMEM address consumer.
+// SALU sgpr -> any SMEM/TDM/VMEM address consumer.
 inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
-    return isGlobalMemLoad(inst) || isTensorLoad(inst);
+    return isGlobalMemLoad(inst) || isTensorOp(inst);
 }
 
 // VALU vgpr -> VMEM address consumer (global_read / MUBUF / FLAT / global_prefetch).

@@ -608,7 +608,7 @@ def _normalize_reg_class(name: str) -> str:
 #   CK_DS     : ds_read / ds_write / ds_atomic            -> s_wait_dscnt
 #   CK_Load   : vector buffer/global/flat LOADS           -> s_wait_loadcnt
 #   CK_KM     : scalar SMEM loads (s_load / s_buffer_load)-> s_wait_kmcnt
-#   CK_Tensor : tensor_load_to_lds                        -> s_wait_tensorcnt
+#   CK_Tensor : tensor_load_to_lds, tensor_store_from_lds -> s_wait_tensorcnt
 def classify_counter(inst: Instruction) -> Optional[CK]:
     op = inst.opcode
     if _is_ds_producer(op):
@@ -619,7 +619,7 @@ def classify_counter(inst: Instruction) -> Optional[CK]:
         return CK.ASYNC
     if _is_load_producer(op):
         return CK.LOAD
-    if op == "tensor_load_to_lds":
+    if op in ("tensor_load_to_lds", "tensor_store_from_lds"):
         return CK.TENSOR
     return None
 

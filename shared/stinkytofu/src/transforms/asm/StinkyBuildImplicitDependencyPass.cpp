@@ -138,7 +138,8 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
             processBarrier(*inst, *mt, bb.getLabel());
         else if (isTensorLoad(*inst) || isDSWrite(*inst))
             processLdsWriter(*inst, *mt, bb.getLabel());
-        else if (isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst))
+        else if (isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst) || isTensorStore(*inst))
+            // tensor_store_from_lds reads LDS, so the ds_writes it stores must stay before it.
             processLdsReader(*inst, *mt, bb.getLabel());
         else
             // StinkyWaitCntInsertionPass tags s_wait_tensorcnt with MemTokenData,
@@ -146,7 +147,7 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
             // this pass. If reordered, teach this branch to tolerate wait-cnt insts.
             assert(false &&
                    "instruction has MemTokenData but is not a barrier, fence, "
-                   "tensor_load, ds_write, ds_read, or global_store_async_from_lds");
+                   "tensor_load, ds_write, ds_read, global_store_async_from_lds, or tensor_store");
     }
 }
 

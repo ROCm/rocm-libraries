@@ -23,9 +23,9 @@ namespace {
 /// attached. Keying on presence would drop the very instructions that matter when
 /// untagged: e.g. a source-fence `s_wait_tensorcnt 0` outside the region-tagged pass
 /// has no memtoken but is exactly what the reader needs to reason about FIFO drains.
-/// Covered: TDM loads, tensorcnt/other waits, ds read/write/atomic, barriers.
+/// Covered: TDM loads and stores, tensorcnt/other waits, ds read/write/atomic, barriers.
 bool isStructural(const StinkyInstruction& inst) {
-    return isTensorLoad(inst) || inst.is(InstFlag::IF_WaitTensorCnt) || isWaitCnt(inst) ||
+    return isTensorOp(inst) || inst.is(InstFlag::IF_WaitTensorCnt) || isWaitCnt(inst) ||
            isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst) || isBarrier(inst);
 }
 

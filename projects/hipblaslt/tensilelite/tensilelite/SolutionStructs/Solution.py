@@ -90,6 +90,7 @@ from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
+from ..Components.TDMStore import tdmStoreLdsBytes, tdmStoreRejectReason
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
@@ -3821,6 +3822,14 @@ class Solution(collections.abc.Mapping):
         printRejectionReason):
       return
 
+    if state["TDMStoreInst"] and not isaInfoMap[isa].asmCaps["HasTDM"]:
+      reject(state, printRejectionReason, "TDMStoreInst requires asmCaps HasTDM")
+      return
+    tdmStoreReject = tdmStoreRejectReason(state)
+    if tdmStoreReject:
+      reject(state, printRejectionReason, tdmStoreReject)
+      return
+
     tdmInst: int = state["TDMInst"]
     state["enableTDMA"] = bool(tdmInst & 0x01)
     state["enableTDMB"] = bool(tdmInst & 0x02)
@@ -4428,6 +4437,9 @@ class Solution(collections.abc.Mapping):
     # audited configs -- exactly 40 both times. Anything in 29..52 reproduces both
     # bounds, so there is roughly a fifth of a k-tile of margin either side.
     storeOverhead = 40
+    # A NonEdge store through the TDM block (TDMStoreInst 3) holds one more VGPR, the staged tile's base.
+    if state.get("TDMStoreInst", 0) == 3:
+      storeOverhead += 1
     slack = (isaInfoMap[isa].regCaps["MaxVgpr"] - valuC
              - elementsPerThread * vgprsPerElement - storeOverhead)
     if slack < residentPerKTile:
@@ -7546,7 +7558,17 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBias"] = epilogueOffset
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
-    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize)
+    # The TDM block stages the D tile from a 256-byte boundary after the LDS that is live while it is
+    # written: the vectors, which every store batch reads, and the main-loop buffers unless the tile may
+    # lie over them. It may unless the next tile's loads already write them (PrefetchAcrossPersistent).
+    tdmStoreBytes = tdmStoreLdsBytes(state)
+    state["_TDMStoreOverMainLoop"] = bool(tdmStoreBytes) and not state["PrefetchAcrossPersistent"]
+    liveEnd = state["LdsOffsetBias"] + epilogueSize if epilogueSize else 0
+    if tdmStoreBytes and not state["_TDMStoreOverMainLoop"]:
+      liveEnd = max(liveEnd, ldsNumBytes)
+    state["_TDMStoreLdsOffset"] = int(math.ceil(liveEnd / 256) * 256) if tdmStoreBytes else 0
+    assert not tdmStoreBytes or state["_TDMStoreLdsOffset"] >= liveEnd
+    ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize, state["_TDMStoreLdsOffset"] + tdmStoreBytes)
 
     state["LdsBytesNoAmax"] = ldsNumBytes
     if state["ProblemType"]["OutputAmaxD"]:

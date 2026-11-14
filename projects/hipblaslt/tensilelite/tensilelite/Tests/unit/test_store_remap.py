@@ -66,3 +66,47 @@ def test_remap_readback_buffers_do_not_overlap(
             writer.vgprPool.checkIn(base)
         released = writer.vgprPool.available() - available_before
         assert released == len(buffers) * kernel["StoreRemapVectorWidth"] * output_bytes // 4
+
+
+def _remapParams(gfx1250_iim):
+  """A bf16 TN gfx1250 kernel, MT128x128 over 4 waves, with StoreRemapVectorWidth 4 and no TDMStoreInst."""
+  from tensilelite.Common.Architectures import gfxToIsa
+  from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
+
+  isa, mi = gfxToIsa("gfx1250"), [16, 16, 32, 1, 1, 4, 4, 2, 2]
+  problemType = {
+    "OperationType": "GEMM", "DataType": "B", "MacDataTypeA": "B", "MacDataTypeB": "B",
+    "DestDataType": "B", "ComputeDataType": "s", "HighPrecisionAccumulate": True,
+    "TransposeA": True, "TransposeB": False, "UseBeta": True, "Batched": True, "MXBlockA": 0, "MXBlockB": 0,
+  }
+  params = {
+    "ProblemType": problemType, "ISA": isa, "MatrixInstruction": mi, "WorkGroup": [16, 16, 1], "WavefrontSize": 32,
+    "DepthU": 64, "KernelLanguage": "Assembly", "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "ScheduleIterAlg": 4,
+    "StaggerU": 0, "GlobalSplitU": 1, "InnerUnroll": 1, "TransposeLDS": -1, "LdsPadA": -1, "LdsPadB": -1,
+    "LdsBlockSizePerPadA": -1, "LdsBlockSizePerPadB": -1, "1LDSBuffer": 0, "VectorWidthA": 1, "VectorWidthB": 1,
+    "StoreVectorWidth": -1, "GlobalReadVectorWidthA": -1, "GlobalReadVectorWidthB": -1, "LocalReadVectorWidth": -1,
+    "SourceSwap": False, "ExpandPointerSwap": False, "GlobalSplitUAlgorithm": "MultipleBuffer", "TDMInst": 3,
+    "LDSTrInst": False, "StreamK": 0, "StreamKForceDPOnly": 0, "PrefetchAcrossPersistent": 0, "UseSubtileImpl": False,
+    "StoreRemapVectorWidth": 4, "DirectToVgprA": False, "DirectToVgprB": False, "DirectToVgprSparseMetadata": False,
+    "WorkGroupMapping": 1, "TDMFuse": 0, "TDMSplit": False, "InitCIterWmma": 0,
+  }
+  params.update(matrixInstructionToMIParameters(mi, isa, params["WavefrontSize"], problemType, params["WorkGroup"],
+                                                gfx1250_iim))
+  return params
+
+
+def test_store_remap_blocks_unchanged_without_tdm(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """Without TDMStoreInst every store block of a StoreRemapVectorWidth kernel remaps D through LDS: the remap is
+  skipped only by TDM blocks."""
+  import re
+  from emit_test_helpers import emit_asm
+
+  sol, asm = emit_asm(gfx1250_iim, assembler, _remapParams(gfx1250_iim))
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["StoreRemapVectorWidth"] == 4 and "tensor_store_from_lds" not in asm
+  blocks = re.split(r"^(label_GW_B\d_FD0_VW\d+_GSU1_(?:Then|NonEdge)):", asm, flags=re.M)
+  names = blocks[1::2]
+  assert names
+  for name, text in zip(names, blocks[2::2]):
+    body = text.split("label_GW_", 1)[0]
+    assert "storeRemap lw" in body, name

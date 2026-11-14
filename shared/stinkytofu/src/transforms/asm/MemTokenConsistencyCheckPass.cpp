@@ -34,7 +34,7 @@ using namespace stinkytofu;
 
 static bool isMemTokenCandidate(const StinkyInstruction& inst) {
     return isTensorLoad(inst) || isDSWrite(inst) || isDSRead(inst) ||
-           isGlobalStoreAsyncFromLds(inst);
+           isGlobalStoreAsyncFromLds(inst) || isTensorStore(inst);
 }
 
 static const char* memTokenCandidateKind(const StinkyInstruction& inst) {
@@ -42,6 +42,7 @@ static const char* memTokenCandidateKind(const StinkyInstruction& inst) {
     if (isDSWrite(inst)) return "ds_store";
     if (isDSRead(inst)) return "ds_load";
     if (isGlobalStoreAsyncFromLds(inst)) return "global_store_async_from_lds";
+    if (isTensorStore(inst)) return "tensor_store";
     return "unknown";
 }
 

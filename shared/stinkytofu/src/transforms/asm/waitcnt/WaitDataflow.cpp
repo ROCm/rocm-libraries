@@ -113,8 +113,8 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         {[](const StinkyInstruction& i) { return isSMemLoad(i); },
          [](const StinkyInstruction&) { return true; }, CounterOrder::OutOfOrder},
 
-        // CK_Tensor: tensor_load_to_lds; every consumer drains.
-        {[](const StinkyInstruction& i) { return isTensorLoad(i); },
+        // CK_Tensor: tensor_load_to_lds and tensor_store_from_lds; every consumer drains.
+        {[](const StinkyInstruction& i) { return isTensorOp(i); },
          [](const StinkyInstruction& i) { return true; }, CounterOrder::InOrder},
 
         // CK_Async: global_store_async_from_lds_*; drains via the LDS WAR

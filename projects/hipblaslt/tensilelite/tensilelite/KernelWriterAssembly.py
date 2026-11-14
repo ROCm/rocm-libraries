@@ -92,6 +92,7 @@ from .Components.TDMFuse import tdmFusePaired, tdmGroupPartner, \
                                 tdmMemberIsLive, tdmPairOnEveryWave, tdmRidesEveryWave, \
                                 tdmStashedMembers, tdmWaveComponents, tdmWaveGuard, \
                                 tdmWavePartition, tdmWaveRangeText, tdmWaveResident
+from .Components.TDMStore import hasEpilogueSideEffects, tdmStoreBlocks
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -14084,7 +14085,6 @@ class KernelWriterAssembly(KernelWriter):
       swapMask: int = kernel[f"LdsOffsetA_Blk"]
       module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(swapMask)))
     else:
-      assert kernel["NumWaves"] > 1
       with self.allocTmpSgpr(1, tag="tdmSwapLdsOffset_tmpSgprRes") as tmpSgprRes:
         tmpSgprIdx: int = tmpSgprRes.idx
         module.add(SCmpLtU32(sgpr(ldsAddrSgprName), kernel["LdsOffsetA_Blk"], "Check if < blk offset"))
@@ -17933,6 +17933,11 @@ class KernelWriterAssembly(KernelWriter):
          and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
+      tdmVectorWidths = tdmStoreBlocks(kernel, edge, atomic, self.states.bpeCexternalGSU1, vectorWidths)
+      tdmNonEdge = edge and bool(tdmStoreBlocks(kernel, False, atomic, self.states.bpeCexternalGSU1, vectorWidths))
+      if globalWriteMode == "MBSKBuffer":
+        # The buffer_store copy of the reduced tile, for a GSU at which each wave reduces on its own.
+        tdmVectorWidths, tdmNonEdge = [], False
 
       for fdIdx in reversed(range(len(factorDims))):
         factorDim = factorDims[fdIdx]
@@ -17991,16 +17996,25 @@ class KernelWriterAssembly(KernelWriter):
                 posLabel = self.labels.getNameInc("ThenDeferredReturnDir")
                 edgeModule.add(SLongBranch(endLabel, tmpPair, tmpOff, posLabel, comment="jump to end"))
           else:
+            tdmStoreBlock = vectorWidth in tdmVectorWidths
+            tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmStoreBlock else None
+            # The TDM block stores the whole tile like the NonEdge path: the widest block, which comes first. With
+            # per-element outputs beyond C and D it keeps the masks and the vector width of the edge block.
+            tdmWide = tdmStoreBlock and not hasEpilogueSideEffects(kernel["ProblemType"])
             currentInstLength, activationTypeStr = \
             self.globalWriteElementBatch(kernel, tPA, tPB, activation,
-                                          applyAlpha, beta, edge, atomic,
-                                          vectorWidth, element, activationLabelList,
+                                          applyAlpha, beta, edge and not tdmWide, atomic,
+                                          vectorWidths[0] if tdmWide else vectorWidth,
+                                          elements[0] if tdmWide else element, activationLabelList,
                                           tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                           actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
                                           edgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["Then"], endLabel,
                                           currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims,
                                           emitGateResidual=emitGateResidual,
-                                          hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes)
+                                          hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes,
+                                          tdmStoreLdsBase=tdmStoreLdsBase)
+            if tdmStoreBlock:
+              self.vgprPool.checkIn(tdmStoreLdsBase)
           # Edge conditions and branches
           if edge == True:
             # Else label
@@ -18061,16 +18075,21 @@ class KernelWriterAssembly(KernelWriter):
                     nonEdgeModule.add(SLongBranch(endLabel, tmpPair, tmpOff, posLabel, comment="jump to end"))
               else:
                 nonEdgeModule = Module("Non_Edge_B%u_FD%u_VW%u" % (beta, factorDim, vectorWidth))
+                tdmStoreLdsBase = self.vgprPool.checkOut(1, "tdmStoreLdsBase") if tdmNonEdge else None
                 currentInstLength, activationTypeStr = \
                 self.globalWriteElementBatch(kernel, tPA, tPB, activation,
                                               applyAlpha, beta, False, atomic,
-                                              vectorWidth, element, activationLabelList,
+                                              vectorWidths[0] if tdmNonEdge else vectorWidth,
+                                              elements[0] if tdmNonEdge else element, activationLabelList,
                                               tmpVgpr, cvtVgprStruct, activationSetPCStruct, activationEnumStrList,
                                               actPCMaxTempSgpr, isInsertActFunctionCallAddrCalc, toActModuleList,
                                               nonEdgeModule, writeLabels[beta][factorDim][vectorWidth][globalWriteMode]["NonEdge"], endLabel,
                                               currentInstLength, betaIdx, fdIdx, vectorDataTypes, factorDims,
                                               emitGateResidual=emitGateResidual,
-                                              hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes)
+                                              hasMultipleGlobalWriteModes=hasMultipleGlobalWriteModes,
+                                              tdmStoreLdsBase=tdmStoreLdsBase)
+                if tdmNonEdge:
+                  self.vgprPool.checkIn(tdmStoreLdsBase)
               edgeModule.add(nonEdgeModule, pos=0)
               # NOTE: isEdgeTarget of normal and adaptive kernels are different
               #   Normal kernel: to Then/Else label, followed by edge store
@@ -19817,6 +19836,20 @@ class KernelWriterAssembly(KernelWriter):
         globalWriteModes = ["GSU1"]
         hasMultipleGlobalWriteModes = False
 
+      # The TDM block stores a tile that every wave of the workgroup staged. MultipleBufferSingleKernel reduces a
+      # tile with all waves of one workgroup only with MbskPrefetchMethod 0 and a GSU of at most gsuThreshold; for a
+      # larger GSU each wave takes the last decrement of its own synchronizer slot. A reduced tile that takes the
+      # block therefore gets a buffer_store copy, and the GSU picks the copy at run time.
+      mbskBufferLabels = {}
+      if kernel["MbskPrefetchMethod"] == 0 and tdmStoreBlocks(
+          {"TDMStoreInst": kernel["TDMStoreInst"], "_GlobalAccumulation": "MultipleBufferSingleKernel",
+           "MbskPrefetchMethod": 0}, edge, atomic, self.states.bpeCexternalGSU1, vectorWidths):
+        # OptNLL_MBSK runs at GSU 1 only, without a reduction, and keeps its single store.
+        if "MBSK" in globalWriteModes:
+          mbskBufferLabels["MBSK"] = Label(self.labels.getNameInc("GW_MBSKBuffer"), "buffer_store copy of the reduced tile")
+          globalWriteModes.insert(globalWriteModes.index("MBSK") + 1, "MBSKBuffer")
+        hasMultipleGlobalWriteModes = hasMultipleGlobalWriteModes or bool(mbskBufferLabels)
+
       gateTreeLabels = {}
       for globalWriteMode in globalWriteModes:
         if self.states.useGateResidual:
@@ -19851,6 +19884,8 @@ class KernelWriterAssembly(KernelWriter):
             if globalWriteMode == "MBSK":
               module.add(labelMBSK)
               kernel["_GlobalAccumulation"] = "MultipleBufferSingleKernel"
+            elif globalWriteMode == "MBSKBuffer":
+              kernel["_GlobalAccumulation"] = "MultipleBufferSingleKernel"
             elif globalWriteMode == "MB":
               module.add(labelMB)
               kernel["_GlobalAccumulation"] = "MultipleBuffer"
@@ -19858,6 +19893,16 @@ class KernelWriterAssembly(KernelWriter):
                 self.states.useBias = DataDirection.NONE
               kernel["ActivationFuncCall"] = False
               activationLabelList = {}
+
+        if globalWriteMode in mbskBufferLabels:
+          with self.allocTmpSgpr(1, tag="mbskBufferGsu") as tmpGsu:
+            module.add(SAndB32(dst=sgpr(tmpGsu.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+            module.add(SCmpGtI32(src0=sgpr(tmpGsu.idx), src1=gsuComponent.gsuThreshold,
+                                 comment="GSU > %u: each wave reduces on its own" % gsuComponent.gsuThreshold))
+          module.add(self.longBranchScc1(label=mbskBufferLabels[globalWriteMode], posNeg=1,
+                                         comment="buffer_store copy of the reduced tile"))
+        elif globalWriteMode == "MBSKBuffer":
+          module.add(mbskBufferLabels["MBSK"])
 
         # A MultipleBuffer write only stores raw partial sums to the workspace;
         # beta*C is applied afterwards by the conversion kernel. Kernels compiled
@@ -20028,7 +20073,8 @@ class KernelWriterAssembly(KernelWriter):
     return maxVgprs, occupancy
 
   def refineOccupancy(self, kernel, atomic, element, actPCMaxTempSgpr, \
-                      gwvw, maxVgprs, ss, beta=False, edge=False):
+                      gwvw, maxVgprs, ss, beta=False, edge=False, storeRemap=None):
+    storeRemap = kernel["StoreRemapVectorWidth"] if storeRemap is None else storeRemap
     # Get estimated numVgprAvailable
     # Use block-aware counting to avoid overestimating with fragmented pools
     # print("Max vgprs =", maxVgprs, self.vgprPool.size(), self.vgprPool.availableBlock(ss.numVgprsPerElement, ss.align))
@@ -20135,7 +20181,7 @@ class KernelWriterAssembly(KernelWriter):
     # check best numElementsPerBatch to handle a column block
     # elements of column block must be multiple size of numElementsPerBatch
     nBatchesPerRow = 0
-    if kernel["StoreRemapVectorWidth"]:
+    if storeRemap:
       firstRow = [e for e in element if e[0]==0 and e[2]==0] # format for element = (tt1, tt0, vc1, vc0)
       # find the largest factor and smaller than numElementPerBatch
       nBatchesPerRow = 1
@@ -20155,7 +20201,7 @@ class KernelWriterAssembly(KernelWriter):
     # Shrink NEPB to an N-group divisor so CLS can compact. Skip if NEPBS is set.
     # Not used for atomic / StoreRemap / subtile.
     if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"] and kernel["EnableMatrixInstruction"] \
-        and not atomic and not kernel["StoreRemapVectorWidth"] and not kernel.get("UseSubtileImpl") \
+        and not atomic and not storeRemap and not kernel.get("UseSubtileImpl") \
         and ss.numVgprsPerElement > 0 \
         and not GlobalWriteBatchWriter.clsEpilogVectorLoopUnsafe(kernel, ss.factorDim):
       maxNIter = GlobalWriteBatchWriter.clsMaxNIter(kernel)
@@ -20237,7 +20283,7 @@ class KernelWriterAssembly(KernelWriter):
                               edgeModule, writeLabel, endLabel, \
                               currentInstLength, \
                               betaIdx, fdIdx, vectorDataTypes, factorDims, emitGateResidual,
-                              hasMultipleGlobalWriteModes=False):
+                              hasMultipleGlobalWriteModes=False, tdmStoreLdsBase=None):
     factorDim = factorDims[fdIdx]
     gateAppliesToFinalD = bool(
         self.states.useGateResidual
@@ -20249,6 +20295,8 @@ class KernelWriterAssembly(KernelWriter):
 
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
+    # A TDM block stages D itself, so only a buffer_store block remaps it through LDS.
+    storeRemap = kernel["StoreRemapVectorWidth"] if tdmStoreLdsBase is None else 0
 
     #print "globalWriteElements: edge=", edge, "beta=", beta, "atomic=", atomic
 
@@ -20300,7 +20348,8 @@ class KernelWriterAssembly(KernelWriter):
       assert activationSetPCStruct, activationEnumStrList and activationLabelList and toActModuleList
       actPCMaxTempSgpr_ = actPCMaxTempSgpr
 
-    numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs = self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr_, gwvw, maxVgprs, ss, beta, edge)
+    numElementsPerBatch, nBatchesPerRow, numBatches, numSgprs = self.refineOccupancy(kernel, atomic, element, actPCMaxTempSgpr_, gwvw, maxVgprs, ss, beta, edge,
+                                                                                       storeRemap)
 
     # set atomicW after we potentially resize GWVW
     atomicW = min(gwvw, self.getVectorAtomicWidth(kernel))
@@ -20449,7 +20498,7 @@ class KernelWriterAssembly(KernelWriter):
             # elementVgprs can be large and should be perfectly tuned to the number of available
             # VGPRS.  We do not want to accidentally overflow and grow the pool here:
 
-            if kernel["StoreRemapVectorWidth"]:
+            if storeRemap:
               #Indication if this batch is last batch for this column block shape
               self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
 
@@ -20462,7 +20511,7 @@ class KernelWriterAssembly(KernelWriter):
                 self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
                 biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
                 activationTypeStr, elementSgprs, tmpSgpr, passAccVgprRead, passMulAlpha, factorDim, numBatches, \
-                _next_firing_rowInc, _direct_next_rowInc))
+                _next_firing_rowInc, _direct_next_rowInc, tdmStoreLdsBase))
             biasLocalBarrierInit = True
           return m
 
@@ -20502,7 +20551,7 @@ class KernelWriterAssembly(KernelWriter):
           actLoopModule.add(_emit_batch_loop())
 
         # SRVW+CLS: check in the offset vgpr after the last store batch.
-        if kernel["StoreRemapVectorWidth"] and kernel["CompactLoopStore"] and getattr(self, "compactLoopStoreVgpr", -1) != -1:
+        if storeRemap and kernel["CompactLoopStore"] and getattr(self, "compactLoopStoreVgpr", -1) != -1:
           self.vgprPool.checkIn(self.compactLoopStoreVgpr)
           self.compactLoopStoreVgpr = -1
 
@@ -21190,7 +21239,7 @@ class KernelWriterAssembly(KernelWriter):
       addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit: bool, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
       batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
-      inter_iter_rowInc=0, direct_next_rowInc=0) -> Module:
+      inter_iter_rowInc=0, direct_next_rowInc=0, tdmStoreLdsBase=None) -> Module:
       packdata = Component.PackData.find(self)
       gwriter  = Component.GlobalWriteComponents.find(self)
       return gwriter(kernel, tPA, tPB, activation, ss, \
@@ -21199,7 +21248,7 @@ class KernelWriterAssembly(KernelWriter):
         addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit, \
         tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
         batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, packdata, self, factorDim, \
-        self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc)
+        self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc, tdmStoreLdsBase)
 
   ##############################################################################
   def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):

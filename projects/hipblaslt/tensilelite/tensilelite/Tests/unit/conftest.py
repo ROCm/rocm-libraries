@@ -2,6 +2,7 @@
 
 import os
 import sys
+from copy import deepcopy
 
 import pytest
 
@@ -13,6 +14,7 @@ if _CODEGEN_DIR not in sys.path:
     sys.path.insert(0, _CODEGEN_DIR)
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
+from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 from toolchain_test_helpers import (
     cxx_compiler as _cxx_compiler,
@@ -20,6 +22,9 @@ from toolchain_test_helpers import (
     shared_full_isa_info_map,
     shared_isa_info_map_or_skip,
 )
+
+# defaultSolution before any test has changed it: pytest imports this conftest before the test modules.
+_PRISTINE_DEFAULT_SOLUTION = deepcopy(dict(defaultSolution))
 
 
 @pytest.fixture(autouse=True)
@@ -101,6 +106,26 @@ def gfx950_iim():
 @pytest.fixture(scope="session")
 def gfx1250_iim():
     return shared_isa_info_map_or_skip("gfx1250")
+
+
+@pytest.fixture(scope="module")
+def gp_gfx1250(gfx1250_iim):
+    """globalParameters, validParameters and defaultSolution set up for gfx1250, for one module.
+
+    defaultSolution starts from its state at import, so Solution construction does not depend on
+    what an earlier test left in it; all three are restored afterwards.
+    """
+    from tensilelite.Common.GlobalParameters import assignGlobalParameters, globalParameters
+    from tensilelite.Common.ValidParameters import validParameters
+
+    saved = [(params, deepcopy(dict(params))) for params in (globalParameters, validParameters, defaultSolution)]
+    defaultSolution.clear()
+    defaultSolution.update(deepcopy(_PRISTINE_DEFAULT_SOLUTION))
+    assignGlobalParameters({}, gfx1250_iim)
+    yield
+    for params, snapshot in saved:
+        params.clear()
+        params.update(snapshot)
 
 
 @pytest.fixture(autouse=True)
