@@ -304,7 +304,12 @@ void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_f
  * hold at once, and whether its B fragments are read one K atom ahead. */
 int rocke_gemm_direct_a_fragment_vgprs(const rocke_gemm_universal_spec_t* spec,
                                        bool local_prefetch);
+int rocke_gemm_direct_a_held_vgprs(const rocke_gemm_universal_spec_t* spec, bool local_prefetch);
 bool rocke_gemm_direct_a_local_prefetch(const rocke_gemm_universal_spec_t* spec);
+
+/* gemm_universal.py :: wmma_lds_swizzle_row_shift: the row shift of the LDS
+ * XOR swizzle key for 16-byte accesses on gfx1201. */
+int rocke_gemm_wmma_lds_swizzle_row_shift(int row_bytes);
 
 /* _emit_zero_acc_op(b, op): zero_vec(srcs[2].dtype, srcs[2].frag_len). Used to build
  * acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants are not

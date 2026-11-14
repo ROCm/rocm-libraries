@@ -124,8 +124,9 @@ extern "C" {
  *     stagger fields (lds_store_after_mma, group_m, k_stagger,
  *     k_stagger_step), which changes its size again.
  * 17: rocke_gemm_trait_spec_t gained lds_db_allow_1wg, changing its layout.
- * 18: rocke_gemm_trait_spec_t gained global_addressing for prepared reads. */
-#define ROCKE_ABI_VERSION 18
+ * 18: rocke_gemm_trait_spec_t gained global_addressing for prepared reads.
+ * 19: rocke_gemm_trait_spec_t gained row_strides at its end. */
+#define ROCKE_ABI_VERSION 19
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

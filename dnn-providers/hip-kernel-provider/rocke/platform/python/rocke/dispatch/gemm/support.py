@@ -262,9 +262,12 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
 def request_shape_supported(
     req: GemmRequest, spec: UniversalGemmSpec
 ) -> Tuple[bool, str]:
-    """Return whether ``req.M/N/K`` satisfy the spec's padding/granularity."""
+    """Return whether ``req.M/N/K`` satisfy the spec's padding/granularity,
+    and its row strides the kernel's."""
     t = spec.tile
     tr = spec.trait
+    if not req.packed() and not tr.row_strides:
+        return False, "A and B row strides other than K need a row_strides kernel"
     checks = (
         ("M", req.M, t.tile_m, tr.pad_m),
         ("N", req.N, t.tile_n, tr.pad_n),

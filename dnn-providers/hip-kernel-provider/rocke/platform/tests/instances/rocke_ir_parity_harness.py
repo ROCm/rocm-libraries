@@ -2144,6 +2144,44 @@ def cases():
                 pad_k=False,
             ),
         )
+    # What dispatch selects: workgroups one K tile apart, the one- and two-wave
+    # K-128 tiles, and row strides as arguments.
+    for tm, tn, tk, wm, row_strides in (
+        (128, 64, 64, 4, False),
+        (128, 64, 64, 4, True),
+        (128, 96, 64, 4, True),
+        (32, 32, 128, 2, False),
+        (16, 16, 128, 1, True),
+    ):
+        tag = f"t{tm}x{tn}x{tk}_direct_a_kst8x1" + ("_ld" if row_strides else "")
+        add(
+            "gemm",
+            f"gemm/gfx1201/{tag}",
+            "gfx1201",
+            build_gemm(
+                f"irhash_gemm_1201_{tag}",
+                "gfx1201",
+                tm,
+                tn,
+                tk,
+                wm,
+                1,
+                16,
+                16,
+                16,
+                "direct_a",
+                "default",
+                32,
+                lds_swizzle=True,
+                group_m=4,
+                k_stagger=8,
+                k_stagger_step=1,
+                row_strides=row_strides,
+                pad_m=False,
+                pad_n=False,
+                pad_k=False,
+            ),
+        )
     # Every other member of gfx11-generic / gfx12-generic has a row of its own
     # that points at its generic's facts; one case each, the gfx1151 / gfx1201
     # t32x32x16 configuration, shows it lowers under its own name.

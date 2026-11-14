@@ -240,16 +240,38 @@ which stores the fp32 accumulator unrounded and halves the C span limit:
   ahead;
 - A, B and C go through bounded buffer resources. A load past the end of A or
   B reads zero and a store outside C is dropped, so the grid is
-  `ceil(N / tile_n) x ceil(M / tile_m)` and M and N need not divide the tile.
+  `ceil(N / tile_n) x ceil(M / tile_m)` and M and N need not divide the tile;
+- K is whole 16-element atoms, not whole tiles. The whole tiles run first and
+  a partial last tile after them; its atoms past K load zero from both
+  operands, so only the prologue and that one loop trip carry the masks;
+- `TraitSpec(row_strides=True)` appends `(lda, ldb)`, the row strides of A and
+  B in elements, to the `(A, B, C, M, N, K)` arguments. C stays packed. Names
+  append `ld`.
 
 The traits it reads are `group_m`, `k_stagger` / `k_stagger_step`,
-`lds_swizzle` and `waves_per_eu`; every other non-default trait is rejected.
-Keep `lds_swizzle` on: without it the B fragment reads conflict in LDS and
-the kernel is much slower. The launch contract is
-`K % tile_k == 0` and every byte span below 2 GiB with M and N rounded up to
-whole tiles; `direct_a_launch_supported(spec, M, N, K)` checks it and
-dispatch applies it. A K that is a multiple of 8192 (a 16 KiB FP16 row
-stride) is legal but slow, because one A fragment load touches 16 rows.
+`lds_swizzle`, `row_strides` and `waves_per_eu`; every other non-default trait
+is rejected. Keep `lds_swizzle` on: without it the B fragment reads conflict
+in LDS and the kernel is much slower. The swizzle keys a B row on the
+128-byte window it falls in (`wmma_lds_swizzle_row_shift`), so a tile whose
+B rows are shorter than 128 bytes still spreads its reads; the gfx1201 compv4
+swizzle uses the same key. The validator
+rejects a tile whose accumulators, fragments and pending B vectors do not fit
+the register file; such tiles build but spill inside the K loop.
+
+The launch contract is `K % 16 == 0`, `lda >= K` and `ldb >= K` (exactly K
+without `row_strides`), and every byte span below 2 GiB with M and N rounded
+up to whole tiles; `direct_a_launch_supported(spec, M, N, K, lda, ldb)` checks
+it and dispatch applies it.
+
+Row strides and the memory system. One A fragment load touches 16 rows. When
+the rows are 16 KiB apart (16-bit elements at a stride that is a multiple of
+8192) they alias in the caches and the kernel is slow, whatever the tile. A
+caller that owns the allocation avoids that with a padded stride and
+`row_strides`; B's stride matters as much as A's. `k_stagger` starts the
+workgroups that share rows at different K tiles. Keep the step at one tile:
+a longer step spreads them further than the caches keep the shared rows, and
+on large outputs with a long K the kernel then falls far behind on some row
+strides.
 
 
 
