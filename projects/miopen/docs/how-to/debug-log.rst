@@ -243,6 +243,10 @@ Implicit GEMM solutions:
     ``ConvHipImplicitGemmV4R1Fwd``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FWD_V4R4`` --
     ``ConvHipImplicitGemmV4R4Fwd``
+  * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FMA_3D_FWD`` --
+    ``ConvHipImplicitGemmFma3dFwd``
+  * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FMA_2D_FWD`` --
+    ``ConvHipImplicitGemmFma2dFwd``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1`` --
     ``ConvHipImplicitGemmBwdDataV1R1``
   * ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_WRW_V4R1`` --

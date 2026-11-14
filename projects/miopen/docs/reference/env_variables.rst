@@ -763,6 +763,16 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
     * - **Environment variable**
       - **Value**
 
+    * - | ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FMA_3D_FWD``
+        | Controls 3D ConvHipImplicitGemmFma3dFwd solution.
+      - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FMA_2D_FWD``
+        | Controls 2D ConvHipImplicitGemmFma2dFwd solution.
+      - | 0: Disable
+        | 1: Enable
+
     * - | ``MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS``
         | Controls 3D ConvHipImplicitGemmFwdXdlops solution.
       - | 0: Disable

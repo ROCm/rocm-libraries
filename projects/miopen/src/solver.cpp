@@ -810,6 +810,10 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     Register(registry, ++id, Primitive::Softmax, softmax::SoftmaxNoncontiguous{}.SolverDbId());
     RegisterWithSolver(
         registry, ++id, conv::ConvDirectDepthwiseFwd2D{}, miopenConvolutionAlgoDirect);
+    RegisterWithSolver(
+        registry, ++id, conv::ConvHipImplicitGemmFma3dFwd{}, miopenConvolutionAlgoImplicitGEMM);
+    RegisterWithSolver(
+        registry, ++id, conv::ConvHipImplicitGemmFma2dFwd{}, miopenConvolutionAlgoImplicitGEMM);
     //  IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     //  space between this comment and the newly registered solver(s)!
 }
