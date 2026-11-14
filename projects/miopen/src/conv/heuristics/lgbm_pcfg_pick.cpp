@@ -208,29 +208,35 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
            kTwoTowerSolvers.end();
 }
 
-// Solvers held out of the perf-config picker regardless of a shipped model.
-//
-// ConvHipConv's model was trained on an older hipconv config vocabulary and
-// over-selects a slow config, regressing OOTB. hipconv's config descriptors (and
-// kernel set) have since changed and are now version-tagged, so the model must be
-// retrained on current-hipconv data before it can be trusted. Gated here, rather
-// than by dropping the section from lgbm_pcfg.bin, so re-enabling is a one-line
-// revert once a retrained model ships.
-bool HeldOutOfPicker(const std::string& solver_name) { return solver_name == "ConvHipConv"; }
-
 } // namespace
+
+// ConvHipConv on gfx1250, every direction: the model retrained on hipconv v0.5 configs was trained
+// on gfx950 data only and has no gfx1250 buckets, and no model has been checked on gfx1250
+// hardware.
+//
+// ConvHipConv on gfx950, backward weights: on MI355X, 300 sampled picks that differ from the
+// default config gave default time / picked time 1.0078 (geomean, 95% CI 0.9868 to 1.0283), but
+// their summed time grew 1.21x, 69 ran more than 3% slower and the worst ran 0.30x. Offline the
+// model gains 0.15% there with a worse worst case than the default. Forward and backward data
+// gain on both and stay enabled.
+//
+// Gated here, rather than by dropping the gfx950 backward-weights buckets from lgbm_pcfg.bin, so
+// enabling them is a one-line change.
+bool HeldOutOfPicker(const std::string& solver_name,
+                     const std::string& gfx_id,
+                     conv::Direction direction)
+{
+    if(solver_name != "ConvHipConv")
+        return false;
+    if(gfx_id.starts_with("gfx1250"))
+        return true;
+    return gfx_id.starts_with("gfx950") && direction == conv::Direction::BackwardWeights;
+}
 
 std::vector<std::string> PickConfig(const std::string& solver_name,
                                     const conv::ProblemDescription& problem,
                                     const Handle& handle)
 {
-    if(HeldOutOfPicker(solver_name))
-    {
-        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name
-                                    << " held out of the picker pending a retrained model");
-        return {};
-    }
-
     const LgbmPcfgMetadata* meta_ptr = nullptr;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.MetadataGet");
@@ -248,6 +254,13 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
         gfx_id = handle.GetDeviceName();
+    }
+
+    if(HeldOutOfPicker(solver_name, gfx_id, problem.GetDirection()))
+    {
+        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " held out of the picker on " << gfx_id
+                                    << ", direction " << problem.GetDirectionStr());
+        return {};
     }
 
     // Two-tower KTN takes precedence where it applies: defer to the solver's own
