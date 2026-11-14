@@ -1,6 +1,6 @@
 # Known divergences: cuDNN frontend compatibility shim
 
-Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
+Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. It also lists where hipDNN's SDPA engines differ from cuDNN (dropout random stream, SDPA backward gaps and extensions), outside the shim. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
@@ -118,6 +118,19 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `deserialize` ignores `enforce_precompiled`.
 - A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
 
+## SDPA dropout random stream
+
+Seeded dropout (`dropout_probability`, seed, offset) in every hipDNN SDPA engine that serves it, forward and backward, draws hipDNN's Philox mask, not cuDNN's random stream. Forward and backward must use the same contract: a gradient is correct only when the forward drew its mask under it. The contract is [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
+
+A `dropout_probability` of 0 is the graph without dropout, forward and backward: seed and offset may be given or absent and are not read. cuDNN frontend v1.24.0's backward builds its random-number node from seed and offset whatever the probability, so a cuDNN backward graph at probability 0 needs them. hipDNN treats probability 0 as the graph without dropout in both directions, following the forward, so seed and offset are optional; graphs cuDNN accepts still work. See [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
+
+## SDPA backward engine gaps
+
+The hip-kernel-provider's FlyDSL SDPA backward engines (`hipkernel:flydsl_sdpa_bwd_merged`, `hipkernel:flydsl_sdpa_bwd_split`) are a first version:
+
+- They decline some graphs cuDNN frontend v1.24.0 serves: ALiBi, a bias with a top-left causal or window mask, a window with bottom-right alignment under `padding_mask`, a bias or dBias with `padding_mask`, an explicit dropout mask, a ragged bias or dBias, and a device-resident attention scale. Another engine may serve them. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
+- Their plans cannot be serialized. See [COVERAGE.md 9.3](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#93-known-issues).
+
 ## hipDNN extensions
 
 - `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
@@ -125,8 +138,10 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `Graph::deserialize(data, enforce_precompiled)` without a handle.
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
 - SDPA forward with a ragged Q over non-paged K/V validates with `seq_len_kv` alone (PyTorch's varlen `seqused_k`); the query lengths come from Q's ragged offset. cuDNN frontend v1.24.0 requires `seq_len_q` as well; cuDNN 9.25 spells the form `cu_seq_len_q` + `seq_len_kv`. See [SEM-028](./SdpaSemanticsRegister.md#sem-028-ragged-q-with-seq_len_kv-alone-non-paged-kv).
+- SDPA backward with FP32 Q, K, V, O, dO and gradients: served by the hip-kernel-provider's `hipkernel:flydsl_sdpa_bwd_split` engine. cuDNN documents its SDPA backward for FP16 and BF16 only. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
+- SDPA backward graphs cuDNN frontend v1.24.0 rejects: dropout with a bottom-right causal mask; a bottom-right causal mask or a window with `Sq > Skv` and no `padding_mask`; head dims that are not a multiple of 8, or from 257 to 512; and `s_q = s_kv = 1`. The gfx950 split engine serves them (a head dim that is not a multiple of 8 only with a padded pitch). The merged engine serves such head dims only up to 32 and none above 256, and the gfx11 split engine serves up to 256. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
 
-Code that must also compile against NVIDIA cuDNN cannot use these.
+Code that must also compile or run against NVIDIA cuDNN cannot use these.
 
 ## Versions
 
