@@ -1,0 +1,8 @@
+build/
+dist/
+*.egg-info/
+__pycache__/
+hipdnn_vllm/_C*.so
+hipdnn_vllm/_build_info.json
+hipdnn_vllm/providers/
+validation/site.env

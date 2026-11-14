@@ -1,0 +1,89 @@
+{
+  "comment": "Validation model matrix. path is relative to HV_ROOT (validation config) unless absolute. weights_gb sizes gpu_memory_utilization; min_vram_gb skips a model on smaller devices. hf_id is the download source for download_models.py, and an optional revision (branch, tag or commit sha; default main) pins it. fallback_ops lists plugin op families the model exercises but the plugin is expected to leave on fallback, so e2e_matrix.py does not require a hipDNN route for them.",
+  "models": [
+    {
+      "name": "qwen3-8b",
+      "hf_id": "Qwen/Qwen3-8B",
+      "path": "hf/Qwen3-8B",
+      "kind": "generate",
+      "weights_gb": 16.4,
+      "min_vram_gb": 24,
+      "max_model_len": 2048,
+      "covers": "GQA, head dim 128. Stands in for Llama-3.1-8B, which is gated on Hugging Face (the matrix allows either)."
+    },
+    {
+      "name": "phi-3-mini",
+      "hf_id": "microsoft/Phi-3-mini-4k-instruct",
+      "path": "hf/Phi-3-mini-4k-instruct",
+      "kind": "generate",
+      "weights_gb": 7.7,
+      "max_model_len": 2048,
+      "covers": "head dim 96, MHA"
+    },
+    {
+      "name": "gemma-3-4b",
+      "hf_id": "unsloth/gemma-3-4b-it",
+      "path": "hf/gemma-3-4b-it",
+      "kind": "generate",
+      "weights_gb": 8.6,
+      "max_model_len": 2048,
+      "llm_kwargs": {"limit_mm_per_prompt": {"image": 0}},
+      "covers": "head dim 256, sliding window, GemmaRMSNorm; text only. unsloth/gemma-3-4b-it is an ungated copy of google/gemma-3-4b-it (gated)."
+    },
+    {
+      "name": "gpt-oss-20b",
+      "hf_id": "openai/gpt-oss-20b",
+      "path": "hf/gpt-oss-20b",
+      "kind": "generate",
+      "weights_gb": 13.8,
+      "min_vram_gb": 40,
+      "max_model_len": 2048,
+      "covers": "attention sinks (sink_token in the P2a/P2b graphs), sliding-window layers, MXFP4 MoE"
+    },
+    {
+      "name": "qwen2.5-vl-3b",
+      "hf_id": "Qwen/Qwen2.5-VL-3B-Instruct",
+      "path": "models/Qwen2.5-VL-3B-Instruct",
+      "kind": "vlm",
+      "weights_gb": 7.5,
+      "max_model_len": 4096,
+      "llm_kwargs": {"max_num_seqs": 8},
+      "covers": "ViT encoder attention, vision LayerNorm/conv when enabled, Qwen2 decoder"
+    },
+    {
+      "name": "bge-m3",
+      "hf_id": "BAAI/bge-m3",
+      "path": "hf/bge-m3",
+      "hf_include": ["pytorch_model.bin", "1_Pooling/*"],
+      "kind": "embed",
+      "weights_gb": 2.3,
+      "extra_gb": 4,
+      "max_model_len": 8192,
+      "covers": "encoder-only attention (P1e), XLM-RoBERTa LayerNorm"
+    },
+    {
+      "name": "qwen2.5-0.5b",
+      "hf_id": "Qwen/Qwen2.5-0.5B",
+      "path": "models/Qwen2.5-0.5B",
+      "kind": "generate",
+      "weights_gb": 1.0,
+      "extra_gb": 6,
+      "matrix": false,
+      "max_model_len": 2048,
+      "covers": "small smoke/bisect model covering attention, norms and linear together"
+    },
+    {
+      "name": "gemma-3-4b-strict-bigkv",
+      "hf_id": "unsloth/gemma-3-4b-it",
+      "path": "hf/gemma-3-4b-it",
+      "kind": "generate",
+      "weights_gb": 8.6,
+      "min_vram_gb": 30,
+      "matrix": false,
+      "max_model_len": 2048,
+      "llm_kwargs": {"limit_mm_per_prompt": {"image": 0}, "gpu_memory_utilization": 0.85},
+      "env": {"HIPDNN_VLLM_STRICT": "1", "HIPDNN_VLLM_ATTN_DEBUG_ROUTE": "1"},
+      "covers": "gemma-3-4b in strict mode with a KV pool past 4 GiB, so its shared hybrid-allocator K/V tensors pass the 2 GiB that a 32-bit page container would allow; run with the attention candidate so any decoder-attention decline fails the run"
+    }
+  ]
+}
