@@ -234,6 +234,7 @@ namespace TensileLite
                 ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
                 ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
+                ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy on device-idx that the other devices access over peer access (for D: every device writes its slice into the device-idx D).")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -949,6 +950,14 @@ int main(int argc, const char* argv[])
                                                      ". Narrow them with --world-filter."));
         }
         // --split-devices N: every problem runs as N slices on N consecutive devices.
+        {
+            auto const placement = args["split-placement"].as<std::string>();
+            if(placement.size() != 4
+               || placement.find_first_not_of("RS") != std::string::npos)
+                throw std::runtime_error(
+                    "--split-placement needs 4 letters (A, B, C, D), each R or S, got '" + placement
+                    + "'");
+        }
         int splitM = args["split-devices"].as<int>();
         if(splitM < 1)
             throw std::runtime_error("--split-devices must be >= 1");
@@ -1194,13 +1203,26 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("--split-devices needs a plain GEMM problem");
         const size_t bytes = static_cast<size_t>(full->d().totalAllocatedElements()
                                                  * full->d().elementBytes());
+        // R = every device has its own copy, S = devices after the first use the first's.
+        auto const placement = args["split-placement"].as<std::string>();
+        auto const shared    = [&](size_t tensor) { return placement[tensor] == 'S'; };
+        // A shared tensor lives on the first device; the others reach it over peer access.
+        if(placement.find('S') != std::string::npos)
+            for(size_t d = 1; d < devices.size(); d++)
+            {
+                ScopedDevice device(devices[d]->deviceId);
+                hipError_t   pe = hipDeviceEnablePeerAccess(devices[0]->deviceId, 0);
+                if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
+                    HIP_CHECK_EXC(pe);
+                static_cast<void>(hipGetLastError());
+            }
         fullOutputs.resize(devices.size());
         for(size_t d = 0; d < devices.size(); d++)
         {
             const int    id     = devices[d]->deviceId;
             ScopedDevice device(id);
             auto&        slots = fullOutputs[d];
-            while(slots.size() < endSlot)
+            while(slots.size() < endSlot && !(d > 0 && shared(3)))
             {
                 void* p = nullptr;
                 HIP_CHECK_EXC(hipMalloc(&p, bytes));
@@ -1218,10 +1240,30 @@ int main(int argc, const char* argv[])
             for(size_t r = firstSlot; r < endSlot; r++)
             {
                 auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
-                void* dest   = static_cast<char*>(slots[r].get()) + offsetBytes;
-                if(inputs.c == inputs.d)
+                auto& dBase  = d > 0 && shared(3) ? fullOutputs[0][r] : slots[r];
+                void* dest   = static_cast<char*>(dBase.get()) + offsetBytes;
+                const bool inPlace = inputs.c == inputs.d;
+                if(inPlace)
                     inputs.c = dest;
                 inputs.d = dest;
+                if(d > 0)
+                {
+                    auto const& first = dynamic_cast<ContractionInputs const&>(*devices[0]->inputArr[r]);
+                    if(shared(0))
+                    {
+                        inputs.a      = first.a;
+                        inputs.scaleA = first.scaleA;
+                        inputs.mxsa   = first.mxsa;
+                    }
+                    if(shared(1))
+                    {
+                        inputs.b      = first.b;
+                        inputs.scaleB = first.scaleB;
+                        inputs.mxsb   = first.mxsb;
+                    }
+                    if(shared(2) && !inPlace)
+                        inputs.c = first.c;
+                }
             }
         }
     };

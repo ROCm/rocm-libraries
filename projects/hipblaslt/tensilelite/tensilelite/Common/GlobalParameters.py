@@ -353,6 +353,12 @@ globalParameters["UseUserArgs"] = False
 # SplitDim M splits A and keeps B replicated; N splits B, replicates A and writes one shared D.
 globalParameters["SplitDevices"] = 1
 globalParameters["SplitDim"] = "M"
+# Where each tensor lives when split: "Replicated" (a copy on every device, the default) or
+# "Shared" (one copy on the first device that the others read, or for D write, over peer access).
+globalParameters["SplitPlacementA"] = "Replicated"
+globalParameters["SplitPlacementB"] = "Replicated"
+globalParameters["SplitPlacementC"] = "Replicated"
+globalParameters["SplitPlacementD"] = "Replicated"
 
 globalParameters["RotatingBufferSize"] = 0  # Size in MB
 globalParameters["RotatingMode"] = (
