@@ -3325,15 +3325,6 @@ TYPED_TEST(local_matrix_precision, applies_and_converts_on_the_accelerator)
         A->ConvertTo(f.id, f.blockdim);
         expect_matrix(*A, ref, f, acc);
 
-        if(f.id == DENSE && is_complex_v<T>)
-        {
-            KNOWN_BUG("the complex rocblasTgemv of HIP DENSE Apply is a FATAL_ERROR stub");
-            expect_in_child([&] {
-                auto M = make_local_matrix(acc, ref, f);
-                apply_and_convert_to_csr(*M);
-            });
-            continue;
-        }
         apply_and_convert_to_csr(*A);
     }
 }

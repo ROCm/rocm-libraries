@@ -81,16 +81,9 @@ namespace
     template <typename... Lists>
     using Concat = typename concat_types<Lists...>::type;
 
-#ifdef SUPPORT_COMPLEX
-    using ComplexTypes = testing::Types<cfloat, cdouble>;
-#else
-    using ComplexTypes = testing::Types<>;
-#endif
-
     // The value types and backends for which the backend vectors define an
     // operation; the others end the program
-    using BlasTypes = Concat<WithBackends<FloatingTypes>, HostOnly<IntegerTypes>>;
-    using AbsTypes  = Concat<WithBackends<RealTypes>, HostOnly<Concat<ComplexTypes, IntegerTypes>>>;
+    using BlasTypes       = Concat<WithBackends<FloatingTypes>, HostOnly<IntegerTypes>>;
     using PowerTypes      = Concat<WithBackends<testing::Types<float, double, int64_t>>,
                                    HostOnly<Concat<testing::Types<int>, ComplexTypes>>>;
     using SortTypes       = WithBackends<testing::Types<float, double, int, int64_t, bool>>;
@@ -776,14 +769,14 @@ TYPED_TEST(local_vector_norm, norm_is_the_euclidean_norm)
     EXPECT_EQ(this->vec(std::vector<T>())->Norm(), T(0));
 }
 
-// Asum and Amax, which the accelerator defines only for real floating point types
+// Asum and Amax
 
 template <typename P>
 class local_vector_abs : public LocalVectorTest<P>
 {
 };
 
-TYPED_TEST_SUITE(local_vector_abs, AbsTypes, TypedName);
+TYPED_TEST_SUITE(local_vector_abs, BlasTypes, TypedName);
 
 TYPED_TEST(local_vector_abs, asum_sums_the_magnitudes)
 {
@@ -796,15 +789,14 @@ TYPED_TEST(local_vector_abs, asum_sums_the_magnitudes)
 
     if constexpr(is_complex_v<T>)
     {
-        // As BLAS scasum: the real sum of |re| + |im|
-        real_t<T> expected = 0;
+        // The 1-norm: the real sum of the moduli |z|, not the |re| + |im| of BLAS scasum
+        double expected = 0;
         for(const T& e : a)
         {
-            expected += std::abs(e.real()) + std::abs(e.imag());
+            expected += std::abs(std::complex<double>(e));
         }
-        EXPECT_EQ(asum.real() + asum.imag(), expected);
-        KNOWN_BUG("the host returns (sum |re|, sum |im|) instead of the real sum");
-        EXPECT_EQ(asum, T(expected, 0));
+        EXPECT_EQ(asum.imag(), 0);
+        expect_near(asum, T(static_cast<real_t<T>>(expected)));
     }
     else
     {

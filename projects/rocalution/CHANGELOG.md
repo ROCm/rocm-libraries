@@ -9,6 +9,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 
 ### Changed
 * `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.
+* `LocalVector::Asum()` and `GlobalVector::Asum()` of complex vectors on the host now return the sum of the moduli `|z|` with a zero imaginary part. Before, they returned the sums of the absolute real and imaginary parts as a complex number. This changes the L1 residual norm of complex solves on the host.
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
@@ -43,6 +44,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::Apply()` and `LocalMatrix::MatrixMult()` of complex DENSE matrices on the accelerator ending the program.
+* Fixed `LocalVector::Asum()`, `GlobalVector::Asum()` and `LocalVector::Amax()` of complex vectors on the accelerator ending the program, which also ended complex solves on the accelerator with the L1 residual norm, and complex `LocalMatrix` solves on the accelerator with the Linf residual norm.
+* Fixed `LocalVector::Asum()` and `GlobalVector::Asum()` of complex vectors on the host returning the sums of the absolute real and imaginary parts as a complex number, whose real plus imaginary part is the BLAS scasum. On both backends they now return the sum of the moduli `|z|` with a zero imaginary part, consistent with `LocalVector::Amax()`, which returns the index and the modulus of the entry with the largest modulus. The L1 residual norm of complex solves on the host is now this sum, which is at least as large as before, so these solves can stop after a different number of iterations, and QMRCGStab and IDR(s), which also use the norm in their iteration, compute different iterates.
 
 ## (Unreleased) rocALUTION 4.1.1
 

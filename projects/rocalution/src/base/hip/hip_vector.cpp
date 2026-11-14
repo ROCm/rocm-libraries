@@ -1156,6 +1156,184 @@ namespace rocalution
         return index;
     }
 
+#ifdef SUPPORT_COMPLEX
+    // Complex Asum and Amax use the modulus |z|, as the host. The rocBLAS complex asum and
+    // amax use |re| + |im| instead. The modulus uses hypot, as the squares of the parts can
+    // overflow.
+    template <typename T>
+    struct hip_complex_modulus
+    {
+        __device__ T operator()(const std::complex<T>& z) const
+        {
+            return hypot(z.real(), z.imag());
+        }
+    };
+
+    template <typename T>
+    struct hip_index_modulus
+    {
+        int64_t index;
+        T       value;
+    };
+
+    // A NaN modulus ranks below every other one, so that NaN entries are skipped, as on the
+    // host, and hip_max_modulus stays commutative, which rocprim::reduce requires
+    template <typename T>
+    struct hip_entry_modulus
+    {
+        const std::complex<T>* vec;
+
+        __device__ hip_index_modulus<T> operator()(int64_t i) const
+        {
+            const T modulus = hip_complex_modulus<T>()(vec[i]);
+            return {i, isnan(modulus) ? static_cast<T>(-1) : modulus};
+        }
+    };
+
+    // The larger modulus, and the smaller index of equal ones
+    template <typename T>
+    struct hip_max_modulus
+    {
+        __device__ hip_index_modulus<T> operator()(const hip_index_modulus<T>& a,
+                                                   const hip_index_modulus<T>& b) const
+        {
+            return (b.value > a.value || (b.value == a.value && b.index < a.index)) ? b : a;
+        }
+    };
+
+    template <typename T>
+    static T hip_complex_asum(const std::complex<T>* vec, int64_t size, hipStream_t stream)
+    {
+        T res = static_cast<T>(0);
+
+        if(size > 0)
+        {
+            auto in = rocprim::make_transform_iterator(vec, hip_complex_modulus<T>());
+
+            char*  buffer      = NULL;
+            size_t buffer_size = 0;
+
+            T* dres = NULL;
+            allocate_hip(1, &dres);
+
+            CHECK_HIP_STATUS(rocprim::reduce(buffer,
+                                             buffer_size,
+                                             in,
+                                             dres,
+                                             static_cast<T>(0),
+                                             size,
+                                             rocprim::plus<T>(),
+                                             stream));
+
+            allocate_hip(buffer_size, &buffer);
+
+            CHECK_HIP_STATUS(rocprim::reduce(buffer,
+                                             buffer_size,
+                                             in,
+                                             dres,
+                                             static_cast<T>(0),
+                                             size,
+                                             rocprim::plus<T>(),
+                                             stream));
+
+            free_hip(&buffer);
+
+            copy_d2h(1, dres, &res);
+
+            free_hip(&dres);
+        }
+
+        return res;
+    }
+
+    template <typename T>
+    static int64_t
+        hip_complex_amax(const std::complex<T>* vec, int64_t size, T& value, hipStream_t stream)
+    {
+        hip_index_modulus<T> res = {0, static_cast<T>(0)};
+
+        if(size > 0)
+        {
+            auto in = rocprim::make_transform_iterator(rocprim::counting_iterator<int64_t>(0),
+                                                       hip_entry_modulus<T>{vec});
+
+            char*  buffer      = NULL;
+            size_t buffer_size = 0;
+
+            char* dres = NULL;
+            allocate_hip(sizeof(hip_index_modulus<T>), &dres);
+
+            hip_index_modulus<T>* out = reinterpret_cast<hip_index_modulus<T>*>(dres);
+
+            CHECK_HIP_STATUS(rocprim::reduce(
+                buffer, buffer_size, in, out, res, size, hip_max_modulus<T>(), stream));
+
+            allocate_hip(buffer_size, &buffer);
+
+            CHECK_HIP_STATUS(rocprim::reduce(
+                buffer, buffer_size, in, out, res, size, hip_max_modulus<T>(), stream));
+
+            free_hip(&buffer);
+
+            CHECK_HIP_STATUS(hipMemcpy(&res, out, sizeof(res), hipMemcpyDeviceToHost));
+
+            free_hip(&dres);
+
+            // The modulus of the entry as the host computes it, with std::hypot as the host
+            // std::abs does: the device hypot and std::abs of a complex value in HIP code can
+            // round differently. A zero modulus stays zero even if entry 0 is NaN, as on the
+            // host.
+            if(res.value > static_cast<T>(0))
+            {
+                std::complex<T> entry;
+                copy_d2h(1, vec + res.index, &entry);
+                res.value = std::hypot(entry.real(), entry.imag());
+            }
+        }
+
+        value = res.value;
+        return res.index;
+    }
+
+    template <>
+    std::complex<float> HIPAcceleratorVector<std::complex<float>>::Asum(void) const
+    {
+        return std::complex<float>(hip_complex_asum(
+            this->vec_, this->size_, HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+    }
+
+    template <>
+    std::complex<double> HIPAcceleratorVector<std::complex<double>>::Asum(void) const
+    {
+        return std::complex<double>(hip_complex_asum(
+            this->vec_, this->size_, HIPSTREAM(_get_backend_descriptor()->HIP_stream_current)));
+    }
+
+    template <>
+    int64_t HIPAcceleratorVector<std::complex<float>>::Amax(std::complex<float>& value) const
+    {
+        float   amax  = 0.0f;
+        int64_t index = hip_complex_amax(this->vec_,
+                                         this->size_,
+                                         amax,
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+        value         = std::complex<float>(amax);
+        return index;
+    }
+
+    template <>
+    int64_t HIPAcceleratorVector<std::complex<double>>::Amax(std::complex<double>& value) const
+    {
+        double  amax  = 0.0;
+        int64_t index = hip_complex_amax(this->vec_,
+                                         this->size_,
+                                         amax,
+                                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+        value         = std::complex<double>(amax);
+        return index;
+    }
+#endif
+
     template <>
     int64_t HIPAcceleratorVector<bool>::Amax(bool& value) const
     {
