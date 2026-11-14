@@ -12711,6 +12711,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       "workspaceType": "None",
       "workspaceSizePerElemC": 0,
       "workspaceSizePerElemBias": 0,
+      "globalAccumulation": (None, 'SingleBuffer', 'MultipleBuffer',
+                             'MultipleBufferSingleKernel', 'PartialsBuffer'
+                            ).index(kernel["_GlobalAccumulation"]),
       "generated": True,
     }
     from .CustomKernels import validateCustomPersistentArgs

@@ -262,6 +262,7 @@ namespace TensileLite
         CustomWorkspaceType workspaceType = CustomWorkspaceType::None;
         size_t workspaceSizePerElemC      = 0;
         size_t workspaceSizePerElemBias   = 0;
+        size_t globalAccumulation = 0;
         // True when this CustomKernel was auto-populated for a Tensile-generated
         // kernel (vs. a hand-written custom kernel).  Generated kernels still
         // rely on sizeMapping for workspace/Stream-K decisions, so several code
