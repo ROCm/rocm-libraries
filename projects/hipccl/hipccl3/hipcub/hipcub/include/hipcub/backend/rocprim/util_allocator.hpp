@@ -35,6 +35,7 @@
 #include <set>
 #include <map>
 #include <mutex>
+#include <thread>
 
 #include <math.h>
 #include <stdio.h>
@@ -75,6 +76,7 @@ struct CachingDeviceAllocator
         int             device;             // device ordinal
         hipStream_t     associated_stream;  // Associated associated_stream
         hipEvent_t      ready_event;        // Signal when associated stream has run to the point at which this block was freed
+        std::thread::id associated_thread;  // Host thread that associated the block with associated_stream
 
         // Constructor (suitable for searching maps for a specific block, given its pointer and device)
         BlockDescriptor(void *d_ptr, int device) :
@@ -83,7 +85,8 @@ struct CachingDeviceAllocator
             bin(INVALID_BIN),
             device(device),
             associated_stream(0),
-            ready_event(0)
+            ready_event(0),
+            associated_thread()
         {}
 
         // Constructor (suitable for searching maps for a range of suitable blocks, given a device)
@@ -94,6 +97,7 @@ struct CachingDeviceAllocator
             , device(device)
             , associated_stream(0)
             , ready_event(0)
+            , associated_thread()
         {}
 
         // Comparison functor for comparing device pointers
@@ -155,6 +159,36 @@ struct CachingDeviceAllocator
             exp = exp >> 1;                    // divide the exponent in half
         }
         return retval;
+    }
+
+
+    /**
+     * Whether \p stream names a different stream on each host thread, so that equal handle
+     * values only identify the same stream when used from the same thread.
+     */
+    static bool IsPerThreadStream(
+        hipStream_t     stream)
+    {
+#ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
+        if (stream == 0)
+            return true;
+#endif
+        return stream == hipStreamPerThread;
+    }
+
+
+    /**
+     * Whether a block associated with \p block_stream on \p block_thread can be reused on
+     * \p active_stream from the calling thread without waiting for its ready event.
+     */
+    static bool IsSameStream(
+        hipStream_t             active_stream,
+        hipStream_t             block_stream,
+        const std::thread::id&  block_thread)
+    {
+        if (active_stream != block_stream)
+            return false;
+        return !IsPerThreadStream(active_stream) || (block_thread == std::this_thread::get_id());
     }
 
 
@@ -315,6 +349,7 @@ struct CachingDeviceAllocator
         bool found = false;
         BlockDescriptor search_key(device);
         search_key.associated_stream = active_stream;
+        search_key.associated_thread = std::this_thread::get_id();
         NearestPowerOf(search_key.bin, search_key.bytes, bin_growth, bytes);
 
         if (search_key.bin > max_bin)
@@ -345,14 +380,17 @@ struct CachingDeviceAllocator
             {
                 // To prevent races with reusing blocks returned by the host but still
                 // in use by the device, only consider cached blocks that are
-                // either (from the active stream) or (from an idle stream)
-                if ((active_stream == block_itr->associated_stream) ||
+                // either (from the active stream) or (from an idle stream).
+                // hipStreamPerThread (and stream 0 with per-thread default streams) names a
+                // different stream on each thread, so it only matches on the same thread.
+                if (IsSameStream(active_stream, block_itr->associated_stream, block_itr->associated_thread) ||
                     (hipEventQuery(block_itr->ready_event) != hipErrorNotReady))
                 {
                     // Reuse existing cache block.  Insert into live blocks.
                     found = true;
                     search_key = *block_itr;
                     search_key.associated_stream = active_stream;
+                    search_key.associated_thread = std::this_thread::get_id();
                     live_blocks.insert(search_key);
 
                     // Remove from free blocks
