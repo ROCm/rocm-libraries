@@ -374,8 +374,19 @@ built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230))
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
 CI, because TheRock treats any rocm-libraries change as a submodule change; scheduled nightly runs
 get `comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
-`test/therock/test_hipblaslt.py`: `quick` selects `*smoke*` on pull requests, and `standard` selects
-`*smoke*:*quick*:*pre_checkin*-*known_bug*` nightly.
+[`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) with these filters:
+
+| ASAN tier | GTest filter |
+| --- | --- |
+| `quick` (pull requests) | `*smoke*-*HipBufferTransferMemoryMode.*/Managed` |
+| `standard` (nightly) | `*smoke*:*quick*:*pre_checkin*-*known_bug*:*HipBufferTransferMemoryMode.*/Managed` |
+
+Both tiers temporarily exclude the two managed-memory buffer cases for the ASAN allocator
+failure tracked in ROCM-34263 and [rocm-systems #15163](https://github.com/ROCm/rocm-systems/issues/15163).
+The `Device` cases remain enabled, and non-ASAN runs retain both memory modes. The runner comment
+records the removal condition and review date. CTest and direct binary invocations bypass this
+exclusion; manual `comprehensive` and `full` ASAN dispatches receive no filter and remain exposed
+to the managed-memory failure.
 
 **Test size and shape expectations.** The suite leans heavily on many small problem sizes rather
 than few large ones, which is the right default: most correctness bugs are in tiling, edge handling,
