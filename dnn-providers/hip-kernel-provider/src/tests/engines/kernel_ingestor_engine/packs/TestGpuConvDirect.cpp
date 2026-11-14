@@ -334,6 +334,9 @@ std::vector<DeviceCase> deviceCases()
     auto oddBatchRagged = dense(72, 40, {9, 21}, {3, 3}, {2, 2}, true);
     oddBatchRagged.n = 5;
     cases.push_back({"Nhwc3x3OddBatchRagged", oddBatchRagged});
+    // A grid of a few tiles over 4+ channel chunks: the rows split-C configs (fp32 partials and
+    // the in-order reduce) serve it; 200 channels leave the last split a short chunk.
+    cases.push_back({"Nhwc3x3SplitC", dense(200, 72, {9, 11}, {3, 3}, {1, 1}, true)});
     return cases;
 }
 

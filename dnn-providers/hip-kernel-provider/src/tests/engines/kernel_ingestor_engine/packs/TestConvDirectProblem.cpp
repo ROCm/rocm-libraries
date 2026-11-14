@@ -708,7 +708,12 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
         {"kd (no 2x3x3 filter)", [](ConfigFields& f) { f.kd = 2; }},
         {"ring", [](ConfigFields& f) { f.ring = 1; }},
         {"bl", [](ConfigFields& f) { f.bl = 1; }},
-        {"split", [](ConfigFields& f) { f.split = 1; }},
+        {"split on ping-pong",
+         [](ConfigFields& f) {
+             f.split = 1;
+             f.pp = 1;
+             f.epi = 0;
+         }},
         {"wm", [](ConfigFields& f) { f.wm = 2; }},
         {"wn", [](ConfigFields& f) { f.wn = 2; }},
         {"bm", [](ConfigFields& f) { f.bm = 128; }},
@@ -934,7 +939,7 @@ TEST(TestConvDirectPlan, Rows3dTilesWalkEveryOutputPlane)
     EXPECT_FALSE(planOf(huge, rows3d, "HALF", 1024).has_value());
 }
 
-TEST(TestConvDirectKernelMatch, BatchUnfoldIsGfx950And2dOnly)
+TEST(TestConvDirectKernelMatch, BatchUnfoldIs2dOnlyAndWithinTheLds)
 {
     // One wave column (16 / un columns of each image): the 2 x 2 x 2 tile's unfolded halo rows
     // (2 x 18 pixels) would pass gfx950's 160 KiB.
@@ -950,12 +955,14 @@ TEST(TestConvDirectKernelMatch, BatchUnfoldIsGfx950And2dOnly)
     auto wide = rowsFields();
     wide.un = 2;
     EXPECT_FALSE(admits(wide, "gfx950")) << "two 34-pixel halo rows of 64 channels: 162 KiB";
-    // Off gfx950 (dword LDS DMA) even when the ship list and atom would run.
+    // The dword LDS DMA (gfx90a / gfx94x) unfolds too, within its 64 KiB.
     auto gfx9 = rowsGfx9Fields();
     gfx9.wq = 1;
     ASSERT_TRUE(admits(gfx9, "gfx90a"));
     gfx9.un = 2;
-    EXPECT_FALSE(admits(gfx9, "gfx90a"));
+    EXPECT_TRUE(admits(gfx9, "gfx90a"));
+    gfx9.un = 4;
+    EXPECT_TRUE(admits(gfx9, "gfx90a"));
     // 3-D rows configs walk planes, not image groups.
     auto rows3d = rowsFields();
     rows3d.kd = 3;
@@ -963,6 +970,62 @@ TEST(TestConvDirectKernelMatch, BatchUnfoldIsGfx950And2dOnly)
     ASSERT_TRUE(admits(rows3d, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
     rows3d.un = 2;
     EXPECT_FALSE(admits(rows3d, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
+}
+
+TEST(TestConvDirectPlan, RowsSplitServesOnlyAQuarterFilledGrid)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.n = 1;
+    shape.c = 640;
+    shape.k = 640;
+    shape.input = {64, 64};
+    auto split = rowsFields();
+    split.split = 1;
+    // 4 x 2 tiles x 5 column blocks = 40 tiles: under a quarter of 256 units.
+    const auto plan = planOf(shape, split, "HALF", 256);
+    ASSERT_TRUE(plan.has_value());
+    const auto& a = plan->args;
+    // 10 chunks of 64 channels; ceil(256 / 40) = 7 wanted, at most 10 / 2 = 5.
+    EXPECT_EQ(a.splits, 5);
+    EXPECT_EQ(a.cps, 2);
+    EXPECT_EQ(plan->grid[0], 40u * 5u);
+    EXPECT_EQ(plan->partialBytes, static_cast<size_t>(5) * 64 * 64 * 640 * sizeof(float));
+    // 40 tiles fill a quarter of 128 units or more: the single-pass configs serve it.
+    EXPECT_FALSE(planOf(shape, split, "HALF", 128).has_value());
+    EXPECT_FALSE(planOf(shape, split, "HALF", 159).has_value());
+    EXPECT_TRUE(planOf(shape, split, "HALF", 160).has_value());
+    // One chunk per split would be all the partials cost: two chunks at least.
+    auto thin = shape;
+    thin.c = 64;
+    EXPECT_FALSE(planOf(thin, split, "HALF", 256).has_value());
+    // The plain tile still serves both.
+    EXPECT_TRUE(planOf(shape, rowsFields(), "HALF", 128).has_value());
+}
+
+TEST(TestConvDirectPlan, SmallGfx950RowsTilesDeclineManyRoundGrids)
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.n = 2;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {256, 256};
+    // 16 x 16 x 128: a quarter of the reference tile.
+    auto small = rowsFields();
+    small.wq = 1;
+    small.wp = 2;
+    small.bm = 16;
+    // 16 x 16 tiles x 2 images = 512 tiles: 8 rounds of 64 units, more than 8 of 32.
+    EXPECT_TRUE(planOf(shape, small, "HALF", 64).has_value());
+    EXPECT_FALSE(planOf(shape, small, "HALF", 32).has_value());
+    // The reference tile and the dword-DMA atoms are not affected.
+    EXPECT_TRUE(planOf(shape, rowsFields(), "HALF", 32).has_value());
+    auto gfx9 = rowsGfx9Fields();
+    gfx9.wq = 1;
+    EXPECT_TRUE(planOf(shape, gfx9, "HALF", 32).has_value());
 }
 
 TEST(TestConvDirectPlan, BatchUnfoldTilesPackImagesAlongTheColumns)
