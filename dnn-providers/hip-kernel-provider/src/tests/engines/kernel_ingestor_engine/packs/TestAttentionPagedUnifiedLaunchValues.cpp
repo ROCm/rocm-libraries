@@ -287,7 +287,8 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnotherContractName)
 
 TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAMissingOptionalOrFloatValue)
 {
-    for(const char* name : {"sink.uid", "ragged_offset.uid", "scale", "sink_is_f32", "num_kv_blocks"})
+    for(const char* name :
+        {"sink.uid", "ragged_offset.uid", "scale", "sink_is_f32", "num_kv_blocks"})
     {
         SCOPED_TRACE(name);
         auto missing = saved(denseInputs());

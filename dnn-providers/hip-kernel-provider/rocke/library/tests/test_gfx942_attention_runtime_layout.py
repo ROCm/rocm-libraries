@@ -761,7 +761,9 @@ def test_runtime_layout_contains_out_of_range_page_ids(
         zlib.crc32(f"bad:{dtype}:{head_size}:{block_size}:{qpk}".encode())
     )
     sc = next(
-        s for s in _scenarios(block_size) if s["seq_lens"][-1] > 0 and s["mode"] == "dense"
+        s
+        for s in _scenarios(block_size)
+        if s["seq_lens"][-1] > 0 and s["mode"] == "dense"
     )
     _run_case(spec, sc, rng, bad_page=bad_page)
 

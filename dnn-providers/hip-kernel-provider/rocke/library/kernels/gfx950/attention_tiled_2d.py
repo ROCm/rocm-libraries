@@ -2286,7 +2286,9 @@ def build_unified_attention_2d_tiled(
 
     def _sink_logit(qh, qh_in):
         # Query head ``qh``'s sink logit in f32 (see ``sink_logit``).
-        return sink_logit(b, sinks, dtype, qh, qh_in, rtl["sink_is_f32"] if RTL else None)
+        return sink_logit(
+            b, sinks, dtype, qh, qh_in, rtl["sink_is_f32"] if RTL else None
+        )
 
     if USE_SINKS:
         m_inits = []
@@ -2569,9 +2571,7 @@ def build_unified_attention_2d_tiled(
             # the cache: it reads as a masked page (block 0, zero-size resource).
             phys_ok = b.cmp_ult(phys, rtl["num_kv_blocks"])
             phys = b.select(phys_ok, phys, b.const_i32(0))
-            page = b.global_ptr_add(
-                src, b.mul(b.zext(phys, I64), rtl_kv_page_stride_b)
-            )
+            page = b.global_ptr_add(src, b.mul(b.zext(phys, I64), rtl_kv_page_stride_b))
             return b.buffer_rsrc(page, b.select(phys_ok, rtl_kv_span, b.const_i32(0)))
 
         def _rtl_kv_voff(kv_tile_idx: Value, linear_half: Value) -> Value:

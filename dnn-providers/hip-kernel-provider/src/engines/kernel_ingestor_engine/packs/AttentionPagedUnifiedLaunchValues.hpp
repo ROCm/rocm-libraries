@@ -119,7 +119,8 @@ struct AttentionPagedUnifiedScalars
     int32_t kvBlockSpanBytes = 0;
     int32_t qBlockGrid = 0;
     int32_t sinkIsF32 = 0; ///< 1: the sink is FLOAT; 0: in the Q data type, or no sink
-    int32_t numKvBlocks = 0; ///< the K/V container's block count; a page id at or past it reads as masked
+    int32_t numKvBlocks
+        = 0; ///< the K/V container's block count; a page id at or past it reads as masked
 };
 
 /// Everything a launch is computed from: block = (blockThreads, 1, 1) and

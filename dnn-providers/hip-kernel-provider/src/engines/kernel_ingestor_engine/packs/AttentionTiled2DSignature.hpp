@@ -52,8 +52,8 @@ inline void
 /// shape kernargs (`RUNTIME_KERNARG_FIELDS`: head counts and window). An LSE-on kernel
 /// (@p emitLse) appends lse_ptr, 8-byte aligned after the runtime kernargs (read off the
 /// compiled LSE kernel). A runtime_layout kernel appends its own arguments after these.
-inline std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>
-    tiled2DKernelSignature(bool emitLse = false)
+inline std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument> tiled2DKernelSignature(bool emitLse
+                                                                                       = false)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
