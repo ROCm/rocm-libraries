@@ -12,10 +12,11 @@ are the pass's: C is the reduction (dY channels), K the outputs (dX channels).
 * **LDS DMA.** Every operand byte reaches LDS through ``buffer_load ... lds``
   (16 bytes per lane; 4 for the narrow tail of an input row), never through
   VGPRs and ``ds_write``. A DMA instruction writes 1 KiB lane-contiguously, so
-  the bank-conflict-free layout is chosen on the *global* side. An input row of
-  64 channels is 8 granules of 16 bytes, granule ``g`` of column ``x`` stored
-  at slot ``g ^ (x % 8)``: a fragment read (16 columns x one granule) hits 8
-  distinct slots per 8 lanes.
+  the LDS swizzle is applied on the *global* side. An input row of 64
+  channels is 8 granules of 16 bytes, granule ``g`` of column ``x`` stored at
+  slot ``g ^ (x % 8)``: by the slot arithmetic, a fragment read (16 columns x
+  one granule) hits 8 distinct slots per 8 lanes (a layout argument, not a
+  counter measurement).
 * **In-kernel transposed weights.** The filter is ``W[C][R][S][K]`` in this
   pass's terms, contiguous along the outputs. The weights of one tap are
   staged as ``[64 reduction rows][block_k outputs]`` and the A fragments are
@@ -591,6 +592,11 @@ def build_dgrad_pp_mfma(spec: DgradPpMfmaSpec, *, arch: str = "gfx950") -> Kerne
             b.s_barrier_bare()  # pair rank 1's last barrier
         return accs
 
+    # ``rank`` is wave-uniform (readfirstlane), so this is a branch per wave,
+    # not per lane. s_barrier counts waves, so the two rank schedules only
+    # need the same barrier count: 2 per step in both, plus prologue / epilogue
+    # barriers that add to 2 per rank (pinned by
+    # test_rank_branches_hit_the_same_barriers).
     branch = b.scf_if_else(b.cmp_eq(rank, c0), result_types=[acc_t] * n_acc)
     with branch as (then_ctx, else_ctx):
         with then_ctx:

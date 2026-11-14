@@ -270,6 +270,33 @@ def test_kernel_name_and_attrs():
     assert kernel.attrs["max_workgroup_size"] == 512
 
 
+def _barrier_shape(region):
+    """``s_barrier_bare`` count at each nesting level of ``region``: (count at
+    this level, shapes of every nested region in order)."""
+    top, nested = 0, []
+    for op in region.ops:
+        top += op.name == "tile.s_barrier_bare"
+        nested += [_barrier_shape(r) for r in op.regions]
+    return top, tuple(nested)
+
+
+@pytest.mark.parametrize("kh, block_k", [(3, 128), (3, 256), (5, 128)])
+def test_rank_branches_hit_the_same_barriers(kh, block_k):
+    """The two wave ranks run different schedules under a wave-uniform rank
+    branch (the rank comes from a readfirstlane wave index). s_barrier counts
+    waves, not program counters, so the schedule is sound when every wave
+    executes the same number of barriers: both rank branches must have the
+    same barrier count at every loop / if nesting level."""
+    spec = DgradPpMfmaSpec(
+        problem=dgrad_pp_mfma_problem(_dgrad(KH=kh)), block_k=block_k
+    )
+    ranks = [op for op in build_dgrad_pp_mfma(spec).body.ops if op.regions]
+    assert [op.name for op in ranks] == ["scf.if_else"]
+    rank0, rank1 = (_barrier_shape(r) for r in ranks[0].regions)
+    assert rank0 == rank1, (rank0, rank1)
+    assert rank0[0] == 2 and rank0[1], rank0
+
+
 def test_aot_grid():
     from kernels.conv.direct_aot_jobs import (
         DIRECT_CAPABILITIES,

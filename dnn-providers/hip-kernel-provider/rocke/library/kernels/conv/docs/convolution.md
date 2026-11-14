@@ -1336,9 +1336,9 @@ A workgroup of 8 waves owns a 16x16 dX pixel tile and `block_k` (128 or 256)
 dX channels, and walks the dY channels in chunks of 64:
 
 - every operand byte is staged with `buffer_load ... lds` (16 bytes per lane,
-  4 for the narrow tail of a halo row), never through VGPRs; the
-  bank-conflict-free LDS layout is a 16-byte granule XOR applied on the global
-  side;
+  4 for the narrow tail of a halo row), never through VGPRs; the LDS
+  swizzle, a 16-byte granule XOR chosen from the bank arithmetic to spread
+  fragment reads over distinct slots, is applied on the global side;
 - the waves form two ranks of 4: rank 0 streams the next filter tap's weights
   into a double buffer, rank 1 the next chunk's dY halo
   `[16 + KH - 1][16 + KW - 1][64]` into the other input buffer, a few 1 KiB
