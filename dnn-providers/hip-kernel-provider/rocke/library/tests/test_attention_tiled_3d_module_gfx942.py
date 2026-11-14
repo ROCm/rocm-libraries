@@ -46,6 +46,7 @@ def test_accepts_supported_cells(head_size, dtype):
         (dict(head_size=0), "head_size"),
         (dict(dtype="fp32"), "fp16/bf16"),
         (dict(num_segments=1 << 20), "num_segments"),
+        (dict(hq=32, hkv=5), "num_kv_heads"),
     ],
 )
 def test_rejects_unsupported_field(kwargs, field):

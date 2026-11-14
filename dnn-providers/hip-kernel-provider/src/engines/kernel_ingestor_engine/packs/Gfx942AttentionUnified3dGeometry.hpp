@@ -105,7 +105,7 @@ inline int64_t gfx942SplitFormula(int64_t num2d, int64_t blockSize, int64_t targ
 }
 
 /// `select_3d`'s count: the split formula with the prefill upper bound
-/// `num_2d = UnifiedAttentionProblem.total_num_q_blocks_upper_bound * num_kv_heads`:
+/// `num_2d = UnifiedAttentionProblem.total_num_q_blocks_upper_bound * num_kv_heads` (rocKE):
 ///
 ///     block_m = 16 if qpk <= 16 else next_power_of_2(qpk)
 ///     num_2d = (total_q // (block_m // qpk) + num_seqs) * num_kv_heads

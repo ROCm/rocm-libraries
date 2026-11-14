@@ -43,9 +43,8 @@ from kernels.common._attention_strided_kv import (
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
-    split_kv_reduce_max_segments,
     split_kv_reduce_spec,
-    tiled_reduce_unsupported_reason,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -1755,36 +1754,16 @@ def supports_tiled_3d_spec(
     )
 
 
-def reduce_max_segments(arch: str) -> int:
-    """The most segments whose factor cache fits ``arch``'s LDS
-    (``ArchTarget.lds_capacity_bytes``). The C++ host mirrors gfx950's as
-    ``GFX950_UNIFIED_3D_MAX_SEGMENTS``."""
-    from rocke.core.arch.target import ArchTarget
-
-    return split_kv_reduce_max_segments(ArchTarget.from_gfx(arch).lds_capacity_bytes)
-
-
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Spec-first predicate for ``build_unified_attention_reduce_tiled``.
 
-    The reduce kernel has no dispatcher gate of its own: it is only ever built beside the
-    3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
-    ``hkp_pack`` validate it as a companion at pack time, and states what the builder
-    otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
-    evenly, and the segment-factor cache fits in LDS. The kernel is one 64-thread CTA
-    whose ``wave64_reduce_max/sum`` butterfly assumes a single wave64, so ``arch`` is
-    gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
-    wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules are
+    :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`, shared with
+    every arch's reduce.
     """
-    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
-    if reason is not None:
-        return False, reason
-    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
-    if not ok:
-        return False, f"tiled reduce kernel: {reason}"
-    return True, "supported"
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def reduce_spec_for(

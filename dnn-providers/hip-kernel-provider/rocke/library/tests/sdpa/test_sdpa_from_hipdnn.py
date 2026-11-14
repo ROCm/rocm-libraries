@@ -505,6 +505,19 @@ def test_hipdnn_assets_are_present_when_required(request):
     assert hipdnn_assets.sdpa_fwd_golden_graphs(), hipdnn_assets.SKIP_REASON
 
 
+def test_installed_hipdnn_assets_imply_require_flag(request):
+    """The converse: an installed tree that carries the hipDNN copy must run with
+    ``--rocke-require-hipdnn-assets``, or a later broken copy would skip the tests
+    below instead of failing. ``platform/tests/test_engine_linkage.py`` checks the
+    CMake wiring both ways, but no CI lane runs that file; this is the in-lane half.
+    A source checkout has no copy, so it skips."""
+    if not hipdnn_assets.installed_copy_present():
+        pytest.skip("not an installed tree: no hipdnn/ copy")
+    assert request.config.getoption(
+        "--rocke-require-hipdnn-assets"
+    ), "the hipDNN copy is installed but --rocke-require-hipdnn-assets was not given"
+
+
 @pytest.mark.skipif(_SDPA_GRAPH_TEMPLATE is None, reason=hipdnn_assets.SKIP_REASON)
 def test_key_sets_match_the_ingestor_sdpa_graph_template():
     """The ingestor's SDPA graph template carries every key hipDNN writes."""

@@ -84,6 +84,15 @@ def pytest_addoption(parser):
             "template and golden bundles when those are missing"
         ),
     )
+    parser.addoption(
+        "--rocke-require-hkp-pack-headers",
+        action="store_true",
+        default=False,
+        help=(
+            "fail, instead of skip, the tests that read hip-kernel-provider pack "
+            "headers when neither an installed copy nor a checkout has them"
+        ),
+    )
 
 
 def pytest_configure(config):

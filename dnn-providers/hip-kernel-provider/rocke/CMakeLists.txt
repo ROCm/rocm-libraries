@@ -188,6 +188,15 @@ set(_rocke_dense_geometry_header
     "${_rocke_pack_headers}/Gfx950AttentionDenseGeometry.hpp")
 set(_rocke_unified_geometry_header
     "${_rocke_pack_headers}/Gfx950AttentionUnified3DGeometry.hpp")
+# test_attention_tiled_3d_reduce_lds.py holds the provider's C++ mirror of the
+# split-KV reduce's segment bound to the Python gate. When the headers are
+# staged, rocke_library_attention_cpu_pytest fails, instead of skipping, if the
+# installed copy is missing.
+if(_rocke_discover_test_assets
+   AND EXISTS "${_rocke_dense_geometry_header}"
+   AND EXISTS "${_rocke_unified_geometry_header}")
+    set(ROCKE_REQUIRE_INSTALLED_HKP_PACK_HEADERS ON)
+endif()
 
 add_subdirectory(platform)
 
@@ -204,8 +213,7 @@ if(ROCKE_INSTALL_TESTS AND ROCKE_INSTALL_PYTHON_TESTS)
         endforeach()
     endif()
 
-    if(EXISTS "${_rocke_dense_geometry_header}"
-       AND EXISTS "${_rocke_unified_geometry_header}")
+    if(ROCKE_REQUIRE_INSTALLED_HKP_PACK_HEADERS)
         install(FILES "${_rocke_dense_geometry_header}"
                       "${_rocke_unified_geometry_header}"
                 DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/hkp_packs")

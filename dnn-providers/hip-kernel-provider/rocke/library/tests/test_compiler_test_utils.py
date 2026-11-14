@@ -8,9 +8,10 @@ compiler whose LLVM major the table records as refusing the option
 (``CompilerOptionNotAccepted``), or one the table has no answer for (a plain
 ``ValueError``). These tests pin that a refusal skips, that it fails when
 ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` requires the tools, and that no other error
-is turned into a skip. They also pin that ``compile_or_skip``, the compile
-helper of the attention backward tests, applies the same policy to a real
-``compile_kernel`` call.
+is turned into a skip, and the same two outcomes for a missing tool reported
+straight to ``require_tools_or_skip``. They also pin that ``compile_or_skip``,
+the compile helper of the attention backward tests, applies the same policy to
+a real ``compile_kernel`` call.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from . import _attention_bwd_resources
 from ._attention_bwd_resources import compile_or_skip
 from ._compiler_test_utils import (
     REQUIRE_COMPILER_TOOLS_ENV,
+    require_tools_or_skip,
     skip_where_compiler_refuses_option,
 )
 
@@ -34,6 +36,27 @@ OPTION = "-amdgpu-mfma-vgpr-form"
 # How the refusal starts, and how the policy introduces it.
 REFUSAL = f"kernel 'probe' needs the compiler option '-mllvm {OPTION}'"
 SKIP_REASON = f"loaded compiler cannot build this kernel: {REFUSAL}"
+MISSING_TOOL = "llvm-objdump not found"
+
+
+def test_missing_tool_skips(monkeypatch):
+    monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
+    with pytest.raises(unittest.SkipTest, match=f"^{MISSING_TOOL}$"):
+        require_tools_or_skip(MISSING_TOOL)
+
+
+def test_missing_tool_fails_where_tools_are_required(monkeypatch):
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+    try:
+        with pytest.raises(
+            AssertionError,
+            match=f"^{REQUIRE_COMPILER_TOOLS_ENV}=1 but {MISSING_TOOL}$",
+        ):
+            require_tools_or_skip(MISSING_TOOL)
+    except unittest.SkipTest as skipped:
+        # A skip escaping here would be reported as a skip, not a failure,
+        # hiding a helper that lost its fail branch.
+        pytest.fail(f"skipped where the tools are required: {skipped}")
 
 
 def _compiler(llvm_major: int) -> CompilerInfo:

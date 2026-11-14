@@ -18,12 +18,13 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackGraph.hpp"
 
 /**
  * @file SdpaGraphMatch.hpp
  * @brief The graph-reading helpers every ingestor pack that serves a single dense BSHD
  *        SDPA-forward node shares: finding the node and its operands, the operand checks
- *        made before anything indexes an axis, the problem read from Q and K, the f32
+ *        made before anything indexes an axis, the problem shape read from Q and K, the f32
  *        compute-type rule for the packs that apply it, and the decline-line head.
  *
  * Pack-family rules (mask kinds, dtypes, the decode rule) stay with the family, e.g.
@@ -42,12 +43,7 @@ inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_SIZE_AXIS = 3;
 inline constexpr uint32_t SDPA_RANK = 4;
 
-inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
+using pack_graph::findTensor;
 
 /// The node an SDPA pack's matchers read, or nullptr if the graph is not a single
 /// SDPA-forward node.
@@ -127,7 +123,7 @@ inline bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
-/// The graph facts a pack's matchers and prepare() need, derived once from the tensors.
+/// The graph facts an SDPA pack's matchers, scorer and prepare() read, from Q and K.
 struct SdpaShape
 {
     int64_t batch = 0;
@@ -139,11 +135,8 @@ struct SdpaShape
     data_objects::DataType dataType = data_objects::DataType::UNSET;
 };
 
-/// The unified attention packs' name for it.
-using UnifiedAttentionProblem = SdpaShape;
-
-/// The graph's shape, read from Q and K. Callers must have checked both with
-/// isWellFormedOperand().
+/// The graph's shape, read from Q and K. Callers must have checked both operands with
+/// isWellFormedOperand(); readProblem() is the checked form.
 inline SdpaShape problemFor(const data_objects::TensorAttributes& q,
                             const data_objects::TensorAttributes& k)
 {
@@ -156,6 +149,20 @@ inline SdpaShape problemFor(const data_objects::TensorAttributes& q,
     problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
     problem.dataType = q.data_type();
     return problem;
+}
+
+/// The shape of the graph whose Q and K are the tensors @p qUid and @p kUid, or nullopt when
+/// either uid names no tensor or a malformed one. Total over an UNVALIDATED graph, so a
+/// matcher or prepare() reached without graph_match never indexes a missing axis.
+inline std::optional<SdpaShape> readProblem(const MatchContext& context, int64_t qUid, int64_t kUid)
+{
+    const auto* q = findTensor(context, qUid);
+    const auto* k = findTensor(context, kUid);
+    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    {
+        return std::nullopt;
+    }
+    return problemFor(*q, *k);
 }
 
 /**

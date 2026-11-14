@@ -131,12 +131,12 @@ using unified_attention::hasBshdStrides;
 using unified_attention::integerMetadata;
 using unified_attention::isWellFormedOperand;
 using unified_attention::MaskType;
-using unified_attention::problemFor;
+using unified_attention::readProblem;
 using unified_attention::sdpaNode;
+using unified_attention::SdpaShape;
 using unified_attention::stringMetadata;
 using unified_attention::supportedDataTypeName;
 using unified_attention::UnifiedAttentionBinding;
-using unified_attention::UnifiedAttentionProblem;
 
 // ---------------------------------------------------------------------------
 // Decline logging
@@ -366,15 +366,13 @@ bool kernelMatches(const MatchContext& context,
     }
     const auto& attributes = *attributesPtr;
 
-    const auto* q = findTensor(context, attributes.q_tensor_uid());
-    const auto* k = findTensor(context, attributes.k_tensor_uid());
-    // problemFor reads dims without checking them, so a direct caller (not behind
-    // graph_match) must not reach it with a malformed operand.
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    // Checked, since a direct caller (not behind graph_match) may pass a malformed operand.
+    const auto read = readProblem(context, attributes.q_tensor_uid(), attributes.k_tensor_uid());
+    if(!read.has_value())
     {
         return false;
     }
-    const auto problem = problemFor(*q, *k);
+    const auto& problem = *read;
 
     // Before any comparison that could divide by it.
     const auto candidate = candidateFor(kernel);
@@ -441,8 +439,9 @@ bool kernelMatches(const MatchContext& context,
 }
 
 /// Scores for the cold ranking. Every legal candidate scores in (0, 1]; a record
-/// kernelMatches already declined gets UNSUPPORTED_SCORE.
-constexpr double SEGMENT_SPAN = 8192.0; // 2^13, above every legal num_segments
+/// kernelMatches already declined gets UNSUPPORTED_SCORE. The span is one past the
+/// segment cap, so even the widest legal candidate scores above UNSUPPORTED_SCORE.
+constexpr double SEGMENT_SPAN = static_cast<double>(GFX950_UNIFIED_3D_MAX_SEGMENTS) + 1.0;
 constexpr double UNSUPPORTED_SCORE = 0.0;
 
 /**
@@ -543,7 +542,7 @@ public:
     PreparedGfx950AttentionUnified3D(IngestorKernelCode segment,
                                      IngestorKernelCode reduce,
                                      UnifiedAttentionBinding binding,
-                                     UnifiedAttentionProblem problem,
+                                     SdpaShape problem,
                                      Gfx950Unified3DWorkspaceLayout layout,
                                      std::vector<unsigned char> workspaceImage,
                                      int64_t slidingWindow)
@@ -572,7 +571,7 @@ public:
         return _binding;
     }
 
-    const UnifiedAttentionProblem& problem() const
+    const SdpaShape& problem() const
     {
         return _problem;
     }
@@ -597,7 +596,7 @@ private:
     IngestorKernelCode _segment;
     IngestorKernelCode _reduce;
     UnifiedAttentionBinding _binding;
-    UnifiedAttentionProblem _problem;
+    SdpaShape _problem;
     Gfx950Unified3DWorkspaceLayout _layout;
     std::vector<unsigned char> _workspaceImage;
     int64_t _slidingWindow = 0;
@@ -605,18 +604,16 @@ private:
 
 /// The graph's problem, read from the bound Q and K uids. A null tensor means a bound uid
 /// names no tensor: refused by name, since everything after indexes dims.
-UnifiedAttentionProblem boundProblem(const MatchContext& context,
-                                     const UnifiedAttentionBinding& binding)
+SdpaShape boundProblem(const MatchContext& context, const UnifiedAttentionBinding& binding)
 {
-    const auto* q = findTensor(context, binding.q);
-    const auto* k = findTensor(context, binding.k);
-    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    const auto problem = readProblem(context, binding.q, binding.k);
+    if(!problem.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "gfx950 attention_unified_3d: the bound Q or K tensor is missing or malformed");
     }
-    return problemFor(*q, *k);
+    return *problem;
 }
 
 /// The candidate, or a refusal that names the kernel: kernel_match declines a candidate it
@@ -638,7 +635,7 @@ AttentionUnified3DCandidate requireCandidate(const KernelDefinition& kernel)
 
 /// The layout for @p candidate over @p problem, or a refusal that says which rule failed.
 Gfx950Unified3DWorkspaceLayout requireLayout(const AttentionUnified3DCandidate& candidate,
-                                             const UnifiedAttentionProblem& problem,
+                                             const SdpaShape& problem,
                                              const KernelDefinition& kernel)
 {
     if(problem.seqLenQ != 1)

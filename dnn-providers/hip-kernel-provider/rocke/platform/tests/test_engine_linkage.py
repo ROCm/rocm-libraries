@@ -267,6 +267,9 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             **expected_artifacts,
         }
         expected_mla_environment = {"PYTHONPATH": f"{test_ctest_rel}tests/library"}
+        expected_attention_cpu_environment = {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library"
+        }
         # The tiling tests run from the installed package, under the installed
         # tests/pytest.ini, with the package root on PYTHONPATH, as three
         # entries: the gpu marker splits off the GPU tests, and visualization/
@@ -335,6 +338,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
             expected_counted_isa_environment.update(compiler_environment)
+            # Tool discovery and enforcement: the reduce-LDS comgr cases need
+            # llvm-objdump and fail (not skip) when it is required but missing.
+            expected_attention_cpu_environment.update(compiler_environment)
+            expected_attention_cpu_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
 
         platform_pytest_parts = [
             test["name"] for test in tests if test["name"].startswith("rocke_pytest_")
@@ -348,6 +355,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert (
                 environment_for(tests, "rocke_library_mla_pytest")
                 == expected_mla_environment
+            )
+            assert (
+                environment_for(tests, "rocke_library_attention_cpu_pytest")
+                == expected_attention_cpu_environment
             )
             assert (
                 environment_for(tests, "rocke_library_runner_contract_pytest")

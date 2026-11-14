@@ -391,7 +391,7 @@ whose engine never appears. Host-side test sources are gated on the arch-agnosti
 | `_hkp_<stem>_cases_<arch>_<snake slug>` | `$PROVIDER/src/tests/CMakeLists.txt` | Only with a hand-written companion census suite (`Test<Engine>CatalogTiles` or `Test<Engine>ModelBinding`; `_hkp_companion_suites` pairs each suite with its `<stem>`): its case names, which the census loop registers beside the generated suite |
 | A knob-suite row: the device test source and the engines it pins | `$PROVIDER/src/integration_tests/CMakeLists.txt` (`IntegrationGpuGfx950AttentionDenseKnobs.cpp Gfx950AttentionDense`) | Explicit-selection cases: forced knobs, exact kernel ID, CPU reference; see stage 5. Compiled into `hip_kernel_provider_integration_tests` when the product root offers every engine the row lists |
 | Categories YAML variable, its `EXISTS` check and list entry | `$PROVIDER/CMakeLists.txt` | Feeds the YAML categorization; any listed file missing drops the whole provider to legacy CTest labels |
-| New files `hipkernel_<Engine>_test_categories_integration.yaml` and `config/hipkernel_<Engine>.toml` | `$PROVIDER/` | Tier patterns and the per-engine test config |
+| `hipkernel_<Family>_test_categories_integration.yaml` and `config/hipkernel_<Family>.toml`: new files for a new family, or the existing pair when the engine joins one (the gfx950 attention engines share `hipkernel_Gfx950Attention_*`) | `$PROVIDER/` | Tier patterns and the family's test config |
 | Bundles plus `.support.json` claims naming the engine and arch | `dnn-providers/integration-tests/integration-test-bundles/{quick,standard}/<Op>/…` | Without matching bundles the engine-pinned target selects zero cases |
 
 Census registration is one `hkp_register_census_tests()` call per packed target, in
