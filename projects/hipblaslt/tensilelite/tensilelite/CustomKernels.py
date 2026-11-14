@@ -399,7 +399,9 @@ def validateCustomPersistentArgs(kernelConfig):
     persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
     # Version 3 is version 0 plus post kernels.
     if version in (0, 3):
-        if persistentGridArgIndices:
+        postArgs = [arg for post in descriptor.get("postKernels") or [] if isinstance(post, dict)
+                    for arg in post.get("args") or [] if isinstance(arg, dict)]
+        if persistentGridArgIndices or any(arg.get("semantic") == "PersistentGrid" for arg in postArgs):
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
         return
     if version == 2:
@@ -500,6 +502,10 @@ def validateCustomPostKernels(kernelConfig):
         if type(bands) is not int or bands < 1:
             raise ValueError(f"Post kernel {expected!r} bands must be a positive integer")
 
+    if "TilesBands" in (descriptor.get("grid") or []):
+        raise ValueError("CustomKernel.grid must not use TilesBands; only post kernels take a band count")
+    if postKernels and kernelConfig.get("ProblemType", {}).get("GroupedGemm", False):
+        raise ValueError("CustomKernel.postKernels do not support GroupedGemm")
     if postKernels and descriptor.get("generated", False):
         raise ValueError("CustomKernel.postKernels require a handwritten custom kernel")
     if ("parallel" in reductions or postKernels or version == 3) and not isStreamK(kernelConfig):

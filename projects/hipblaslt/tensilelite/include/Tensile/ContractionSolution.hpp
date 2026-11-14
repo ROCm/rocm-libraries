@@ -186,7 +186,7 @@ namespace TensileLite
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
         X_MACRO(ESMRuntimeSupported) \
-        /* Stream-K post-kernel args */ \
+        /* Stream-K args, taken by main and post kernels */ \
         X_MACRO(SKSplitFactor) \
         X_MACRO(NumTiles) \
         X_MACRO(WorkspaceOffsetPartials)

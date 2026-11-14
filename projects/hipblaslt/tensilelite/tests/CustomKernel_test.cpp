@@ -105,6 +105,28 @@ TEST(CustomKernelTest, PostKernelsDefaultWhenAbsent)
     EXPECT_TRUE(kernel.postKernels.empty());
 }
 
+// An explicit empty list must stay empty so the at-least-one-mode check fires.
+TEST(CustomKernelTest, EmptyReductionsAreNotDefaulted)
+{
+    msgpack::zone                          zone;
+    std::map<std::string, msgpack::object> fields{
+        {"name", msgpack::object(std::string("probe"), zone)},
+        {"reductions", msgpack::object(std::vector<std::string>{}, zone)}};
+    msgpack::sbuffer packed;
+    msgpack::pack(packed, fields);
+    auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+    CustomKernel                    kernel;
+    Serialization::MessagePackInput reader(unpacked.get());
+    reader.input(kernel);
+    ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+    EXPECT_TRUE(kernel.reductions.empty());
+
+    ContractionSolution solution;
+    solution.customKernel = kernel;
+    EXPECT_THROW(solution.validateCustomPostKernels(), std::runtime_error);
+}
+
 TEST(CustomKernelTest, PostKernelsRoundTrip)
 {
     CustomKernel kernel;
@@ -716,13 +738,20 @@ TEST(CustomKernelTest, PostKernelsValidate)
          "main kernel grid [StreamKNoBatch, One, One]"},
         {[](Solution& s) { s.sizeMapping.workAssignment = WorkAssignment::DynamicWorkQueue; },
          "require StaticGrid or Hybrid work assignment"},
+        {[](Solution& s) { s.customKernel.grid.x = CustomGridSize::TilesBands; },
+         "main kernel grid must not use TilesBands"},
+        {[](Solution& s) { s.problemType.groupedGemm = true; },
+         "Post kernels do not support grouped GEMM"},
+        {[](Solution& s) {
+             s.customKernel.postKernels[0].args
+                 = {{CustomArgType::uint32, CustomArgSemantic::PersistentGrid}};
+         },
+         "PersistentGrid requires persistent loop argument layout 1"},
         {[](Solution& s) {
              s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
          },
          "version 3 requires a StreamK solution"},
-        {[](Solution& s) {
-             s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::None;
-         },
+        {[](Solution& s) { s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::None; },
          "version 3 requires a StreamK solution"},
     };
     for(size_t i = 0; i < invalid.size(); ++i)
@@ -741,6 +770,17 @@ TEST(CustomKernelTest, PostKernelsValidate)
                 << "case " << i << ": " << e.what();
         }
     }
+}
+
+// TilesBands needs the band count only a post kernel supplies, so the main
+// kernel grid may not use it, with or without post kernels.
+TEST(CustomKernelTest, MainGridRefusesTilesBands)
+{
+    ContractionSolution solution;
+    solution.customKernel.name = "probe";
+    solution.customKernel.grid
+        = {CustomGridSize::One, CustomGridSize::TilesBands, CustomGridSize::One};
+    EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error);
 }
 
 // Parallel reduction needs a Stream-K solution even without post kernels.
@@ -776,8 +816,12 @@ TEST(CustomKernelTest, PostKernelsRefuseGroupedGemm)
                                   nullptr);
     });
     expectRefused([&] {
-        solution.solveGroupedGemmGPU(
-            {dummyProblem()}, ContractionSolution::GroupedInputs(), probeDevice(), nullptr, nullptr, nullptr);
+        solution.solveGroupedGemmGPU({dummyProblem()},
+                                     ContractionSolution::GroupedInputs(),
+                                     probeDevice(),
+                                     nullptr,
+                                     nullptr,
+                                     nullptr);
     });
 }
 

@@ -4168,12 +4168,7 @@ namespace TensileLite
         {
             std::cout << "Wavefront size: " << pAMDGPU->wavefrontSize << std::endl;
             std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
-            std::cout << "Work group size: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
             std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
-        }
-
-        if(T_Debug)
-        {
             std::cout << "Tiles: " << tiles.x << ", " << tiles.y << ", " << tiles.z << std::endl;
         }
 
@@ -5619,11 +5614,11 @@ namespace TensileLite
             throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
         if(version == 2 && outerVersion != 3)
             throw std::runtime_error("StreamK cluster argument layout version 2 requires KernArgsVersion=3");
-        // Layout 3 is layout 0 plus Stream-K post kernels. Runtimes with the
-        // persistent-loop layout check (#12537, 812bcc660b5) reject version 3 at
-        // load, which drops the whole library file. Earlier runtimes ignore it
-        // and the post kernels but force tree reduction for handwritten kernels,
-        // so only a kernel without `tree` support computes wrong results there.
+        // Layout 3 is layout 0 plus Stream-K post kernels. Runtimes that
+        // validate the persistent-loop layout reject version 3 at load, which
+        // drops the whole library file. Runtimes that do not ignore it and the
+        // post kernels but force tree reduction for handwritten kernels, so
+        // only a kernel without `tree` support computes wrong results there.
         if(version == 3 && (outerVersion != 3 || customKernel.postKernels.empty()))
             throw std::runtime_error(
                 "Argument layout version 3 requires KernArgsVersion=3 and post kernels");
@@ -5645,6 +5640,12 @@ namespace TensileLite
         }
         if(customKernel.reductions.empty())
             throw std::runtime_error("Custom kernel must support at least one reduction mode");
+        if(customKernel.grid.x == CustomGridSize::TilesBands
+           || customKernel.grid.y == CustomGridSize::TilesBands
+           || customKernel.grid.z == CustomGridSize::TilesBands)
+            throw std::runtime_error("The main kernel grid must not use TilesBands");
+        if(!customKernel.postKernels.empty() && problemType.groupedGemm)
+            throw std::runtime_error("Post kernels do not support grouped GEMM");
         if(!customKernel.postKernels.empty() && !handwrittenCustomKernel())
             throw std::runtime_error("Post kernels require a handwritten custom kernel");
         if((modes[static_cast<size_t>(CustomReductionMode::Parallel)]
@@ -5666,8 +5667,7 @@ namespace TensileLite
             if(post.version != 1)
                 throw std::runtime_error(
                     concatenate("Post kernel ", post.name, " has unsupported version"));
-            if(post.threads.x == 0 || post.threads.y == 0 || post.threads.z == 0
-               || post.bands == 0)
+            if(post.threads.x == 0 || post.threads.y == 0 || post.threads.z == 0 || post.bands == 0)
                 throw std::runtime_error(
                     concatenate("Post kernel ", post.name, " needs threads and bands"));
         }
@@ -5730,18 +5730,26 @@ namespace TensileLite
         if(customKernel.name.empty())
             return;
 
+        if(version == 0 || version == 3)
+        {
+            auto refusePersistentGrid = [](std::vector<CustomArgDefinition> const& args) {
+                for(auto const& arg : args)
+                    if(arg.semantic == CustomArgSemantic::PersistentGrid)
+                        throw std::runtime_error(
+                            "PersistentGrid requires persistent loop argument layout 1");
+            };
+            refusePersistentGrid(customKernel.args);
+            for(auto const& post : customKernel.postKernels)
+                refusePersistentGrid(post.args);
+            return;
+        }
+
         const std::array<CustomArgSemantic, 2> dataParallelArgSemantics{
             CustomArgSemantic::ItersPerTile, CustomArgSemantic::PersistentGrid};
         size_t count = 0, previous = 0;
         for(size_t i = 0; i < customKernel.args.size(); ++i)
         {
             const auto& arg = customKernel.args[i];
-            if(version == 0 || version == 3)
-            {
-                if(arg.semantic == CustomArgSemantic::PersistentGrid)
-                    throw std::runtime_error("PersistentGrid requires persistent loop argument layout 1");
-                continue;
-            }
             switch(arg.semantic)
             {
             case CustomArgSemantic::MagicNumberItersPerTile:
