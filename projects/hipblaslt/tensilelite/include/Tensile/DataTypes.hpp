@@ -296,20 +296,6 @@ namespace TensileLite
     {
     };
 
-#ifdef _WIN32
-    template <>
-    struct TypeInfo<Float6> : public BaseTypeInfo<Float6, rocisa::DataType::Float6, 1, false, false>
-    {
-    };
-    template <>
-    struct TypeInfo<BFloat6> : public BaseTypeInfo<BFloat6, rocisa::DataType::BFloat6, 1, false, false>
-    {
-    };
-    template <>
-    struct TypeInfo<Float4> : public BaseTypeInfo<Float4, rocisa::DataType::Float4, 1, false, false>
-    {
-    };
-#else // _WIN32
     template <>
     struct TypeInfo<Float6x32> : public BaseTypeInfo<Float6x32, rocisa::DataType::Float6, 32, false, false>
     {
@@ -322,9 +308,7 @@ namespace TensileLite
     struct TypeInfo<Float4x2> : public BaseTypeInfo<Float4x2, rocisa::DataType::Float4, 2, false, false>
     {
     };
-#endif // _WIN32
-    // w4a16 weights. Plain storage (not a HIP arithmetic type), so unlike the
-    // fp4/fp6 types this is available on Windows too.
+    // w4a16 weights.
     template <>
     struct TypeInfo<Int4x2> : public BaseTypeInfo<Int4x2, rocisa::DataType::Int4, 2, false, true>
     {
@@ -356,11 +340,9 @@ namespace TensileLite
                                          Float8_fnuz,
                                          BFloat8_fnuz,
                                          int8_t,
-#ifndef _WIN32
                                          Float6x32,
                                          BFloat6x32,
                                          Float4x2,
-#endif // !_WIN32
                                          E8>;
 
     // Convert variants to type T
@@ -429,7 +411,6 @@ namespace TensileLite
         return static_cast<T>(*std::get_if<Int8x4>(&val));
     }
 
-#ifndef _WIN32
     // Convert variants to type T
     template <typename T>
     typename std::enable_if<std::is_same<Float6x32, T>::value, T>::type
@@ -471,7 +452,6 @@ namespace TensileLite
             throw std::runtime_error("Unsupported variant cast type.");
         }
     }
-#endif // !_WIN32
 
     TENSILELITEHOST_EXPORT std::string ToString(ConstantVariant d);
     TENSILELITEHOST_EXPORT bool        CompareValue(const ConstantVariant& d, double value);
