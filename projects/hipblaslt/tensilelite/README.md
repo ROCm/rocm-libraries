@@ -9,7 +9,7 @@ benchmark client, `tensilelite-client`.
 | Version | Built by | Meaning |
 | --- | --- | --- |
 | `5.0.0+g<commit>` | `pip install <path>`, tox, `invoke install`, standalone CMake | A development build of that rocm-libraries commit. It makes no ROCm claim. |
-| `5.0.0+g<commit>.dirty` | The same, from a checkout with uncommitted changes | As above; the exact changes are recorded in a digest in `_build_info.py`. |
+| `5.0.0+g<commit>.dirty` | The same, from a checkout with uncommitted changes | As above; `_build_info.py` fingerprints tracked contents and untracked metadata. |
 | `5.0.0+rocm<identity>` | TheRock release, release-candidate and nightly builds | Released as part of that ROCm build. |
 | `5.0.0+devrocm<identity>` | TheRock CI and development builds | Built in that TheRock development build. |
 
@@ -17,6 +17,14 @@ benchmark client, `tensilelite-client`.
 written to logic and configuration files and must remain equal. The commit is
 always recorded in the installed package (`tensilelite/_build_info.py`), also
 for `+rocm`/`+devrocm` wheels.
+
+The dirty fingerprint covers the whole rocm-libraries repository. Tracked changes
+include contents; nonignored untracked entries include only path, file type, size
+and integer `lstat().st_mtime_ns`, without reading contents or following links.
+Python supports this timestamp field on Linux and Windows, but filesystem
+precision varies. Same-metadata untracked edits can collide, and copies can have
+different dirty identities. This is a build-pairing check, not a byte-level
+attestation. See [decision 3](docs/PackagingIdentityPlan.md#decision-3--how-the-sha-is-obtained-stamped-and-compared-decided).
 
 ## ROCm installations
 
@@ -246,10 +254,23 @@ Relevant options:
 
 ## Design records
 
-- `docs/Public.md`: original proposal.
-- `docs/PackagingDecisions.md`: accepted choices and rationale.
-- `docs/PackagingPlan.md`: implementation and acceptance plan.
-- `PythonBuildGrillingDecisions.md`: current canonical Python-build decisions.
+- [Python build decisions](PythonBuildGrillingDecisions.md): current decisions.
+- [ROCm wheel runtime decisions](RocmWheelRuntimeGrillingDecisions.md): current
+  installed-runtime decisions.
+- [Python build implementation plan](PythonBuildImplementationPlan.md): current
+  rocm-libraries implementation plan.
+- [TheRock Python build implementation plan](TheRockPythonBuildImplementationPlan.md):
+  current TheRock integration plan.
+- [ROCm version identity investigation](RocmVersionIdentityInvestigation.md):
+  version-authority evidence and conclusions.
+- [Invoke installation with a Python ROCm SDK](InvokeInstallPythonRocmSupport.md):
+  planned Python-SDK support for `invoke install`.
+- [Public proposal](docs/Public.md),
+  [packaging decisions](docs/PackagingDecisions.md), and
+  [packaging plan](docs/PackagingPlan.md): superseded proposal and planning records.
+- [Namespace split proposal](docs/TensileLiteNamespaceSplitProposal.md) and
+  [relative-import investigation](docs/TensileLiteRelativeImportInvestigation.md):
+  historical namespace migration planning snapshots.
 
 <!-- Copyright Advanced Micro Devices, Inc., or its affiliates. -->
 <!-- SPDX-License-Identifier: MIT -->
