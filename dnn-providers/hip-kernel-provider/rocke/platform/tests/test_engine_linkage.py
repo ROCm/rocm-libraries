@@ -613,7 +613,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     rocke_tiling_visualization_pytest in the comprehensive tier only, which
     pull-request and push CI (quick and standard) do not select.
     rocke_ctest_shard_pytest and rocke_library_gdn_pytest run in the standard,
-    comprehensive and full tiers and not in the quick tier."""
+    comprehensive and full tiers and not in the quick tier. Another category
+    keeps rocke_library_gdn_pytest in the ffm-quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctests(ctest_dir)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
@@ -651,7 +652,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             name,
             standard_labels,
         )
-        assert not {"quick", "ffm-quick"} & standard_labels, (name, standard_labels)
+        assert "quick" not in standard_labels, (name, standard_labels)
+    assert "ffm-quick" not in labels.get("rocke_ctest_shard_pytest", set())
 
 
 # (exported target, installed header, extern "C" symbol it declares). The
