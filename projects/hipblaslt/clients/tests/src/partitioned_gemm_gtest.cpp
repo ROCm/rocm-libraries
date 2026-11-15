@@ -776,3 +776,68 @@ INSTANTIATE_TEST_SUITE_P(partitioned_gemm_ext_placement_multi_gpu,
                          [](::testing::TestParamInfo<bool> const& info) {
                              return std::string(info.param ? "HalvesSwapped" : "HalvesInOrder");
                          });
+
+// Copies are matched to the partitions by device. A list in the other order for every matrix is
+// swapped back; lists that disagree are an error.
+TEST(partitioned_gemm_ext_copies_multi_gpu, SwappedCopiesAreMatchedByDevice)
+{
+    int count = 0;
+    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
+    if(count < 2)
+        GTEST_SKIP() << "needs two devices";
+    Partitions        parts({0, 1});
+    auto              gemm = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    // Every list in reverse order: partition i must still use the copy on device i.
+    auto in = buffers.inputs();
+    std::swap(in.a[0], in.a[1]);
+    std::swap(in.b[0], in.b[1]);
+    std::swap(in.c[0], in.c[1]);
+    std::swap(in.d[0], in.d[1]);
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_SUCCESS);
+    if(heuristic.empty())
+        GTEST_SKIP() << "no algorithm accepted by every partition";
+    ASSERT_EQ(gemm.initialize(heuristic[0].algo, parts.workspaces(), false, parts.streams),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(gemm.run(parts.streams), HIPBLAS_STATUS_SUCCESS);
+    parts.sync();
+
+    // The D on device i (buffers.d[i]) holds the slice of partition i.
+    auto ref = referenceGemm(op, parts.rawHandles()[0], 0);
+    ASSERT_FALSE(ref.empty());
+    expectSlicesMatch(gemm, parts, buffers, ref, SplitDim::N);
+}
+
+TEST(partitioned_gemm_ext_copies_multi_gpu, CopiesInDifferentOrdersAreRejected)
+{
+    int count = 0;
+    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
+    if(count < 2)
+        GTEST_SKIP() << "needs two devices";
+    Partitions        parts({0, 1});
+    auto              gemm = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    // A in reverse order, B in order: no assignment keeps both local.
+    auto in = buffers.inputs();
+    std::swap(in.a[0], in.a[1]);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Both copies of B on device 0: partition 1 has no copy of its own.
+    in      = buffers.inputs();
+    in.b[1] = in.b[0];
+    in.b[0] = buffers.c[0]; // another buffer on device 0, so the list is not "shared"
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
+
+    // The plain order still works.
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
+}

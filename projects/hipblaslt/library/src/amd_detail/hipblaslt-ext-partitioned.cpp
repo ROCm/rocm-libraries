@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace hipblaslt_ext
@@ -90,6 +92,31 @@ namespace hipblaslt_ext
                 return -1;
             }
             return attr.type == hipMemoryTypeDevice ? attr.device : -1;
+        }
+
+        // Copy sets to partitions: allowed[j][p] says copy set j may go to partition p. Fills
+        // `owner` (copy set j -> partition) with an assignment that keeps every copy set allowed,
+        // trying the given order first. Returns false when there is none.
+        bool matchCopies(std::vector<std::vector<bool>> const& allowed,
+                         std::vector<size_t>&                  owner,
+                         std::vector<bool>&                    used,
+                         size_t                                j)
+        {
+            const size_t parts = allowed.size();
+            if(j == parts)
+                return true;
+            for(size_t step = 0; step < parts; step++)
+            {
+                const size_t p = (j + step) % parts;
+                if(used[p] || !allowed[j][p])
+                    continue;
+                used[p]  = true;
+                owner[j] = p;
+                if(matchCopies(allowed, owner, used, j + 1))
+                    return true;
+                used[p] = false;
+            }
+            return false;
         }
 
         // One split matrix as the slice placement sees it: column-major, and the slice is either
@@ -285,6 +312,68 @@ namespace hipblaslt_ext
         if(inputs.alpha == nullptr || inputs.beta == nullptr)
             return HIPBLAS_STATUS_INVALID_VALUE;
 
+        // A matrix passed as different pointers (copies) is matched to the partitions by device:
+        // partition p uses the copy on its device, whatever the order of the list. All copied
+        // matrices must agree on one assignment (all in order, or all swapped the same way);
+        // otherwise some partition would read or write the wrong device's copy, which is an error.
+        // Shared matrices (one pointer repeated) and copies on no partition's device do not count.
+        PartitionedGemmInputs in = inputs;
+        {
+            const char*                     names[4] = {"A", "B", "C", "D"};
+            const std::vector<const void*>  d0(inputs.d.begin(), inputs.d.end());
+            const std::vector<const void*>* lists[4] = {&inputs.a, &inputs.b, &inputs.c, &d0};
+            std::vector<std::vector<bool>>  allowed(parts, std::vector<bool>(parts, true));
+            std::ostringstream              layout;
+            for(int t = 0; t < 4; t++)
+            {
+                auto const& list = *lists[t];
+                if(std::all_of(
+                       list.begin(), list.end(), [&](const void* p) { return p == list[0]; }))
+                    continue;
+                layout << " " << names[t] << ":";
+                for(size_t j = 0; j < parts; j++)
+                {
+                    const int device = pageDevice(list[j]);
+                    layout << " " << device;
+                    if(std::find(s.devices.begin(), s.devices.end(), device) == s.devices.end())
+                        continue;
+                    for(size_t p = 0; p < parts; p++)
+                        if(s.devices[p] != device)
+                            allowed[j][p] = false;
+                }
+            }
+            std::vector<size_t> owner(parts);
+            std::vector<bool>   used(parts, false);
+            if(!matchCopies(allowed, owner, used, 0))
+            {
+                std::ostringstream devices;
+                for(int device : s.devices)
+                    devices << " " << device;
+                log_error(__func__,
+                          "PartitionedGemm: the copies of A, B, C and D cannot be matched to one"
+                          " partition each by device. Partition devices:",
+                          devices.str(),
+                          "devices of the copies, in list order:",
+                          layout.str());
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+            for(size_t j = 0; j < parts; j++)
+            {
+                in.a[owner[j]] = inputs.a[j];
+                in.b[owner[j]] = inputs.b[j];
+                in.c[owner[j]] = inputs.c[j];
+                in.d[owner[j]] = inputs.d[j];
+                if(owner[j] != j)
+                    log_hints(__func__,
+                              "PartitionedGemm: copy set",
+                              j,
+                              "is on device",
+                              s.devices[owner[j]],
+                              "and is used by partition",
+                              owner[j]);
+            }
+        }
+
         // Slices along the split dimension: the first N-1 take size/N, the last takes the rest.
         const int64_t total = dim == SplitDim::M ? m : n;
         const int64_t base  = total / static_cast<int64_t>(parts);
@@ -297,18 +386,18 @@ namespace hipblaslt_ext
             size[i]   = i + 1 < parts ? base : total - offset[i];
         }
 
-        const std::vector<const void*> dPointers(inputs.d.begin(), inputs.d.end());
+        const std::vector<const void*> dPointers(in.d.begin(), in.d.end());
         const int64_t                  leading[4] = {lda, ldb, ldc, ldd};
         const int64_t                  strides[4] = {strideA, strideB, strideC, strideD};
 
         // The matrices split by `dim`: op(A) with M, op(B) with N, and C and D with both.
         std::vector<SplitMatrix> split;
         if(dim == SplitDim::M)
-            split.push_back({"A", inputs.a.data(), lda, bytes[0], s.opA == HIPBLAS_OP_T, k});
+            split.push_back({"A", in.a.data(), lda, bytes[0], s.opA == HIPBLAS_OP_T, k});
         else
-            split.push_back({"B", inputs.b.data(), ldb, bytes[1], s.opB == HIPBLAS_OP_N, k});
+            split.push_back({"B", in.b.data(), ldb, bytes[1], s.opB == HIPBLAS_OP_N, k});
         split.push_back(
-            {"C", inputs.c.data(), ldc, bytes[2], dim == SplitDim::N, dim == SplitDim::M ? n : m});
+            {"C", in.c.data(), ldc, bytes[2], dim == SplitDim::N, dim == SplitDim::M ? n : m});
         split.push_back(
             {"D", dPointers.data(), ldd, bytes[3], dim == SplitDim::N, dim == SplitDim::M ? n : m});
 
@@ -396,8 +485,7 @@ namespace hipblaslt_ext
             }
 
             const void*        ptr[4];
-            const void* const* lists[4]
-                = {inputs.a.data(), inputs.b.data(), inputs.c.data(), dPointers.data()};
+            const void* const* lists[4] = {in.a.data(), in.b.data(), in.c.data(), dPointers.data()};
             for(int t = 0; t < 4; t++)
             {
                 const void* p = lists[t][i];

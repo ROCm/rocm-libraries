@@ -1114,13 +1114,18 @@ namespace hipblaslt_ext
     /*! \ingroup types_module
      *  \brief The inputs of a PartitionedGemm.
      *
-     *  \details ``a``, ``b``, ``c`` and ``d`` hold one pointer per partition, N in total;
-     * pointer ``i`` is the one partition ``i`` uses. Each points at a whole matrix (the library
+     *  \details ``a``, ``b``, ``c`` and ``d`` hold one pointer per partition, N in total. Each
+     * points at a whole matrix (the library
      * adds the partition's slice offset), and the leading dimensions and batch strides of
      * PartitionedGemm::setProblem describe that whole matrix. Passing the same pointer N times
      * shares one matrix between the partitions (it must be reachable from every partition
      * device); passing different pointers gives each partition its own copy, which the caller
      * keeps equal. For D, the same pointer means every partition writes its slice into one D.
+     * Copies are matched to the partitions by device, whatever the order of the lists: partition
+     * ``p`` uses the copy on its device, so the D on device X receives the slice of the partition
+     * on device X. All copied matrices must agree on one assignment; if they do not (for example
+     * A listed in one order and B in the other), setProblem returns
+     * ``HIPBLAS_STATUS_INVALID_VALUE`` and logs an error.
      * hipBLASLt allocates and copies nothing. ``alpha`` and ``beta`` are host pointers, as in
      * GemmInputs, and apply to every partition.
      *
