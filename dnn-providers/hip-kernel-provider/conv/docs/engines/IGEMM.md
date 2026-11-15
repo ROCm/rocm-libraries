@@ -130,14 +130,15 @@ K1 differs in kind: one source compiled at first use for the device in hand, run
 
 ## Next steps and deferred ideas
 
-1. **Fragment read-ahead for BK-64 tiles** (load a k-step's fragments before its MMA loop): the largest same-config residual to the rocKE port (1.20x on gfx1201 BK-64). Gain bounded by that residual on the BK-64 picks.
-2. **gfx90a/gfx908 forward pipeline** (more work per barrier, deeper load/LDS/MMA overlap) for NCHW fp16 and the Wan-VAE 3-D bf16 layers, the heaviest K1 losses on those GPUs. RDNA pipelining of the same kind (ring, register prefetch) measured no gain, so this needs a structural change.
-3. **gfx906 FMA forward for NCHW fp16** (1.55x behind V4R1 on 65 graphs, the largest K1 weighted loss anywhere), beyond the `v_dot2` fp16 path the FMA kernel has.
-4. **Out-of-the-box selection and compile cost:** the declared order takes the first admitted config; a native per-config scorer from tile fit, waves, split plan and occupancy, plus a precompiled code-object store, would avoid compiling 90-130 candidates on grouped graphs.
-5. **Group-fusion inf parity:** mask the structural zeros of the expanded filter, A/B'd against the compiled-out build.
-6. **Split knob:** expose the split count so autotune can override the analytic plan on shapes where it guesses wrong.
-7. **TF32 as tagged sibling engines** once hipDNN can filter by numerical note; three-bf16 does not pay on CDNA today and stays only as an autotune candidate.
-8. **Workspace limits:** a per-family test that a caller's workspace cap declines at plan time, never at execute.
+1. **Patch GEMMs at microsecond scale** (gfx950, NHWC bf16, autotuned, same GPU): the patch configs run ViT-B/16 forward 1.6-1.85x faster than the previous best engine and ConvNeXt 2x2 forward up to 1.25x, with every patch graph's time unchanged or better outside noise. They still trail MIOpen's hipconv patch kernel by 1.2-1.4x (ViT forward) and 1.4-1.9x (backward data, ConvNeXt and U-Net 2x2), where its single double-buffered, transpose-read GEMM keeps more work per barrier. A dedicated patch tile (deeper k-chunks, transposed-read B for backward data) is the remaining step.
+2. **Fragment read-ahead for BK-64 tiles** (load a k-step's fragments before its MMA loop): the largest same-config residual to the rocKE port (1.20x on gfx1201 BK-64). Gain bounded by that residual on the BK-64 picks.
+3. **gfx90a/gfx908 forward pipeline** (more work per barrier, deeper load/LDS/MMA overlap) for NCHW fp16 and the Wan-VAE 3-D bf16 layers, the heaviest K1 losses on those GPUs. RDNA pipelining of the same kind (ring, register prefetch) measured no gain, so this needs a structural change.
+4. **gfx906 FMA forward for NCHW fp16** (1.55x behind V4R1 on 65 graphs, the largest K1 weighted loss anywhere), beyond the `v_dot2` fp16 path the FMA kernel has.
+5. **Out-of-the-box selection and compile cost:** the declared order takes the first admitted config; a native per-config scorer from tile fit, waves, split plan and occupancy, plus a precompiled code-object store, would avoid compiling 90-130 candidates on grouped graphs.
+6. **Group-fusion inf parity:** mask the structural zeros of the expanded filter, A/B'd against the compiled-out build.
+7. **Split knob:** expose the split count so autotune can override the analytic plan on shapes where it guesses wrong.
+8. **TF32 as tagged sibling engines** once hipDNN can filter by numerical note; three-bf16 does not pay on CDNA today and stays only as an autotune candidate.
+9. **Workspace limits:** a per-family test that a caller's workspace cap declines at plan time, never at execute.
 
 ## Tests
 
