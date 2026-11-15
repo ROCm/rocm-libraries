@@ -23,6 +23,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuWrwNative.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -2238,6 +2239,141 @@ TEST(TestConvDepthwiseValuWrwComputeType, ServesCudnnsComputeTypesPerElementType
                                 return matchesGraph(wrwPack(), fixture.context()).has_value();
                             });
 }
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): every forward variant that writes y -- the W-strip and
+// channels-first floors (2-D and 3-D), microtile, fused halo, LDS (2-D, 3-D, channels-first
+// plane tiles) and rowtile (stride 1 and 2, one or two channels a lane) -- on shapes whose
+// channels and planes are not multiples of the tiles, against the CPU convolution followed by
+// the chain on the host (one rounding).
+// ---------------------------------------------------------------------------
+
+namespace fused_valu
+{
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+struct FusedShape
+{
+    std::string name;
+    ConvShape shape;
+};
+
+std::vector<FusedShape> shapes()
+{
+    std::vector<FusedShape> shapes;
+    shapes.push_back({"Nhwc3x3", depthwise(26, {13, 11}, {3, 3}, {1, 1}, true)});
+    shapes.push_back({"Nhwc5x5", depthwise(40, {12, 9}, {5, 5}, {2, 2}, true)});
+    shapes.push_back({"Nhwc7x7", depthwise(34, {11, 10}, {7, 7}, {3, 3}, true)});
+    shapes.push_back({"Nhwc9x9", depthwise(18, {10, 9}, {9, 9}, {4, 4}, true)});
+    ConvShape strided = depthwise(26, {13, 12}, {3, 3}, {1, 1}, true);
+    strided.stride = {2, 2};
+    shapes.push_back({"Nhwc3x3Stride2", strided});
+    shapes.push_back({"OddChannelsNhwc", depthwise(13, {9, 7}, {3, 3}, {1, 1}, true)});
+    shapes.push_back({"Nchw3x3", depthwise(10, {19, 37}, {3, 3}, {1, 1}, false)});
+    shapes.push_back({"Nchw5x5", depthwise(6, {17, 35}, {5, 5}, {2, 2}, false)});
+    shapes.push_back({"Nchw7x7", depthwise(6, {15, 34}, {7, 7}, {3, 3}, false)});
+    shapes.push_back({"OneDNhwc", depthwise(24, {29}, {3}, {1}, true)});
+    shapes.push_back({"Ndhwc3x3x3", depthwise(24, {5, 9, 7}, {3, 3, 3}, {1, 1, 1}, true)});
+    shapes.push_back({"Ncdhw3x3x3", depthwise(5, {4, 7, 9}, {3, 3, 3}, {1, 1, 1}, false)});
+    return shapes;
+}
+
+template <typename T>
+void run(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    for(const auto& config : catalog())
+    {
+        kernels.push_back(
+            kernelFor(config, conv_epilogue_test::elementTypeOf<T>(), ConvDirection::FORWARD));
+    }
+    const auto runner
+        = conv_epilogue_test::catalogRunner(packFor(ConvDirection::FORWARD), std::move(kernels));
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials), 1)
+        << "no config serves this fused case";
+}
+
+class TestGpuConvDepthwiseValuFused
+    : public ::testing::TestWithParam<std::tuple<FusedShape, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseValuFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    run<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvDepthwiseValuFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    run<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvDepthwiseValuFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    run<BFloat16>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> chainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvDepthwiseValuFused,
+                         ::testing::Combine(::testing::ValuesIn(shapes()),
+                                            ::testing::ValuesIn(chainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvDepthwiseValuFused,
+                         ::testing::Combine(::testing::Values(shapes()[0], shapes()[6]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvDepthwiseValuFusedSpecials : public ::testing::TestWithParam<FusedShape>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseValuFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    run<float>(GetParam().shape,
+               {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+               Specials::NAN_INF);
+    run<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvDepthwiseValuFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    run<Half>(GetParam().shape,
+              {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+              Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDepthwiseValuFusedSpecials,
+                         ::testing::Values(shapes()[0], shapes()[6], shapes()[10]),
+                         [](const auto& info) { return info.param.name; });
+
+} // namespace fused_valu
 
 } // namespace
 
