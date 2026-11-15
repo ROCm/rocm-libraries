@@ -520,8 +520,11 @@ void addEpilogueDefines(compilation::KernelCompileOptions& options, const ConvEp
         const auto& operand = epilogue.operands[i];
         const int index = static_cast<int>(i);
         fields += "float c" + std::to_string(index) + ";";
-        chan += reg(index) + "=ok?" + std::string(loaderFor(operand.dataType)) + "(e.operand["
-                + std::to_string(index) + "]," + (operand.perChannel ? "ch" : "0") + "):0.0f;";
+        // A column past the edge reads channel 0, whose value its discarded result never
+        // uses: the load is unconditional, so the store code stays one basic block (a load
+        // under a branch there costs the tile kernels their register allocation).
+        chan += reg(index) + "=" + std::string(loaderFor(operand.dataType)) + "(e.operand["
+                + std::to_string(index) + "]," + (operand.perChannel ? "ok?ch:0" : "0") + ");";
     }
     std::string code;
     for(const auto& op : epilogue.ops)
@@ -557,7 +560,7 @@ void addEpilogueDefines(compilation::KernelCompileOptions& options, const ConvEp
             code += "v=convEpiSigmoid(v);";
             break;
         case OpCode::TANH:
-            code += "v=tanhf(v);";
+            code += "v=convEpiTanh(v);";
             break;
         case OpCode::ELU:
             code += "v=convEpiElu(v," + slot(op.slot) + ");";
