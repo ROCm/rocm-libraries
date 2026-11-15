@@ -42,7 +42,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_DEPTHWISE_MFMA_FWD/BWD` | Depthwise on matrix cores (gfx950 hipconv class), NHWC and NCHW | fwd, bwd-data (s1); fwd (s2) | gfx908-gfx950 | 640 |
 | `CONV_DEPTHWISE_ROWS_FWD/BWD` | Depthwise by channel rows: 1-D/vocoder depthwise, dilated, strided ConvTranspose1d | fwd, bwd-data | all (VALU) | 222 |
 | `CONV_DEPTHWISE_VALU_FWD/BWD` | General VALU depthwise, plus the strided bwd `phase` variant | fwd, bwd-data | all | 342 (162 fwd, 180 bwd) |
-| `CONV_DEPTHWISE_VALU_WRW` | Depthwise backward weights (register strips; NHWC and NCHW) | wrw | all | 900 |
+| `CONV_DEPTHWISE_VALU_WRW` | Depthwise backward weights (register strips; NHWC and NCHW) | wrw | all | 1140 |
 | `CONV_NAIVE_FWD/BWD/WRW` | Coverage-first production kernels: serve graphs no faster engine serves, within a workload budget | all | all | 9 |
 | `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` (hipblaslt-provider) | Explicit GEMM (im2col/col2im) | all | all | BLAS-internal |
 | `ROCBLAS_CONV_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_ENGINE_DETERMINISTIC`, `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` (hipblaslt-provider) | The exact and TF32 explicit-GEMM engines, bitwise reproducible (rocBLAS atomics not allowed, no hipBLASLt workspace); the default engines report `NONDETERMINISTIC`. Cost against the default engines: `hipblaslt-provider/docs/engines/EXPLICIT_GEMM.md`. | all | all | BLAS-internal |

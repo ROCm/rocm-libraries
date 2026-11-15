@@ -146,10 +146,19 @@ CONFIGS += [dict(c, bpc=b) for c in CONFIGS if c["variant"] == "tile" for b in V
 VTILE += [dict(c, bpc=b) for c in VTILE for b in VALU_BPC]
 # The same schedules with the partitions traded for whole rounds of blocks (fill 1): small
 # batches gain (gfx950 EfficientNet c960 30^2 n16: 1.12x); some n128 shapes run 4-5% slower, so
-# both forms ship and autotune picks.
+# both plans ship and autotune picks. The row-staging Hankel body (form 1) ships at fill 1 only in
+# the schedules where whole rounds beat the target on gfx950 (four blocks a unit at two rows a
+# step: EfficientNet c1536 12^2 and c960 30^2 n16, 1.11-1.13x); elsewhere its fill 1 measured
+# within 2% of fill 0 or slower.
+HANKEL_FORM1_FILL_SCHEDULES = ((16, 2, 1, 4), (32, 2, 1, 4))
 CONFIGS += [dict(c, fill=1) for c in CONFIGS if c["variant"] == "tile"]
 VTILE += [dict(c, fill=1) for c in VTILE]
-HANKEL += [dict(c, fill=1) for c in HANKEL]
+HANKEL += [
+    dict(c, fill=1)
+    for c in HANKEL
+    if c["form"] == 0
+    or (c["q"], c["g"], c["nwg"], c["bpc"]) in HANKEL_FORM1_FILL_SCHEDULES
+]
 
 kmd, umd, udd, ued = U("kmd"), U("umd"), U("udd"), U("ued")
 w(
