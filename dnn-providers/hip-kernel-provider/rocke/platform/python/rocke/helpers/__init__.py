@@ -260,6 +260,7 @@ from .loads import (
     AsyncTileLoaderSlot,
     CoalescedTileLoader,
     DescriptorFn,
+    RegTransposeTileLoader,
     lane_contiguous_descriptor,
 )
 from .persistent import (
@@ -507,6 +508,7 @@ __all__ = [
     "AsyncTileLoaderSlot",
     "CoalescedTileLoader",
     "DescriptorFn",
+    "RegTransposeTileLoader",
     "lane_contiguous_descriptor",
     "SchedulePolicy",
     "SoftwarePipeline",

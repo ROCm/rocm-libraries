@@ -297,6 +297,18 @@ because that table is fixed to five MFMA-atom tile shapes, while a
 register-staged tile has any row count and 2 to 16 chunks per row. Use one
 form per tile, on both the producer and the consumer side.
 
+### Variant: transpose in registers (`RegTransposeTileLoader`)
+
+When the free axis of an M-outer tile is the contiguous one in global memory,
+`vector_axis="row"` still writes one 16-bit LDS store per element.
+`RegTransposeTileLoader` (`rocke.helpers.loads`) gives each thread micro-tiles
+of 8 K columns x `vec` free-axis rows: 8 `vec`-wide global reads, a regroup in
+registers (one `v_perm_b32` per output dword) and one 16-byte LDS store per
+row. `plan` / `choose_vec` pick the work split (whole waves only on thin tiles),
+`load_global` / `store_lds` split it for register-prefetch loops, and an
+optional `col_swizzle` maps the column of every 16-byte store (the consumer
+reads through the same map). C++ twin: `rocke_reg_transpose_tile_loader_*`.
+
 ---
 
 ## Optimization Method 3: Reduce Pipeline Stages
