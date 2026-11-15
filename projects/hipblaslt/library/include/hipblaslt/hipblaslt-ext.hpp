@@ -1291,6 +1291,11 @@ namespace hipblaslt_ext
         /*! \ingroup library_module
         *  \brief Launches every partition's slice on its stream and returns without waiting.
         *
+        *  \details After the launches the partitions are joined on the GPU: each stream waits
+        * for every other partition to finish its slice. Work that the caller enqueues on any
+        * of the streams after this call therefore sees the slices of all partitions (for
+        * example, a shared D is complete), with no event or host wait of the caller's own.
+        *
         *  @param[in]
         *  streams       One stream per partition.
         *  @param[in]

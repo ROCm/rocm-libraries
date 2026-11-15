@@ -2191,9 +2191,6 @@ public:
             hipStream_t stream = nullptr;
             check(hipStreamCreate(&stream), "hipStreamCreate");
             m_streams.push_back(stream);
-            hipEvent_t stop = nullptr;
-            check(hipEventCreate(&stop), "hipEventCreate");
-            m_stops.push_back(stop);
             // reach the device 0 buffers
             hipError_t peer = hipDeviceEnablePeerAccess(previous, 0);
             if(peer != hipSuccess && peer != hipErrorPeerAccessAlreadyEnabled)
@@ -2221,7 +2218,6 @@ public:
             static_cast<void>(hipSetDevice(int(i)));
             static_cast<void>(hipStreamSynchronize(m_streams[i]));
             static_cast<void>(hipStreamDestroy(m_streams[i]));
-            static_cast<void>(hipEventDestroy(m_stops[i - 1]));
             if(i - 1 < m_workspaces.size())
                 static_cast<void>(hipFree(m_workspaces[i - 1]));
             for(auto& replica : m_replica)
@@ -2386,23 +2382,13 @@ public:
     }
 
     // One launch of every partition. Partitions wait for work already queued on stream0, and
-    // stream0 waits for all of them, so stream0 sees the whole span.
+    // PartitionedGemm::run joins them at the end, so stream0 sees the whole span.
     hipblasStatus_t run()
     {
-        int previous = 0;
-        check(hipGetDevice(&previous), "hipGetDevice");
         check(hipEventRecord(m_start, m_streams[0]), "hipEventRecord");
         for(size_t i = 1; i < m_streams.size(); i++)
             check(hipStreamWaitEvent(m_streams[i], m_start, 0), "hipStreamWaitEvent");
-        auto status = m_gemm->run(m_streams);
-        for(size_t i = 1; i < m_streams.size(); i++)
-        {
-            check(hipSetDevice(int(i)), "hipSetDevice");
-            check(hipEventRecord(m_stops[i - 1], m_streams[i]), "hipEventRecord");
-            check(hipSetDevice(previous), "hipSetDevice");
-            check(hipStreamWaitEvent(m_streams[0], m_stops[i - 1], 0), "hipStreamWaitEvent");
-        }
-        return status;
+        return m_gemm->run(m_streams);
     }
 
 private:
@@ -2421,7 +2407,6 @@ private:
     int64_t m_m = 0, m_n = 0, m_batch = 1, m_ldd = 0, m_strideD = 0;
     std::vector<std::unique_ptr<hipblaslt_local_handle>>   m_handleOwners;
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
-    std::vector<hipEvent_t>                                m_stops;
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
     hipEvent_t                                             m_start = nullptr;
     std::unique_ptr<hipblaslt_ext::PartitionedGemm>        m_gemm;

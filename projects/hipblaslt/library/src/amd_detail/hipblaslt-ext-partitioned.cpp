@@ -93,6 +93,47 @@ namespace hipblaslt_ext
         SplitDim             dim          = SplitDim::M;
         std::vector<int64_t> sliceOffset, sliceSize;
 
+        // One event per partition (device, event) that joins the partitions at the end of
+        // run(): created on the device of the partition's stream, recreated when that changes.
+        std::vector<std::pair<int, hipEvent_t>> joinEvents;
+
+        ~PartitionedGemmImpl()
+        {
+            releaseJoinEvents();
+        }
+
+        void releaseJoinEvents()
+        {
+            for(auto& [device, event] : joinEvents)
+            {
+                ScopedDevice guard(device);
+                static_cast<void>(hipEventDestroy(event));
+            }
+            joinEvents.clear();
+        }
+
+        bool ensureJoinEvents(std::vector<int> const& devices)
+        {
+            bool same = joinEvents.size() == devices.size();
+            for(size_t i = 0; same && i < devices.size(); i++)
+                same = joinEvents[i].first == devices[i];
+            if(same)
+                return true;
+            releaseJoinEvents();
+            for(int device : devices)
+            {
+                ScopedDevice guard(device);
+                hipEvent_t   event = nullptr;
+                if(!guard.ok() || hipEventCreateWithFlags(&event, hipEventDisableTiming) != hipSuccess)
+                {
+                    releaseJoinEvents();
+                    return false;
+                }
+                joinEvents.emplace_back(device, event);
+            }
+            return true;
+        }
+
         size_t count() const
         {
             return gemms.size();
@@ -388,18 +429,41 @@ namespace hipblaslt_ext
             return HIPBLAS_STATUS_INVALID_VALUE;
         if(auto st = s.checkStreams(streams); st != HIPBLAS_STATUS_SUCCESS)
             return st;
+        std::vector<int> devices(s.count());
         for(size_t i = 0; i < s.count(); i++)
         {
-            int device = -1;
-            if(hipStreamGetDevice(streams[i], &device) != hipSuccess)
+            if(hipStreamGetDevice(streams[i], &devices[i]) != hipSuccess)
                 return HIPBLAS_STATUS_INVALID_VALUE;
-            ScopedDevice guard(device);
+            ScopedDevice guard(devices[i]);
             if(!guard.ok())
                 return HIPBLAS_STATUS_INVALID_VALUE;
             auto st = s.gemms[i]->run(
                 streams[i], start.empty() ? nullptr : start[i], stop.empty() ? nullptr : stop[i]);
             if(st != HIPBLAS_STATUS_SUCCESS)
                 return st;
+        }
+
+        // Join the partitions on the GPU, so that work enqueued on any partition's stream after
+        // this call runs once every partition has finished its slice. The caller needs no
+        // event or host wait of its own.
+        if(s.count() > 1)
+        {
+            if(!s.ensureJoinEvents(devices))
+                return HIPBLAS_STATUS_INTERNAL_ERROR;
+            for(size_t i = 0; i < s.count(); i++)
+            {
+                ScopedDevice guard(devices[i]);
+                if(hipEventRecord(s.joinEvents[i].second, streams[i]) != hipSuccess)
+                    return HIPBLAS_STATUS_INTERNAL_ERROR;
+            }
+            for(size_t j = 0; j < s.count(); j++)
+            {
+                ScopedDevice guard(devices[j]);
+                for(size_t i = 0; i < s.count(); i++)
+                    if(i != j
+                       && hipStreamWaitEvent(streams[j], s.joinEvents[i].second, 0) != hipSuccess)
+                        return HIPBLAS_STATUS_INTERNAL_ERROR;
+            }
         }
         return HIPBLAS_STATUS_SUCCESS;
     }
