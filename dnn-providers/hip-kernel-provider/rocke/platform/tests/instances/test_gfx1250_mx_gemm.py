@@ -42,6 +42,7 @@ from rocke.instances.gfx1250.mx_gemm import (
     K_READS,
     LDS_BUFFERS,
     OUT_DTYPES,
+    READ_ISSUES,
     SCALE_SWAPS,
     SCALES,
     TILE_K,
@@ -404,6 +405,40 @@ class MxGemmSpecTest(unittest.TestCase):
                     **_DIRECT,
                 ),
                 needs,
+            ),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
+
+    def test_read_issue_validate_and_name(self):
+        """Interleaved reads need read-ahead without the half-B prefetch, the
+        16x16 WMMA and, with "contiguous" FP6 reads, the swaps after the
+        wait; they tag the name."""
+        self.assertEqual(READ_ISSUES, ("block", "interleave"))
+        ahead = {"local_prefetch": 1, "half_plr": "none"}
+        for spec in (
+            _spec6(k_reads="contiguous", scale_swap="wait", **ahead),
+            _spec6(**ahead),
+            _spec8(**ahead),
+        ):
+            interleave = replace(spec, read_issue="interleave")
+            with self.subTest(interleave.kernel_name()):
+                self.assertIsNone(validate(interleave))
+                self.assertTrue(interleave.kernel_name().endswith("_ril"))
+                self.assertNotIn("_ril", spec.kernel_name())
+        needs = "needs local_prefetch 1 and half_plr 'none'"
+        bad = {
+            "value": (_spec6(read_issue="mixed"), "read_issue must be one of"),
+            "direct": (_spec6(read_issue="interleave", **_DIRECT), needs),
+            "half_b": (_spec6(read_issue="interleave"), needs),
+            "atom": (
+                _spec(read_issue="interleave", half_plr="none"),
+                "is for the 16x16 WMMA",
+            ),
+            "swap": (
+                _spec6(read_issue="interleave", k_reads="contiguous", **ahead),
+                "needs scale_swap 'wait'",
             ),
         }
         for label, (spec, reason) in bad.items():
@@ -1002,6 +1037,82 @@ class MxGemmIrTest(unittest.TestCase):
             for other in (_spec6(k_reads="contiguous", **path), _spec8(**path)):
                 with self.subTest(other.kernel_name()):
                     self.assertNotIn(barrier, _llvm(other))
+
+    def test_l_order(self):
+        """Each WMMA appears once, and part ``i`` (the WMMAs whose larger
+        index is ``i``) follows parts ``0..i-1``: it needs read groups
+        ``0..i`` only."""
+        for rm, rn in itertools.product((1, 2, 4, 8), (1, 2, 4, 8)):
+            order = TileCompute.l_order(rm, rn)
+            with self.subTest(rm=rm, rn=rn):
+                self.assertEqual(
+                    sorted(order), sorted(itertools.product(range(rm), range(rn)))
+                )
+                parts = [max(pair) for pair in order]
+                self.assertEqual(parts, sorted(parts))
+        self.assertEqual(TileCompute.l_order(2, 2), [(0, 0), (1, 0), (1, 1), (0, 1)])
+
+    def test_interleaved_reads_follow_the_wmma_chunks(self):
+        """With ``read_issue`` "interleave" each K-step issues its WMMAs in
+        ``read_groups`` chunks; read group ``g`` of the next K-step follows
+        chunk ``min(g, groups - 2)``, and the K-step ends with a use of its
+        operands (and, with the swaps after the wait, of the scale reads they
+        took) after its last WMMA."""
+        load = re.compile(r"= load (<\d+ x i32>|i32), ptr addrspace\(3\)")
+        hold = re.compile(r'call void asm sideeffect "", "v[v,]*"')
+        ahead = {"local_prefetch": 1, "half_plr": "none", "read_issue": "interleave"}
+        for spec in (
+            _spec6(
+                tile_m=128,
+                tile_n=128,
+                tile_k=512,
+                k_reads="contiguous",
+                scale_swap="wait",
+                **ahead,
+            ),
+            _spec6(
+                1024,
+                16,
+                2048,
+                tile_m=128,
+                tile_n=16,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                **ahead,
+            ),
+            _spec8(tile_m=64, tile_n=128, **ahead),
+        ):
+            tokens = []
+            for line in _llvm(spec).splitlines():
+                if re.search(_WMMA, line):
+                    tokens.append("W")
+                elif load.search(line):
+                    tokens.append("R")
+                elif hold.search(line):
+                    tokens.append("H")
+            # Tile 0's K-step 0 reads come before any WMMA.
+            first = tokens.index("W")
+            self.assertEqual(set(tokens[:first]), {"R"})
+            order = TileCompute.l_order(spec.wave_repeat_m, spec.wave_repeat_n)
+            groups = spec.read_groups
+            size, extra = divmod(len(order), groups)
+            step = []
+            for c in range(groups):
+                step += ["W"] * (size + (c < extra))
+                for g in range(groups):
+                    if min(g, max(groups - 2, 0)) == c:
+                        # IR loads: every 8 B FP6 read is its own load.
+                        rows = (g < spec.wave_repeat_m) + (g < spec.wave_repeat_n)
+                        scales = spec.a_scale_reads + spec.b_scale_reads
+                        step += ["R"] * (
+                            scales * (g == 0) + rows * len(spec.lane_reads)
+                        )
+            step.append("H")
+            with self.subTest(spec.kernel_name()):
+                rest = tokens[first:]
+                steps, extra_tokens = divmod(len(rest), len(step))
+                self.assertEqual(extra_tokens, 0)
+                self.assertEqual(rest, step * steps)
 
     def test_three_buffers_issue_wait_and_peel(self):
         """With three buffers the prologue loads three tiles and every tile
@@ -1970,7 +2081,26 @@ class MxGemmHostBuildTest(unittest.TestCase):
                     {"half_plr": "b", "half_b_order": "late"},
                     {"half_plr": "none"},
                     {"half_plr": "b", "lds_buffers": 3},
+                    {"half_plr": "none", "read_issue": "interleave"},
+                    {"half_plr": "none", "read_issue": "interleave", "lds_buffers": 3},
                 )
+            ),
+            # Interleaved reads at the MAB tiling (one N-repeat, one-word B
+            # scales).
+            _spec6(
+                49152,
+                16,
+                32768,
+                tile_m=256,
+                tile_n=16,
+                tile_k=512,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                k_reads="contiguous",
+                scale_swap="wait",
+                local_prefetch=1,
+                half_plr="none",
+                read_issue="interleave",
             ),
             # Register scales at the MAF/MED, MAB and SM tilings.
             *(
@@ -2164,6 +2294,50 @@ class MxGemmDeviceTest(unittest.TestCase):
                         {"tile_m": 128, "tile_n": 128, "tile_k": 384},
                     ),
                 )
+            ]
+            # Interleaved reads: three buffers, edge tiles and a
+            # K tail, a one-K-step tail, narrow N, FP8 and chunked FP6.
+            + [
+                make(*problem, local_prefetch=1, half_plr="none", **fields)
+                for make, problem, fields in (
+                    (_spec6, (), {"k_reads": "contiguous", "scale_swap": "wait"}),
+                    (
+                        _spec6,
+                        (1024, 1024, 3072 + 256),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 128,
+                            "tile_k": 512,
+                            "lds_buffers": 3,
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                        },
+                    ),
+                    (
+                        _spec6,
+                        (1000, 1000, 2048 + 96),
+                        {"tile_m": 128, "tile_n": 128, "tile_k": 384},
+                    ),
+                    (
+                        _spec6,
+                        (1024, 1024, 2048 + 128),
+                        {"tile_m": 64, "tile_n": 128, "tile_k": 512},
+                    ),
+                    (
+                        _spec6,
+                        (1024, 16, 2048),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 16,
+                            "wave_group": (4, 1),
+                            "cluster_dim": (1, 2, 1),
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                        },
+                    ),
+                    (_spec8, (), {"tile_m": 128, "tile_n": 128}),
+                )
+                for fields in ({**fields, "read_issue": "interleave"},)
             ]
             # Register scales: every half packing, the reuse orders, edge
             # tiles and K tails.

@@ -883,6 +883,7 @@ _AXES = {
     "scales": ("scales", str, "lds"),
     "lds_buffers": ("lds_buffers", int, "2"),
     "scale_swap": ("scale_swap", str, "read"),
+    "read_issue": ("read_issue", str, "block"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),

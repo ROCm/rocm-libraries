@@ -131,6 +131,7 @@ K_READS = ("chunked", "contiguous")
 WMMA_REUSE = ("none", "a", "b", "ab")
 SCALES = ("lds", "registers")
 SCALE_SWAPS = ("read", "wait")
+READ_ISSUES = ("block", "interleave")
 LDS_BUFFERS = (2, 3)
 WAVE_GROUPS = ((2, 2), (4, 1), (1, 4))
 OUT_DTYPES = ("fp8e4m3", "fp16", "bf16")
@@ -238,6 +239,12 @@ class MxGemmSpec:
     VALU may not cross, so the scale reads need no wait of their own. Words
     carried to the next K-step or tile stay in K order until then.
 
+    ``read_issue`` is where the next K-step's LDS reads go with read-ahead
+    and no half-B prefetch: ``"block"`` all before the K-step's WMMAs;
+    ``"interleave"`` in groups, one after each chunk of the K-step's WMMAs
+    (:meth:`TileCompute._run_interleave`), so the reads issue while the
+    WMMAs run.
+
     ``wmma_reuse`` (``local_prefetch`` 0, the 16x16 WMMA) orders each
     K-step's WMMAs and flags every WMMA whose next WMMA takes the same
     operand, so the hardware may keep that operand instead of reading it
@@ -288,6 +295,7 @@ class MxGemmSpec:
     scales: str = "lds"
     lds_buffers: int = 2
     scale_swap: str = "read"
+    read_issue: str = "block"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -467,6 +475,20 @@ class MxGemmSpec:
         return self.contiguous_k and self.scale_swap == "wait"
 
     @property
+    def read_groups(self) -> int:
+        """Groups of a K-step's reads with ``read_issue`` "interleave": group
+        ``i`` holds A row ``i`` and B fragment ``i`` (group 0 the scales
+        first)."""
+        return max(self.wave_repeat_m, self.wave_repeat_n)
+
+    def group_reads(self, group: int) -> int:
+        """LDS read instructions of a read group, counted as ``reads_per_step``
+        counts them."""
+        rows = (group < self.wave_repeat_m) + (group < self.wave_repeat_n)
+        scales = self.a_scale_reads + self.b_scale_reads if group == 0 else 0
+        return scales + rows * self.row_reads
+
+    @property
     def tdm_loads(self) -> int:
         """TDM loads a wave issues per tile: its data component, then its
         scale component unless the scales go to registers."""
@@ -579,6 +601,7 @@ class MxGemmSpec:
                 "sreg": self.scale_regs,
                 "lb3": self.lds_buffers == 3,
                 "swait": self.scale_swap == "wait",
+                "ril": self.read_issue == "interleave",
             },
         )
 
@@ -848,6 +871,16 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return f"scale_swap must be one of {SCALE_SWAPS}"
     if spec.scale_swap == "wait" and (not spec.contiguous_k or spec.scale_regs):
         return "scale_swap 'wait' needs k_reads 'contiguous' and scales 'lds'"
+    if spec.read_issue not in READ_ISSUES:
+        return f"read_issue must be one of {READ_ISSUES}"
+    if spec.read_issue == "interleave":
+        if spec.local_prefetch != 1 or spec.half_plr != "none":
+            return "read_issue 'interleave' needs local_prefetch 1 and half_plr 'none'"
+        if spec.atom.a_rows != 1:
+            return "read_issue 'interleave' is for the 16x16 WMMA"
+        if spec.contiguous_k and not spec.swap_after_wait:
+            # The groups hold reads only: the swaps go after the wait.
+            return "read_issue 'interleave' with 'contiguous' reads needs scale_swap 'wait'"
     row = spec.k_bytes(spec.tile_k)
     if spec.lds_buffers != 2 and row < _GL2_LINE_BYTES and _GL2_LINE_BYTES % row == 0:
         # The GL2 prefetch of such rows follows the tile index's parity,
@@ -1527,6 +1560,16 @@ class LdsReader:
     def __init__(self, k: _Kernel, rows: RowMaps):
         self.k = k
         self.rows = rows
+        # id(fragment) -> (fragment, its reads), for fragment_pair's.
+        self._parts = {}
+        # The reads of the last scales() call.
+        self.scale_reads = []
+
+    def parts(self, frag):
+        """The reads a :meth:`fragment_pair` fragment was made of (the
+        registers its WMMAs read; not the zero padding), else ``None``."""
+        entry = self._parts.get(id(frag))
+        return list(entry[1]) if entry and entry[0] is frag else None
 
     def load_i32(self, offset, n: int = 4):
         return self.k.b.smem_load_vN(
@@ -1551,6 +1594,50 @@ class LdsReader:
             frag = k.b.vec_concat(frag, k.b.vector_splat(k.b.const_i32(0), padding))
         return frag
 
+    def _assemble(self, parts):
+        """A fragment from its reads (in ``lane_reads`` order) and padding."""
+        b = self.k.b
+        frag = parts[0]
+        for part in parts[1:]:
+            frag = b.vec_concat(frag, part)
+        padding = self.k.spec.atom.frag_words - sum(
+            w for _, w in self.k.spec.lane_reads
+        )
+        if padding:
+            frag = b.vec_concat(frag, b.vector_splat(b.const_i32(0), padding))
+        return frag
+
+    def fragment_pair(self, buffer, step, rm, rn):
+        """A row ``rm`` and B fragment ``rn`` of a K-step (16x16 WMMA; either
+        may be ``None``), their reads alternating: A's first, B's first,
+        A's second, ..."""
+        k, ops = self.k, self.k.ops
+        lane_k = self._lane_k(step)
+        bases = []
+        if rm is not None:
+            row = self.rows.m_row(rm, k.lane_col)
+            bases.append(
+                ops.add(ops.add(buffer, k.layout.row_offset(ops, "a", row)), lane_k)
+            )
+        if rn is not None:
+            row = self.rows.n_row(rn, k.lane_col)
+            bases.append(
+                ops.add(ops.add(buffer, k.layout.row_offset(ops, "b", row)), lane_k)
+            )
+        parts = [[] for _ in bases]
+        for offset, words in k.spec.lane_reads:
+            for base, part in zip(bases, parts):
+                part.append(self.load_i32(ops.add(base, offset), words))
+        frags = []
+        for part in parts:
+            frags.append(self._assemble(part))
+            self._parts[id(frags[-1])] = (frags[-1], part)
+        frags = iter(frags)
+        return (
+            next(frags) if rm is not None else None,
+            next(frags) if rn is not None else None,
+        )
+
     def a_fragment(self, buffer, rm, step):
         k = self.k
         lane_k = self._lane_k(step)
@@ -1574,6 +1661,7 @@ class LdsReader:
         k = self.k
         b, ops, spec = k.b, k.ops, k.spec
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
+        self.scale_reads = []
         a_lane = k.lane if spec.atom.a_rows == 2 else k.lane_col
         a_base = ops.add(
             buffer,
@@ -1583,9 +1671,14 @@ class LdsReader:
         if rm_count >= 4:
             for chunk in range(rm_count // 4):
                 words = self.load_i32(ops.add(a_base, chunk * 16))
+                self.scale_reads.append(words)
                 a_scales += [b.vec_extract(words, i) for i in range(4)]
         else:
             words = self.load_i32(a_base, n=rm_count)
+            if rm_count > 1:
+                # One word is the scale itself (an asm operand cannot be a
+                # one-element vector).
+                self.scale_reads.append(words)
             a_scales = [b.vec_extract(words, i) for i in range(rm_count)]
         b_base = ops.add(
             buffer,
@@ -1595,9 +1688,14 @@ class LdsReader:
         if rn_count >= 4:
             for chunk in range(rn_count // 4):
                 words = self.load_i32(ops.add(b_base, chunk * 16))
+                self.scale_reads.append(words)
                 b_scales += [b.vec_extract(words, i) for i in range(4)]
         else:
             words = self.load_i32(b_base, n=rn_count)
+            if rn_count > 1:
+                # One word is the scale itself (an asm operand cannot be a
+                # one-element vector).
+                self.scale_reads.append(words)
             b_scales = [b.vec_extract(words, i) for i in range(rn_count)]
         if spec.contiguous_k and not spec.swap_after_wait:
             return self.swap_groups(a_scales, b_scales)
@@ -1758,6 +1856,10 @@ class TileCompute:
             )
         if self.k.spec.half_b:
             return self._run_half_b(
+                parity, accumulators, head, next_parity, hooks, steps
+            )
+        if self.k.spec.read_issue == "interleave":
+            return self._run_interleave(
                 parity, accumulators, head, next_parity, hooks, steps
             )
         return self._run_full(parity, accumulators, head, next_parity, hooks, steps)
@@ -1921,6 +2023,101 @@ class TileCompute:
         return out, (a_frags, a_scales, b_scales, [b_frags])
 
     @staticmethod
+    def l_order(rm_count: int, rn_count: int) -> list[tuple[int, int]]:
+        """A K-step's WMMAs ``(rm, rn)`` in L order: part ``i`` adds A row
+        ``i`` with B fragments ``0..i``, then B fragment ``i`` with A rows
+        ``0..i-1``, so part ``i`` needs read group ``i`` and the groups
+        before it only."""
+        order = []
+        for i in range(max(rm_count, rn_count)):
+            if i < rm_count:
+                order += [(i, j) for j in range(min(i + 1, rn_count))]
+            if i < rn_count:
+                order += [(j, i) for j in range(min(i, rm_count))]
+        return order
+
+    def _hold(self, a_frags, b_frags, scales, scale_reads) -> None:
+        """A use of a K-step's operands after its last WMMA: none of their
+        registers frees up, so no read of the next K-step's groups can
+        overwrite one a WMMA of this K-step is still reading. With it the
+        scale reads the swaps took (``scale_swap`` "wait"): in expert
+        scheduling a read overwriting a register a VALU took waits for every
+        WMMA issued since. Fragments carried in through the loop (reads not
+        known) are left out."""
+        values = list(scales) + list(scale_reads)
+        for frag in [*a_frags, *b_frags]:
+            values += self.reader.parts(frag) or []
+        self.k.b.inline_asm("", ",".join("v" * len(values)), values)
+
+    def _run_interleave(self, parity, accumulators, head, next_parity, hooks, steps):
+        """``read_issue`` "interleave": the WMMAs of K-step ``s`` run in L
+        order (:meth:`l_order`) in ``read_groups`` chunks; read group ``g``
+        of K-step ``s+1`` follows chunk ``min(g, groups - 2)``, so no group
+        follows the K-step's last chunk. K-step ``s`` ends with a use of its
+        operands (:meth:`_hold`): the groups land in registers K-step
+        ``s-1`` left, whose last WMMAs are at least a chunk old, and issue
+        while the WMMAs run; each group arrives ahead of the K-step ``s+1``
+        WMMAs that need it. The last K-step reads the next tile's K-step 0
+        from the other buffer; the cluster late wait (and TDM refill)
+        follows its first group. The signal follows the second-to-last
+        K-step's last group, the buffer's last read."""
+        k, reader = self.k, self.reader
+        spec = k.spec
+        rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
+        buffer = k.buffer_base(parity)
+        next_buffer = k.buffer_base(next_parity)
+        out = list(accumulators)
+        mma = self._mma_fn(out)
+        a_frags, a_scales, b_scales, (b_frags,) = head
+        # Carried in with the head: the scale reads are not known.
+        scale_reads = []
+        order = self.l_order(rm_count, rn_count)
+        groups = spec.read_groups
+        size, extra = divmod(len(order), groups)
+        chunks, at = [], 0
+        for g in range(groups):
+            n = size + (1 if g < extra else 0)
+            chunks.append(order[at : at + n])
+            at += n
+        for step in range(steps):
+            last = step + 1 == steps
+            source = (next_buffer, 0) if last else (buffer, step + 1)
+            if last:
+                hooks.refill()
+            signal_here = hooks.signal is not None and step + 2 == steps
+            self._wait(spec.reads_per_step)
+            a_scales, b_scales = self._wmma_scales(a_scales, b_scales)
+            next_a, next_b = [None] * rm_count, [None] * rn_count
+            for c, chunk in enumerate(chunks):
+                for rm, rn in chunk:
+                    mma(rm, rn, a_frags[rm], b_frags[rn], a_scales[rm], b_scales[rn])
+                for g in range(groups):
+                    if min(g, max(groups - 2, 0)) != c:
+                        continue
+                    if g == 0:
+                        next_scales = reader.scales(*source)
+                        next_scale_reads = reader.scale_reads
+                    a_frag, b_frag = reader.fragment_pair(
+                        *source,
+                        g if g < rm_count else None,
+                        g if g < rn_count else None,
+                    )
+                    if a_frag is not None:
+                        next_a[g] = a_frag
+                    if b_frag is not None:
+                        next_b[g] = b_frag
+                    if last and g == 0:
+                        self._signal_before_late(hooks, steps)
+                        hooks.late_refill(spec.group_reads(0))
+                    if signal_here and g == groups - 1:
+                        hooks.signal()
+            self._hold(a_frags, b_frags, [*a_scales, *b_scales], scale_reads)
+            a_frags, b_frags = next_a, next_b
+            a_scales, b_scales = next_scales
+            scale_reads = next_scale_reads
+        return out, (a_frags, a_scales, b_scales, [b_frags])
+
+    @staticmethod
     def wmma_order(reuse: str, rm_count: int, rn_count: int):
         """``(rm, rn)`` of each WMMA of a K-step and whether it flags A and B
         for the next one (``wmma_reuse``)."""
@@ -2063,13 +2260,16 @@ class Pipeline:
                 b.s_barrier_bare()
                 k.fence()
 
-        def late() -> None:
+        def late(pending: int | None = None) -> None:
             k.fence()
             if spec.has_cluster:
                 b.inline_asm(_CLUSTER_WAIT_ASM, "~{memory}")
             # No wave drained its reads of this buffer before the signal;
-            # the workgroup barrier publishes them here.
-            pending = min(spec.late_pending_reads, _DSCNT_MAX)
+            # the workgroup barrier publishes them here. ``pending``: the
+            # other buffer's reads issued after this buffer's last one.
+            if pending is None:
+                pending = spec.late_pending_reads
+            pending = min(pending, _DSCNT_MAX)
             b.inline_asm(f"s_wait_dscnt {pending}", "~{memory}")
             b.s_barrier_bare()
             self.tdm.issue(k.clamp_k(ops.v(ops.add(k0, ahead))), parity)
