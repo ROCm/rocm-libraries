@@ -126,6 +126,9 @@
 #   117-118 -- regt_addr_step (the stepped micro-tile address decode) on a
 #         stride-2 problem with Wo = 8: the plain register-transpose loop and
 #         regt_prefetch mode 3.
+#   119-121 -- wmma_atomic_pair (the paired-lane split-K atomic epilogue):
+#         fp16 dW over the register-transpose loader, bf16 dW over the default
+#         loader, and two-stage, which both engines must reject.
 #   (Grouped wgrad reaches the C++ engine only through stream-K. The
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -141,7 +144,7 @@
 #   207 -- streamk with unroll_k (must raise ValueError)
 #   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-118, so run_diff.py stops at the shared END before reaching 200+; these
+# 0-121, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -284,6 +287,10 @@ _REGT_CFGS = {
         dict(reg_transpose=True, regt_addr_step=True, regt_prefetch=3, problem=_P_S2),
         "gfx1201",
     ),
+    119: (dict(reg_transpose=True, split_k=2, wmma_atomic_pair=True), "gfx1201"),
+    120: (dict(split_k=2, wmma_atomic_pair=True, dtype_d="bf16"), "gfx1201"),
+    # rejected: the two-stage scratch has no packed atomics
+    121: (dict(split_k=2, two_stage=True, wmma_atomic_pair=True), "gfx1201"),
 }
 
 

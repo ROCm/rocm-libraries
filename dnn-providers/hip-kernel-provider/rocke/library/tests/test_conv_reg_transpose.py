@@ -240,5 +240,53 @@ class TestRegtAddrStep(unittest.TestCase):
         self.assertIn("scf.if_else", _ir(_wgrad(regt_addr_step=True, regt_prefetch=3)))
 
 
+class TestWmmaAtomicPair(unittest.TestCase):
+    def test_tag_and_gates(self):
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        self.assertIn("_apr", _wgrad(split_k=2, wmma_atomic_pair=True).kernel_name())
+        self.assertNotIn("_apr", _wgrad(split_k=2).kernel_name())
+        self.assertEqual(
+            is_valid_wgrad_spec(_wgrad(split_k=2, wmma_atomic_pair=True), "gfx1201"),
+            (True, "ok"),
+        )
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        for kw in (
+            dict(wmma_atomic_pair=True),  # unsplit
+            dict(wmma_atomic_pair=True, split_k=2, two_stage=True),
+            dict(
+                wmma_atomic_pair=True,
+                split_k=2,
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            ),
+        ):
+            with self.assertRaises(ValueError):
+                _wgrad(**kw).validate()
+
+    def test_half_the_atomics_one_dpp_each(self):
+        off = _ir(_wgrad(split_k=2))
+        on = _ir(_wgrad(split_k=2, wmma_atomic_pair=True))
+        atom = r"global_atomic_add_pk_f16"
+        n_off, n_on = len(re.findall(atom, off)), len(re.findall(atom, on))
+        self.assertGreater(n_off, 0)
+        self.assertEqual(2 * n_on, n_off)
+        self.assertEqual(len(re.findall(r"tile\.dpp_xor", on)), n_on)
+
+    def test_identity_label(self):
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        lab = (
+            "wgrad-implicit_gemm-fp16-2d-t64x64x128-w1x4-a16x16x16-v8x8x1-mem-"
+            "default-grp-sk2-rtp3-regt-apr-wave32-gfx1201-llvm24"
+        )
+        ident = KernelIdentity.from_label(lab)
+        self.assertTrue(ident.wmma_atomic_pair)
+        self.assertEqual(ident.label(), lab)
+        self.assertNotEqual(
+            ident.stable_hash(), replace(ident, wmma_atomic_pair=False).stable_hash()
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

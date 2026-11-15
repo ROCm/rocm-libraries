@@ -83,6 +83,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.reg_transpose = false;
     s.regt_prefetch = 0;
     s.regt_addr_step = false;
+    s.wmma_atomic_pair = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -357,7 +358,7 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
      *     flags={"async": async_dma, "kouter": lds_k_outer, "regt": ...,
-     *            "rtp{N}": ..., "ras": ..., "pad{N}": ...,
+     *            "rtp{N}": ..., "ras": ..., "apr": ..., "pad{N}": ...,
      *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
      *            "wsr{N}": ..., "unroll": unroll_k, "pfa": prefetch_addr},
      *   )
@@ -387,14 +388,14 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, regt, rtp{N}, ras, pad{N}, spk/spkauto, twostage,
+    /* flags: async, kouter, regt, rtp{N}, ras, apr, pad{N}, spk/spkauto, twostage,
      * wsr{N}, unroll, pfa, rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most
      * WGRAD_NAME_MAX_FLAGS
      * when every conditional tag is present. The name is built before
      * validation, so an invalid spec can reach the maximum too. */
     enum
     {
-        WGRAD_NAME_MAX_FLAGS = 17
+        WGRAD_NAME_MAX_FLAGS = 18
     };
     char pad_flag[32] = {0};
     const char* flag_names[WGRAD_NAME_MAX_FLAGS];
@@ -425,6 +426,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     }
     flag_names[n_flags] = "ras";
     flag_on[n_flags] = s->regt_addr_step ? 1 : 0;
+    n_flags++;
+    /* A different split-K epilogue; only tagged when set. Mirrors Python. */
+    flag_names[n_flags] = "apr";
+    flag_on[n_flags] = s->wmma_atomic_pair ? 1 : 0;
     n_flags++;
 
     /* An explicit lds_k_pad changes the LDS row stride and so the emitted code;
@@ -1608,6 +1613,25 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
+    /* wmma_atomic_pair: the 16-bit WMMA split-K atomic epilogue. Mirrors the
+     * WgradConvSpec.validate() gate. */
+    if(s->wmma_atomic_pair)
+    {
+        const char* dd = s->dtype_d ? s->dtype_d : "fp16";
+        const char* epi = s->epilogue ? s->epilogue : "default";
+        if(s->split_k == 1 || s->two_stage || wgrad_streamk_on(s) || s->wave_size != 32
+           || strcmp(epi, "default") != 0 || (strcmp(dd, "fp16") != 0 && strcmp(dd, "bf16") != 0))
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "wmma_atomic_pair is the 16-bit WMMA split-K atomic epilogue: it needs "
+                         "split_k > 1 (not two-stage, not stream-K), wave32, the default epilogue "
+                         "and an fp16 / bf16 dW");
+            return false;
+        }
+    }
+
     /* The wgrad builder has no load/math wave split, so "wavelet" would build
      * the "mem" kernel under another name. Mirrors Python is_valid_wgrad_spec. */
     if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
@@ -2735,6 +2759,100 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
 //                dW row length, so the pair is dword-aligned).
 // The caller must zero-initialise dW before launch.
 // ---------------------------------------------------------------------------
+/* Python _emit_wgrad_split_k_pair_atomics (wmma_atomic_pair): one full packed
+ * atomic per lane per two C rows. Every slot of a lane shares one column and
+ * the adjacent column lives in lane l ^ 1, so for each slot pair (i, i + 1) a
+ * lane packs its two 16-bit values into one dword and swaps it with lane l ^ 1
+ * (one DPP row_xmask:1). The even-column lane then owns row i, the odd-column
+ * lane row i + 1, each stored at the even column. */
+static void wgrad_emit_split_k_pair_atomics(rocke_ir_builder_t* b,
+                                            const rocke_conv_build_ctx_t* ctx,
+                                            const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
+                                            rocke_value_t* block_warp_m_off,
+                                            rocke_value_t* block_warp_n_off,
+                                            rocke_value_t* dw_ptr,
+                                            rocke_value_t* wg_M_v,
+                                            rocke_value_t* wg_N_v,
+                                            rocke_value_t* c_kpg_e)
+{
+    const rocke_mmaop_t* op = ctx->op;
+    const bool is_bf16 = spec->dtype_d != NULL && strcmp(spec->dtype_d, "bf16") == 0;
+    const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
+    const int frag_len = op->dst.frag_len;
+    if(frag_len % 2)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "wmma_atomic_pair needs an even result fragment length");
+        return;
+    }
+    rocke_value_t* c1 = rocke_b_const_i32(b, 1);
+    rocke_value_t* lane_bit = rocke_b_land(b, ctx->lane, c1);
+    rocke_value_t* c0 = rocke_b_const_i32(b, 0);
+    rocke_value_t* odd = rocke_b_cmp_ne(b, lane_bit, c0);
+    int flat = 0;
+    for(int mi = 0; mi < ctx->mfmas_m; ++mi)
+    {
+        rocke_value_t* c_mo = rocke_b_const_i32(b, mi * spec->warp_tile_m);
+        rocke_value_t* atom_m_base = rocke_b_add(b, block_warp_m_off, c_mo);
+        for(int ni = 0; ni < ctx->mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = ctx->final_accs[flat++];
+            rocke_value_t* c_no = rocke_b_const_i32(b, ni * spec->warp_tile_n);
+            rocke_value_t* atom_n_base = rocke_b_add(b, block_warp_n_off, c_no);
+            for(int i = 0; i < frag_len; i += 2)
+            {
+                rocke_value_t* row0 = NULL;
+                rocke_value_t* col = NULL;
+                rocke_value_t* row1 = NULL;
+                rocke_value_t* col1 = NULL;
+                rocke_arch_layout_map_coord(c_map, b, ctx->lane, i, &row0, &col);
+                rocke_arch_layout_map_coord(c_map, b, ctx->lane, i + 1, &row1, &col1);
+                rocke_value_t* e0 = rocke_b_vec_extract(b, acc, i);
+                rocke_value_t* v0
+                    = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, e0) : rocke_b_trunc_f32_to_f16(b, e0);
+                rocke_value_t* e1 = rocke_b_vec_extract(b, acc, i + 1);
+                rocke_value_t* v1
+                    = is_bf16 ? rocke_b_trunc_f32_to_bf16(b, e1) : rocke_b_trunc_f32_to_f16(b, e1);
+                rocke_value_t* pair[2] = {v0, v1};
+                rocke_value_t* own = rocke_b_vec_pack(b, pair, 2, v0->type);
+                rocke_value_t* own_w
+                    = rocke_b_vec_bitcast(b, own, rocke_vector_type(b, rocke_i32(), 1));
+                rocke_value_t* own_i = rocke_b_vec_extract(b, own_w, 0);
+                rocke_value_t* nbr_i = rocke_b_warp_shuffle_xor_dpp(b, own_i, 1);
+                rocke_value_t* nbr_w = rocke_b_vec_pack(b, &nbr_i, 1, rocke_i32());
+                rocke_value_t* nbr = rocke_b_vec_bitcast(b, nbr_w, own->type);
+                rocke_value_t* n0 = rocke_b_vec_extract(b, nbr, 0);
+                rocke_value_t* n1 = rocke_b_vec_extract(b, nbr, 1);
+                /* even column: (own[i], nbr[i]) at row i; odd: (nbr[i+1], own[i+1]). */
+                rocke_value_t* lo = rocke_b_select(b, odd, n1, v0);
+                rocke_value_t* hi = rocke_b_select(b, odd, v1, n0);
+                rocke_value_t* row = rocke_b_select(b, odd, row1, row0);
+                rocke_value_t* c_m = rocke_b_add(b, atom_m_base, row);
+                rocke_value_t* n_col = rocke_b_add(b, atom_n_base, col);
+                rocke_value_t* lb = rocke_b_land(b, ctx->lane, c1);
+                rocke_value_t* c_n = rocke_b_sub(b, n_col, lb);
+                rocke_value_t* m_ok = rocke_b_cmp_lt(b, c_m, wg_M_v);
+                rocke_value_t* n_ok = rocke_b_cmp_lt(b, c_n, wg_N_v);
+                rocke_value_t* ok = rocke_b_land(b, m_ok, n_ok);
+                rocke_if_t if_op = rocke_b_scf_if(b, ok);
+                rocke_b_region_enter(b, if_op.then_region);
+                {
+                    rocke_value_t* r = wgrad_row_addr(b, c_m, ctx->group_idx, c_kpg_e);
+                    rocke_value_t* rm = rocke_b_mul(b, r, wg_N_v);
+                    rocke_value_t* c_off = rocke_b_add(b, rm, c_n);
+                    rocke_value_t* lohi[2] = {lo, hi};
+                    rocke_value_t* vec = rocke_b_vec_pack(b, lohi, 2, v0->type);
+                    if(is_bf16)
+                        rocke_b_global_atomic_add_pk_bf16(b, dw_ptr, c_off, vec, NULL);
+                    else
+                        rocke_b_global_atomic_add_pk_f16(b, dw_ptr, c_off, vec, NULL);
+                }
+                rocke_b_region_leave(b);
+            }
+        }
+    }
+}
+
 static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
                                              const rocke_conv_build_ctx_t* ctx,
                                              const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
@@ -2762,6 +2880,13 @@ static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
     rocke_value_t* c_kpg_e = ctx->group_idx != NULL ? ctx->p_kpg : NULL;
 
     const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
+
+    if(spec->wmma_atomic_pair && !is_fp32)
+    {
+        wgrad_emit_split_k_pair_atomics(
+            b, ctx, spec, block_warp_m_off, block_warp_n_off, dw_ptr, wg_M_v, wg_N_v, c_kpg_e);
+        return;
+    }
 
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; ++mi)

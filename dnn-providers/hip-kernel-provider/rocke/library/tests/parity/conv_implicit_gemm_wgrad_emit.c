@@ -97,6 +97,9 @@
  *         mode 2 (rejected). Must match the Python _REGT_CFGS.
  *  117-118 regt_addr_step on a stride-2 problem with Wo = 8: the plain loop
  *         and regt_prefetch mode 3. Must match the Python _REGT_CFGS.
+ *  119-121 wmma_atomic_pair: fp16 dW with reg_transpose, bf16 dW on the
+ *         default loader, and two-stage (rejected). Must match the Python
+ *         _REGT_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -380,6 +383,23 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         spec->regt_addr_step = true;
         spec->regt_prefetch = idx == 118 ? 3 : 0;
         break;
+    case 119:
+        spec->split_k = 2;
+        spec->wmma_atomic_pair = true;
+        break;
+    case 120:
+        spec->reg_transpose = false;
+        spec->split_k = 2;
+        spec->wmma_atomic_pair = true;
+        spec->dtype_d = "bf16";
+        break;
+    case 121:
+        /* rejected: the two-stage scratch has no packed atomics */
+        spec->reg_transpose = false;
+        spec->split_k = 2;
+        spec->two_stage = true;
+        spec->wmma_atomic_pair = true;
+        break;
     default:
         return -1;
     }
@@ -390,7 +410,7 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
-    if(idx >= 109 && idx <= 118)
+    if(idx >= 109 && idx <= 121)
         return make_regt_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);

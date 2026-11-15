@@ -257,6 +257,14 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * regt_prefetch mode 3 only. Mirrors WgradConvSpec.regt_addr_step.
      * Default false: byte-identical IR. */
     bool regt_addr_step; /* default false */
+    /* wmma_atomic_pair: the 16-bit WMMA split-K atomic epilogue pairs the two
+     * lanes holding adjacent dW columns (lane l and l ^ 1) with one DPP swap,
+     * so each lane issues one full packed atomic per two accumulator rows
+     * instead of one zero-partner packed atomic per element. Needs split_k > 1
+     * (not two-stage, not stream-K), wave32, the default epilogue and an fp16 /
+     * bf16 dW. Mirrors WgradConvSpec.wmma_atomic_pair. Default false:
+     * byte-identical IR. */
+    bool wmma_atomic_pair; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

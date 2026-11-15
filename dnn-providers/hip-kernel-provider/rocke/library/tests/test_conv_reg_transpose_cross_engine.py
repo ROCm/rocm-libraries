@@ -177,5 +177,35 @@ class TestRegtAddrStepCrossEngine(_CrossEngine):
         self.assert_rejected_alike((dict(regt_addr_step=True, reg_transpose=False),))
 
 
+class TestWmmaAtomicPairCrossEngine(_CrossEngine):
+    def test_identical_ir(self):
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        bf16 = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+        self.assert_same(
+            (
+                dict(split_k=2, wmma_atomic_pair=True),
+                dict(split_k=2, wmma_atomic_pair=True, data=bf16),
+                # The epilogue does not need the register-transpose loader.
+                dict(split_k=2, wmma_atomic_pair=True, reg_transpose=False),
+            )
+        )
+
+    def test_rejected_alike(self):
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        self.assert_rejected_alike(
+            (
+                dict(wmma_atomic_pair=True),
+                dict(split_k=2, two_stage=True, wmma_atomic_pair=True),
+                dict(
+                    split_k=2,
+                    wmma_atomic_pair=True,
+                    data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+                ),
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

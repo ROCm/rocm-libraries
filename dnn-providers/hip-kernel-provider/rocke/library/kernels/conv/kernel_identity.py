@@ -159,6 +159,9 @@ class KernelIdentity:
     # wgrad regt_addr_step: the stepped micro-tile address decode. Left out
     # of the hash while False.
     regt_addr_step: bool = False
+    # wgrad wmma_atomic_pair: the paired-lane WMMA split-K atomic epilogue.
+    # Left out of the hash while False.
+    wmma_atomic_pair: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
     # identity_supports_problem). Left out of the hash while False.
@@ -273,6 +276,8 @@ class KernelIdentity:
             del fields["reg_transpose"]
         if not fields["regt_addr_step"]:
             del fields["regt_addr_step"]
+        if not fields["wmma_atomic_pair"]:
+            del fields["wmma_atomic_pair"]
         if not fields["patch"]:
             del fields["patch"]
         if not fields["tap_outer_k"]:

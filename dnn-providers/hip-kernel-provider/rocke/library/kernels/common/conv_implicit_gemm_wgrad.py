@@ -96,6 +96,7 @@ from rocke.core.ir import (
     PtrType,
     Type,
     Value,
+    VectorType,
 )
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
@@ -652,6 +653,16 @@ class WgradConvSpec:
     # correct. Tag "ras". Default False: byte-identical when off.
     regt_addr_step: bool = False
 
+    # WMMA split-K atomic epilogue (16-bit dW) only: pair the two lanes that
+    # hold adjacent dW columns (lane l and l ^ 1 of the C fragment) with one
+    # DPP swap so each lane issues ONE full packed atomic per two accumulator
+    # rows, instead of one packed atomic per element with a zero partner.
+    # Halves the atomic count, and no two lanes of one atomic instruction hit
+    # the same dword any more (the zero-partner form sends lanes l and l ^ 1
+    # to the same address, which the L2 serializes).
+    # Tag "apr". Default False: byte-identical when off.
+    wmma_atomic_pair: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -842,6 +853,8 @@ class WgradConvSpec:
                 # A different K-loop body; only tagged when set.
                 f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
                 "ras": self.regt_addr_step,
+                # A different split-K epilogue; only tagged when set.
+                "apr": self.wmma_atomic_pair,
                 # An explicit lds_k_pad changes the LDS row stride and so the
                 # emitted code, but nothing else in the name reflects it. Two
                 # pads would otherwise collide on one symbol and the compile
@@ -1086,6 +1099,19 @@ class WgradConvSpec:
         _regt_why = _reg_transpose_conflict(self)
         if _regt_why:
             raise ValueError(_regt_why)
+        if self.wmma_atomic_pair and (
+            self.split_k == 1
+            or self.two_stage
+            or self.streamk != "off"
+            or self.wave_size != 32
+            or self.epilogue != "default"
+            or self.data.dtype_d not in ("fp16", "bf16")
+        ):
+            raise ValueError(
+                "wmma_atomic_pair is the 16-bit WMMA split-K atomic epilogue: it "
+                "needs split_k > 1 (not two-stage, not stream-K), wave32, the "
+                "default epilogue and an fp16 / bf16 dW"
+            )
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -4657,6 +4683,23 @@ def _emit_wgrad_split_k_epilogue_wmma(
             else:
                 b.global_atomic_add_pk_f16(dw_ptr, c_off_even, vec)
 
+    if spec.wmma_atomic_pair and dtype_d in ("fp16", "bf16"):
+        _emit_wgrad_split_k_pair_atomics(
+            b,
+            spec,
+            op,
+            accs,
+            lane,
+            block_warp_m_off,
+            block_warp_n_off,
+            dw_ptr,
+            wg_M_v,
+            wg_N_v,
+            _row_addr,
+            _to_dtype,
+        )
+        return
+
     flat = 0
     for mi in range(mfmas_m):
         atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
@@ -4676,6 +4719,78 @@ def _emit_wgrad_split_k_epilogue_wmma(
                         b.global_atomic_add(dw_ptr, c_off, b.vec_extract(acc, i))
                 else:
                     _emit_single_packed_atomic(c_m, c_n, b.vec_extract(acc, i))
+
+
+def _emit_wgrad_split_k_pair_atomics(
+    b: IRBuilder,
+    spec: WgradConvSpec,
+    op,
+    accs: Sequence[Value],
+    lane: Value,
+    block_warp_m_off: Value,
+    block_warp_n_off: Value,
+    dw_ptr: Value,
+    wg_M_v: Value,
+    wg_N_v: Value,
+    row_addr,
+    to_dtype,
+) -> None:
+    """``wmma_atomic_pair``: one full packed atomic per lane per two C rows.
+
+    In the WMMA result fragment every slot of a lane shares one column, and
+    the adjacent column lives in lane ``l ^ 1`` (the column is ``l % 16`` plus
+    a multiple of 16). For each slot pair ``(i, i + 1)`` a lane packs its two
+    16-bit values into one dword and swaps that dword with lane ``l ^ 1`` (one
+    DPP ``row_xmask:1``). The even-column lane then owns row ``i`` -- (its
+    value, its neighbour's) -- and the odd-column lane row ``i + 1`` -- (its
+    neighbour's value, its own) -- each stored with one packed atomic at the
+    even column. Rows come from the result layout map (``op.dst_layout()``),
+    so the row of slot ``i + 1`` is not assumed.
+
+    ``wg_N`` is even (``is_valid_wgrad_spec`` requires an even dW row), so an
+    in-range even column always has its odd partner in range: the column test
+    is the same one the zero-partner path makes.
+    """
+    dtype_d = spec.data.dtype_d
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+    c_map = op.dst_layout()
+    frag_len = op.dst.frag_len
+    if frag_len % 2:
+        raise ValueError("wmma_atomic_pair needs an even result fragment length")
+    c1 = b.const_i32(1)
+    odd = b.cmp_ne(b.land(lane, c1), b.const_i32(0))
+    flat = 0
+    for mi in range(mfmas_m):
+        atom_m_base = b.add(block_warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+            for i in range(0, frag_len, 2):
+                row0, col = c_map.coord(b, lane, i)
+                row1, _ = c_map.coord(b, lane, i + 1)
+                v0 = to_dtype(b.vec_extract(acc, i))
+                v1 = to_dtype(b.vec_extract(acc, i + 1))
+                own = b.vec_pack([v0, v1], v0.type)
+                own_i = b.vec_extract(b.vec_bitcast(own, VectorType(I32, 1)), 0)
+                nbr_i = b.warp_shuffle_xor_dpp(own_i, 1)
+                nbr = b.vec_bitcast(b.vec_pack([nbr_i], I32), own.type)
+                n0 = b.vec_extract(nbr, 0)
+                n1 = b.vec_extract(nbr, 1)
+                # even column: (own[i], nbr[i]) at row i; odd: (nbr[i+1], own[i+1]).
+                lo = b.select(odd, n1, v0)
+                hi = b.select(odd, v1, n0)
+                c_m = b.add(atom_m_base, b.select(odd, row1, row0))
+                c_n = b.sub(b.add(atom_n_base, col), b.land(lane, c1))
+                ok = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
+                with b.scf_if(ok):
+                    c_off = b.add(b.mul(row_addr(c_m), wg_N_v), c_n)
+                    vec = b.vec_pack([lo, hi], v0.type)
+                    if dtype_d == "bf16":
+                        b.global_atomic_add_pk_bf16(dw_ptr, c_off, vec)
+                    else:
+                        b.global_atomic_add_pk_f16(dw_ptr, c_off, vec)
 
 
 def _cshuffle_epilogue(op, atom, grid, kwargs: dict) -> CShuffleEpilogue:

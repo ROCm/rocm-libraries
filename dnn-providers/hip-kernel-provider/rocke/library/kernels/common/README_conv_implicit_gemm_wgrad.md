@@ -88,6 +88,12 @@ tagged in the kernel name and `KernelIdentity`.
 - WMMA split-K on gfx12 RDNA: `gfx12-generic` (and so gfx1200 / gfx1201) sets
   `memory.has_global_float_atomic_add` in both arch tables, which admits the
   WMMA split-K atomic and two-stage paths there exactly as on gfx1250.
+- `wmma_atomic_pair` (tag `apr`): the 16-bit WMMA split-K atomic epilogue
+  pairs lane `l` with lane `l ^ 1` (the adjacent dW column) through one DPP
+  swap per two accumulator rows, so each lane issues one full packed atomic
+  instead of one zero-partner packed atomic per element. Needs `split_k > 1`
+  (not two-stage, not stream-K), wave32, the `default` epilogue and an fp16 /
+  bf16 dW; independent of `reg_transpose`.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 
