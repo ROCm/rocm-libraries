@@ -547,6 +547,26 @@ TEST_F(TestRMSnormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
     }
 }
 
+TEST_F(TestRMSnormPlanBuilder, AcceptsABakedOrRuntimeEpsilon)
+{
+    // A pass-by-value epsilon carries no baked scalar; the plan reads it from the variant pack.
+    for(const bool fused : {false, true})
+    {
+        SCOPED_TRACE(fused ? "fused activation" : "one node");
+        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            fused ? hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph()
+                  : hipdnn_test_sdk::utilities::createValidRMSNormGraph(),
+            [](GraphT& graph) {
+                auto& epsilon = tensorNamed(graph, "epsilon");
+                epsilon.value.Reset();
+                epsilon.is_runtime_pass_by_value = true;
+            });
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    }
+}
+
 TEST_F(TestRMSnormPlanBuilder, DeclinesAVirtualKernelBuffer)
 {
     for(const char* name : {"x", "y", "scale"})

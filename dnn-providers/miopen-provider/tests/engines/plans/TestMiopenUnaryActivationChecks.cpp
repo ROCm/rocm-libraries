@@ -78,6 +78,42 @@ TEST(TestMiopenUnaryActivationChecks,
         {1, 1, 4, 8}, std::vector<int64_t>{64, 64, 16, 1}, std::vector<int64_t>{32, 32, 1, 4})));
 }
 
+TEST(TestMiopenUnaryActivationChecks,
+     DeclinesPairWhereOnlyOneSideTakesTheTwoDimensionalShortcutWithStridedColumns)
+{
+    // The input's row stride equals its width, so only the output's row stride (16 against
+    // width 8) selects the shortcut, and the input's columns are 2 apart.
+    EXPECT_FALSE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{32, 32, 8, 2}, std::vector<int64_t>{64, 64, 16, 1})));
+    EXPECT_FALSE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{64, 64, 16, 1}, std::vector<int64_t>{32, 32, 8, 2})));
+    // Only the strided side's row stride (16 against width 8) selects the shortcut; the
+    // unit-stride side's row stride equals its width.
+    EXPECT_FALSE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{64, 64, 16, 2}, std::vector<int64_t>{32, 32, 8, 1})));
+    EXPECT_FALSE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{32, 32, 8, 1}, std::vector<int64_t>{64, 64, 16, 2})));
+}
+
+TEST(TestMiopenUnaryActivationChecks,
+     DeclinesLowRankPairTheTwoDimensionalSolverReadsWithUnitColumns)
+{
+    EXPECT_FALSE(
+        isSupported(reluGraph({4, 8}, std::vector<int64_t>{16, 2}, std::vector<int64_t>{16, 1})));
+    EXPECT_FALSE(
+        isSupported(reluGraph({4, 8}, std::vector<int64_t>{16, 1}, std::vector<int64_t>{16, 2})));
+    EXPECT_FALSE(isSupported(
+        reluGraph({1, 4, 8}, std::vector<int64_t>{32, 16, 2}, std::vector<int64_t>{64, 16, 1})));
+}
+
+TEST(TestMiopenUnaryActivationChecks, AcceptsPackedColumnMajorPairWithUnitLeadingExtents)
+{
+    // Both sides are packed, so MIOpen walks them flat and the strided-column decline does not
+    // apply.
+    EXPECT_TRUE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{32, 32, 1, 4}, std::vector<int64_t>{32, 32, 1, 4})));
+}
+
 TEST(TestMiopenUnaryActivationChecks, AcceptsNonPackedPairTheTwoDimensionalSolverReadsCorrectly)
 {
     // Unit columns on both sides.
