@@ -85,7 +85,10 @@ class Repo:
 
     def commit(self) -> str:
         self.git("add", "-A")
-        self.git("commit", "-q", "--allow-empty", "-m", "c")
+        # The user's git config must not sign, or prompt for, fixture commits.
+        self.git(
+            "-c", "commit.gpgSign=false", "commit", "-q", "--allow-empty", "-m", "c"
+        )
         return self.git("rev-parse", "HEAD")
 
     def check(self, *args: str, root: Path | None = None) -> tuple[int, dict]:
@@ -139,6 +142,25 @@ def test_code_written_once_is_not_a_copy(repo):
     head = repo.commit()
     rc, report = repo.check("--base", base, "--head", head)
     assert rc == 0 and report["findings"] == []
+
+
+def test_fixture_commits_ignore_the_users_signing_settings(
+    monkeypatch, tmp_path_factory, tmp_path
+):
+    """`commit.gpgSign=true` in the user's config must not stop fixture commits."""
+    home = tmp_path_factory.mktemp("home")
+    for key, value in {"commit.gpgSign": "true", "gpg.program": "false"}.items():
+        subprocess.run(
+            ["git", "config", "--file", str(home / ".gitconfig"), key, value],
+            check=True,
+        )
+    # `Repo.git` runs with the environment captured at import, so patch that copy.
+    monkeypatch.setitem(_GIT_ENV, "HOME", str(home))
+    monkeypatch.setitem(_GIT_ENV, "USERPROFILE", str(home))
+    monkeypatch.delitem(_GIT_ENV, "XDG_CONFIG_HOME", raising=False)
+    r = Repo(tmp_path)
+    r.write("library/kernels/keep.py", "X = 1\n")
+    assert r.commit()
 
 
 def test_new_code_written_twice_is_a_new_copy(repo):
@@ -755,6 +777,18 @@ def test_dunder_main_block_is_skipped(repo):
     head = repo.commit()
     _, report = repo.check("--base", base, "--head", head)
     assert report["findings"] == []
+
+
+def test_a_block_run_only_on_import_is_still_checked(repo):
+    """`if __name__ != "__main__":` runs when the file is imported, so it is library
+    code and not harness code."""
+    script = 'if __name__ != "__main__":\n' + BLOCK.format(load="load", k="32.0")
+    repo.write("library/builders/gfx950/x/a.py", script)
+    base = repo.commit()
+    repo.write("library/builders/gfx950/x/b.py", script)
+    head = repo.commit()
+    _, report = repo.check("--base", base, "--head", head)
+    assert kinds(report) == ["NEW COPY"]
 
 
 @pytest.mark.parametrize("name", ["check", "bench"])
