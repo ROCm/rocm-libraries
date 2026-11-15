@@ -18,102 +18,17 @@
 
 /**
  * @file
- * Host side of MxGemmPipelineAgBgCrCompTDMScheduled: the K-major E8M0 scale
- * layout, bit-exact element codecs, the output rounding of its epilogue and a reference GEMM.
- *
- * Scales. One E8M0 byte per 32 K values of each A or B row. The natural layout is
- * [rows][ceil(K / 32)]; the kernel reads [ceil(K / 128)][rows][4]: K step s of row r is the int32
- * at (s * rows + r) * 4, its byte g the scale of K values s * 128 + g * 32 .. + 31. A K step past
- * ceil(K / 32) groups (a partial last K step) is zero-padded. This is the gfx1250 scale preshuffle
- * (preShuffleScaleBuffer_gfx1250) with one row group spanning all rows, the same bytes as
- * hipBLASLt's preSwizzleScalesGFX1250.
+ * Reference of MxGemmPipelineAgBgCrCompTDMScheduled: bit-exact element codecs, the output
+ * rounding of its epilogue and a reference GEMM over its K-major scales (mx_scale_to_kmajor in
+ * host/mx_processing.hpp).
  *
  * Elements. A and B rows are K-contiguous bytes: FP4 two per byte (K even in the low nibble), FP8
  * E4M3 (OCP, no infinity) and BF8 E5M2 one per byte. C and D are row-major in the output type.
+ * The decoders follow the hardware encodings, including E8M0 0x00 (2^-127) and BF8 infinities,
+ * which type_convert decodes differently.
  */
 
 namespace ck_tile {
-
-namespace mx_tdm_scheduled {
-
-/// K values of one K-major scale pack (a K step) and of one E8M0 scale.
-inline constexpr index_t kScaleStepK  = 128;
-inline constexpr index_t kScaleGroupK = 32;
-
-} // namespace mx_tdm_scheduled
-
-/// Bytes of a K-major scale array of `rows` rows.
-CK_TILE_HOST std::size_t mx_scale_kmajor_bytes(index_t rows, long_index_t K)
-{
-    return static_cast<std::size_t>(integer_divide_ceil(K, mx_tdm_scheduled::kScaleStepK)) * rows *
-           4;
-}
-
-/// [rows][ceil(K / 32)] (row r at natural + r * row_stride) to [ceil(K / 128)][rows][4]:
-/// preShuffleScaleBuffer_gfx1250 with MThreadPerXdl = rows, after a copy that drops the row
-/// stride and zero-pads the groups to a whole K step.
-CK_TILE_HOST std::vector<uint8_t>
-mx_scale_to_kmajor(const uint8_t* natural, index_t rows, long_index_t K, long_index_t row_stride)
-{
-    const long_index_t groups = integer_divide_ceil(K, mx_tdm_scheduled::kScaleGroupK);
-    const long_index_t padded = integer_divide_ceil(K, mx_tdm_scheduled::kScaleStepK) * 4;
-    if(row_stride < groups)
-        throw std::invalid_argument("mx_scale_to_kmajor: row_stride " + std::to_string(row_stride) +
-                                    " < " + std::to_string(groups) + " scale groups");
-    std::vector<uint8_t> out(mx_scale_kmajor_bytes(rows, K), 0);
-    if(rows == 0)
-        return out;
-    std::vector<uint8_t> dense(out.size(), 0);
-    for(index_t r = 0; r < rows; ++r)
-        std::copy_n(natural + r * row_stride, groups, dense.begin() + r * padded);
-    preShuffleScaleBuffer_gfx1250<uint8_t, mx_tdm_scheduled::kScaleGroupK, true>(
-        dense.data(), out.data(), rows, static_cast<index_t>(padded), rows);
-    return out;
-}
-
-/// True when Kernel declares `static constexpr bool KMajorScales = true`.
-template <typename Kernel, typename = void>
-struct uses_kmajor_mx_scales : std::false_type
-{
-};
-
-template <typename Kernel>
-struct uses_kmajor_mx_scales<Kernel, std::void_t<decltype(Kernel::KMajorScales)>>
-    : std::bool_constant<Kernel::KMajorScales>
-{
-};
-
-template <typename Kernel>
-inline constexpr bool uses_kmajor_mx_scales_v = uses_kmajor_mx_scales<Kernel>::value;
-
-/// mx_scale_to_kmajor of a [rows][K / 32] host tensor of one-byte scales, as a 1-D host tensor.
-template <typename ScaleTensor>
-CK_TILE_HOST ScaleTensor mx_scale_tensor_to_kmajor(const ScaleTensor& natural,
-                                                   index_t rows,
-                                                   long_index_t K)
-{
-    static_assert(sizeof(*natural.data()) == 1, "mx_scale_tensor_to_kmajor: one-byte scales");
-    const auto bytes =
-        mx_scale_to_kmajor(reinterpret_cast<const uint8_t*>(natural.data()),
-                           rows,
-                           K,
-                           static_cast<long_index_t>(natural.mDesc.get_strides()[0]));
-    ScaleTensor out({bytes.size()});
-    std::memcpy(out.data(), bytes.data(), bytes.size());
-    return out;
-}
-
-/// The inverse of mx_scale_to_kmajor: [rows][ceil(K / 32)], dense.
-CK_TILE_HOST std::vector<uint8_t>
-mx_scale_from_kmajor(const uint8_t* kmajor, index_t rows, long_index_t K)
-{
-    const long_index_t groups = integer_divide_ceil(K, mx_tdm_scheduled::kScaleGroupK);
-    std::vector<uint8_t> out(static_cast<std::size_t>(rows * groups));
-    for(index_t r = 0; r < rows; ++r)
-        for(long_index_t g = 0; g < groups; ++g)
-            out[r * groups + g] = kmajor[((g / 4) * rows + r) * 4 + g % 4];
-    return out;
-}
 
 namespace mx_tdm_scheduled {
 

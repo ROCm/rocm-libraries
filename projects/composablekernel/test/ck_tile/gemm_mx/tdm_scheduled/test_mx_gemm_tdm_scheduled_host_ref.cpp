@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only checks of host/mx_scale_kmajor.hpp: the K-major scale shuffle, the element codecs,
-// the epilogue's output rounding, and the K-major reference against a plain one.
+// Host-only checks of mx_scale_to_kmajor (host/mx_processing.hpp) and
+// host/reference/reference_mx_gemm_tdm_scheduled.hpp: the K-major scale shuffle, the element
+// codecs, the epilogue's output rounding, and the K-major reference against a plain one.
 
 #include <cmath>
 #include <cstdint>
@@ -13,7 +14,8 @@
 
 #include <gtest/gtest.h>
 
-#include "ck_tile/host/mx_scale_kmajor.hpp"
+#include "ck_tile/host/mx_processing.hpp"
+#include "ck_tile/host/reference/reference_mx_gemm_tdm_scheduled.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
 namespace {
@@ -21,6 +23,23 @@ namespace {
 using ck_tile::index_t;
 using ck_tile::long_index_t;
 namespace sched = ck_tile::mx_tdm_scheduled;
+
+/// Bytes of a K-major scale array of `rows` rows.
+std::size_t mx_scale_kmajor_bytes(index_t rows, long_index_t K)
+{
+    return static_cast<std::size_t>(ck_tile::integer_divide_ceil(K, sched::kScaleStepK)) * rows * 4;
+}
+
+/// The inverse of mx_scale_to_kmajor: [rows][ceil(K / 32)], dense.
+std::vector<uint8_t> mx_scale_from_kmajor(const uint8_t* kmajor, index_t rows, long_index_t K)
+{
+    const long_index_t groups = ck_tile::integer_divide_ceil(K, sched::kScaleGroupK);
+    std::vector<uint8_t> out(static_cast<std::size_t>(rows * groups));
+    for(index_t r = 0; r < rows; ++r)
+        for(long_index_t g = 0; g < groups; ++g)
+            out[r * groups + g] = kmajor[((g / 4) * rows + r) * 4 + g % 4];
+    return out;
+}
 
 TEST(MxGemmTdmScheduledHostRef, ScaleShuffleRoundTripsAndPadsThePartialKStep)
 {
@@ -35,9 +54,9 @@ TEST(MxGemmTdmScheduledHostRef, ScaleShuffleRoundTripsAndPadsThePartialKStep)
         for(auto& x : natural)
             x = static_cast<uint8_t>(1 + rng() % 254);
         const auto kmajor = ck_tile::mx_scale_to_kmajor(natural.data(), rows, K, stride);
-        ASSERT_EQ(kmajor.size(), ck_tile::mx_scale_kmajor_bytes(rows, K));
+        ASSERT_EQ(kmajor.size(), mx_scale_kmajor_bytes(rows, K));
         ASSERT_EQ(kmajor.size(), static_cast<size_t>((K + 127) / 128 * rows * 4));
-        const auto back = ck_tile::mx_scale_from_kmajor(kmajor.data(), rows, K);
+        const auto back = mx_scale_from_kmajor(kmajor.data(), rows, K);
         for(index_t r = 0; r < rows; ++r)
             for(long_index_t g = 0; g < groups; ++g)
                 ASSERT_EQ(back[r * groups + g], natural[r * stride + g]);

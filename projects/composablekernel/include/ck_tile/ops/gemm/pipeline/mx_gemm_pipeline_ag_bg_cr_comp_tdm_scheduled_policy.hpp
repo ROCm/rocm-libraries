@@ -225,8 +225,8 @@ MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
  *
  * A is M x K and B is N x K, both K-contiguous (RCR); E is M x N row-major. A and B are
  * pk_fp4_t, fp8_t or bf8_t of the same width, with one E8M0 scale per 32 K values in the K-major
- * layout [ceil(K / 128)][M or N][4] (see host/mx_scale_kmajor.hpp). ODataType (E) is fp8_t
- * (saturating), half_t or bf16_t.
+ * layout [ceil(K / 128)][M or N][4] (see mx_scale_to_kmajor in host/mx_processing.hpp). ODataType
+ * (E) is fp8_t (saturating), half_t or bf16_t.
  *
  * BlockGemmShape is a TileGemmShape: block tile (tile_m, tile_n, tile_k), block warps 2x2x1,
  * 4x1x1 or 1x4x1 and warp tile 32x16x128 (FP4) or 16x16x128: the scaled WMMA atom. A

@@ -25,7 +25,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/arg_parser.hpp"
-#include "ck_tile/host/mx_scale_kmajor.hpp"
+#include "ck_tile/host/reference/reference_mx_gemm_tdm_scheduled.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
