@@ -1622,6 +1622,11 @@ private:
         options.add("CONV_GROUP_TW", std::to_string(tile.tw));
         options.add("CONV_GROUP_CB", std::to_string(tile.cb));
         options.add("CONV_GROUP_CF", std::to_string(tile.cf));
+        // One split: the kernel's direct dw store (compiled only then).
+        if(wrw->second.args.direct != 0)
+        {
+            options.add("CONV_GROUP_DIRECT", std::string("1"));
+        }
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4WrwArgs>());
         conv.setBlockSize(

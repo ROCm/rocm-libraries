@@ -95,7 +95,7 @@ struct K4WrwArgs
     int splits;
     long long tiles; // images x output planes x row tiles x column tiles
     long long partialElems; // dw elements: one slot of the partials
-    /// One split (`direct`): the kernel writes dw itself, as the reduce would (the sum from +0,
+    /// One split (`direct`; the kernel compiled with CONV_GROUP_DIRECT): the kernel writes dw itself, as the reduce would (the sum from +0,
     /// rounded once to the element type; element (k, c, t, r, s) at k sK + c sC + t sT + r sR +
     /// s sS, taps reflected under `reflect`), and no reduce runs; `partial` is unused.
     void* dw;

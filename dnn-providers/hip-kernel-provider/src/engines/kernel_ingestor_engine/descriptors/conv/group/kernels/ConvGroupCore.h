@@ -1375,8 +1375,13 @@ struct K4WrwFrag
 // before the barrier that ends the previous tile's multiplies. Waves: CB >= 4, CB / 4 blocks a
 // wave; else 4 / CB waves a block, each taking every (4 / CB)-th chunk, their sums added in wave
 // order through LDS at the end. The workgroup writes its split's partial slot.
+// CONV_GROUP_DIRECT 1 (wrw at one split): the kernels write dw themselves (K4WrwArgs::direct);
+// 0 (default): fp32 partials only, compiled as without the direct store.
+#ifndef CONV_GROUP_DIRECT
+#define CONV_GROUP_DIRECT 0
+#endif
 /// Writes dw element (output channel kAll over all groups, input channel c of its group, tap of
-/// the ft x R x S taps) under a.direct (one split): the sum from +0, rounded once, as
+/// the ft x R x S taps) under CONV_GROUP_DIRECT (one split): the sum from +0, rounded once, as
 /// k4WrwReduce writes one slot.
 template <class T, int R, int S>
 __device__ inline void k4WrwPutDw(const K4WrwArgs& a, long long kAll, int c, int tap, float v)
@@ -1565,10 +1570,10 @@ __device__ void k4WrwMma(const K4WrwArgs& a)
         if(sub != 0)
             return;
     }
-    // The diagonal (in-group) entries into the split's slot: [g][k][c][tap]; at one split into
-    // dw (the branch taken once, outside the unrolled stores).
+    // The diagonal (in-group) entries into the split's slot: [g][k][c][tap]; at one split
+    // (CONV_GROUP_DIRECT) into dw.
     const int taps = a.ft * TAPS;
-    if(a.direct)
+#if CONV_GROUP_DIRECT
     {
 #pragma unroll
         for(int bb = 0; bb < BPW; ++bb)
@@ -1593,6 +1598,7 @@ __device__ void k4WrwMma(const K4WrwArgs& a)
         }
         return;
     }
+#endif
     float* out = a.partial + split * a.partialElems;
 #pragma unroll
     for(int bb = 0; bb < BPW; ++bb)
@@ -1810,7 +1816,7 @@ __device__ void k4WrwMmaWide(const K4WrwArgs& a)
         return;
     const int taps = a.ft * TAPS;
     const int c = ib * 16 + c16;
-    if(a.direct)
+#if CONV_GROUP_DIRECT
     {
 #pragma unroll
         for(int ob = 0; ob < NBO; ++ob)
@@ -1829,6 +1835,7 @@ __device__ void k4WrwMmaWide(const K4WrwArgs& a)
                 }
         return;
     }
+#endif
     float* out
         = a.partial + split * a.partialElems + static_cast<long long>(g) * a.cg * a.cg * taps;
 #pragma unroll
@@ -1991,7 +1998,7 @@ __device__ void k4WrwFma(const K4WrwArgs& a)
     }
     const int taps = a.ft * TAPS;
     const int g = (cbt * CH + k) / a.cg;
-    if(a.direct)
+#if CONV_GROUP_DIRECT
     {
 #pragma unroll
         for(int tap = 0; tap < TAPS; ++tap)
@@ -1999,6 +2006,7 @@ __device__ void k4WrwFma(const K4WrwArgs& a)
                 a, static_cast<long long>(g) * a.cg + k % a.cg, c, ft * TAPS + tap, acc[tap]);
         return;
     }
+#endif
     float* out = a.partial + split * a.partialElems
                  + ((static_cast<long long>(g) * a.cg + k % a.cg) * a.cg + c) * taps + ft * TAPS;
 #pragma unroll
