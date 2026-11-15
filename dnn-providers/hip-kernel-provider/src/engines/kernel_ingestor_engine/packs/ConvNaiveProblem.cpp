@@ -334,26 +334,32 @@ std::optional<ConvNaiveProblem>
         return std::nullopt;
     }
 
-    // A fused graph: the convolution's y is the virtual head of the pointwise chain, and the
-    // kernel writes the chain's output in its place.
+    // A fused graph: the tensor the convolution writes is the virtual head of the pointwise
+    // chain, and the kernel writes the chain's output in its place. (Only forward reaches here:
+    // convFields declines the other directions' fused graphs.)
     conv_epilogue::ConvEpilogue epilogue;
     if(context.graph.nodeCount() > 1)
     {
         const auto& tensors = context.graph.getTensorMap();
-        const auto convY = tensors.find(fields->operands.y);
-        if(convY == tensors.end() || convY->second == nullptr || convY->second->dims() == nullptr)
+        const auto written = tensors.find(fields->writtenUid);
+        if(written == tensors.end() || written->second == nullptr
+           || written->second->dims() == nullptr)
         {
             return std::nullopt;
         }
-        const std::vector<int64_t> convDims(convY->second->dims()->begin(),
-                                            convY->second->dims()->end());
-        auto parsed = conv_epilogue::parseConvEpilogue(context, fields->operands.y, convDims);
+        const std::vector<int64_t> convDims(written->second->dims()->begin(),
+                                            written->second->dims()->end());
+        auto parsed = conv_epilogue::parseConvEpilogue(context, fields->writtenUid, convDims);
         if(!parsed.has_value() || parsed->empty())
         {
             return std::nullopt;
         }
         epilogue = std::move(*parsed);
-        fields->operands.y = epilogue.outputUid;
+        auto& role = fields->writtenUid == fields->operands.x
+                         ? fields->operands.x
+                         : (fields->writtenUid == fields->operands.w ? fields->operands.w
+                                                                     : fields->operands.y);
+        role = epilogue.outputUid;
         fields->writtenUid = epilogue.outputUid;
     }
 

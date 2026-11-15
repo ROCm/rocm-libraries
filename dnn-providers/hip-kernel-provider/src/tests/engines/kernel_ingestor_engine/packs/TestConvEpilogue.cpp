@@ -447,12 +447,12 @@ std::vector<DeclineCase> declineCases()
                      }});
     cases.push_back({"OperandSpatialExtent", sbr(), [](FusedGraphSpec& s) {
                          auto& t = entryOf(s, BIAS_OPERAND).tensor;
-                         t.dims[2] = 2;
+                         t.dims[2] = t.dims[1]; // the channel count, on another axis
                          t.strides = conv_naive_test::packedStrides(t.dims, true);
                      }});
     cases.push_back({"OperandBatchExtent", sbr(), [](FusedGraphSpec& s) {
                          auto& t = entryOf(s, BIAS_OPERAND).tensor;
-                         t.dims[0] = 2;
+                         t.dims[0] = t.dims[1]; // the channel count, on another axis
                          t.strides = conv_naive_test::packedStrides(t.dims, true);
                      }});
     cases.push_back({"OperandRank", sbr(), [](FusedGraphSpec& s) {
@@ -531,20 +531,32 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST(TestConvEpilogue, DeclinesFusedBackwardDirections)
 {
-    // Forward only: a backward-data or backward-weights graph never carries an epilogue.
-    for(const auto direction : {ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
-    {
-        auto conv = conv_naive_test::specFor(nhwcHalf(), direction);
-        const GraphFixture single(conv_naive_test::buildGraph(conv));
-        ASSERT_TRUE(conv_naive::parseConvNaiveProblem(single.context(), direction, Fusion::EPILOGUE)
-                        .has_value());
-        // The same graph with a pointwise node after it.
-        FusedGraphSpec spec = fusedSpecFor(nhwcHalf(), {relu()}, DataType::HALF);
-        spec.conv.direction = direction;
-        const GraphFixture fused(buildFusedGraph(spec));
-        EXPECT_FALSE(conv_naive::parseConvNaiveProblem(fused.context(), direction, Fusion::EPILOGUE)
-                         .has_value());
-    }
+    // Forward only: a backward-data graph whose dx feeds a pointwise chain is declined, though it
+    // is well formed (dx and dy have one shape here: same padding, unit stride, C == K).
+    ConvShape shape = nhwcHalf();
+    shape.c = shape.k;
+    auto conv = conv_naive_test::specFor(shape, ConvDirection::BACKWARD_DATA);
+    const GraphFixture single(conv_naive_test::buildGraph(conv));
+    ASSERT_TRUE(conv_naive::parseConvNaiveProblem(
+                    single.context(), ConvDirection::BACKWARD_DATA, Fusion::EPILOGUE)
+                    .has_value());
+    FusedGraphSpec spec = fusedSpecFor(shape, {relu()}, DataType::FLOAT);
+    spec.conv.direction = ConvDirection::BACKWARD_DATA;
+    // dy is real; dx, which the convolution writes, heads the chain.
+    spec.conv.y.isVirtual = false;
+    spec.conv.y.dataType = shape.dataType;
+    spec.conv.x.isVirtual = true;
+    spec.conv.x.dataType = DataType::FLOAT;
+    spec.nodes[0].in0 = conv_naive_test::X_UID;
+    ASSERT_EQ(spec.conv.x.dims, spec.conv.y.dims);
+    const GraphFixture fused(buildFusedGraph(spec));
+    EXPECT_FALSE(conv_naive::parseConvNaiveProblem(
+                     fused.context(), ConvDirection::BACKWARD_DATA, Fusion::EPILOGUE)
+                     .has_value());
+    // The forward direction of the same graph is not a forward convolution either.
+    EXPECT_FALSE(
+        conv_naive::parseConvNaiveProblem(fused.context(), ConvDirection::FORWARD, Fusion::EPILOGUE)
+            .has_value());
 }
 
 // ---------------------------------------------------------------------------

@@ -137,11 +137,12 @@ inline bool dimsEqual(const flatbuffers::Vector<int64_t>* dims,
            && std::equal(dims->begin(), dims->end(), expected.begin());
 }
 
-/// Strides of a tensor's rank, none negative.
-inline bool stridesWellFormed(const data_objects::TensorAttributes& tensor, size_t rank)
+/// One stride per dim, none negative.
+inline bool stridesWellFormed(const data_objects::TensorAttributes& tensor)
 {
     const auto* strides = tensor.strides();
-    if(strides == nullptr || strides->size() != rank)
+    const auto* dims = tensor.dims();
+    if(strides == nullptr || dims == nullptr || strides->size() != dims->size())
     {
         return false;
     }
@@ -160,7 +161,7 @@ inline bool intermediateFits(const data_objects::TensorAttributes& tensor,
 {
     return tensor.virtual_() && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor)
            && !ragged(tensor) && isFloatElement(tensor.data_type())
-           && dimsEqual(tensor.dims(), outputDims) && stridesWellFormed(tensor, outputDims.size());
+           && dimsEqual(tensor.dims(), outputDims) && stridesWellFormed(tensor);
 }
 
 template <typename Optional>
@@ -235,7 +236,7 @@ public:
             }
             scalar = false;
         }
-        if(!stridesWellFormed(*tensor, _dims.size()))
+        if(!stridesWellFormed(*tensor))
         {
             return false;
         }
@@ -369,8 +370,9 @@ public:
                 }
                 const int64_t in0 = pw.in_0_tensor_uid();
                 const int64_t in1 = *pw.in_1_tensor_uid();
-                // Exactly one input is the running value.
-                if((in0 == current) == (in1 == current))
+                // One input is the running value. Both cannot be: the other one is read as an
+                // operand, and the running value is virtual, which addBinaryInput declines.
+                if(in0 != current && in1 != current)
                 {
                     return std::nullopt;
                 }
