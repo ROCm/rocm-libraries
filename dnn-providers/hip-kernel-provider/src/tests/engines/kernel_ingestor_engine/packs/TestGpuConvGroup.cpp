@@ -397,7 +397,9 @@ std::vector<DeviceCase> deviceCases()
 /// Whether this device has a K4 atom for the case's element type, and the direction serves it.
 bool served(const ConvShape& shape, ConvDirection direction)
 {
-    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+    // The properties outlive the architecture's view of their name.
+    const auto device = currentDeviceProperties();
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
     if(direction == ConvDirection::BACKWARD_WEIGHTS)
     {
         // Small groups: a matrix-core atom for the element type, and fp32 also on FMA everywhere.
