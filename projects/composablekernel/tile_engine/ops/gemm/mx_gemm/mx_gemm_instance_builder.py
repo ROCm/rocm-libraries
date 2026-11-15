@@ -227,9 +227,9 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         # direct: MxDirectStoreEpilogue, E from the accumulators; tdm: TdmEpilogue, E through LDS
         # (the store_width tuning only limits N; take 1 to run any N).
         epilogue_type = (
-            "ck_tile::MxTdmStoreEpilogue<Pipeline>"
+            "ck_tile::MxTdmStoreEpilogue<P>"
             if epilogue == "tdm"
-            else "ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<Pipeline>>"
+            else "ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<P>>"
         )
         return f"""// Generated kernel instance for {kernel_name}
 #pragma once
@@ -279,12 +279,29 @@ struct SelectedKernel {{
                                           ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
             Traits>,
         Policy>;
-    using Kernel = ck_tile::MxGemmKernel<
-        ck_tile::GemmTile2DNMajorPartitioner<typename Pipeline::BlockGemmShape>,
-        Pipeline,
+    // One kernel per TailNumber of the pipeline (Pipeline::WithTailNum).
+    template <typename P>
+    using KernelOf = ck_tile::MxGemmKernel<
+        ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
+        P,
         {epilogue_type}>;
 
+    // The pipeline's TailHandler picks the kernel of K's whole-tile count on the host.
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
+    {{
+        const ck_tile::index_t full_tiles = args.K / TileK;
+        return Pipeline::TailHandler(
+            [&](auto, auto tail_num) {{
+                return launch_kernel<
+                    KernelOf<typename Pipeline::template WithTailNum<decltype(tail_num)::value>>>(
+                    args, stream);
+            }},
+            Pipeline::BlockHasHotloop(full_tiles),
+            Pipeline::GetBlockLoopTailNum(full_tiles));
+    }}
+
+    template <typename Kernel>
+    static float launch_kernel(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
     {{
         const auto kargs = Kernel::MakeKernelArgs(args);
         if(!Kernel::IsSupportedArgument(kargs))

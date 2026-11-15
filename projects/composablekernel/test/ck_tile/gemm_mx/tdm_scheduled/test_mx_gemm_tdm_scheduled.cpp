@@ -35,8 +35,8 @@ TEST(MxGemmTdmScheduled, Fp4MafOddTiles)
     check<Maf>(1024, 1024, 1536);
     check<Maf>(1024, 1024, 2560);
 }
-// One instance serves every whole-tile count: 1 and 2 run without the loop, 3 and 4 with it,
-// each with TailNumber One (odd) or Two (even).
+// One instance serves every whole-tile count: odd counts (1, 3) run its TailNumber::One kernel,
+// even counts (2, 4) its Two kernel.
 TEST(MxGemmTdmScheduled, Fp4MafTileCounts)
 {
     for(index_t tiles = 1; tiles <= 4; ++tiles)

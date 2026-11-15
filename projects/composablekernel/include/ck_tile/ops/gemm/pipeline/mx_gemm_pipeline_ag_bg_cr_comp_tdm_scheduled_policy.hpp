@@ -10,6 +10,7 @@
 #include "ck_tile/ops/gemm/block/block_gemm_areg_breg_creg_v1_custom_policy.hpp"
 #include "ck_tile/ops/gemm/block/block_gemm_mx_asmem_bsmem_creg_tdm_scheduled.hpp"
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
+#include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp"
@@ -237,18 +238,37 @@ MxTdmScheduledSelectTraits(long_index_t M, long_index_t N, long_index_t K)
  * get_warp_size()). Traits is an MxTdmScheduledGemmTraits. Scheduler must be Intrawave: the
  * pipeline is one explicitly scheduled loop in which every wave interleaves its LDS reads and
  * WMMAs.
+ *
+ * TailNum is the K loop's variant, as in CK's GemmPipelineProblem: TailNumber::One (an odd count
+ * of whole K tiles) or Two (even), picked on the host by the pipeline's TailHandler, one kernel
+ * per variant; TailNumber::Full runs any count, its odd tile chosen at run time.
  */
 template <typename ADataType_,
           typename BDataType_,
           typename ODataType_,
           typename BlockGemmShape_,
           typename Traits_                 = MxTdmScheduledGemmTraits<>,
-          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave>
+          GemmPipelineScheduler Scheduler_ = GemmPipelineScheduler::Intrawave,
+          TailNumber TailNum_              = TailNumber::Full>
 struct MxGemmTdmScheduledProblem
     : MxGemmPipelineProblem<ADataType_, BDataType_, float, BlockGemmShape_, Traits_, Scheduler_>
 {
     using ODataType   = remove_cvref_t<ODataType_>;
     using AccDataType = float;
+
+    static constexpr auto TailNum = TailNum_;
+    static_assert(TailNum == TailNumber::One || TailNum == TailNumber::Two ||
+                      TailNum == TailNumber::Full,
+                  "comp_tdm_scheduled: TailNum is TailNumber::One, Two or Full");
+    /// This Problem with TailNum T.
+    template <TailNumber T>
+    using WithTailNum = MxGemmTdmScheduledProblem<ADataType_,
+                                                  BDataType_,
+                                                  ODataType_,
+                                                  BlockGemmShape_,
+                                                  Traits_,
+                                                  Scheduler_,
+                                                  T>;
 
     static_assert(std::is_same_v<typename MxGemmTdmScheduledProblem::ALayout,
                                  tensor_layout::gemm::RowMajor> &&

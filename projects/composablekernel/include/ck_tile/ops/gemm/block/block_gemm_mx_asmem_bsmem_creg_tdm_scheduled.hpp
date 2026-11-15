@@ -127,6 +127,13 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
           as_window(MakeLdsScaleWindow<true>(smem_, wave_m_)),
           bs_window(MakeLdsScaleWindow<false>(smem_, wave_n_))
     {
+        static_for<0, 2, 1>{}([&](auto parity) {
+            const index_t buffer = parity * kBufferStride;
+            origins[0][parity]   = opaque_scalar(FragmentOrigin<true>(buffer));
+            origins[1][parity]   = opaque_scalar(FragmentOrigin<false>(buffer));
+            origins[2][parity]   = opaque_scalar(ScaleOrigin<true>(buffer));
+            origins[3][parity]   = opaque_scalar(ScaleOrigin<false>(buffer));
+        });
     }
 
     /// A K step's scales and A fragments in LDS buffer `buffer` (a byte offset).
@@ -200,6 +207,35 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
     }
 
     private:
+    static constexpr index_t kBufferStride = Policy::template GetLdsBufferStride<Problem>();
+
+    /// The word offset, from a linear read window's, of the wave's repeat-0, K-step-0 fragment
+    /// of A or B in LDS buffer `buffer` (a byte offset).
+    template <bool IsA>
+    CK_TILE_DEVICE index_t FragmentOrigin(index_t buffer) const
+    {
+        constexpr index_t atom    = Policy::template GetAtom<Problem, IsA>();
+        constexpr index_t repeats = IsA ? kRm : kRn;
+        constexpr index_t base    = Policy::template GetLdsOperand<Problem, IsA>().base / 4;
+        constexpr index_t wave_words =
+            Policy::template GetLdsRowOffset<Problem, IsA>(repeats * atom);
+        return buffer / 4 + base + (IsA ? wave_m : wave_n) * wave_words;
+    }
+
+    /// The word offset, from a linear scale window's, of K step 0's scales of A or B in LDS
+    /// buffer `buffer`.
+    template <bool IsA>
+    CK_TILE_DEVICE static index_t ScaleOrigin(index_t buffer)
+    {
+        return buffer / 4 + Policy::template GetLdsOperand<Problem, IsA, true>().base / 4;
+    }
+
+    /// origins[i][parity] for the LDS buffer at byte offset `buffer`.
+    CK_TILE_DEVICE index_t Origin(index_t i, index_t buffer) const
+    {
+        return buffer == 0 ? origins[i][0] : origins[i][1];
+    }
+
     /// A's or B's fragment of repeat r at K step `step`, as words. With linear reads the wave,
     /// buffer, repeat and step are a word offset from the window's; otherwise the window moves
     /// to the fragment's first row and the buffer and step are the offset.
@@ -225,10 +261,8 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
                         offsets[i] = Policy::template GetLdsRowOffset<Problem, IsA>(i * atom);
                     return offsets;
                 }();
-                constexpr index_t wave_words =
-                    Policy::template GetLdsRowOffset<Problem, IsA>(repeats * atom);
-                return window.load_with_offset(buffer / 4 + base + wave_index * wave_words +
-                                                   repeat_offsets[r] + step * (kStepBytes / 4),
+                return window.load_with_offset(Origin(IsA ? 0 : 1, buffer) + repeat_offsets[r] +
+                                                   step * (kStepBytes / 4),
                                                number<-1>{},
                                                bool_constant<false>{});
             }
@@ -262,8 +296,9 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
             constexpr index_t step_words =
                 Policy::template MakeLdsScaleDescriptor<Problem, IsA>().calculate_offset(
                     make_multi_index(1, 0, 0));
-            return window.load_with_offset(
-                buffer / 4 + op.base / 4 + step * step_words, number<-1>{}, bool_constant<false>{});
+            return window.load_with_offset(Origin(IsA ? 2 : 3, buffer) + step * step_words,
+                                           number<-1>{},
+                                           bool_constant<false>{});
         }
         else
         {
@@ -277,6 +312,11 @@ struct BlockGemmMxAsmemBsmemCRegTDMScheduled
 
     index_t wave_m;
     index_t wave_n;
+    /// Word origins of the linear reads, [A, B, A scales, B scales][buffer parity], from
+    /// FragmentOrigin and ScaleOrigin. Opaque, so that each operand and buffer keeps one address
+    /// VGPR and the reads' remaining offsets fit the 16-bit DS immediate; folded into each
+    /// read's constant, the offsets pass 64 KiB and every read holds its own address VGPR.
+    index_t origins[4][2];
     ALdsWindow a_window;
     BLdsWindow b_window;
     AScaleWindow as_window;

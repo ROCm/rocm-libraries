@@ -29,7 +29,7 @@ std::vector<index_t> sample_rows(index_t M, index_t tile_m)
 }
 
 template <typename Kernel>
-void check_sampled(index_t M, index_t N, index_t K)
+void check_sampled_kernel(index_t M, index_t N, index_t K)
 {
     using Pipeline = typename Kernel::GemmPipeline;
     using O        = typename Pipeline::ODataType;
@@ -47,6 +47,13 @@ void check_sampled(index_t M, index_t N, index_t K)
     for(std::size_t i = 0; i < rows.size(); ++i)
         std::memcpy(got_rows.data() + i * row_bytes, got.data() + rows[i] * row_bytes, row_bytes);
     EXPECT_EQ(first_mismatch<O>(got_rows, want, N), "");
+}
+
+template <typename Kernel>
+void check_sampled(index_t M, index_t N, index_t K)
+{
+    for_tail_num<Kernel>(
+        K, [&](auto variant) { check_sampled_kernel<typename decltype(variant)::type>(M, N, K); });
 }
 
 // A past 2^31 bytes: the MAB shape (tile_n 16) at M 65536, K 81920 (2.5 GiB of FP4 A).

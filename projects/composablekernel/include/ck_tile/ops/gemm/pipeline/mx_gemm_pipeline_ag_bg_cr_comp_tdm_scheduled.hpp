@@ -23,9 +23,10 @@ inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::coheren
 #endif
 } // namespace mx_tdm_scheduled
 
-/// The K loop's tile-count dispatch, as BaseGemmPipelineAgBgCrCompTDM's: tile t uses LDS buffer
-/// t % 2 and the loop runs tile pairs, so a whole-tile count leaves one tile after the pairs
-/// (TailNumber::One) or none (Two), and up to two tiles need no loop.
+/// The K loop's tile-count dispatch, on the host as flatmm's: tile t uses LDS buffer t % 2 and
+/// the loop runs tile pairs, so a whole-tile count has one tile besides the pairs
+/// (TailNumber::One) or none (Two). The caller instantiates the kernel whose Problem::TailNum
+/// TailHandler passes; the loop runs any count of pairs, so the hot loop is not dispatched.
 template <typename Problem>
 struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
 {
@@ -42,27 +43,26 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
         return num_loop % PrefetchStages == 1 ? TailNumber::One : TailNumber::Two;
     }
 
+    /// The TailNumber of an M x N x K problem: of its whole K tiles, the K tail excluded.
+    CK_TILE_HOST_DEVICE static constexpr TailNumber GetTailNumber(index_t K)
+    {
+        return GetBlockLoopTailNum(K / Problem::BlockGemmShape::kK);
+    }
+
+    /// Calls run_func(bool_constant<true>, integral_constant<TailNumber, tail_number>).
     /// With CK_TILE_FORCE_SINGLE_TAIL_HANDLER, one variant, TailNumber::Full, serves every count:
     /// its odd tile and the K tail's buffer are chosen at run time.
     template <typename RunFunction>
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
-#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
-        if(has_hot_loop)
-        {
-            if(tail_number == TailNumber::One)
-                return run_func(bool_constant<true>{},
-                                integral_constant<TailNumber, TailNumber::One>{});
-            return run_func(bool_constant<true>{},
-                            integral_constant<TailNumber, TailNumber::Two>{});
-        }
-        if(tail_number == TailNumber::One)
-            return run_func(bool_constant<false>{},
-                            integral_constant<TailNumber, TailNumber::One>{});
-        return run_func(bool_constant<false>{}, integral_constant<TailNumber, TailNumber::Two>{});
-#else
         ignore = has_hot_loop;
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
+        if(tail_number == TailNumber::One)
+            return run_func(bool_constant<true>{},
+                            integral_constant<TailNumber, TailNumber::One>{});
+        return run_func(bool_constant<true>{}, integral_constant<TailNumber, TailNumber::Two>{});
+#else
         ignore = tail_number;
         return run_func(bool_constant<true>{}, integral_constant<TailNumber, TailNumber::Full>{});
 #endif
@@ -85,9 +85,9 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
  *
  * M, N and K are run time; the Problem's traits (MxTdmScheduledGemmTraits) carry the code paths
  * that depend on them (edges, wide offsets, a K tail). Tile t uses LDS buffer t % 2 and the loop
- * runs tile pairs; the base's TailHandler picks, from the whole-tile count, the variant that
- * runs the odd tile after the pairs (TailNumber::One) or none (Two), so every tile's buffer is
- * a compile-time constant.
+ * runs tile pairs; Problem::TailNum is the variant that runs the odd tile before the pairs
+ * (TailNumber::One) or none (Two), so every tile's buffer is a compile-time constant. The host
+ * picks it from the whole-tile count with the base's TailHandler and launches that kernel.
  */
 template <typename Problem_, typename Policy_ = MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>>
 struct MxGemmPipelineAgBgCrCompTDMScheduled
@@ -114,6 +114,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     using BElementWise   = remove_cvref_t<typename Problem::BElementWise>;
 
     using PipelineImplBase = GemmPipelineAgBgCrImplBase<Problem, Policy>;
+
+    /// This pipeline with Problem::TailNum T: the kernel the base's TailHandler picks.
+    template <TailNumber T>
+    using WithTailNum =
+        MxGemmPipelineAgBgCrCompTDMScheduled<typename Problem::template WithTailNum<T>, Policy>;
 
     static_assert(mx_tdm_scheduled::InvalidTuning<Policy::template GetReason<Problem>()>::value,
                   "comp_tdm_scheduled: the Problem and policy break a rule of the policy's "
@@ -242,6 +247,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             name += "_wide";
         if(Traits::kHasTail)
             name += "_tail" + std::to_string(Traits::kTailSteps);
+        if(Problem::TailNum == TailNumber::One)
+            name += "_odd";
+        else if(Problem::TailNum == TailNumber::Two)
+            name += "_even";
         return name + "_w" + std::to_string(Traits::kStoreWidth);
     }
 
@@ -282,6 +291,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             return "D's offsets pass 2^31: needs a WideD instance";
         if(need.tail_steps != Traits::kTailSteps)
             return "the K tail (K mod tile_k, in 128-wide K steps) is not the instance's TailSteps";
+        if(Problem::TailNum != TailNumber::Full && Base::GetTailNumber(K) != Problem::TailNum)
+            return "the whole K tile count's parity is not the instance's TailNum "
+                   "(the base's TailHandler picks it)";
         if(N % Traits::kStoreWidth != 0)
             return "the store width does not divide N";
         return nullptr;
@@ -945,14 +957,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         }
 
         /// The K loop: full_tiles whole K tiles, then the K tail with Traits::kHasTail.
-        /// HasHotLoop and TailNum are the base's for full_tiles; TailNumber::Full has the odd
-        /// tile and the K tail's buffer chosen at run time.
-        template <bool HasHotLoop, TailNumber TailNum>
+        /// TailNum is the base's for full_tiles; TailNumber::Full has the odd tile and the K
+        /// tail's buffer chosen at run time.
+        template <TailNumber TailNum>
         CK_TILE_DEVICE void operator()(AccTile& acc, index_t full_tiles)
         {
-            static_assert(TailNum == TailNumber::One || TailNum == TailNumber::Two ||
-                              (TailNum == TailNumber::Full && HasHotLoop),
-                          "comp_tdm_scheduled: TailNumber One, Two or (with the loop) Full");
             // builds the TDM descriptors once, before the loop and patch per tile
             Hoist();
             if constexpr(kHasCluster)
@@ -978,15 +987,25 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 a_tile = block_gemm.LocalPrefetchA(BufferBase(0), 0);
                 block_gemm.template LocalPrefetchB<0, kRn>(b_tile, BufferBase(0), 0);
             }
-            // Tile t uses LDS buffer t % 2. The pairs run buffer 0 and then buffer 1, so each
-            // tile's buffer is a compile-time constant and its LDS offsets fold into immediates.
-            // TailNumber::One runs the odd tile, in buffer 0, after the pairs; without the loop
-            // (one or two whole tiles) the pair is straight-line code.
+            // Tile t uses LDS buffer t % 2, so each tile's buffer is a compile-time constant and
+            // its LDS offsets fold into immediates. TailNumber::Two runs pairs in buffers 0 and
+            // 1; One runs the odd tile, tile 0, first and then pairs in buffers 1 and 0. Either
+            // way nothing but the K tail follows a loop that may run no pair: an odd tile after
+            // it, reached around the loop too, costs about 130 VGPRs (maf).
             const index_t pairs_end =
-                TailNum == TailNumber::Two
-                    ? full_tiles * kTileK
-                    : integer_divide_nonnegative<2>(full_tiles) * (2 * kTileK);
-            if constexpr(HasHotLoop)
+                TailNum == TailNumber::Full
+                    ? integer_divide_nonnegative<2>(full_tiles) * (2 * kTileK)
+                    : full_tiles * kTileK;
+            if constexpr(TailNum == TailNumber::One)
+            {
+                k_tile<kKSteps, 0>(acc, a_tile, b_tile, 0, 0);
+                for(index_t k0 = kTileK; k0 < pairs_end; k0 += 2 * kTileK)
+                {
+                    k_tile<kKSteps, 1>(acc, a_tile, b_tile, k0, 1);
+                    k_tile<kKSteps, 0>(acc, a_tile, b_tile, k0 + kTileK, 0);
+                }
+            }
+            else
             {
                 for(index_t k0 = 0; k0 < pairs_end; k0 += 2 * kTileK)
                 {
@@ -994,14 +1013,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     k_tile<kKSteps, 1>(acc, a_tile, b_tile, k0 + kTileK, 1);
                 }
             }
-            else if constexpr(TailNum == TailNumber::Two)
-            {
-                k_tile<kKSteps, 0>(acc, a_tile, b_tile, 0, 0);
-                k_tile<kKSteps, 1>(acc, a_tile, b_tile, kTileK, 1);
-            }
-            if constexpr(TailNum == TailNumber::One)
-                k_tile<kKSteps, 0>(acc, a_tile, b_tile, pairs_end, 0);
-            else if constexpr(TailNum == TailNumber::Full)
+            if constexpr(TailNum == TailNumber::Full)
             {
                 if(integer_modulo_nonnegative<2>(full_tiles))
                     k_tile<kKSteps, 0>(acc, a_tile, b_tile, pairs_end, 0);
@@ -1071,14 +1083,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             scale_b_window[number<0>{}],
             c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(p_smem));
         AccTile acc;
-        const index_t full_tiles = Traits::kHasTail ? num_loop - 1 : num_loop;
-        Base::TailHandler(
-            [&](auto has_hot_loop, auto tail_num) {
-                impl.template operator()<decltype(has_hot_loop)::value, decltype(tail_num)::value>(
-                    acc, full_tiles);
-            },
-            Base::BlockHasHotloop(full_tiles),
-            Base::GetBlockLoopTailNum(full_tiles));
+        impl.template operator()<Problem::TailNum>(acc, Traits::kHasTail ? num_loop - 1 : num_loop);
         c_block_tile = BlockGemm::ToCBlockTile(acc);
 #else
         ignore = a_dram_block_window_tmp;

@@ -359,11 +359,19 @@ int run_kernel(const Options& o)
     return bad ? 1 : 0;
 }
 
-/// Runs pipeline P with the epilogue -epilogue names.
+/// Runs pipeline P with the epilogue -epilogue names, in the variant of K's whole-tile count.
 template <typename P>
 int run(const Options& o)
 {
-    return o.epilogue == "tdm" ? run_kernel<TdmKernel<P>>(o) : run_kernel<DirectKernel<P>>(o);
+    const index_t full_tiles = o.K / P::kTileK;
+    return P::TailHandler(
+        [&](auto, auto tail_num) {
+            using PT = typename P::template WithTailNum<decltype(tail_num)::value>;
+            return o.epilogue == "tdm" ? run_kernel<TdmKernel<PT>>(o)
+                                       : run_kernel<DirectKernel<PT>>(o);
+        },
+        P::BlockHasHotloop(full_tiles),
+        P::GetBlockLoopTailNum(full_tiles));
 }
 
 /// The named instances: the tuned instances of the maf, medium and mab problems and variants of

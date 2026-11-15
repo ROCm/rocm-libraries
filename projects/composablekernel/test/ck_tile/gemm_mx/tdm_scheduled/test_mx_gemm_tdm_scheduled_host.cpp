@@ -185,6 +185,42 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     EXPECT_EQ(Mab::GetTuningName<MabProblem>(), "_c1x4_pf0_lp0_hplrnone");
 }
 
+// The host picks the kernel of a whole-tile count's parity: TailNumber::One for odd counts, Two
+// for even ones, with the K tail excluded; each variant rejects the other parity, Full none.
+TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCount)
+{
+    using ck_tile::TailNumber;
+    using Default = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using Full    = PipelineOf<MafProblem, Default>;
+    using One     = Full::WithTailNum<TailNumber::One>;
+    using Two     = Full::WithTailNum<TailNumber::Two>;
+    static_assert(Full::GetTailNumber(512) == TailNumber::One);
+    static_assert(Full::GetTailNumber(1024) == TailNumber::Two);
+    static_assert(Full::GetTailNumber(1536 + 128) == TailNumber::One);
+    const auto picked = [](index_t K) {
+        const index_t tiles = K / 512;
+        return Full::TailHandler([](auto, auto tail_num) { return decltype(tail_num)::value; },
+                                 Full::BlockHasHotloop(tiles),
+                                 Full::GetBlockLoopTailNum(tiles));
+    };
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
+    EXPECT_EQ(picked(512), TailNumber::One);
+    EXPECT_EQ(picked(1024), TailNumber::Two);
+    EXPECT_EQ(picked(65536), TailNumber::Two);
+#else
+    EXPECT_EQ(picked(512), TailNumber::Full);
+#endif
+    EXPECT_EQ(One::GetKernelName(), "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_odd_w1");
+    EXPECT_EQ(Two::GetKernelName(), "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_even_w1");
+    for(index_t K : {512, 1024, 1536, 2048})
+    {
+        const bool odd = K / 512 % 2;
+        EXPECT_EQ(One::GetUnsupportedReason(1024, 1024, K) == nullptr, odd) << K;
+        EXPECT_EQ(Two::GetUnsupportedReason(1024, 1024, K) == nullptr, !odd) << K;
+        EXPECT_EQ(Full::GetUnsupportedReason(1024, 1024, K), nullptr) << K;
+    }
+}
+
 TEST(MxGemmTdmScheduledHost, PolicyRejectsInvalidProblems)
 {
     using Default  = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;

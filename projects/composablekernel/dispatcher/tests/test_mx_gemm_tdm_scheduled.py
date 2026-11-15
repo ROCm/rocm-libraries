@@ -461,7 +461,7 @@ class TestDispatcher(unittest.TestCase):
             )
             header = path.read_text()
         self.assertIn("_comp_tdm_scheduled_tdm_", path.name)
-        self.assertIn("ck_tile::MxTdmStoreEpilogue<Pipeline>", header)
+        self.assertIn("ck_tile::MxTdmStoreEpilogue<P>", header)
         self.assertNotIn("MxDirectStoreEpilogue", header)
 
     def test_kernel_config(self):

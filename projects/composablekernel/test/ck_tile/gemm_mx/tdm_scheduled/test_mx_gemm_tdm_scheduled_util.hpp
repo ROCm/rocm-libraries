@@ -71,6 +71,44 @@ using TdmKernelOf =
                           P,
                           ck_tile::MxTdmStoreEpilogue<P>>;
 
+/// Kernel with its pipeline's Problem::TailNum T. TdmEpilogue does not depend on the pipeline's
+/// TailNum; the direct-store epilogue stores the pipeline's C block tile.
+template <typename Kernel, ck_tile::TailNumber T>
+struct WithTailNum;
+template <typename Partitioner, typename P, typename Epilogue, ck_tile::TailNumber T>
+struct WithTailNum<ck_tile::MxGemmKernel<Partitioner, P, Epilogue>, T>
+{
+    using type = ck_tile::MxGemmKernel<Partitioner, typename P::template WithTailNum<T>, Epilogue>;
+};
+template <typename Partitioner, typename P, index_t StoreWidth, ck_tile::TailNumber T>
+struct WithTailNum<ck_tile::MxGemmKernel<Partitioner,
+                                         P,
+                                         ck_tile::MxDirectStoreEpilogue<
+                                             ck_tile::MxDirectStoreEpilogueProblem<P, StoreWidth>>>,
+                   T>
+{
+    using PT   = typename P::template WithTailNum<T>;
+    using type = ck_tile::MxGemmKernel<
+        Partitioner,
+        PT,
+        ck_tile::MxDirectStoreEpilogue<ck_tile::MxDirectStoreEpilogueProblem<PT, StoreWidth>>>;
+};
+
+/// Calls f(WithTailNum<Kernel, T>{}) with T the TailNum of K: the pipeline's TailHandler picks
+/// TailNumber::One or Two from the whole-tile count on the host.
+template <typename Kernel, typename F>
+auto for_tail_num(index_t K, F&& f)
+{
+    using P                  = typename Kernel::GemmPipeline;
+    const index_t full_tiles = K / P::kTileK;
+    return P::TailHandler(
+        [&](auto, auto tail_num) { return f(WithTailNum<Kernel, decltype(tail_num)::value>{}); },
+        P::BlockHasHotloop(full_tiles),
+        P::GetBlockLoopTailNum(full_tiles));
+}
+
+/// A comp_tdm_scheduled instance, named by its TailNumber::Full kernel: check runs the kernel of
+/// each problem's TailNum (for_tail_num).
 template <typename A,
           typename B,
           typename O,
@@ -370,7 +408,7 @@ first_mismatch(const std::vector<uint8_t>& got, const std::vector<uint8_t>& want
 /// Runs `Kernel` on the sparse inputs, their scales scale_shift above E8M0's bias, and
 /// requires bitwise equality with the reference.
 template <typename Kernel>
-void check(index_t M, index_t N, index_t K, int scale_shift = kSparseScaleShift)
+void check_kernel(index_t M, index_t N, index_t K, int scale_shift)
 {
     SCOPED_TRACE(Kernel::GetName() + " M" + std::to_string(M) + " N" + std::to_string(N) + " K" +
                  std::to_string(K) + " scale shift " + std::to_string(scale_shift));
@@ -390,6 +428,15 @@ void check(index_t M, index_t N, index_t K, int scale_shift = kSparseScaleShift)
     const auto want = run_reference<Kernel>(in, M, N, K);
     EXPECT_EQ(first_mismatch<typename Kernel::GemmPipeline::ODataType>(got, want, N), "");
 #endif
+}
+
+/// check_kernel of the instance's kernel for K's TailNum.
+template <typename Kernel>
+void check(index_t M, index_t N, index_t K, int scale_shift = kSparseScaleShift)
+{
+    for_tail_num<Kernel>(K, [&](auto variant) {
+        check_kernel<typename decltype(variant)::type>(M, N, K, scale_shift);
+    });
 }
 
 } // namespace mx_tdm_scheduled_test
