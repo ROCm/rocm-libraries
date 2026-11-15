@@ -22,11 +22,13 @@
 # take the first buildable config, the probe. Config 9 holds an scf.if_else,
 # which their recorder does not record yet; the other configs record.
 #
-# There is no C counterpart (barrier_fence_emit.c): the attention backward
-# family is Python-only (no C++ builder of these kernels exists; see the
-# C++-engine waiver in dsl_docs/instances/attention_bwd.md). The C++ engine's
-# own fence emission is unit-tested by tests/core/test_barrier_fence.cpp (the
-# probe), and library/tests/test_barrier_fence_parity_emit.py lowers this
+# There is no C counterpart (barrier_fence_emit.c). The backward kernels'
+# C++ builders have their own parity pairs (attention_bwd_*_emit.c and
+# attention_dense_bwd_*_emit.c, dsl_docs/instances/attention_bwd.md 0.3),
+# whose .ll, every fenced barrier included, must match Python byte for byte.
+# The C++ engine's own fence emission is unit-tested by
+# tests/core/test_barrier_fence.cpp (the probe), and
+# library/tests/test_barrier_fence_parity_emit.py lowers this
 # emitter's "ir" output with rocke_engine.lower_serialized_ir when the engine is
 # built, comparing it byte for byte with the "ll" output (the cross-engine
 # check of every config, backward kernels included).

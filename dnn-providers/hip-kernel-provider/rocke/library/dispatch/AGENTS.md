@@ -534,8 +534,9 @@ without one, the architecture's full-part CU count.
 
 `attention_bwd/` is the dispatcher of the SDPA backward families (general,
 dense, unified; design doc `platform/dsl_docs/instances/attention_bwd.md`,
-sections 8 and 9). It is Python-only: the C++ engine has no backward (design
-doc 0.3, the C++-engine waiver).
+sections 8 and 9). It is Python-only. The C++ engine has twins of the backward
+kernel builders, but not of this registry, routing, tuning or the recorded
+refusal tables (design doc 0.3).
 
 * **Knob registry** (`tuning_common.py`). Every `AttnBwdSpec` tuning field,
   every plan runtime value (`RUNTIME_KNOBS`), every prep / convert tuning
@@ -596,13 +597,14 @@ doc 0.3, the C++-engine waiver).
 
 **Production status: dormant.** Like the forward registry, the backward
 dispatcher is not load-bearing for production yet: no provider calls it (the
-hip-kernel-provider serves rocKE kernels through the C++ engine, which has no
-backward), so hipDNN backward requests go to the provider's other engines.
+hip-kernel-provider serves rocKE kernels through the C++ engine, which has the
+backward kernel builders but not this dispatcher), so hipDNN backward requests
+go to the provider's other engines.
 Its callers are the CPU tests (`tests/dispatch/attention_bwd/test_registry.py`,
 `test_serving_policy.py`, which plans every accepted case with the shipped
 policy and no override). Follow-up: a provider backward
-engine that calls `run_attention_bwd` (with the C++ port of the backward, or a
-Python-serving path).
+engine that calls `run_attention_bwd` (a C++ port of this routing on top of the
+kernel builder twins, or a Python-serving path).
 
 `tests/test_attention_bwd_dispatch.py` checks that every accepted case-table
 request gets exactly one family and never the dense one when ineligible.
