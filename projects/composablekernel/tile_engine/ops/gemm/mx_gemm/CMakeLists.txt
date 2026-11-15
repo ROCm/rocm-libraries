@@ -108,10 +108,9 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
         -include ${instance_header}
     )
     if(trait MATCHES "^comp_tdm_scheduled_")
-        # rocKE's comgr options; comp_tdm_scheduled's schedule assumes them.
+        # rocKE's comgr options but the machine scheduler, which the pipeline's hints steer.
         target_compile_options(${target_name} PRIVATE
             "SHELL:-mllvm -amdgpu-expert-scheduling-mode"
-            "SHELL:-mllvm -enable-misched=false"
             "SHELL:-mllvm -enable-post-misched=false"
             "SHELL:-mllvm -greedy-regclass-priority-trumps-globalness"
         )

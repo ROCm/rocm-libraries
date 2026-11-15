@@ -11,6 +11,13 @@
 #include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_policy.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
+// 0: the machine scheduler orders each region (a half K step or a K step) with the hot loop
+// hints. 1: the source order is the schedule (pinned per-step waits, no hints), built with
+// -mllvm -enable-misched=false.
+#ifndef CK_TILE_TDM_SCHEDULED_SOURCE_ORDER
+#define CK_TILE_TDM_SCHEDULED_SOURCE_ORDER 0
+#endif
+
 namespace ck_tile {
 
 namespace mx_tdm_scheduled {
@@ -79,9 +86,12 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
  * SplitBLdsRead) and Pipeline (PrefetchStages 2: tile k refills its own buffer with
  * tile k+2 once the cluster has read it; tile k+1 is waited for at tile k's last K step).
  *
- * The schedule is one intrawave loop, written with explicit waits rather than left to the
- * compiler's schedulers, so Problem::Scheduler must be GemmPipelineScheduler::Intrawave; the
- * tuning knobs are the policy's (MxGemmPipelineAgBgCrCompTDMScheduledPolicy).
+ * The schedule is one intrawave loop, so Problem::Scheduler must be
+ * GemmPipelineScheduler::Intrawave. The machine scheduler orders each region (a half K step, a K
+ * step) with V1-style hot loop hints that spread the next K step's LDS reads over the WMMAs;
+ * fences pin the barriers and TDM loads, whose descriptors are computed a region ahead.
+ * CK_TILE_TDM_SCHEDULED_SOURCE_ORDER keeps the source order instead. The tuning knobs are the
+ * policy's (MxGemmPipelineAgBgCrCompTDMScheduledPolicy).
  *
  * M, N and K are run time; the Problem's traits (MxTdmScheduledGemmTraits) carry the code paths
  * that depend on them (edges, wide offsets, a K tail). Tile t uses LDS buffer t % 2 and the loop
@@ -198,6 +208,21 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     /// cross.
     static constexpr int32_t kAluMayCross =
         LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS;
+    static constexpr bool kSourceOrder = CK_TILE_TDM_SCHEDULED_SOURCE_ORDER != 0;
+    /// The fence mask around the barriers: with the machine scheduler SALU stays put too, as the
+    /// barriers are SALU.
+    static constexpr int32_t kBarrierFence =
+        kSourceOrder ? kAluMayCross : LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::TRANS;
+    /// A K step's ds_loads (unclamped): kReadsA with LocalPrefetchA (scales and A), kReadsBFrag
+    /// per B fragment.
+    static constexpr index_t kReadsBFrag = Policy::template GetChunksPerLane<Problem>();
+    static constexpr index_t kReadsA =
+        (kRm < 8 ? 1 : kRm / 4) + (kRn < 8 ? 1 : kRn / 4) + kReadsBFrag * (kAtomM / 16) * kRm;
+    /// Half B's reads before its first half's WMMAs, and the s_wait_dscnt of a refill after them.
+    static constexpr index_t kReadsHalfB   = kReadsA + kReadsBFrag * kHalf;
+    static constexpr index_t kPendingHalfB = kReadsHalfB < 63 ? kReadsHalfB : 63;
+    static_assert(min(kReadsA + kReadsBFrag * kRn, index_t{63}) == kReadsPerStep,
+                  "comp_tdm_scheduled: the read counts are the policy's GetReadsPerStep");
     using BlockGemm  = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
     using CBlockTile = typename BlockGemm::CBlockTile;
     using AccTile    = typename BlockGemm::AccTile;
@@ -603,6 +628,35 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 static_cast<uint32_t>(steps_left));
         }
 
+        /// Issue split in two, the descriptor arithmetic ahead of the refill's barrier and the
+        /// loads after it.
+        struct Refill
+        {
+            TDMGroups data;
+            TDMGroups scale;
+        };
+        CK_TILE_DEVICE Refill PrepareIssue(index_t k0, index_t parity) const
+        {
+            const index_t k_byte     = integer_divide_nonnegative<kKPerByte>(k0);
+            const index_t k_step     = integer_divide_nonnegative<Policy::kAtomK>(k0);
+            const uint32_t lds_shift = static_cast<uint32_t>(BufferBase(parity));
+            Refill r{data, scale};
+            r.data.g0 =
+                TDM_GROUP0{data_lds + lds_shift, data_global + static_cast<uint32_t>(k_byte), 0, 0};
+            r.data.g1.tensorDim0(static_cast<uint32_t>(packed_k - k_byte));
+            r.scale.g0 = TDM_GROUP0{scale_lds + lds_shift,
+                                    scale_global + static_cast<uint32_t>(k_step * scale_stride),
+                                    0,
+                                    0};
+            r.scale.g1.tensorDim1(static_cast<uint32_t>(k_atoms - k_step));
+            return r;
+        }
+        CK_TILE_DEVICE static void IssuePrepared(const Refill& r)
+        {
+            amd_tdm_load(r.data.g0, r.data.g1, r.data.g2);
+            amd_tdm_load(r.scale.g0, r.scale.g1, r.scale.g2);
+        }
+
         // ---------------------------------------------------------------- Gl2Prefetcher
 
         /// Bytes between A's or B's rows, from the DRAM window's descriptor as the TDM loads take
@@ -746,35 +800,64 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
 
         /// The GL2 prefetch ahead of tile k0, then (with local prefetch) the wait and barrier that
         /// publish tile k0 + 1 before its first read.
-        template <index_t StaticParity>
+        /// Gl2: the GL2 prefetch is here, not a region earlier (gl2_early).
+        template <index_t StaticParity, bool Gl2 = true>
         CK_TILE_DEVICE void publish_next_tile(index_t k0) const
         {
-            PrefetchAhead<StaticParity>(k0);
-            sched_fence<kAluMayCross>();
+            if constexpr(Gl2)
+                PrefetchAhead<StaticParity>(k0);
+            sched_fence<kBarrierFence>();
             if constexpr(kPrefetchLdsRead)
             {
                 // Tile k+1 is read next, from this point: it is the only TDM load in flight, and
                 // the barrier below publishes it.
                 s_wait_tensorcnt<0>();
                 s_barrier();
-                sched_fence<kAluMayCross>();
+                sched_fence<kBarrierFence>();
             }
         }
 
         /// Refills buffer parity with the tile two K tiles on, once the cluster and the
         /// workgroup have read it: this wave's reads of the buffer drain, then one barrier
-        /// (cluster_barrier() includes the workgroup's) publishes every wave's.
-        CK_TILE_DEVICE void fill_stage(index_t k0, index_t parity) const
+        /// (cluster_barrier() includes the workgroup's) publishes every wave's. Pending is the
+        /// count of the other buffer's reads issued since this buffer's last read.
+        template <index_t Pending>
+        CK_TILE_DEVICE static void fill_barrier()
         {
-            sched_fence<kAluMayCross>();
-            s_wait_dscnt_pinned<kLatePending>();
+            sched_fence<kBarrierFence>();
+            s_wait_dscnt_pinned<Pending>();
             if constexpr(kHasCluster)
                 cluster_barrier();
             else
                 s_barrier();
+            if constexpr(!kSourceOrder)
+                sched_fence<kBarrierFence>();
+        }
+        CK_TILE_DEVICE void fill_stage(index_t k0, index_t parity) const
+        {
+            fill_barrier<kLatePending>();
             Issue(ClampK(k0 + 2 * kTileK), parity);
             sched_fence<kAluMayCross>();
         }
+        /// fill_stage with the descriptors of PrepareIssue(ClampK(k0 + 2 * kTileK), parity).
+        template <index_t Pending>
+        CK_TILE_DEVICE static void fill_stage(const Refill& refill)
+        {
+            fill_barrier<Pending>();
+            IssuePrepared(refill);
+            sched_fence<kAluMayCross>();
+        }
+        CK_TILE_DEVICE Refill prepare_fill(index_t k0, index_t parity) const
+        {
+            return PrepareIssue(ClampK(k0 + 2 * kTileK), parity);
+        }
+
+        /// With the machine scheduler, the GL2 prefetch of a tile of Steps > 1 K steps is issued
+        /// in step Steps - 2, so that its address arithmetic spreads over that step's WMMAs.
+        template <index_t Steps, index_t Step>
+        static constexpr bool gl2_early = !kSourceOrder && Steps > 1 && Step + 2 == Steps;
+        template <index_t Steps>
+        static constexpr bool gl2_at_publish = kSourceOrder || Steps == 1;
 
         /// The next tile has landed (only the two newer loads stay in flight) and every wave sees
         /// it.
@@ -794,6 +877,44 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             block_gemm.template Run<First, Count, BOuter, 0, kRm * Count>(acc, a, b);
         }
 
+        /// The wait for a K step's reads before its WMMAs: pinned in the source order, else left
+        /// to the compiler's waitcnt insertion.
+        template <index_t N>
+        CK_TILE_DEVICE static void step_wait()
+        {
+            if constexpr(kSourceOrder)
+                s_wait_dscnt_pinned<N>();
+        }
+
+        /// Closes a scheduling region of Reads ds_loads (the next K step's) and Wmmas WMMAs, as
+        /// V1's HotLoopScheduler: the reads go to the first Window WMMAs, ceil(Reads / Window) per
+        /// WMMA or one per ceil(Window / Reads) WMMAs, and sched_barrier(0) ends the region.
+        /// Front-loaded reads keep their distance to the next step's WMMAs.
+        template <index_t Reads, index_t Wmmas, index_t WindowWanted = Wmmas>
+        CK_TILE_DEVICE static void hot_loop_scheduler()
+        {
+            constexpr index_t Window = WindowWanted < 1 ? 1 : WindowWanted;
+            if constexpr(!kSourceOrder)
+            {
+                if constexpr(Reads > 0 && Reads <= Window)
+                    static_for<0, Reads, 1>{}([](auto) {
+                        __builtin_amdgcn_sched_group_barrier(LLVMSchedGroupMask::DS_READ, 1, 0);
+                        __builtin_amdgcn_sched_group_barrier(
+                            LLVMSchedGroupMask::MFMA, (Window + Reads - 1) / Reads, 0);
+                    });
+                else if constexpr(Reads > Window)
+                    static_for<0, Window, 1>{}([](auto) {
+                        __builtin_amdgcn_sched_group_barrier(
+                            LLVMSchedGroupMask::DS_READ, (Reads + Window - 1) / Window, 0);
+                        __builtin_amdgcn_sched_group_barrier(LLVMSchedGroupMask::MFMA, 1, 0);
+                    });
+                if constexpr(Reads > 0 && Window < Wmmas)
+                    __builtin_amdgcn_sched_group_barrier(
+                        LLVMSchedGroupMask::MFMA, Wmmas - Window, 0);
+                __builtin_amdgcn_sched_barrier(0);
+            }
+        }
+
         /// PrefetchLdsRead and SplitBLdsRead: all reads of K step s + 1 before the first wait but
         /// B's second half, which follows the first half's WMMAs.
         /// The WMMAs run B outer (rn outer, rm inner), so each half's WMMAs use only that half's
@@ -808,6 +929,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                                           index_t buffer,
                                           index_t next_buffer) const
         {
+            Refill refill;
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
@@ -820,21 +942,33 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 }
                 else
                 {
-                    publish_next_tile<StaticParity>(k0);
+                    publish_next_tile<StaticParity, gl2_at_publish<Steps>>(k0);
+                    if constexpr(!kSourceOrder)
+                        refill = prepare_fill(k0, parity);
                     a_tile = block_gemm.LocalPrefetchA(next_buffer, 0);
                     block_gemm.template LocalPrefetchB<0, kHalf>(b_tile, next_buffer, 0);
                 }
-                s_wait_dscnt_pinned<kReadsPerStep>();
+                step_wait<kReadsPerStep>();
                 gemm<true, 0, kHalf>(acc, cur, cur_b);
+                hot_loop_scheduler<kReadsHalfB, kRm * kHalf>();
                 if constexpr(!last)
                     block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, buffer, step + 1);
-                else
+                else if constexpr(kSourceOrder)
                 {
                     block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, next_buffer, 0);
                     fill_stage(k0, parity);
                 }
-                s_wait_dscnt_pinned<kReadsPerStep>();
+                else
+                {
+                    // The refill first, so that B's second half spreads over the WMMAs below.
+                    fill_stage<kPendingHalfB>(refill);
+                    block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, next_buffer, 0);
+                }
+                if constexpr(gl2_early<Steps, step>)
+                    PrefetchAhead<StaticParity>(k0);
+                step_wait<kReadsPerStep>();
                 gemm<true, kHalf, kHalf>(acc, cur, cur_b);
+                hot_loop_scheduler<kReadsBFrag * kHalf, kRm * kHalf>();
             });
         }
 
@@ -848,6 +982,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                                         index_t buffer,
                                         index_t next_buffer) const
         {
+            Refill refill;
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
@@ -858,15 +993,34 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     a_tile = block_gemm.LocalPrefetchA(buffer, step + 1);
                     block_gemm.template LocalPrefetchB<0, kRn>(b_tile, buffer, step + 1);
                 }
-                else
+                else if constexpr(kSourceOrder)
                 {
                     publish_next_tile<StaticParity>(k0);
                     a_tile = block_gemm.LocalPrefetchA(next_buffer, 0);
                     block_gemm.template LocalPrefetchB<0, kRn>(b_tile, next_buffer, 0);
                     fill_stage(k0, parity);
                 }
-                s_wait_dscnt_pinned<kReadsPerStep>();
+                else
+                {
+                    // The refill first, so that the next tile's reads spread over the WMMAs.
+                    if constexpr(Steps == 1)
+                        refill = prepare_fill(k0, parity);
+                    publish_next_tile<StaticParity, gl2_at_publish<Steps>>(k0);
+                    fill_stage<0>(refill);
+                    a_tile = block_gemm.LocalPrefetchA(next_buffer, 0);
+                    block_gemm.template LocalPrefetchB<0, kRn>(b_tile, next_buffer, 0);
+                }
+                if constexpr(gl2_early<Steps, step>)
+                {
+                    PrefetchAhead<StaticParity>(k0);
+                    refill = prepare_fill(k0, parity);
+                }
+                step_wait<kReadsPerStep>();
                 gemm<false, 0, kRn>(acc, cur, cur_b);
+                // The last step's refill drains these reads first: they take half the WMMAs.
+                hot_loop_scheduler<kReadsA + kReadsBFrag * kRn,
+                                   kRm * kRn,
+                                   step + 2 == Steps ? kRm * kRn / 2 : kRm * kRn>();
             });
         }
 
@@ -877,19 +1031,35 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         CK_TILE_DEVICE void
         k_tile_direct(AccTile& acc, index_t k0, index_t parity, index_t buffer) const
         {
+            Refill refill;
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
                 const ATile h          = block_gemm.LocalPrefetchA(buffer, step);
                 BTile b;
                 block_gemm.template LocalPrefetchB<0, kRn>(b, buffer, step);
-                s_wait_dscnt_pinned<0>();
-                if constexpr(last)
+                step_wait<0>();
+                if constexpr(last && kSourceOrder)
                 {
                     publish_next_tile<StaticParity>(k0);
                     fill_stage(k0, parity);
                 }
+                else if constexpr(last)
+                {
+                    if constexpr(Steps == 1)
+                        refill = prepare_fill(k0, parity);
+                    publish_next_tile<StaticParity, gl2_at_publish<Steps>>(k0);
+                    fill_stage<0>(refill);
+                }
+                if constexpr(gl2_early<Steps, step>)
+                {
+                    PrefetchAhead<StaticParity>(k0);
+                    refill = prepare_fill(k0, parity);
+                }
                 gemm<false, 0, kRn>(acc, h, b);
+                // The step's reads feed its own WMMAs: no hints, the region only ends the step.
+                if constexpr(!kSourceOrder)
+                    __builtin_amdgcn_sched_barrier(0);
             });
         }
 
