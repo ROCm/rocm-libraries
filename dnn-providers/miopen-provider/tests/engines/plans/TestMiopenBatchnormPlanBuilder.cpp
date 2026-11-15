@@ -2513,9 +2513,9 @@ const std::vector<BnVirtualRoleParam>& singleNodeVirtualRoles()
 
 } // namespace
 
-// The single-node training plan only honours a complete running-statistics set or
-// none, and saved mean / inv_variance only as a pair; anything else is dropped
-// silently at execute time, so the builder must decline it.
+// The single-node batchnorm plan serves no running statistics, and saved mean / inv_variance
+// only as a pair; anything else would be dropped silently at execute time, so the builder must
+// decline it.
 class TestMiopenBatchnormPlanBuilderTrainingStats
     : public ::testing::TestWithParam<BnTrainingStatsParam>
 {

@@ -67,6 +67,27 @@ TEST(TestMiopenUnaryActivationChecks, AcceptsNonPackedTensorsWithDifferentStride
         {2, 3, 4, 4}, std::vector<int64_t>{48, 16, 4, 1}, std::vector<int64_t>{192, 64, 16, 2})));
 }
 
+TEST(TestMiopenUnaryActivationChecks,
+     DeclinesNonPackedPairTheTwoDimensionalSolverReadsWithUnitColumns)
+{
+    // Row stride 1 against width 8 puts the pair on the two-dimensional shortcut, which walks
+    // unit-stride columns, but the input's columns are 4 apart.
+    EXPECT_FALSE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{32, 32, 1, 4}, std::vector<int64_t>{64, 64, 16, 1})));
+    EXPECT_FALSE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{64, 64, 16, 1}, std::vector<int64_t>{32, 32, 1, 4})));
+}
+
+TEST(TestMiopenUnaryActivationChecks, AcceptsNonPackedPairTheTwoDimensionalSolverReadsCorrectly)
+{
+    // Unit columns on both sides.
+    EXPECT_TRUE(isSupported(reluGraph(
+        {1, 1, 4, 8}, std::vector<int64_t>{32, 32, 8, 1}, std::vector<int64_t>{64, 64, 16, 1})));
+    // Width 1 has a single column, so the innermost stride is never walked.
+    EXPECT_TRUE(isSupported(reluGraph(
+        {1, 1, 4, 1}, std::vector<int64_t>{4, 4, 1, 1}, std::vector<int64_t>{8, 8, 2, 3})));
+}
+
 TEST(TestMiopenUnaryActivationChecks, AcceptsPackedTensorsWhoseUnitDimStridesDiffer)
 {
     EXPECT_TRUE(isSupported(reluGraph(
