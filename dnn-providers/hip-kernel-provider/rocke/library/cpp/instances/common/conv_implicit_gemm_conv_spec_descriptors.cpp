@@ -325,6 +325,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.uniform_k_decode = false;
     s.regt_prefetch = 0;
     s.lds_swizzle = false;
+    s.group_fast_raster = false;
 
     s.num_load_waves = 2; /* wavelet pipeline: default 2 load waves */
     return s;
@@ -397,6 +398,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *            "ukd": uniform_k_decode,
      *            f"rtp{regt_prefetch}": regt_prefetch > 0,
      *            "lxs": lds_swizzle,
+     *            "gfr": group_fast_raster,
      *            "tf32": self.data.is_tf32}) */
     char short_buf[128];
     char t_buf[48];
@@ -408,8 +410,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char skc_buf[24];
     char rtp_buf[24];
     const char* parts[6];
-    const char* flag_names[10];
-    int flag_on[10];
+    const char* flag_names[11];
+    int flag_on[11];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -471,13 +473,15 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     flag_on[7] = s->regt_prefetch > 0 ? 1 : 0;
     flag_names[8] = "lxs";
     flag_on[8] = s->lds_swizzle ? 1 : 0;
+    flag_names[9] = "gfr";
+    flag_on[9] = s->group_fast_raster ? 1 : 0;
     /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
      * from an fp32 kernel with the same atom shape. Last, and only when set,
      * so every existing name is unchanged. */
-    flag_names[9] = "tf32";
-    flag_on[9] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
+    flag_names[10] = "tf32";
+    flag_on[10] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 10, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 11, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -1535,6 +1539,29 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         {
             ROCKE_SPEC_FAIL(
                 reason, reason_cap, "lds_swizzle needs tile_k in 16/32/64/128 (got %d)", s->tile_k);
+        }
+    }
+    if(s->group_fast_raster)
+    {
+        /* Python fwd_group_fast_raster_reason. */
+        const struct
+        {
+            bool on;
+            const char* label;
+        } gfr_flags[] = {
+            {s->split_k > 1 || s->split_k_cluster > 0, "split-K (z carries the slice)"},
+            {s->chiplet_swizzle, "chiplet_swizzle (it remaps blockIdx.y)"},
+            {s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0, "the wavelet pipeline"},
+        };
+        for(size_t i = 0; i < sizeof(gfr_flags) / sizeof(gfr_flags[0]); ++i)
+        {
+            if(gfr_flags[i].on)
+            {
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "group_fast_raster does not support %s",
+                                gfr_flags[i].label);
+            }
         }
     }
 

@@ -955,6 +955,12 @@ def _tf32_split_k_spec(idx: int):
 #       in swizzled 8-element chunks
 #  100: lds_swizzle with lds_k_pad=0: rejected by both engines
 #  101: lds_swizzle + regt_prefetch 1 + uniform_k_decode at tile_k 128, fp16
+#  102: group_fast_raster, grouped, fp16 (the group on y, the M tile on z)
+#  103: group_fast_raster + uniform_k_decode + lds_swizzle + regt_prefetch 1,
+#       grouped, bf16
+#  104: group_fast_raster on an ungrouped problem, fp16 (only the M tile moves)
+#  105: group_fast_raster on the gfx1250 split-K binary (config 41): rejected by
+#       both engines
 _RDNA4 = dict(N=2, Hi=14, Wi=14, C=64, K=128, fy=3, fx=3, pH=1, pW=1)
 _RDNA4_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2)
 _BF16 = ConvDataSpec("bf16", "bf16", "bf16")
@@ -989,11 +995,24 @@ _RDNA4_CFGS = {
         dict(tile_k=128, lds_swizzle=True, regt_prefetch=1, uniform_k_decode=True),
         "gfx1201",
     ),
+    102: (_RDNA4_GROUPED, dict(group_fast_raster=True), "gfx1201"),
+    103: (
+        _RDNA4_GROUPED,
+        dict(
+            group_fast_raster=True,
+            uniform_k_decode=True,
+            lds_swizzle=True,
+            regt_prefetch=1,
+            data=_BF16,
+        ),
+        "gfx1201",
+    ),
+    104: (_RDNA4, dict(group_fast_raster=True), "gfx1201"),
 }
 
 
 # Configs built on the gfx1250 split-K binary rather than on the RDNA4 base.
-_RDNA4_SPLIT_CFGS = (90, 95, 99)
+_RDNA4_SPLIT_CFGS = (90, 95, 99, 105)
 
 
 def _rdna4_spec(idx: int):
@@ -1019,6 +1038,9 @@ def _rdna4_spec(idx: int):
     if idx == 99:
         spec, arch = _split_k_spec(41)
         return replace(spec, split_k=1, lds_swizzle=True), arch
+    if idx == 105:
+        spec, arch = _split_k_spec(41)
+        return replace(spec, group_fast_raster=True), arch
     prob, kw, arch = _RDNA4_CFGS[idx]
     return ImplicitGemmConvSpec(problem=_cp(**prob), **dict(base, **kw)), arch
 

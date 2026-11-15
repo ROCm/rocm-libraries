@@ -396,6 +396,17 @@ class ImplicitGemmConvSpec:
     # fragment reads and the row-major tile stores conflict-free.
     # Default False: byte-identical, same kernel names.
     lds_swizzle: bool = False
+    # Group-fast launch raster ("gfr"; grouped problems): the group index
+    # rides on blockIdx.y and the M tile on blockIdx.z, so the workgroups
+    # dispatched one after another are the groups of one pixel tile. They read
+    # adjacent channel slices of the same input pixels (and write adjacent
+    # slices of the same output pixels) while those cache lines and DRAM pages
+    # are open, instead of every group sweeping all pixels on its own: with
+    # the default (M tiles, groups) order a group's slices are a strided
+    # pattern of 2 * cpg-byte pieces, re-fetched once per group when the
+    # input does not stay in the caches. The launch grid becomes
+    # (N tiles, groups, M tiles). Default False: byte-identical.
+    group_fast_raster: bool = False
 
     @property
     def block_size(self) -> int:
@@ -502,6 +513,7 @@ class ImplicitGemmConvSpec:
                 "ukd": self.uniform_k_decode,
                 f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
                 "lxs": self.lds_swizzle,
+                "gfr": self.group_fast_raster,
                 # TF32 compute keeps fp32 storage, so nothing else in the name
                 # tells it from an fp32 kernel with the same atom shape. Last,
                 # and only when set, so every existing name is unchanged.
@@ -936,6 +948,23 @@ def fwd_lds_swizzle_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[
     return None
 
 
+def fwd_group_fast_raster_reason(spec: ImplicitGemmConvSpec) -> Optional[str]:
+    """Why ``spec.group_fast_raster`` cannot be built, or ``None``. (Its M
+    tiles ride on gridDim.z, under the same 65535 cap
+    :func:`is_valid_spec_for_problem` and the cache's ``_grid_fits`` apply to
+    every grid axis.)"""
+    if not spec.group_fast_raster:
+        return None
+    for flag, label in (
+        (spec.split_k > 1 or spec.split_k_cluster > 0, "split-K (z carries the slice)"),
+        (spec.chiplet_swizzle, "chiplet_swizzle (it remaps blockIdx.y)"),
+        (spec.pipeline == "wavelet", "the wavelet pipeline"),
+    ):
+        if flag:
+            return f"group_fast_raster does not support {label}"
+    return None
+
+
 def _rpf_lds_barrier(b: IRBuilder, arch: str) -> None:
     """The in-loop barrier of the register-prefetch K loops (regt_prefetch):
     orders the LDS accesses of the tile before and after it, and leaves the
@@ -1194,6 +1223,10 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         if _why is not None:
             return False, _why
 
+    if spec.group_fast_raster:
+        _why = fwd_group_fast_raster_reason(spec)
+        if _why is not None:
+            return False, _why
 
     if spec.split_k != 1 or spec.split_k_cluster:
         _why = fwd_split_k_reason(spec, family, target)
@@ -1309,6 +1342,9 @@ def implicit_gemm_conv_grid(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int]:
     """
     gm = (spec.grid_M + spec.tile_m - 1) // spec.tile_m
     gn = (spec.grid_N_gemm + spec.tile_n - 1) // spec.tile_n
+    if spec.group_fast_raster:
+        # Group-fast raster: (N tiles, groups, M tiles).
+        return (gn, spec.grid_groups, gm)
     return (gn, gm, spec.grid_groups)
 
 
@@ -1642,7 +1678,7 @@ def _build_implicit_gemm_conv_impl(
         warp_m=spec.warp_m,
         warp_n=spec.warp_n,
         wave_size=spec.wave_size,
-    ).bind(b, block_m_axis="y", block_n_axis="x")
+    ).bind(b, block_m_axis="z" if spec.group_fast_raster else "y", block_n_axis="x")
     tid = grid.tid
     lane = grid.lane
     warp_id = grid.warp_id
@@ -1732,7 +1768,11 @@ def _build_implicit_gemm_conv_impl(
         split_k_lo = b.to_sgpr_u32(b.mul(slice_id, p_ks))
         split_k_hi = b.to_sgpr_u32(b.add(split_k_lo, p_ks))
     if grouped:
-        group_idx = group_z if split else b.block_id_z()
+        if split:
+            group_idx = group_z
+        else:
+            # group_fast_raster: the group rides on y, the M tile on z.
+            group_idx = b.block_id_y() if spec.group_fast_raster else b.block_id_z()
         # Merged: the base advances by the merged kpg, which is Gm exactly
         # (depthwise only), so it is the build-time constant, not p_kpg.
         k_out_group_base = b.mul(group_idx, c_gm if merged else p_kpg)
@@ -2417,7 +2457,10 @@ def _build_implicit_gemm_conv_impl(
         # Merged: g is the merged group and the merged kpg is Gm, so the same
         # expression yields k_out = merged_group*Gm + g_n.
         _k_out_grp_base = (
-            b.mul(group_idx if split else b.block_id_z(), c_gm if merged else p_kpg)
+            b.mul(
+                group_idx if split or spec.group_fast_raster else b.block_id_z(),
+                c_gm if merged else p_kpg,
+            )
             if grouped
             else None
         )

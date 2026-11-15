@@ -681,9 +681,13 @@ def _grid(spec: ConvInstanceSpec, req: OperatorRequest) -> tuple[int, int, int]:
         return (tiles, max(1, req.G), max(1, ident.split_k))
     from kernels.common.conv_args import ConvArgs
 
-    return ConvArgs.from_problem(
+    gx, gy, gz = ConvArgs.from_problem(
         _gemm_problem(req), tile_m=ident.tile_m, tile_n=ident.tile_n
     ).grid()
+    if ident.group_fast_raster:
+        # fwd group-fast raster: the group on y, the M tile on z.
+        return (gx, gz, gy)
+    return (gx, gy, gz)
 
 
 def _block(spec: ConvInstanceSpec) -> tuple[int, int, int]:

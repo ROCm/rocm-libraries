@@ -130,6 +130,8 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         regt_prefetch=spec.regt_prefetch,
         # The XOR-swizzled unpadded A/B LDS tiles (layout and fragment reads).
         lds_swizzle=spec.lds_swizzle,
+        # The group-fast launch raster (the group on blockIdx.y, M tile on z).
+        group_fast_raster=spec.group_fast_raster,
         # The wavelet load-wave count changes the launch block and the loaders.
         num_load_waves=spec.num_load_waves,
         # The fused accumulator epilogue changes the emitted epilogue (and

@@ -195,6 +195,8 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     s.regt_prefetch = dict_int(d, "regt_prefetch", s.regt_prefetch);
     /* The XOR-swizzled unpadded A/B LDS tiles. */
     s.lds_swizzle = dict_bool(d, "lds_swizzle", s.lds_swizzle);
+    /* The group-fast launch raster (group on y, M tile on z). */
+    s.group_fast_raster = dict_bool(d, "group_fast_raster", s.group_fast_raster);
     /* The wavelet load-wave count sizes the launch block and the load-wave
      * loaders; dropped, a non-default count builds a different kernel. */
     s.num_load_waves = dict_int(d, "num_load_waves", s.num_load_waves);

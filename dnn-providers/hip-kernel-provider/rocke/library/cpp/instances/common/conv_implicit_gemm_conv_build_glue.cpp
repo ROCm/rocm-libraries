@@ -487,7 +487,9 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     rocke_value_t* warp_n_idx_v = rocke_b_mod(b, warp_id_v, c_warps_n);
     rocke_value_t* warp_k_idx_v = rocke_b_const_i32(b, 0);
 
-    rocke_value_t* block_m_off_b = rocke_b_mul(b, rocke_b_block_id_y(b), c_tile_m);
+    /* group_fast_raster: bind(block_m_axis="z"); the group then rides on y. */
+    rocke_value_t* block_m_off_b = rocke_b_mul(
+        b, spec->group_fast_raster ? rocke_b_block_id_z(b) : rocke_b_block_id_y(b), c_tile_m);
     rocke_value_t* block_n_off_b = rocke_b_mul(b, rocke_b_block_id_x(b), c_tile_n);
     rocke_value_t* block_k_off_b = rocke_b_const_i32(b, 0);
 
@@ -600,7 +602,11 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
          * Bind subexpressions in Python's left-to-right order to pin SSA ids.
          * Split-K: the group is the z quotient decoded above. */
-        ctx->group_idx = ctx->fwd_split ? split_group_z : rocke_b_block_id_z(b);
+        if(ctx->fwd_split)
+            ctx->group_idx = split_group_z;
+        else /* group_fast_raster: the group rides on y, the M tile on z. */
+            ctx->group_idx
+                = spec->group_fast_raster ? rocke_b_block_id_y(b) : rocke_b_block_id_z(b);
         /* AOT: the runtime p_kpg param (was const_i32(p.kpg)). Merged: the
          * merged kpg, which is Gm exactly (depthwise only), so c_gm. */
         ctx->k_out_group_base
@@ -1028,7 +1034,9 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
             /* Merged: g is the merged group and the merged kpg is Gm, so the
              * same expression yields k_out = merged_group*Gm + g_n. Split-K
              * reuses the decoded group (z also carries the slice). */
-            rocke_value_t* bid_z = ctx.fwd_split ? ctx.group_idx : rocke_b_block_id_z(b);
+            rocke_value_t* bid_z = (ctx.fwd_split || spec->group_fast_raster)
+                                       ? ctx.group_idx
+                                       : rocke_b_block_id_z(b);
             ctx.d_k_out_group_base = rocke_b_mul(b, bid_z, ctx.merged ? ctx.c_gm : ctx.p_kpg);
         }
         else

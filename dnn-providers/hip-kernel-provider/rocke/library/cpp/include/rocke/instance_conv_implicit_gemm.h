@@ -237,6 +237,12 @@ typedef struct rocke_implicit_gemm_conv_spec
      * alike. Default false: byte-identical. Mirrors
      * ImplicitGemmConvSpec.lds_swizzle. */
     bool lds_swizzle; /* default false */
+    /* Group-fast launch raster (kernel-name flag gfr): the conv group rides on
+     * blockIdx.y and the M tile on blockIdx.z, so the launch grid is
+     * (N tiles, groups, M tiles). Not with split-K, chiplet_swizzle or the
+     * wavelet pipeline. Default false: byte-identical. Mirrors
+     * ImplicitGemmConvSpec.group_fast_raster. */
+    bool group_fast_raster; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

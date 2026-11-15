@@ -434,6 +434,9 @@ def _grid_for_spec(spec, p):
     gx = (N_gemm + spec.tile_n - 1) // spec.tile_n
     gy = (M + spec.tile_m - 1) // spec.tile_m
     # grid_order="NM": x=N-tile, y=M-tile (mirrors bake_off_implicit_gemm)
+    if getattr(spec, "group_fast_raster", False):
+        # group_fast_raster: the group on y, the M tile on z.
+        return (gx, spec.grid_groups, gy)
     return (gx, gy, spec.grid_groups)
 
 
@@ -6772,6 +6775,9 @@ def _grid_for(direction, problem, ident, split_k=None):
         return gx, gy, gz * (split_k or 1)
     # A group-merged fwd kernel runs one workgroup per Gm groups. Its merged
     # GEMM-N (Gm) fits one tile, as the true one (kpg = 1) does, so gx agrees.
+    if getattr(ident, "group_fast_raster", False):
+        # group_fast_raster: the group on y, the M tile on z.
+        return gx, gz // max(1, ident.group_merge), gy
     return gx, gy, gz // max(1, ident.group_merge)
 
 

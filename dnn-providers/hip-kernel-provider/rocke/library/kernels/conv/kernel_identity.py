@@ -174,6 +174,10 @@ class KernelIdentity:
     # fwd ImplicitGemmConvSpec.lds_swizzle: the XOR-swizzled unpadded A/B LDS
     # tiles. Left out of the hash while False.
     lds_swizzle: bool = False
+    # fwd ImplicitGemmConvSpec.group_fast_raster: the group on blockIdx.y and
+    # the M tile on blockIdx.z (launch grid (N tiles, groups, M tiles)). It
+    # serves grouped problems only. Left out of the hash while False.
+    group_fast_raster: bool = False
     # ---- capability: bounds which problems this binary can serve ----
     is_3d: bool = False
     is_pointwise: bool = False
@@ -278,6 +282,8 @@ class KernelIdentity:
             del fields["split_k_cluster"]
         if not fields["lds_swizzle"]:
             del fields["lds_swizzle"]
+        if not fields["group_fast_raster"]:
+            del fields["group_fast_raster"]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]
@@ -511,6 +517,9 @@ def identity_supports_problem(
         C, X, Y = int(problem.C), int(problem.X), int(problem.Y)
         run = math.gcd(X * C, int(problem.sW) * C, int(problem.Wi) * C)
         extents = ((kpg, "kpg"), (Y * X * C, "Y*X*C"), (run, "dX run"))
+    if identity.group_fast_raster and int(getattr(problem, "groups", 1)) <= 1:
+        # group_fast_raster only reorders the group axis of the launch.
+        return False, "group_fast_raster serves grouped problems only"
     gm = max(1, int(identity.group_merge))
     if gm > 1:
         ok, why = _group_merge_fits(identity, problem, gm)
@@ -730,6 +739,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "is_pointwise",
     "grouped",
     "patch",
+    "group_fast_raster",
     "group_merge",
     "tile_m",
     "tile_n",
