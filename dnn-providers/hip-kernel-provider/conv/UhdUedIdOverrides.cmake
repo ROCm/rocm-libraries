@@ -3,22 +3,20 @@
 #
 # UHD training branch only. The UHD pipeline keys an engine's L2 dataset by its UED id, and
 # refuses new measurements of an engine whose descriptors changed under an unchanged id
-# (dataset_binding_mismatch). uhd_ued_id_overrides.json gives such engines a new id here.
+# (dataset_binding_mismatch). uhd_ued_id_overrides.json lists the engines given a new id.
 #
-# The id is rewritten in a production source root that is a copy (the pipeline packs one,
-# HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT), in the UED and in every descriptor naming it (the
-# KDPs' engine field). The KDPs are DVC outputs, so the in-tree descriptors are never edited:
-# a build packing the in-tree root keeps the original ids. A UUID replaces a UUID, so every
-# catalog keeps the size its DVC pointer records (on Linux: file(WRITE) on Windows writes
-# CRLF line endings).
+# Their UEDs in git already carry the new id. Their KDPs are DVC outputs that still name the
+# old one in their engine field, so this rewrites old to new in the catalogs of the root the
+# product pack reads (a copy in the pipeline, the pulled DVC outputs in a tree build; no
+# git-tracked file is touched). A UUID replaces a UUID, so every catalog keeps the size its
+# DVC pointer records (on Linux: file(WRITE) on Windows writes CRLF line endings).
 
-if(NOT HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
-    return()
+if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+    set(_uhd_ids_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+else()
+    set(_uhd_ids_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
 endif()
-file(REAL_PATH "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" _uhd_ids_root)
-file(REAL_PATH "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" _uhd_ids_in_tree)
-if(_uhd_ids_root STREQUAL _uhd_ids_in_tree OR NOT IS_DIRECTORY "${_uhd_ids_root}/conv")
-    message(STATUS "conv: UED id overrides not applied (the production root is the source tree)")
+if(NOT IS_DIRECTORY "${_uhd_ids_root}/conv")
     return()
 endif()
 
@@ -37,7 +35,7 @@ if(_uhd_ids_count GREATER 0)
     endforeach()
 endif()
 
-file(GLOB_RECURSE _uhd_ids_docs "${_uhd_ids_root}/conv/*.ued.json"
+file(GLOB_RECURSE _uhd_ids_docs
      "${_uhd_ids_root}/conv/*.kdp.json")
 set(_uhd_ids_rewritten 0)
 foreach(_doc IN LISTS _uhd_ids_docs)

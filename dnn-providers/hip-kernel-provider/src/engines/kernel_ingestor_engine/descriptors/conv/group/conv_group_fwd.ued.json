@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "ebca2f9e-0b82-5b43-9c8d-3720c7563f5e",
+  "id": "6230506d-33b3-464a-93b3-3bd78e65fe65",
   "name": "hipkernel:CONV_GROUP_FWD",
   "graph_match": {
     "native": "hipkernel.conv_group_fwd.graph_match"

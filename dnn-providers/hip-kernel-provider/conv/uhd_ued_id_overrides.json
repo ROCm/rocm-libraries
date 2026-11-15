@@ -1,5 +1,5 @@
 {
-  "//": "UHD training branch only: new ids for conv UEDs whose descriptors changed under an unchanged id, so the UHD pipeline keeps their measurements apart from earlier datasets. Applied at configure time to a production source root that is a copy (the pipeline's), to the UED and to every descriptor naming it (the KDPs' engine field). Brad's branch keeps the original ids.",
+  "//": "UHD training branch only: new ids for conv UEDs whose descriptors changed under an unchanged id, so the UHD pipeline keeps their L2 measurements apart from earlier datasets. The UEDs in git carry the new ids; conv/UhdUedIdOverrides.cmake rewrites the old id in the DVC-stored KDPs of the packed root at configure time. Brad's branch keeps the original ids.",
   "overrides": {
     "5462bae3-cc0b-5f05-a9e7-1275528cfe71": {
       "id": "f467fd26-7745-4e49-afd4-a9c76bc6fd6d",
