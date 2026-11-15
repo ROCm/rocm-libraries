@@ -27,8 +27,8 @@ sys.path.insert(0, str(FLYDSL))
 import gen_descriptors  # noqa: E402
 
 OP = "rmsnorm_bwd"
-UED_ID = gen_descriptors._uuid(f"ued/{OP}")
 FIELDS = {"dtype": "string", "N": "int"}
+UED_ID = gen_descriptors.ued_id(OP, FIELDS)
 
 
 def _install(
@@ -143,6 +143,46 @@ def test_two_models_for_one_metric_on_one_key_are_refused(tmp_path: Path) -> Non
     _install(tmp_path, "predict_engine", "gfx950", "second")
     with pytest.raises(gen_descriptors.HkpPackError, match="second tflops model"):
         gen_descriptors.installed_models(tmp_path, UED_ID)
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"dtype": "string", "N": "int", "has_dropout": "int"},  # a field added
+        {"dtype": "string"},  # a field removed
+        {"dtype": "string", "N": "string"},  # a field retyped
+        {"N": "int", "dtype": "string"},  # the order its instances declare them in
+    ],
+)
+def test_the_engine_id_moves_exactly_when_its_kernel_fields_do(changed: dict) -> None:
+    # A model is trained against one field list, and the UHD pipeline files measurements by
+    # engine id: the same fields keep the id (and every model trained against it), other
+    # fields get a new id and so new datasets.
+    assert gen_descriptors.ued_id(OP, dict(FIELDS)) == UED_ID
+    assert gen_descriptors.ued_id(OP, changed) != UED_ID
+    assert gen_descriptors.OpDescriptors(OP, FIELDS).ued_id == UED_ID
+
+
+@pytest.mark.parametrize("slot_op", gen_descriptors.SPLIT_SLOT_OPS)
+def test_the_split_engine_id_moves_when_any_slots_fields_do(slot_op: str) -> None:
+    # The split engine's slots share one UED: its id covers every slot's fields, so a change
+    # in any one slot moves it, and a slot op cannot mint an id of its own.
+    slots = {
+        op: {"dtype": "string", "block_m": "int"}
+        for op in gen_descriptors.SPLIT_SLOT_OPS
+    }
+    split_id = gen_descriptors.split_ued_id(slots)
+    assert (
+        gen_descriptors.split_ued_id({op: dict(f) for op, f in slots.items()})
+        == split_id
+    )
+    changed = {
+        **slots,
+        slot_op: {"dtype": "string", "block_m": "int", "block_n": "int"},
+    }
+    assert gen_descriptors.split_ued_id(changed) != split_id
+    with pytest.raises(ValueError, match="split engine's UED id"):
+        gen_descriptors.OpDescriptors(slot_op, slots[slot_op])
 
 
 def test_two_metric_less_models_on_one_key_are_refused(tmp_path: Path) -> None:

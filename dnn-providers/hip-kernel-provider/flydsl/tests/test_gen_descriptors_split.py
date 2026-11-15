@@ -42,6 +42,13 @@ FORBIDDEN_UED_MEMBERS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_installed_models(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # These rows are synthetic, so their fields give engine ids no installed model was
+    # trained against: the models in the real tree must stay out of reach.
+    monkeypatch.setattr(gd, "CONTENT_DIR", tmp_path)
+
+
 def _entry(
     op: str,
     name: str,
