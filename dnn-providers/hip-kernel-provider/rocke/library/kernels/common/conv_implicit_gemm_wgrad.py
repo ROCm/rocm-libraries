@@ -100,7 +100,11 @@ from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
-from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.loads import (
+    AsyncTileLoader,
+    CoalescedTileLoader,
+    RegTransposeTileLoader,
+)
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
@@ -586,6 +590,30 @@ class WgradConvSpec:
     # byte-identical IR and keeps its kernel name.
     prefetch_global_regs: bool = False
 
+    # Register-transpose operand load for the M-outer tile (both A and B):
+    # each thread reads a micro-tile of 8 K positions x ``v`` free-axis
+    # elements with ``v``-wide global loads (one per K position, along the
+    # stride-1 free axis), regroups it in registers into ``v`` runs of 8
+    # K-contiguous elements and writes each with one 16-byte LDS store
+    # (rocke.helpers.loads.RegTransposeTileLoader). The LDS tile and the
+    # fragment reads are those of the default M-outer path.
+    #
+    # Why: the K-outer tile (lds_k_outer) removes the per-element
+    # transpose-on-store only where an LDS transpose read exists. The RDNA
+    # WMMA targets have none, so their M-outer tile was filled with one 16-bit
+    # LDS store per element, and with scalar global loads wherever a thread's
+    # share of a K tile was under one vector. This moves the transpose into
+    # VALU byte permutes.
+    #
+    # ``vector_size_a`` / ``vector_size_b`` set the free-axis width ``v``
+    # exactly when given (a width the tile cannot be split into at 8 x ``v``
+    # per thread is rejected, not narrowed); left None, the widest usable
+    # width the channel run allows is taken. See wgrad_reg_transpose_vecs.
+    #
+    # Default False: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    reg_transpose: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -771,6 +799,8 @@ class WgradConvSpec:
             flags={
                 "async": self.async_dma,
                 "kouter": self.lds_k_outer,
+                # A different load/store body; only tagged when set.
+                "regt": self.reg_transpose,
                 # An explicit lds_k_pad changes the LDS row stride and so the
                 # emitted code, but nothing else in the name reflects it. Two
                 # pads would otherwise collide on one symbol and the compile
@@ -1012,6 +1042,9 @@ class WgradConvSpec:
         _pgr_why = _prefetch_global_regs_conflict(self)
         if _pgr_why:
             raise ValueError(_pgr_why)
+        _regt_why = _reg_transpose_conflict(self)
+        if _regt_why:
+            raise ValueError(_regt_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1385,6 +1418,104 @@ def _prefetch_global_regs_conflict(spec: "WgradConvSpec") -> str:
                     f"needs {n} (use a wider vector or a smaller tile)"
                 )
     return ""
+
+
+def _reg_transpose_conflict(spec: "WgradConvSpec") -> str:
+    """Why ``spec.reg_transpose`` cannot be honoured, or ``""`` if it can.
+
+    Arch-free half of the gate (is_valid_wgrad_spec adds the arch family).
+    Shared by ``validate`` and ``is_valid_wgrad_spec`` so the two cannot drift.
+    """
+    if not spec.reg_transpose:
+        return ""
+    if spec.data.dtype_a not in ("bf16", "fp16") or spec.data.dtype_b not in (
+        "bf16",
+        "fp16",
+    ):
+        return (
+            "reg_transpose requires 16-bit A/B dtypes (one 16-byte LDS store "
+            f"carries 8 elements); got dtype_a={spec.data.dtype_a!r} "
+            f"dtype_b={spec.data.dtype_b!r}"
+        )
+    if spec.lds_k_outer:
+        return (
+            "reg_transpose fills the M-outer tile; lds_k_outer stores K-outer "
+            "and needs no transpose at all"
+        )
+    if spec.async_dma:
+        return (
+            "reg_transpose is not supported with async_dma: the direct "
+            "global->LDS load has no register stage to transpose in"
+        )
+    if spec.prefetch_addr:
+        return (
+            "reg_transpose is not supported with prefetch_addr: the carried "
+            "offsets are the CoalescedTileLoader slot plan"
+        )
+    if spec.prefetch_global_regs:
+        return (
+            "reg_transpose is not supported with prefetch_global_regs: that "
+            "K loop stages the CoalescedTileLoader chunks"
+        )
+    _, _, why = wgrad_reg_transpose_vecs(spec)
+    return why
+
+
+def wgrad_reg_transpose_vecs(spec: "WgradConvSpec") -> Tuple[int, int, str]:
+    """``(vec_a, vec_b, reason)``: the register-transpose free-axis widths.
+
+    An explicit ``vector_size_a`` / ``vector_size_b`` is taken exactly (each
+    width is its own binary in the AOT cache, so silently narrowing one would
+    build a duplicate under another name); ``None`` takes the widest width
+    the stride-1 run (kpg for dY, cpg for X, over the merged problem) allows
+    and the tile can be split into. ``reason`` is ``""`` when both are usable.
+    """
+    p = spec.merged_problem
+    out = []
+    for side, rows, chan, override in (
+        ("A", spec.tile_m, p.kpg, spec.vector_size_a),
+        ("B", spec.tile_n, p.cpg, spec.vector_size_b),
+    ):
+        if override is not None:
+            if chan % override:
+                return (
+                    0,
+                    0,
+                    (
+                        f"reg_transpose {side} width {override} does not divide "
+                        f"the stride-1 channel run {chan}"
+                    ),
+                )
+            _, _, why = RegTransposeTileLoader.plan(
+                tile_rows=rows,
+                tile_cols=spec.tile_k,
+                block_size=spec.block_size,
+                wave_size=spec.wave_size,
+                vec=override,
+            )
+            if why:
+                return 0, 0, f"reg_transpose {side}: {why}"
+            out.append(override)
+            continue
+        cap = next(v for v in (8, 4, 2, 1) if chan % v == 0)
+        v = RegTransposeTileLoader.choose_vec(
+            tile_rows=rows,
+            tile_cols=spec.tile_k,
+            block_size=spec.block_size,
+            wave_size=spec.wave_size,
+            max_vec=cap,
+        )
+        if v is None:
+            return (
+                0,
+                0,
+                (
+                    f"reg_transpose {side}: no width <= {cap} splits the "
+                    f"{rows}x{spec.tile_k} tile over {spec.block_size} threads"
+                ),
+            )
+        out.append(v)
+    return out[0], out[1], ""
 
 
 # The register-prefetch loop carries every global load of the next tile as a
@@ -2258,6 +2389,17 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _pgr_why = _prefetch_global_regs_conflict(spec)
     if _pgr_why:
         return False, _pgr_why
+    if spec.reg_transpose and family != "wmma":
+        # Written for (and measured on) the RDNA WMMA targets, which lack the
+        # LDS transpose read lds_k_outer relies on. The loader itself is
+        # wave-size agnostic; MFMA targets keep their own operand paths until
+        # it is measured there.
+        return False, (
+            f"reg_transpose is enabled only on WMMA (wave32) targets; got {arch}"
+        )
+    _regt_why = _reg_transpose_conflict(spec)
+    if _regt_why:
+        return False, _regt_why
     # The wgrad builder has no load/math wave split, so a "wavelet" spec built
     # silently as "mem" under another name. Reject it instead of benchmarking
     # one kernel twice.
@@ -2817,7 +2959,8 @@ def build_implicit_gemm_conv_wgrad(
     # synchronous K-outer loaders for the slot partition and the descriptors,
     # and only swaps the global->register->LDS hop for one async copy.
     _wmma_async = spec.async_dma and op.family == "wmma"
-    if not spec.async_dma:
+    # reg_transpose takes its widths from wgrad_reg_transpose_vecs instead.
+    if not spec.async_dma and not spec.reg_transpose:
 
         va = CoalescedTileLoader.choose_vec(
             tile_rows=block_m,
@@ -2991,22 +3134,48 @@ def build_implicit_gemm_conv_wgrad(
             a_axis, b_axis = axis_a, axis_b
             a_vec, b_vec = load_vec_a, load_vec_b
 
-        a_sync_loader = CoalescedTileLoader(
-            tile_rows=a_tile_rows,
-            tile_cols=a_tile_cols,
-            block_size=threads,
-            load_vec=a_vec,
-            elem_dtype=ir_dtype_a,
-            vector_axis=a_axis,
-        )
-        b_sync_loader = CoalescedTileLoader(
-            tile_rows=b_tile_rows,
-            tile_cols=b_tile_cols,
-            block_size=threads,
-            load_vec=b_vec,
-            elem_dtype=ir_dtype_b,
-            vector_axis=b_axis,
-        )
+        if spec.reg_transpose:
+            # Register transpose (reg_transpose): the same M-outer tile, filled
+            # by 8(K) x v(free) micro-tiles with one 16-byte LDS store per
+            # free-axis row instead of one 16-bit store per element. The widths
+            # come from the validator's own helper, so a spec it accepted
+            # cannot build with other ones.
+            _rt_va, _rt_vb, _rt_why = wgrad_reg_transpose_vecs(spec)
+            if _rt_why:
+                raise ValueError(_rt_why)
+            a_sync_loader = RegTransposeTileLoader(
+                tile_rows=block_m,
+                tile_cols=block_k,
+                block_size=threads,
+                wave_size=spec.wave_size,
+                vec=_rt_va,
+                elem_dtype=ir_dtype_a,
+            )
+            b_sync_loader = RegTransposeTileLoader(
+                tile_rows=block_n,
+                tile_cols=block_k,
+                block_size=threads,
+                wave_size=spec.wave_size,
+                vec=_rt_vb,
+                elem_dtype=ir_dtype_b,
+            )
+        else:
+            a_sync_loader = CoalescedTileLoader(
+                tile_rows=a_tile_rows,
+                tile_cols=a_tile_cols,
+                block_size=threads,
+                load_vec=a_vec,
+                elem_dtype=ir_dtype_a,
+                vector_axis=a_axis,
+            )
+            b_sync_loader = CoalescedTileLoader(
+                tile_rows=b_tile_rows,
+                tile_cols=b_tile_cols,
+                block_size=threads,
+                load_vec=b_vec,
+                elem_dtype=ir_dtype_b,
+                vector_axis=b_axis,
+            )
 
     # The gfx1250 async loop keeps the plain pipeline's (hint-free) policy; the
     # MFMA async loop keeps its own.

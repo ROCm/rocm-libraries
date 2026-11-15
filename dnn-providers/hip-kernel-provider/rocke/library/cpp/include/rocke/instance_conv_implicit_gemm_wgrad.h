@@ -231,6 +231,15 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * existing aggregate initialisers keep their layout.
      * Default false: every existing config emits byte-identical IR. */
     bool prefetch_global_regs; /* default false */
+    /* reg_transpose: fill the M-outer A (dY) and B (X) LDS tiles with the
+     * register-transpose loader (rocke_reg_transpose_tile_loader_t): micro-tiles
+     * of 8 K positions x v free-axis elements read with v-wide global loads and
+     * written with one 16-byte LDS store per free-axis row. WMMA (wave32)
+     * targets only; rejected with lds_k_outer, async_dma, prefetch_addr,
+     * prefetch_global_regs and non-16-bit A/B. vector_size_a / vector_size_b
+     * set v exactly when given. Mirrors WgradConvSpec.reg_transpose.
+     * Default false: every existing config emits byte-identical IR. */
+    bool reg_transpose; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

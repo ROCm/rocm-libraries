@@ -694,6 +694,30 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
      * gets (row, col) inside the tile-local frame and returns the global element
      * offset + validity, so the conv-coord-transform DAG drives the address
      * arithmetic while the loader owns the thread distribution. */
+    /* wgrad reg_transpose: RegTransposeTileLoader.load for A then B, with the
+     * run descriptors when regt_addr_step set them. */
+    if(ctx->have_regt_loaders)
+    {
+        rocke_reg_transpose_tile_loader_load(b,
+                                             &ctx->a_regt_loader,
+                                             ctx->tid,
+                                             A_dst,
+                                             ctx->a_descriptor_fn,
+                                             ctx,
+                                             ctx->a_rsrc,
+                                             ctx->a_run_fn,
+                                             ctx->run_user);
+        rocke_reg_transpose_tile_loader_load(b,
+                                             &ctx->b_regt_loader,
+                                             ctx->tid,
+                                             B_dst,
+                                             ctx->b_descriptor_fn,
+                                             ctx,
+                                             ctx->b_rsrc,
+                                             ctx->b_run_fn,
+                                             ctx->run_user);
+        return;
+    }
     if(ov != NULL && ov->a_load_override != NULL)
     {
         ov->a_load_override(b, spec, k_off, A_dst, &ctx->grid, ctx->input_cache_context, ov->user);

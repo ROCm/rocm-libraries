@@ -538,6 +538,16 @@ typedef struct rocke_conv_build_ctx
     rocke_coalesced_tile_loader_t a_sync_loader; /* sync A loader (valid iff sync)*/
     rocke_coalesced_tile_loader_t b_sync_loader; /* sync B loader                 */
     bool have_sync_loaders; /* true => *_sync_loader valid     */
+    /* wgrad reg_transpose: the register-transpose A/B loaders, which take the
+     * sync load path in place of *_sync_loader when have_regt_loaders is set.
+     * a_run_fn / b_run_fn (regt_addr_step) are the per-unit run descriptors,
+     * NULL for the per-column descriptors; run_user is their closure state. */
+    bool have_regt_loaders;
+    rocke_reg_transpose_tile_loader_t a_regt_loader;
+    rocke_reg_transpose_tile_loader_t b_regt_loader;
+    rocke_loads_run_descriptor_fn a_run_fn;
+    rocke_loads_run_descriptor_fn b_run_fn;
+    void* run_user;
     rocke_coalesced_tile_loader_t a_wavelet_loader; /* wavelet load-wave A loader     */
     rocke_coalesced_tile_loader_t b_wavelet_loader; /* wavelet load-wave B loader     */
     bool have_wavelet_loaders; /* true => *_wavelet_loader valid */

@@ -56,6 +56,21 @@ two-stage path.
 
 ## Changelog
 
+### Register-transpose operand loads on RDNA4 (`reg_transpose`)
+
+The RDNA WMMA targets have no LDS transpose read, so `lds_k_outer` does not
+apply there and the M-outer A / B tiles were filled with one 16-bit LDS store
+per element. Every knob below is default-off, mirrored in the C++ engine and
+tagged in the kernel name and `KernelIdentity`.
+
+- `reg_transpose` (tag `regt`): both tiles load through
+  `RegTransposeTileLoader`, 8 K x `v` free-axis micro-tiles with `v`-wide
+  global reads and one 16-byte LDS store per row. The LDS tile and the
+  fragment reads are unchanged. `wgrad_reg_transpose_vecs` picks `v` (an
+  explicit `vector_size_a` / `vector_size_b` is taken exactly). WMMA only;
+  rejected with `lds_k_outer`, `async_dma`, `prefetch_addr`,
+  `prefetch_global_regs` and non-16-bit A/B.
+
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 
 The plain synchronous K loop waited for each tile's global reads before its

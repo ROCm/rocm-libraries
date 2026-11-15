@@ -79,6 +79,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.prefetch_addr = false;
     s.register_prefetch = false;
     s.prefetch_global_regs = false;
+    s.reg_transpose = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -352,7 +353,8 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     f"a{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
-     *     flags={"async": async_dma, "kouter": lds_k_outer, "pad{N}": ...,
+     *     flags={"async": async_dma, "kouter": lds_k_outer, "regt": ...,
+     *            "pad{N}": ...,
      *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
      *            "wsr{N}": ..., "unroll": unroll_k, "pfa": prefetch_addr},
      *   )
@@ -382,13 +384,13 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll, pfa,
-     * rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most WGRAD_NAME_MAX_FLAGS
+    /* flags: async, kouter, regt, pad{N}, spk/spkauto, twostage, wsr{N}, unroll,
+     * pfa, rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most WGRAD_NAME_MAX_FLAGS
      * when every conditional tag is present. The name is built before
      * validation, so an invalid spec can reach the maximum too. */
     enum
     {
-        WGRAD_NAME_MAX_FLAGS = 14
+        WGRAD_NAME_MAX_FLAGS = 15
     };
     char pad_flag[32] = {0};
     const char* flag_names[WGRAD_NAME_MAX_FLAGS];
@@ -401,6 +403,11 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
 
     flag_names[n_flags] = "kouter";
     flag_on[n_flags] = s->lds_k_outer ? 1 : 0;
+    n_flags++;
+
+    /* A different load/store body; only tagged when set. Mirrors Python. */
+    flag_names[n_flags] = "regt";
+    flag_on[n_flags] = s->reg_transpose ? 1 : 0;
     n_flags++;
 
     /* An explicit lds_k_pad changes the LDS row stride and so the emitted code;
@@ -715,6 +722,134 @@ static bool wgrad_sync_staged_chunks(const rocke_implicit_gemm_conv_wgrad_spec_t
         out[i] = frees[i] * s->tile_k / (vec * threads);
     }
     return true;
+}
+
+/* Python wgrad_reg_transpose_vecs: the register-transpose free-axis widths
+ * (A over the kpg run, B over the cpg run of the merged problem). An explicit
+ * vector_size_a / vector_size_b is taken exactly; otherwise the widest width
+ * the channel run allows and the tile splits into. Returns false with Python's
+ * reason when a side has none. */
+static bool wgrad_reg_transpose_vecs(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                     int* out_va,
+                                     int* out_vb,
+                                     char* reason,
+                                     size_t reason_cap)
+{
+    const int threads = s->warp_m * s->warp_n * s->wave_size;
+    const int gm = s->group_merge > 1 ? s->group_merge : 1;
+    const char* sides[2] = {"A", "B"};
+    const int rows[2] = {s->tile_m, s->tile_n};
+    const int chans[2]
+        = {rocke_conv_problem_kpg(&s->problem) * gm, rocke_conv_problem_cpg(&s->problem) * gm};
+    const bool has_ov[2] = {s->has_vector_size_a, s->has_vector_size_b};
+    const int ov[2] = {s->vector_size_a, s->vector_size_b};
+    int out[2] = {0, 0};
+    for(int i = 0; i < 2; ++i)
+    {
+        if(has_ov[i])
+        {
+            if(ov[i] == 0 || chans[i] % ov[i])
+            {
+                if(reason && reason_cap)
+                    snprintf(
+                        reason,
+                        reason_cap,
+                        "reg_transpose %s width %d does not divide the stride-1 channel run %d",
+                        sides[i],
+                        ov[i],
+                        chans[i]);
+                return false;
+            }
+            char why[256];
+            if(rocke_reg_transpose_tile_loader_plan(
+                   rows[i], s->tile_k, threads, s->wave_size, ov[i], NULL, NULL, why, sizeof why)
+               != ROCKE_OK)
+            {
+                if(reason && reason_cap)
+                    snprintf(reason, reason_cap, "reg_transpose %s: %s", sides[i], why);
+                return false;
+            }
+            out[i] = ov[i];
+            continue;
+        }
+        int cap = 1;
+        for(int v = 8; v >= 1; v /= 2)
+        {
+            if(chans[i] % v == 0)
+            {
+                cap = v;
+                break;
+            }
+        }
+        int v = 0;
+        if(rocke_reg_transpose_tile_loader_choose_vec(
+               rows[i], s->tile_k, threads, s->wave_size, cap, &v)
+           != ROCKE_OK)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "reg_transpose %s: no width <= %d splits the %dx%d tile over %d threads",
+                         sides[i],
+                         cap,
+                         rows[i],
+                         s->tile_k,
+                         threads);
+            return false;
+        }
+        out[i] = v;
+    }
+    if(out_va)
+        *out_va = out[0];
+    if(out_vb)
+        *out_vb = out[1];
+    return true;
+}
+
+/* Python _reg_transpose_conflict: why reg_transpose cannot be honoured (the
+ * arch-free half; the caller adds the WMMA family gate). Returns true with
+ * the reason set when it cannot. */
+static bool wgrad_reg_transpose_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                                         char* reason,
+                                         size_t reason_cap)
+{
+    if(!s->reg_transpose)
+        return false;
+    const char* da = s->dtype_a ? s->dtype_a : "fp16";
+    const char* db = s->dtype_b ? s->dtype_b : "fp16";
+    const bool a16 = strcmp(da, "bf16") == 0 || strcmp(da, "fp16") == 0;
+    const bool b16 = strcmp(db, "bf16") == 0 || strcmp(db, "fp16") == 0;
+    const char* why = NULL;
+    if(!a16 || !b16)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "reg_transpose requires 16-bit A/B dtypes (one 16-byte LDS store carries 8 "
+                     "elements); got dtype_a='%s' dtype_b='%s'",
+                     da,
+                     db);
+        return true;
+    }
+    if(s->lds_k_outer)
+        why = "reg_transpose fills the M-outer tile; lds_k_outer stores K-outer and needs no "
+              "transpose at all";
+    else if(s->async_dma)
+        why = "reg_transpose is not supported with async_dma: the direct global->LDS load has no "
+              "register stage to transpose in";
+    else if(s->prefetch_addr)
+        why = "reg_transpose is not supported with prefetch_addr: the carried offsets are the "
+              "CoalescedTileLoader slot plan";
+    else if(s->prefetch_global_regs)
+        why = "reg_transpose is not supported with prefetch_global_regs: that K loop stages the "
+              "CoalescedTileLoader chunks";
+    if(why != NULL)
+    {
+        if(reason && reason_cap)
+            snprintf(reason, reason_cap, "%s", why);
+        return true;
+    }
+    return !wgrad_reg_transpose_vecs(s, NULL, NULL, reason, reason_cap);
 }
 
 /* Mirrors Python _wmma_async_available: whether a wave32 spec can take the
@@ -1387,6 +1522,20 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             }
         }
     }
+
+    /* reg_transpose: written for the RDNA WMMA targets, which lack the LDS
+     * transpose read lds_k_outer relies on. Mirrors Python is_valid_wgrad_spec. */
+    if(s->reg_transpose && !is_wmma_family)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "reg_transpose is enabled only on WMMA (wave32) targets; got %s",
+                     arch);
+        return false;
+    }
+    if(wgrad_reg_transpose_conflict(s, reason, reason_cap))
+        return false;
 
     /* The wgrad builder has no load/math wave split, so "wavelet" would build
      * the "mem" kernel under another name. Mirrors Python is_valid_wgrad_spec. */
@@ -3361,6 +3510,48 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
         ctx->have_async_loaders = true;
         ctx->have_sync_loaders = false;
+    }
+    else if(spec->reg_transpose)
+    {
+        /* reg_transpose: the same M-outer tile, filled by 8(K) x v(free)
+         * micro-tiles (RegTransposeTileLoader). The widths come from the
+         * validator's own helper, and the CoalescedTileLoader width choice is
+         * skipped, as in Python. */
+        int rt_va = 0;
+        int rt_vb = 0;
+        char why[256];
+        if(!wgrad_reg_transpose_vecs(spec, &rt_va, &rt_vb, why, sizeof why))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", why);
+            return false;
+        }
+        if(rocke_reg_transpose_tile_loader_init(&ctx->a_regt_loader,
+                                                ctx->block_m,
+                                                ctx->block_k,
+                                                ctx->threads,
+                                                spec->wave_size,
+                                                rt_va,
+                                                rocke_conv_tr_elem_dtype(spec->dtype_a),
+                                                why,
+                                                sizeof why)
+               != ROCKE_OK
+           || rocke_reg_transpose_tile_loader_init(&ctx->b_regt_loader,
+                                                   ctx->block_n,
+                                                   ctx->block_k,
+                                                   ctx->threads,
+                                                   spec->wave_size,
+                                                   rt_vb,
+                                                   rocke_conv_tr_elem_dtype(spec->dtype_b),
+                                                   why,
+                                                   sizeof why)
+                  != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", why);
+            return false;
+        }
+        ctx->have_regt_loaders = true;
+        ctx->have_sync_loaders = false;
+        ctx->have_async_loaders = false;
     }
     else
     {

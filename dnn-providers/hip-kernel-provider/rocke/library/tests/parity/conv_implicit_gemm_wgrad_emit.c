@@ -89,6 +89,9 @@
  *  108    the same base at split_k = 1 with vector_size_c = 2: the cshuffle
  *         store epilogue honours the explicit dW width (C = 64 alone would
  *         pick 8). Must match the Python _ATOMIC_VEC_C_BASES.
+ *  109-113 reg_transpose on the gfx1201 WMMA base (config 6): auto widths,
+ *         bf16 at widths 4 / 2, scalar loads, split-K on gfx1200, and gfx950
+ *         (rejected). Must match the Python _REGT_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -309,10 +312,56 @@ static int make_cfg_tf32(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
     return 0;
 }
 
+/* The register-transpose knobs on the gfx1201 WMMA base (config 6). Must
+ * match _REGT_CFGS in the Python emitter. */
+static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    if(make_base_cfg(6, spec, arch) != 0)
+        return -1;
+    spec->reg_transpose = true;
+    *arch = "gfx1201";
+    switch(idx)
+    {
+    case 109:
+        break;
+    case 110:
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 4;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 2;
+        break;
+    case 111:
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    case 112:
+        spec->split_k = 2;
+        *arch = "gfx1200";
+        break;
+    case 113:
+        /* rejected: a wave64 target */
+        spec->wave_size = 64;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        *arch = "gfx950";
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 109 && idx <= 113)
+        return make_regt_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);
     if(idx >= 89 && idx <= 105)

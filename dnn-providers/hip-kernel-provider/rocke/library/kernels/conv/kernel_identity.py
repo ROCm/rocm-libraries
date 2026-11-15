@@ -149,6 +149,9 @@ class KernelIdentity:
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
+    # wgrad (WgradConvSpec.reg_transpose): the register-transpose operand
+    # load. Left out of the hash while False, like prefetch_addr.
+    reg_transpose: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
     # identity_supports_problem). Left out of the hash while False.
@@ -257,6 +260,8 @@ class KernelIdentity:
             del fields["prefetch_global_regs"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
+        if not fields["reg_transpose"]:
+            del fields["reg_transpose"]
         if not fields["patch"]:
             del fields["patch"]
         if not fields["tap_outer_k"]:
