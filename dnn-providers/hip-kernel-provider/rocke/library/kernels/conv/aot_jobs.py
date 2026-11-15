@@ -240,6 +240,28 @@ CACHE_WGRAD_WMMA_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
     (256, 64, 64, 4, 2),
     (256, 128, 64, 4, 2),
 )
+# Two-stage (f32 workspace) split-K on the RDNA4 targets: built on the cover
+# above and on these (tile_m, tile_n, tile_k, warp_m, warp_n), the geometries
+# of the gfx1201 wgrad rows a two-stage kernel won (M-outer loader: small
+# tiles over a deep reduction; register-transpose loader: the wide tiles).
+# The cshuffle epilogue and the async loop keep the cover above.
+CACHE_WGRAD_WMMA_TWO_STAGE_RDNA4_GEOMETRIES: Tuple[
+    Tuple[int, int, int, int, int], ...
+] = (
+    (16, 16, 32, 1, 1),
+    (32, 16, 32, 2, 1),
+    (32, 32, 32, 2, 2),
+    (32, 32, 64, 2, 2),
+    (64, 64, 16, 1, 4),
+    (64, 64, 16, 2, 2),
+    (64, 192, 16, 4, 2),
+    (16, 128, 128, 1, 4),
+    (64, 192, 128, 4, 4),
+    (128, 192, 64, 4, 2),
+    (128, 256, 64, 2, 8),
+    (192, 192, 64, 2, 4),
+    (256, 192, 64, 2, 4),
+)
 # The register-prefetch K loop (WgradConvSpec.prefetch_global_regs) on gfx950: built
 # as an extra kernel next to the plain synchronous loop of the widest-vector
 # (8 / 8) configurations, on these (tile_m, tile_n, tile_k, warp_m, warp_n,
@@ -918,6 +940,19 @@ def _wgrad_wmma_cover(mma_family: str, geometry: tuple) -> bool:
     return mma_family != "wmma" or tuple(geometry[:5]) in CACHE_WGRAD_WMMA_GEOMETRIES
 
 
+def _wgrad_two_stage_cover(
+    arch: str, mma_family: str, geometry: tuple, in_cover: bool
+) -> bool:
+    """Whether a wgrad geometry gets two-stage split-K kernels: the
+    :func:`_wgrad_wmma_cover` (``in_cover``), plus
+    :data:`CACHE_WGRAD_WMMA_TWO_STAGE_RDNA4_GEOMETRIES` on the RDNA4 targets."""
+    return in_cover or (
+        mma_family == "wmma"
+        and arch in CACHE_RDNA4_ARCHS
+        and tuple(geometry[:5]) in CACHE_WGRAD_WMMA_TWO_STAGE_RDNA4_GEOMETRIES
+    )
+
+
 def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[dict]:
     """The gfx1250 async wgrad loaders' chunk widths, for the identity.
 
@@ -1561,6 +1596,9 @@ def _wgrad_jobs(
         )
         if epilogue != "default" and not in_cover:
             continue
+        ts_cover = _wgrad_two_stage_cover(
+            arch, mma_family, (tile_m, tile_n, tile_k, warp_m, warp_n), in_cover
+        )
         # The K-outer LDS tile, picked per geometry by the predicate the JIT
         # sweep and dispatch use. It is a pure function of arch/dtype/atom, so
         # a shape-generic binary can carry it; leaving it at the spec default
@@ -1598,7 +1636,7 @@ def _wgrad_jobs(
             for two_stage, caps in itertools.product(
                 _wgrad_split_reductions(arch, split_k, False), _layout_caps()
             ):
-                if two_stage and not in_cover:
+                if two_stage and not ts_cover:
                     continue
                 vec_c = _wgrad_vec_c(arch, dd, epilogue, vec_bc, split_k, two_stage)
                 grouped = caps["grouped"]
@@ -1687,7 +1725,7 @@ def _wgrad_jobs(
                 atom,
                 wave_size,
                 split_ks,
-                in_cover,
+                ts_cover,
                 _pad_cfg,
             )
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
@@ -1845,14 +1883,14 @@ def _wgrad_regt_jobs(
     atom,
     wave_size: int,
     split_ks: Sequence[int],
-    in_cover: bool,
+    ts_cover: bool,
     pad_cfg: dict,
 ) -> Iterator[BuildJob]:
     """The register-transpose wgrad jobs of one geometry ((tile_m, tile_n,
     tile_k, warp_m, warp_n, warp tile, pipeline, epilogue)). lds_k_outer,
     prefetch_addr and the K-loop variants stay at their defaults (none of them
     applies to the register-transpose tile); two-stage is built on the
-    two-stage cover only, as for the M-outer loader."""
+    two-stage cover (``ts_cover``) only, as for the M-outer loader."""
     from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
 
     da, db, dd = dtypes
@@ -1866,7 +1904,7 @@ def _wgrad_regt_jobs(
         addr_step,
         apr,
     ) in _wgrad_regt_variants(arch, dd, geometry[:6], split_ks):
-        if two_stage and not in_cover:
+        if two_stage and not ts_cover:
             continue
         for caps in _layout_caps():
             cfg = dict(
@@ -2455,21 +2493,22 @@ def count_jobs(
                     for ts in _wgrad_split_reductions(target.gfx, sk, False)
                 ]
                 n_plain = sum(1 for ts in reductions if not ts)
-                if in_cover:
-                    stages = len(reductions)
-                    # The async loop: once per non-two-stage configuration.
-                    asyncs = n_plain * (
-                        len(_wgrad_k_loops(wave_size, pipeline, False, target)) - 1
-                    )
-                else:
-                    stages, asyncs = n_plain, 0
+                ts_cover = _wgrad_two_stage_cover(target.gfx, mma_family, geo, in_cover)
+                stages = len(reductions) if ts_cover else n_plain
+                # The async loop: once per non-two-stage configuration.
+                asyncs = (
+                    n_plain
+                    * (len(_wgrad_k_loops(wave_size, pipeline, False, target)) - 1)
+                    if in_cover
+                    else 0
+                )
                 total += vecs * stages * layouts + asyncs * layouts
                 if geo[7] == "default" and _wgrad_regt_geometry(target, geo, da, db):
                     for v in _wgrad_regt_variants(
                         target.gfx, dtype_triple(dtype)[2], geo[:6], split_ks
                     ):
                         two_stage = v[4]
-                        if two_stage and not in_cover:
+                        if two_stage and not ts_cover:
                             continue
                         total += layouts
                         if _wgrad_x_run(

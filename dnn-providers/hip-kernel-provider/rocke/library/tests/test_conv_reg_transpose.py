@@ -465,6 +465,39 @@ class TestWgradRdna4Grid(unittest.TestCase):
             self.assertEqual(j.caps, dict(grouped=False, xrun=True))
             self.assertTrue(j.identity.regt_prefetch)
 
+    def test_two_stage_rdna4_cover(self):
+        from kernels.conv.aot_jobs import (
+            CACHE_WGRAD_WMMA_GEOMETRIES,
+            CACHE_WGRAD_WMMA_TWO_STAGE_RDNA4_GEOMETRIES,
+            _geometry_list,
+        )
+        from rocke.core.arch import ArchTarget
+
+        self.assertFalse(
+            set(CACHE_WGRAD_WMMA_TWO_STAGE_RDNA4_GEOMETRIES)
+            & set(CACHE_WGRAD_WMMA_GEOMETRIES)
+        )
+        for arch, want in (("gfx1201", True), ("gfx1250", False)):
+            geos = [
+                g
+                for g in _geometry_list(ArchTarget.from_gfx(arch), "fp16", "wgrad")
+                if tuple(g[:5]) in ((32, 16, 32, 2, 1), (128, 256, 64, 2, 8))
+                and g[7] == "default"
+            ]
+            ids = [j.identity for j in self._jobs(arch, geos=geos)]
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    any(i.two_stage and i.group_merge == 1 for i in ids), want
+                )
+                # The cshuffle epilogue keeps the gfx1250 cover.
+                self.assertFalse(any(i.epilogue == "cshuffle" for i in ids))
+        # Every RDNA4 cover geometry is a geometry of the gfx1201 grid.
+        grid = {
+            tuple(g[:5])
+            for g in _geometry_list(ArchTarget.from_gfx("gfx1201"), "fp16", "wgrad")
+        }
+        self.assertLessEqual(set(CACHE_WGRAD_WMMA_TWO_STAGE_RDNA4_GEOMETRIES), grid)
+
     def test_count_jobs_matches_the_walk(self):
         from kernels.conv.aot_jobs import (
             CACHE_DGRAD_MAX_SUB_GEMMS,
