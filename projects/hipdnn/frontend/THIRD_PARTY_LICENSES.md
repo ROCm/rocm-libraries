@@ -25,6 +25,9 @@ hipDNN contains source code derived from the following third-party project.
   `include/`) stubs the raw backend C functions that upstream
   `include/cudnn_frontend_shim.h` wraps, with the attribute names and types
   one legacy sample passes to them.
+  The causal-mask and diagonal-band argument handling of the Python bindings'
+  keyword `sdpa` (`python/frontend_bindings/src/graph_kwargs_bindings.cpp`) is
+  derived from upstream `python/pygraph/sdpa.cpp`.
   Each such file carries a "Portions derived from NVIDIA cuDNN frontend" header
   naming its upstream sources.
   `tests/cudnn_samples/legacy/utils/helpers.h` and `error_util.h` are

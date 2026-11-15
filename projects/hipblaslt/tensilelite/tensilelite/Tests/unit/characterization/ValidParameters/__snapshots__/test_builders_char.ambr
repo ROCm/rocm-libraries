@@ -1359,6 +1359,7 @@
 # name: test_valid_parameters_key_roster
   list([
     '1LDSBuffer',
+    'A2ASubRounds',
     'ActivationAlt',
     'ActivationFuncCall',
     'ActivationFused',
@@ -1367,6 +1368,7 @@
     'AdaptiveGemmNTAB',
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
+    'AssertAlphaValue',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
     'AssertSizeEqual',
@@ -1565,6 +1567,15 @@
       'len': 3,
       'type': 'list',
     }),
+    'A2ASubRounds': dict({
+      'head': list([
+        1,
+        2,
+        4,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'ActivationAlt': dict({
       'head': list([
         False,
@@ -1619,6 +1630,13 @@
     'AssertAILessThanEqual': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'AssertAlphaValue': dict({
+      'head': list([
+        1,
+      ]),
+      'len': 1,
+      'type': 'list',
     }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
@@ -2187,7 +2205,7 @@
         'NoSwizzle',
         'HostPreSwizzle',
       ]),
-      'len': 4,
+      'len': 5,
       'type': 'list',
     }),
     'MacroTile': dict({

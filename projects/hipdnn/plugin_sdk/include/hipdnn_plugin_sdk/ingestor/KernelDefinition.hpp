@@ -35,9 +35,9 @@ using KernelPrepareFn = std::shared_ptr<const void> (*)(const KernelDefinition&)
 /// immutable definitions, never a reference into a mutable cache.
 struct KernelDefinition
 {
-    DescriptorId kernelId;
-    DescriptorId packId;
-    DescriptorId dispatchId; ///< Denormalized from the pack for direct lookup.
+    DescriptorId kernelId{};
+    DescriptorId packId{};
+    DescriptorId dispatchId{}; ///< Denormalized from the pack for direct lookup.
     KernelSource source;
     MetadataValues metadata;
     int64_t priority = 0;
