@@ -53,6 +53,7 @@ they accept.  Nothing is allocated (no LDS, no scratch).
 
 from __future__ import annotations
 
+from dataclasses import field
 from typing import Callable, Optional, Union
 
 from rocke.core.ir import I16, I32, I64, IRBuilder, Value, VectorType
@@ -63,6 +64,7 @@ from ._attention_bwd_addr import as_i32
 __all__ = [
     "LSE_ROWS_PER_LANE",
     "dense_row_has_key",
+    "emit_lse_field",
     "lse_row_value",
     "lse_row_has_mass",
     "lse_store",
@@ -142,6 +144,22 @@ def lse_row_has_mass(b: IRBuilder, l: Value) -> Value:
     """
     zero = b.const_f32(0.0)
     return b.lor(b.fcmp("one", l, zero), b.fcmp("uno", l, zero))
+
+
+def emit_lse_field():
+    """The ``emit_lse`` dataclass field of the split-KV reduce specs.
+
+    ``emit_lse``: also write the natural-log softmax normalizer (LSE) as FP32
+    ``[total_q, num_query_heads, 1]`` through a trailing ``lse_ptr`` argument. Off by
+    default; off adds no LSE parameter and no LSE store. (The reduce IR still differs
+    from before LSE existed: the masked-segment merge fix in the reduce builder applies
+    with LSE on or off.)
+
+    A factory and not a base class, so the field stays where each spec declares it:
+    field order, ``spec_hash`` and cache keys do not move. Every call returns a new
+    ``Field``.
+    """
+    return field(default=False, kw_only=True)
 
 
 def reduce_lse_store(

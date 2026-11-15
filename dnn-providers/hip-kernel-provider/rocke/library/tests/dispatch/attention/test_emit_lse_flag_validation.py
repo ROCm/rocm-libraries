@@ -8,9 +8,11 @@ it would change the kernel's identity without the caller asking for it. The guar
 lives in several classes, and a direct caller of a public spec class reaches each one
 without passing the request validator. This test takes an instance of each class from
 the dispatcher, rebuilds it with a non-bool ``emit_lse`` and expects the class itself
-to refuse, so a class that loses its guard, or a new class that never gets one, fails
-here. The request-level refusal is pinned in ``test_unified_lse_dispatch.py`` and
-``test_dense_lse_dispatch.py`` (host only).
+to refuse, so a class that loses its guard fails here. A new class that carries the
+field fails the coverage test only if the requests below reach it (unpinned, split-KV,
+tiled 2D and dense, on both arches); a class they cannot reach has to be added to the
+requests by hand. The request-level refusal is pinned in ``test_dense_lse_dispatch.py``;
+``test_unified_lse_dispatch.py`` pins the ``AttentionSpec`` refusal (host only).
 """
 
 import dataclasses
@@ -138,3 +140,14 @@ def test_emit_lse_rejects_non_bool_values(name, bad):
             ValueError, match=f"^emit_lse must be a bool, got {type(bad).__name__}$"
         ):
             dataclasses.replace(carrier, emit_lse=bad)
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_reduce_spec_emit_lse_is_a_keyword_only_flag_that_defaults_off(arch):
+    """Both split-KV reduce specs take the field from ``emit_lse_field``: off by
+    default, and keyword-only so it cannot shift a positional argument."""
+    spec = dispatch_attention(
+        _tuning(_unified_request(arch), f"{arch}_u3d_splitkv_seg16_t1xb")
+    ).spec.reduce_spec
+    emit_lse = {f.name: f for f in dataclasses.fields(type(spec))}["emit_lse"]
+    assert emit_lse.default is False and emit_lse.kw_only

@@ -40,7 +40,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import reduce_lse_store
+from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
@@ -1474,12 +1474,7 @@ class UnifiedAttentionReduceTiledSpec:
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
-    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
-    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
-    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
-    #   still differs from before LSE existed: the masked-segment merge fix below
-    #   applies with LSE on or off.)
-    emit_lse: bool = field(default=False, kw_only=True)
+    emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
         require_bool("emit_lse", self.emit_lse)

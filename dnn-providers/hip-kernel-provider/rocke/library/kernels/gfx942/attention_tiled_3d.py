@@ -31,7 +31,7 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar, Optional, Tuple
 
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
@@ -40,7 +40,7 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import reduce_lse_store
+from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
@@ -1344,12 +1344,7 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
-    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
-    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
-    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
-    #   still differs from before LSE existed: the masked-segment merge fix below
-    #   applies with LSE on or off.)
-    emit_lse: bool = field(default=False, kw_only=True)
+    emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
         require_bool("emit_lse", self.emit_lse)
