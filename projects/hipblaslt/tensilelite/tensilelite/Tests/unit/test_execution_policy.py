@@ -5,6 +5,7 @@
 
 import copy
 import itertools
+import sys
 
 import pytest
 
@@ -18,6 +19,11 @@ from tensilelite.ExecutionPolicy import (
     hasHybridAssignment,
     isStreamKSpatialCluster,
 )
+
+# tensilelite.Component initialises tensilelite.Components; importing WorkAssignment
+# directly first hits a circular import via Components/TileProcessingStrategy.
+import tensilelite.Component  # noqa: F401
+from tensilelite.Components.WorkAssignment import StaticGrid
 
 pytestmark = pytest.mark.unit
 
@@ -355,3 +361,30 @@ def test_inherited_streamk_cluster_payload_is_rederived_when_source_policy_chang
     assert state["InternalSupportParams"]["PersistentLoopArgsVersion"] == version
     assert state["AssignedDerivedParameters"] is False
     assert state["AssignedProblemIndependentDerivedParameters"] is False
+
+
+@pytest.mark.parametrize("strategy, assignment, overrides, fences", [
+    ("DataParallel", "StaticGrid", {}, True),
+    ("DataParallel", "StaticGrid", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("StreamK", "DynamicWorkQueue", {"enableTDMA": False, "enableTDMB": False}, True),
+    ("StreamK", "Hybrid", {"enableTDMA": False, "enableTDMB": False}, False),
+    ("DataParallel", "StaticGrid",
+     {"enableTDMA": False, "enableTDMB": False, "_PersistentVectorEpilogueLds": True}, True),
+    ("DataParallel", "StaticGrid", {"NumThreads": 32, "WavefrontSize": 32}, False),
+], ids=["tdm", "no_tdm", "queue", "hybrid", "epilogue_lds", "one_wave"])
+def test_handoff_fences_lds(strategy, assignment, overrides, fences):
+    """The persistent tile handoff ends with a workgroup barrier with TDM loads on more than one
+    wave, with the epilogue vectors in LDS, in a spatial cluster or in the DynamicWorkQueue
+    component; the TDM flush relies on it.
+
+    DataParallel pairs only with StaticGrid -- resolve_policy rejects every other assignment -- so
+    the queue and hybrid rows exercise those assignments under StreamK.
+    """
+    kernel = {"TileProcessingStrategy": strategy, "WorkAssignment": assignment, "ClusterDim": [1, 1],
+              "NumThreads": 128, "WavefrontSize": 32, "PrefetchAcrossPersistent": 0,
+              "enableTDMA": True, "enableTDMB": True}
+    kernel.update(overrides)
+    # The queue reason reads the component's own WorkAssignment rather than the kernel argument,
+    # so the component identity below is load-bearing.
+    component = getattr(sys.modules[StaticGrid.__module__], assignment)
+    assert component().handoffFencesLds(kernel) == fences
