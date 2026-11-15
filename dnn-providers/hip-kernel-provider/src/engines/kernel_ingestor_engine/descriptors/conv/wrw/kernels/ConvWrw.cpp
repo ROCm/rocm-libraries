@@ -32,9 +32,10 @@
 //                    fp32 partials only (default)
 // Loop 5 (gfx950, 16-bit, channels-last kept, ConvWrwDirect.h) also takes CONV_K3_PP and
 // CONV_K3_SWZ (default 1: the ping-pong and the swizzled rows; 0 only for ablation).
-// ConvWrwReduce, the partials' fixed-order sum, shares the source, as does ConvWrwReduceRows, the
-// same sum by K C T R S rows (the host's choice for at most 2 splits).
-// Three-bf16 (fp32 graphs under TF32 permission) compiles the bf16 kernel (CONV_K3_T unsigned
+// ConvWrwReduce, the partials' fixed-order sum, shares the source, as do ConvWrwReduceTile, the
+// same sum written by K C T R S runs (the host's choice for K C T R S at few splits), and
+// ConvWrwReduceRows (K C T R S at one split on gfx950).
+// Three-bf16 (fp32 graphs, the TF32 engine's configs) compiles the bf16 kernel (CONV_K3_T unsigned
 // short) with CONV_K3_MATH 1, which adds ConvWrwSplit (the operands split into 3N bf16 images,
 // K3SplitArgs), and CONV_K3_TO float, the reduces' dw element type. Neither is defined
 // otherwise, so every other config compiles exactly as before.
@@ -281,6 +282,11 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
 extern "C" __global__ void __launch_bounds__(256) ConvWrwReduce(K3ReduceArgs a)
 {
     k3Reduce<CONV_K3_TO>(a);
+}
+
+extern "C" __global__ void __launch_bounds__(256) ConvWrwReduceTile(K3ReduceArgs a)
+{
+    k3ReduceTile<CONV_K3_TO>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvWrwReduceRows(K3ReduceArgs a)

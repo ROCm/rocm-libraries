@@ -10,12 +10,12 @@ SPDX-License-Identifier:  MIT
 ## At a glance
 
 - **What:** implicit GEMM on matrix cores (MFMA, WMMA) or FMA micro-tiles, channels-last native, runtime shapes; a config fixes only the atom, the tile and a few code-path knobs.
-- **Covers:** fwd and bwd-data; fp32, fp16, bf16 (TF32-class forms under `HIP_KERNEL_PROVIDER_CONV_TF32`); any layout (NHWC native, packed NCHW by tiled transpose or the `cf` epilogue, anything else by strided copy); 1-D/2-D/3-D; any groups; any stride, dilation and padding; both conv modes; images past 2^31 pixels on large-image configs; patch convolutions (filter equal to the stride, no padding: ViT, ConvNeXt and U-Net patchify) as one GEMM on the patch configs.
+- **Covers:** fwd and bwd-data; fp32, fp16, bf16 (TF32-class forms in the `CONV_IGEMM_FWD/BWD_TF32` sibling engines); any layout (NHWC native, packed NCHW by tiled transpose or the `cf` epilogue, anything else by strided copy); 1-D/2-D/3-D; any groups; any stride, dilation and padding; both conv modes; images past 2^31 pixels on large-image configs; patch convolutions (filter equal to the stride, no padding: ViT, ConvNeXt and U-Net patchify) as one GEMM on the patch configs.
 - **Arches:** MFMA on gfx908, gfx90a, gfx942, gfx950 (gfx950's double-rate 16x16x32 / 32x32x16 atoms; xf32 on gfx942); WMMA on gfx11 and gfx12; an FMA kernel admitted for every type on every architecture (the only fp32 path on RDNA, the only path on gfx906, gfx103x and gfx1250; the last two are not validated on hardware).
 - **Wins when:** compute-bound dense and grouped layers in fwd and bwd-data, NCHW 16-bit backward data, 3-D fp32, and everything on gfx906 (where MIOpen falls to im2col + rocBLAS). It serves every fwd/bwd graph of the 2K subset.
 - **Loses when:** gfx90a/gfx908 NCHW fp16 forward vs MIOpen's older XDLOPS implicit GEMMs (1.2-1.4x behind), gfx906 NCHW fp16 forward vs its V4R1 kernel (1.55x), stride-1 3x3 where Winograd (K5) or direct (K2) win, strided NCHW bwd-data where K7 wins.
-- **Precision:** fp32 accumulation, one rounding (split-K partials in fp32, summed in split order). Deterministic. No numerical notes.
-- **Instances:** 1666 fwd + 1314 bwd configs, all runtime-geometry (no compile-time shape tier); 37 large-image twins and 39 TF32-class configs per direction; 761 fwd + 497 bwd patch configs (44 fwd + 88 bwd of them the patch tile), admitted only on patch convolutions.
+- **Precision:** fp32 accumulation, one rounding (split-K partials in fp32, summed in split order). Deterministic. No numerical notes on the exact engines; the TF32 siblings report `TENSOR_CORE`.
+- **Instances:** 1618 fwd + 1269 bwd exact configs, all runtime-geometry (no compile-time shape tier), 37 large-image twins among them, and 752 fwd + 491 bwd patch configs admitted only on patch convolutions (44 fwd + 88 bwd of them the patch tile); the TF32 siblings list 48 fwd + 45 bwd TF32-class configs (9 + 6 of them patch configs).
 - **vs MIOpen:** competes with CK grouped implicit GEMM (`ConvHipImplicitGemm{,3D}Group{Fwd,Bwd}Xdlops`), the older HIP and asm implicit GEMMs, and `GemmFwdRest`/`GemmBwdRest`. Call-weighted factor where K1 is our best: 0.93-1.44x fwd, 1.15-1.47x bwd on matrix-core GPUs; 3.0x / 1.8x on gfx906.
 
 ## Why it exists
@@ -64,7 +64,7 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 | `fuse` 2-16 | run F small groups as one block-diagonal group (filter expanded in the workspace) | fused group <= 64 channels each way |
 | `large` | 64-bit positions within an image | only images past 2^31 - 1 pixels (and only them) |
 | `patch` | 1: the patch view above on the general loop (forward width fold, backward data one GEMM with the patch scatter); 2: the patch tile | patch convolutions only; backward data writes channels-last dx with a vector dividing S C |
-| `math` `bf16x3` | three-bf16 TF32 form | fp32 graphs, TF32 permitted |
+| `math` `bf16x3` | three-bf16 TF32 form (the `_TF32` engines only) | fp32 graphs |
 
 **Host side:**
 - Gates: everything the naive parser gates (`parseConvNaiveProblem`, every graph, node and tensor field), plus `N`, `C`, `K`, groups, extents, padding, stride and dilation within 32 bits, row tiles and grid y/z within launch limits. Fwd and bwd only.
@@ -108,7 +108,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 - fp32 accumulation on every path: fp16/bf16 products on MFMA/WMMA accumulate in fp32; fp32 runs on fp32 MFMA (exact products) or FMA; one rounding to the output type. Split-K writes fp32 partials and adds them in split order before that rounding.
 - Deterministic: fixed tile order, no atomics; the device suite relaunches every admitted config and compares bits.
 - Tested against hipDNN's CPU reference with 2e-6 per reduction term (times the reduction length) plus 2 storage epsilons; TF32 forms at 1e-3 (xf32) and 3e-5 (three-bf16) per term.
-- **TF32 forms** (`HIP_KERNEL_PROVIDER_CONV_TF32` only, fp32 graphs only): three-bf16 on every matrix-core arch (operands split into hi + lo bf16 at the LDS store; lo·hi, hi·lo and hi·hi accumulated in fp32; about 2^-16 per product), and xf32 on gfx942 (operands rounded to nearest-even TF32 at fragment load, not truncated by the hardware). Infinities stay infinite in both. Measured against the best exact config on top fp32 shapes: xf32 1.07-1.27x faster on MI325X (7 of 8 shapes); three-bf16 0.5-0.7x on gfx950 and gfx942. No numerical note is reported for these configs (a note is per engine).
+- **TF32 forms** (`CONV_IGEMM_FWD/BWD_TF32`, offered by default, fp32 graphs only): three-bf16 on every matrix-core arch (operands split into hi + lo bf16 at the LDS store; lo·hi, hi·lo and hi·hi accumulated in fp32; about 2^-16 per product), and xf32 on gfx942 (operands rounded to nearest-even TF32 at fragment load, not truncated by the hardware). Infinities stay infinite in both. Measured against the best exact config on top fp32 shapes: xf32 1.07-1.27x faster on MI325X (7 of 8 shapes); three-bf16 0.5-0.7x on gfx950 and gfx942. The siblings report `TENSOR_CORE`, cuDNN's note for TF32, so a caller excludes them through the hipDNN API's cuDNN-compatible `deselect_numeric_notes`; the exact engines list no TF32 config.
 - **inf/NaN:** ±inf inputs give the fp32 result on native and TF32 configs (tested), except group-fusion configs: the zero blocks of the expanded filter turn another group's infinity into NaN (0 x inf). Those configs are excluded from the infinity test; it is an open parity item. Padding is read as zeros and multiplied, as in a zero-padded reference; no test covers infinite filter values.
 
 ## Comparison with MIOpen
@@ -138,7 +138,7 @@ K1 differs in kind: one source compiled at first use for the device in hand, run
 5. **Out-of-the-box selection and compile cost:** the declared order takes the first admitted config; a native per-config scorer from tile fit, waves, split plan and occupancy, plus a precompiled code-object store, would avoid compiling 90-130 candidates on grouped graphs.
 6. **Group-fusion inf parity:** mask the structural zeros of the expanded filter, A/B'd against the compiled-out build.
 7. **Split knob:** expose the split count so autotune can override the analytic plan on shapes where it guesses wrong.
-8. **TF32 as tagged sibling engines** once hipDNN can filter by numerical note; three-bf16 does not pay on CDNA today and stays only as an autotune candidate.
+8. **Three-bf16 on CDNA:** it does not pay there (0.5-0.7x) and stays only as an autotune candidate in the TF32 siblings; a faster split would make it worth selecting.
 9. **Workspace limits:** a per-family test that a caller's workspace cap declines at plan time, never at execute.
 
 ## Tests

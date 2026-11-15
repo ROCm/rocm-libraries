@@ -43,6 +43,32 @@ private:
     bool _set = false;
 };
 
+/**
+ * @brief Sets @p handle's atomics mode to rocblas_atomics_not_allowed for the guard's lifetime,
+ *        then restores the previous mode.
+ *
+ * rocBLAS allows atomics by default, and a kernel that adds partial results with atomics is not
+ * bitwise reproducible; with atomics not allowed rocBLAS gives the same bits on every run
+ * (rocblas_set_atomics_mode). The guard costs the speed of the atomic kernels where rocBLAS
+ * would have picked one.
+ */
+class ScopedNoAtomics
+{
+public:
+    explicit ScopedNoAtomics(rocblas_handle handle);
+    ~ScopedNoAtomics();
+
+    ScopedNoAtomics(const ScopedNoAtomics&) = delete;
+    ScopedNoAtomics& operator=(const ScopedNoAtomics&) = delete;
+    ScopedNoAtomics(ScopedNoAtomics&&) = delete;
+    ScopedNoAtomics& operator=(ScopedNoAtomics&&) = delete;
+
+private:
+    rocblas_handle _handle;
+    rocblas_atomics_mode _previous = rocblas_atomics_allowed;
+    bool _set = false;
+};
+
 /// Whether @p call lets its fp32 operands multiply as XF32 (GemmCall::tf32).
 bool permitsXf32(const GemmCall& call);
 

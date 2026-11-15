@@ -332,13 +332,6 @@ bool atomRunsOn(std::string_view atom, std::string_view gcnArchName)
            && !arch.empty();
 }
 
-bool tf32Permitted()
-{
-    const auto raw = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(
-        hipdnn_data_sdk::utilities::getEnv("HIP_KERNEL_PROVIDER_CONV_TF32")));
-    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
-}
-
 std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvDirection direction)
 {
     if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA)
@@ -1072,8 +1065,9 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 
 /// Kernel-scoped applicability: the config runs on this device and computes this problem
 /// correctly. A large-image config (64-bit positions within an image) serves exactly the images
-/// past 2^31 - 1 pixels, the other configs exactly the rest. Its atom must exist on the device and take the graph's element type (fp32 through
-/// rounded operands -- xf32, three-bf16 -- only with TF32 permission), and its channel vector
+/// past 2^31 - 1 pixels, the other configs exactly the rest. Its atom must exist on the device and take the graph's element type (fp32 also
+/// through rounded operands -- xf32, three-bf16 -- the TF32 configs, which only the
+/// CONV_IGEMM_*_TF32 engines list), and its channel vector
 /// must divide the reduction channels. An XCD-order config is served only where the device has
 /// several XCDs (elsewhere it is its plain twin), a halo config only where the problem fits
 /// the halo loop. A direct-filter config serves backward data whose filter is packed K T R S C/g
@@ -1161,13 +1155,12 @@ bool kernelMatches(const MatchContext& context,
     const auto wanted = conv_igemm::dataElement(problem->base.dataType);
     if(tile->split)
     {
-        if(wanted != "f32" || element != "bf16" || !conv_igemm::tf32Permitted())
+        if(wanted != "f32" || element != "bf16")
         {
             return false;
         }
     }
-    else if(element != "any"
-            && (element != wanted || (tile->info.tf32 && !conv_igemm::tf32Permitted())))
+    else if(element != "any" && element != wanted)
     {
         return false;
     }

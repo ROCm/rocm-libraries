@@ -99,9 +99,12 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
         std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
-        for(size_t i = 0; i < catalogs.size(); ++i)
+        // Each direction's exact engine's catalog, then its TF32 engine's (CONV_IGEMM_*_TF32).
+        for(size_t index = 0; index < 2 * catalogs.size(); ++index)
         {
-            const std::string file = i == 0 ? "conv_igemm_fwd.kdp.json" : "conv_igemm_bwd.kdp.json";
+            const size_t i = index / 2;
+            const std::string file = std::string(i == 0 ? "conv_igemm_fwd" : "conv_igemm_bwd")
+                                     + (index % 2 == 0 ? "" : "_tf32") + ".kdp.json";
             std::filesystem::path found;
             for(const auto& root : roots)
             {
@@ -695,7 +698,7 @@ std::vector<DeviceCase> tf32Cases()
     return cases;
 }
 
-/// The TF32-class fp32 configs (xf32, three-bf16) under TF32 permission, against the fp64 reference
+/// The TF32-class fp32 configs (xf32, three-bf16; the CONV_IGEMM_*_TF32 engines'), against the fp64 reference
 /// at their own bounds; and with +inf and -inf in the input, where every output a infinity reaches
 /// must be that infinity (or NaN where both meet), as exact fp32 gives. Native fp32 configs take
 /// the same infinities.
@@ -710,8 +713,6 @@ TEST_P(TestGpuConvIgemmTf32, Float)
     {
         GTEST_SKIP() << "no TF32-class configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::TF32);
 }
 
@@ -722,8 +723,6 @@ TEST_P(TestGpuConvIgemmTf32, FloatInfinities)
     {
         GTEST_SKIP() << "no TF32-class configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::TF32, true);
 }
 
@@ -734,12 +733,10 @@ TEST_P(TestGpuConvIgemmTf32, FloatInfinitiesNative)
 }
 
 /// Opt-in (K1_TF32_TIMING=<shape CSV>, forward): the best config per math form (exact, xf32,
-/// three-bf16) per shape, TF32 permitted. See ConvTf32Timing.hpp.
+/// three-bf16) per shape. See ConvTf32Timing.hpp.
 TEST(TestGpuConvIgemmTiming, ByMathForm)
 {
     SKIP_IF_NO_DEVICES();
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     conv_tf32_timing::timeByForm(
         packFor(ConvDirection::FORWARD),
         ConvDirection::FORWARD,

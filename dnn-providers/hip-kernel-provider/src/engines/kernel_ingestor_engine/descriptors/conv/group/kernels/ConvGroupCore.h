@@ -1375,6 +1375,27 @@ struct K4WrwFrag
 // before the barrier that ends the previous tile's multiplies. Waves: CB >= 4, CB / 4 blocks a
 // wave; else 4 / CB waves a block, each taking every (4 / CB)-th chunk, their sums added in wave
 // order through LDS at the end. The workgroup writes its split's partial slot.
+// CONV_GROUP_DIRECT 1 (wrw at one split): the kernels write dw themselves (K4WrwArgs::direct);
+// 0 (default): fp32 partials only, compiled as without the direct store.
+#ifndef CONV_GROUP_DIRECT
+#define CONV_GROUP_DIRECT 0
+#endif
+/// Writes dw element (output channel kAll over all groups, input channel c of its group, tap of
+/// the ft x R x S taps) under CONV_GROUP_DIRECT (one split): the sum from +0, rounded once, as
+/// k4WrwReduce writes one slot.
+template <class T, int R, int S>
+__device__ inline void k4WrwPutDw(const K4WrwArgs& a, long long kAll, int c, int tap, float v)
+{
+    constexpr int TAPS = R * S;
+    if(a.reflect)
+        tap = a.ft * TAPS - 1 - tap;
+    const int ts = tap % S, tr = (tap / S) % R, tt = tap / TAPS;
+    float sum = 0.0f;
+    sum += v;
+    static_cast<T*>(a.dw)[kAll * a.sK + c * a.sC + tt * a.sT + tr * a.sR + ts * a.sS]
+        = K1Elem<T>::store(sum);
+}
+
 template <class T, class Atom, int R, int S, int ST, int TH, int TW, int CB, int CF>
 __device__ void k4WrwMma(const K4WrwArgs& a)
 {
@@ -1549,8 +1570,35 @@ __device__ void k4WrwMma(const K4WrwArgs& a)
         if(sub != 0)
             return;
     }
-    // The diagonal (in-group) entries into the split's slot: [g][k][c][tap].
+    // The diagonal (in-group) entries into the split's slot: [g][k][c][tap]; at one split
+    // (CONV_GROUP_DIRECT) into dw.
     const int taps = a.ft * TAPS;
+#if CONV_GROUP_DIRECT
+    {
+#pragma unroll
+        for(int bb = 0; bb < BPW; ++bb)
+        {
+            const int ch = cbt * CH + (blk0 + bb) * 16;
+#pragma unroll
+            for(int tap = 0; tap < TAPS; ++tap)
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                {
+                    const int k = Atom::dRow(lane, e);
+                    if(k / a.cg == c16 / a.cg)
+                    {
+                        const int g = (ch + k) / a.cg;
+                        k4WrwPutDw<T, R, S>(a,
+                                            static_cast<long long>(g) * a.cg + k % a.cg,
+                                            c16 % a.cg,
+                                            ft * TAPS + tap,
+                                            acc[bb][tap][e]);
+                    }
+                }
+        }
+        return;
+    }
+#endif
     float* out = a.partial + split * a.partialElems;
 #pragma unroll
     for(int bb = 0; bb < BPW; ++bb)
@@ -1768,6 +1816,26 @@ __device__ void k4WrwMmaWide(const K4WrwArgs& a)
         return;
     const int taps = a.ft * TAPS;
     const int c = ib * 16 + c16;
+#if CONV_GROUP_DIRECT
+    {
+#pragma unroll
+        for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+            for(int tap = 0; tap < TAPS; ++tap)
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                {
+                    const int k = k0 + ob * 16 + Atom::dRow(lane, e);
+                    if(k < a.cg && c < a.cg)
+                        k4WrwPutDw<T, R, S>(a,
+                                            static_cast<long long>(g) * a.cg + k,
+                                            c,
+                                            ft * TAPS + tap,
+                                            acc[ob][tap][e]);
+                }
+        return;
+    }
+#endif
     float* out
         = a.partial + split * a.partialElems + static_cast<long long>(g) * a.cg * a.cg * taps;
 #pragma unroll
@@ -1930,6 +1998,15 @@ __device__ void k4WrwFma(const K4WrwArgs& a)
     }
     const int taps = a.ft * TAPS;
     const int g = (cbt * CH + k) / a.cg;
+#if CONV_GROUP_DIRECT
+    {
+#pragma unroll
+        for(int tap = 0; tap < TAPS; ++tap)
+            k4WrwPutDw<T, R, S>(
+                a, static_cast<long long>(g) * a.cg + k % a.cg, c, ft * TAPS + tap, acc[tap]);
+        return;
+    }
+#endif
     float* out = a.partial + split * a.partialElems
                  + ((static_cast<long long>(g) * a.cg + k % a.cg) * a.cg + c) * taps + ft * TAPS;
 #pragma unroll

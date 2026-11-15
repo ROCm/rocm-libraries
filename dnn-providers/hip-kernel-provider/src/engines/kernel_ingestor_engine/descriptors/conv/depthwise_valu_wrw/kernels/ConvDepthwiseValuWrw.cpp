@@ -18,10 +18,11 @@
 //                    1 = register tile: compile-time CONV_DW_KD x CONV_DW_KH x CONV_DW_KW (KD 1
 //                        for 1-D and 2-D), every tap's sum in registers, dy read once per
 //                        position
-//                    2 = matrix core (ConvDepthwiseHankelWrw.h): 16-bit channels-last, unit
-//                        stride and dilation, compile-time CONV_DW_KH x CONV_DW_KW, on 4x4x4
+//                    2 = matrix core (ConvDepthwiseHankelWrw.h): 16-bit channels-last, stride
+//                        CONV_DW_S (1 or 2, both axes), unit dilation, compile-time
+//                        CONV_DW_KH x CONV_DW_KW, on 4x4x4
 //                        MFMA; CONV_DW_Q columns a tile, CONV_DW_G rows a step, CONV_DW_NWG
-//                        16-channel groups a wave
+//                        16-channel groups a wave, CONV_DW_FORM the kernel body (0 or 1)
 //                    3 = vector tile (channels-last, unit width stride and dilation, compile-time
 //                        CONV_DW_KH x CONV_DW_KW, multiplier 1): a thread owns CONV_DW_CV
 //                        consecutive channels (one vector load a column) and every tap's sum of
@@ -58,6 +59,11 @@
 #ifndef CONV_DW_MULT
 #define CONV_DW_MULT 1
 #endif
+// CONV_DW_DIRECT 1 (one partition): the partial kernel writes dw itself (args.direct); 0 (default):
+// fp32 partials, compiled exactly as without the direct store.
+#ifndef CONV_DW_DIRECT
+#define CONV_DW_DIRECT 0
+#endif
 
 using ElementType = CONV_DW_TYPE;
 
@@ -83,6 +89,18 @@ constexpr int LANES = BLOCK / CHANNELS;
 __device__ inline float toFloat(ElementType v)
 {
     return static_cast<float>(v);
+}
+
+/// Under CONV_DW_DIRECT (one partition): an output channel's tap sum into dw itself, with the
+/// fold's rounding (the sum from +0, rounded once; taps reflected for true convolution), so no
+/// fold runs. Without it the kernels store fp32 partials, compiled as before.
+__device__ inline void
+    putDw(const ConvDepthwiseValuWrwArgs& a, long channel, int tap, int taps, float v)
+{
+    float total = 0.0f;
+    total += v;
+    const int target = CONV_DW_FLIP != 0 ? taps - 1 - tap : tap;
+    static_cast<ElementType*>(a.dw)[channel * taps + target] = static_cast<ElementType>(total);
 }
 
 /// Element offset of (n, c, z, y, x) in a packed tensor of c channels and extents (d, h, w).
@@ -424,7 +442,11 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                 {
                     total += lanes[(l * lanesC + tid) * CV + e];
                 }
+#if CONV_DW_DIRECT
+                putDw(a, c + e, t, TAPS, total);
+#else
                 a.partial[((long)partition * a.c + c + e) * TAPS + t] = total;
+#endif
             }
         }
         __syncthreads();
@@ -444,7 +466,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
 {
 #if CONV_DW_VARIANT == 2
     static_assert(hankel::THREADS == BLOCK, "one block size");
+#if CONV_DW_FORM == 1
+    hankel::partialRows<__is_same(ElementType, __bf16)>(a);
+#else
     hankel::partial<__is_same(ElementType, __bf16)>(a);
+#endif
 #elif CONV_DW_VARIANT == 3
     vtile::partial(a);
 #else
@@ -495,7 +521,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
                            * toFloat(x[offsetOf(n, c / MULT, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
                 }
             }
+#if CONV_DW_DIRECT
+            putDw(a, c, tap, a.taps, sum);
+#else
             a.partial[((long)partition * channels + c) * a.taps + tap] = sum;
+#endif
         }
     }
 #else
@@ -541,7 +571,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
             {
                 total += lanes[l][tid % CHANNELS];
             }
+#if CONV_DW_DIRECT
+            putDw(a, c, t, TAPS, total);
+#else
             a.partial[((long)partition * channels + c) * TAPS + t] = total;
+#endif
         }
         __syncthreads();
     }
@@ -583,7 +617,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const float total = blockSum(sum, scratch);
         if(tid == 0)
         {
+#if CONV_DW_DIRECT
+            putDw(a, c, tap, a.taps, total);
+#else
             a.partial[((long)partition * channels + c) * a.taps + tap] = total;
+#endif
         }
     }
 #else
@@ -623,7 +661,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const float total = blockSum(sum[t], scratch);
         if(tid == 0)
         {
+#if CONV_DW_DIRECT
+            putDw(a, c, t, TAPS, total);
+#else
             a.partial[((long)partition * channels + c) * TAPS + t] = total;
+#endif
         }
     }
 #endif

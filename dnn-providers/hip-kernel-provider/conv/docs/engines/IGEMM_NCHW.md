@@ -14,8 +14,8 @@ SPDX-License-Identifier:  MIT
 - **Arches:** WMMA on gfx11/gfx12 (fp16, bf16); MFMA 16x16 on gfx908-gfx950 (fp16; bf16 from gfx90a; fp32 on the 16x16x4 atom); an FMA kernel everywhere (the fp32 path on RDNA).
 - **Wins when:** strided NCHW backward data and ConvTranspose: vocoder 1-D (HiFi-GAN upsampling and dilated residual blocks), strided 1x1, patchify, 2x2x2 and 3x3x3 stride-2 3-D (nnU-Net). 1.4-2.4x MIOpen, call-weighted, with almost no losses.
 - **Loses when:** large compute-bound GEMMs (wide channels, unit stride 2-D): its matrix-core loop reaches only 13-20% of peak there, and K1 or Winograd serve those.
-- **Precision:** fp32 accumulation, every dx element written once by one block, no split, no atomics: deterministic. No numerical notes.
-- **Instances:** 1845 configs + 84 TF32 (three-bf16); about 28-50 admitted per graph.
+- **Precision:** fp32 accumulation, every dx element written once by one block, no split, no atomics: deterministic. No numerical notes on the exact engine; `CONV_IGEMM_NCHW_BWD_TF32` reports `TENSOR_CORE`.
+- **Instances:** 1845 exact configs, and 84 three-bf16 configs in `CONV_IGEMM_NCHW_BWD_TF32`; about 28-50 admitted per graph.
 - **vs MIOpen:** replaces `GemmBwdRest` / `GemmBwd1x1_stride2` (GEMM into a column buffer, then a col2im scatter) and CK grouped bwd on NCHW; 1.5-2.6x faster than CK grouped bwd and 1.4-4.4x faster than `GemmBwdRest` on the graphs it wins.
 
 ## Why it exists
@@ -61,7 +61,7 @@ At stride 1 (1-D convolutions, dilated residual blocks) there is one phase and t
 | 4 | 1-8 | per row or `flat`; patchify 4x4 |
 | 5, 6, 8 | 6-10, 7-12, 9-16 | ConvTranspose1d `k = 2s` |
 
-Counts: 1845 exact configs (WMMA 1020, MFMA 16x16 684, FMA 141) and 84 three-bf16 configs, registered only under `HIP_KERNEL_PROVIDER_CONV_TF32`.
+Counts: 1845 exact configs (WMMA 1020, MFMA 16x16 684, FMA 141) and 84 three-bf16 configs, which the `CONV_IGEMM_NCHW_BWD_TF32` sibling lists (offered by default, reporting `TENSOR_CORE`).
 
 ## Strengths and weaknesses
 
@@ -86,7 +86,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 
 - fp32 accumulation; fp16/bf16 on MFMA/WMMA accumulate in fp32; one rounding at the store. One block writes each dx element once; no split-K, no atomics. The device suite relaunches every config and compares bits.
 - Padding and out-of-range taps load zeros and are multiplied; rows no dy row reaches are stored as exact zeros.
-- **Three-bf16** (TF32 permission, fp32 graphs): dy and w are split along K into 3K bf16 channels by a pre-pass (high, low, and high-with-infinities-zeroed for the cross term), run on the bf16 matrix-core configs, dx written in fp32. Admitted only on RDNA for 3-D problems with all strides >= 2 and at least 27 taps, the only place it measured faster than exact (1.07x and 1.46x on gfx1201; 0.05-0.79x elsewhere). Infinities stay infinite (tested).
+- **Three-bf16** (`CONV_IGEMM_NCHW_BWD_TF32`, fp32 graphs): dy and w are split along K into 3K bf16 channels by a pre-pass (high, low, and high-with-infinities-zeroed for the cross term), run on the bf16 matrix-core configs, dx written in fp32. Admitted only on RDNA for 3-D problems with all strides >= 2 and at least 27 taps, the only place it measured faster than exact (1.07x and 1.46x on gfx1201; 0.05-0.79x elsewhere). Infinities stay infinite (tested).
 - Tested against hipDNN's CPU reference with a per-term bound times the reduction length plus 2 storage epsilons; three-bf16 against fp64 with a TF32 bound.
 
 ## Comparison with MIOpen
@@ -118,5 +118,5 @@ K7 wins by never materializing columns or staged layouts: one pass reads dy and 
 
 ## Tests
 
-- `src/tests/engines/kernel_ingestor_engine/packs/TestConvIgemmNchwProblem.cpp` (host): acceptance; argument forms (width convolution over rows, strided rows); one refusal per graph field and per config field; direction; dtype; grid limits; atoms per architecture; stride and taps follow the filter; flat configs and flat refusals; stride-1 taps shift by the dilation; LDS arithmetic mirrors the kernel; three-bf16 only under permission, only where it pays, with the tripled problem and its split.
-- `TestGpuConvIgemmNchw.cpp` (device): every admitted config in fp32, fp16 and bf16 over 1-D ConvTranspose shapes (k4 s2 to k16 s8, partial and past-stride padding, wide rows, 70 channels, output extent 1), strided 1x1 and patchify, height- and depth-strided rows, 2x2x2 and 3x3x3 s2 3-D (padded and unpadded), stride-1 k3-k11 with dilation 3 and 5, height dilation; bitwise relaunch of every config; three-bf16 and its infinity cases; catalog invariants (three-bf16 only under permission, knobs distinguish every config, LDS fits, a device reporting no units is served like a counted one).
+- `src/tests/engines/kernel_ingestor_engine/packs/TestConvIgemmNchwProblem.cpp` (host): acceptance; argument forms (width convolution over rows, strided rows); one refusal per graph field and per config field; direction; dtype; grid limits; atoms per architecture; stride and taps follow the filter; flat configs and flat refusals; stride-1 taps shift by the dilation; LDS arithmetic mirrors the kernel; three-bf16 only for fp32 and only where it pays, with the tripled problem and its split.
+- `TestGpuConvIgemmNchw.cpp` (device): every admitted config in fp32, fp16 and bf16 over 1-D ConvTranspose shapes (k4 s2 to k16 s8, partial and past-stride padding, wide rows, 70 channels, output extent 1), strided 1x1 and patchify, height- and depth-strided rows, 2x2x2 and 3x3x3 s2 3-D (padded and unpadded), stride-1 k3-k11 with dilation 3 and 5, height dilation; bitwise relaunch of every config; three-bf16 and its infinity cases; catalog invariants (three-bf16 only for fp32 where it pays, knobs distinguish every config, LDS fits, a device reporting no units is served like a counted one).

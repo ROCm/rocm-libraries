@@ -10,24 +10,21 @@
 #include <HipblasltPlugin.hpp>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "common/ConvRepackFormulation.hpp"
 #include "engines/conv/ConvGemmTestGraphs.hpp"
-#include "engines/conv/ConvReducedPrecision.hpp"
 
 /**
  * @file TestConvReducedPrecision.cpp
- * @brief The reduced-precision-reduction convolution engines' host-side rules: the switch that
- *        registers them, the one form they serve (reducedPrecisionGemmCalls), and one decline per
- *        gate of that form.
+ * @brief The reduced-precision-reduction convolution engines' host-side rules: they are
+ *        registered by default, the one form they serve (reducedPrecisionGemmCalls), and one
+ *        decline per gate of that form.
  */
 namespace
 {
 
 using namespace hipblaslt_plugin;
 using namespace hipblaslt_plugin::test;
-using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 using DataType = conv_data_objects::DataType;
 
 /// The form's shape: a 1x1 fp16 backward weights of 4 channels-first images, which no single GEMM
@@ -67,37 +64,16 @@ bool hasEngine(const std::vector<int64_t>& ids, int64_t id)
     return std::find(ids.begin(), ids.end(), id) != ids.end();
 }
 
-TEST(TestConvReducedPrecision, SwitchReadsOnlyAffirmativeValues)
-{
-    ScopedEnvironmentVariableSetter env(CONV_RPR_ENV_NAME);
-    EXPECT_FALSE(convReducedPrecisionEnginesEnabled());
-    for(const auto* value : {"1", "true", "ON", " yes "})
-    {
-        env.setValue(value);
-        EXPECT_TRUE(convReducedPrecisionEnginesEnabled()) << value;
-    }
-    for(const auto* value : {"0", "false", "off", "2", "enable"})
-    {
-        env.setValue(value);
-        EXPECT_FALSE(convReducedPrecisionEnginesEnabled()) << value;
-    }
-}
-
-TEST(TestConvReducedPrecision, NoEngineRegisteredWithoutTheSwitch)
+TEST(TestConvReducedPrecision, EnginesAreRegisteredByDefault)
 {
     using namespace hipdnn_data_sdk::utilities;
-    ScopedEnvironmentVariableSetter env(CONV_RPR_ENV_NAME);
-    const auto unset = engineIds();
-    EXPECT_FALSE(hasEngine(unset, ROCBLAS_CONV_RPR_ENGINE_ID));
-    EXPECT_FALSE(hasEngine(unset, HIPBLASLT_CONV_RPR_ENGINE_ID));
+    [[maybe_unused]] const auto ids = engineIds();
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
-    env.setValue("1");
-    const auto set = engineIds();
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
-    EXPECT_TRUE(hasEngine(set, ROCBLAS_CONV_RPR_ENGINE_ID));
+    EXPECT_TRUE(hasEngine(ids, ROCBLAS_CONV_RPR_ENGINE_ID));
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
-    EXPECT_TRUE(hasEngine(set, HIPBLASLT_CONV_RPR_ENGINE_ID));
+    EXPECT_TRUE(hasEngine(ids, HIPBLASLT_CONV_RPR_ENGINE_ID));
 #endif
 #endif
 }

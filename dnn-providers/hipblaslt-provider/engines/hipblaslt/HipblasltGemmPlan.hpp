@@ -19,11 +19,17 @@ namespace hipblaslt_plugin
  *
  * Construction queries hipBLASLt for every call and throws when it finds no algorithm, so
  * building the plan is also its applicability check.
+ *
+ * A deterministic plan offers hipBLASLt no workspace (HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES
+ * 0, as MIOpen's deterministic GEMMs do), so no algorithm can split a reduction across
+ * workgroups into a workspace; the convolution's own repack workspace is separate.
  */
 class HipblasltGemmPlan : public IPlan
 {
 public:
-    HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle, const std::vector<GemmCall>& calls);
+    HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
+                      const std::vector<GemmCall>& calls,
+                      bool deterministic = false);
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 

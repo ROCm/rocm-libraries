@@ -490,7 +490,8 @@ CATALOG = {
         C("mfma16_f32", 64, 16, 16, 4, 1, vec=4, pack=1),
     ]
     + fma("FLOAT")
-    # TF32 permission only (three-bf16 on every matrix-core arch; xf32 on gfx942).
+    # TF32 configs (three-bf16 on every matrix-core arch; xf32 on gfx942): the CONV_IGEMM_*_TF32
+    # engines' catalogs (isTf32), not the exact engines'.
     + [
         C("mfma32_bf16", 128, 128, 16, vec=4, math="bf16x3"),
         C("mfma32_bf16", 128, 64, 32, vec=4, math="bf16x3"),
@@ -511,6 +512,12 @@ CATALOG = {
         C("mfma16_xf32", 256, 64, 16, 4, 1, vec=4, xcd=1, halo=1),
     ],
 }
+
+
+def isTf32(c):
+    """A TF32 config: fp32 through rounded operands (three-bf16, or gfx942's xf32 atoms)."""
+    return c["math"] == "bf16x3" or c["atom"].endswith("_xf32")
+
 
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
 w(
@@ -622,17 +629,39 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 }
             )
     total += len(kernels)
+    # The TF32 configs make an engine of their own, which reports the TENSOR_CORE numerical
+    # note (cuDNN's note for TF32 engines), so a caller can exclude them by note.
+    ued_tf32 = U("ued." + tag + ".tf32")
     w(
-        f"conv_igemm_{tag}.kdp.json",
+        f"conv_igemm_{tag}_tf32.ued.json",
         {
             "version": "1.0",
-            "id": U("kdp." + tag),
-            "name": f"hipkernel:conv_igemm_{tag}",
-            "arch": [],
-            "matchers": [umd],
-            "engine": ued,
-            "dispatch": udd,
-            "kernelDescriptors": kernels,
+            "id": ued_tf32,
+            "name": f"hipkernel:CONV_IGEMM_{direction}_TF32",
+            "graph_match": {"native": f"hipkernel.conv_igemm_{tag}.graph_match"},
+            "metadata": kmd,
+            "knobs": KNOBS,
+            "behavior_notes": ["runtime_compilation"],
+            # RFC 0025 numerical notes: TENSOR_CORE (fp32 through TF32-class rounded
+            # operands). Deterministic as the exact engine.
+            "numerical_notes": ["tensor_core"],
         },
     )
+    for suffix, engine, members in (
+        ("", ued, [k for k in kernels if not isTf32(k["metadata"])]),
+        ("_tf32", ued_tf32, [k for k in kernels if isTf32(k["metadata"])]),
+    ):
+        w(
+            f"conv_igemm_{tag}{suffix}.kdp.json",
+            {
+                "version": "1.0",
+                "id": U("kdp." + tag + suffix.replace("_", ".")),
+                "name": f"hipkernel:conv_igemm_{tag}{suffix}",
+                "arch": [],
+                "matchers": [umd],
+                "engine": engine,
+                "dispatch": udd,
+                "kernelDescriptors": members,
+            },
+        )
 print(total, "kernel configs")

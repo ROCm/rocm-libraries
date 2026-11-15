@@ -11,7 +11,8 @@
 /// (n, c, do, ho, wo), both packed in one layout. 1-D and 2-D problems lead with extent-1 axes
 /// (pad 0, stride 1, dilation 1). The reduction runs over rows = n * do * ho, in `partitions`
 /// partitions of `rowsPerPartition` rows: the partial kernel writes one fp32 sum per
-/// (partition, channel, tap) to `partial`, the fold kernel sums them in partition order.
+/// (partition, channel, tap) to `partial`, the fold kernel sums them in partition order (at one
+/// partition the partial kernel writes dw itself).
 struct ConvDepthwiseValuWrwArgs
 {
     const void* x;
@@ -42,4 +43,7 @@ struct ConvDepthwiseValuWrwArgs
     int partitions;
     int rowsPerPartition;
     int taps;
+    /// Nonzero (one partition): the partial kernel, compiled with CONV_DW_DIRECT, writes dw itself
+    /// with the fold's rounding, and no fold runs; `partial` is unused.
+    int direct;
 };

@@ -6,12 +6,15 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -618,8 +621,8 @@ bool expectServed(const std::string& arch, DataType dataType)
     return false;
 }
 
-/// The configs a case runs: the graph's own element type, or three-bf16 (math 1: fp32 graphs
-/// under TF32 permission, the bf16 kernel on split operands).
+/// The configs a case runs: the graph's own element type, or three-bf16 (math 1: fp32 graphs,
+/// CONV_WRW_TF32's configs, the bf16 kernel on split operands).
 enum class Math
 {
     NATIVE,
@@ -654,6 +657,109 @@ bool matches(float got, float want, float tolerance)
         return got == want;
     }
     return std::fabs(got - want) <= tolerance;
+}
+
+/// The reduce's dw is the fixed-order sum of the partials @p workspace holds after a launch
+/// of @p launch, bit for bit: per element, split group j (0..3) adds splits j, j + 4, ... in
+/// order from +0, then ((g0 + g1) + g2) + g3, rounded once to dw's type (both reduces, quad and
+/// tile, sum in this order; a NaN matches any NaN). @p dw is the device dw in its layout, taps
+/// reflected under flip.
+template <typename TO>
+void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
+                                 const void* workspace,
+                                 const void* dw,
+                                 const std::vector<int64_t>& dwDims,
+                                 const std::vector<int64_t>& dwStrides)
+{
+    const auto& r = launch.reduce;
+    const size_t partialFloats
+        = static_cast<size_t>(r.splits) * static_cast<size_t>(r.partialElems);
+    std::vector<float> partials(partialFloats);
+    ASSERT_EQ(
+        hipMemcpy(partials.data(),
+                  static_cast<const char*>(workspace) + (launch.split ? launch.splitBytes : 0),
+                  partialFloats * sizeof(float),
+                  hipMemcpyDeviceToHost),
+        hipSuccess);
+    int64_t count = 1;
+    for(const auto extent : dwDims)
+    {
+        count *= extent;
+    }
+    // The last element's offset: dw may be packed in either filter layout.
+    int64_t span = 0;
+    for(size_t axis = 0; axis < dwDims.size(); ++axis)
+    {
+        span += (dwDims[axis] - 1) * dwStrides[axis];
+    }
+    std::vector<TO> got(static_cast<size_t>(span + 1));
+    ASSERT_EQ(hipMemcpy(got.data(), dw, got.size() * sizeof(TO), hipMemcpyDeviceToHost),
+              hipSuccess);
+    int64_t mismatches = 0;
+    const int64_t groups = r.groups;
+    const int64_t taps = r.taps;
+    const int64_t kg = r.kg;
+    const int64_t cg = r.cg;
+    const int64_t splits = r.splits;
+    // A value's bits (a NaN or a signed zero compares by its encoding).
+    const auto bitsOf = [](const TO& v) {
+        std::conditional_t<sizeof(TO) == 4, uint32_t, uint16_t> u = 0;
+        std::memcpy(&u, &v, sizeof(u));
+        return u;
+    };
+    for(int64_t g = 0; g < groups; ++g)
+    {
+        for(int64_t tap = 0; tap < taps; ++tap)
+        {
+            for(int64_t k = 0; k < kg; ++k)
+            {
+                for(int64_t c = 0; c < cg; ++c)
+                {
+                    const int64_t at = ((g * taps + tap) * kg + k) * cg + c;
+                    std::array<float, 4> group{0.0f, 0.0f, 0.0f, 0.0f};
+                    for(int64_t sp = 0; sp < splits; ++sp)
+                    {
+                        group[static_cast<size_t>(sp % 4)]
+                            += partials[static_cast<size_t>(sp * r.partialElems + at)];
+                    }
+                    float sum = group[0];
+                    sum += group[1];
+                    sum += group[2];
+                    sum += group[3];
+                    const TO want = static_cast<TO>(sum);
+                    // dw index: (g kg + k, c, taps in row-major order over dims 2..).
+                    const int64_t wtap = r.flip != 0 ? taps - 1 - tap : tap;
+                    int64_t offset = (g * kg + k) * dwStrides[0] + c * dwStrides[1];
+                    int64_t rest = wtap;
+                    for(size_t axis = dwDims.size() - 1; axis >= 2; --axis)
+                    {
+                        offset += (rest % dwDims[axis]) * dwStrides[axis];
+                        rest /= dwDims[axis];
+                    }
+                    const TO have = got[static_cast<size_t>(offset)];
+                    // NaN (+inf meeting -inf) carries no defined payload: any NaN matches.
+                    const bool bothNan = std::isnan(static_cast<float>(want))
+                                         && std::isnan(static_cast<float>(have));
+                    if(!bothNan && bitsOf(want) != bitsOf(have) && ++mismatches <= 5)
+                    {
+                        ADD_FAILURE() << "reduce at dw offset " << offset << " (g " << g << ", k "
+                                      << k << ", c " << c << ", tap " << tap
+                                      << "): not the fixed-order sum of " << splits << " splits";
+                    }
+                }
+            }
+        }
+    }
+    const char* reduce = "quad";
+    if(r.tile == 1)
+    {
+        reduce = "tile";
+    }
+    else if(r.tile == 2)
+    {
+        reduce = "rows";
+    }
+    EXPECT_EQ(mismatches, 0) << "of " << count << " dw elements (reduce " << reduce << ")";
 }
 
 /// Runs every config of @p kernels (default: the shipped catalog) the kernel match admits on
@@ -809,6 +915,24 @@ void runCase(const DeviceCase& deviceCase,
             workspaceBytes));
         if(workspace != nullptr)
         {
+            // The partials of the last launch and its dw: the reduce's sum, bit for bit.
+            const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+            ASSERT_TRUE(problem.has_value());
+            const auto launch = conv_wrw::wrwLaunchFor(*problem, config, device);
+            ASSERT_TRUE(launch.has_value());
+            if(!launch->dwStore)
+            {
+                if(config.math == 1)
+                {
+                    expectReduceIsFixedOrderSum<float>(
+                        *launch, workspace, w.rawDeviceData(), w.dims(), w.strides());
+                }
+                else
+                {
+                    expectReduceIsFixedOrderSum<T>(
+                        *launch, workspace, w.rawDeviceData(), w.dims(), w.strides());
+                }
+            }
             ASSERT_EQ(hipFree(workspace), hipSuccess);
         }
         w.markDeviceModified();
@@ -936,7 +1060,7 @@ TEST(TestGpuConvWrwWideTiles, BFloat16PartialChannelTiles)
     runWideTilesPartialChannels<BFloat16>();
 }
 
-/// The three-bf16 fp32 configs (TF32 permission): devices with bf16 matrix cores where three
+/// The three-bf16 fp32 configs (CONV_WRW_TF32's): devices with bf16 matrix cores where three
 /// bf16 products beat exact fp32 (gfx90a, gfx942, gfx950, gfx11, gfx12; not gfx908).
 class TestGpuConvWrwThreeBf16 : public ::testing::TestWithParam<DeviceCase>
 {
@@ -953,8 +1077,6 @@ TEST_P(TestGpuConvWrwThreeBf16, Float)
     {
         GTEST_SKIP() << "no three-bf16 configs on " << arch;
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(GetParam(), Math::THREE_BF16);
 }
 
@@ -970,8 +1092,6 @@ TEST_P(TestGpuConvWrwThreeBf16, FloatInfinities)
     {
         GTEST_SKIP() << "no three-bf16 configs on " << arch;
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(GetParam(), Math::THREE_BF16, true);
 }
 
@@ -1026,12 +1146,10 @@ std::vector<DeviceCase> threeBf16Cases()
 }
 
 /// Opt-in (K3_TF32_TIMING=<shape CSV>): the best exact fp32 and the best three-bf16 config per
-/// shape, TF32 permitted. See ConvTf32Timing.hpp.
+/// shape. See ConvTf32Timing.hpp.
 TEST(TestGpuConvWrwTiming, ExactAgainstThreeBf16)
 {
     SKIP_IF_NO_DEVICES();
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     conv_tf32_timing::timeByForm(
         PACK, ConvDirection::BACKWARD_WEIGHTS, catalog(), "K3_TF32_TIMING", [](const auto& kernel) {
             return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");

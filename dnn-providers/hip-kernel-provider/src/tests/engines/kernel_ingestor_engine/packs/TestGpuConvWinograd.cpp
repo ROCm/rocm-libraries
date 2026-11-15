@@ -114,17 +114,19 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
         std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 3> catalogs;
-        for(size_t i = 0; i < catalogs.size(); ++i)
+        // Each direction's engines' catalogs: forward and backward data the exact-tile engine's,
+        // the bf16 engine's (CONV_WINOGRAD_*_BF16) and the F(4,3) engine's (CONV_WINOGRAD_*_F43).
+        const std::vector<std::pair<size_t, std::string>> files = {
+            {0, "conv_winograd_fwd.kdp.json"},
+            {0, "conv_winograd_fwd_bf16.kdp.json"},
+            {0, "conv_winograd_fwd_f43.kdp.json"},
+            {1, "conv_winograd_bwd.kdp.json"},
+            {1, "conv_winograd_bwd_bf16.kdp.json"},
+            {1, "conv_winograd_bwd_f43.kdp.json"},
+            {2, "conv_winograd_wrw.kdp.json"},
+        };
+        for(const auto& [i, file] : files)
         {
-            std::string file = "conv_winograd_wrw.kdp.json";
-            if(i == 0)
-            {
-                file = "conv_winograd_fwd.kdp.json";
-            }
-            else if(i == 1)
-            {
-                file = "conv_winograd_bwd.kdp.json";
-            }
             std::filesystem::path found;
             for(const auto& root : roots)
             {
@@ -415,11 +417,6 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
     // A few KiB of "last-level cache": the LLC-fit configs slice the batch on every device.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter llc(
         "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES", "4096");
-    // bf16 and F(4,3) run behind their opt-ins (conv_winograd::bf16Permitted, f43Permitted).
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter bf16(
-        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "1");
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter f43(
-        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "1");
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
     auto spec = specFor(shape, direction);

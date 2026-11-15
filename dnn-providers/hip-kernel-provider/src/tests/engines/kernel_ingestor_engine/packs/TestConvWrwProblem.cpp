@@ -13,8 +13,6 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
-
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -2213,10 +2211,14 @@ TEST(TestConvWrwLaunch, TheRingFillsTracksStepsSplitsAndTheWorkspace)
     EXPECT_EQ(a.partialElems, 9 * 40 * 24);
     EXPECT_EQ(launch->workspaceBytes, size_t{5} * 9 * 40 * 24 * 4);
     EXPECT_EQ(launch->kernelType, "K1AtomMfma32F16");
-    // The reduce: 5 splits, so quads (the row reduce takes at most 2): 9 taps x 40 k x 6
-    // quads of c, 64 per block.
-    EXPECT_EQ(launch->reduceGrid, (9u * 40 * 6 + 63) / 64);
-    EXPECT_EQ(launch->reduce.rows, 0);
+    // The reduce: dw K C T R S of 9 taps at 5 splits, so tiles (reduceTileFor): 24 channels
+    // narrowed to 16 for blocks (40 x 2 still below 2 a unit), one output channel a tile.
+    EXPECT_EQ(launch->reduce.tile, 1);
+    EXPECT_EQ(launch->reduce.tileC, 16);
+    EXPECT_EQ(launch->reduce.tileK, 1);
+    EXPECT_EQ(launch->reduce.tilesC, 2);
+    EXPECT_EQ(launch->reduce.tilesK, 40);
+    EXPECT_EQ(launch->reduceGrid, 80u);
     EXPECT_EQ(launch->reduceBlock, 256u);
     EXPECT_EQ(launch->reduce.elems, 40 * 24 * 9);
     EXPECT_EQ(launch->reduce.partialElems, a.partialElems);
@@ -2398,26 +2400,32 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(krsc->reduce.wk, 24 * 9);
     EXPECT_EQ(krsc->reduce.wc, 1);
     EXPECT_EQ(krsc->reduce.wtap, 24);
-    // K C T R S of 2 to 64 taps at most 2 splits reduces by rows (a run of channels' taps,
-    // contiguous in dw); more splits, K T R S C, one tap, or more than 64 taps by quads of
-    // channels. 304 units give the base 5 splits (22 steps / 4); one unit gives it 2.
+    // K C T R S of several taps at most K3_REDUCE_TILE_MAX_SPLITS splits reduces by tiles
+    // (each output channel's run of channels' taps, contiguous in dw); more splits, K T R S C
+    // or one tap by quads of channels. 304 units give the base 5 splits (22 steps / 4); one
+    // unit gives it 2.
     EXPECT_EQ(kcrs->reduce.splits, 5);
-    EXPECT_EQ(kcrs->reduce.rows, 0);
-    EXPECT_EQ(krsc->reduce.rows, 0);
+    EXPECT_EQ(kcrs->reduce.tile, 1);
+    EXPECT_EQ(krsc->reduce.tile, 0);
     EXPECT_EQ(krsc->reduceGrid, (9u * 40 * 6 + 63) / 64); // 9 taps x 40 k x 6 quads, 64 a block
     const auto twoSplits = launchOf(ConfigFields{}, baseShape(), "gfx942", 1);
     ASSERT_TRUE(twoSplits.has_value());
     EXPECT_EQ(twoSplits->reduce.splits, 2);
-    EXPECT_EQ(twoSplits->reduce.rows, 1);
-    EXPECT_EQ(twoSplits->reduceGrid, 40u); // 40 output channels x one run of 24 channels
+    EXPECT_EQ(twoSplits->reduce.tile, 1);
+    // One unit: all 24 channels and 4 output channels a tile (4 x 24 x 9 floats of LDS).
+    EXPECT_EQ(twoSplits->reduce.tileC, 24);
+    EXPECT_EQ(twoSplits->reduce.tileK, 4);
+    EXPECT_EQ(twoSplits->reduceGrid, 10u);
     auto wide = baseShape();
-    wide.c = 136; // three runs of 64 channels
+    wide.c = 136; // two tiles of 128 channels, the second of 8
     wide.k = 8;
     const auto runs = launchOf(rowsFields(), wide, "gfx942", 1);
     ASSERT_TRUE(runs.has_value());
     EXPECT_LE(runs->reduce.splits, 2);
-    EXPECT_EQ(runs->reduce.rows, 1);
-    EXPECT_EQ(runs->reduceGrid, 8u * 3);
+    EXPECT_EQ(runs->reduce.tile, 1);
+    EXPECT_EQ(runs->reduce.tileC, 128);
+    EXPECT_EQ(runs->reduce.tileK, 2); // 4 x 128 x 9 floats pass the LDS
+    EXPECT_EQ(runs->reduceGrid, 4u * 2);
     auto many = baseShape();
     many.input = {10, 12};
     many.filter = {9, 9}; // 81 taps
@@ -2425,11 +2433,13 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     auto f81 = rowsFields();
     f81.s = 9;
     f81.fr = 1;
-    // Each refusal below at one unit (at most 2 splits), so only its own gate declines rows.
-    const auto quadsOnly = launchOf(f81, many, "gfx942", 1);
-    ASSERT_TRUE(quadsOnly.has_value());
-    EXPECT_LE(quadsOnly->reduce.splits, 2);
-    EXPECT_EQ(quadsOnly->reduce.rows, 0);
+    // 81 taps: all 24 channels (the LDS takes 48 by 81 taps), two output channels a tile.
+    const auto manyTaps = launchOf(f81, many, "gfx942", 1);
+    ASSERT_TRUE(manyTaps.has_value());
+    EXPECT_LE(manyTaps->reduce.splits, 2);
+    EXPECT_EQ(manyTaps->reduce.tile, 1);
+    EXPECT_EQ(manyTaps->reduce.tileC, 24);
+    EXPECT_EQ(manyTaps->reduce.tileK, 2);
     auto pointwise = baseShape();
     pointwise.filter = {1, 1};
     pointwise.prePadding = pointwise.postPadding = {0, 0};
@@ -2439,18 +2449,67 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     const auto oneTap = launchOf(f1, pointwise, "gfx942", 1);
     ASSERT_TRUE(oneTap.has_value());
     EXPECT_LE(oneTap->reduce.splits, 2);
-    EXPECT_EQ(oneTap->reduce.rows, 0);
+    EXPECT_EQ(oneTap->reduce.tile, 0);
     const auto krscFew
         = conv_wrw::wrwLaunchFor(*problem, configOf(ConfigFields{}), deviceOf("gfx942", 1));
     ASSERT_TRUE(krscFew.has_value());
     EXPECT_EQ(krscFew->reduce.splits, 2);
-    EXPECT_EQ(krscFew->reduce.rows, 0);
+    EXPECT_EQ(krscFew->reduce.tile, 0);
+    // One split (one image of 3 rows: 5 steps): the tile reduce, except on gfx950, where the row
+    // reduce runs (one output channel's run of 64 channels a block: 40 blocks).
+    auto oneSplitShape = baseShape();
+    oneSplitShape.n = 1;
+    oneSplitShape.input = {3, 12};
+    const auto oneSplit942 = launchOf(ConfigFields{}, oneSplitShape, "gfx942");
+    ASSERT_TRUE(oneSplit942.has_value());
+    EXPECT_EQ(oneSplit942->reduce.splits, 1);
+    EXPECT_EQ(oneSplit942->reduce.tile, 1);
+    const auto oneSplit950 = launchOf(ConfigFields{}, oneSplitShape, "gfx950");
+    ASSERT_TRUE(oneSplit950.has_value());
+    EXPECT_EQ(oneSplit950->reduce.splits, 1);
+    EXPECT_EQ(oneSplit950->reduce.tile, 2);
+    EXPECT_EQ(oneSplit950->reduceGrid, 40u);
+    // More splits than the tile reduce takes: quads.
+    auto deep = baseShape();
+    deep.n = 64;
+    const auto manySplits = launchOf(ConfigFields{}, deep);
+    ASSERT_TRUE(manySplits.has_value());
+    EXPECT_GT(manySplits->reduce.splits, K3_REDUCE_TILE_MAX_SPLITS);
+    EXPECT_EQ(manySplits->reduce.tile, 0);
 
     auto convolution = baseShape();
     convolution.mode = ConvMode::CONVOLUTION;
     const auto flipped = launchOf(ConfigFields{}, convolution);
     ASSERT_TRUE(flipped.has_value());
     EXPECT_EQ(flipped->reduce.flip, 1);
+}
+
+TEST(TestConvWrwLaunch, ReduceTilesFillTheUnitsWithinTheLds)
+{
+    // c512 3x3 on 256 units: 128 channels and 2 output channels a tile (2 x 128 x 9 floats)
+    // leave 1024 blocks, 2 a unit.
+    const auto big = conv_wrw::reduceTileFor(1, 512, 512, 9, 256);
+    EXPECT_EQ(big.tileC, 128);
+    EXPECT_EQ(big.tileK, 2);
+    EXPECT_EQ(big.tilesC, 4);
+    EXPECT_EQ(big.tilesK, 256);
+    EXPECT_EQ(big.blocks, 1024);
+    // c64 3x3: 64 channels give 64 blocks; narrowed to 16 for 256.
+    const auto small = conv_wrw::reduceTileFor(1, 64, 64, 9, 256);
+    EXPECT_EQ(small.tileC, 16);
+    EXPECT_EQ(small.tileK, 1);
+    EXPECT_EQ(small.blocks, 256);
+    // Channels not whole quads: the tile rounds up (the last quad partly empty).
+    const auto odd = conv_wrw::reduceTileFor(1, 8, 6, 9, 1);
+    EXPECT_EQ(odd.tileC, 8);
+    EXPECT_EQ(odd.tilesC, 1);
+    EXPECT_EQ(odd.tileK, 4);
+    EXPECT_EQ(odd.blocks, 2);
+    // Groups multiply the blocks.
+    EXPECT_EQ(conv_wrw::reduceTileFor(32, 4, 4, 9, 1).blocks, 32);
+    // 125 taps: 32 channels (4096 / 125 floats, whole quads); 1025 taps: not one quad.
+    EXPECT_EQ(conv_wrw::reduceTileFor(1, 64, 64, 125, 1).tileC, 32);
+    EXPECT_EQ(conv_wrw::reduceTileFor(1, 64, 64, 1025, 1).blocks, 0);
 }
 
 TEST(TestConvWrwLaunch, OneSplitIntoContiguousChannelsWritesDwWithoutAReduce)
@@ -3303,10 +3362,6 @@ TEST(TestConvWrwComputeType, ServesCudnnsComputeTypesPerElementType)
                             [](const ConvShape& s) { return parse(specOf(s)).has_value(); });
 }
 
-using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
-
-constexpr const char* TF32_ENV = "HIP_KERNEL_PROVIDER_CONV_TF32";
-
 /// An fp32 graph three-bf16 is admitted for on CDNA (threeBf16Pays): 128 input and 64 output
 /// channels, 3x3, unit stride.
 ConvShape x3Shape()
@@ -3317,17 +3372,8 @@ ConvShape x3Shape()
     return shape;
 }
 
-TEST(TestConvWrwThreeBf16, OnlyWithTf32PermissionAndOnlyForFloatGraphs)
+TEST(TestConvWrwThreeBf16, OnlyForFloatGraphs)
 {
-    {
-        const ScopedEnvironmentVariableSetter off(TF32_ENV, "");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", x3Shape()));
-    }
-    {
-        const ScopedEnvironmentVariableSetter no(TF32_ENV, "0");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", x3Shape()));
-    }
-    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
     EXPECT_TRUE(admits(threeBf16Fields(), "gfx942", x3Shape()));
     EXPECT_TRUE(admits(threeBf16Fields(), "gfx950", x3Shape()));
     // gfx90a: three bf16 products never beat its exact fp32 MFMA here (threeBf16Pays).
@@ -3342,10 +3388,9 @@ TEST(TestConvWrwThreeBf16, OnlyWithTf32PermissionAndOnlyForFloatGraphs)
     EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", x3Shape()));
 }
 
-/// Every field three-bf16 adds, one refusal each, from a config admitted under permission.
+/// Every field three-bf16 adds, one refusal each, from an admitted config.
 TEST(TestConvWrwThreeBf16, RefusesOneFieldAtATime)
 {
-    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
     const auto shape = x3Shape();
     ASSERT_TRUE(admits(threeBf16Fields(), "gfx942", shape));
     const auto refuses = [&](const std::function<void(ConfigFields&)>& mutate) {
@@ -3387,7 +3432,6 @@ TEST(TestConvWrwThreeBf16, RefusesOneFieldAtATime)
 
 TEST(TestConvWrwThreeBf16, LaunchesTheBf16ConfigOnThreeTimesTheImagesAfterTheSplit)
 {
-    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
     const auto x3 = launchOf(threeBf16Fields(), x3Shape());
     ASSERT_TRUE(x3.has_value());
     // The bf16 config on the bf16 problem of 6 images.

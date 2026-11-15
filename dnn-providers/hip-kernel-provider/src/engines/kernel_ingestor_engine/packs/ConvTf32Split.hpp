@@ -27,8 +27,8 @@
  * as in fp32). The engine then runs a bf16 config on the problem with 3x the reduction channels
  * and writes its output in fp32.
  *
- * TF32 is a permission (conv_igemm::tf32Permitted, HIP_KERNEL_PROVIDER_CONV_TF32): a config of
- * math 1 is admitted only for an fp32 graph under it.
+ * A config of math 1 is a TF32 config: it is admitted only for an fp32 graph, and only the
+ * families' *_TF32 engines list it (they report the TENSOR_CORE numerical note).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_tf32
 {

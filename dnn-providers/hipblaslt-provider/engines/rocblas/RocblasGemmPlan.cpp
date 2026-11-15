@@ -58,6 +58,11 @@ void RocblasGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                        "rocblas_set_stream failed");
     }
+    std::optional<rocblas_backend::ScopedNoAtomics> noAtomics;
+    if(_bitwiseReproducible)
+    {
+        noAtomics.emplace(rocblasHandle);
+    }
     std::optional<rocblas_backend::ScopedXf32> xf32;
     if(std::any_of(_calls.begin(), _calls.end(), rocblas_backend::permitsXf32))
     {

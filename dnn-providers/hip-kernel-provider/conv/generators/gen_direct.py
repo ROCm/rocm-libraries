@@ -68,8 +68,9 @@ INTS = [
     "pp",
     "epi",
     "un",
+    "cf",
 ]
-ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0)
+ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0, un=0, cf=0)
 STRINGS = ["direction", "dtype", "kind", "atom", "archs"]
 F33, F55, F77, F17, F71, F333, F555 = (
     (1, 3, 3),
@@ -137,10 +138,11 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
     )
 
 
-def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0):
+def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0, cf=0):
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
-    (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images.
+    (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images. cf 1
+    (2-D, 16-bit, gfx950): packed channels-first activations read and written in place.
     """
     return dict(
         kind="rows",
@@ -173,6 +175,7 @@ def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0)
         pp=pp,
         epi=epi,
         un=un,
+        cf=cf,
     )
 
 
@@ -216,6 +219,23 @@ for dt in ("HALF", "BFLOAT16"):
             # gfx90a catalog tiles (40^2 c1280 1.36-1.51x -> 1.10-1.17x of MIOpen's search time).
             RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, pp=1, un=4),
             RW(f"mfma16_{e}", F33, 8, 4, 1, 2, 4, 16, 8, un=4),
+        ],
+    )
+    # gfx908 rows, dword LDS DMA; bf16 on the 16x16x8 atom. Eight-wave blocks run two waves per
+    # SIMD at 128 VGPRs + 128 AGPRs, so the tiles keep 8-12 accumulator sets a wave; the four-wave
+    # tiles (one wave per SIMD) take the 20- and 24-row tiles.
+    a908 = "mfma16_f16" if dt == "HALF" else "mfma16_bf16_908"
+    add(
+        dt,
+        ["gfx908"],
+        [
+            RW(a908, F33, 8, 2, 2, 2, 2, 16, 8),
+            RW(a908, F33, 6, 2, 2, 2, 2, 32, 8),
+            RW(a908, F33, 4, 4, 2, 2, 2, 32, 8),
+            RW(a908, F33, 8, 3, 2, 2, 2, 16, 8),
+            RW(a908, F33, 8, 3, 2, 1, 2, 16, 8),
+            RW(a908, F33, 5, 4, 4, 1, 2, 16, 8),
+            RW(a908, F33, 6, 2, 4, 1, 2, 16, 8),
         ],
     )
     # gfx942
@@ -294,6 +314,12 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F333, 8, 2, 2, 3, 2, 32, 8),
             RW(f"mfma16x32_{e}", F333, 8, 2, 2, 2, 2, 64, 8),
             RW(f"mfma16x32_{e}", F333, 8, 4, 2, 2, 2, 64, 8),
+            # Packed channels-first activations in place (no staging transposes): the 256-wide K
+            # tile at 64- and 32-channel chunks, the 16 x 32 tile, and the 20-row tile for 40^2.
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 64, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 8, 4, 1, 2, 4, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 8, 4, 2, 2, 2, 32, 8, epi=0, cf=1),
+            RW(f"mfma16x32_{e}", F33, 5, 4, 4, 1, 2, 64, 8, epi=0, cf=1),
         ],
     )
     add(
@@ -534,7 +560,8 @@ add(
     [F(F33, 8, 8, 4, 16, 4, pipe=1), F(F333, 8, 8, 4, 16, 4, ring=0, pipe=1)],
 )
 add("FLOAT", ["gfx12"], [F(F333, 8, 8, 4, 16, 4, ring=0)])
-# Three-bf16 fp32 (TF32 permission only): bf16 operands, 3x reduction, fp32 output.
+# Three-bf16 fp32 (TF32 configs, the CONV_DIRECT_*_TF32 engines'): bf16 operands, 3x reduction,
+# fp32 output.
 X3 = dict(math=1)
 add(
     "FLOAT",
@@ -675,9 +702,18 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             if c["rows"]:
                 # ConvDirectRows.h's two halo stages; the pack gates the same (rowsLdsBytes).
                 eb = 4 if c["atom"] == "mfma16_f32" else 2
-                lds = 2 * (c["wp"] * c["pw"] + c["r"] - 1)
-                lds *= c["un"] * (c["wq"] * 16 // c["un"] + c["s"] - 1)
-                lds *= c["bc"] * eb
+                hh = c["wp"] * c["pw"] + c["r"] - 1
+                lds = (
+                    2
+                    * hh
+                    * c["un"]
+                    * (c["wq"] * 16 // c["un"] + c["s"] - 1)
+                    * c["bc"]
+                    * eb
+                )
+                if c["cf"]:
+                    runs = (7 + c["wq"] * 16 + c["s"] - 1 + 7) // 8
+                    lds = lds // 2 + hh * c["bc"] * runs * 16
                 limit = 160 * 1024 if archs <= {"gfx950"} else 64 * 1024
                 assert lds <= limit, (c, archs, lds)
                 name = (
@@ -686,6 +722,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     f".pp{c['pp']}.epi{c['epi']}"
                     + (f".u{c['un']}" if c["un"] > 1 else "")
                     + (".split" if c["split"] else "")
+                    + (".cf" if c["cf"] else "")
                 )
             else:
                 name = (
@@ -715,17 +752,39 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 }
             )
     total += len(kernels)
+    # The three-bf16 configs make an engine of their own, which reports the TENSOR_CORE
+    # numerical note (cuDNN's note for TF32 engines), so a caller can exclude them by note.
+    ued_tf32 = U("ued." + tag + ".tf32")
     write(
-        f"conv_direct_{tag}.kdp.json",
+        f"conv_direct_{tag}_tf32.ued.json",
         {
             "version": "1.0",
-            "id": U("kdp." + tag),
-            "name": f"hipkernel:conv_direct_{tag}",
-            "arch": [],
-            "matchers": [umd],
-            "engine": ued,
-            "dispatch": udd,
-            "kernelDescriptors": kernels,
+            "id": ued_tf32,
+            "name": f"hipkernel:CONV_DIRECT_{direction}_TF32",
+            "graph_match": {"native": f"hipkernel.conv_direct_{tag}.graph_match"},
+            "metadata": kmd,
+            "knobs": INTS,
+            "behavior_notes": ["runtime_compilation"],
+            # RFC 0025 numerical notes: TENSOR_CORE (fp32 through bf16 operand parts).
+            # Deterministic as the exact engine.
+            "numerical_notes": ["tensor_core"],
         },
     )
+    for suffix, engine, members in (
+        ("", ued, [k for k in kernels if not k["metadata"]["math"]]),
+        ("_tf32", ued_tf32, [k for k in kernels if k["metadata"]["math"]]),
+    ):
+        write(
+            f"conv_direct_{tag}{suffix}.kdp.json",
+            {
+                "version": "1.0",
+                "id": U("kdp." + tag + suffix.replace("_", ".")),
+                "name": f"hipkernel:conv_direct_{tag}{suffix}",
+                "arch": [],
+                "matchers": [umd],
+                "engine": engine,
+                "dispatch": udd,
+                "kernelDescriptors": members,
+            },
+        )
 print(total, "kernel configs")

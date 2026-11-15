@@ -486,7 +486,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     int math = 0;
     int atomId = 0;
     int rowsKnob = 0;
-    const std::array<std::pair<const char*, int*>, 28> ints{
+    const std::array<std::pair<const char*, int*>, 29> ints{
         {{"atom_id", &atomId},   {"math", &math},          {"kd", &config.kd},
          {"r", &config.r},       {"s", &config.s},         {"bm", &config.bm},
          {"bn", &config.bn},     {"bc", &config.bc},       {"wm", &config.wm},
@@ -496,7 +496,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
          {"pipe", &config.pipe}, {"rows", &rowsKnob},      {"pw", &config.pw},
          {"fn", &config.fn},     {"wp", &config.wp},       {"wq", &config.wq},
          {"wk", &config.wk},     {"pp", &config.pp},       {"epi", &config.epi},
-         {"un", &config.un}}};
+         {"un", &config.un},     {"cf", &config.cf}}};
     for(const auto& [name, target] : ints)
     {
         const auto value = intField(kernel, name);
@@ -512,8 +512,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     }
     // The rows knobs belong to rows configs only; the halo-tile knobs to the others.
     const bool rowsFields = config.pw != 0 || config.fn != 0 || config.wp != 0 || config.wq != 0
-                            || config.wk != 0 || config.pp != 0 || config.epi != 0
-                            || config.un != 0;
+                            || config.wk != 0 || config.pp != 0 || config.epi != 0 || config.un != 0
+                            || config.cf != 0;
     if(config.rows)
     {
         if(config.pw < 1 || config.fn < 1 || config.wp < 1 || config.wq < 1 || config.wk < 1
@@ -523,7 +523,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
            || config.wn != 0 || config.bm != config.wp * config.pw
            || config.bn != config.wk * config.fn * 16
            || (config.un != 1 && config.un != 2 && config.un != 4)
-           || (config.un > 1 && config.kd != 1))
+           || (config.un > 1 && config.kd != 1) || (config.cf != 0 && config.cf != 1)
+           || (config.cf == 1
+               && (config.kd != 1 || config.un != 1 || config.split != 0 || config.pp != 0
+                   || config.epi != 0 || math != 0
+                   || conv_igemm::atomElement(config.atom) == "f32")))
         {
             return std::nullopt;
         }
@@ -604,6 +608,14 @@ int64_t rowsLdsBytes(const Config& config)
     // The operand is the atom's element (three-bf16 runs on bf16 atoms).
     const int64_t operandBytes = conv_igemm::atomElement(config.atom) == "f32" ? 4 : 2;
     const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw + config.r - 1;
+    if(config.cf != 0)
+    {
+        // Raw stage: per halo row bc channel rows of the 8-column runs covering the halo from
+        // its 8-aligned start; plus one channels-last stage.
+        const int64_t runs = (7 + config.wq * 16 + config.s - 1 + 7) / 8;
+        return haloRows * config.bc * runs * 16
+               + haloRows * (config.wq * 16 + config.s - 1) * config.bc * operandBytes;
+    }
     // un images' halo rows side by side, (16 wq / un + s - 1) pixels each.
     const int64_t haloColumns
         = static_cast<int64_t>(config.un) * (config.wq * 16 / config.un + config.s - 1);
@@ -612,8 +624,11 @@ int64_t rowsLdsBytes(const Config& config)
 
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
+    // Channels-first rows need CDNA4's 16-byte LDS DMA and transpose reads.
+    const bool cfRuns = config.cf == 0
+                        || hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0;
     return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
-           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName);
+           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName) && cfRuns;
 }
 
 std::optional<Plan>
@@ -668,14 +683,22 @@ std::optional<Plan>
         {
             return std::nullopt;
         }
+        // Channels-first: both activations packed channels-first (the graph layout the staged
+        // configs transpose), and input rows of whole 16-byte runs.
+        if(config.cf != 0
+           && (!problem.in.needed || !problem.in.transpose || !problem.out.needed
+               || !problem.out.transpose || (a.wi * operandBytes) % 16 != 0))
+        {
+            return std::nullopt;
+        }
         // gfx950 16-bit rows tiles smaller than the 16 x 32 x 128 tile serve tail-bound grids:
         // past ROWS_SMALL_TILE_ROUNDS persistent rounds the tail is a small share and the large
         // tile is ahead (MI355X, 384^2-1024^2 VAE layers), so they decline instead of near-tying
         // it under autotune.
         const long long tilePixelChannels
             = static_cast<long long>(t.th) * config.wq * 16 * config.blockColumns();
-        if(config.split == 0 && !config.math && config.atom.rfind("mfma16x32_", 0) == 0
-           && tilePixelChannels < ROWS_LARGE_TILE
+        if(config.split == 0 && !config.math && config.cf == 0
+           && config.atom.rfind("mfma16x32_", 0) == 0 && tilePixelChannels < ROWS_LARGE_TILE
            && t.blocks > ROWS_SMALL_TILE_ROUNDS * std::max<int64_t>(1, computeUnits))
         {
             return std::nullopt;
@@ -695,7 +718,7 @@ std::optional<Plan>
     // A staging transpose is one launch of a 256-thread block per tile.
     for(const Staging* staging : {&problem.in, &problem.out})
     {
-        if(staging->needed && staging->transpose)
+        if(config.cf == 0 && staging->needed && staging->transpose)
         {
             const auto& t = staging->transposeArgs;
             constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
@@ -750,17 +773,19 @@ std::optional<Plan>
     else if(config.split != 0)
     {
         // Split only an under-filled grid: below 2 blocks per CU, 2+ chunks per split, <= 16.
+        // A grid that needs no split declines: the config's split-0 twin runs the same tile and
+        // chunk order in one launch, where this one would add the partials and the reduce.
         const long long wanted = 2 * std::max<int64_t>(1, computeUnits);
-        if(tile->blocks < wanted && chunks >= 4)
+        const long long splits
+            = tile->blocks < wanted && chunks >= 4
+                  ? std::min({MAX_SPLITS, chunks / 2, divUp(wanted, tile->blocks)})
+                  : 1;
+        if(splits < 2)
         {
-            const long long splits
-                = std::min({MAX_SPLITS, chunks / 2, divUp(wanted, tile->blocks)});
-            if(splits > 1)
-            {
-                k2.cps = static_cast<int>(divUp(chunks, splits));
-                k2.splits = static_cast<int>(divUp(chunks, k2.cps));
-            }
+            return std::nullopt;
         }
+        k2.cps = static_cast<int>(divUp(chunks, splits));
+        k2.splits = static_cast<int>(divUp(chunks, k2.cps));
     }
     plan.grid[0] = static_cast<unsigned int>(gridX);
     plan.grid[1] = static_cast<unsigned int>(columnBlocks);
@@ -774,8 +799,9 @@ std::optional<Plan>
         plan.grid[2] = 1;
     }
 
-    // Workspace: [staged activations][formatted weights][three-bf16 input][split partials].
-    size_t offset = problem.stagingBytes;
+    // Workspace: [staged activations][formatted weights][three-bf16 input][split partials];
+    // channels-first configs stage nothing.
+    size_t offset = config.cf != 0 ? 0 : problem.stagingBytes;
     plan.weightOffset = offset;
     plan.weightBytes = static_cast<size_t>(plan.weightElems)
                        * static_cast<size_t>(config.math ? 2 : problem.elementBytes);
@@ -915,13 +941,13 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    // The atom takes the graph's element type; three-bf16 runs fp32 graphs on bf16 atoms, and
-    // only with TF32 permission.
+    // The atom takes the graph's element type; three-bf16 (the CONV_DIRECT_*_TF32 engines' configs)
+    // runs fp32 graphs on bf16 atoms.
     const auto element = conv_igemm::atomElement(config->atom);
     const auto wanted = conv_igemm::dataElement(problem->base.dataType);
     if(config->math)
     {
-        if(wanted != "f32" || element != "bf16" || !conv_igemm::tf32Permitted())
+        if(wanted != "f32" || element != "bf16")
         {
             return std::nullopt;
         }
@@ -1108,6 +1134,7 @@ public:
             options.add("CONV_DIRECT_SPLIT", std::to_string(config.split));
             options.add("CONV_DIRECT_PP", std::to_string(config.pp));
             options.add("CONV_DIRECT_EPI", std::to_string(config.epi));
+            options.add("CONV_DIRECT_CF", std::to_string(config.cf));
         }
         else
         {
@@ -1172,7 +1199,7 @@ public:
         const std::array<const Staging*, 2> stagings{&run->problem.in, &run->problem.out};
         for(size_t i = 0; i < stagings.size(); ++i)
         {
-            if(!stagings[i]->needed)
+            if(!stagings[i]->needed || config.cf != 0)
             {
                 continue;
             }
@@ -1258,14 +1285,16 @@ public:
                 dispatch.copy(i, stream).launch(stream, args);
             }
         };
+        // Channels-first configs read and write the graph's activations in place.
+        const bool staged = config.cf == 0;
         for(size_t i = 0; i < stagings.size(); ++i)
         {
-            if(stagings[i]->needed)
+            if(staged && stagings[i]->needed)
             {
                 operand[i] = base + stagings[i]->workspaceOffset;
             }
         }
-        if(stagings[0]->needed)
+        if(staged && stagings[0]->needed)
         {
             stage(0, true);
         }
@@ -1313,7 +1342,7 @@ public:
             K2ReduceArgs reduce{args.ws, operand[1], plan.outElems, args.splits, 0};
             dispatch.reduce(stream).launch(stream, reduce);
         }
-        if(stagings[1]->needed)
+        if(staged && stagings[1]->needed)
         {
             stage(1, false);
         }

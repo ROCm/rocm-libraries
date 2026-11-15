@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -198,6 +199,39 @@ TEST(TestPlanBuilderEngine, GetDetailsOmitsGraphCaptureSupportByDefault)
     EXPECT_THAT(engineDetails.behaviorNotes(),
                 ::testing::Not(::testing::Contains(
                     static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE))));
+}
+
+TEST(TestPlanBuilderEngine, GetDetailsOmitsNumericalNotesByDefault)
+{
+    PlanBuilderEngine const engine(hipdnn_data_sdk::utilities::ROCBLAS_MATMUL_ENGINE_ID);
+    HipdnnEnginePluginHandle dummyHandle;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, result);
+
+    // No field: hipDNN reports the engine NONDETERMINISTIC.
+    EngineDetailsWrapper const engineDetails(result.ptr, result.size);
+    EXPECT_FALSE(engineDetails.numericalNotes().has_value());
+}
+
+TEST(TestPlanBuilderEngine, GetDetailsWritesItsNumericalNotesAsGiven)
+{
+    HipdnnEnginePluginHandle dummyHandle;
+    for(const auto& notes : {std::vector<int32_t>{},
+                             std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_TENSOR_CORE},
+                             std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION,
+                                                  HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC}})
+    {
+        PlanBuilderEngine const engine(
+            hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID, false, notes);
+        hipdnnPluginConstData_t result;
+        engine.getDetails(dummyHandle, result);
+
+        // An empty list is written too: it is the engine's determinism claim.
+        EngineDetailsWrapper const engineDetails(result.ptr, result.size);
+        ASSERT_TRUE(engineDetails.numericalNotes().has_value());
+        EXPECT_EQ(*engineDetails.numericalNotes(), notes);
+    }
 }
 
 TEST(TestPlanBuilderEngine, InitializeExecutionContextInvokesFirstApplicablePlanBuilder)

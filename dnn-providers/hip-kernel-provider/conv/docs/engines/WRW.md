@@ -9,7 +9,7 @@ SPDX-License-Identifier:  MIT
 
 ## At a glance
 - **What:** dW[k][c][tap] = Σ dy·x over images and output positions, as an implicit GEMM. A block owns all filter-width taps of its filter rows in registers and stages each input window once for all of them. Nine loop bodies (`loop` 0-8) cover strides, rings, stems, narrow maps, gfx950 DMA / direct, exact-fp32 FMA, and a runtime-geometry generic tier.
-- **Covers:** backward weights. fp32, fp16 and bf16; a three-bf16 fp32 form exists only under `HIP_KERNEL_PROVIDER_CONV_TF32`, on the classes where it measured faster. x and dy both packed NCHW or both packed NHWC; the generic tier also reads any strides. dW is packed K C T R S or K T R S C. 1-D, 2-D and 3-D, groups, any stride, dilation and padding, both convolution modes.
+- **Covers:** backward weights. fp32, fp16 and bf16; a three-bf16 fp32 form in the `CONV_WRW_TF32` sibling engine, on the classes where it measured faster. x and dy both packed NCHW or both packed NHWC; the generic tier also reads any strides. dW is packed K C T R S or K T R S C. 1-D, 2-D and 3-D, groups, any stride, dilation and padding, both convolution modes.
 - **Large tensors:** the batch must fit 32 bits. Images past 2 GiB run on block-based-buffer configs (`pb 1`).
 - **Arches:** MFMA on gfx908-gfx950 and WMMA on gfx11/gfx12 (K1's atoms). FMA loops give exact fp32 on RDNA, and serve every dtype on gfx906. gfx950 extras: LDS DMA ring, LDS transpose reads, and the hipconv-class direct loop.
 - **Wins when:** most wrw on RDNA (MIOpen falls to universal GEMM or naive there), NHWC bf16 3x3 / 3x3x3 (VAE, Wan VAE), vocoder 1-D, small-C stems, dilated rows, narrow ResNet / Inception maps (packed rows), pointwise on RDNA and gfx950.
@@ -18,7 +18,7 @@ SPDX-License-Identifier:  MIT
   - deeplab ASPP at large dilation on 65² maps and on gfx906/908;
   - NCHW 1x1 fp16 on gfx942 / gfx90a, where MIOpen rounds per image;
   - hifigan 1x16 stride-8 on gfx950.
-- **Precision:** fp32 accumulation. Split partials are fp32 and summed in a fixed order; dW is rounded once. Deterministic, no atomics, no numerical note.
+- **Precision:** fp32 accumulation. Split partials are fp32 and summed in a fixed order; dW is rounded once. Deterministic, no atomics, no numerical note (`CONV_WRW_TF32` reports `TENSOR_CORE`).
 - **Instances:** 5,545 configs, 590 of them three-bf16, in per-dtype, per-arch-group packs (`cdna`, `cdnapk`, `gfx950`, `direct`, `rdna`, `fma`, `fmardna`, `fma906`/`fma906b`, `generic`, `genericfma`, `x3*`). Two tiers: specialized (geometry compile-time) and generic (`loop 8`, runtime geometry).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K3 is our fastest engine: 1.67x gfx950, 1.43x gfx942, 1.33x gfx90a, 1.79x gfx908, 4.50x gfx1201, 17.95x gfx1100. MIOpen ran in search mode.
 
@@ -49,8 +49,8 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
 
 **Split and reduce.** Steps split evenly over grid z to fill the dispatch units. The count comes from `splitsWanted`: units x `bpu` blocks per unit, at most steps / 4, workspace ≤ 1 GiB, then the count that best fills the last round.
 - Each split writes fp32 partials [split][g][tap][k][c].
-- `ConvWrwReduce` adds them in a fixed order: 4 split groups of every-4th split, then the groups in order. It writes dW in its dtype and layout, reflected for true convolution.
-- K C T R S filters of 2-64 taps at one or two splits take a row reduce, which writes each output channel's run of 64 channels x taps contiguously.
+- `ConvWrwReduce` adds them in a fixed order: 4 split groups of every-4th split, then the groups in order. It writes dW in its dtype and layout, reflected for true convolution. Its loads are non-temporal on gfx9 (plain on gfx950 at 64 or more splits) and plain on RDNA, where a non-temporal load misses the infinity cache holding the fresh partials (3x on gfx1201).
+- K C T R S filters of more than one tap at up to 8 splits take the tile reduce (`ConvWrwReduceTile`): a block sums a tile of output by input channels with all taps in the same order and writes each output channel's run contiguously. The quad blocks' writes land `taps` elements apart, which cost the c512 3x3 reduce 6-9 µs on gfx942 and gfx950. At one split on gfx950 the row reduce (one output channel's run of 64 channels a block) runs instead; it measured 3-4 µs ahead there.
 - At one split into K T R S C (or one tap), `dws 1` configs write dW directly: no workspace and no reduce.
 
 ## Implementation design
@@ -118,7 +118,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 - **Tolerance:** the device suite grades against hipDNN's CPU reference accumulated in fp64. The tolerance is 2e-6 x reduction length + 2 storage-eps x (|ref| + 1e-3); three-bf16 uses 3e-5 x reduction length.
 - **inf/NaN:** infinities in x propagate as in the reference, and a test pins it for exact fp32 and the three-bf16 split. Known open parity item: the gfx950 direct loop (5) can turn inf x structural zero into NaN.
 - **Determinism:** no atomics anywhere. The device suite relaunches each config over a re-filled workspace and compares bits.
-- **Reduced precision:** the three-bf16 form drops lo x lo, about 2^-16 of each product. It carries no precision note (notes are per engine) and moves to a sibling engine once callers can filter by note. MIOpen's `GemmWrw1x1_stride1` rounds dW to fp16 after every image. K3 does not; that form is the env-gated BLAS reduced-precision-reduction engine.
+- **Reduced precision:** the three-bf16 form drops lo x lo, about 2^-16 of each product. Only `CONV_WRW_TF32` lists it (590 configs; 4955 exact in `CONV_WRW`), reporting `TENSOR_CORE`, by which a caller excludes it (`deselect_numeric_notes`). MIOpen's `GemmWrw1x1_stride1` rounds dW to fp16 after every image. K3 does not; that form is the BLAS reduced-precision-reduction engines', which report `REDUCED_PRECISION_REDUCTION`.
 
 ## Comparison with MIOpen
 - **CK `ConvHipImplicitGemm{,3D}GroupWrwXdlops`:** M = K, N = C·taps via descriptor im2col, NHWC only. NCHW goes through 3-5 full-tensor transposes. Split-K uses fp32 or packed 16-bit atomics; deterministic mode forces split 1. K3 wins where CK transposes or runs one split, and loses on some large NHWC bf16 3x3 on gfx90a.
@@ -149,19 +149,18 @@ No code was copied.
 3. **gfx90a NHWC bf16 VAE 3x3:** a ring ping-pong `pp` knob for CDNA2, whose long MFMA phase suits it (a projection only; needs a probe). Also: d24/d36 there run at 61% of MFMA peak against asm igemm's 70%.
 4. **Strided 3x3 on small maps:** a flattened-position variant of loop 1 phases, as K4 wrw does.
 5. **inf parity in loop 5:** a select for structural zeros, A/B-checked against the compiled-out build.
-6. **Three-bf16 as a tagged sibling engine** once note filtering lands.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvWrwProblem.cpp` (host):
   - **Gates:** one refusal per field (`RefusesOneFieldAtATime`, `OneField`); every loop's admission rules (ring phases, DMA ring gfx950-only, the direct loop and its plan, small-C, packed rows, unaligned dy).
   - **Large images and layouts:** block-based buffers serve only images past the range; layouts are read from strides.
   - **Generic tier:** spec keys, the ASPP decline, its FMA form.
-  - **Arithmetic and planning:** LDS and load-pass arithmetic against the kernels'; ring track trimming; the split planner and `bpu`; reduce layouts and reflection; the one-split direct store.
-  - **TF32:** three-bf16 admitted only with permission and only on paying classes.
+  - **Arithmetic and planning:** LDS and load-pass arithmetic against the kernels'; ring track trimming; the split planner and `bpu`; reduce layouts and reflection; the reduce choice (quad, tile, row) and its tiles; the one-split direct store.
+  - **TF32:** three-bf16 admitted only for fp32 graphs and only on paying classes.
 - `TestGpuConvWrw.cpp` (device), fp32/fp16/bf16 against an fp64-accumulated reference:
   - every admitted config on NCHW and NHWC, 1-D/2-D/3-D, groups, stride 2, dilations 2/3/12;
   - padding below, at and past the filter; odd channels and partial tiles; both dW layouts; true convolution;
   - three-bf16 against exact fp32, and infinities;
-  - the determinism relaunch;
+  - the determinism relaunch, and dW equal bit for bit to the fixed-order sum of the workspace's partials (every reduce);
   - knob uniqueness, generic spec keys, and atom ids and LDS fits per arch.
-- `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (none, deterministic).
+- `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (`CONV_WRW` none, `CONV_WRW_TF32` `TENSOR_CORE`; both deterministic) and that only `CONV_WRW_TF32` lists three-bf16 configs.
