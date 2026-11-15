@@ -574,7 +574,7 @@ _PLAIN_BF16_TN = {
 # Defaults a logic regeneration may write out explicitly without changing any value.
 _EXPLICIT_DEFAULTS = {
     "UseGateResidual": False,
-    "FusedGemmA2A": False,
+    "FusedA2A": "Disabled",
     "isMixMode": False,
     "MetadataLayout": 0,
     "GateResidualDataTypeList": [],
