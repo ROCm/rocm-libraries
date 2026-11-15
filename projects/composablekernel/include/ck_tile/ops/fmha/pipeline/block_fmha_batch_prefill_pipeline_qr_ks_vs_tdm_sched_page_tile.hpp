@@ -361,6 +361,21 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
+        // Masked tiles of Policy::UseMaskLoopTrims: the key tiles of this query tile that need no
+        // per-pixel mask, as {first, width} (GetInteriorTileRangeForValidRows), formed once for the
+        // loop.
+        constexpr bool kMaskLoopTrims =
+            FmhaMask::IsMasking && Policy::template UseMaskLoopTrims<Problem>();
+        [[maybe_unused]] index_t mask_interior_first = 0;
+        [[maybe_unused]] index_t mask_interior_width = 0;
+        if constexpr(kMaskLoopTrims)
+        {
+            const auto interior = mask.GetInteriorTileRangeForValidRows(
+                q_origin.at(I0), number<kM0>{}, number<kN0>{});
+            mask_interior_first = interior.at(I0);
+            mask_interior_width = interior.at(I1);
+        }
+
         const auto tile_range_result = [&]() {
             if constexpr(kHasSink)
                 return mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
@@ -1032,17 +1047,29 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                         return make_tuple(
                             kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
                 }();
+                // The split tail predicate (the columns of the last tile past
+                // physical_seqlen_k_end). In the tiles of kMaskLoopTrims the key range ends at
+                // seqlen_k: the loop's last tile is an edge tile, and the mask predicate masks its
+                // columns past seqlen_k, so the split predicate is redundant there. A KV-split
+                // partial's range ends at its split's end, which the mask does not cover.
+                constexpr bool kSplitTailCheck = kHasUnevenSplits && !kMaskLoopTrims;
                 if constexpr(kUseCountdownLoop)
                 {
-                    bool need_split_check = false;
-                    if constexpr(kHasUnevenSplits)
+                    [[maybe_unused]] bool need_split_check = false;
+                    if constexpr(kSplitTailCheck)
                     {
                         const bool needs_tail_predicate =
                             k_origin.at(I0) + kN0 > physical_seqlen_k_end;
                         need_split_check = remaining_loops == 1 && needs_tail_predicate;
                     }
                     bool need_mask_check = false;
-                    if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+                    if constexpr(kMaskLoopTrims)
+                    {
+                        need_mask_check =
+                            static_cast<uint32_t>(k_origin.at(I0) - mask_interior_first) >=
+                            static_cast<uint32_t>(mask_interior_width);
+                    }
+                    else if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
                     {
                         need_mask_check = mask.IsEdgeTileForValidRows(
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
@@ -1050,17 +1077,17 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
 
                     if constexpr(FmhaMask::IsMasking)
                     {
-                        // Under masking the edge test also covers the KV tail (the tile range is
-                        // rounded up to a tile), so only the mask predicate can fire; the two
-                        // predicates stay separate to keep each one cheap.
-                        if(__builtin_expect(need_split_check, false))
+                        if constexpr(kSplitTailCheck)
                         {
-                            set_tile_if(s_acc,
-                                        -numeric<SMPLComputeDataType>::infinity(),
-                                        [&](auto tile_idx) {
-                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                            return physical_seqlen_k_end <= col;
-                                        });
+                            if(__builtin_expect(need_split_check, false))
+                            {
+                                set_tile_if(s_acc,
+                                            -numeric<SMPLComputeDataType>::infinity(),
+                                            [&](auto tile_idx) {
+                                                const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                                return physical_seqlen_k_end <= col;
+                                            });
+                            }
                         }
                         if(__builtin_expect(need_mask_check, false))
                         {
@@ -1087,7 +1114,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                 }
                 else
                 {
-                    if constexpr(kHasUnevenSplits)
+                    if constexpr(kSplitTailCheck)
                     {
                         const bool needs_tail_predicate =
                             k_origin.at(I0) + kN0 > physical_seqlen_k_end;
@@ -1114,8 +1141,14 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                         // Rows past seqlen_q are never stored (the kernel's O view is bounded by
                         // seqlen_q), so they do not force the per-pixel check on every key tile of
                         // a partial last query tile.
-                        bool need_perpixel_check = mask.IsEdgeTileForValidRows(
-                            q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                        bool need_perpixel_check;
+                        if constexpr(kMaskLoopTrims)
+                            need_perpixel_check =
+                                static_cast<uint32_t>(k_origin.at(I0) - mask_interior_first) >=
+                                static_cast<uint32_t>(mask_interior_width);
+                        else
+                            need_perpixel_check = mask.IsEdgeTileForValidRows(
+                                q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                         if(need_perpixel_check)
                         {
                             set_tile_if(s_acc,
