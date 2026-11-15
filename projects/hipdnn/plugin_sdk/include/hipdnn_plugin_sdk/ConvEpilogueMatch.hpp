@@ -207,7 +207,7 @@ public:
         }
         inputType = tensor->data_type();
         const auto* dims = tensor->dims();
-        if(dims == nullptr || dims->size() == 0)
+        if(dims == nullptr)
         {
             return false;
         }
@@ -374,11 +374,9 @@ public:
                 {
                     return std::nullopt;
                 }
+                // The other input is never an earlier step's result: those are virtual, which
+                // addBinaryInput declines.
                 const int64_t other = in0 == current ? in1 : in0;
-                if(std::find(chain.begin(), chain.end(), other) != chain.end())
-                {
-                    return std::nullopt;
-                }
                 const bool add = mode == PointwiseMode::ADD;
                 if(!addBinaryInput(other,
                                    add ? OpCode::ADD_OPERAND : OpCode::MUL_OPERAND,
@@ -443,16 +441,16 @@ public:
                 }
             }
 
+            // Each step writes a tensor of its own. Its dims are checked where it is read: by the
+            // next step as an intermediate, or by the caller as the graph's output (an operand
+            // never has the output's dims).
             const int64_t out = pw.out_0_tensor_uid();
-            if(std::find(chain.begin(), chain.end(), out) != chain.end()
-               || std::any_of(_epilogue.operands.begin(),
-                              _epilogue.operands.end(),
-                              [out](const Operand& operand) { return operand.uid == out; }))
+            if(std::find(chain.begin(), chain.end(), out) != chain.end())
             {
                 return std::nullopt;
             }
             const auto* outTensor = tensorOf(_graph, out);
-            if(outTensor == nullptr || !dimsEqual(outTensor->dims(), _dims))
+            if(outTensor == nullptr)
             {
                 return std::nullopt;
             }
@@ -492,7 +490,8 @@ private:
 /// Gates every field: the node kinds and order, each pointwise mode and its attributes (relu
 /// clips and slope, swish beta, elu alpha, softplus beta, axis, in_2), each node's compute type,
 /// and for every tensor its dims (the broadcast kind), strides, data type, virtual flag,
-/// pass-by-value and ragged fields and alignment.
+/// pass-by-value and ragged fields and alignment. The written output's dims, layout and type are
+/// the caller's to check, as the convolution's own y.
 inline std::optional<ConvEpilogue>
     parseConvEpilogue(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                       int64_t convOutputUid,

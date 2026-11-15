@@ -364,19 +364,12 @@ std::optional<ConvNaiveProblem>
         return std::nullopt;
     }
 
-    // Three distinct operands: an output aliasing an input is read while it is written. The
-    // same holds for the epilogue's operands.
+    // Three distinct operands: an output aliasing an input is read while it is written. An
+    // epilogue operand never aliases y (its dims differ) and only reads.
     const auto& uids = fields->operands;
     if(uids.x == uids.w || uids.x == uids.y || uids.w == uids.y)
     {
         return std::nullopt;
-    }
-    for(const auto& operand : epilogue.operands)
-    {
-        if(operand.uid == uids.x || operand.uid == uids.w || operand.uid == uids.y)
-        {
-            return std::nullopt;
-        }
     }
 
     const auto x = deviceOperand(context, uids.x);
