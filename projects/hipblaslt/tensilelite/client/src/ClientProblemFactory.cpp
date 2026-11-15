@@ -426,6 +426,8 @@ namespace TensileLite
                     throw std::runtime_error("--split-devices does not support --grouped-gemm");
                 for(int d = 0; d < splitM; d++)
                     m_slices.push_back(std::make_unique<ClientProblemFactory>(args, d, splitM));
+                for(size_t i = 0; i < m_problems.size(); i++)
+                    m_problemIndex.emplace(m_problems[i].get(), i);
             }
         }
 
@@ -439,9 +441,9 @@ namespace TensileLite
         {
             if(m_slices.empty())
                 return const_cast<ContractionProblem*>(full);
-            for(size_t i = 0; i < m_problems.size(); i++)
-                if(m_problems[i].get() == full)
-                    return m_slices.at(device)->m_problems.at(i).get();
+            auto it = m_problemIndex.find(full);
+            if(it != m_problemIndex.end())
+                return m_slices.at(device)->m_problems.at(it->second).get();
             throw std::runtime_error("[ClientProblemFactory] problem is not from this factory");
         }
 

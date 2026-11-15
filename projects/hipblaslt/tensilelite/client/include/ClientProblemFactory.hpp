@@ -36,6 +36,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <unordered_map>
 
 namespace TensileLite
 {
@@ -134,6 +135,9 @@ namespace TensileLite
             size_t                            m_sliceCount = 1;
             bool                              m_splitN     = false;
             std::vector<std::unique_ptr<ClientProblemFactory>> m_slices;
+            // Index of each problem in m_problems, built once with the slices (read-only after
+            // that, so devices can look their slice up concurrently).
+            std::unordered_map<ContractionProblem const*, size_t> m_problemIndex;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;

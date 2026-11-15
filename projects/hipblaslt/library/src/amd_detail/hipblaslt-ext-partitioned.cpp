@@ -255,6 +255,9 @@ namespace hipblaslt_ext
         pimpl->typeC       = typeC;
         pimpl->typeD       = typeD;
         pimpl->typeCompute = typeCompute;
+        // A null handle makes the object unusable (no partitions) instead of failing later.
+        if(std::find(handles.begin(), handles.end(), nullptr) != handles.end())
+            return;
         for(auto handle : handles)
         {
             pimpl->gemms.push_back(
@@ -288,6 +291,8 @@ namespace hipblaslt_ext
                                                 SplitDim                     dim,
                                                 const PartitionedGemmInputs& inputs)
     {
+        if(!pimpl) // moved from
+            return HIPBLAS_STATUS_INVALID_VALUE;
         auto&        s     = *pimpl;
         const size_t parts = s.count();
         // All or nothing: a failure below must not leave the previous problem usable with some
@@ -575,6 +580,8 @@ namespace hipblaslt_ext
     hipblasStatus_t
         PartitionedGemm::getSlice(size_t partition, int64_t& offset, int64_t& size) const
     {
+        if(!pimpl) // moved from
+            return HIPBLAS_STATUS_INVALID_VALUE;
         auto const& s = *pimpl;
         if(!s.hasProblem || partition >= s.count())
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -588,6 +595,8 @@ namespace hipblaslt_ext
         const GemmPreference&                          pref,
         std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults)
     {
+        if(!pimpl) // moved from
+            return HIPBLAS_STATUS_INVALID_VALUE;
         auto& s = *pimpl;
         if(!s.hasProblem)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -625,6 +634,8 @@ namespace hipblaslt_ext
     hipblasStatus_t PartitionedGemm::isAlgoSupported(hipblasLtMatmulAlgo_t& algo,
                                                      std::vector<size_t>&   workspaceSizeInBytes)
     {
+        if(!pimpl) // moved from
+            return HIPBLAS_STATUS_INVALID_VALUE;
         auto& s = *pimpl;
         if(!s.hasProblem)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -641,6 +652,8 @@ namespace hipblaslt_ext
 
     void PartitionedGemm::setMaxWorkspaceBytes(size_t workspaceBytes)
     {
+        if(!pimpl)
+            return;
         for(auto& gemm : pimpl->gemms)
             gemm->setMaxWorkspaceBytes(workspaceBytes);
     }
@@ -650,6 +663,8 @@ namespace hipblaslt_ext
                                                 bool                            useUserArgs,
                                                 const std::vector<hipStream_t>& streams)
     {
+        if(!pimpl) // moved from
+            return HIPBLAS_STATUS_INVALID_VALUE;
         auto& s = *pimpl;
         if(!s.hasProblem || !s.sized(workspaces))
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -674,6 +689,8 @@ namespace hipblaslt_ext
                                          const std::vector<hipEvent_t>&  start,
                                          const std::vector<hipEvent_t>&  stop)
     {
+        if(!pimpl) // moved from
+            return HIPBLAS_STATUS_INVALID_VALUE;
         auto& s = *pimpl;
         if(!s.hasProblem || !s.sized(start, true) || !s.sized(stop, true))
             return HIPBLAS_STATUS_INVALID_VALUE;

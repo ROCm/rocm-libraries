@@ -1005,3 +1005,36 @@ TEST(pre_checkin_partitioned_gemm_ext, FailedSetProblemClearsTheProblem)
     GemmPreference                                pref;
     EXPECT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_INVALID_VALUE);
 }
+
+// A moved-from PartitionedGemm and one built with a null handle are unusable, not crashes.
+TEST(pre_checkin_partitioned_gemm_ext, MovedFromAndNullHandlesAreRejected)
+{
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    PartitionedGemm moved(std::move(gemm));
+    EXPECT_EQ(gemm.getPartitionCount(), 0u);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_INVALID_VALUE);
+    int64_t offset = 0, size = 0;
+    EXPECT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_INVALID_VALUE);
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+    GemmPreference                                pref;
+    EXPECT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_INVALID_VALUE);
+    gemm.setMaxWorkspaceBytes(1);
+    EXPECT_EQ(setReplicated(moved, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
+
+    auto handles = parts.rawHandles();
+    handles[1]   = nullptr;
+    PartitionedGemm withNull(handles,
+                             HIPBLAS_OP_T,
+                             HIPBLAS_OP_N,
+                             HIP_R_16F,
+                             HIP_R_16F,
+                             HIP_R_16F,
+                             HIP_R_16F,
+                             HIPBLAS_COMPUTE_32F);
+    EXPECT_EQ(withNull.getPartitionCount(), 0u);
+    EXPECT_EQ(setReplicated(withNull, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_INVALID_VALUE);
+}

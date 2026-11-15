@@ -464,6 +464,11 @@ namespace TensileLite
             }
             else
             {
+                // The span of a split run is host wall clock, so the devices must be idle when it
+                // starts, as on the other path; otherwise earlier queued work would be counted.
+                if(m_split != nullptr && m_split->numSlices() > 1)
+                    forEachDevice(*m_devices,
+                                  [](DeviceContext&) { HIP_CHECK_EXC(hipDeviceSynchronize()); });
                 m_start.assign(m_devices->size(), nullptr);
                 m_stop.assign(m_devices->size(), nullptr);
                 for(size_t d = 0; d < m_devices->size(); d++)
