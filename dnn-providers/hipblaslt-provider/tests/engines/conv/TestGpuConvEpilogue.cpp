@@ -676,7 +676,50 @@ TEST_P(TestGpuConvEpilogueClaims, FusedWhereBare)
     const ConvGemmGraph bare(convCase.shape, ConvDirection::FORWARD);
     const FusedConvGraph fused(convCase.shape, chain.second);
     const bool bareClaimed = builder.isApplicable(*handle, bare.graph());
-    EXPECT_EQ(builder.isApplicable(*handle, fused.graph()), bareClaimed);
+    const bool fusedClaimed = builder.isApplicable(*handle, fused.graph());
+    if(bareClaimed && !fusedClaimed)
+    {
+        // The one decline fusion may add: every layout's fused plan needs a GEMM with an fp32
+        // output (one rounding), and the backend has no algorithm for one of them. Every layout
+        // must formulate, and every layout must hold a GEMM the backend refuses.
+        const auto problem = parseConvProblem(fused.graph(), ConvDirection::FORWARD);
+        ASSERT_TRUE(problem.has_value());
+        const auto factory = factoryFor(backend, deterministic);
+        for(const auto layout : {ColumnLayout::FOLLOW_Y,
+                                 ColumnLayout::CHANNELS_FIRST,
+                                 ColumnLayout::CHANNELS_LAST,
+                                 ColumnLayout::STAGED_CHANNELS_LAST})
+        {
+            auto calls = convGemmCalls(*problem, MAX_REPACK_WORKSPACE_BYTES, layout);
+            ASSERT_TRUE(calls.has_value());
+            const auto plan
+                = fuseEpilogue(*problem, std::move(*calls), backend == Backend::HIPBLASLT);
+            ASSERT_TRUE(plan.has_value()) << "fusion declined a plan";
+            bool refused = false;
+            for(const auto& stage : plan->stages)
+            {
+                if(stage.calls.empty())
+                {
+                    continue;
+                }
+                try
+                {
+                    static_cast<void>(factory(*handle, stage.calls));
+                }
+                catch(const std::exception&)
+                {
+                    refused = true;
+                }
+            }
+            EXPECT_TRUE(refused) << "the backend runs every GEMM of a layout, yet the graph was "
+                                    "declined";
+        }
+        ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt refuses an fp32-output GEMM";
+        GTEST_SKIP() << "hipBLASLt"
+                     << (deterministic ? " without a workspace (the deterministic engine)" : "")
+                     << " has no algorithm for an fp32-output GEMM of this convolution";
+    }
+    EXPECT_EQ(fusedClaimed, bareClaimed);
     if(bareClaimed)
     {
         runFused<Half>(convCase, chain.second, backend, Specials::NONE, deterministic);

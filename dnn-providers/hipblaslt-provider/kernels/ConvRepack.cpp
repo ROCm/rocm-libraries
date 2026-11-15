@@ -236,6 +236,72 @@ __device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
 {
     const StridedCastArgs& args = a.cast;
     auto* dst = static_cast<OutputType*>(args.dst);
+    if(a.epilogue.channelAxis < 0 && args.total % 4 == 0
+       && reinterpret_cast<unsigned long long>(args.src) % 16 == 0
+       && reinterpret_cast<unsigned long long>(args.dst) % (4 * sizeof(OutputType)) == 0)
+    {
+        // Flat and four elements a thread: 16-byte loads of the fp32 result, one store of four
+        // outputs. The channel advances element by element within the four, and by the stride's
+        // quotient and remainder between them.
+        using Load = float __attribute__((ext_vector_type(4)));
+        using Bits = unsigned short __attribute__((ext_vector_type(4)));
+        const long long quads = args.total / 4;
+        const long long first = firstThread();
+        const long long step = threadStride();
+        if(first >= quads)
+        {
+            return;
+        }
+        const long long inner = a.epilogue.flatChannelStride;
+        const long long chans = a.epilogue.flatChannels;
+        const long long start = 4 * first;
+        const long long q = start / inner;
+        long long rem = start - q * inner;
+        long long channel = q % chans;
+        // Between quads: 4 * step elements, less the 3 the inner loop advanced.
+        const long long gap = 4 * step - 3;
+        const long long qs = gap / inner;
+        const long long remStep = gap - qs * inner;
+        const long long chStep = qs % chans;
+        const auto* src = reinterpret_cast<const Load*>(args.src);
+        for(long long i = first; i < quads; i += step)
+        {
+            const Load v = src[i];
+            OutputType out[4];
+#pragma unroll
+            for(int e = 0; e < 4; ++e)
+            {
+                out[e] = static_cast<OutputType>(applyEpilogue(a.epilogue, v[e], channel));
+                const long long advance = e < 3 ? 1 : remStep;
+                const long long jump = e < 3 ? 0 : chStep;
+                rem += advance;
+                long long carry = 0;
+                while(rem >= inner)
+                {
+                    rem -= inner;
+                    ++carry;
+                }
+                channel += jump + carry;
+                while(channel >= chans)
+                {
+                    channel -= chans;
+                }
+            }
+            if constexpr(sizeof(OutputType) == 4)
+            {
+                Load packed;
+                __builtin_memcpy(&packed, out, sizeof(out));
+                reinterpret_cast<Load*>(dst)[i] = packed;
+            }
+            else
+            {
+                Bits packed;
+                __builtin_memcpy(&packed, out, sizeof(out));
+                reinterpret_cast<Bits*>(dst)[i] = packed;
+            }
+        }
+        return;
+    }
     if(a.epilogue.channelAxis < 0)
     {
         // Flat: element i of both sides. The channel advances by the step's quotient and
