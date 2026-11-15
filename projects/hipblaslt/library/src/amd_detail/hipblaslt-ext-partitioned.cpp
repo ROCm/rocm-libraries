@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 // PartitionedGemm: one GEMM run as slices on several devices (for example the partitions of a
-// DPX card). It owns one hipblaslt_ext::Gemm per partition and only uses the public Gemm API.
+// DPX card). It owns one hipblaslt_ext::Gemm per partition and uses the public Gemm API, plus
+// the device of each handle to give every partition the slice whose memory is on its device.
 
 #include "hipblaslt/hipblaslt-ext.hpp"
+#include "hipblaslt_internal.hpp"
+#include "utility.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -75,12 +78,56 @@ namespace hipblaslt_ext
         {
             return static_cast<const char*>(base) + elements * static_cast<int64_t>(bytes);
         }
+
+        // The device that holds the page at `p`, or -1 when that is not known (host or managed
+        // memory). Works for hipMalloc and for VMM mappings alike.
+        int pageDevice(const void* p)
+        {
+            hipPointerAttribute_t attr;
+            if(hipPointerGetAttributes(&attr, p) != hipSuccess)
+            {
+                static_cast<void>(hipGetLastError());
+                return -1;
+            }
+            return attr.type == hipMemoryTypeDevice ? attr.device : -1;
+        }
+
+        // One split matrix as the slice placement sees it: column-major, and the slice is either
+        // whole columns (`columns`) or rows of every column. `other` is the size of the dimension
+        // that is not split.
+        struct SplitMatrix
+        {
+            const char*        name;
+            const void* const* pointers; // one per partition
+            int64_t            ld;
+            size_t             bytes;
+            bool               columns;
+            int64_t            other;
+        };
+
+        // Fraction of slice [offset, offset + size) of `m`, as partition `i` addresses it, that
+        // is on `device`, from a few sampled elements of the first batch.
+        double
+            localFraction(SplitMatrix const& m, size_t i, int64_t offset, int64_t size, int device)
+        {
+            constexpr int kSamples = 8;
+            int           local    = 0;
+            for(int j = 0; j < kSamples; j++)
+            {
+                const int64_t along  = offset + size * j / kSamples;
+                const int64_t across = m.other * j / kSamples;
+                const int64_t elem   = m.columns ? along * m.ld : along + across * m.ld;
+                local += pageDevice(advance(m.pointers[i], elem, m.bytes)) == device;
+            }
+            return double(local) / kSamples;
+        }
     } // namespace
 
     class PartitionedGemm::PartitionedGemmImpl
     {
     public:
         std::vector<std::unique_ptr<Gemm>> gemms;
+        std::vector<int>                   devices; // device of each partition's handle
 
         hipblasOperation_t   opA, opB;
         hipDataType          typeA, typeB, typeC, typeD;
@@ -182,8 +229,12 @@ namespace hipblaslt_ext
         pimpl->typeD       = typeD;
         pimpl->typeCompute = typeCompute;
         for(auto handle : handles)
+        {
             pimpl->gemms.push_back(
                 std::make_unique<Gemm>(handle, opA, opB, typeA, typeB, typeC, typeD, typeCompute));
+            pimpl->devices.push_back(handle ? reinterpret_cast<rocblaslt_handle>(handle)->device
+                                            : -1);
+        }
     }
 
     PartitionedGemm::~PartitionedGemm()                                     = default;
@@ -249,6 +300,83 @@ namespace hipblaslt_ext
         const std::vector<const void*> dPointers(inputs.d.begin(), inputs.d.end());
         const int64_t                  leading[4] = {lda, ldb, ldc, ldd};
         const int64_t                  strides[4] = {strideA, strideB, strideC, strideD};
+
+        // The matrices split by `dim`: op(A) with M, op(B) with N, and C and D with both.
+        std::vector<SplitMatrix> split;
+        if(dim == SplitDim::M)
+            split.push_back({"A", inputs.a.data(), lda, bytes[0], s.opA == HIPBLAS_OP_T, k});
+        else
+            split.push_back({"B", inputs.b.data(), ldb, bytes[1], s.opB == HIPBLAS_OP_N, k});
+        split.push_back(
+            {"C", inputs.c.data(), ldc, bytes[2], dim == SplitDim::N, dim == SplitDim::M ? n : m});
+        split.push_back(
+            {"D", dPointers.data(), ldd, bytes[3], dim == SplitDim::N, dim == SplitDim::M ? n : m});
+
+        // Partition i computes slice slice[i]. Which partition computes which slice does not
+        // change the result (every slice is written at its own place in D), so the slices go
+        // where most of their bytes are local: a framework that places the halves of a shared
+        // matrix on the other devices than expected still gets local accesses.
+        std::vector<size_t> slice(parts);
+        for(size_t i = 0; i < parts; i++)
+            slice[i] = i;
+        std::vector<std::vector<double>> localBytes(parts, std::vector<double>(parts, 0.0));
+        for(size_t i = 0; i < parts; i++)
+            for(size_t j = 0; j < parts; j++)
+                for(auto const& mat : split)
+                    localBytes[i][j] += localFraction(mat, i, offset[j], size[j], s.devices[i])
+                                        * double(size[j]) * double(mat.other) * double(mat.bytes);
+        auto localTotal = [&](std::vector<size_t> const& map) {
+            double sum = 0;
+            for(size_t i = 0; i < parts; i++)
+                sum += localBytes[i][map[i]];
+            return sum;
+        };
+        {
+            // Greedy: each partition in turn takes the free slice with the most local bytes. It
+            // replaces the plain order only when it is strictly better (for 2 partitions this
+            // compares both orders).
+            std::vector<size_t> greedy(parts);
+            std::vector<bool>   taken(parts, false);
+            for(size_t i = 0; i < parts; i++)
+            {
+                size_t best = parts;
+                for(size_t j = 0; j < parts; j++)
+                    if(!taken[j] && (best == parts || localBytes[i][j] > localBytes[i][best]))
+                        best = j;
+                greedy[i]   = best;
+                taken[best] = true;
+            }
+            if(localTotal(greedy) > localTotal(slice))
+                slice = greedy;
+        }
+        // A hint when a split matrix still mostly lives on another device than its partition.
+        for(size_t i = 0; i < parts; i++)
+            for(auto const& mat : split)
+            {
+                const int64_t o = offset[slice[i]], z = size[slice[i]];
+                if(localFraction(mat, i, o, z, s.devices[i]) < 0.5)
+                    log_hints(__func__,
+                              "PartitionedGemm: partition",
+                              i,
+                              "runs on device",
+                              s.devices[i],
+                              "but most of its slice of",
+                              mat.name,
+                              "is on device",
+                              pageDevice(advance(
+                                  mat.pointers[i], mat.columns ? o * mat.ld : o, mat.bytes)));
+            }
+        {
+            std::vector<int64_t> o(parts), z(parts);
+            for(size_t i = 0; i < parts; i++)
+            {
+                o[i] = offset[slice[i]];
+                z[i] = size[slice[i]];
+            }
+            offset = std::move(o);
+            size   = std::move(z);
+        }
+
         for(size_t i = 0; i < parts; i++)
         {
             // Element offset of this partition's slice inside each (whole) matrix. The

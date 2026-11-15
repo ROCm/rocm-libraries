@@ -1123,6 +1123,12 @@ namespace hipblaslt_ext
      * keeps equal. For D, the same pointer means every partition writes its slice into one D.
      * hipBLASLt allocates and copies nothing. ``alpha`` and ``beta`` are host pointers, as in
      * GemmInputs, and apply to every partition.
+     *
+     *  Where the memory is (hipMalloc on one device, or a VMM range whose pages are on several
+     * devices) is up to the caller: for example, two copies of A back to back in one VMM range
+     * are passed as ``{va, va + sizeA}``, and one D whose halves are on the two devices as
+     * ``{va, va}``. The library reads where the pages of each slice are and gives every
+     * partition the slice that is on its device (see PartitionedGemm::getSlice).
      */
     struct PartitionedGemmInputs
     {
@@ -1193,6 +1199,12 @@ namespace hipblaslt_ext
         *  \details ``m``, ``n``, ``k``, the leading dimensions and the strides describe the
         * full matrices. The pointers come from ``inputs``.
         *
+        *  Which partition computes which slice is chosen here: the slices of the split
+        * matrices (op(A) for SplitDim::M, op(B) for SplitDim::N, and C and D) go to the
+        * partitions whose devices hold most of their pages, and otherwise partition ``i``
+        * computes slice ``i``. The result is the same either way. A slice that still mostly
+        * lives on another device is reported in the hints log (``HIPBLASLT_LOG_MASK=4``).
+        *
         *  @param[in]
         *  m,n,k                            The size of the full problem.
         *  @param[in]
@@ -1230,6 +1242,9 @@ namespace hipblaslt_ext
 
         /*! \ingroup library_module
         *  \brief The slice of partition ``partition`` along the split dimension.
+        *
+        *  \details It need not be slice number ``partition``: setProblem may give a partition
+        * the slice whose memory is on its device.
         *
         *  @param[in]
         *  partition        The partition index.

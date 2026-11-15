@@ -113,7 +113,9 @@ stream, workspace and event per partition when it initializes and runs. ``SplitD
 dimension to split, and the first ``N - 1`` partitions take ``size / N`` while the last takes
 the remainder. hipBLASLt does not allocate or copy any matrix. The caller passes one pointer per
 partition for each matrix: the same pointer shares a matrix between the partitions, different
-pointers give each partition its own copy. See
+pointers give each partition its own copy. Where the memory lives (``hipMalloc`` on one
+device, or a VMM range with pages on several devices) is up to the caller: the library gives
+each partition the slice whose pages are on its device, and ``getSlice`` reports it. See
 ``clients/samples/31_hipblaslt_gemm_partitioned_ext`` for an example and
 ``hipblaslt-bench --partitions`` to benchmark it. This version supports plain GEMM; the device
 user arguments overloads are declared and return ``HIPBLAS_STATUS_NOT_SUPPORTED``.

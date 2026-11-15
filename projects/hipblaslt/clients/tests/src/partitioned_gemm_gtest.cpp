@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace hipblaslt_ext;
@@ -599,3 +600,179 @@ INSTANTIATE_TEST_SUITE_P(
         Combo{"M_SharedABD", SplitDim::M, Placement::Shared, Placement::Shared, Placement::Shared},
         Combo{"N_SharedABD", SplitDim::N, Placement::Shared, Placement::Shared, Placement::Shared}),
     [](::testing::TestParamInfo<Combo> const& info) { return std::string(info.param.name); });
+
+namespace
+{
+    // One VMM range whose two halves are on two devices (half h on owners[h]), readable and
+    // writable from both. Skips the test when VMM is not available or the halves are not a
+    // multiple of the allocation granularity.
+    struct SplitVmm
+    {
+        void*                           va         = nullptr;
+        size_t                          half       = 0;
+        hipMemGenericAllocationHandle_t handles[2] = {};
+        int                             mapped     = 0;
+
+        // Returns false (and a reason) when VMM cannot be used here.
+        bool create(size_t halfBytes, int const owners[2], std::string& why)
+        {
+            half                      = halfBytes;
+            hipMemAllocationProp prop = {};
+            prop.type                 = hipMemAllocationTypePinned;
+            prop.location.type        = hipMemLocationTypeDevice;
+            for(int h = 0; h < 2; h++)
+            {
+                int vmm = 0;
+                if(hipDeviceGetAttribute(
+                       &vmm, hipDeviceAttributeVirtualMemoryManagementSupported, owners[h])
+                       != hipSuccess
+                   || !vmm)
+                {
+                    why = "no virtual memory management on device " + std::to_string(owners[h]);
+                    return false;
+                }
+                prop.location.id   = owners[h];
+                size_t granularity = 0;
+                if(hipMemGetAllocationGranularity(
+                       &granularity, &prop, hipMemAllocationGranularityRecommended)
+                       != hipSuccess
+                   || granularity == 0 || half % granularity != 0)
+                {
+                    why = "half size is not a multiple of the allocation granularity";
+                    return false;
+                }
+            }
+            EXPECT_EQ(hipMemAddressReserve(&va, 2 * half, 0, nullptr, 0), hipSuccess);
+            for(int h = 0; h < 2; h++)
+            {
+                // The owner must be the current device, or the pages land on the current one.
+                EXPECT_EQ(hipSetDevice(owners[h]), hipSuccess);
+                prop.location.id = owners[h];
+                EXPECT_EQ(hipMemCreate(&handles[h], half, &prop, 0), hipSuccess);
+                EXPECT_EQ(hipMemMap(static_cast<char*>(va) + h * half, half, 0, handles[h], 0),
+                          hipSuccess);
+                mapped++;
+            }
+            hipMemAccessDesc access[2] = {};
+            for(int d = 0; d < 2; d++)
+            {
+                access[d].location.type = hipMemLocationTypeDevice;
+                access[d].location.id   = d;
+                access[d].flags         = hipMemAccessFlagsProtReadWrite;
+            }
+            EXPECT_EQ(hipMemSetAccess(va, 2 * half, access, 2), hipSuccess);
+            return true;
+        }
+
+        ~SplitVmm()
+        {
+            for(int h = 0; h < mapped; h++)
+            {
+                static_cast<void>(hipMemUnmap(static_cast<char*>(va) + h * half, half));
+                static_cast<void>(hipMemRelease(handles[h]));
+            }
+            if(va != nullptr)
+                static_cast<void>(hipMemAddressFree(va, 2 * half));
+        }
+    };
+
+    // GetParam(): the halves of the shared B are on the devices in reverse order.
+    class partitioned_gemm_ext_placement_multi_gpu : public ::testing::TestWithParam<bool>
+    {
+    };
+}
+
+// B is shared and split along N, and each half of it is on one partition's device. Whichever
+// order the halves are in, each partition must compute the slice on its own device.
+TEST_P(partitioned_gemm_ext_placement_multi_gpu, SlicesFollowThePages)
+{
+    int count = 0;
+    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
+    if(count < 2)
+        GTEST_SKIP() << "needs two devices";
+    const bool swapped = GetParam();
+
+    // op(A)=T: A is K x M; op(B)=N: B is K x N, so a half of B (N/2 columns) is 2 MiB.
+    constexpr int64_t m = 256, n = 2048, k = 1024;
+    const int         owners[2] = {swapped ? 1 : 0, swapped ? 0 : 1};
+    SplitVmm          b;
+    std::string       why;
+    if(!b.create(size_t(k) * (n / 2) * sizeof(half_t), owners, why))
+        GTEST_SKIP() << why;
+
+    // B column j holds (j % 8) / 8 and A holds ones, so D(i, j) = k * (j % 8) / 8 exactly.
+    std::vector<half_t> hb(size_t(k) * n);
+    for(int64_t j = 0; j < n; j++)
+        for(int64_t r = 0; r < k; r++)
+            hb[j * k + r] = half_t(float(j % 8) / 8.f);
+    ASSERT_EQ(hipMemcpy(b.va, hb.data(), hb.size() * sizeof(half_t), hipMemcpyHostToDevice),
+              hipSuccess);
+    const std::vector<half_t> ha(size_t(k) * m, half_t(1));
+
+    Partitions parts({0, 1});
+    auto       gemm = makeGemm(parts);
+    // A and D: one copy per partition, on its device.
+    std::vector<std::unique_ptr<DeviceBuf>> a, d;
+    for(int dev = 0; dev < 2; dev++)
+    {
+        a.push_back(std::make_unique<DeviceBuf>(dev, ha.size() * sizeof(half_t), ha.data()));
+        d.push_back(std::make_unique<DeviceBuf>(dev, size_t(m) * n * sizeof(half_t)));
+    }
+    const float           alpha = 1.f, beta = 0.f;
+    PartitionedGemmInputs in;
+    in.a     = {a[0]->get(), a[1]->get()};
+    in.b     = {b.va, b.va};
+    in.c     = {d[0]->get(), d[1]->get()};
+    in.d     = {d[0]->get(), d[1]->get()};
+    in.alpha = &alpha;
+    in.beta  = &beta;
+    ASSERT_EQ(gemm.setProblem(m, n, k, 1, k, k, m, m, 0, 0, 0, 0, SplitDim::N, in),
+              HIPBLAS_STATUS_SUCCESS);
+
+    // Partition i computes the half of B that is on device i.
+    for(size_t i = 0; i < 2; i++)
+    {
+        int64_t offset = -1, size = 0;
+        ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
+        const int64_t expected = (owners[0] == int(i) ? 0 : 1) * (n / 2);
+        EXPECT_EQ(offset, expected) << "partition " << i;
+        EXPECT_EQ(size, n / 2);
+    }
+
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_SUCCESS);
+    if(heuristic.empty())
+        GTEST_SKIP() << "no algorithm accepted by every partition";
+    ASSERT_EQ(gemm.initialize(heuristic[0].algo, parts.workspaces(), false, parts.streams),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(gemm.run(parts.streams), HIPBLAS_STATUS_SUCCESS);
+    parts.sync();
+
+    // Each partition's D holds its slice, at the slice's columns.
+    for(size_t i = 0; i < 2; i++)
+    {
+        int64_t offset = 0, size = 0;
+        ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
+        std::vector<half_t> got(size_t(m) * n);
+        ASSERT_EQ(hipSetDevice(int(i)), hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(got.data(), d[i]->get(), got.size() * sizeof(half_t), hipMemcpyDeviceToHost),
+            hipSuccess);
+        size_t bad = 0;
+        for(int64_t col = offset; col < offset + size; col++)
+            for(int64_t row = 0; row < m; row++)
+                bad += float(got[col * m + row]) != float(k * (col % 8)) / 8.f;
+        EXPECT_EQ(bad, 0u) << "partition " << i << " columns [" << offset << ", " << offset + size
+                           << ")";
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(partitioned_gemm_ext_placement_multi_gpu,
+                         partitioned_gemm_ext_placement_multi_gpu,
+                         ::testing::Values(false, true),
+                         [](::testing::TestParamInfo<bool> const& info) {
+                             return std::string(info.param ? "HalvesSwapped" : "HalvesInOrder");
+                         });
