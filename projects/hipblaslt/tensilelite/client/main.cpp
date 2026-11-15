@@ -1216,15 +1216,20 @@ int main(int argc, const char* argv[])
         auto const placement = args["split-placement"].as<std::string>();
         auto const shared    = [&](size_t tensor) { return placement[tensor] == 'S'; };
         // A shared tensor lives on the first device; the others reach it over peer access.
-        if(placement.find('S') != std::string::npos)
-            for(size_t d = 1; d < devices.size(); d++)
-            {
-                ScopedDevice device(devices[d]->deviceId);
-                hipError_t   pe = hipDeviceEnablePeerAccess(devices[0]->deviceId, 0);
-                if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
-                    HIP_CHECK_EXC(pe);
-                static_cast<void>(hipGetLastError());
-            }
+        // An OutputPeerD kernel also writes the other device's D, so every device needs access to
+        // every other one.
+        if(placement.find('S') != std::string::npos || full->outputPeerD())
+            for(size_t d = 0; d < devices.size(); d++)
+                for(size_t other = 0; other < devices.size(); other++)
+                {
+                    if(other == d || (d > 0 && other > 0 && !full->outputPeerD()))
+                        continue;
+                    ScopedDevice device(devices[d]->deviceId);
+                    hipError_t   pe = hipDeviceEnablePeerAccess(devices[other]->deviceId, 0);
+                    if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
+                        HIP_CHECK_EXC(pe);
+                    static_cast<void>(hipGetLastError());
+                }
         fullOutputs.resize(devices.size());
         std::vector<size_t> sliceBytes(devices.size(), 0);
         for(size_t d = 0; d < devices.size(); d++)
@@ -1286,8 +1291,7 @@ int main(int argc, const char* argv[])
                 for(size_t r = firstSlot; r < endSlot; r++)
                 {
                     auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
-                    inputs.peerD = static_cast<char*>(fullOutputs[peer][r].get()) + sliceBytes[d];
-                }
+                    inputs.peerD = static_cast<char*>(fullOutputs[peer][r].get()) + sliceBytes[d];                }
             }
     };
 

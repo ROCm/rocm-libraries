@@ -3866,6 +3866,9 @@ namespace TensileLite
                                                        problem.useGateResidual() ? gate.strides().at(index) : 0);
                     break;
                 }
+                case CustomArgSemantic::AddressPeerD:
+                    rv.args.template append<void const*>("AddressPeerD", inputs.peerD);
+                    break;
                 case CustomArgSemantic::AddressAmaxOut:
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
                     break;

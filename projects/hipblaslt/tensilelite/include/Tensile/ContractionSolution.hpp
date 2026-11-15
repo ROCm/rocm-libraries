@@ -185,7 +185,8 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        X_MACRO(AddressPeerD)
 
     enum class CustomArgSemantic
     {
