@@ -29,6 +29,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvGroupProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvTf32TestSupport.hpp"
@@ -1986,6 +1987,14 @@ TEST(TestConvGroupProblem, OnlyForwardTakesAnEpilogue)
         EXPECT_FALSE(conv_group::parseGroupProblem(other.context(), direction).has_value());
         EXPECT_FALSE(matchesGraph(packFor(direction), other.context()).has_value());
     }
+}
+
+// Opt-in: each config's time with and without a fused bias + relu (shapes in $GROUP_EPI_TIMING).
+TEST(TestGpuConvGroupFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), "GROUP_EPI_TIMING");
 }
 
 } // namespace

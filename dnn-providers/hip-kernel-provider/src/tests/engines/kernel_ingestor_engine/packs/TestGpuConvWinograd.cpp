@@ -27,6 +27,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWinogradProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -987,6 +988,14 @@ TEST(TestConvWinogradFusion, OnlyForwardMatchersClaimFusedGraphs)
     ASSERT_TRUE(fused.has_value());
     EXPECT_FALSE(fused->base.epilogue.empty());
     EXPECT_EQ(fused->yUid, conv_epilogue_test::outputUid(2));
+}
+
+// Opt-in: each config's time with and without a fused bias + relu (shapes in $WINO_EPI_TIMING).
+TEST(TestGpuConvWinogradFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), "WINO_EPI_TIMING");
 }
 
 } // namespace
