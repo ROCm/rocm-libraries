@@ -265,6 +265,13 @@ def test_amax_output_addresses():
         assert expected in sems
 
 
+def test_peer_d_address_follows_the_epilogue_args_and_precedes_amax():
+    sems = _sems(_writer(), _kernel(ProblemType={"OutputPeerD": True, "OutputAmaxD": True}))
+    assert sems.count("AddressPeerD") == 1
+    assert sems.index("AddressPeerD") < sems.index("AddressAmaxOut")
+    assert "AddressPeerD" not in _sems(_writer(), _kernel())
+
+
 def test_mbsk_trailing_args_from_algorithm():
     sems = _sems(_writer(), _kernel(GlobalSplitUAlgorithm="MultipleBufferSingleKernel"))
     assert sems[-7:] == ["AddressTD", "Synchronizer", "GSUSync",

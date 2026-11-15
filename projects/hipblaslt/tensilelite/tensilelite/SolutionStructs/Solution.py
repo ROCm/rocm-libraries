@@ -2440,6 +2440,34 @@ class Solution(collections.abc.Mapping):
       state["PostLoopStoreInNll"] = False
 
   ########################################
+  # OutputPeerD feasibility: what a solution with a second D store must not use
+  @staticmethod
+  def outputPeerDUnmet(state):
+    """The limits of OutputPeerD that `state` does not meet (empty when it is allowed).
+
+    The second D store is added to the plain buffer-store epilogue only (addStore, tc 'D'),
+    and it is a system-scope store, which only gfx1250 is validated for.
+    """
+    problemType = state["ProblemType"]
+    limits = (
+      (tuple(state.get("ISA", (0, 0, 0))) == (12, 5, 0), "gfx1250"),
+      (state.get("BufferStore", 1) == 1, "BufferStore=1"),
+      # SCOPE_SYS with the LU/WB hint is not accepted by the assembler.
+      (state.get("TemporalHintD", 0) != 3, "TemporalHintD != 3"),
+      (state.get("GlobalSplitU", 1) == 1, "GlobalSplitU=1"),
+      (not isPersistent(state), "no StreamK / persistent kernel"),
+      (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
+      (not state.get("UseSubtileImpl", False), "UseSubtileImpl=False"),
+      (state.get("WorkGroup", [0, 0, 1])[2] == 1, "no LocalSplitU"),
+      (not problemType.get("SupportUserArgs", False), "SupportUserArgs=False"),
+      (not problemType.get("GroupedGemm", False), "no GroupedGemm"),
+      (not problemType.get("OutputAmaxD", False), "no OutputAmaxD"),
+      (not problemType.get("UseE", False), "no UseE"),
+      (problemType.get("FusedA2A", "Disabled") == "Disabled", "FusedA2A=Disabled"),
+    )
+    return [what for ok, what in limits if not ok]
+
+  ########################################
   # assign all derived parameters
   @staticmethod
   def assignDerivedParameters(
@@ -2453,25 +2481,7 @@ class Solution(collections.abc.Mapping):
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
     if state["ProblemType"].get("OutputPeerD", False):
-      # The second D store is added to the plain buffer-store epilogue only (addStore, tc 'D').
-      peerDLimits = (
-        (state.get("BufferStore", 1) == 1, "BufferStore=1"),
-        # The peer store is a system-scope store: gfx12 has the scope field, gfx9 has no equivalent
-        # here, and SCOPE_SYS with the LU/WB hint is not accepted by the assembler.
-        (tuple(state.get("ISA", (0, 0, 0)))[0] == 12, "gfx12"),
-        (state.get("TemporalHintD", 0) != 3, "TemporalHintD != 3"),
-        (state.get("GlobalSplitU", 1) == 1, "GlobalSplitU=1"),
-        (not isPersistent(state), "no StreamK / persistent kernel"),
-        (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
-        (not state.get("UseSubtileImpl", False), "UseSubtileImpl=False"),
-        (state.get("WorkGroup", [0, 0, 1])[2] == 1, "no LocalSplitU"),
-        (not state["ProblemType"].get("SupportUserArgs", False), "SupportUserArgs=False"),
-        (not state["ProblemType"].get("GroupedGemm", False), "no GroupedGemm"),
-        (not state["ProblemType"].get("OutputAmaxD", False), "no OutputAmaxD"),
-        (not state["ProblemType"].get("UseE", False), "no UseE"),
-        (state["ProblemType"].get("FusedA2A", "Disabled") == "Disabled", "FusedA2A=Disabled"),
-      )
-      unmet = [what for ok, what in peerDLimits if not ok]
+      unmet = Solution.outputPeerDUnmet(state)
       if unmet:
         reject(state, printRejectionReason, "OutputPeerD needs: " + ", ".join(unmet))
         return
