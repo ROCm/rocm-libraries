@@ -568,12 +568,24 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
     std::size_t runs_since_improvement = 0;
     bool stop                          = false;
 
+    const auto time_budget_exhausted = [&] {
+        if(std::chrono::steady_clock::now() - start_time <= time_budget)
+            return false;
+        MIOPEN_LOG_W("Ending search, tuning time budget of " << time_budget.count()
+                                                             << " ms is exhausted");
+        return true;
+    };
+
     for(std::size_t first = 0; first < solutions.size() && !stop; first += batch_size)
     {
         const auto last = std::min(first + batch_size, solutions.size());
         {
+            // Build only the kernels the iteration limit can still time. The loop stops as soon
+            // as run_counter reaches the limit, so this subtraction does not wrap.
+            const auto precompile_last =
+                first + std::min(last - first, GetTuningIterationsMax() - run_counter);
             std::vector<const ConvSolution*> batch;
-            for(auto i = first; i < last; ++i)
+            for(auto i = first; i < precompile_last; ++i)
                 batch.push_back(&solutions[i].second);
             PrecompileCandidates(profile_h, batch);
         }
@@ -593,6 +605,11 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
             if(ret != 0)
             {
                 ++failed_counter;
+                if(time_budget_exhausted())
+                {
+                    stop = true;
+                    break;
+                }
                 continue;
             }
 
@@ -630,10 +647,8 @@ ConvHipDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
                 stop = true;
                 break;
             }
-            if(std::chrono::steady_clock::now() - start_time > time_budget)
+            if(time_budget_exhausted())
             {
-                MIOPEN_LOG_W("Ending search, tuning time budget of " << time_budget.count()
-                                                                     << " ms is exhausted");
                 stop = true;
                 break;
             }
