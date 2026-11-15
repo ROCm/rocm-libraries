@@ -50,7 +50,9 @@ from .ir import (
     _refuse_unsigned_operands,
     _sync_attr,
     _trap_op_error,
+    claimed_align,
     dpp_ctrl_attr,
+    element_type,
     dpp_xor_ctrl,
     gpu_check_word_symbol,
     require_streaming_arch,
@@ -769,11 +771,7 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_load_vN")
         byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
-        align = int(op.attrs.get("align", vec * 2))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_load_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, vec, element_type(op.result.type))
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
@@ -2415,11 +2413,7 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
         byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
-        align = int(op.attrs.get("align", byte_count))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_store_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, n, element_type(val.type))
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
