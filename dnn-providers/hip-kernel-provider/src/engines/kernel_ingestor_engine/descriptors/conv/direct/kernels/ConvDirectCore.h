@@ -682,16 +682,6 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
     const int wm = wave % WM, wn = wave / WM;
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     const int tilePix = a.th * a.tw;
-#if defined(CONV_EPI) && CONV_EPI
-    // The fused epilogue's per-channel operands of the lane's output columns.
-    ConvEpiGen::Chan chans[FN];
-#pragma unroll
-    for(int j = 0; j < FN; ++j)
-    {
-        const int en = n0 + wn * WTN + j * DIM + lane % DIM;
-        chans[j] = epi.chan(en, en < a.k);
-    }
-#endif
 
     Loader ld;
     ld.init(a, b, tid);
@@ -991,6 +981,17 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         typedef typename K1Raw<16>::type Raw;
         __syncthreads();
         TS* strip = reinterpret_cast<TS*>(lds + (stage ^ 1) * SLOT) + wave * STRIP;
+#if defined(CONV_EPI) && CONV_EPI
+        // The fused epilogue's per-channel operands of the lane's output columns, loaded per
+        // store so they hold no registers through the main loop.
+        ConvEpiGen::Chan chans[FN];
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+        {
+            const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+            chans[j] = epi.chan(en, en < a.k);
+        }
+#endif
 #pragma unroll
         for(int i = 0; i < FM; ++i)
         {
@@ -1264,24 +1265,18 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
     };
 
     T* out = static_cast<T*>(a.y);
-#if defined(CONV_EPI) && CONV_EPI
-    // The fused epilogue's per-channel operands of the thread's TN channels.
-    ConvEpiGen::Chan chans[TN];
-#pragma unroll
-    for(int j = 0; j < TN; ++j)
-    {
-        const int en = n0 + tn * TN + j;
-        chans[j] = epi.chan(en, en < a.k);
-    }
-#endif
     auto store = [&](int set, int od, int) {
         const int nb = n0 + tn * TN;
 #if defined(CONV_EPI) && CONV_EPI
+        // The fused epilogue, one channel's operands at a time, on the accumulators in place.
 #pragma unroll
-        for(int i = 0; i < TM; ++i)
+        for(int j = 0; j < TN; ++j)
+        {
+            const ConvEpiGen::Chan ch = epi.chan(nb + j, nb + j < a.k);
 #pragma unroll
-            for(int j = 0; j < TN; ++j)
-                acc[set][i][j] = epi(acc[set][i][j], chans[j], 0, true);
+            for(int i = 0; i < TM; ++i)
+                acc[set][i][j] = epi(acc[set][i][j], ch, 0, true);
+        }
 #endif
 #pragma unroll
         for(int i = 0; i < TM; ++i)
