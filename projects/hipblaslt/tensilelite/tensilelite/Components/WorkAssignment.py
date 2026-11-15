@@ -405,9 +405,9 @@ class WorkAssignment(Component):
             exclusive with SKXCC so the disjuncts never overlap.
 
         Fixed non-SKXCC WGMXCC == 1 needs no fix (PersistentWorkGroupIndex is already the raw
-        rank).  On WorkGroupIdFromTTM targets (gfx12) PersistentWorkGroupIndex is re-read from
-        the raw hardware id (ttmp9); single-queue arches (NumXCD <= 1) are
-        trivially balanced. The writer prologue uses this same predicate."""
+        rank). Single-queue arches (including current gfx12 targets) always
+        select queue 0 regardless of rank. The writer prologue uses this same
+        predicate."""
         return ((hasDynamicAssignment(kernel) or hasHybridAssignment(kernel))
                 and writer.states.archCaps["NumXCD"] > 1
                 and not writer.states.archCaps["WorkGroupIdFromTTM"]
@@ -427,8 +427,8 @@ class WorkAssignment(Component):
         in-window-dead persistent ``StreamKTileIdx`` carrier (KernelWriterAssembly
         prologue -- zero extra SGPR), then moved into ``PersistentWorkGroupIndex``
         by ``emitRawRankRestore``; here it is reduced ``% numQueues``.
-        Otherwise (WGMXCC no-op, or gfx12) ``PersistentWorkGroupIndex`` already
-        holds the raw id, so fall back to ``PersistentWorkGroupIndex %% numQueues``.
+        Otherwise, use ``PersistentWorkGroupIndex %% numQueues``; single-queue
+        targets select queue 0 regardless of whether the rank was remapped.
         """
         partition = Component.TileProcessingStrategy.find(writer).queuePartition()
         module = Module("StreamK queue index")
@@ -759,14 +759,6 @@ class StaticGrid(WorkAssignment):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
-        # Skip the gfx12 ttmp reread under clustering: defineAndResources already left
-        # the cluster-decoded rank in WorkGroup0/1/2, and rereading ttmp9 (cluster_x here)
-        # would collide PersistentWorkGroupIndex across the cluster.
-        if writer.states.archCaps["WorkGroupIdFromTTM"] and not clusterEnabled(kernel["ClusterDim"]):
-            module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
-            module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
-            module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
-
         # No USO prologue: bit 29 is tested in place at each divergence site.
 
         # Cluster multicast: the host launches (Cs * clusters, Ck, 1), so after the
@@ -803,7 +795,7 @@ class StaticGrid(WorkAssignment):
 
         if skConstsInVgprs:
             module.add(VMovB32(dst=vgpr(writer.states.persistentConstVgprs["PersistentWorkGroupIndex"]), src=sgpr("WorkGroup0"),
-                               comment="Save original StreamK index to VGPR"))
+                               comment="Save mapped persistent rank to VGPR"))
         else:
             module.add(SMovB32(dst=sgpr(partition.initial_rank), src=sgpr("WorkGroup0"),
                                comment="Save mapped persistent rank"))
@@ -1170,28 +1162,19 @@ class Hybrid(WorkAssignment):
         partition = Component.TileProcessingStrategy.find(writer).queuePartition()
         module = Module("StreamK Hybrid openLoop")
 
-        # ----- Common prologue: XCC mapping, gfx12 workaround, save WG0 -----
+        # Mapping reads the packed mode bit, so it must precede extraction.
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
-        # Skip the gfx12 ttmp reread under clustering: defineAndResources already left
-        # the cluster-decoded rank in WorkGroup0/1/2, and rereading ttmp9 (cluster_x here)
-        # would collide PersistentWorkGroupIndex across the cluster.
-        if writer.states.archCaps["WorkGroupIdFromTTM"] and not clusterEnabled(kernel["ClusterDim"]):
-            module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
-            module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
-            module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
-
-        # SK5 always has isPersistentConstantsToVgprEnabled(kernel) == False,
+        # Hybrid always has isPersistentConstantsToVgprEnabled(kernel) == False,
         # so save directly to the PersistentWorkGroupIndex SGPR (no VGPR-cache path).
         module.add(SMovB32(dst=sgpr(partition.launch_rank), src=sgpr("WorkGroup0"),
-                           comment="SK5: save original StreamK index"))
+                           comment="Hybrid: save mapped persistent rank"))
         # Work stealing: this WG has not yet seen its home queue empty.
         if kernel["WorkQueueStealing"]:
             module.add(SMovB32(dst=sgpr(partition.sticky_empty), src=0,
                                comment="WS: home not yet empty"))
 
-        # ----- Extract the mode bit once for the whole kernel -----
         module.add(Component.WorkAssignment.find(writer).extractMode(writer, kernel))
         module.add(self.emitRawRankRestore(writer, kernel, hybrid=True))
 
