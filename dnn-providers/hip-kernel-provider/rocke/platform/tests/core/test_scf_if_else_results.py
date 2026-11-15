@@ -13,13 +13,15 @@ lowerers' refusals of a branch that does not yield the results or yields a
 buffer descriptor, of a yield in a branch of an if/else without results (alone
 and in a loop) or before the end of a branch of one with results, directly or
 in an scf.if within the branch, of an LDS allocation or a packed-only type as a
-result, of an if/else without one condition and two branches, of a yield in
-the kernel body or in an scf.if in a loop body, and of a malformed if/else in
-an unrolled loop of zero trips, directly in its body or in an scf.if there; a
-loop in a branch keeps its own yield; and,
-when a GPU is present, a kernel whose lanes take both branches on the LLVM and
-the hipcc route. The refusals run the verifier and the Python lowerings
-everywhere, and the C++ lowerings where the ``rocke_engine`` binding is built.
+result, of a result or yielded value with no type (the Python engine only;
+serialized IR cannot carry one to the C++ engine), of an if/else without one
+condition and two branches, of a yield in the kernel body or in an scf.if in a
+loop body, and of a malformed if/else in an unrolled loop of zero trips,
+directly in its body or in an scf.if there; a loop in a branch keeps its own
+yield; and, when a GPU is present, a kernel whose lanes take both branches on
+the LLVM and the hipcc route. The refusals run the verifier and the Python
+lowerings everywhere, and the C++ lowerings where the ``rocke_engine`` binding
+is built.
 """
 
 from __future__ import annotations
@@ -372,6 +374,82 @@ def test_a_packed_only_lds_result_is_refused_as_packed_only_first():
         "or vector form -- keep them in i32 storage and unpack explicitly"
     )
     _assert_refused(kernel, TypeError, message)
+
+
+UNTYPED_RESULT_MESSAGE = "scf.if_else result 0 failed - type=None, expected an IR type"
+UNTYPED_YIELD_MESSAGE = (
+    "scf.if_else then branch yield 0 failed - type=None, expected i32"
+)
+
+
+def test_builder_refuses_a_result_with_no_type():
+    """A result type of None is refused with a TypeError before it is read."""
+    b = IRBuilder("if_else_untyped_builder")
+    cond = b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT))
+    with pytest.raises(TypeError) as error:
+        b.scf_if_else(cond, result_types=[None])
+    assert str(error.value) == UNTYPED_RESULT_MESSAGE
+
+
+def _assert_python_engine_refuses(kernel, error_type, message):
+    """``assert_refused_everywhere`` for gfx942 at the host flavor, in the
+    Python engine only: serialized IR, which carries a kernel to the C++
+    engine, has no spelling for a value with no type. ``test_yield_rules.cpp``
+    holds the C++ engine's builder, rule, verifier and lowerings to the same
+    types and texts."""
+    assert_refused_everywhere(
+        kernel, "gfx942", error_type, message, HOST_FLAVOR, engines=("python",)
+    )
+
+
+def _emit_if_else_yielding(b, cond, then_value):
+    """Emit into ``b`` an if/else on ``cond`` with one i32 result whose then
+    branch yields ``then_value`` and whose else branch yields 2, written past
+    the builder's check; return the if/else op."""
+    branch = b.scf_if_else(cond, result_types=[I32])
+    then_ctx, else_ctx = branch.__enter__()
+    with then_ctx:
+        b.scf_yield(then_value)
+    with else_ctx:
+        b.scf_yield(b.const_i32(2))
+    return branch.op
+
+
+def test_a_result_with_no_type_is_refused_before_it_is_read():
+    """A result whose type was taken away past the builder is refused by the
+    verifier and both lowerings with a TypeError, not read."""
+    b = IRBuilder("if_else_untyped_result")
+    op = _emit_if_else_yielding(
+        b, b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT)), b.const_i32(1)
+    )
+    b.ret()
+    op.results[0].type = None
+    _assert_python_engine_refuses(b.kernel, TypeError, UNTYPED_RESULT_MESSAGE)
+
+
+@pytest.mark.parametrize("in_zero_trip_loop", [False, True])
+def test_a_yield_of_a_value_with_no_type_is_refused_before_it_is_read(
+    in_zero_trip_loop,
+):
+    """A branch that yields a value with no type is refused with a TypeError
+    by the verifier and both lowerings, the LLVM lowering also in the body of
+    an unrolled loop of zero trips, which it does not lower."""
+
+    def emit(b, _k):
+        _emit_if_else_yielding(
+            b,
+            b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT)),
+            Value("%untyped", None),
+        )
+
+    if in_zero_trip_loop:
+        kernel = _carrying_loop_kernel("zero_trip_untyped_yield", 0, emit, unroll=True)
+    else:
+        b = IRBuilder("if_else_untyped_yield")
+        emit(b, None)
+        b.ret()
+        kernel = b.kernel
+    _assert_python_engine_refuses(kernel, TypeError, UNTYPED_YIELD_MESSAGE)
 
 
 STRAY_YIELD_MESSAGE = (

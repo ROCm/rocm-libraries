@@ -51,8 +51,8 @@ row's caller observes.
 Every engine this run can drive, plus the verifier:
 ``assert_refused_everywhere`` and ``assert_accepted_everywhere`` run the Python
 verifier and the LLVM and HIP lowerings of each engine in
-``available_engines()``. Unlike the both-engine helpers they do not skip without
-the binding, so a run without it (installed CI) still checks the Python engine.
+``available_engines()``. Unlike the both-engine helpers they do not skip when
+the binding is absent.
 """
 
 from __future__ import annotations
@@ -415,14 +415,18 @@ def assert_refused_everywhere(
     error_type: type[Exception],
     message: str,
     llvm_flavor: str | None = None,
+    *,
+    engines: tuple[Engine, ...] | None = None,
 ) -> None:
     """Assert that the Python verifier reports ``message`` for ``kernel`` and
-    that the LLVM and HIP lowerings of every engine in ``available_engines()``
-    refuse it as :func:`assert_engine_rejects` and
-    :func:`assert_engine_rejects_hip` check. The C++ verifier is not reached
-    through the binding; the native tests check it."""
+    that the LLVM and HIP lowerings of each of ``engines`` (default:
+    ``available_engines()``) refuse it as :func:`assert_engine_rejects` and
+    :func:`assert_engine_rejects_hip` check. ``engines=("python",)`` holds a
+    kernel only the Python engine can receive (one serialized IR cannot
+    spell) to the Python engine alone. The C++ verifier is not reached through
+    the binding; the native tests check it."""
     assert message in [diagnostic.message for diagnostic in verify(kernel)]
-    for engine in available_engines():
+    for engine in available_engines() if engines is None else engines:
         assert_engine_rejects(
             kernel,
             arch,

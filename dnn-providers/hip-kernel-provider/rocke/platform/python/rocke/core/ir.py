@@ -1614,6 +1614,27 @@ def _scf_for_carried_count_error(op: Op) -> str | None:
     return None
 
 
+def _untyped_value_message(
+    value_type: object, what: str, index: int, expected: str
+) -> str | None:
+    """The refusal for value ``index`` of ``what`` (``"scf.for result"``,
+    say) when its type ``value_type`` is not a :class:`Type`, or None when it
+    is.
+
+    The builders and the IR parser type every value, but a value built or
+    edited by hand can lack a type. The loop rule (:func:`_scf_for_error`) and
+    the if/else rule (:func:`_if_else_yields`) check each value with it before
+    they read its type's name; the loop rule reports it as a ``ValueError``,
+    as every loop refusal is, and the if/else rule as a ``TypeError``, as its
+    builder refuses a result type. The C++ engine (``untyped_value_message``
+    in ``cpp/core/ir/ir_flow.cpp``) writes the same text, spelling its missing
+    type ``None``.
+    """
+    if isinstance(value_type, Type):
+        return None
+    return f"{what} {index} failed - type={value_type!r}, expected {expected}"
+
+
 def _scf_for_metadata_entry_error(op: Op) -> str | None:
     """The refusal for the ``scf.for`` ``op`` when an ``iter_args`` metadata
     entry does not describe its carried value, or None when every entry does.
@@ -1623,7 +1644,8 @@ def _scf_for_metadata_entry_error(op: Op) -> str | None:
     ``type`` names the type of init operand ``i``; result ``i`` has that type
     too. An entry with no type name gets the IR parser's refusal
     (:func:`_untyped_loop_value_message`), so a loop gets one text whichever
-    of the two meets it first.
+    of the two meets it first. An init operand or result with no type is
+    refused (:func:`_untyped_value_message`) before its type is read.
     """
     for index, (entry, init, result) in enumerate(
         zip(op.attrs.get("iter_args", []), op.operands[3:], op.results)
@@ -1636,11 +1658,21 @@ def _scf_for_metadata_entry_error(op: Op) -> str | None:
         type_name = entry.get("type")
         if not isinstance(type_name, str):
             return _untyped_loop_value_message(name)
+        error = _untyped_value_message(
+            init.type, "scf.for init operand", index, "an IR type"
+        )
+        if error is not None:
+            return error
         if type_name != init.type.name:
             return (
                 f"scf.for iter_arg {name} metadata type '{type_name}' "
                 f"does not match init type '{init.type.name}'"
             )
+        error = _untyped_value_message(
+            result.type, "scf.for result", index, init.type.name
+        )
+        if error is not None:
+            return error
         if result.type != init.type:
             return (
                 f"scf.for result type '{result.type.name}' does not match "
@@ -1657,8 +1689,9 @@ def _scf_for_yield_error(op: Op) -> str | None:
     The loop takes its carried values from the one ``scf.yield`` that ends its
     body, so the body yields only at its end; it ends in a yield of one value
     per init operand, of that operand's type, whenever the loop carries any. A
-    loop that carries none may end in an empty yield or in none. The loop holds
-    one body region (:func:`_scf_for_region_error`).
+    loop that carries none may end in an empty yield or in none. A yielded
+    value with no type is refused (:func:`_untyped_value_message`) before its
+    type is read. The loop holds one body region (:func:`_scf_for_region_error`).
     """
     body_ops = op.regions[0].ops
     carried = op.operands[3:]
@@ -1678,6 +1711,11 @@ def _scf_for_yield_error(op: Op) -> str | None:
             f"scf.for carries {count} values, but its body yields {len(yielded)} values"
         )
     for index, (init, value) in enumerate(zip(carried, yielded)):
+        error = _untyped_value_message(
+            value.type, "scf.for body yield", index, init.type.name
+        )
+        if error is not None:
+            return error
         if value.type != init.type:
             return (
                 f"scf.for iter_arg {index} is {init.type.name}, but its body "
@@ -1743,18 +1781,25 @@ def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
             _refuse_malformed_control_flow(region.ops)
 
 
-def _refuse_if_else_result_type(index: int, result_type: Type) -> None:
+def _refuse_if_else_result_type(index: int, result_type: object) -> None:
     """Refuse an ``scf.if_else`` result ``index`` of type ``result_type`` that
     an if/else cannot carry.
 
-    A packed-only type has no value form (:func:`_refuse_packed_only_value`,
-    ``TypeError``). An LDS allocation is a name the lowerings resolve to its
-    base, not a value: neither the phi (LLVM) nor the variable (HIP) that holds
-    a result can hold one (``ValueError``). The packed-only rule comes first, so
-    an LDS tile of i4 gets its ``TypeError``. The builder and
+    A result needs a type (:func:`_untyped_value_message`, ``TypeError``);
+    this comes first, so no later rule reads a missing type. A packed-only type has
+    no value form (:func:`_refuse_packed_only_value`, ``TypeError``). An LDS
+    allocation is a name the lowerings resolve to its base, not a value:
+    neither the phi (LLVM) nor the variable (HIP) that holds a result can hold
+    one (``ValueError``). The packed-only rule comes before the LDS rule, so an
+    LDS tile of i4 gets its ``TypeError``. The builder and
     :func:`_if_else_yields` use this rule, and the C++ engine
     (``rocke_i_check_if_else_result_type``) reports the same type and text.
     """
+    error = _untyped_value_message(
+        result_type, "scf.if_else result", index, "an IR type"
+    )
+    if error is not None:
+        raise TypeError(error)
     _refuse_packed_only_value("scf.if_else", result_type)
     if isinstance(result_type, SmemType):
         raise ValueError(
@@ -1776,7 +1821,9 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
     yields in its regions. That closing ``scf.yield`` gives
     one value per result, of the result's type, and never a buffer descriptor
     (:func:`_is_buffer_descriptor`): neither the phi (LLVM) nor the variable
-    (HIP) that holds a result can hold the lowered descriptor.
+    (HIP) that holds a result can hold the lowered descriptor. A yielded value
+    with no type (:func:`_untyped_value_message`) is a ``TypeError``, raised
+    before any rule reads its type; every other refusal is a ``ValueError``.
     """
     name = _IF_ELSE_BRANCHES[branch]
     count = len(op.results)
@@ -1811,6 +1858,11 @@ def _if_else_branch_yield(op: Op, branch: int) -> Op | None:
                 "descriptor, which an if/else cannot carry; yield the values the "
                 "descriptor is built from and build it after the if/else"
             )
+        error = _untyped_value_message(
+            value.type, f"scf.if_else {name} branch yield", index, result.type.name
+        )
+        if error is not None:
+            raise TypeError(error)
         if value.type != result.type:
             raise ValueError(
                 f"scf.if_else result {index} is {result.type.name}, but its {name} "

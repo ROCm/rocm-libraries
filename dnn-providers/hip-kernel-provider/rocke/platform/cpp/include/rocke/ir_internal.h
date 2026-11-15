@@ -345,9 +345,9 @@ bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel);
 /* Whether an scf.if_else can carry a result `index` of type `result_type`
  * (Python core/ir.py::_refuse_if_else_result_type, which raises where this
  * returns): ROCKE_OK, or the status of the Python exception with its text
- * written to `err`. A packed-only type is refused first (ROCKE_ERR_TYPE), then
- * an LDS allocation (ROCKE_ERR_VALUE). The builder and rocke_i_if_else_yields
- * use it. */
+ * written to `err`. A missing type (NULL or unnamed) is refused first, then a
+ * packed-only type (both ROCKE_ERR_TYPE), then an LDS allocation
+ * (ROCKE_ERR_VALUE). The builder and rocke_i_if_else_yields use it. */
 rocke_status_t rocke_i_check_if_else_result_type(int index,
                                                  const rocke_type_t* result_type,
                                                  char* err,
@@ -359,7 +359,8 @@ rocke_status_t rocke_i_check_if_else_result_type(int index,
  * branches, checked first; each result passes rocke_i_check_if_else_result_type;
  * a branch of an if/else without results holds no scf.yield, and a branch of
  * one with results holds one, at its end, of one value per result, of the
- * result's type, and never a buffer descriptor. A branch holds no other
+ * result's type (a value with no type is a ROCKE_ERR_TYPE refusal that does not
+ * read the missing name), and never a buffer descriptor. A branch holds no other
  * scf.yield, directly or in a nested region that takes no yields
  * (rocke_i_orphan_yield); a NULL branch counts as missing. Returns ROCKE_OK, or the
  * status of the Python engine's exception with its refusal written to `err`.

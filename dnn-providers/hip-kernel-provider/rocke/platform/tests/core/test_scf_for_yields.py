@@ -16,9 +16,11 @@ does not lower; each loop is held to its own counts, and a loop or an if/else
 nested in a body keeps its own yields. A metadata entry that is not a map is
 the exception: the C++ engine's parser refuses it before the loop rule runs,
 with its own text. An entry with no type name is refused by the C++ parser
-first too, with the text the loop rule shares. Each refusal runs the Python
-verifier and the Python lowerings everywhere, and the C++ lowerings where the
-``rocke_engine`` binding is built.
+first too, with the text the loop rule shares. A carried value or result with
+no type is refused before its type is read, in the Python engine only, as
+serialized IR cannot carry one to the C++ engine. Each other refusal runs the
+Python verifier and the Python lowerings everywhere, and the C++ lowerings
+where the ``rocke_engine`` binding is built.
 ``tests/core/test_yield_rules.cpp`` covers the same rules in the C++ engine,
 its verifier included.
 """
@@ -26,7 +28,7 @@ its verifier included.
 from __future__ import annotations
 
 import pytest
-from rocke.core.ir import F32, I32, IRBuilder, PtrType
+from rocke.core.ir import F32, I32, IRBuilder, PtrType, Value
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.verify import verify
 from rocke.tests.engines import (
@@ -432,6 +434,51 @@ def test_a_loop_whose_metadata_misdescribes_its_carried_values_is_refused(
     kernel, loop = _loop_kernel_yielding_its_init("loop_metadata")
     edit(loop)
     _refused(kernel, message)
+
+
+def _untype_the_init(loop):
+    loop.operands[3] = Value("%untyped", None)
+
+
+def _untype_the_result(loop):
+    loop.results[0].type = None
+
+
+def _untype_the_yield(loop):
+    loop.regions[0].ops[-1].operands = [Value("%untyped", None)]
+
+
+@pytest.mark.parametrize(
+    "edit,message",
+    [
+        pytest.param(
+            _untype_the_init,
+            "scf.for init operand 0 failed - type=None, expected an IR type",
+            id="init",
+        ),
+        pytest.param(
+            _untype_the_result,
+            "scf.for result 0 failed - type=None, expected i32",
+            id="result",
+        ),
+        pytest.param(
+            _untype_the_yield,
+            "scf.for body yield 0 failed - type=None, expected i32",
+            id="yield",
+        ),
+    ],
+)
+def test_a_loop_value_with_no_type_is_refused_before_it_is_read(edit, message):
+    """A loop whose init operand, result or closing yield has no type, edited
+    past the builder, is refused by the verifier and every lowering before the
+    missing type is read. Only the Python engine runs: serialized IR, which
+    carries a kernel to the C++ engine, has no spelling for a value with no
+    type; ``test_yield_rules.cpp`` holds the C++ engine to the same texts."""
+    kernel, loop = _loop_kernel_yielding_its_init("loop_untyped")
+    edit(loop)
+    assert_refused_everywhere(
+        kernel, ARCH, ValueError, message, HOST_FLAVOR, engines=("python",)
+    )
 
 
 # What the C++ engine's parser reports for a metadata list whose element is

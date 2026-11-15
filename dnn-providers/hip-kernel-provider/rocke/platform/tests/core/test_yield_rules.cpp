@@ -17,7 +17,9 @@
  * a branch of one with results ends in a yield of one value per result and
  * holds no other, directly or in an scf.if within it. A yield goes directly in an scf.for body or such a branch; one anywhere
  * else (the kernel body, an scf.if) is an orphan. A result is refused by the
- * packed-only rule (a TypeError) before the LDS rule (a ValueError). The C
+ * packed-only rule (a TypeError) before the LDS rule (a ValueError). A result
+ * or yielded value with no type is refused (a TypeError) before its missing
+ * type is read; the C builder also refuses a result with no type. The C
  * builder has no point where both branches are done, so it does not check the
  * branches: the verifier and the lowerings do, the LLVM lowering also in the
  * body of an unrolled loop of zero trips, which it does not lower, directly in
@@ -32,6 +34,7 @@
 #include <string>
 #include <vector>
 
+#include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 #include "rocke/ir_serialize.h"
@@ -195,6 +198,23 @@ struct Kernel
             std::vector<rocke_value_t*> values(*then_yield_count, then_zero);
             rocke_b_scf_yield(&b, values.data(), *then_yield_count);
         }
+        rocke_b_region_leave(&b);
+        rocke_b_region_enter(&b, branch.else_region);
+        rocke_value_t* else_zero = rocke_b_const_i32(&b, 0);
+        rocke_b_scf_yield(&b, &else_zero, 1);
+        rocke_b_region_leave(&b);
+        return branch;
+    }
+
+    /* An if/else on `lane < 8` with one i32 result whose then branch yields
+     * `then_value` and whose else branch yields zero. */
+    rocke_if_else_t build_if_else_yielding(rocke_value_t* then_value)
+    {
+        const rocke_type_t* i32 = rocke_i32();
+        rocke_if_else_t branch = rocke_b_scf_if_else_results(
+            &b, rocke_b_cmp_lt(&b, lane, rocke_b_const_i32(&b, 8)), &i32, 1);
+        rocke_b_region_enter(&b, branch.then_region);
+        rocke_b_scf_yield(&b, &then_value, 1);
         rocke_b_region_leave(&b);
         rocke_b_region_enter(&b, branch.else_region);
         rocke_value_t* else_zero = rocke_b_const_i32(&b, 0);
@@ -762,10 +782,9 @@ void a_loop_whose_iter_args_metadata_is_malformed_is_refused()
 /* A raw value (rocke_i_value_named given no type) has no type, and a raw op
  * given no result types leaves its results so. A loop whose init operand,
  * result or closing yield has no type is refused by the verifier and both
- * lowerings instead of read: an init operand as having no init type, a result
- * or yielded value with its missing type named "(null)". A raw value has no
- * defining op either, so the verifier also reports it out of scope; the
- * lowerings meet the loop rule first. */
+ * lowerings, with the Python engine's ValueError and text, before the missing
+ * type is read. A raw value has no defining op either, so the verifier also
+ * reports it out of scope; the lowerings meet the loop rule first. */
 void a_loop_value_with_no_type_is_refused()
 {
     const std::string out_of_scope = "operand '%untyped' used before definition / out of scope\n";
@@ -782,7 +801,8 @@ void a_loop_value_with_no_type_is_refused()
             false);
         rocke_b_ret(&k.b);
         loop_op->operands[3] = rocke_i_value_named(&k.b, "%untyped", nullptr);
-        const std::string message = "scf.for iter_arg %acc has no init type";
+        const std::string message
+            = "scf.for init operand 0 failed - type=None, expected an IR type";
         check_refused_reporting(k,
                                 ROCKE_ERR_VALUE,
                                 message,
@@ -797,7 +817,7 @@ void a_loop_value_with_no_type_is_refused()
         loop_op->results[0]->type = nullptr;
         check_refused(k,
                       ROCKE_ERR_VALUE,
-                      "scf.for result type '(null)' does not match iter_arg %acc type 'i32'",
+                      "scf.for result 0 failed - type=None, expected i32",
                       "loop with a result with no type");
     }
     {
@@ -811,7 +831,7 @@ void a_loop_value_with_no_type_is_refused()
             },
             false);
         rocke_b_ret(&k.b);
-        const std::string message = "scf.for iter_arg 0 is i32, but its body yields (null)";
+        const std::string message = "scf.for body yield 0 failed - type=None, expected i32";
         check_refused_reporting(k,
                                 ROCKE_ERR_VALUE,
                                 message,
@@ -1038,6 +1058,77 @@ void an_if_else_with_missing_branches_is_refused()
     check_refused(k, ROCKE_ERR_VALUE, message, "missing branches");
 }
 
+/* An if/else result or yielded value with no type is refused, as Python
+ * refuses one, with a TypeError, before the missing type is read: by the C
+ * builder given a NULL result type, and, past the builder, by the rule, the
+ * verifier and both lowerings. A result type that is NULL or has no name
+ * counts as missing. A yielded value with no type is refused in the body of an
+ * unrolled loop of zero trips too, which the LLVM lowering does not lower. A
+ * raw value (rocke_i_value_named given no type) has no defining op either, so
+ * the verifier also reports it out of scope. */
+void an_if_else_value_with_no_type_is_refused()
+{
+    const std::string untyped_result
+        = "scf.if_else result 0 failed - type=None, expected an IR type";
+    const std::string untyped_yield
+        = "scf.if_else then branch yield 0 failed - type=None, expected i32";
+    const std::string out_of_scope = "operand '%untyped' used before definition / out of scope\n";
+    {
+        Kernel k("if_else_null_result_type");
+        const rocke_type_t* no_type = nullptr;
+        refusal builder{ROCKE_OK, ""};
+        try
+        {
+            rocke_b_scf_if_else_results(
+                &k.b, rocke_b_cmp_lt(&k.b, k.lane, rocke_b_const_i32(&k.b, 8)), &no_type, 1);
+        }
+        catch(const ckc::Error& error)
+        {
+            builder = {error.code(), error.message()};
+        }
+        check(builder.status == ROCKE_ERR_TYPE && builder.message == untyped_result,
+              "builder, NULL result type: " + std::to_string(builder.status) + " "
+                  + builder.message);
+    }
+    rocke_type_t unnamed = *rocke_i32();
+    unnamed.name = nullptr;
+    for(const rocke_type_t* missing :
+        {static_cast<const rocke_type_t*>(nullptr), static_cast<const rocke_type_t*>(&unnamed)})
+    {
+        const std::string what = missing ? "result type with no name" : "result with no type";
+        Kernel k("if_else_untyped_result");
+        rocke_if_else_t branch = k.build_if_else_with_a_result(Kernel::extra_yield::none);
+        rocke_b_ret(&k.b);
+        branch.op->results[0]->type = missing;
+        check_rule(branch.op, ROCKE_ERR_TYPE, untyped_result, what);
+        check_refused(k, ROCKE_ERR_TYPE, untyped_result, what);
+    }
+    {
+        Kernel k("if_else_untyped_yield");
+        rocke_if_else_t branch
+            = k.build_if_else_yielding(rocke_i_value_named(&k.b, "%untyped", nullptr));
+        rocke_b_ret(&k.b);
+        check_rule(branch.op, ROCKE_ERR_TYPE, untyped_yield, "yield of a value with no type");
+        check_refused_reporting(k,
+                                ROCKE_ERR_TYPE,
+                                untyped_yield,
+                                untyped_yield + "\n" + out_of_scope,
+                                "yield of a value with no type");
+    }
+    {
+        Kernel k("zero_trip_if_else_untyped_yield");
+        k.build_carrying_loop(0, true, [&k](const rocke_for_t&) {
+            k.build_if_else_yielding(rocke_i_value_named(&k.b, "%untyped", nullptr));
+        });
+        rocke_b_ret(&k.b);
+        check_refused_reporting(k,
+                                ROCKE_ERR_TYPE,
+                                untyped_yield,
+                                untyped_yield + "\n" + out_of_scope,
+                                "zero-trip loop, yield of a value with no type");
+    }
+}
+
 /* An if/else whose result is an LDS tile of i4, the type swapped in past the
  * builder: the packed-only rule answers first, with a TypeError, in the rule,
  * the verifier and both lowerings. */
@@ -1089,6 +1180,7 @@ int main()
     well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();
+    an_if_else_value_with_no_type_is_refused();
     if(g_failures)
     {
         fprintf(stderr, "%d failure(s)\n", g_failures);
