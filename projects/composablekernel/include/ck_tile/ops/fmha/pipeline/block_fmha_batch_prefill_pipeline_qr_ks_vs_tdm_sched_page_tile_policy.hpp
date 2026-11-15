@@ -25,6 +25,14 @@ inline constexpr bool fmha_page_tile_d128_prepared_bases_v =
     Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 && Geometry::kN == 128 &&
     Problem::kPageBlockSize >= 64 && !Problem::kHasSink &&
     Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !fmha_tdm_is_split_partial_v<Problem>;
+
+// D64/V64 M128 N128 page tiles other than the KV-split partial kernels: with the WMMA operand
+// guard, they read each stage's K or V in groups of four
+// (FmhaBatchPrefillPageTileQuadD64N128ReadSchedule).
+template <typename Problem, typename Geometry>
+inline constexpr bool fmha_page_tile_d64_quad_reads_v =
+    Geometry::kM == 128 && Geometry::kN == 128 && Geometry::kHeadDimQK == 64 &&
+    Geometry::kDv == 64 && !fmha_tdm_is_split_partial_v<Problem>;
 } // namespace detail
 
 // Policy of the gfx1250 batch-prefill page-tile pipeline: the scheduled-TDM policy and the
@@ -340,20 +348,62 @@ struct FmhaBatchPrefillPageTileTuning : BaseTuning
     using Options = Options_;
 };
 
+// Reads of the guarded D64/V64 M128 N128 page tiles: each stage's eight K or V loads in two groups
+// of four, the loads of WMMAs w .. w + 3 in the second half of WMMA w (w = 0, 4). The scheduled-TDM
+// default pairs them behind every even WMMA (FmhaTdmSchedPairedD64N128ReadSchedule). The read
+// after a WMMA waits for the WMMA's issue, so on latency-bound launches fewer, larger groups save
+// about 2 % of a KV block. The stage tail waits hold for any placement of a stage's loads.
+template <typename Geometry>
+struct FmhaBatchPrefillPageTileQuadD64N128ReadSchedule
+    : FmhaTdmSchedEvenlyInterleavedReadSchedule<Geometry>
+{
+    using Base = FmhaTdmSchedEvenlyInterleavedReadSchedule<Geometry>;
+    using Kind = FmhaTdmSchedLoadKind;
+    static_assert(Geometry::kKSuLoadCount == 8 && Geometry::kVStageLoadCount == 8 &&
+                  Base::kQkWmmasPerStage == 8 && Base::kPvWmmasPerStage == 8);
+
+    template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
+    CK_TILE_HOST_DEVICE static constexpr void VisitQkRowHalf(Visitor&& visitor)
+    {
+        static_assert(Wmma >= 0 && Wmma < Base::kQkWmmasPerStage);
+        constexpr auto kind = Stage == Base::kNumQkStages - 1 ? Kind::VRead : Kind::KRead;
+        if constexpr(SecondHalf && Wmma % 4 == 0)
+            static_for<Wmma, Wmma + 4, 1>{}(
+                [&](auto access) { visitor(std::integral_constant<Kind, kind>{}, access); });
+    }
+
+    template <index_t Stage, index_t Wmma, bool SecondHalf, typename Visitor>
+    CK_TILE_HOST_DEVICE static constexpr void VisitPvRowHalf(Visitor&& visitor)
+    {
+        static_assert(Wmma >= 0 && Wmma < Base::kPvWmmasPerStage);
+        constexpr auto kind = Stage == Base::kNumPvStages - 1 ? Kind::KRead : Kind::VRead;
+        if constexpr(SecondHalf && Wmma % 4 == 0)
+            static_for<Wmma, Wmma + 4, 1>{}(
+                [&](auto access) { visitor(std::integral_constant<Kind, kind>{}, access); });
+    }
+};
+
 // Grouped drains of a guarded page-tile problem. The D128 tiles with prepared tile bases read PV
 // stage 0's V in the softmax, so their QK tail stage refills nothing and one drain covers a whole
 // stage (D128 P64: 20 instead of 27 full drains per KV tile). With V0 read in the QK tail stage it
 // stays alive across that stage and the softmax, and whole-stage groups spill it (32 VGPRs): the
-// kept operands take the low 256 registers.
+// kept operands take the low 256 registers. The D64 M128 tiles read in groups of four.
 template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
-using FmhaBatchPrefillPageTileGroupedDrainFor =
-    std::conditional_t<detail::fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>,
+using FmhaBatchPrefillPageTileGroupedDrainFor = std::conditional_t<
+    detail::fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>,
+    FmhaTdmSchedGroupedDrainPlacement<Geometry,
+                                      Geometry::kQkWmmasPerStage / Geometry::kQkMIter,
+                                      Geometry::kPvWmmasPerStage -
+                                          kFmhaTdmSchedPvLastMRow<Geometry>,
+                                      false>,
+    std::conditional_t<detail::fmha_page_tile_d64_quad_reads_v<Problem, Geometry>,
                        FmhaTdmSchedGroupedDrainPlacement<
                            Geometry,
-                           Geometry::kQkWmmasPerStage / Geometry::kQkMIter,
-                           Geometry::kPvWmmasPerStage - kFmhaTdmSchedPvLastMRow<Geometry>,
-                           false>,
-                       FmhaTdmSchedGroupedDrainPlacement<Geometry>>;
+                           4,
+                           4,
+                           true,
+                           FmhaBatchPrefillPageTileQuadD64N128ReadSchedule<Geometry>>,
+                       FmhaTdmSchedGroupedDrainPlacement<Geometry>>>;
 
 // Schedule of a page-tile problem: with the WMMA operand guard (the vectorized KV layout) the
 // WMMA-first rows run with grouped drains; otherwise the shared default schedule.

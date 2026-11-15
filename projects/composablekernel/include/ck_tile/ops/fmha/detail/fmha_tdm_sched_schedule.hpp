@@ -364,12 +364,17 @@ struct FmhaTdmSchedRowRange
 // implements both points: the operand registers of the WMMAs that a drain covers stay allocated
 // until it (QkKeptPairs; PvKeptRows for the PV WMMA emitter). No streaming output rescale.
 // Without QkTailReads the QK tail stage issues no reads and has no Drain or KeepPending point: the
-// caller reads PV stage 0's V after the stage's RAW fence (kFmhaTdmSchedQkTailReads).
-template <typename Geometry_, index_t QkGroup_ = 4, index_t PvGroup_ = 4, bool QkTailReads_ = true>
+// caller reads PV stage 0's V after the stage's RAW fence (kFmhaTdmSchedQkTailReads). ReadPlacement
+// assigns the reads to the rows.
+template <typename Geometry_,
+          index_t QkGroup_        = 4,
+          index_t PvGroup_        = 4,
+          bool QkTailReads_       = true,
+          typename ReadPlacement_ = FmhaTdmSchedScheduleFor<Geometry_>>
 struct FmhaTdmSchedGroupedDrainPlacement
 {
     using Geometry      = Geometry_;
-    using ReadPlacement = FmhaTdmSchedScheduleFor<Geometry>;
+    using ReadPlacement = ReadPlacement_;
     using Kind          = FmhaTdmSchedLoadKind;
     using Point         = FmhaTdmSchedSchedulePoint;
     template <Point P>
@@ -518,17 +523,27 @@ struct FmhaTdmSchedGroupedDrainPlacement
 // Whether a placement is the grouped-drain placement, whose points the policy implements.
 template <typename Placement>
 inline constexpr bool kIsFmhaTdmSchedGroupedDrain = false;
-template <typename Geometry, index_t QkGroup, index_t PvGroup, bool QkTailReads>
+template <typename Geometry,
+          index_t QkGroup,
+          index_t PvGroup,
+          bool QkTailReads,
+          typename ReadPlacement>
 inline constexpr bool kIsFmhaTdmSchedGroupedDrain<
-    FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup, QkTailReads>> = true;
+    FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup, QkTailReads, ReadPlacement>> =
+    true;
 
 // Whether a placement's QK tail stage reads PV stage 0's V (all but the grouped-drain placement
 // without QkTailReads, whose caller reads it after the QK stage).
 template <typename Placement>
 inline constexpr bool kFmhaTdmSchedQkTailReads = true;
-template <typename Geometry, index_t QkGroup, index_t PvGroup, bool QkTailReads>
+template <typename Geometry,
+          index_t QkGroup,
+          index_t PvGroup,
+          bool QkTailReads,
+          typename ReadPlacement>
 inline constexpr bool kFmhaTdmSchedQkTailReads<
-    FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup, QkTailReads>> = QkTailReads;
+    FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup, QkTailReads, ReadPlacement>> =
+    QkTailReads;
 
 // The tile schedule owns phase order. The context exposes only the concrete
 // work of one sequence-K tile; its large tensors stay in the pipeline scope.
