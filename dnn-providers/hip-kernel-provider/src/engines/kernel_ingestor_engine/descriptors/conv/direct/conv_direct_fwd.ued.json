@@ -34,7 +34,8 @@
     "wk",
     "pp",
     "epi",
-    "un"
+    "un",
+    "cf"
   ],
   "behavior_notes": [
     "runtime_compilation"

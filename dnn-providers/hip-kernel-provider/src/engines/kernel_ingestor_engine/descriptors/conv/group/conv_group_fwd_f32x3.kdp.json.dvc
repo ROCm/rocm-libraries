@@ -1,5 +1,5 @@
 outs:
-- md5: bf35a86786b7ef9b25d50d33d4e5852f
+- md5: f8403217afc94535fb9fb7f84caf8c0a
   size: 109318
   hash: md5
   path: conv_group_fwd_f32x3.kdp.json

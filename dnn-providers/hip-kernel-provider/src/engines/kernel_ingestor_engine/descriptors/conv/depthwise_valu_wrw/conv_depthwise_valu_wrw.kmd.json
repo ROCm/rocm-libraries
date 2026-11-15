@@ -58,6 +58,14 @@
     {
       "name": "strip",
       "type": "int"
+    },
+    {
+      "name": "form",
+      "type": "int"
+    },
+    {
+      "name": "fill",
+      "type": "int"
     }
   ]
 }

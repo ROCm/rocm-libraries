@@ -4184,13 +4184,165 @@ __device__ K3_LOOP_INLINE void k3WrwRingDmaTr(const K3Args& a)
         a, acc, g, t * R, a.ft * R, k0, c0, wk, wc, lane, bz);
 }
 
-/// The row reduce (ConvWrwReduceRows; K C T R S filters of 2 to K3_REDUCE_ROW_MAX_TAPS taps and at
-/// most 2 splits): a block is one output channel's run of K3_REDUCE_ROW_CHANNELS channels by all
-/// taps, contiguous in dw. Each element sums its splits in split order (reads: consecutive
-/// threads take consecutive channels of one tap), the sums are transposed in LDS, and the run is
-/// written contiguously; the quad blocks write it a channel apart, taps elements between
-/// neighbours. With more splits the quad blocks' split groups win: each element's splits here
-/// run in one thread.
+/// A load of the partials: non-temporal (NT) on gfx9, where it measured faster or even, and
+/// plain on RDNA, where a non-temporal load misses the infinity cache that still holds the
+/// partials the main kernel just wrote (gfx1201: 3x the reduce's time).
+template <bool NT, class P>
+__device__ inline P k3PartialLoad(const P* p)
+{
+#if defined(__GFX9__)
+    if constexpr(NT)
+        return __builtin_nontemporal_load(p);
+    else
+        return *p;
+#else
+    return *p;
+#endif
+}
+
+/// The tile reduce (ConvWrwReduceTile; K C T R S filters of more than one tap, at most
+/// K3_REDUCE_TILE_MAX_SPLITS splits): a block is a tile of `tileK` output channels by `tileC`
+/// input channels of one group, by all taps, which is one contiguous run of dw per output
+/// channel. A thread sums a quad (4 channels of one tap and output channel) with the quad
+/// reduce's association, its four split groups as four sums: group j adds splits j, j + 4, ...
+/// in order, then ((g0 + g1) + g2) + g3; so the two reduces write the same bits. Two quads a
+/// thread at a time keep their loads in flight together. The sums are placed in LDS in dw's
+/// order and the block writes each run contiguously (the quad blocks write K C T R S a channel
+/// apart, `taps` elements between neighbours: 2.36M scattered 16-bit stores cost the c512 3x3
+/// reduce 6-9 us on gfx942 and gfx950).
+template <class T>
+__device__ inline void k3ReduceTile(const K3ReduceArgs& a)
+{
+    typedef float f4 __attribute__((ext_vector_type(4)));
+    __shared__ float tile[K3_REDUCE_TILE_FLOATS];
+    const int taps = a.taps;
+    const int ct = static_cast<int>(blockIdx.x % a.tilesC);
+    const int kt = static_cast<int>((blockIdx.x / a.tilesC) % a.tilesK);
+    const int g = static_cast<int>(blockIdx.x / (a.tilesC * a.tilesK));
+    const int k0 = kt * a.tileK, c0 = ct * a.tileC;
+    const int kn = a.kg - k0 < a.tileK ? a.kg - k0 : a.tileK;
+    const int cn = a.cg - c0 < a.tileC ? a.cg - c0 : a.tileC;
+    const int cq = (cn + 3) / 4;
+    const int items = taps * kn * cq; // quads, c fastest, then k, then tap (the partials' order)
+    const bool vec = (a.cg % 4) == 0;
+    const long long pe = a.partialElems;
+    const auto srcOf = [&](int it) {
+        const int q = it % cq, kl = (it / cq) % kn, tap = it / (cq * kn);
+        return a.partial + ((static_cast<long long>(g) * taps + tap) * a.kg + k0 + kl) * a.cg + c0
+               + q * 4;
+    };
+    const auto load = [&](const float* src, int sp, int c) -> f4 {
+        if(vec)
+            return k3PartialLoad<true>(reinterpret_cast<const f4*>(src + sp * pe));
+        f4 v = {0.0f, 0.0f, 0.0f, 0.0f};
+        for(int j = 0; j < 4 && c + j < cn; ++j)
+            v[j] = k3PartialLoad<true>(src + sp * pe + j);
+        return v;
+    };
+    // dw's order in the tile: per output channel, channel by tap.
+    const auto put = [&](int it, f4 r) {
+        const int q = it % cq, kl = (it / cq) % kn, tap = it / (cq * kn);
+        const int wt = a.flip ? taps - 1 - tap : tap;
+        for(int j = 0; j < 4 && q * 4 + j < cn; ++j)
+            tile[(kl * cn + q * 4 + j) * taps + wt] = r[j];
+    };
+    int it = static_cast<int>(threadIdx.x);
+    for(; it + 256 < items; it += 512)
+    {
+        const int ca = (it % cq) * 4, cb = ((it + 256) % cq) * 4;
+        const float* sa = srcOf(it);
+        const float* sb = srcOf(it + 256);
+        f4 a0 = {0.0f, 0.0f, 0.0f, 0.0f}, a1 = a0, a2 = a0, a3 = a0;
+        f4 b0 = a0, b1 = a0, b2 = a0, b3 = a0;
+        int sp = 0;
+        for(; sp + 4 <= a.splits; sp += 4)
+        {
+            f4 va[4], vb[4];
+#pragma unroll
+            for(int j = 0; j < 4; ++j)
+            {
+                va[j] = load(sa, sp + j, ca);
+                vb[j] = load(sb, sp + j, cb);
+            }
+            a0 += va[0];
+            a1 += va[1];
+            a2 += va[2];
+            a3 += va[3];
+            b0 += vb[0];
+            b1 += vb[1];
+            b2 += vb[2];
+            b3 += vb[3];
+        }
+        if(sp < a.splits)
+        {
+            a0 += load(sa, sp, ca);
+            b0 += load(sb, sp, cb);
+        }
+        if(sp + 1 < a.splits)
+        {
+            a1 += load(sa, sp + 1, ca);
+            b1 += load(sb, sp + 1, cb);
+        }
+        if(sp + 2 < a.splits)
+        {
+            a2 += load(sa, sp + 2, ca);
+            b2 += load(sb, sp + 2, cb);
+        }
+        a0 += a1;
+        a0 += a2;
+        a0 += a3;
+        b0 += b1;
+        b0 += b2;
+        b0 += b3;
+        put(it, a0);
+        put(it + 256, b0);
+    }
+    for(; it < items; it += 256)
+    {
+        const int ca = (it % cq) * 4;
+        const float* sa = srcOf(it);
+        f4 a0 = {0.0f, 0.0f, 0.0f, 0.0f}, a1 = a0, a2 = a0, a3 = a0;
+        int sp = 0;
+        for(; sp + 4 <= a.splits; sp += 4)
+        {
+            f4 va[4];
+#pragma unroll
+            for(int j = 0; j < 4; ++j)
+                va[j] = load(sa, sp + j, ca);
+            a0 += va[0];
+            a1 += va[1];
+            a2 += va[2];
+            a3 += va[3];
+        }
+        if(sp < a.splits)
+            a0 += load(sa, sp, ca);
+        if(sp + 1 < a.splits)
+            a1 += load(sa, sp + 1, ca);
+        if(sp + 2 < a.splits)
+            a2 += load(sa, sp + 2, ca);
+        a0 += a1;
+        a0 += a2;
+        a0 += a3;
+        put(it, a0);
+    }
+    k1LdsBarrier();
+    // Each output channel's run: cn x taps elements from channel c0, contiguous.
+    T* dw = static_cast<T*>(a.dw);
+    const int run = cn * taps;
+    for(int e = static_cast<int>(threadIdx.x); e < kn * run; e += 256)
+    {
+        const int kl = e / run;
+        dw[(static_cast<long long>(g) * a.kg + k0 + kl) * a.wk + static_cast<long long>(c0) * taps
+           + (e - kl * run)]
+            = K1Elem<T>::store(tile[e]);
+    }
+}
+
+/// The row reduce (ConvWrwReduceRows; K C T R S filters of 2 to K3_REDUCE_ROW_MAX_TAPS taps at one
+/// split on gfx950, where it measured 3-4 us ahead of the tile reduce in the call): a block is one
+/// output channel's run of K3_REDUCE_ROW_CHANNELS channels by all taps, contiguous in dw. Each
+/// element adds its one split to +0 (the tile and quad reduces' sum of one split), the sums are
+/// transposed in LDS, and the run is written contiguously.
 template <class T>
 __device__ inline void k3ReduceRows(const K3ReduceArgs& a)
 {
@@ -4212,7 +4364,7 @@ __device__ inline void k3ReduceRows(const K3ReduceArgs& a)
             = a.partial + ((g * taps + tap) * a.kg + k) * static_cast<long long>(a.cg) + c0 + cl;
         float sum = 0.0f;
         for(int sp = 0; sp < a.splits; ++sp)
-            sum += __builtin_nontemporal_load(src + sp * a.partialElems);
+            sum += k3PartialLoad<true>(src + sp * a.partialElems);
         tile[cl * taps + tap] = sum;
     }
     k1LdsBarrier();
@@ -4251,21 +4403,34 @@ __device__ inline void k3Reduce(const K3ReduceArgs& a)
     {
         if(vec)
         {
-            int sp = grp;
-            for(; sp + 12 < a.splits; sp += 16)
-            {
-                f4 v[4];
+            const auto add = [&](auto nt) {
+                constexpr bool NT = decltype(nt)::value != 0;
+                int sp = grp;
+                for(; sp + 12 < a.splits; sp += 16)
+                {
+                    f4 v[4];
 #pragma unroll
-                for(int j = 0; j < 4; ++j)
-                    v[j] = __builtin_nontemporal_load(
-                        reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
+                    for(int j = 0; j < 4; ++j)
+                        v[j] = k3PartialLoad<NT>(
+                            reinterpret_cast<const f4*>(src + (sp + 4 * j) * a.partialElems));
 #pragma unroll
-                for(int j = 0; j < 4; ++j)
-                    sum += v[j];
-            }
-            for(; sp < a.splits; sp += 4)
-                sum += __builtin_nontemporal_load(
-                    reinterpret_cast<const f4*>(src + sp * a.partialElems));
+                    for(int j = 0; j < 4; ++j)
+                        sum += v[j];
+                }
+                for(; sp < a.splits; sp += 4)
+                    sum += k3PartialLoad<NT>(
+                        reinterpret_cast<const f4*>(src + sp * a.partialElems));
+            };
+#if defined(__gfx950__)
+            // Many splits of a small dw wait on non-temporal latency on gfx950 (c64 at 150
+            // splits: 8.8 against 4.6 us); fewer read faster non-temporally.
+            if(a.splits >= 64)
+                add(K3Int<0>{});
+            else
+                add(K3Int<1>{});
+#else
+            add(K3Int<1>{});
+#endif
         }
         else
         {

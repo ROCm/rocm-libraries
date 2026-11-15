@@ -152,7 +152,7 @@ std::optional<GroupWrwLaunch>
                    int bpu,
                    const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);
 
-/// Three-bf16 (TF32 permission, math 1 configs): the split copies a launch reads and where they
+/// Three-bf16 (math 1 configs: the TF32 engines'): the split copies a launch reads and where they
 /// sit in the workspace (after everything else the dispatch keeps there).
 struct GroupSplit
 {

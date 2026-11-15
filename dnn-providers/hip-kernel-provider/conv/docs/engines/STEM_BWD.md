@@ -67,7 +67,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 
 - fp32 accumulation (fp16/bf16 products exact on the 16-bit atoms; fp32 on fp32 MFMA or FMA); the whole reduction over (window, output channels, depth taps) runs inside one block in a fixed order; one rounding at the store; no split, no atomics. The device suite relaunches every config and compares bits.
 - Window offsets a phase does not use hold zero filter entries and are multiplied: an infinite dy value can meet those zeros and give NaN where an exact reference gives ±inf. This is an open parity item.
-- TF32 permission is ignored: a three-bf16 form (3K) measures 0.25-0.70x of exact on every architecture, so none ships.
+- No TF32 sibling: a three-bf16 form (3K) measures 0.25-0.70x of exact on every architecture, so none ships.
 
 ## Comparison with MIOpen
 

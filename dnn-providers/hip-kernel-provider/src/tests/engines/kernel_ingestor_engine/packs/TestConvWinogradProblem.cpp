@@ -614,7 +614,9 @@ ConfigFields sreg(int64_t f16math)
     return f;
 }
 
-TEST(TestConvWinogradGraphMatch, Bf16IsDeclinedUnlessPermitted)
+// bf16 forward and backward data match the graph; which engine serves them is the catalog's
+// (only CONV_WINOGRAD_*_BF16 lists bf16 forward / backward-data configs).
+TEST(TestConvWinogradGraphMatch, Bf16AndHalfMatch)
 {
     for(const auto direction : DIRECTIONS)
     {
@@ -622,26 +624,17 @@ TEST(TestConvWinogradGraphMatch, Bf16IsDeclinedUnlessPermitted)
         shape.dataType = DataType::BFLOAT16;
         const GraphFixture fixture(buildGraph(specFor(shape, direction)), testDeviceProperties());
         const auto pack = direction == ConvDirection::FORWARD ? PACK_FWD : PACK_BWD;
-        // The problem parses (the kernels serve it); the engine declines it by default.
         EXPECT_TRUE(parse(specFor(shape, direction)).has_value());
-        {
-            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
-                "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "0");
-            EXPECT_FALSE(matchesGraph(pack, fixture.context()).has_value());
-        }
-        {
-            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter permitted(
-                "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "1");
-            EXPECT_TRUE(matchesGraph(pack, fixture.context()).has_value());
-        }
-        // fp16 needs no permission.
+        EXPECT_TRUE(matchesGraph(pack, fixture.context()).has_value());
         shape.dataType = DataType::HALF;
         const GraphFixture half(buildGraph(specFor(shape, direction)), testDeviceProperties());
         EXPECT_TRUE(matchesGraph(pack, half.context()).has_value());
     }
 }
 
-TEST(TestConvWinogradKernelMatch, F43IsDeclinedUnlessPermitted)
+// F(4,3) configs serve fp32 graphs; which engine lists them is the catalog's (only
+// CONV_WINOGRAD_*_F43).
+TEST(TestConvWinogradKernelMatch, F43ServesFloat)
 {
     ConfigFields f4;
     f4.m = 4;
@@ -659,15 +652,7 @@ TEST(TestConvWinogradKernelMatch, F43IsDeclinedUnlessPermitted)
                 = std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD");
             return kernel;
         };
-        {
-            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
-                "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "0");
-            EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernelFor(f4), *bound));
-            // F(2,3) needs no permission.
-            EXPECT_TRUE(matchesKernel(pack, fixture.context(), kernelFor(f2), *bound));
-        }
-        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter permitted(
-            "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "1");
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), kernelFor(f2), *bound));
         EXPECT_TRUE(matchesKernel(pack, fixture.context(), kernelFor(f4), *bound));
     }
 }
@@ -689,12 +674,6 @@ bool admits(const ConfigFields& fields,
     {
         shape.dataType = DataType::BFLOAT16;
     }
-    // bf16 graphs and F(4,3) configs are admitted only with their opt-ins (bf16Permitted,
-    // f43Permitted); the configs' own rules are what these cases test.
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter bf16(
-        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "1");
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter f43(
-        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "1");
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 64;

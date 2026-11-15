@@ -563,9 +563,19 @@ std::optional<GroupWrwLaunch>
     {
         return std::nullopt;
     }
+    // One split: the kernel writes dw itself (the reduce's rounding of one slot), with no
+    // workspace and no reduce launch.
+    k.direct = splits == 1 ? 1 : 0;
+    k.reflect = r.reflect;
+    k.sK = r.sK;
+    k.sC = r.sC;
+    k.sT = r.sT;
+    k.sR = r.sR;
+    k.sS = r.sS;
     launch.grid = static_cast<unsigned int>(grid);
     launch.reduceGrid = static_cast<unsigned int>(reduceGrid);
-    launch.workspaceBytes = alignUp(static_cast<size_t>(slots * k.partialElems) * sizeof(float));
+    launch.workspaceBytes
+        = k.direct != 0 ? 0 : alignUp(static_cast<size_t>(slots * k.partialElems) * sizeof(float));
     return launch;
 }
 
@@ -729,7 +739,7 @@ struct Tile
     /// planner's target workgroups a dispatch unit (1 to 16). 0 for the other directions'
     /// configs.
     int64_t bpu = 0;
-    /// 1: the three-bf16 form (TF32 permission) of a bf16 matrix-core config, for fp32 graphs.
+    /// 1: the three-bf16 form (a TF32 config) of a bf16 matrix-core config, for fp32 graphs.
     int64_t math = 0;
     /// Row streaming (k4ConvMmaRows) with rs (1 to 4) input rows in flight: cb waves of one
     /// 16-channel block each, 16 wp output columns (wp 1, 2 or 4), a band of th output rows, unit
@@ -1022,7 +1032,7 @@ bool kernelMatches(const MatchContext& context,
         return wrwFor(context, kernel, *tile).has_value();
     }
     const auto problem = problemFor(context, *direction, *tile);
-    // Three-bf16 (math 1): a bf16 atom for an fp32 graph, under TF32 permission only.
+    // Three-bf16 (math 1, the CONV_GROUP_*_TF32 engines' configs): a bf16 atom for an fp32 graph.
     const bool x3 = tile->math == 1;
     if(!problem.has_value()
        || kernel.getStringMetadata("dtype")
@@ -1037,7 +1047,6 @@ bool kernelMatches(const MatchContext& context,
     }
     if(x3
        && (problem->igemm.base.dataType != data_objects::DataType::FLOAT
-           || !conv_igemm::tf32Permitted()
            || !conv_group::threeBf16Pays(*problem, context.deviceProperties.gcnArchName)))
     {
         return false;
@@ -1660,6 +1669,11 @@ private:
         options.add("CONV_GROUP_TW", std::to_string(tile.tw));
         options.add("CONV_GROUP_CB", std::to_string(tile.cb));
         options.add("CONV_GROUP_CF", std::to_string(tile.cf));
+        // One split: the kernel's direct dw store (compiled only then).
+        if(wrw->second.args.direct != 0)
+        {
+            options.add("CONV_GROUP_DIRECT", std::string("1"));
+        }
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4WrwArgs>());
         conv.setBlockSize(
@@ -1686,25 +1700,31 @@ private:
                           void* workspace)
     {
         const auto& problem = dispatch.problem().wrw;
-        if(workspace == nullptr)
+        K4WrwArgs args = dispatch.wrwLaunch().args;
+        if(workspace == nullptr && args.direct == 0)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                            "conv_group wrw needs its workspace");
         }
         const auto stream = handle.getStream();
-        K4WrwArgs args = dispatch.wrwLaunch().args;
+        void* dw
+            = hipdnn_plugin_sdk::findDeviceBuffer(problem.dwUid, deviceBuffers, numDeviceBuffers)
+                  .ptr;
         args.x = hipdnn_plugin_sdk::findDeviceBuffer(problem.xUid, deviceBuffers, numDeviceBuffers)
                      .ptr;
         args.dy
             = hipdnn_plugin_sdk::findDeviceBuffer(problem.dyUid, deviceBuffers, numDeviceBuffers)
                   .ptr;
         args.partial = static_cast<float*>(workspace);
+        args.dw = dw;
         dispatch.convForStream(stream).launch(stream, args);
+        if(args.direct != 0)
+        {
+            return;
+        }
         K4WrwReduceArgs reduce = dispatch.wrwLaunch().reduce;
         reduce.partial = static_cast<const float*>(workspace);
-        reduce.dw
-            = hipdnn_plugin_sdk::findDeviceBuffer(problem.dwUid, deviceBuffers, numDeviceBuffers)
-                  .ptr;
+        reduce.dw = dw;
         dispatch.reduceForStream(stream).launch(stream, reduce);
     }
 

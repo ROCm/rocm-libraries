@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "id": "ecf1c14f-b011-5dcf-8cec-ecefb9c5a4c9",
+  "name": "hipkernel:CONV_GROUP_FWD_TF32",
+  "graph_match": {
+    "native": "hipkernel.conv_group_fwd.graph_match"
+  },
+  "metadata": "828aab00-518d-5254-aa31-5f5b2635c782",
+  "knobs": [
+    "atom",
+    "t",
+    "r",
+    "s",
+    "stride",
+    "th",
+    "wp",
+    "cb",
+    "cf",
+    "cg",
+    "oc",
+    "px",
+    "pf",
+    "nbi",
+    "nbo",
+    "tw",
+    "bpu",
+    "math",
+    "rs"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "numerical_notes": [
+    "tensor_core"
+  ]
+}

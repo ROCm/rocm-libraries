@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "id": "fe458e8d-817f-5a07-9b50-9f5bbc6e1021",
+  "name": "hipkernel:CONV_GROUP_BWD_TF32",
+  "graph_match": {
+    "native": "hipkernel.conv_group_bwd.graph_match"
+  },
+  "metadata": "828aab00-518d-5254-aa31-5f5b2635c782",
+  "knobs": [
+    "atom",
+    "t",
+    "r",
+    "s",
+    "stride",
+    "th",
+    "wp",
+    "cb",
+    "cf",
+    "cg",
+    "oc",
+    "px",
+    "pf",
+    "nbi",
+    "nbo",
+    "tw",
+    "bpu",
+    "math",
+    "rs"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ],
+  "numerical_notes": [
+    "tensor_core"
+  ]
+}
