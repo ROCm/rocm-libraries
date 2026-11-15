@@ -156,12 +156,12 @@ No code was copied.
   - **Gates:** one refusal per field (`RefusesOneFieldAtATime`, `OneField`); every loop's admission rules (ring phases, DMA ring gfx950-only, the direct loop and its plan, small-C, packed rows, unaligned dy).
   - **Large images and layouts:** block-based buffers serve only images past the range; layouts are read from strides.
   - **Generic tier:** spec keys, the ASPP decline, its FMA form.
-  - **Arithmetic and planning:** LDS and load-pass arithmetic against the kernels'; ring track trimming; the split planner and `bpu`; reduce layouts and reflection; the one-split direct store.
+  - **Arithmetic and planning:** LDS and load-pass arithmetic against the kernels'; ring track trimming; the split planner and `bpu`; reduce layouts and reflection; the reduce choice (quad, tile, row) and its tiles; the one-split direct store.
   - **TF32:** three-bf16 admitted only with permission and only on paying classes.
 - `TestGpuConvWrw.cpp` (device), fp32/fp16/bf16 against an fp64-accumulated reference:
   - every admitted config on NCHW and NHWC, 1-D/2-D/3-D, groups, stride 2, dilations 2/3/12;
   - padding below, at and past the filter; odd channels and partial tiles; both dW layouts; true convolution;
   - three-bf16 against exact fp32, and infinities;
-  - the determinism relaunch;
+  - the determinism relaunch, and dW equal bit for bit to the fixed-order sum of the workspace's partials (every reduce);
   - knob uniqueness, generic spec keys, and atom ids and LDS fits per arch.
 - `TestConvDescriptorShards.cpp` checks the shipped shards' numerical notes (none, deterministic).
