@@ -85,15 +85,23 @@ template <typename ShippedModels, typename DeclaredIds>
         {
             continue;
         }
-        failures += "\n" + std::string(engineName) + ": the shipped model " + model.path + " (id "
-                    + id + ") records selector_revision '" + recorded
-                    + "' but this build computes '" + std::string(revision)
-                    + "'. The loader refuses it and engine selection falls back as if no model "
-                      "shipped.\n  Restamp it only with proof:\n    python -m uhd_gen restamp "
-                    + model.path + " --selector-before <dump at the training build>"
-                    + " --selector-after " + dump
-                    + " [--rows-before <L1 corpus at the old revision> --rows-after <L1 corpus "
-                      "at the new revision>] --write\n";
+        failures.append("\n")
+            .append(engineName)
+            .append(": the shipped model ")
+            .append(model.path)
+            .append(" (id ")
+            .append(id)
+            .append(") records selector_revision '")
+            .append(recorded)
+            .append("' but this build computes '")
+            .append(revision)
+            .append("'. The loader refuses it and engine selection falls back as if no model "
+                    "shipped.\n  Restamp it only with proof:\n    python -m uhd_gen restamp ")
+            .append(model.path)
+            .append(" --selector-before <dump at the training build> --selector-after ")
+            .append(dump)
+            .append(" [--rows-before <L1 corpus at the old revision> --rows-after <L1 corpus "
+                    "at the new revision>] --write\n");
     }
     if(checked == 0)
     {
