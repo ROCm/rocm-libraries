@@ -23,11 +23,23 @@
 #define DW_EPI_ARG , dwEpi
 #define DW_EPI_BIND(p) const ConvEpiGen& dwEpi = (p).epi;
 #define DW_EPI_DECL(name, ch, ok) const ConvEpiGen::Chan name = dwEpi.chan((ch), (ok));
-#define DW_EPI_APPLY(v, name) dwEpiApply(dwEpi, (v), (name))
+#define DW_EPI_APPLY(v, name) dwEpiApply<T>(dwEpi, (v), (name))
 
-/// The epilogue of one result. The value passes an empty asm first: with the chain visible to
-/// the 16-bit FMA-mix combines, instruction selection fails for some chains ("Cannot select:
-/// f32 = Constant<-1>").
+// Every result passes an empty asm before the epilogue, for two measured reasons:
+// - Compiler workaround. AMD clang 24.0.0git (ROCm llvm-project 557591b1fc45, HIP 7.18.26454;
+//   hipcc and HIPRTC alike) fails instruction selection with "Cannot select: f32 =
+//   Constant<-1>" on fused fp16 VALU tiles without it: the microtile, fused halo and LDS
+//   variants and the one-channel-a-lane rowtile, on gfx90a, gfx94x and gfx950, for several
+//   chains (silu, gelu-tanh, gelu, tanh, elu, bias + relu, scale + bias + clamp). AMD clang
+//   23.0.0git (llvm-project 43215c73116c, HIP 7.13.26176) compiles them; the floors, bf16 and
+//   fp32, the two-channel rowtile, gfx906, gfx908 and RDNA never fail (every fused forward
+//   config swept). TestConvDepthwiseValuFusedCompile fails if the barrier goes while the bug
+//   remains.
+// - Registers. With the barrier only on the failing configs, the other fused VALU and
+//   matrix-core configs allocate more VGPRs (up to 240 more on gfx94x and gfx950, every dtype):
+//   the barrier keeps the epilogue out of the accumulation's schedule. The channel-row kernels
+//   are unaffected either way.
+template <class T>
 __device__ inline float dwEpiApply(const ConvEpiGen& epi, float v, const ConvEpiGen::Chan& chan)
 {
     asm("" : "+v"(v));
