@@ -54,7 +54,8 @@ def _kernel(**over):
     problem_type = {
         "MXBlockA": False, "MXBlockB": False, "Sparse": False, "UseBeta": True,
         "UseScaleAB": False, "UseScaleCD": False, "UseScaleAlphaVec": 0, "UseE": False,
-        "ActivationType": ActivationType("none"), "OutputAmaxD": False, "UseBias": 0,
+        "ActivationType": ActivationType("none"), "OutputAmaxD": False, "OutputPeerD": False,
+        "UseBias": 0,
         "GroupedGemm": False, "FusedA2A": "Disabled",
     }
     problem_type.update(over.pop("ProblemType", {}))

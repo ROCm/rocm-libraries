@@ -742,7 +742,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-e', problemType.useE)
         param('use-gate-residual', problemType.useGateResidual)
         param('output-amaxD', problemType.outputAmaxD)
-        param('output-peerD', problemType.outputPeerD)
+        if problemType.outputPeerD: # only when on, so the config text of other problems is unchanged
+            param('output-peerD', problemType.outputPeerD)
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
