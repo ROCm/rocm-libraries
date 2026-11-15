@@ -1102,13 +1102,16 @@ namespace hipblaslt_ext
      *
      *  \details With ``M``, every partition computes ``m_i x n x k`` and the first operand
      * (A) is split. With ``N``, every partition computes ``m x n_i x k`` and the second
-     * operand (B) is split. The first ``N - 1`` partitions take ``size / N`` and the last
-     * partition takes the remainder.
+     * operand (B) is split. With ``Batch``, every partition computes whole ``m x n x k``
+     * matrices for a range of the batches, and every matrix with a nonzero batch stride is
+     * split. The first ``N - 1`` partitions take ``size / N`` and the last partition takes
+     * the remainder.
      */
     enum class SplitDim
     {
         M, //!< Split rows of op(A), C and D.
         N, //!< Split columns of op(B), C and D.
+        Batch, //!< Split the batch: whole matrices, a range of batches per partition.
     };
 
     /*! \ingroup types_module
@@ -1205,7 +1208,8 @@ namespace hipblaslt_ext
         * full matrices. The pointers come from ``inputs``.
         *
         *  Which partition computes which slice is chosen here: the slices of the split
-        * matrices (op(A) for SplitDim::M, op(B) for SplitDim::N, and C and D) go to the
+        * matrices (op(A) for SplitDim::M, op(B) for SplitDim::N, every batched matrix for
+        * SplitDim::Batch, and C and D) go to the
         * partitions whose devices hold most of their pages, and otherwise partition ``i``
         * computes slice ``i``. The result is the same either way. A slice that still mostly
         * lives on another device is reported in the hints log (``HIPBLASLT_LOG_MASK=4``).

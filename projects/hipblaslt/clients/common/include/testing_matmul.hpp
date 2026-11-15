@@ -1201,8 +1201,8 @@ inline std::string partitioned_unsupported_reason(const Arguments& arg,
     if(int(arg.partitions) > devices)
         return "--partitions " + std::to_string(int(arg.partitions)) + " needs that many devices, found "
                + std::to_string(devices);
-    if(arg.split_dim != 'M' && arg.split_dim != 'N')
-        return "split_dim must be M or N";
+    if(arg.split_dim != 'M' && arg.split_dim != 'N' && arg.split_dim != 'B')
+        return "split_dim must be M, N or B";
     if(arg.grouped_gemm > 0 || arg.batch_mode != 0)
         return "partitions support a single strided-batched GEMM only";
     if(arg.bias_vector || arg.activation_type != hipblaslt_activation_type::none || arg.use_e
@@ -2171,9 +2171,14 @@ private:
 class PartitionedRun
 {
 public:
-    PartitionedRun(const Arguments& arg, hipblasLtHandle_t handle0, hipStream_t stream0,
-                   hipblasOperation_t transA, hipblasOperation_t transB)
-        : m_dim(arg.split_dim == 'M' ? hipblaslt_ext::SplitDim::M : hipblaslt_ext::SplitDim::N)
+    PartitionedRun(const Arguments&   arg,
+                   hipblasLtHandle_t  handle0,
+                   hipStream_t        stream0,
+                   hipblasOperation_t transA,
+                   hipblasOperation_t transB)
+        : m_dim(arg.split_dim == 'M'   ? hipblaslt_ext::SplitDim::M
+                : arg.split_dim == 'B' ? hipblaslt_ext::SplitDim::Batch
+                                       : hipblaslt_ext::SplitDim::N)
         , m_dElem(realDataTypeSize(arg.d_type))
     {
         for(int t = 0; t < 4; t++)
@@ -2325,7 +2330,23 @@ public:
             if(m_gemm->getSlice(i, offset, size) != HIPBLAS_STATUS_SUCCESS)
                 throw std::runtime_error("getSlice failed");
             // A column-major D: an M slice is `size` rows of every column, an N slice is `size`
-            // whole columns.
+            // whole columns, and a batch slice is `size` whole matrices.
+            if(m_dim == hipblaslt_ext::SplitDim::Batch)
+            {
+                for(int64_t b = offset; b < offset + size; b++)
+                {
+                    const size_t at = size_t(b) * size_t(m_strideD) * m_dElem;
+                    check(hipMemcpy2D(static_cast<char*>(const_cast<void*>(m_src[3])) + at,
+                                      pitch,
+                                      static_cast<char*>(m_replica[3][i - 1]) + at,
+                                      pitch,
+                                      size_t(m_m) * m_dElem,
+                                      size_t(m_n),
+                                      hipMemcpyDefault),
+                          "hipMemcpy2D");
+                }
+                continue;
+            }
             const size_t elemOffset = splitM ? size_t(offset) : size_t(offset) * size_t(m_ldd);
             const size_t width      = (splitM ? size_t(size) : size_t(m_m)) * m_dElem;
             const size_t height     = splitM ? size_t(m_n) : size_t(size);

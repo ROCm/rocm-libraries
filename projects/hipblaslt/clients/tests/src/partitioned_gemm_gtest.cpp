@@ -841,3 +841,102 @@ TEST(partitioned_gemm_ext_copies_multi_gpu, CopiesInDifferentOrdersAreRejected)
     // The plain order still works.
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
 }
+
+// Batch split: whole matrices, the first partitions take batch_count / N batches, the last the rest.
+TEST(pre_checkin_partitioned_gemm_ext, BatchSplitSlices)
+{
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+    auto              in = buffers.inputs();
+
+    const int64_t sa = kLda * kM, sb = kLdb * kN, sc = kLdc * kN, sd = kLdd * kN;
+    ASSERT_EQ(
+        gemm.setProblem(kM, kN, kK, 5, kLda, kLdb, kLdc, kLdd, sa, sb, sc, sd, SplitDim::Batch, in),
+        HIPBLAS_STATUS_SUCCESS);
+    int64_t offset = -1, size = -1;
+    ASSERT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(offset, 0);
+    EXPECT_EQ(size, 2);
+    ASSERT_EQ(gemm.getSlice(1, offset, size), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(offset, 2);
+    EXPECT_EQ(size, 3);
+
+    // One batch cannot be split between two partitions.
+    EXPECT_EQ(
+        gemm.setProblem(kM, kN, kK, 1, kLda, kLdb, kLdc, kLdd, sa, sb, sc, sd, SplitDim::Batch, in),
+        HIPBLAS_STATUS_INVALID_VALUE);
+}
+
+// Two devices, 5 batches split 2 + 3: each partition computes its batches into its own D.
+TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
+{
+    int count = 0;
+    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
+    if(count < 2)
+        GTEST_SKIP() << "needs two devices";
+
+    // op(A)=T: A is K x M; op(B)=N: B is K x N. A holds ones and column j of batch b of B holds
+    // ((j + 3b) % 8) / 8, so D(i, j) of batch b is k * ((j + 3b) % 8) / 8 exactly.
+    constexpr int64_t         m = 64, n = 48, k = 32, batch = 5;
+    constexpr int64_t         sa = k * m, sb = k * n, sd = m * n;
+    const std::vector<half_t> ha(size_t(sa) * batch, half_t(1));
+    std::vector<half_t>       hb(size_t(sb) * batch);
+    for(int64_t b = 0; b < batch; b++)
+        for(int64_t j = 0; j < n; j++)
+            for(int64_t r = 0; r < k; r++)
+                hb[b * sb + j * k + r] = half_t(float((j + 3 * b) % 8) / 8.f);
+
+    Partitions                              parts({0, 1});
+    auto                                    gemm = makeGemm(parts);
+    std::vector<std::unique_ptr<DeviceBuf>> a, b, d;
+    for(int dev = 0; dev < 2; dev++)
+    {
+        a.push_back(std::make_unique<DeviceBuf>(dev, ha.size() * 2, ha.data()));
+        b.push_back(std::make_unique<DeviceBuf>(dev, hb.size() * 2, hb.data()));
+        d.push_back(std::make_unique<DeviceBuf>(dev, size_t(sd) * batch * 2));
+    }
+    const float           alpha = 1.f, beta = 0.f;
+    PartitionedGemmInputs in;
+    in.a     = {a[0]->get(), a[1]->get()};
+    in.b     = {b[0]->get(), b[1]->get()};
+    in.c     = {d[0]->get(), d[1]->get()};
+    in.d     = {d[0]->get(), d[1]->get()};
+    in.alpha = &alpha;
+    in.beta  = &beta;
+    ASSERT_EQ(gemm.setProblem(m, n, k, batch, k, k, m, m, sa, sb, sd, sd, SplitDim::Batch, in),
+              HIPBLAS_STATUS_SUCCESS);
+
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_SUCCESS);
+    if(heuristic.empty())
+        GTEST_SKIP() << "no algorithm accepted by every partition";
+    ASSERT_EQ(gemm.initialize(heuristic[0].algo, parts.workspaces(), false, parts.streams),
+              HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(gemm.run(parts.streams), HIPBLAS_STATUS_SUCCESS);
+    parts.sync();
+
+    int64_t covered = 0;
+    for(size_t i = 0; i < 2; i++)
+    {
+        int64_t offset = 0, size = 0;
+        ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
+        covered += size;
+        std::vector<half_t> got(size_t(sd) * batch);
+        ASSERT_EQ(hipSetDevice(int(i)), hipSuccess);
+        ASSERT_EQ(hipMemcpy(got.data(), d[i]->get(), got.size() * 2, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        size_t bad = 0;
+        for(int64_t bb = offset; bb < offset + size; bb++)
+            for(int64_t j = 0; j < n; j++)
+                for(int64_t r = 0; r < m; r++)
+                    bad += float(got[bb * sd + j * m + r]) != float(k * ((j + 3 * bb) % 8)) / 8.f;
+        EXPECT_EQ(bad, 0u) << "partition " << i << " batches [" << offset << ", " << offset + size
+                           << ")";
+    }
+    EXPECT_EQ(covered, batch);
+}

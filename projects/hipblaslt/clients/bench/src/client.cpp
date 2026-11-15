@@ -722,8 +722,8 @@ try
 
         ("split_dim",
          value<std::string>(&split_dim_str)->default_value("N"),
-         "With --partitions: the dimension to split, M or N. The first partitions take size/partitions "
-         "and the last takes the rest.")
+         "With --partitions: the dimension to split, M, N or B (the batch). The first partitions take "
+         "size/partitions and the last takes the rest.")
 
         ("part_place_a",
          value<std::string>(&part_place_str[0])->default_value("shared"),
@@ -922,9 +922,10 @@ try
         hipblaslt_cerr << "Invalid --partitions: " << partitions_opt << std::endl;
         return 1;
     }
-    if(split_dim_str != "M" && split_dim_str != "N" && split_dim_str != "m" && split_dim_str != "n")
+    if(split_dim_str.size() != 1
+       || std::string("MNBmnb").find(split_dim_str[0]) == std::string::npos)
     {
-        hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M or N)" << std::endl;
+        hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M, N or B)" << std::endl;
         return 1;
     }
     for(int t = 0; t < 4; t++)
@@ -939,7 +940,7 @@ try
     }
     arg.part_place[4] = 0;
     arg.partitions = static_cast<uint8_t>(partitions_opt);
-    arg.split_dim  = split_dim_str[0] == 'm' || split_dim_str[0] == 'M' ? 'M' : 'N';
+    arg.split_dim     = char(std::toupper(static_cast<unsigned char>(split_dim_str[0])));
 
     if(algo_method_str.compare("heuristic") == 0)
     {

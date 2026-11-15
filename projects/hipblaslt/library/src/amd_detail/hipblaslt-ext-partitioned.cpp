@@ -375,7 +375,7 @@ namespace hipblaslt_ext
         }
 
         // Slices along the split dimension: the first N-1 take size/N, the last takes the rest.
-        const int64_t total = dim == SplitDim::M ? m : n;
+        const int64_t total = dim == SplitDim::M ? m : dim == SplitDim::N ? n : batch_count;
         const int64_t base  = total / static_cast<int64_t>(parts);
         if(base == 0)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -390,16 +390,34 @@ namespace hipblaslt_ext
         const int64_t                  leading[4] = {lda, ldb, ldc, ldd};
         const int64_t                  strides[4] = {strideA, strideB, strideC, strideD};
 
-        // The matrices split by `dim`: op(A) with M, op(B) with N, and C and D with both.
+        // The matrices split by `dim`: op(A) with M, op(B) with N, and C and D with both. A batch
+        // split splits every matrix with a nonzero batch stride; a slice is `size` whole
+        // matrices, `stride` elements apart, so it is sampled like whole columns of length
+        // `stride`.
         std::vector<SplitMatrix> split;
-        if(dim == SplitDim::M)
-            split.push_back({"A", in.a.data(), lda, bytes[0], s.opA == HIPBLAS_OP_T, k});
+        if(dim == SplitDim::Batch)
+        {
+            const char*        names[4] = {"A", "B", "C", "D"};
+            const void* const* lists[4] = {in.a.data(), in.b.data(), in.c.data(), dPointers.data()};
+            for(int t = 0; t < 4; t++)
+                if(strides[t] != 0)
+                    split.push_back({names[t], lists[t], strides[t], bytes[t], true, strides[t]});
+        }
         else
-            split.push_back({"B", in.b.data(), ldb, bytes[1], s.opB == HIPBLAS_OP_N, k});
-        split.push_back(
-            {"C", in.c.data(), ldc, bytes[2], dim == SplitDim::N, dim == SplitDim::M ? n : m});
-        split.push_back(
-            {"D", dPointers.data(), ldd, bytes[3], dim == SplitDim::N, dim == SplitDim::M ? n : m});
+        {
+            if(dim == SplitDim::M)
+                split.push_back({"A", in.a.data(), lda, bytes[0], s.opA == HIPBLAS_OP_T, k});
+            else
+                split.push_back({"B", in.b.data(), ldb, bytes[1], s.opB == HIPBLAS_OP_N, k});
+            split.push_back(
+                {"C", in.c.data(), ldc, bytes[2], dim == SplitDim::N, dim == SplitDim::M ? n : m});
+            split.push_back({"D",
+                             dPointers.data(),
+                             ldd,
+                             bytes[3],
+                             dim == SplitDim::N,
+                             dim == SplitDim::M ? n : m});
+        }
 
         // Partition i computes slice slice[i]. Which partition computes which slice does not
         // change the result (every slice is written at its own place in D), so the slices go
@@ -435,7 +453,10 @@ namespace hipblaslt_ext
                 greedy[i]   = best;
                 taken[best] = true;
             }
-            if(localTotal(greedy) > localTotal(slice))
+            // Only when the partitions are on different devices: on one device every order is
+            // equally local, and sampling must not reorder the slices.
+            const bool distinct = std::set<int>(s.devices.begin(), s.devices.end()).size() == parts;
+            if(distinct && localTotal(greedy) > localTotal(slice))
                 slice = greedy;
         }
         // A hint when a split matrix still mostly lives on another device than its partition.
@@ -471,7 +492,12 @@ namespace hipblaslt_ext
             // Element offset of this partition's slice inside each (whole) matrix. The
             // matrices are column-major.
             int64_t elems[4] = {0, 0, 0, 0};
-            if(dim == SplitDim::M)
+            if(dim == SplitDim::Batch)
+            {
+                for(int t = 0; t < 4; t++)
+                    elems[t] = offset[i] * strides[t];
+            }
+            else if(dim == SplitDim::M)
             {
                 elems[0] = s.opA == HIPBLAS_OP_N ? offset[i] : offset[i] * lda;
                 elems[2] = offset[i];
@@ -506,10 +532,11 @@ namespace hipblaslt_ext
             GemmProblemType type(s.opA, s.opB, s.typeA, s.typeB, s.typeC, s.typeD, s.typeCompute);
             const int64_t   mi = dim == SplitDim::M ? size[i] : m;
             const int64_t   ni = dim == SplitDim::N ? size[i] : n;
+            const int64_t   bi = dim == SplitDim::Batch ? size[i] : batch_count;
             auto            st = s.gemms[i]->setProblem(mi,
                                              ni,
                                              k,
-                                             batch_count,
+                                             bi,
                                              leading[0],
                                              leading[1],
                                              leading[2],
