@@ -88,7 +88,8 @@ A stand-alone Matmul through `rocblas_gemm_strided_batched_ex`, with no fused op
 > backend: the exact engine, its TF32 and reduced-precision-reduction siblings, and deterministic siblings of the exact and
 > TF32 engines (table below).
 
-Single-node convolution graphs, forward, backward data and backward weights:
+Single-node convolution graphs, forward, backward data and backward weights, and forward convolutions followed by a pointwise
+epilogue (below):
 - Data types: FP32, FP16, BF16, the same for all three tensors; compute type unset or FP32,
   or FP16 for FP16 tensors (cuDNN's set), accumulated in FP32
 - 1-D, 2-D and 3-D (rank 3 to 5), any x and y strides, groups (including depthwise), padding (including asymmetric), stride,
@@ -103,6 +104,15 @@ How a convolution runs, in order of preference:
    outermost spatial axis (backward data bands dx rows, each computing the output rows that reach them). Backward weights sums
    the slices or bands, and any reduction long enough that rocBLAS would split it, in FP32 before rounding once. The repack
    kernels are compiled at runtime by HIPRTC on first use.
+
+Fused forward graphs (every engine but the RPR siblings): the convolution, then a chain of pointwise nodes: scale and bias
+(per-channel or scalar), relu (clipped, clamp, leaky), GELU (exact and tanh), swish/silu, sigmoid, tanh, elu, abs and softplus.
+The chain runs in FP32 and y is rounded once:
+- **Native:** hipBLASLt's epilogue in the GEMM (bias, relu, clamp, tanh GELU, swish with beta 1, sigmoid) when y is channels-last
+  with one group and the GEMM writes it directly
+- **Fused into the pass:** a channels-first y staged channels-last; the copy back into y applies the chain
+- **Extra pass:** otherwise (rocBLAS, channels-first rows, groups, other activations): the GEMMs write y in FP32 to the workspace
+  and one cast applies the chain
 
 Engines and their numerical notes ([RFC 0025](../../../projects/hipdnn/docs/rfcs/0025_NumericalNotes.md)). Every engine
 below is registered by default; a caller excludes one by its notes through the hipDNN API's cuDNN-compatible
