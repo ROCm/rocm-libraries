@@ -1044,8 +1044,13 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         = [&](InputTensorMap& tensors, FillResult& result) -> std::optional<VerificationOutcome> {
         try
         {
-            result = hipdnn_integration_tests::fillInputs(
-                wrapper.getGraph(), tensors, leafInputUids, _inputFillRecipes, device, aliases);
+            result = hipdnn_integration_tests::fillInputs(wrapper.getGraph(),
+                                                          tensors,
+                                                          leafInputUids,
+                                                          _inputFillRecipes,
+                                                          *_deps.referenceExecutors,
+                                                          device,
+                                                          aliases);
         }
         catch(const DeviceInputError& e)
         {
