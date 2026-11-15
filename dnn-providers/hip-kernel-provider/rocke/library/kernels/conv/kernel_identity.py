@@ -146,8 +146,9 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.prefetch_global_regs): the register-prefetch K loop.
     # Left out of the hash while False, like prefetch_addr.
     prefetch_global_regs: bool = False
-    # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
-    # decode K loop. Left out of the hash while False, like prefetch_addr.
+    # dgrad / fwd (DgradConvSpec / ImplicitGemmConvSpec.uniform_k_decode): the
+    # per-tile reduction decode K loop. Left out of the hash while False, like
+    # prefetch_addr.
     uniform_k_decode: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see

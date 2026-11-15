@@ -321,6 +321,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
 
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
+    s.uniform_k_decode = false;
 
     s.num_load_waves = 2; /* wavelet pipeline: default 2 load waves */
     return s;
@@ -390,6 +391,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *            f"gm{group_merge}": group_merge > 1,
      *            "splitk": split_k > 1,
      *            f"skc{split_k_cluster}": split_k_cluster > 0,
+     *            "ukd": uniform_k_decode,
      *            "tf32": self.data.is_tf32}) */
     char short_buf[128];
     char t_buf[48];
@@ -400,8 +402,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char gm_buf[24];
     char skc_buf[24];
     const char* parts[6];
-    const char* flag_names[7];
-    int flag_on[7];
+    const char* flag_names[8];
+    int flag_on[8];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -456,13 +458,15 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     snprintf(skc_buf, sizeof(skc_buf), "skc%d", s->split_k_cluster);
     flag_names[5] = skc_buf;
     flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
+    flag_names[6] = "ukd";
+    flag_on[6] = s->uniform_k_decode ? 1 : 0;
     /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
      * from an fp32 kernel with the same atom shape. Last, and only when set,
      * so every existing name is unchanged. */
-    flag_names[6] = "tf32";
-    flag_on[6] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
+    flag_names[7] = "tf32";
+    flag_on[7] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 7, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 8, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -1401,6 +1405,35 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         }
         /* grouped conv IS supported on WMMA: the grid-per-group index +
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
+    }
+
+    /* The uniform-decode K-loop. */
+    if(s->uniform_k_decode)
+    {
+        if(strcmp(family, "wmma") != 0 || s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "uniform_k_decode is wired for the WMMA mem pipeline only");
+        }
+        const struct
+        {
+            bool on;
+            const char* label;
+        } ukd_flags[] = {
+            {s->problem.is_3d, "3-D convolution"},
+            {rocke_conv_problem_is_pointwise(&s->problem), "the pointwise fast path"},
+            {s->group_merge > 1, "group_merge"},
+            {s->async_dma, "async_dma"},
+            {s->unroll_k, "unroll_k"},
+        };
+        for(size_t i = 0; i < sizeof(ukd_flags) / sizeof(ukd_flags[0]); ++i)
+        {
+            if(ukd_flags[i].on)
+            {
+                ROCKE_SPEC_FAIL(
+                    reason, reason_cap, "uniform_k_decode does not support %s", ukd_flags[i].label);
+            }
+        }
     }
 
     if(s->split_k != 1 || s->split_k_cluster)

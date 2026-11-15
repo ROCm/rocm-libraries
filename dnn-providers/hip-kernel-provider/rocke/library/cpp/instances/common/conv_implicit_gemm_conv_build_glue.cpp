@@ -1049,6 +1049,11 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     {
         rocke_conv_emit_kloop_wavelet(&ctx);
     }
+    else if(spec->uniform_k_decode)
+    {
+        /* uniform per-tile reduction decode (+ the plain loop) */
+        rocke_conv_emit_kloop_uniform_decode(&ctx);
+    }
     else if(!ctx.async_dma)
     {
         rocke_conv_emit_kloop_simple(&ctx);

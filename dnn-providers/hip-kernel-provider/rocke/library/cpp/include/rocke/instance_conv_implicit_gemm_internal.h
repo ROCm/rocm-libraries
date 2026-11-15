@@ -814,6 +814,10 @@ void rocke_conv_emit_mfma_phase(rocke_conv_build_ctx_t* ctx,
  * software pipeline (ping-pong A_smem/A_smem2). */
 void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx);
 
+/* spec.uniform_k_decode branch: the uniform per-tile reduction decode loop
+ * (cpg % tile_k == 0) followed by the plain loop for the other problems. */
+void rocke_conv_emit_kloop_uniform_decode(rocke_conv_build_ctx_t* ctx);
+
 /* not-async branch (lines 1311-1319): single scf.for_iter load+sync+mfma+sync.
  * Covers mem, compv3, compv4, and basic (basic now uses the same runtime loop). */
 void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx);

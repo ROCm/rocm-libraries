@@ -610,7 +610,7 @@ def _spec_raw(idx: int):
         return _mfma_gate_spec(idx)
     if 82 <= idx <= 85:
         return _tf32_split_k_spec(idx)
-    if idx in _RDNA4_CFGS:
+    if idx in _RDNA4_CFGS or idx in _RDNA4_SPLIT_CFGS:
         return _rdna4_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
@@ -937,12 +937,30 @@ def _tf32_split_k_spec(idx: int):
 # conv_implicit_gemm_emit.c.
 #   86: tile_k 128 (the RDNA4 tile_k axis), fp16
 #   87: config 86 in bf16
+#   88: uniform_k_decode, fp16
+#   89: uniform_k_decode, bf16, grouped (2 groups of cpg 64)
+#   90: uniform_k_decode on the gfx1250 split-K binary (config 41): the
+#       decode starts at the slice's k_lo and ends at its k_hi
+#   91: uniform_k_decode on a pointwise (1x1, stride 1, pad 0) problem: rejected
+#       by both engines
 _RDNA4 = dict(N=2, Hi=14, Wi=14, C=64, K=128, fy=3, fx=3, pH=1, pW=1)
+_RDNA4_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2)
 _BF16 = ConvDataSpec("bf16", "bf16", "bf16")
 _RDNA4_CFGS = {
     86: (_RDNA4, dict(tile_k=128), "gfx1201"),
     87: (_RDNA4, dict(tile_k=128, data=_BF16), "gfx1201"),
+    88: (_RDNA4, dict(uniform_k_decode=True), "gfx1201"),
+    89: (_RDNA4_GROUPED, dict(uniform_k_decode=True, data=_BF16), "gfx1201"),
+    91: (
+        dict(_RDNA4, fy=1, fx=1, pH=0, pW=0),
+        dict(uniform_k_decode=True),
+        "gfx1201",
+    ),
 }
+
+
+# Configs built on the gfx1250 split-K binary rather than on the RDNA4 base.
+_RDNA4_SPLIT_CFGS = (90,)
 
 
 def _rdna4_spec(idx: int):
@@ -959,6 +977,9 @@ def _rdna4_spec(idx: int):
         pipeline="mem",
         epilogue="cshuffle",
     )
+    if idx == 90:
+        spec, arch = _split_k_spec(41)
+        return replace(spec, uniform_k_decode=True), arch
     prob, kw, arch = _RDNA4_CFGS[idx]
     return ImplicitGemmConvSpec(problem=_cp(**prob), **dict(base, **kw)), arch
 

@@ -312,6 +312,7 @@ Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the 
 The gfx12 RDNA targets (gfx1201, gfx1200 and gfx12-generic: wave32, WMMA 16x16x16) carry these forward implicit-GEMM additions. Every knob is off by default (byte-identical IR and kernel name), refused by `is_valid_spec` outside its scope, mirrored in the C++ engine, and pinned by the `conv_implicit_gemm` parity pair (`tests/parity/conv_implicit_gemm_emit`).
 
 - **tile_k 128 grid axis.** The AOT grid (`kernels/conv/aot_jobs.py`) walks `CACHE_RDNA4_EXTRA_TILE_K = (128,)` after the base geometry product for the RDNA4 targets, in all three directions. Every other arch keeps its geometry lists and chunk order.
+- **`uniform_k_decode`** (`ukd`; WMMA `mem` pipeline, 2-D; not pointwise, `group_merge`, `async_dma` or `unroll_k`). When `cpg % tile_k == 0` every K tile lies inside one filter tap, so the K loop carries the tile's `(c0, x, y)` as scalar iteration arguments, advanced with a compare-and-wrap per tile. Each load offset is the hoisted row part plus a uniform per-tile part, and the `(hi, wi)` bounds compare the row's pixel against uniform per-tap limits: no magic division per load. A second, plain loop over the rest of the range runs for problems whose `cpg` is not a multiple of `tile_k` (exactly one of the two loops has a non-empty range), so the binary serves the same problems as the plain kernel. Under split-K the decode starts at the slice's `k_lo` and ends at its `k_hi`.
 
 ### Step-By-Step Trace (one workgroup)
 

@@ -124,6 +124,8 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         # directly: a spec without them is malformed, not unsplit.
         split_k=spec.split_k,
         split_k_cluster=spec.split_k_cluster,
+        # The uniform per-tile reduction decode K loop.
+        uniform_k_decode=spec.uniform_k_decode,
         # The wavelet load-wave count changes the launch block and the loaders.
         num_load_waves=spec.num_load_waves,
         # The fused accumulator epilogue changes the emitted epilogue (and

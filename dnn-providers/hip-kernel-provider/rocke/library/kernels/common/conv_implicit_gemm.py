@@ -355,6 +355,17 @@ class ImplicitGemmConvSpec:
     # tile's rows across the S slabs and stores them cast into D. No Stage 2
     # launch. Bakes the degree: the launch passes ks_count == S.
     split_k_cluster: int = 0
+    # Uniform per-tile reduction decode ("ukd"; the forward twin of
+    # DgradConvSpec.uniform_k_decode). When cpg is a multiple of tile_k every
+    # K tile lies inside one filter tap, so the tile's (c0, x, y) is uniform:
+    # this K loop carries it as scalar iteration arguments (advanced with a
+    # compare-and-wrap per tile) and splits each load offset into the hoisted
+    # row part plus a uniform per-tile part; the (hi, wi) bounds compare the
+    # row's invariant pixel against uniform per-tap limits. No magic division
+    # per load. Problems whose cpg is not a multiple of tile_k run the plain
+    # loop, which the binary also carries, so it serves the same problems.
+    # WMMA mem pipeline, 2-D, not group-merged. Default False: byte-identical.
+    uniform_k_decode: bool = False
 
     @property
     def block_size(self) -> int:
@@ -458,6 +469,7 @@ class ImplicitGemmConvSpec:
                 # a kernarg, so only the variant reaches the name.
                 "splitk": self.split_k > 1,
                 f"skc{self.split_k_cluster}": self.split_k_cluster > 0,
+                "ukd": self.uniform_k_decode,
                 # TF32 compute keeps fp32 storage, so nothing else in the name
                 # tells it from an fp32 kernel with the same atom shape. Last,
                 # and only when set, so every existing name is unchanged.
@@ -1070,6 +1082,20 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         ):
             if flag:
                 return False, f"WMMA conv does not support {label} on {arch}"
+
+    if spec.uniform_k_decode:
+        if family != "wmma" or spec.pipeline != "mem":
+            return False, "uniform_k_decode is wired for the WMMA mem pipeline only"
+        for flag, label in (
+            (spec.problem.is_3d, "3-D convolution"),
+            (spec.problem.is_pointwise, "the pointwise fast path"),
+            (spec.group_merge > 1, "group_merge"),
+            (spec.async_dma, "async_dma"),
+            (spec.unroll_k, "unroll_k"),
+        ):
+            if flag:
+                return False, f"uniform_k_decode does not support {label}"
+
 
     if spec.split_k != 1 or spec.split_k_cluster:
         _why = fwd_split_k_reason(spec, family, target)
@@ -2542,6 +2568,121 @@ def _build_implicit_gemm_conv_impl(
             b.scf_yield(*accs_b)
 
         final_accs = for_op.results
+    elif spec.uniform_k_decode:
+        # Uniform per-tile reduction decode (ImplicitGemmConvSpec.uniform_k_decode).
+        # Loop 1 runs when cpg is a multiple of tile_k and carries the tile's
+        # (c0, x, y); loop 2 is the plain loop and runs otherwise. Exactly one
+        # of the two has a non-empty range, chosen per problem from kernargs.
+        if a_load_override is not None or m_index_fn is not None or not split_ab:
+            raise ValueError(
+                "uniform_k_decode takes the split A/B addressing without loader "
+                "overrides"
+            )
+        _uk_lo = split_k_lo if split else c0
+        _uk_hi = split_k_hi if split else c_K_gemm
+        c1 = b.const_i32(1)
+        uk_ok = b.cmp_eq(b.mod(p_cpg, c_block_k), c0)
+        _uk_q = b.div(_uk_lo, p_cpg)
+        uk_c0 = b.mod(_uk_lo, p_cpg)
+        uk_x0 = b.mod(_uk_q, p_X)
+        uk_y0 = b.div(_uk_q, p_X)
+        uk_end = b.select(uk_ok, _uk_hi, _uk_lo)
+        uk_cap: List[Optional[Tuple[Value, ...]]] = [None]
+
+        def _uk_tile(ct: Value, xd: Value, yd: Value) -> Tuple[Value, ...]:
+            hd = b.mul(yd, p_dH)
+            wd = b.mul(xd, p_dW)
+            a_off = b.add(b.add(b.mul(yd, a_ystep), b.mul(xd, a_xstep)), ct)
+            b_off = b.add(b.add(b.mul(yd, p_B_stride_y), b.mul(xd, p_B_stride_x)), ct)
+            return (
+                b.sub(c0, hd),
+                b.sub(p_Hi, hd),
+                b.sub(c0, wd),
+                b.sub(p_Wi, wd),
+                b.cmp_lt(yd, p_Y),
+                a_off,
+                b_off,
+            )
+
+        def _a_uk(b_: IRBuilder, row: Value, col: Value):
+            h_lo, h_hi, w_lo, w_hi, y_ok, a_off, _ = uk_cap[0]
+            m_val = b_.add(block_m_off_v, row)
+            q_wo, wo = magic_divmod(
+                b_,
+                m_val,
+                params["p_magic_m_Wo_mult"],
+                params["p_magic_m_Wo_shift"],
+                p_Wo,
+            )
+            n, ho = magic_divmod(
+                b_,
+                q_wo,
+                params["p_magic_m_Ho_mult"],
+                params["p_magic_m_Ho_shift"],
+                p_Ho,
+            )
+            hi0 = b_.add(b_.mul(ho, p_sH), neg_pH)
+            wi0 = b_.add(b_.mul(wo, p_sW), neg_pW)
+            base = b_.add(
+                b_.add(b_.mul(n, params["p_A_stride_n"]), b_.mul(hi0, s_hi)),
+                b_.mul(wi0, s_wi),
+            )
+            if grouped:
+                base = b_.add(base, a_group_base)
+            ok = b_.land(
+                b_.land(b_.cmp_ge(hi0, h_lo), b_.cmp_lt(hi0, h_hi)),
+                b_.land(b_.cmp_ge(wi0, w_lo), b_.cmp_lt(wi0, w_hi)),
+            )
+            return b_.add(b_.add(base, a_off), col), b_.land(ok, y_ok)
+
+        def _b_uk(b_: IRBuilder, row: Value, col: Value):
+            y_ok, _, b_off = uk_cap[0][4:]
+            n_val = b_.add(block_n_off_v, row)
+            k_out = b_.add(k_out_group_base, n_val) if grouped else n_val
+            off = b_.add(b_.add(b_.mul(k_out, p_B_stride_k), b_off), col)
+            return off, y_ok
+
+        def _uk_next(ct: Value, xd: Value, yd: Value) -> Tuple[Value, ...]:
+            # Next tile: c0 wraps into the next filter tap.
+            nc = b.add(ct, c_block_k)
+            wrap_c = b.cmp_ge(nc, p_cpg)
+            nc = b.select(wrap_c, c0, nc)
+            nx = b.add(xd, b.select(wrap_c, c1, c0))
+            wrap_x = b.cmp_ge(nx, p_X)
+            nx = b.select(wrap_x, c0, nx)
+            ny = b.add(yd, b.select(wrap_x, c1, c0))
+            return nc, nx, ny
+
+        n_acc = len(accs)
+        uk_iter = list(accs) + [("uk_c", uk_c0), ("uk_x", uk_x0), ("uk_y", uk_y0)]
+        for_uk = b.scf_for_iter(_uk_lo, uk_end, c_block_k, uk_iter, iv_name="k_uk")
+        with for_uk as (k_uk, iter_vars):
+            ct, xd, yd = iter_vars[n_acc:]
+            uk_cap[0] = _uk_tile(ct, xd, yd)
+            k_off_capture[0] = k_uk
+            a_staged = a_sync_loader.load_global(
+                b, tid=tid, descriptor=_a_uk, rsrc=a_rsrc
+            )
+            b_staged = b_sync_loader.load_global(
+                b, tid=tid, descriptor=_b_uk, rsrc=b_rsrc
+            )
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
+            b.sync()
+            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+            b.sync()
+            b.scf_yield(*new_accs, *_uk_next(ct, xd, yd))
+        uk_accs = list(for_uk.results)[:n_acc]
+
+        fb_iter = [(f"fb_{name}", v) for (name, _), v in zip(accs, uk_accs)]
+        for_fb = b.scf_for_iter(uk_end, _uk_hi, c_block_k, fb_iter, iv_name="k0")
+        with for_fb as (k0, iter_vars):
+            emit_load_phase(k0, A_smem, B_smem)
+            b.sync()
+            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+            b.sync()
+            b.scf_yield(*new_accs)
+        final_accs = list(for_fb.results)
     elif not spec.async_dma:
         # mem / compv3 / compv4 / basic: all use scf_for_iter — only bound changes to runtime.
         for_op = (

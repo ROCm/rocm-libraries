@@ -217,6 +217,13 @@ typedef struct rocke_implicit_gemm_conv_spec
      * gets its own LDS bytes (pool = ab+c) and the barrier is elided -> lower
      * small-tile latency, more LDS. Only affects epilogue == "cshuffle". */
     bool cshuffle_no_alias; /* default false */
+
+    /* Uniform per-tile reduction decode (kernel-name flag ukd): when cpg is a
+     * multiple of tile_k the K loop carries the tile's (c0, x, y) as scalar
+     * iteration arguments; the plain loop serves the other problems from the
+     * same binary. WMMA mem pipeline, 2-D. Default false: byte-identical.
+     * Mirrors ImplicitGemmConvSpec.uniform_k_decode. */
+    bool uniform_k_decode; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller
