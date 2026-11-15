@@ -51,6 +51,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_direct_fwd_gstream_wmma.py"
     "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
     "tests/library/tests/test_direct_dgrad_wmma.py"
+    "tests/library/tests/test_direct_dgrad_pp_mfma.py"
     "tests/library/tests/test_direct_fwd_wmma.py"
     "tests/library/tests/test_conv_fwd_split_k.py"
     "tests/library/tests/test_conv_winograd_fwd_cpu.py"
@@ -208,6 +209,7 @@ endif()
 # stride kernarg, the unified attention running-max carry and keyless
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
+# LDS alignment claims of the backward kernel with the slices dK / dV sink, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
 # gfx1250 3D kernel's paged reads staying bounded to the sequence's last page, the
 # host-side SDPA sequence-length and padding-mask adapters/specs, the
@@ -225,6 +227,7 @@ endif()
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_bwd_gemm.py"
     "tests/library/tests/test_attention_bwd_body.py"
+    "tests/library/tests/test_attention_bwd_lds_alignment.py"
     "tests/library/tests/test_gfx1250_attention_operand_roles.py"
     "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
     "tests/library/tests/test_attention_dense_decode.py"
