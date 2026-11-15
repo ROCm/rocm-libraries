@@ -1101,6 +1101,18 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
     const int n0 = blockIdx.y * BN;
     const int tid = threadIdx.x;
     const int tn = tid % NT, tq = tid / NT;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue's per-channel operands of the thread's columns, loaded before the
+    // reduction so their latency hides behind it (a stem's short reduction otherwise waits on
+    // them at the store).
+    ConvEpiGen::Chan chans[TN];
+#pragma unroll
+    for(int j = 0; j < TN; ++j)
+    {
+        const int en = n0 + tn * TN + j;
+        chans[j] = epi.chan(en, en < a.k);
+    }
+#endif
     const int runs = a.tw / TM;
     const int ohl = tq / runs, owl = (tq - ohl * runs) * TM;
     const bool rowOk = ohl < a.th;
@@ -1271,18 +1283,13 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
     auto store = [&](int set, int od, int) {
         const int nb = n0 + tn * TN;
 #if defined(CONV_EPI) && CONV_EPI
-        // The fused epilogue, one channel's operands at a time, on the accumulators in place. The
-        // column goes through an empty asm, so the loop-invariant loads stay in the store rather
-        // than being hoisted to hold registers through the main loop.
-        int col = nb;
-        asm volatile("" : "+v"(col));
+        // The fused epilogue on the accumulators in place.
 #pragma unroll
         for(int j = 0; j < TN; ++j)
         {
-            const ConvEpiGen::Chan ch = epi.chan(col + j, col + j < a.k);
 #pragma unroll
             for(int i = 0; i < TM; ++i)
-                acc[set][i][j] = epi(acc[set][i][j], ch, 0, true);
+                acc[set][i][j] = epi(acc[set][i][j], chans[j], 0, true);
         }
 #endif
 #pragma unroll
