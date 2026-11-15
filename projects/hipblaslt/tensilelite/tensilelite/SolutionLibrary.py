@@ -31,6 +31,7 @@ from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 from .SolutionStructs.CompactSolution import hydrateSolution
+from .MatchingTable import MatchingTable
 from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
@@ -152,6 +153,13 @@ class MatchingLibrary:
 
         table.sort(key=lambda r: r["key"])
 
+        # Column storage (int64 keys, float64 speeds, solution refs) is about a
+        # tenth of the memory of the row dicts; the dicts stay only when a value
+        # could not be stored exactly.
+        columns = MatchingTable.fromRows(table)
+        if columns is not None:
+            table = columns
+
         return cls(properties, table, distance, d.get("useKdTree", False))
 
     @property
@@ -163,7 +171,17 @@ class MatchingLibrary:
                 and self.properties == other.properties \
                 and self.distance == other.distance
 
-        self.table += other.table
+        if isinstance(self.table, MatchingTable) and isinstance(other.table, MatchingTable):
+            self.table += other.table
+        elif len(other.table) == 0:
+            pass
+        elif len(self.table) == 0:
+            self.table = other.table
+        else:
+            # Mixed or legacy forms merge as row dicts, as before.
+            mine = self.table.toRows() if isinstance(self.table, MatchingTable) else self.table
+            theirs = other.table.toRows() if isinstance(other.table, MatchingTable) else other.table
+            self.table = mine + theirs
 
         # useKdTree is a property of the merged table, not of either contributor. OR rather
         # than assert: logic files that share a key are written independently, and requiring
