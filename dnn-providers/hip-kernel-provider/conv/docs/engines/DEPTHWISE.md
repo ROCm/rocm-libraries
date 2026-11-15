@@ -160,7 +160,7 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
   - `VALU`: the W-strip and channels-first floors (2-D and 3-D), microtile, fused halo, LDS tiles (2-D, 3-D, channels-first plane tiles) and rowtile;
   - `ROWS`: the plane tile and the band;
   - `MFMA`: the channel-diagonal core before it rounds into the LDS output row (the row copy stays a bitwise copy), and the channel-pair core.
-- Every thread owns fixed channels, so a store site loads its channels' operands once (`ConvDepthwiseEpilogue.h`). With fusion off the macros expand to nothing and the kernels compile to the instructions they compiled before.
+- Every thread owns fixed channels, so a store site loads its channels' operands once (`ConvDepthwiseEpilogue.h`). With fusion off the macros expand to nothing and the kernels compile to the same instructions as a build without the hook.
 - 16-bit rowtile configs pass the accumulator through an empty `asm` before the epilogue: without it, instruction selection fails for some chains (gelu-tanh, bias + relu) in the current compiler.
 - No config is added: the epilogue is part of a config's compile, so a fused pattern compiles once per config and serves every graph of that pattern.
 
