@@ -74,10 +74,12 @@ std::vector<ChainCase> chainCases()
         {"BiasRelu", {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)}, "add.k.HALF|relu"});
     cases.push_back({"BiasOnly", {bias(DataType::HALF)}, "add.k.HALF"});
     cases.push_back({"ReluOnly", {relu()}, "relu"});
-    cases.push_back(
-        {"ClippedRelu", {bias(DataType::FLOAT), relu(std::nullopt, 6.0F)}, "add.k.FLOAT|relu"});
-    cases.push_back({"Clamp", {relu(-1.0F, 1.0F)}, "relu"});
-    cases.push_back({"LeakyRelu", {relu(std::nullopt, std::nullopt, 0.1F)}, "relu"});
+    cases.push_back({"ClippedRelu",
+                     {bias(DataType::FLOAT), relu(std::nullopt, 6.0F)},
+                     "add.k.FLOAT|relu.clamp"});
+    cases.push_back({"Clamp", {relu(-1.0F, 1.0F)}, "relu.clamp"});
+    cases.push_back({"LeakyRelu", {relu(std::nullopt, std::nullopt, 0.1F)}, "relu.leaky"});
+    cases.push_back({"LeakyClamp", {relu(-1.0F, 1.0F, 0.2F)}, "relu.leaky.clamp"});
     cases.push_back({"ScaleBiasRelu",
                      {scale(DataType::FLOAT), bias(DataType::BFLOAT16), relu()},
                      "mul.k.FLOAT|add.k.BFLOAT16|relu"});
@@ -666,11 +668,21 @@ TEST(TestConvEpilogueKey, DiffersBetweenPatterns)
 TEST(TestConvEpilogueKey, EqualForSamePatternAcrossValuesAndShapes)
 {
     const auto base = keyOf(fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu()}));
-    // Other relu values: clipped, clamp, leaky.
-    EXPECT_EQ(base,
-              keyOf(fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu(std::nullopt, 6.0F)})));
-    EXPECT_EQ(base,
-              keyOf(fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu(-1.0F, 1.0F, 0.2F)})));
+    // Other values of one relu form: the lower clip of a relu, the bounds of a clamp, the slope
+    // of a leaky relu.
+    EXPECT_EQ(base, keyOf(fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu(0.5F)})));
+    const auto clamp
+        = keyOf(fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu(std::nullopt, 6.0F)}));
+    EXPECT_EQ(clamp, keyOf(fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu(-1.0F, 1.0F)})));
+    const auto leaky = keyOf(
+        fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu(std::nullopt, std::nullopt, 0.1F)}));
+    EXPECT_EQ(
+        leaky,
+        keyOf(fusedSpecFor(nhwcHalf(), {bias(DataType::HALF), relu(-2.0F, std::nullopt, 0.3F)})));
+    // The forms themselves are different activations, so different code.
+    EXPECT_NE(base, clamp);
+    EXPECT_NE(base, leaky);
+    EXPECT_NE(clamp, leaky);
     // Other shapes and layout: batch, channels, spatial, padding, channels-first.
     ConvShape other = nhwcHalf();
     other.n = 5;
@@ -730,8 +742,8 @@ TEST(TestConvEpilogueKey, GeneratedCodeIsCanonical)
     // Two parses of one pattern give byte-identical generated defines.
     const auto first
         = parseFused(fusedSpecFor(nhwcHalf(), {scale(), bias(DataType::HALF), relu()}));
-    const auto second = parseFused(
-        fusedSpecFor(nhwcHalf(), {scale(), bias(DataType::HALF), relu(1.0F, 2.0F, 0.5F)}));
+    const auto second
+        = parseFused(fusedSpecFor(nhwcHalf(), {scale(), bias(DataType::HALF), relu(1.0F)}));
     ASSERT_TRUE(first.has_value() && second.has_value());
     compilation::KernelCompileOptions a("gfx942");
     compilation::KernelCompileOptions b("gfx942");

@@ -50,6 +50,26 @@ std::string_view loaderFor(DataType dataType)
                                                    "conv epilogue operand of an unsupported type");
 }
 
+/// A relu step's form, which its attributes fix at plan build: "relu" (lower clip only),
+/// "relu.clamp" (an upper clip), "relu.leaky" (a lower-clip slope) or "relu.leaky.clamp".
+std::string reluForm(const ConvEpilogue& epilogue, const Op& op)
+{
+    const auto& scalars = epilogue.scalars;
+    const bool upper = !std::isinf(scalars[static_cast<size_t>(op.slot) + 1].value)
+                       || scalars[static_cast<size_t>(op.slot) + 1].value < 0.0F;
+    const bool slope = scalars[static_cast<size_t>(op.slot) + 2].value != 0.0F;
+    std::string form = "relu";
+    if(slope)
+    {
+        form += ".leaky";
+    }
+    if(upper)
+    {
+        form += ".clamp";
+    }
+    return form;
+}
+
 std::string slot(int index)
 {
     return "e.scalar[" + std::to_string(index) + "]";
@@ -98,7 +118,7 @@ std::string patternOf(const ConvEpilogue& epilogue)
             pattern += "mul.value";
             break;
         case OpCode::RELU:
-            pattern += "relu";
+            pattern += reluForm(epilogue, op);
             break;
         case OpCode::GELU:
             pattern += "gelu";
@@ -168,9 +188,29 @@ void addEpilogueDefines(compilation::KernelCompileOptions& options, const ConvEp
             code += "v*=" + slot(op.slot) + ";";
             break;
         case OpCode::RELU:
-            code += "v=convEpiRelu(v," + slot(op.slot) + "," + slot(op.slot + 1) + ","
-                    + slot(op.slot + 2) + ");";
+        {
+            // The form is the activation (relu, clipped relu or clamp, leaky relu); the clip
+            // and slope values stay runtime arguments.
+            const auto form = reluForm(epilogue, op);
+            if(form == "relu")
+            {
+                code += "v=convEpiReluLower(v," + slot(op.slot) + ");";
+            }
+            else if(form == "relu.clamp")
+            {
+                code += "v=convEpiReluClamp(v," + slot(op.slot) + "," + slot(op.slot + 1) + ");";
+            }
+            else if(form == "relu.leaky")
+            {
+                code += "v=convEpiReluLeaky(v," + slot(op.slot) + "," + slot(op.slot + 2) + ");";
+            }
+            else
+            {
+                code += "v=convEpiRelu(v," + slot(op.slot) + "," + slot(op.slot + 1) + ","
+                        + slot(op.slot + 2) + ");";
+            }
             break;
+        }
         case OpCode::GELU:
             code += "v=convEpiGelu(v);";
             break;

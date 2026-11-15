@@ -62,6 +62,23 @@ __device__ inline float convEpiRelu(float v, float lower, float upper, float slo
     return v <= lower ? below : above;
 }
 
+// The same function for the forms a graph's attributes fix at plan build, so the store code
+// carries only what the form needs: no upper clip (upper +inf), no slope (slope 0), or neither.
+__device__ inline float convEpiReluLower(float v, float lower)
+{
+    return v <= lower ? lower : v;
+}
+__device__ inline float convEpiReluClamp(float v, float lower, float upper)
+{
+    const float above = v >= upper ? upper : v;
+    return v <= lower ? lower : above;
+}
+__device__ inline float convEpiReluLeaky(float v, float lower, float slope)
+{
+    const float below = lower + slope * (v - lower);
+    return v <= lower ? below : v;
+}
+
 /// x times a gate in [0, 1]: a gate that is exactly 0 gives 0, so a gate that saturates at -inf
 /// gives 0 rather than -inf * 0. NaN stays NaN (a NaN gate is not 0).
 __device__ inline float convEpiGated(float v, float gate)
