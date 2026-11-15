@@ -77,6 +77,30 @@ ScopedXf32::~ScopedXf32()
     }
 }
 
+ScopedNoAtomics::ScopedNoAtomics(rocblas_handle handle)
+    : _handle(handle)
+{
+    if(rocblas_get_atomics_mode(_handle, &_previous) == rocblas_status_success)
+    {
+        _set = rocblas_set_atomics_mode(_handle, rocblas_atomics_not_allowed)
+               == rocblas_status_success;
+    }
+    if(!_set)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "rocblas_set_atomics_mode failed: the plan's results would not be reproducible");
+    }
+}
+
+ScopedNoAtomics::~ScopedNoAtomics()
+{
+    if(_set)
+    {
+        static_cast<void>(rocblas_set_atomics_mode(_handle, _previous));
+    }
+}
+
 bool permitsXf32(const GemmCall& call)
 {
     return call.tf32 && call.a.dataType == data_objects::DataType::FLOAT

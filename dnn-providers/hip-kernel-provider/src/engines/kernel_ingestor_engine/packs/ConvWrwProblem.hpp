@@ -153,8 +153,8 @@ struct WrwConfig
     /// their block-based buffer forms, which serve large images alone (channels-first, each
     /// channel plane within the range); the upper-case kinds serve the other images.
     std::string spec;
-    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
-    /// (tf32Permitted): a bf16 config run on x and dy split into 3N bf16 images by
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph (a TF32 config,
+    /// CONV_WRW_TF32's): a bf16 config run on x and dy split into 3N bf16 images by
     /// ConvWrwSplit (K3SplitArgs), dw written in fp32 by the reduce.
     int64_t math = 0;
 };
@@ -265,6 +265,25 @@ int64_t splitsWanted(int64_t blocksXY,
                      int64_t steps,
                      int64_t partialElems,
                      int64_t dispatchUnits);
+
+/// The tile reduce's blocks (ConvWrwReduceTile): tiles of tileK output channels by tileC input
+/// channels (a multiple of 4) of one group, by all taps; tilesK x tilesC tiles a group. blocks 0:
+/// no tile fits (more taps than the LDS takes at 4 channels).
+struct ReduceTile
+{
+    int64_t tileK = 0;
+    int64_t tileC = 0;
+    int64_t tilesK = 0;
+    int64_t tilesC = 0;
+    int64_t blocks = 0;
+};
+
+/// The tile reduce's tiles for dw of @p groups groups of @p kg x @p cg channels and @p taps
+/// taps on @p units dispatch units: tileC the input channels (rounded up to quads), at most 128
+/// and within K3_REDUCE_TILE_FLOATS with all taps, halved (down to 16) while the tiles leave
+/// fewer than 2 blocks a unit; tileK the most output channels (4, 2 or 1) a tile within the LDS
+/// that keeps 2 blocks a unit.
+ReduceTile reduceTileFor(int64_t groups, int64_t kg, int64_t cg, int64_t taps, int64_t units);
 
 /// A row ring's tracks (loops 1, 2, 3 at height stride 1): `len` steps a track for the height
 /// classes rho < `longClasses`, len - 1 for the others (K3Track).
@@ -382,7 +401,7 @@ DirectPlan directPlanFor(int64_t tiles,
  * loads a thread in flight; not for filters of at most 9 taps dilated 6 or more on a filter
  * axis (ASPP-class, where the BLAS path wins). Declined
  * wherever a key of its spec serves the problem (specServes): a specialized config's class.
- * math 0, or 1 (three-bf16): an fp32 graph, TF32 permitted (tf32Permitted), a bf16 atom, dws 0,
+ * math 0, or 1 (three-bf16): an fp32 graph, a bf16 atom, dws 0,
  * 3N within 32 bits; the launch is the config's on the bf16 problem of 3N images, with
  * ConvWrwSplit ahead of it and the split operands ahead of the partials in the workspace.
  */

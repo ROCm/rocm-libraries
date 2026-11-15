@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <cstdint>
+#include <set>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -10,6 +13,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -17,8 +21,6 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
-#include "engines/conv/ConvReducedPrecision.hpp"
-#include "engines/conv/ConvTf32.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
 using namespace hipdnn_data_sdk::utilities;
@@ -49,30 +51,21 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
     expected.push_back(ROCBLAS_MATMUL_ENGINE_ID);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
-    // The TF32 twins only behind their temporary switch.
-    const bool tf32Engines = hipblaslt_plugin::convTf32EnginesEnabled();
-    const bool rprEngines = hipblaslt_plugin::convReducedPrecisionEnginesEnabled();
+    // The exact engines, their TF32 and reduced-precision-reduction siblings and the
+    // deterministic siblings of the exact and TF32 engines, by default.
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     expected.push_back(HIPBLASLT_CONV_ENGINE_ID);
-    if(tf32Engines)
-    {
-        expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_ID);
-    }
-    if(rprEngines)
-    {
-        expected.push_back(HIPBLASLT_CONV_RPR_ENGINE_ID);
-    }
+    expected.push_back(HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID);
+    expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_ID);
+    expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID);
+    expected.push_back(HIPBLASLT_CONV_RPR_ENGINE_ID);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     expected.push_back(ROCBLAS_CONV_ENGINE_ID);
-    if(tf32Engines)
-    {
-        expected.push_back(ROCBLAS_CONV_TF32_ENGINE_ID);
-    }
-    if(rprEngines)
-    {
-        expected.push_back(ROCBLAS_CONV_RPR_ENGINE_ID);
-    }
+    expected.push_back(ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID);
+    expected.push_back(ROCBLAS_CONV_TF32_ENGINE_ID);
+    expected.push_back(ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID);
+    expected.push_back(ROCBLAS_CONV_RPR_ENGINE_ID);
 #endif
 #endif
 
@@ -353,6 +346,94 @@ TEST(TestGpuHipblasltEnginePluginApi, GetEngineDetailsValid)
               HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
+
+#ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+// Each convolution engine's RFC 0025 numerical notes: TENSOR_CORE for TF32 (cuDNN's TF32 note),
+// REDUCED_PRECISION_REDUCTION for the fp16 partial sums, and NONDETERMINISTIC for every engine
+// but the *_DETERMINISTIC siblings, which claim determinism (TestGpuConvGemmDeterministic reruns
+// their plans and compares the bits). Deselecting NONDETERMINISTIC therefore leaves exactly the
+// deterministic siblings.
+TEST(TestGpuHipblasltEnginePluginApi, ConvEnginesReportTheirNumericalNotes)
+{
+    SKIP_IF_NO_DEVICES();
+    hipdnnEnginePluginHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnEnginePluginCreateImpl(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    // Notes describe the engine: any graph serves the query.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto serializedGraph = builder.Release();
+    hipdnnPluginConstData_t const opGraph
+        = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
+
+    using Notes = std::vector<int32_t>;
+    constexpr int32_t TF32 = HIPDNN_NUMERICAL_NOTE_TENSOR_CORE;
+    constexpr int32_t RPR = HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION;
+    constexpr int32_t NONDETERMINISTIC = HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC;
+    std::vector<std::pair<int64_t, Notes>> expected;
+    std::set<int64_t> deterministic;
+#ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
+    expected.emplace_back(HIPBLASLT_CONV_ENGINE_ID, Notes{NONDETERMINISTIC});
+    expected.emplace_back(HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID, Notes{});
+    expected.emplace_back(HIPBLASLT_CONV_TF32_ENGINE_ID, Notes{TF32, NONDETERMINISTIC});
+    expected.emplace_back(HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID, Notes{TF32});
+    expected.emplace_back(HIPBLASLT_CONV_RPR_ENGINE_ID, Notes{RPR, NONDETERMINISTIC});
+    deterministic.insert(
+        {HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID, HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID});
+#endif
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+    expected.emplace_back(ROCBLAS_CONV_ENGINE_ID, Notes{NONDETERMINISTIC});
+    expected.emplace_back(ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID, Notes{});
+    expected.emplace_back(ROCBLAS_CONV_TF32_ENGINE_ID, Notes{TF32, NONDETERMINISTIC});
+    expected.emplace_back(ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID, Notes{TF32});
+    expected.emplace_back(ROCBLAS_CONV_RPR_ENGINE_ID, Notes{RPR, NONDETERMINISTIC});
+    deterministic.insert(
+        {ROCBLAS_CONV_ENGINE_DETERMINISTIC_ID, ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC_ID});
+#endif
+    // Deselecting NONDETERMINISTIC (cuDNN's deterministic-only filter) over every engine the
+    // plugin lists keeps exactly the deterministic siblings.
+    uint32_t count = 0;
+    ASSERT_EQ(hipdnnEnginePluginGetAllEngineIdsImpl(nullptr, 0, &count),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    std::vector<int64_t> allIds(count, 0);
+    ASSERT_EQ(hipdnnEnginePluginGetAllEngineIdsImpl(allIds.data(), count, &count),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    std::set<int64_t> kept;
+    for(const auto engineId : allIds)
+    {
+        hipdnnPluginConstData_t details;
+        ASSERT_EQ(hipdnnEnginePluginGetEngineDetailsImpl(handle, engineId, &opGraph, &details),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(
+            details.ptr, details.size);
+        // An absent list is reported NONDETERMINISTIC (RFC 0025).
+        const auto notes = wrapper.numericalNotes();
+        if(notes.has_value()
+           && std::find(notes->begin(), notes->end(), NONDETERMINISTIC) == notes->end())
+        {
+            kept.insert(engineId);
+        }
+        EXPECT_EQ(hipdnnEnginePluginDestroyEngineDetailsImpl(handle, &details),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+    }
+    EXPECT_EQ(kept, deterministic);
+    for(const auto& [engineId, notes] : expected)
+    {
+        SCOPED_TRACE(engineId);
+        hipdnnPluginConstData_t engineDetailsOut;
+        ASSERT_EQ(
+            hipdnnEnginePluginGetEngineDetailsImpl(handle, engineId, &opGraph, &engineDetailsOut),
+            HIPDNN_PLUGIN_STATUS_SUCCESS);
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper const engineDetails(
+            engineDetailsOut.ptr, engineDetailsOut.size);
+        const auto reported = engineDetails.numericalNotes();
+        ASSERT_TRUE(reported.has_value());
+        EXPECT_EQ(*reported, notes);
+        EXPECT_EQ(hipdnnEnginePluginDestroyEngineDetailsImpl(handle, &engineDetailsOut),
+                  HIPDNN_PLUGIN_STATUS_SUCCESS);
+    }
+    EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+#endif
 
 TEST(TestGpuHipblasltEnginePluginApi, GetWorkspaceSizeValid)
 {

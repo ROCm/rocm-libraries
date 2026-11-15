@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -43,7 +44,7 @@
  *        dispatch of the partial and fold kernels.
  *
  * The schedule is hipconv's Hankel depthwise wgrad (partial sums per partition of the
- * reduction, folded in a fixed order), reimplemented on vector ALU so it runs on every
+ * reduction, folded in a fixed order; one partition writes dw directly), reimplemented on vector ALU so it runs on every
  * architecture, both layouts, 1-D to 3-D and every element type in exact fp32 arithmetic. On
  * CDNA the hankel configs run the construction itself on 4x4x4 MFMA (16-bit, channels-last,
  * stride 1 or 2; ConvDepthwiseHankelWrw.h). Every kernel config is admitted on correctness alone;
@@ -298,25 +299,52 @@ bool vtileAdmits(const WrwProblem& problem, const WrwConfig& config, int xAlign,
 void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& config)
 {
     auto& a = problem.args;
-    // Enough partitions that the partial kernel fills the device, each at least one row.
+    // Enough partitions that the partial kernel fills the device (bpc blocks a unit; the VALU
+    // variants' bpc 0 is BLOCKS_PER_CU), each at least one row.
+    const int64_t units = std::max<int64_t>(1, computeUnits);
     const int64_t blocksPerPartition = blocksPerPartitionOf(problem, config);
-    const int64_t wanted
-        = std::max<int64_t>(1, computeUnits) * (isHankel(config) ? config.bpc : BLOCKS_PER_CU);
+    const int64_t wanted = units * (config.bpc > 0 ? config.bpc : BLOCKS_PER_CU);
     // A vector tile's block splits a partition's rows over its row lanes: at least four rows a
     // lane, or the lanes idle and the partial sums outgrow the work.
     const int64_t rowsAtLeast
         = config.variant == "vtile"
               ? 4 * (BLOCK / vtileChannelLanes(a.c, std::max<int64_t>(config.cv, 1)))
               : 1;
-    const int64_t partitions = std::clamp<int64_t>(
+    const int64_t most = std::clamp<int64_t>(
         divUp(wanted, blocksPerPartition), 1, std::max<int64_t>(1, a.rows / rowsAtLeast));
+    // fill 1: whole rounds of blocks over the units. Of most / 2 .. most partitions (each taken
+    // as the rows split into equal runs), the one with the least rounds x rows a partition, the
+    // busiest unit's rows (the most partitions on a tie). gfx950 EfficientNet c960 30^2 n16: 35
+    // partitions of 15 blocks ran a third round for 13 blocks (26.8 us); 17 run one (1.12x).
+    // fill 0 keeps the target, which some n128 shapes need; autotune picks between them.
+    const auto partitionsOf = [&](int64_t p) { return divUp(a.rows, divUp(a.rows, p)); };
+    int64_t partitions = partitionsOf(most);
+    int64_t bestCost = std::numeric_limits<int64_t>::max();
+    const int64_t least = config.fill != 0 ? std::max({int64_t{1}, most / 2, most - 64}) : most;
+    for(int64_t p = most; p >= least; --p)
+    {
+        const int64_t actual = partitionsOf(p);
+        const int64_t cost = divUp(actual * blocksPerPartition, units) * divUp(a.rows, actual);
+        if(cost < bestCost)
+        {
+            partitions = actual;
+            bestCost = cost;
+        }
+    }
     a.rowsPerPartition = static_cast<int>(divUp(a.rows, partitions));
     a.partitions = static_cast<int>(divUp(a.rows, a.rowsPerPartition));
+    // One partition: the partial kernel writes dw itself (no workspace, no fold).
+    a.direct = a.partitions == 1 ? 1 : 0;
 }
 
 size_t workspaceBytesFor(const WrwProblem& problem)
 {
     const auto& a = problem.args;
+    // One partition: the partial kernel writes dw itself.
+    if(a.direct != 0)
+    {
+        return 0;
+    }
     return static_cast<size_t>(a.partitions) * static_cast<size_t>(a.c * problem.mult)
            * static_cast<size_t>(a.taps) * sizeof(float);
 }
@@ -411,6 +439,7 @@ conv_depthwise_valu_wrw::WrwConfig configOf(const KernelDefinition& kernel)
     config.cv = kernel.getIntMetadata("cv");
     config.strip = kernel.getIntMetadata("strip");
     config.form = kernel.getIntMetadata("form");
+    config.fill = kernel.getIntMetadata("fill");
     return config;
 }
 
@@ -438,9 +467,9 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 /// Kernel-scoped applicability: the config computes this problem correctly and launches. The
 /// floor serves every problem; a register tile needs its compile-time filter (depth 1 for 1-D
 /// and 2-D); the matrix-core (hankel) configs pass hankelAdmits, and only they may set the
-/// q, g, nwg, bpc, s and form fields; the vector tiles pass vtileAdmits, and only they may set cv and
-/// strip. The partitions are sized from the device's units, so a device that
-/// reports none is declined.
+/// q, g, nwg, s and form fields (bpc 0, 1, 2 or 8 on the others); the vector tiles pass
+/// vtileAdmits, and only they may set cv and strip. The partitions are sized from the device's
+/// units, so a device that reports none is declined.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -462,10 +491,16 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // The matrix-core fields are the hankel variant's alone.
+    // The matrix-core fields are the hankel variant's alone; the VALU variants take bpc 0 (4
+    // blocks a unit), 1, 2 or 8.
     if(!hankel
-       && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0 || config.s != 0
-           || config.form != 0))
+       && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.s != 0 || config.form != 0
+           || (config.bpc != 0 && config.bpc != 1 && config.bpc != 2 && config.bpc != 8)))
+    {
+        return false;
+    }
+    // fill 0 or 1; the floor keeps its target (fill 0).
+    if((config.fill != 0 && config.fill != 1) || (config.fill != 0 && config.variant == "floor"))
     {
         return false;
     }
@@ -569,7 +604,7 @@ public:
     {
     }
 
-    /// One fp32 partial sum per (partition, channel, tap).
+    /// One fp32 partial sum per (partition, channel, tap); none at one partition.
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
@@ -632,6 +667,11 @@ public:
         }
         options.add("CONV_DW_VARIANT", variant);
         options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
+        // One partition: the partial kernel's direct dw store (compiled only then).
+        if(problem->args.direct != 0)
+        {
+            options.add("CONV_DW_DIRECT", std::string("1"));
+        }
         // Defined only for a multiplier, so the multiplier-1 programs compile as before.
         if(config.mult != 1)
         {
@@ -691,14 +731,16 @@ public:
                 uint32_t numDeviceBuffers,
                 void* workspace) const override
     {
-        if(workspace == nullptr)
+        const auto& dispatch = dynamic_cast<const PreparedConvDepthwiseValuWrw&>(prepared);
+        const auto& problem = dispatch.problem();
+        // One partition writes dw in the partial kernel: no workspace and no fold.
+        const bool direct = problem.args.direct != 0;
+        if(workspace == nullptr && !direct)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "conv_depthwise_valu_wrw needs its partial-sum workspace");
         }
-        const auto& dispatch = dynamic_cast<const PreparedConvDepthwiseValuWrw&>(prepared);
-        const auto& problem = dispatch.problem();
         ConvDepthwiseValuWrwArgs args = problem.args;
         args.x = hipdnn_plugin_sdk::findDeviceBuffer(problem.xUid, deviceBuffers, numDeviceBuffers)
                      .ptr;
@@ -711,7 +753,10 @@ public:
         args.partial = static_cast<float*>(workspace);
         const auto stream = handle.getStream();
         dispatch.partialForStream(stream).launch(stream, args);
-        dispatch.foldForStream(stream).launch(stream, args);
+        if(!direct)
+        {
+            dispatch.foldForStream(stream).launch(stream, args);
+        }
     }
 
 private:

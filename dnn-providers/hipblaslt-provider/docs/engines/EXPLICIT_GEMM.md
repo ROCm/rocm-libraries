@@ -1,6 +1,6 @@
 # Explicit-GEMM convolution — ROCBLAS_CONV_ENGINE and HIPBLASLT_CONV_ENGINE
 
-> Engine ids: `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE`; behind switches `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE`, `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` · Builder: `engines/conv/ConvGemmPlanBuilder.cpp` · Formulation: `common/ConvGemmFormulation.*`, `common/ConvRepackFormulation.*`, `common/GemmFormulation.*` · Kernels: `kernels/ConvRepack.cpp` (HIPRTC) · Registration: `HipblasltContainer.cpp`
+> Engine ids: `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE`; siblings `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE`, `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE`, and the deterministic `ROCBLAS_CONV_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_ENGINE_DETERMINISTIC`, `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` · Builder: `engines/conv/ConvGemmPlanBuilder.cpp` · Formulation: `common/ConvGemmFormulation.*`, `common/ConvRepackFormulation.*`, `common/GemmFormulation.*` · Kernels: `kernels/ConvRepack.cpp` (HIPRTC) · Registration: `HipblasltContainer.cpp`
 
 ## At a glance
 - **What:** a convolution becomes one or more strided-batched BLAS GEMMs. The GEMM reads the tensors directly where it can (1x1, point output). Otherwise HIP repack kernels move data around it: im2col, col2im, channels-last staging and fp32 partial sums. Both engines share one backend-neutral layer; the backend only runs the GEMMs.
@@ -13,13 +13,14 @@
   - Accumulation is fp32 with one final rounding.
   - Every multi-GEMM sum goes through fp32 partials in a fixed order.
   - rocBLAS calls that would round partials to 16 bits are declined.
-  - No numerical notes are reported, so hipDNN reports these engines `NONDETERMINISTIC`.
+  - The default engines report `NONDETERMINISTIC` (the libraries may split a reduction across workgroups); their `*_DETERMINISTIC` siblings do not (see Numerical precision).
 - **Workspace:** the repack workspace is held to 1 GiB; above that the plan slices by images, then by bands of rows. hipBLASLt gets up to 128 MiB more. rocBLAS uses its handle's own scratch.
 - **Large tensors:** every size is 64-bit on the host. A call is split until each piece fits the libraries' 32-bit arguments: per image when the batch stride passes 2^31, and in chunks when n or k passes 2^30.
 - **Siblings:**
-  - `*_TF32`: permits TF32 on fp32 GEMMs. On rocBLAS this is xf32, gfx942 only. On hipBLASLt it is FAST_TF32: native on gfx942, bf16x3 on gfx950, fp32 fallback elsewhere.
-  - `*_RPR`: MIOpen-style per-image fp16 1x1 wrw.
-  - Both are registered only under the switches below.
+  - `*_TF32`: permits TF32 on fp32 GEMMs. On rocBLAS this is xf32, gfx942 only. On hipBLASLt it is FAST_TF32: native on gfx942, bf16x3 on gfx950, fp32 fallback elsewhere. Reports `TENSOR_CORE`.
+  - `*_RPR`: MIOpen-style per-image fp16 1x1 wrw. Reports `REDUCED_PRECISION_REDUCTION`.
+  - `*_DETERMINISTIC`: the exact and TF32 engines with rocBLAS atomics not allowed, or no hipBLASLt workspace; bitwise reproducible.
+  - All are offered by default; a caller excludes them by note through the hipDNN API's cuDNN-compatible `deselect_numeric_notes`.
 - **vs MIOpen:** competes with `GemmFwd1x1_0_1/_0_2`, `GemmFwdRest`, `GemmBwd1x1_stride1/2`, `GemmBwdRest`, `GemmWrw1x1_stride1` and `GemmWrwUniversal`. On an 86-shape test set, MIOpen Gemm* time / ours is 1.06x to 2.2x geomean per GPU (indicative).
 
 ## Why it exists
@@ -93,18 +94,31 @@
   - Every sum spanning several GEMMs (slices, bands, images, k-chunks, split reductions) uses fp32 partials in fixed order with one final rounding.
   - bwd-data col2im sums fp32 columns per dx element in a fixed order.
 - **vs MIOpen:** MIOpen's `GemmWrw1x1_stride1` rounds dw to fp16 once per image (beta 1 into the output). This engine rounds once overall, by policy.
-- **TF32 siblings** (`HIPBLASLT_PROVIDER_CONV_TF32=1` at provider load):
+- **TF32 siblings** (`*_TF32`, offered by default, `TENSOR_CORE`):
   - They serve only plans that contain an fp32 GEMM.
   - hipBLASLt asks for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to fp32 when no algorithm exists: native TF32 on gfx942, bf16x3 emulation on gfx950, silent fp32 elsewhere.
   - rocBLAS sets `rocblas_xf32_xdl_math_op`, which takes effect only on gfx942.
-  - TF32 here is a permission and is never reported. The gtest bound is 2^-9 × reduction length.
+  - They report `TENSOR_CORE`, cuDNN's note for TF32 engines (PyTorch's cuDNN path excludes fp32 engines with it when TF32 is not allowed). The gtest bound is 2^-9 × reduction length.
   - MIOpen's own rocBLAS xf32 path measures net-negative on gfx942 (geomean 0.88x), and MIOpen does not use it. These siblings are not yet compared in an autotuned sweep.
-- **RPR siblings** (`HIPDNN_CONV_ALLOW_REDUCED_PRECISION_REDUCTION=1`):
+- **RPR siblings** (`*_RPR`, offered by default, `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC`):
   - One form: 1x1, unit-stride, unpadded fp16 wrw over several channels-first images, run as one GEMM per image adding into the fp16 dw. This is MIOpen's `GemmWrw1x1_stride1` and cuDNN's `REDUCED_PRECISION_REDUCTION`.
-  - bf16 has no reduced form. The plan builder re-checks the switch on every call.
+  - bf16 has no reduced form. Compute type unset, fp32 or fp16, as cuDNN offers it.
   - Measured deviation from exact is 1-4 fp16 ulps of max |dw|.
   - It wins on gfx1100 (DeepLab c1024 k2048 128²: 16.0 ms against 23.8 ms for the exact engines and MIOpen's 36.0) and on gfx1201 (1.32-1.42x on three graphs). It is neutral on CDNA.
-- **Notes:** none of these engines authors numerical notes, so hipDNN reports all six as `NONDETERMINISTIC`. A caller cannot yet exclude TF32 or RPR by note, which is why the switches exist. The provider's own repack and cast steps are deterministic. Bitwise repeatability of the BLAS calls is not asserted and has no relaunch test.
+- **Notes and determinism** (RFC 0025, cuDNN's model: determinism is a per-engine note a framework deselects):
+
+  | Engine | Numerical notes |
+  |---|---|
+  | `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` | `NONDETERMINISTIC` |
+  | `ROCBLAS_CONV_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_ENGINE_DETERMINISTIC` | none |
+  | `ROCBLAS_CONV_TF32_ENGINE`, `HIPBLASLT_CONV_TF32_ENGINE` | `TENSOR_CORE`, `NONDETERMINISTIC` |
+  | `ROCBLAS_CONV_TF32_ENGINE_DETERMINISTIC`, `HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC` | `TENSOR_CORE` |
+  | `ROCBLAS_CONV_RPR_ENGINE`, `HIPBLASLT_CONV_RPR_ENGINE` | `REDUCED_PRECISION_REDUCTION`, `NONDETERMINISTIC` |
+
+  - The default engines run the libraries' defaults: rocBLAS with atomics allowed, hipBLASLt offered up to 128 MiB of workspace. Either may split a reduction across workgroups.
+  - The deterministic siblings share the default engines' code; one flag picks the plan's library settings. rocBLAS runs with `rocblas_atomics_not_allowed`, the handle's mode saved and restored around the plan (as MIOpen's `DisableRocblasAtomics`). hipBLASLt is offered no workspace (`HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES` 0, as MIOpen's deterministic GEMMs), so it declines a GEMM it has no workspace-free algorithm for. The repack workspace is separate and unaffected.
+  - The provider's own repack and cast steps are deterministic: every sum has one owning thread in a fixed order.
+  - `TestGpuConvGemmDeterministic` executes each deterministic sibling's plan six times over a re-filled workspace and requires identical bits, on long-K backward weights and small-tile, long-reduction forward and backward data (where split-K would apply) and a spread of im2col shapes.
 - **Error model:** correctness runs use the #15481 reduction-length-aware tolerance, including large tensors past 2 GiB on gfx950. Three library behaviours would round partials to 16 bits, and each is handled:
   - rocBLAS k-chunking into bf16 is declined;
   - rocBLAS gfx11 bf16 GEMV is declined;
@@ -146,7 +160,7 @@
 1. **Ranking.** Replace the alphabetical OOTB order with a measured heuristic or UHD. Measured without autotune, that ordering is the largest gap against MIOpen.
 2. **Long 1-D and small-channel 16-bit wrw against `GemmWrwUniversal`** (about 4x on MI325X). This needs diagnosis: a layout candidate, the reduction split threshold, or library algorithm choice.
 3. **Templated summing col2im on 16-bit columns.** This would keep 16-bit-output GEMMs for overlapping taps. On RDNA3, the libraries' 16-bit-output GEMMs run 4-5x faster than fp32-output ones on a vocoder upsampler.
-4. **Report notes and drop the switches** once a caller can deselect by note: `TENSOR_CORE` for TF32 and `REDUCED_PRECISION_REDUCTION` for RPR. Then offer RPR under FLOAT or HALF compute as cuDNN does. Further RPR forms (rocBLAS 16-bit k-chunks, hipBLASLt fp16 split-K) are measurement-led.
+4. **Further RPR forms** (rocBLAS 16-bit k-chunks, hipBLASLt fp16 split-K) are measurement-led.
 5. **Calibrate the 1 GiB repack cap** against measured workloads.
 
 ## Tests
@@ -155,7 +169,8 @@
 - **Repack formulation:** `TestConvRepackFormulation` covers im2col and col2im, column layout, staging, slicing and banding under a lowered cap, fp32 sums for long and narrow reductions, split reductions, aligned and disjoint workspace, and the decline cases.
 - **Launch selection:** `TestConvRepackLaunch` covers the vectorized, LDS-tile, disjoint and generic paths, including offsets past 32 bits.
 - **Repack kernels on device:** `TestGpuRepackKernels` checks the specialized kernels bit for bit against the generic ones and against the host, and checks the fixed-tree cast.
-- **Device correctness:** `TestGpuConvGemm` runs both backends in fp32, fp16 and bf16 against a CPU reference, with sliced, banded, benchmarked, split, staged, TF32 and RPR variants.
+- **Device correctness:** `TestGpuConvGemm` runs both backends in fp32, fp16 and bf16 against a CPU reference, with sliced, banded, benchmarked, split, staged, TF32, RPR and deterministic (`TestGpuConvGemmDeterministic`, six executes each) variants.
   - `TestConvGemmRocblasLimits` pins both rocBLAS declines.
   - `TestGpuConvGemmLarge` is opt-in (`HIPBLASLT_PROVIDER_LARGE_TESTS=1`). It covers more than 4 GiB, n past 2^30, a batch stride past 2^31 and an image over the cap, checking sampled outputs against a double sum.
-- **RPR siblings:** `TestConvReducedPrecision` covers the switch, registration and one decline per gate.
+- **RPR siblings:** `TestConvReducedPrecision` covers registration and one decline per gate.
+- **Notes:** `TestGpuHipblasltEnginePluginApi.ConvEnginesReportTheirNumericalNotes` checks every conv engine's notes, and that deselecting `NONDETERMINISTIC` keeps exactly the deterministic siblings.

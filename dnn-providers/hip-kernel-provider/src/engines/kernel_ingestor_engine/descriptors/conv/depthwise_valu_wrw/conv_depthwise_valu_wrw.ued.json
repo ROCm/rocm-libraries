@@ -16,7 +16,8 @@
     "s",
     "cv",
     "strip",
-    "form"
+    "form",
+    "fill"
   ],
   "behavior_notes": [
     "runtime_compilation"

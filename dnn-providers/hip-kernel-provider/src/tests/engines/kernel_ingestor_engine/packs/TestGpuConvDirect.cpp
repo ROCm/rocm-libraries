@@ -36,9 +36,9 @@
  *        the device, through the engines' own graph match, kernel match, prepare and launch,
  *        against hipDNN's CPU reference convolution.
  *
- * Every config of the installed catalog that the kernel match admits on this device runs on
- * every case, forward and backward data, in fp32, fp16 and bf16 (and, with TF32 permission, the
- * three-bf16 fp32 configs). The cases cover every instantiated filter (3x3, 5x5, 7x7, 1x7, 7x1,
+ * Every config of the installed catalogs (the exact engines' and the CONV_DIRECT_*_TF32 engines')
+ * that the kernel match admits on this device runs on every case, forward and backward data, in
+ * fp32, fp16 and bf16 (the three-bf16 fp32 configs in their own suite). The cases cover every instantiated filter (3x3, 5x5, 7x7, 1x7, 7x1,
  * 3x3x3, 5x5x5), both layouts (channels-first runs through the staging transposes), padding 0 to 3,
  * asymmetric padding, odd extents, channel counts that are not tile multiples (and 3, which only
  * the scalar configs serve), maps wide and deep enough for several blocks, depth splitting, and
@@ -98,10 +98,12 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
         std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
-        for(size_t i = 0; i < catalogs.size(); ++i)
+        // Each direction's exact engine's catalog, then its TF32 engine's (CONV_DIRECT_*_TF32).
+        for(size_t index = 0; index < 2 * catalogs.size(); ++index)
         {
-            const std::string file
-                = i == 0 ? "conv_direct_fwd.kdp.json" : "conv_direct_bwd.kdp.json";
+            const size_t i = index / 2;
+            const std::string file = std::string(i == 0 ? "conv_direct_fwd" : "conv_direct_bwd")
+                                     + (index % 2 == 0 ? "" : "_tf32") + ".kdp.json";
             std::filesystem::path found;
             for(const auto& root : roots)
             {
@@ -338,10 +340,20 @@ std::vector<DeviceCase> deviceCases()
     // A grid of a few tiles over 4+ channel chunks: the rows split-C configs (fp32 partials and
     // the in-order reduce) serve it; 200 channels leave the last split a short chunk.
     cases.push_back({"Nhwc3x3SplitC", dense(200, 72, {9, 11}, {3, 3}, {1, 1}, true)});
+    // Channels-first rows of whole 16-byte runs (widths a multiple of 8): the in-place
+    // channels-first configs serve these; leading pads 2, 0 and 3 move the halo against its
+    // 8-aligned runs, 72 and 136 channels leave short chunks, and many tiles make blocks walk.
+    cases.push_back({"Nchw3x3Runs", dense(72, 136, {21, 40}, {3, 3}, {2, 2}, false)});
+    cases.push_back({"Nchw3x3RunsPad0", dense(40, 24, {9, 16}, {3, 3}, {0, 0}, false)});
+    cases.push_back({"Nchw3x3RunsAsymmetric",
+                     padded(dense(40, 24, {9, 16}, {3, 3}, {1, 1}, false), {0, 3}, {2, 1})});
+    auto manyRuns = dense(136, 40, {48, 64}, {3, 3}, {1, 1}, false);
+    manyRuns.n = 6;
+    cases.push_back({"Nchw3x3RunsManyTiles", manyRuns});
     return cases;
 }
 
-/// Which configs a run takes: the native ones, or (fp32 with TF32 permission) the three-bf16 ones.
+/// Which configs a run takes: the native ones, or (fp32, the TF32 engines') the three-bf16 ones.
 enum class Math
 {
     NATIVE,
@@ -543,7 +555,7 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
-/// The three-bf16 fp32 configs (TF32 permission): matrix-core devices only.
+/// The three-bf16 fp32 configs (the CONV_DIRECT_*_TF32 engines'): matrix-core devices only.
 class TestGpuConvDirectThreeBf16
     : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
 {
@@ -562,8 +574,6 @@ TEST_P(TestGpuConvDirectThreeBf16, Float)
     {
         GTEST_SKIP() << "no bf16 matrix cores";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16);
 }
 
@@ -579,8 +589,6 @@ TEST_P(TestGpuConvDirectThreeBf16, FloatInfinities)
     {
         GTEST_SKIP() << "no bf16 matrix cores";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16, true);
 }
 

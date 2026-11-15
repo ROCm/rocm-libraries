@@ -456,7 +456,9 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
         {
             continue;
         }
+#if !CONV_DW_DIRECT
         float* out = a.partial + ((long)partition * a.c + c) * a.taps;
+#endif
 #pragma unroll
         for(int rg = 0; rg < RG; ++rg)
 #pragma unroll
@@ -467,7 +469,11 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     const int r = 4 * rg + i, s = 4 * sg + v;
                     if(r < KH && s < KW)
                     {
+#if CONV_DW_DIRECT
+                        putDw(a, c, r * KW + s, a.taps, acc[cg][rg][sg][v]);
+#else
                         out[r * KW + s] = acc[cg][rg][sg][v];
+#endif
                     }
                 }
     }

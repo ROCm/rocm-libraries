@@ -456,7 +456,7 @@ bool served(const ConvShape& shape, ConvDirection direction)
     return true;
 }
 
-/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// The configs a run takes: the graph's own element type, or (fp32, the TF32 engines') the
 /// three-bf16 ones.
 enum class Math
 {
@@ -464,15 +464,25 @@ enum class Math
     THREE_BF16,
 };
 
+/// Runs every admitted config of the case against the CPU reference. @p units, when positive,
+/// replaces the device's dispatch units in the planners (1: backward weights at one split, where
+/// the kernel writes dw itself); @p directRuns counts the configs that ran without workspace.
 template <typename T>
 void runCase(ConvShape shape,
              ConvDirection direction,
              Math math = Math::NATIVE,
-             bool infinities = false)
+             bool infinities = false,
+             int units = 0,
+             int* directRuns = nullptr)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
-    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    auto device = currentDeviceProperties();
+    if(units > 0)
+    {
+        device.multiProcessorCount = units;
+    }
+    const GraphFixture fixture(buildGraph(spec), device);
     const auto pack = packFor(direction);
     const auto bound = matchesGraph(pack, fixture.context());
     if(direction == ConvDirection::BACKWARD_WEIGHTS && shape.c / shape.groups > 32)
@@ -585,6 +595,10 @@ void runCase(ConvShape shape,
         {
             ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
         }
+        else if(directRuns != nullptr)
+        {
+            ++*directRuns;
+        }
 
         written.fillWithSentinelValue();
         const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
@@ -683,7 +697,37 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                    : "Wrw");
                          });
 
-/// The three-bf16 fp32 configs (TF32 permission; wide groups, forward and backward data) at
+/// Backward weights at one split (one dispatch unit in the planner): the kernel writes dw itself,
+/// without workspace or reduce, against the reference and bitwise on a relaunch.
+class TestGpuConvGroupWrwOneSplit : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvGroupWrwOneSplit, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    int direct = 0;
+    auto shape = GetParam().shape;
+    shape.dataType = DataType::HALF;
+    runCase<Half>(shape, ConvDirection::BACKWARD_WEIGHTS, Math::NATIVE, false, 1, &direct);
+    if(served(shape, ConvDirection::BACKWARD_WEIGHTS))
+    {
+        EXPECT_GE(direct, 1) << "no config wrote dw itself at one split";
+    }
+}
+
+TEST_P(TestGpuConvGroupWrwOneSplit, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(GetParam().shape, ConvDirection::BACKWARD_WEIGHTS, Math::NATIVE, false, 1);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupWrwOneSplit,
+                         ::testing::ValuesIn(deviceCases()),
+                         [](const auto& info) { return info.param.name; });
+
+/// The three-bf16 fp32 configs (CONV_GROUP_*_TF32's; wide groups, forward and backward data) at
 /// three-bf16's bound, and with +inf and -inf in the kernel's input (each must reach the output
 /// as itself, NaN where both meet). Small-group cases admit none and skip.
 class TestGpuConvGroupThreeBf16
@@ -698,8 +742,6 @@ TEST_P(TestGpuConvGroupThreeBf16, Float)
     {
         GTEST_SKIP() << "no three-bf16 configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16);
 }
 
@@ -711,8 +753,6 @@ TEST_P(TestGpuConvGroupThreeBf16, FloatInfinities)
     {
         GTEST_SKIP() << "no three-bf16 configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     runCase<float>(shape, std::get<1>(GetParam()), Math::THREE_BF16, true);
 }
 
@@ -728,12 +768,10 @@ INSTANTIATE_TEST_SUITE_P(,
                          });
 
 /// Opt-in (GROUP_TF32_TIMING=<shape CSV>, its direction column choosing the pack): the best
-/// exact and the best three-bf16 config per shape, TF32 permitted. See ConvTf32Timing.hpp.
+/// exact and the best three-bf16 config per shape. See ConvTf32Timing.hpp.
 TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
 {
     SKIP_IF_NO_DEVICES();
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         conv_tf32_timing::timeByForm(
@@ -750,10 +788,9 @@ TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
 
 // ---- Host-only: the graph gates, one decline per field, and the kernel gates ----
 
-/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 wide-group graphs
-/// admit some forward and backward data on every arch with bf16 matrix cores (not gfx908), and
-/// bf16 graphs, small groups and backward weights none.
-TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
+/// fp32 wide-group graphs admit three-bf16 configs forward and backward data on every arch with
+/// bf16 matrix cores (not gfx908), and bf16 graphs, small groups and backward weights none.
+TEST(TestConvGroupCatalog, ThreeBf16OnlyForFloatWideGroups)
 {
     // RegNet-like wide groups (32 channels), and ResNeXt-like small ones (4).
     auto wide = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
@@ -796,13 +833,6 @@ TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
                     }
                     return count;
                 };
-                {
-                    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
-                        conv_tf32_test::TF32_ENV, "");
-                    EXPECT_EQ(admitted(), 0);
-                }
-                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-                    conv_tf32_test::TF32_ENV, "1");
                 const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908"
                                       && shape.groups == wide.groups
                                       && direction != ConvDirection::BACKWARD_WEIGHTS;
@@ -1533,7 +1563,9 @@ TEST(TestConvGroupCatalog, WrwKernelGatesEveryField)
     ASSERT_NE(base, kernels.end());
     EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
     const auto& handler = dispatchHandler(pack);
-    EXPECT_GT(handler.workspaceBytes(fixture.context(), *bound, *base), 0u);
+    // Two 12 x 13 images are too few dy tiles to split: the kernel writes dw itself, so the
+    // config takes no workspace.
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, *base), 0u);
     const auto declines = [&](const char* field, const auto& value) {
         auto kernel = *base;
         kernel.metadata[field] = value;
@@ -1763,6 +1795,20 @@ TEST(TestConvGroupWrwLaunch, SplitsFillTheDeviceAndPartialsSizeTheWorkspace)
     EXPECT_EQ(launch->reduce.sK, 4 * 9);
     EXPECT_EQ(launch->reduce.sC, 9);
     EXPECT_EQ(launch->reduce.sS, 1);
+    EXPECT_EQ(args.direct, args.splits == 1 ? 1 : 0);
+    // One unit at one workgroup a unit: one split, so the kernel writes dw itself (the reduce's
+    // strides) and takes no workspace.
+    properties.multiProcessorCount = 1;
+    const auto one = conv_group::groupWrwLaunch(*problem, 8, 16, 1, 1, properties);
+    ASSERT_TRUE(one.has_value());
+    EXPECT_EQ(one->args.splits, 1);
+    EXPECT_EQ(one->args.direct, 1);
+    EXPECT_EQ(one->workspaceBytes, 0u);
+    EXPECT_EQ(one->args.sK, 4 * 9);
+    EXPECT_EQ(one->args.sC, 9);
+    EXPECT_EQ(one->args.sS, 1);
+    EXPECT_EQ(one->args.reflect, 0);
+    properties.multiProcessorCount = 256;
     // No units, no plan; channels not a multiple of the tile's.
     properties.multiProcessorCount = 0;
     EXPECT_FALSE(conv_group::groupWrwLaunch(*problem, 8, 16, 1, 4, properties).has_value());

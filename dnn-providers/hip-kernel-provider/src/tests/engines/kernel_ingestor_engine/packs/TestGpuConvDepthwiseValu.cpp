@@ -21,6 +21,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuWrwNative.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -673,6 +674,8 @@ struct WrwConfig
     int64_t strip = 0;
     /// The hankel configs' kernel body; 0 otherwise.
     int64_t form = 0;
+    /// 1: partitions traded for whole rounds of blocks.
+    int64_t fill = 0;
 
     std::string tag() const
     {
@@ -680,7 +683,7 @@ struct WrwConfig
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
                + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult) + "s"
                + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip) + "f"
-               + std::to_string(form);
+               + std::to_string(form) + "l" + std::to_string(fill);
     }
 };
 
@@ -733,6 +736,24 @@ const std::vector<WrwConfig>& wrwCatalog()
                 configs.push_back({layout, "tile", 1, k, k, 0, 0, 0, 0, 2});
             }
         }
+        // Partition targets of the register tiles (bpc 1, 2, 8; 0 is 4 blocks a unit): the 3x3
+        // tile in both layouts.
+        for(const auto* layout : {"NHWC", "NCHW"})
+        {
+            for(const int64_t bpc : {1, 2, 8})
+            {
+                WrwConfig config{layout, "tile", 1, 3, 3};
+                config.bpc = bpc;
+                configs.push_back(config);
+            }
+        }
+        // The 3x3 tile with its partitions traded for whole rounds (fill 1), both layouts.
+        for(const auto* layout : {"NHWC", "NCHW"})
+        {
+            WrwConfig config{layout, "tile", 1, 3, 3};
+            config.fill = 1;
+            configs.push_back(config);
+        }
         // Vector tiles: (filter, cv, strip).
         for(const auto& [k, cv, strip] : std::vector<std::array<int64_t, 3>>{{3, 4, 8},
                                                                              {3, 8, 4},
@@ -746,6 +767,14 @@ const std::vector<WrwConfig>& wrwCatalog()
             WrwConfig config{"NHWC", "vtile", 1, k, k};
             config.cv = cv;
             config.strip = strip;
+            configs.push_back(config);
+        }
+        // A vector tile at one block a unit (bpc 1): one partition on one unit.
+        {
+            WrwConfig config{"NHWC", "vtile", 1, 3, 3};
+            config.cv = 4;
+            config.strip = 8;
+            config.bpc = 1;
             configs.push_back(config);
         }
         for(const int64_t stride : {1, 2})
@@ -767,6 +796,13 @@ const std::vector<WrwConfig>& wrwCatalog()
                     config.form = 1;
                     configs.push_back(config);
                 }
+                // One schedule with its partitions traded for whole rounds (fill 1).
+                WrwConfig filled{"NHWC", "hankel", 1, k, k, 32, 2, 1, 2, 1, stride};
+                filled.fill = 1;
+                configs.push_back(filled);
+                // The same in the row-staging body (form 1).
+                filled.form = 1;
+                configs.push_back(filled);
             }
         }
         return configs;
@@ -810,7 +846,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"s", config.s},
            {"cv", config.cv},
            {"strip", config.strip},
-           {"form", config.form}};
+           {"form", config.form},
+           {"fill", config.fill}};
     return kernel;
 }
 
@@ -844,12 +881,20 @@ std::vector<DeviceCase> multiplierCases()
 
 /// Every config that admits @p shape runs it, from a workspace the handler sizes, against the
 /// CPU reference (reflected for true convolution).
+/// @p units, when positive, replaces the device's dispatch units in the partition planner (1:
+/// the bpc-1 configs run one partition, where the partial kernel writes dw itself); @p directRuns
+/// counts the configs that ran without workspace.
 template <typename T>
-void runWrwCase(ConvShape shape)
+void runWrwCase(ConvShape shape, int units = 0, int* directRuns = nullptr)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
-    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    auto device = currentDeviceProperties();
+    if(units > 0)
+    {
+        device.multiProcessorCount = units;
+    }
+    const GraphFixture fixture(buildGraph(spec), device);
     const auto pack = wrwPack();
     const auto bound = matchesGraph(pack, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
@@ -897,9 +942,15 @@ void runWrwCase(ConvShape shape)
         const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
         ASSERT_NE(prepared, nullptr);
         const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
-        ASSERT_GT(workspaceBytes, 0u);
         void* workspace = nullptr;
-        ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+        if(workspaceBytes > 0)
+        {
+            ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+        }
+        else if(directRuns != nullptr)
+        {
+            ++*directRuns;
+        }
 
         w.fillWithSentinelValue();
         const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
@@ -923,7 +974,10 @@ void runWrwCase(ConvShape shape)
             w,
             workspace,
             workspaceBytes));
-        ASSERT_EQ(hipFree(workspace), hipSuccess);
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipFree(workspace), hipSuccess);
+        }
         w.markDeviceModified();
 
         const auto* actual = static_cast<const T*>(w.rawHostData());
@@ -975,6 +1029,37 @@ INSTANTIATE_TEST_SUITE_P(,
 INSTANTIATE_TEST_SUITE_P(Multiplier,
                          TestGpuConvDepthwiseValuWrw,
                          ::testing::ValuesIn(multiplierCases()),
+                         [](const auto& info) { return info.param.name; });
+
+/// One dispatch unit in the planner: the bpc-1 configs (and any whose channel blocks reach the
+/// target) run one partition, where the partial kernel writes dw itself, without workspace or
+/// fold; against the reference and bitwise on a relaunch.
+class TestGpuConvDepthwiseValuWrwOnePartition : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseValuWrwOnePartition, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    int direct = 0;
+    runWrwCase<float>(GetParam().shape, 1, &direct);
+    // Every 2-D 3x3 multiplier-1 case admits the bpc-1 3x3 tile.
+    const auto& shape = GetParam().shape;
+    if(shape.filter == std::vector<int64_t>{3, 3} && shape.k == shape.c)
+    {
+        EXPECT_GE(direct, 1) << "no config wrote dw itself at one partition";
+    }
+}
+
+TEST_P(TestGpuConvDepthwiseValuWrwOnePartition, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwCase<Half>(GetParam().shape, 1);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDepthwiseValuWrwOnePartition,
+                         ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
 
 /// An inf in x that some filter taps never pair with a dy element: a column past wo of the last
@@ -1088,7 +1173,10 @@ void runWrwInfCase(const InfCase& infCase)
             w,
             workspace,
             workspaceBytes));
-        ASSERT_EQ(hipFree(workspace), hipSuccess);
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipFree(workspace), hipSuccess);
+        }
         w.markDeviceModified();
         const auto* actual = static_cast<const T*>(w.rawHostData());
         int64_t mismatches = 0;
@@ -1884,6 +1972,38 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
              c.form = 1;
          },
          false},
+        // A VALU variant's partition target: bpc 0 (4 blocks a unit), 1, 2 or 8.
+        {"ValuTileBpcOne",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.bpc = 1;
+         },
+         true},
+        {"ValuTileBpcEight",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.bpc = 8;
+         },
+         true},
+        {"ValuTileFillOne",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.fill = 1;
+         },
+         true},
+        {"FillTwo", [](ConvShape&, WrwConfig& c, std::string&) { c.fill = 2; }, false},
+        {"FloorFillOne",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "floor", 0, 0, 0};
+             c.fill = 1;
+         },
+         false},
+        {"ValuTileBpcFour",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.bpc = 4;
+         },
+         false},
     };
     const auto pack = wrwPack();
     for(const auto& c : cases)
@@ -1902,6 +2022,70 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
             matchesKernel(pack, fixture.context(), wrwKernelFor(config, shape.dataType), *bound),
             c.admitted);
     }
+}
+
+// Host-only: the partition planner takes the least rounds of blocks times rows a partition, and
+// one partition takes no workspace (the partial kernel writes dw).
+TEST(TestConvDepthwiseValuWrwPartitions, LeastRoundsTimesRowsAndOnePartitionWritesDw)
+{
+    namespace dw = conv_depthwise_valu_wrw;
+    const auto problemOf = [](ConvShape shape, int units) {
+        shape.dataType = DataType::HALF;
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                                   countedDevice(units, "gfx950"));
+        return dw::parseWrwProblem(fixture.context());
+    };
+    // EfficientNet c960 30^2 n16 on 256 units, hankel q32 g2 nwg1 at 2 blocks a unit: 15 blocks
+    // a partition. The target 35 (rows of 14) runs three rounds (42 rows on the busiest unit);
+    // with fill 1, 17 partitions of 29 rows are 255 blocks, one round (29 rows), the least of
+    // 17 .. 35.
+    auto shape = depthwise(960, {30, 30}, {3, 3}, {1, 1}, true);
+    shape.n = 16;
+    auto problem = problemOf(shape, 256);
+    ASSERT_TRUE(problem.has_value());
+    dw::WrwConfig hankel;
+    hankel.variant = "hankel";
+    hankel.kd = 1;
+    hankel.kh = hankel.kw = 3;
+    hankel.q = 32;
+    hankel.g = 2;
+    hankel.nwg = 1;
+    hankel.bpc = 2;
+    hankel.mult = 1;
+    hankel.s = 1;
+    // fill 0 keeps the target: 35 partitions of 14 rows.
+    dw::partitionFor(*problem, 256, hankel);
+    EXPECT_EQ(problem->args.partitions, 35);
+    EXPECT_EQ(problem->args.rowsPerPartition, 14);
+    hankel.fill = 1;
+    dw::partitionFor(*problem, 256, hankel);
+    EXPECT_EQ(problem->args.partitions, 17);
+    EXPECT_EQ(problem->args.rowsPerPartition, 29);
+    EXPECT_EQ(problem->args.direct, 0);
+    EXPECT_EQ(dw::workspaceBytesFor(*problem), size_t{17} * 960 * 9 * 4);
+    // One unit at one block a unit: one partition, written straight into dw.
+    dw::WrwConfig tile;
+    tile.variant = "tile";
+    tile.kd = 1;
+    tile.kh = tile.kw = 3;
+    tile.mult = 1;
+    tile.bpc = 1;
+    auto one = problemOf(shape, 1);
+    ASSERT_TRUE(one.has_value());
+    dw::partitionFor(*one, 1, tile);
+    EXPECT_EQ(one->args.partitions, 1);
+    EXPECT_EQ(one->args.direct, 1);
+    EXPECT_EQ(dw::workspaceBytesFor(*one), 0u);
+    // bpc 0 on a VALU variant is 4 blocks a unit, 8 targets twice that.
+    tile.bpc = 0;
+    auto four = problemOf(shape, 256);
+    ASSERT_TRUE(four.has_value());
+    dw::partitionFor(*four, 256, tile);
+    tile.bpc = 8;
+    auto eight = problemOf(shape, 256);
+    ASSERT_TRUE(eight.has_value());
+    dw::partitionFor(*eight, 256, tile);
+    EXPECT_GT(eight->args.partitions, four->args.partitions);
 }
 
 // Host-only: the matrix-core configs load x and dy 16 bytes at a time, so each pointer must be

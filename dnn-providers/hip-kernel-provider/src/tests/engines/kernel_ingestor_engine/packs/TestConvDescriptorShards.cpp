@@ -7,8 +7,11 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -126,21 +129,80 @@ TEST(TestConvDescriptorShards, EveryConvEngineValidatesOnEveryShippedShard)
     }
 }
 
+bool hasSuffix(const std::string& text, const std::string& suffix)
+{
+    return text.size() >= suffix.size()
+           && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 /// The numerical notes a conv engine reports (RFC 0025): its algorithm class where cuDNN names
-/// one (FFT, WINOGRAD), and never NONDETERMINISTIC. Every engine claims bitwise-reproducible
-/// results, which each family's device test (TestGpuConv*) proves by launching every config it
-/// runs twice (ConvDeterminismTestSupport.hpp).
+/// one (FFT; WINOGRAD with the tile note where one tile serves every config), TENSOR_CORE for the
+/// engines of TF32 configs (cuDNN's note for TF32), and never NONDETERMINISTIC. Every engine
+/// claims bitwise-reproducible results, which each family's device test (TestGpuConv*) proves
+/// by launching every config it runs twice (ConvDeterminismTestSupport.hpp).
 std::vector<int32_t> expectedNumericalNotes(const std::string& engineName)
 {
+    if(hasSuffix(engineName, "_TF32"))
+    {
+        return {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+    }
     if(engineName.rfind("hipkernel:CONV_FFT_", 0) == 0)
     {
         return {HIPDNN_NUMERICAL_NOTE_FFT};
     }
-    if(engineName.rfind("hipkernel:CONV_WINOGRAD_", 0) == 0)
+    if(engineName == "hipkernel:CONV_WINOGRAD_WRW")
     {
         return {HIPDNN_NUMERICAL_NOTE_WINOGRAD};
     }
+    if(hasSuffix(engineName, "_F43"))
+    {
+        return {HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6};
+    }
+    if(engineName.rfind("hipkernel:CONV_WINOGRAD_", 0) == 0)
+    {
+        return {HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4};
+    }
     return {};
+}
+
+template <typename T>
+const T* metadataOf(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel,
+                    const std::string& field)
+{
+    const auto it = kernel.metadata.find(field);
+    return it == kernel.metadata.end() ? nullptr : std::get_if<T>(&it->second);
+}
+
+/// A TF32 config: fp32 through rounded operands (three-bf16: math 1 or "bf16x3"; xf32 atoms).
+bool isTf32Config(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel)
+{
+    const auto* math = metadataOf<int64_t>(kernel, "math");
+    const auto* mathName = metadataOf<std::string>(kernel, "math");
+    const auto* atom = metadataOf<std::string>(kernel, "atom");
+    return (math != nullptr && *math == 1) || (mathName != nullptr && *mathName == "bf16x3")
+           || (atom != nullptr && hasSuffix(*atom, "_xf32"));
+}
+
+/// Which configs an engine may list: a *_TF32 engine only TF32 configs and every other engine
+/// none; a Winograd forward / backward-data engine its own kind (BF16: bf16, F43: F(4,3), the
+/// exact-tile engine neither).
+bool engineListsConfig(const std::string& engineName,
+                       const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel)
+{
+    if(isTf32Config(kernel) != hasSuffix(engineName, "_TF32"))
+    {
+        return false;
+    }
+    if(engineName.rfind("hipkernel:CONV_WINOGRAD_", 0) != 0
+       || engineName == "hipkernel:CONV_WINOGRAD_WRW")
+    {
+        return true;
+    }
+    const auto* dtype = metadataOf<std::string>(kernel, "dtype");
+    const auto* m = metadataOf<int64_t>(kernel, "m");
+    const bool bf16 = dtype != nullptr && *dtype == "BFLOAT16";
+    const bool f43 = m != nullptr && *m == 4;
+    return bf16 == hasSuffix(engineName, "_BF16") && f43 == hasSuffix(engineName, "_F43");
 }
 
 TEST(TestConvDescriptorShards, EveryConvEngineDeclaresItsNumericalNotesOnEveryShippedShard)
@@ -166,6 +228,59 @@ TEST(TestConvDescriptorShards, EveryConvEngineDeclaresItsNumericalNotesOnEverySh
             EXPECT_EQ(*set.engine.numericalNotes, expectedNumericalNotes(set.engine.name));
         }
         EXPECT_GT(convEngines, 0) << "no conv engine in the shard";
+    }
+}
+
+// The configs a note marks sit only in the engines that report it: the exact engines list no
+// TF32, F(4,3) or bf16 Winograd forward / backward-data config, and each sibling engine lists
+// only its own kind.
+TEST(TestConvDescriptorShards, EachConvEngineListsOnlyTheConfigsItsNotesDescribe)
+{
+    const auto root = productionRoot();
+    ASSERT_FALSE(root.empty()) << "no production descriptor tree beside this binary";
+    for(const auto& shard : archShards(root))
+    {
+        SCOPED_TRACE(shard.string());
+        std::set<std::string> names;
+        for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(shard)))
+        {
+            if(set.engine.name.rfind("hipkernel:CONV", 0) != 0)
+            {
+                continue;
+            }
+            names.insert(set.engine.name);
+            size_t kernels = 0;
+            for(const auto& pack : set.packs)
+            {
+                for(const auto& kernel : pack.kernels)
+                {
+                    ++kernels;
+                    EXPECT_TRUE(engineListsConfig(set.engine.name, kernel))
+                        << set.engine.name << " lists " << kernel.name;
+                }
+            }
+            EXPECT_GT(kernels, 0U) << set.engine.name << " lists no config";
+        }
+        // Every family with TF32 configs ships its TF32 engine beside the exact one, and
+        // Winograd its bf16 and F(4,3) engines.
+        const std::vector<std::pair<std::string, std::string>> siblings = {
+            {"hipkernel:CONV_IGEMM_FWD", "hipkernel:CONV_IGEMM_FWD_TF32"},
+            {"hipkernel:CONV_IGEMM_BWD", "hipkernel:CONV_IGEMM_BWD_TF32"},
+            {"hipkernel:CONV_DIRECT_FWD", "hipkernel:CONV_DIRECT_FWD_TF32"},
+            {"hipkernel:CONV_DIRECT_BWD", "hipkernel:CONV_DIRECT_BWD_TF32"},
+            {"hipkernel:CONV_WRW", "hipkernel:CONV_WRW_TF32"},
+            {"hipkernel:CONV_IGEMM_NCHW_BWD", "hipkernel:CONV_IGEMM_NCHW_BWD_TF32"},
+            {"hipkernel:CONV_GROUP_FWD", "hipkernel:CONV_GROUP_FWD_TF32"},
+            {"hipkernel:CONV_GROUP_BWD", "hipkernel:CONV_GROUP_BWD_TF32"},
+            {"hipkernel:CONV_WINOGRAD_FWD", "hipkernel:CONV_WINOGRAD_FWD_BF16"},
+            {"hipkernel:CONV_WINOGRAD_BWD", "hipkernel:CONV_WINOGRAD_BWD_BF16"},
+            {"hipkernel:CONV_WINOGRAD_FWD", "hipkernel:CONV_WINOGRAD_FWD_F43"},
+            {"hipkernel:CONV_WINOGRAD_BWD", "hipkernel:CONV_WINOGRAD_BWD_F43"},
+        };
+        for(const auto& [exact, sibling] : siblings)
+        {
+            EXPECT_EQ(names.count(exact), names.count(sibling)) << exact << " / " << sibling;
+        }
     }
 }
 

@@ -36,8 +36,22 @@ public:
         return _calls;
     }
 
+    /// Runs every call with rocBLAS atomics not allowed (rocblas_backend::ScopedNoAtomics), so
+    /// the plan gives the same bits on every execute. The convolution engines set it: they claim
+    /// bitwise-reproducible results (RFC 0025).
+    void requireBitwiseReproducible()
+    {
+        _bitwiseReproducible = true;
+    }
+
+    bool bitwiseReproducible() const
+    {
+        return _bitwiseReproducible;
+    }
+
 private:
     std::vector<GemmCall> _calls;
+    bool _bitwiseReproducible = false;
 };
 
 } // namespace hipblaslt_plugin

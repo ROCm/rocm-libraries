@@ -9,12 +9,12 @@ One document per engine family. Each opens with an **At a glance** summary and t
 
 | Doc | Engines | One line |
 |---|---|---|
-| [IGEMM](IGEMM.md) | `CONV_IGEMM_FWD/BWD` (K1) | Implicit GEMM on MFMA/WMMA or FMA micro-tiles; the general forward and backward-data workhorse. |
-| [IGEMM_NCHW](IGEMM_NCHW.md) | `CONV_IGEMM_NCHW_BWD` (K7) | Channels-first backward data with col2im fused, in place. |
-| [DIRECT](DIRECT.md) | `CONV_DIRECT_FWD/BWD` (K2) | Stride-1 direct convolution on matrix cores: halo tiles, and filter-row reuse with batch packing. |
-| [WRW](WRW.md) | `CONV_WRW` (K3) | Backward weights as a row-direct implicit GEMM with a deterministic split reduction. |
-| [WINOGRAD](WINOGRAD.md) | `CONV_WINOGRAD_FWD/BWD/WRW` (K5) | Winograd 3x3: fused, cooperative and multipass forms in all three directions. |
-| [GROUP](GROUP.md) | `CONV_GROUP_FWD/BWD/WRW` (K4) | Grouped convolution on block-diagonal matrix-core tiles. |
+| [IGEMM](IGEMM.md) | `CONV_IGEMM_FWD/BWD`, `CONV_IGEMM_FWD/BWD_TF32` (K1) | Implicit GEMM on MFMA/WMMA or FMA micro-tiles; the general forward and backward-data workhorse. |
+| [IGEMM_NCHW](IGEMM_NCHW.md) | `CONV_IGEMM_NCHW_BWD`, `CONV_IGEMM_NCHW_BWD_TF32` (K7) | Channels-first backward data with col2im fused, in place. |
+| [DIRECT](DIRECT.md) | `CONV_DIRECT_FWD/BWD`, `CONV_DIRECT_FWD/BWD_TF32` (K2) | Stride-1 direct convolution on matrix cores: halo tiles, and filter-row reuse with batch packing. |
+| [WRW](WRW.md) | `CONV_WRW`, `CONV_WRW_TF32` (K3) | Backward weights as a row-direct implicit GEMM with a deterministic split reduction. |
+| [WINOGRAD](WINOGRAD.md) | `CONV_WINOGRAD_FWD/BWD/WRW`, `CONV_WINOGRAD_FWD/BWD_BF16`, `CONV_WINOGRAD_FWD/BWD_F43` (K5) | Winograd 3x3: fused, cooperative and multipass forms in all three directions. |
+| [GROUP](GROUP.md) | `CONV_GROUP_FWD/BWD/WRW`, `CONV_GROUP_FWD/BWD_TF32` (K4) | Grouped convolution on block-diagonal matrix-core tiles. |
 | [GROUP_VALU](GROUP_VALU.md) | `CONV_GROUP_VALU_FWD/BWD/WRW` | Grouped and small-group convolution on the vector ALU, lanes along the row; 1-D, 2-D and 3-D. |
 | [DEPTHWISE](DEPTHWISE.md) | `CONV_DEPTHWISE_{MFMA,ROWS,VALU}_FWD/BWD`, `CONV_DEPTHWISE_VALU_WRW` | The depthwise engines, with a selection guide. |
 | [SMALLC](SMALLC.md) | `CONV_SMALLC_FWD/BWD` | Few-channel stems forward, and stride-1 backward data into few channels. |
