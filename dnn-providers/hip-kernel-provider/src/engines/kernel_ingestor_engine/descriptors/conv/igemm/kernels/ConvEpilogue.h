@@ -8,7 +8,7 @@
 //   out[o] = Elem<T>::store(epi(acc, chan, o, live)); per element
 //
 //   ch    the column's channel (the output channel, groups included); ok false for a column past
-//         the tensor's edge (no loads there)
+//         the tensor's edge (it reads channel 0's operands and its result is discarded)
 //   chan  ConvEpiGen::Chan, the per-channel operands (bias, scale, ...) held in registers
 //   acc   the convolution's fp32 result for one output element
 //   o     its element offset in the output tensor (computed only when ConvEpiGen::NEEDS_OFFSET)
@@ -23,7 +23,8 @@
 // the provider from the graph's pointwise nodes:
 //
 //   CONV_EPI_CHAN_FIELDS  the per-channel registers (float members)
-//   CONV_EPI_CHAN_CODE    fills c from channel ch, loading only when ok
+//   CONV_EPI_CHAN_CODE    fills c from channel ch (channel 0 when not ok, a column whose
+//                         result is discarded)
 //   CONV_EPI_CODE         the per-element body: transforms float v and returns it
 //
 // The generated code reads operand tensors through e.operand[] and values through e.scalar[];
@@ -52,14 +53,13 @@ __device__ inline float convEpiLoadBf16(const void* p, long long i)
 
 /// The graph's RELU_FWD: at or below the lower clip the slope line through it, at or above the
 /// upper clip the upper clip, else v. NaN fails every compare and stays NaN. A zero slope gives
-/// the lower clip itself, so relu(-inf) is the clip, not 0 * -inf.
+/// the lower clip itself, so relu(-inf) is the clip, not 0 * -inf. Selects only: a branch here
+/// splits the store code of the tile kernels into blocks and costs them their registers.
 __device__ inline float convEpiRelu(float v, float lower, float upper, float slope)
 {
-    if(v <= lower)
-    {
-        return slope == 0.0f ? lower : lower + slope * (v - lower);
-    }
-    return v >= upper ? upper : v;
+    const float below = slope == 0.0f ? lower : lower + slope * (v - lower);
+    const float above = v >= upper ? upper : v;
+    return v <= lower ? below : above;
 }
 
 /// x times a gate in [0, 1]: a gate that is exactly 0 gives 0, so a gate that saturates at -inf
@@ -87,23 +87,42 @@ __device__ inline float convEpiGelu(float v)
 }
 
 /// GELU with the tanh approximation (PyTorch's approximate="tanh").
+// The activations below stay free of branches: a branch in the per-element epilogue splits the
+// unrolled store code of the tile kernels into blocks, and their register allocation then grows
+// by up to the tile's outputs (measured on the depthwise tiles: 49 to 215 VGPRs). The library's
+// tanhf branches over its ranges, so tanh is built on expm1f; where a select chooses between v
+// and an expensive value, the value passes an empty asm so the compiler does not turn the select
+// into a branch around it.
+
+/// tanh from expm1: -t / (t + 2) with t = e^(-2|v|) - 1, signed like v. Accurate near 0 (expm1),
+/// 1 at infinity, NaN for NaN.
+__device__ inline float convEpiTanh(float v)
+{
+    const float t = expm1f(-2.0f * fabsf(v));
+    return copysignf(-t / (t + 2.0f), v);
+}
+
 __device__ inline float convEpiGeluTanh(float v)
 {
     const float inner = 0.79788456080286536f * (v + 0.044715f * v * v * v);
-    return convEpiGated(v, 0.5f * (1.0f + tanhf(inner)));
+    return convEpiGated(v, 0.5f * (1.0f + convEpiTanh(inner)));
 }
 
 /// ELU: v above 0, alpha (e^v - 1) at or below.
 __device__ inline float convEpiElu(float v, float alpha)
 {
-    return v > 0.0f ? v : alpha * expm1f(v);
+    float below = alpha * expm1f(v);
+    asm("" : "+v"(below));
+    return v > 0.0f ? v : below;
 }
 
 /// Softplus as PyTorch computes it: log(1 + e^(beta v)) / beta, and v itself where beta v > 20.
 __device__ inline float convEpiSoftplus(float v, float beta)
 {
     const float bv = beta * v;
-    return bv > 20.0f ? v : log1pf(expf(bv)) / beta;
+    float smooth = log1pf(expf(bv)) / beta;
+    asm("" : "+v"(smooth));
+    return bv > 20.0f ? v : smooth;
 }
 
 #ifndef CONV_EPI_NEEDS_OFFSET
