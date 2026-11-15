@@ -131,10 +131,12 @@ extern "C" {
  *     v_ptr and live_rows at its end, which changes its size and field
  *     offsets; rocke_wmma_fmha_fwd_v2_spec_t gained dense_q and seqused_q in
  *     the padding after page_block_size (its size and offsets are unchanged).
- * 19: rocke_dw_wgrad_fold_spec_t gained cols, slices and unroll at its end,
+ * 19: rocke_coalesced_tile_loader_t gained has_col_xor and col_xor[4] at its
+ *     end (after elem_dtype), which changes its size.
+ * 20: rocke_dw_wgrad_fold_spec_t gained cols, slices and unroll at its end,
  *     which changes its size (16 -> 32 bytes on a 64-bit host) and the
  *     struct-return of rocke_dw_wgrad_fold_spec_default(). */
-#define ROCKE_ABI_VERSION 19
+#define ROCKE_ABI_VERSION 20
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.
