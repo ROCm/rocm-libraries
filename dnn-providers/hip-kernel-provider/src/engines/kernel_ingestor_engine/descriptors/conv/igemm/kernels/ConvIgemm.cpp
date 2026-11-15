@@ -61,7 +61,7 @@
 #endif
 
 extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPANCY
-    ConvIgemm(K1Args a)
+    ConvIgemm(K1Args a CONV_EPI_PARAM)
 {
 #if CONV_IGEMM_FMA
     k1ConvFma<CONV_IGEMM_T,
@@ -72,7 +72,7 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPA
               CONV_IGEMM_VEC,
               CONV_IGEMM_DIR,
               CONV_IGEMM_WD,
-              CONV_IGEMM_PACK>(a);
+              CONV_IGEMM_PACK>(a CONV_EPI_ARG);
 #else
     k1ConvMma<CONV_IGEMM_T,
               CONV_IGEMM_ATOM,
@@ -91,7 +91,7 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPA
               CONV_IGEMM_PACK,
               CONV_IGEMM_CF,
               CONV_IGEMM_SWZ,
-              CONV_IGEMM_DMA>(a);
+              CONV_IGEMM_DMA>(a CONV_EPI_ARG);
 #endif
 }
 
@@ -114,7 +114,11 @@ extern "C" __global__ void __launch_bounds__(256) ConvIgemmTranspose(ConvIgemmTr
 }
 
 /// Split-K: adds the splits' fp32 partials in order into the output's element type.
-extern "C" __global__ void __launch_bounds__(256) ConvIgemmReduce(K1ReduceArgs a)
+extern "C" __global__ void __launch_bounds__(256) ConvIgemmReduce(K1ReduceArgs a CONV_EPI_PARAM)
 {
+#if defined(CONV_EPI) && CONV_EPI
+    k1ReduceSplitsEpi<CONV_IGEMM_T>(a, ConvEpiGen{epiArgs});
+#else
     k1ReduceSplits<CONV_IGEMM_T>(a);
+#endif
 }

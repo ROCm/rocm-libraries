@@ -92,31 +92,12 @@ std::string_view directionName(ConvDirection direction)
     return "";
 }
 
-/// The element type's name in the kernel source, from the KMD's dtype spelling.
-std::string elementTypeFor(const std::string& dtype)
-{
-    if(dtype == "FLOAT")
-    {
-        return "float";
-    }
-    if(dtype == "HALF")
-    {
-        return "_Float16";
-    }
-    if(dtype == "BFLOAT16")
-    {
-        return "__bf16";
-    }
-    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "conv_naive kernel declares unsupported dtype '"
-                                                       + dtype + "'");
-}
-
 /// Graph-scoped applicability for one direction: a single convolution node of that
 /// direction that the naive kernel computes correctly and quickly enough.
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_naive::parseConvNaiveProblem(context, direction);
+    const auto problem
+        = conv_naive::parseConvNaiveProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value()
        || !conv_naive::withinWorkloadBudget(*problem, context.deviceProperties))
     {
@@ -195,13 +176,17 @@ ConvDirection directionFor(const KernelDefinition& kernel)
         "conv_naive kernel declares unsupported direction '" + direction + "'");
 }
 
-/// The argument list the kernels take: one ConvNaiveArgs by value. Only consulted for a
-/// pre-built kernel; a HIPRTC-compiled one carries no recorded signature.
-const std::vector<KernelArgument>& kernelSignature()
+/// The argument list the kernels take: one ConvNaiveArgs by value, and a ConvEpiArgs after it
+/// when an epilogue is fused. Only consulted for a pre-built kernel; a HIPRTC-compiled one
+/// carries no recorded signature.
+const std::vector<KernelArgument>& kernelSignature(bool fused)
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(ConvNaiveArgs)), 0, ""}};
-    return s_signature;
+    static const std::vector<KernelArgument> s_fusedSignature{
+        {"by_value", static_cast<uint32_t>(sizeof(ConvNaiveArgs)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fusedSignature : s_signature;
 }
 
 /// The compiled kernel and its argument block, minus the three pointers, which change per
@@ -261,7 +246,8 @@ public:
         // Re-derived from the graph, which the match admitted; the bound uids confirm it is
         // the same graph.
         const auto direction = directionFor(kernel);
-        const auto problem = conv_naive::parseConvNaiveProblem(context, direction);
+        const auto problem
+            = conv_naive::parseConvNaiveProblem(context, direction, conv_naive::Fusion::EPILOGUE);
         const auto x = tryGetBoundInt(bound, X_TOKEN);
         const auto w = tryGetBoundInt(bound, W_TOKEN);
         const auto y = tryGetBoundInt(bound, Y_TOKEN);
@@ -274,11 +260,16 @@ public:
         }
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
-        options.add("CONV_NAIVE_TYPE",
-                    elementTypeFor(kernel.getStringMetadata(std::string(DTYPE_FIELD))));
+        // The kernel match pairs the kernel's dtype with the graph's, so the problem's element
+        // type is the kernel's.
+        conv_naive::addCompileOptions(options, *problem);
 
-        auto code = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, kernelSignature());
+        auto code = buildIngestorKernelCode(_kernelCompiler,
+                                            _kpackLoader,
+                                            context,
+                                            kernel,
+                                            options,
+                                            kernelSignature(!problem->epilogue.empty()));
 
         // Backward weights: one block per dw element (the block shares its reduction); else one
         // thread per output element.
@@ -314,7 +305,17 @@ public:
                      problem.operands.y, deviceBuffers, numDeviceBuffers)
                      .ptr;
 
-        dispatch.kernelForStream(handle.getStream()).launch(handle.getStream(), args);
+        auto& runnable = dispatch.kernelForStream(handle.getStream());
+        if(problem.epilogue.empty())
+        {
+            runnable.launch(handle.getStream(), args);
+        }
+        else
+        {
+            const ConvEpiArgs epiArgs
+                = conv_epilogue::epilogueArgs(problem.epilogue, deviceBuffers, numDeviceBuffers);
+            runnable.launch(handle.getStream(), args, epiArgs);
+        }
     }
 
 private:

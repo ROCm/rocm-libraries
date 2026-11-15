@@ -34,6 +34,7 @@
 typedef _Float16 k1_half;
 typedef unsigned short k1_bf16; // bf16 bits
 
+#include "ConvEpilogue.h"
 #include "ConvIgemmArgs.h"
 
 // ---------------------------------------------------------------------------------------------
@@ -1822,8 +1823,9 @@ template <class T,
           int PACK = 0,
           int CF = 0,
           int SWZ = 0,
-          int DMA = 0>
-__device__ void k1ConvMma(const K1Args& a)
+          int DMA = 0,
+          class Epi = ConvEpiNone>
+__device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -2294,6 +2296,9 @@ __device__ void k1ConvMma(const K1Args& a)
         walk.template init<DIR>(a, gather);
 #pragma unroll
         for(int j = 0; j < FN; ++j)
+        {
+            const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+            const typename Epi::Chan chan = epi.chan(g * ncols + en, en < ncols);
 #pragma unroll
             for(int rc = 0; rc < WTM / CFR; ++rc)
             {
@@ -2301,8 +2306,17 @@ __device__ void k1ConvMma(const K1Args& a)
                 for(int i = 0; i < CFR / DIM; ++i)
 #pragma unroll
                     for(int e = 0; e < Atom::ACC; ++e)
+                    {
+                        const long long em
+                            = m0 + wm * WTM + rc * CFR + i * DIM + Atom::dRow(lane, e);
+                        const bool live = em < gather.rows && en < ncols;
+                        long long eo = 0;
+                        if constexpr(Epi::NEEDS_OFFSET)
+                            eo = live ? k1OutIndexCf<DIR>(a, gather, g, phase, em, en) : 0;
                         strip[(lane % DIM) * OLDC + i * DIM + Atom::dRow(lane, e)]
-                            = K1Elem<T>::store(acc[rc * (CFR / DIM) + i][j][e]);
+                            = K1Elem<T>::store(
+                                epi(acc[rc * (CFR / DIM) + i][j][e], chan, eo, live));
+                    }
                 __builtin_amdgcn_wave_barrier();
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -2343,6 +2357,7 @@ __device__ void k1ConvMma(const K1Args& a)
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
             }
+        }
         return;
     }
 
@@ -2351,6 +2366,13 @@ __device__ void k1ConvMma(const K1Args& a)
     k1LdsBarrier();
     T* strip = lds + wave * DIM * OLD;
     constexpr int ROW_VECS = WTN / VEC;
+    typename Epi::Chan chans[FN];
+#pragma unroll
+    for(int j = 0; j < FN; ++j)
+    {
+        const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+        chans[j] = epi.chan(g * ncols + en, en < ncols);
+    }
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
@@ -2358,8 +2380,16 @@ __device__ void k1ConvMma(const K1Args& a)
         for(int j = 0; j < FN; ++j)
 #pragma unroll
             for(int e = 0; e < Atom::ACC; ++e)
+            {
+                const long long em = m0 + wm * WTM + i * DIM + Atom::dRow(lane, e);
+                const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+                const bool live = em < gather.rows && en < ncols;
+                long long eo = 0;
+                if constexpr(Epi::NEEDS_OFFSET)
+                    eo = live ? k1OutIndex<DIR>(a, gather, g, phase, em, en) : 0;
                 strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
-                    = K1Elem<T>::store(acc[i][j][e]);
+                    = K1Elem<T>::store(epi(acc[i][j][e], chans[j], eo, live));
+            }
         __builtin_amdgcn_wave_barrier();
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -2399,8 +2429,17 @@ __device__ void k1ConvMma(const K1Args& a)
 #define CONV_IGEMM_FMA_DOT2 1
 #endif
 
-template <class T, int BM, int BN, int BK, int THREADS, int VEC, int DIR, int WD = 0, int PACK = 0>
-__device__ void k1ConvFma(const K1Args& a)
+template <class T,
+          int BM,
+          int BN,
+          int BK,
+          int THREADS,
+          int VEC,
+          int DIR,
+          int WD = 0,
+          int PACK = 0,
+          class Epi = ConvEpiNone>
+__device__ void k1ConvFma(const K1Args& a, const Epi& epi = Epi{})
 {
     constexpr int TX = 16, TY = THREADS / TX; // threads along n, along m
     constexpr int TM = BM / TY, TN = BN / TX;
@@ -2527,6 +2566,13 @@ __device__ void k1ConvFma(const K1Args& a)
 
     T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
     float* partial = a.partial + static_cast<long long>(split) * a.outElems;
+    typename Epi::Chan chans[TN];
+#pragma unroll
+    for(int j = 0; j < TN; ++j)
+    {
+        const int nn = n0 + ((j / 4) * TX + tx) * 4 + j % 4;
+        chans[j] = epi.chan(g * ncols + nn, nn < ncols);
+    }
 #pragma unroll
     for(int i = 0; i < TM; ++i)
     {
@@ -2541,7 +2587,7 @@ __device__ void k1ConvFma(const K1Args& a)
                 if(splits > 1)
                     partial[o] = acc[i][j];
                 else
-                    out[o] = K1Elem<T>::store(acc[i][j]);
+                    out[o] = K1Elem<T>::store(epi(acc[i][j], chans[j], o, true));
             }
         }
     }
@@ -2727,6 +2773,27 @@ __device__ inline void k1ReduceSplits(const K1ReduceArgs& a)
         out[i] = K1Elem<T>::store(sum);
     }
 }
+
+#if defined(CONV_EPI) && CONV_EPI
+// The fused split-K reduce: the epilogue applied once to each summed element. The channel comes
+// from the flat walk (ConvEpiFlatChannel), with no division per element.
+template <class T>
+__device__ inline void k1ReduceSplitsEpi(const K1ReduceArgs& a, const ConvEpiGen& epi)
+{
+    T* out = static_cast<T*>(a.out);
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    const long long first = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    ConvEpiFlatChannel flat(epi.e, first, step);
+    for(long long i = first; i < a.elems; i += step)
+    {
+        float sum = 0.0f;
+        for(int sp = 0; sp < a.splits; ++sp)
+            sum += a.partial[static_cast<long long>(sp) * a.elems + i];
+        out[i] = K1Elem<T>::store(epi(sum, epi.chan(flat.ch, true), i, true));
+        flat.advance();
+    }
+}
+#endif
 
 // ---------------------------------------------------------------------------------------------
 // Three-bf16 channel split (K1Split3Args): the pre-pass of the engines' TF32 forms. A config

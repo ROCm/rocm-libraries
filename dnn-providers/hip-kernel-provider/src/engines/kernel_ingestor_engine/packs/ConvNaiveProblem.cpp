@@ -16,6 +16,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvComputeType.hpp"
 #include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
@@ -69,11 +70,17 @@ ConvFields commonFields(const Attributes& attributes)
 
 /// The node's operands in forward roles, and which of them the kernel writes, or nullopt
 /// when the graph is not one convolution node of @p direction.
-std::optional<ConvFields> convFields(const MatchContext& context, ConvDirection direction)
+std::optional<ConvFields>
+    convFields(const MatchContext& context, ConvDirection direction, Fusion fusion)
 {
-    // One node per graph, and shapes fixed at plan build: the argument block is computed from
-    // the graph's dims, which an override-shape graph would change at execute.
-    if(context.graph.nodeCount() != 1 || context.graph.getGraph().is_override_shape_enabled())
+    // One node per graph (or, fused, the convolution first and a forward direction), and shapes
+    // fixed at plan build: the argument block is computed from the graph's dims, which an
+    // override-shape graph would change at execute.
+    const size_t nodes = context.graph.nodeCount();
+    const bool fusedShape
+        = fusion == Fusion::EPILOGUE && direction == ConvDirection::FORWARD && nodes > 1;
+    if(nodes < 1 || (nodes != 1 && !fusedShape)
+       || context.graph.getGraph().is_override_shape_enabled())
     {
         return std::nullopt;
     }
@@ -318,13 +325,36 @@ std::string_view engineName(ConvDirection direction)
     return "";
 }
 
-std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& context,
-                                                      ConvDirection direction)
+std::optional<ConvNaiveProblem>
+    parseConvNaiveProblem(const MatchContext& context, ConvDirection direction, Fusion fusion)
 {
-    const auto fields = convFields(context, direction);
+    auto fields = convFields(context, direction, fusion);
     if(!fields.has_value())
     {
         return std::nullopt;
+    }
+
+    // A fused graph: the convolution's y is the virtual head of the pointwise chain, and the
+    // kernel writes the chain's output in its place.
+    conv_epilogue::ConvEpilogue epilogue;
+    if(context.graph.nodeCount() > 1)
+    {
+        const auto& tensors = context.graph.getTensorMap();
+        const auto convY = tensors.find(fields->operands.y);
+        if(convY == tensors.end() || convY->second == nullptr || convY->second->dims() == nullptr)
+        {
+            return std::nullopt;
+        }
+        const std::vector<int64_t> convDims(convY->second->dims()->begin(),
+                                            convY->second->dims()->end());
+        auto parsed = conv_epilogue::parseConvEpilogue(context, fields->operands.y, convDims);
+        if(!parsed.has_value() || parsed->empty())
+        {
+            return std::nullopt;
+        }
+        epilogue = std::move(*parsed);
+        fields->operands.y = epilogue.outputUid;
+        fields->writtenUid = epilogue.outputUid;
     }
 
     // Both modes are served: convolution reflects the filter, cross-correlation does not.
@@ -334,11 +364,19 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
         return std::nullopt;
     }
 
-    // Three distinct operands: an output aliasing an input is read while it is written.
+    // Three distinct operands: an output aliasing an input is read while it is written. The
+    // same holds for the epilogue's operands.
     const auto& uids = fields->operands;
     if(uids.x == uids.w || uids.x == uids.y || uids.w == uids.y)
     {
         return std::nullopt;
+    }
+    for(const auto& operand : epilogue.operands)
+    {
+        if(operand.uid == uids.x || operand.uid == uids.w || operand.uid == uids.y)
+        {
+            return std::nullopt;
+        }
     }
 
     const auto x = deviceOperand(context, uids.x);
@@ -409,6 +447,7 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
     problem.direction = direction;
     problem.dataType = x->dataType;
     problem.operands = uids;
+    problem.epilogue = std::move(epilogue);
     problem.spatialRank = spatialRank;
 
     auto& args = problem.args;
@@ -490,6 +529,26 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
     args.total = *total;
     problem.multiplyAccumulates = *macs;
     return problem;
+}
+
+void addCompileOptions(compilation::KernelCompileOptions& options, const ConvNaiveProblem& problem)
+{
+    switch(problem.dataType)
+    {
+    case data_objects::DataType::FLOAT:
+        options.add("CONV_NAIVE_TYPE", std::string("float"));
+        break;
+    case data_objects::DataType::HALF:
+        options.add("CONV_NAIVE_TYPE", std::string("_Float16"));
+        break;
+    case data_objects::DataType::BFLOAT16:
+        options.add("CONV_NAIVE_TYPE", std::string("__bf16"));
+        break;
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "conv_naive: unsupported element type");
+    }
+    conv_epilogue::addEpilogueDefines(options, problem.epilogue);
 }
 
 bool withinWorkloadBudget(const ConvNaiveProblem& problem,
