@@ -1014,6 +1014,31 @@ def cases():
             32,
         ),
     )
+    # The double-buffered (compv4) WMMA K loop on gfx1201, plain and with
+    # lds_swizzle: pins the parity-following fragment reads and the swizzled
+    # read address.
+    for swizzle in (False, True):
+        add(
+            "gemm",
+            f"gemm/gfx1201/t128x128x32_compv4{'_swz' if swizzle else ''}",
+            "gfx1201",
+            build_gemm(
+                f"irhash_gemm_1201_compv4{'_swz' if swizzle else ''}",
+                "gfx1201",
+                128,
+                128,
+                32,
+                2,
+                2,
+                16,
+                16,
+                16,
+                "compv4",
+                "default",
+                32,
+                lds_swizzle=swizzle,
+            ),
+        )
     # Every other member of gfx11-generic / gfx12-generic has a row of its own
     # that points at its generic's facts; one case each, the gfx1151 / gfx1201
     # t32x32x16 configuration, shows it lowers under its own name.

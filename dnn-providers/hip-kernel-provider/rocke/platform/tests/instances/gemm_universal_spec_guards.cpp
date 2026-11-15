@@ -85,6 +85,21 @@ void no_tdm(Spec& s)
     s.trait.tdm_depth = 1;
 }
 
+/* A gfx1201-sized bf16 WMMA tile (64x64x32, 2x2 waves, no TDM): the base
+ * spec's 256x256x256 A/B tile overflows gfx1201's LDS. */
+void gfx1201_tile(Spec& s)
+{
+    bf16_16x16x16(s);
+    no_tdm(s);
+    s.trait.lds_k_pad = 0;
+    s.tile.tile_m = 64;
+    s.tile.tile_n = 64;
+    s.tile.tile_k = 32;
+    s.tile.warp_m = 2;
+    s.tile.warp_n = 2;
+    s.block_size = 128;
+}
+
 void run(const Case& c)
 {
     Spec s = base_spec();
@@ -166,6 +181,27 @@ int main()
          "gfx1250",
          [](Spec& s) { s.trait.pipeline = "wmma_v1"; },
          "WMMA path supports only the 'mem' pipeline (got 'wmma_v1') on gfx1250"},
+        {"compv4 on gfx1201 (double-buffered WMMA K loop)",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.pipeline = "compv4";
+         },
+         nullptr},
+        {"compv3 on gfx1201",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.pipeline = "compv3";
+         },
+         "WMMA path supports only the 'mem' or 'compv4' pipeline (got 'compv3') on gfx1201"},
+        {"lds_swizzle on gfx1201",
+         "gfx1201",
+         [](Spec& s) {
+             gfx1201_tile(s);
+             s.trait.lds_swizzle = true;
+         },
+         nullptr},
         {"cshuffle off gfx1250",
          "gfx1201",
          [](Spec& s) {

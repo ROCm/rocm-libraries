@@ -91,6 +91,22 @@
           "sha256": "48e1828aec7161bbc2353ba6b5848a608deef8acc0c2ebd0d68746e532899a48",
           "status": "ok"
         },
+        "gemm/gfx1201/t128x128x32_compv4": {
+          "arch": "gfx1201",
+          "bytes": 225878,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "90e2e158fd09ae4147946878c6100816011c8d428e4661ce641fe0677ce553eb",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x32_compv4_swz": {
+          "arch": "gfx1201",
+          "bytes": 235456,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_swz_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "eeedbb7a49c89f1da744a6d2e05a8430b082a48fde0fd5901c2ecaef0045e638",
+          "status": "ok"
+        },
         "gemm/gfx1201/t32x32x16": {
           "arch": "gfx1201",
           "bytes": 16093,
@@ -329,6 +345,22 @@
           "sha256": "a3efdd1617e67573b9be91bec20199015cc5f3cff31c10d07096f67d56a7f0b9",
           "status": "ok"
         },
+        "gemm/gfx1201/t128x128x32_compv4": {
+          "arch": "gfx1201",
+          "bytes": 225885,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "5d90188efb2464c00320600e9d2f39486e7e8cb020b2c88253231bfaed545a70",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x32_compv4_swz": {
+          "arch": "gfx1201",
+          "bytes": 235463,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_swz_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "dc7be7278b9b67fc69d3cad4ac7f89b6b7d7e291b2a08f790bd8379f3d601d5d",
+          "status": "ok"
+        },
         "gemm/gfx1201/t32x32x16": {
           "arch": "gfx1201",
           "bytes": 16100,
@@ -565,6 +597,22 @@
           "family": "gemm",
           "kernel_name": "irhash_gemm_1200_a_fp16_t32x32x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
           "sha256": "4cb50c070509259f2f8ded44841dc58354f569de42b33d1c9fcfe6dbb73a0500",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x32_compv4": {
+          "arch": "gfx1201",
+          "bytes": 225949,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "32ff6d4cd9cd1e2bd1d26f43691f6342261858115b46d66621d8042a9841d7e7",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x32_compv4_swz": {
+          "arch": "gfx1201",
+          "bytes": 235527,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_swz_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "6bf3e80f14d7b6186be89285f51332644fc0b40fb062dff7582e2be9a6e3569d",
           "status": "ok"
         },
         "gemm/gfx1201/t32x32x16": {
@@ -834,6 +882,22 @@
           "family": "gemm",
           "kernel_name": "irhash_gemm_1200_a_fp16_t32x32x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
           "sha256": "4cb50c070509259f2f8ded44841dc58354f569de42b33d1c9fcfe6dbb73a0500",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x32_compv4": {
+          "arch": "gfx1201",
+          "bytes": 225949,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "32ff6d4cd9cd1e2bd1d26f43691f6342261858115b46d66621d8042a9841d7e7",
+          "status": "ok"
+        },
+        "gemm/gfx1201/t128x128x32_compv4_swz": {
+          "arch": "gfx1201",
+          "bytes": 235527,
+          "family": "gemm",
+          "kernel_name": "irhash_gemm_1201_compv4_swz_fp16_t128x128x32_w2x2x1_wt16x16x16_compv4_intrawave_default_pad",
+          "sha256": "6bf3e80f14d7b6186be89285f51332644fc0b40fb062dff7582e2be9a6e3569d",
           "status": "ok"
         },
         "gemm/gfx1201/t32x32x16": {

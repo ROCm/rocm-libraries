@@ -656,11 +656,14 @@ rocke_value_t* rocke_gemm_emit_frag_smem_load(rocke_gemm_build_ctx_t* ctx,
                                               rocke_value_t* k_in_atom,
                                               rocke_value_t* atom_mn_base,
                                               rocke_value_t* k_tile_base,
-                                              int frag_len)
+                                              int frag_len,
+                                              rocke_value_t* swz_row)
 {
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* lds_row = rocke_b_add(b, atom_mn_base, mn_in_atom);
     rocke_value_t* lds_col = rocke_b_add(b, k_tile_base, k_in_atom);
+    /* swz_row: the parity-free tile row the store side keyed lds_swizzle on
+     * (NULL when off); every chunk's column goes through the same XOR. */
     /* fp8/bf8 is the one case where frag_len is not an element count: the
      * gfx1250 K=64 WMMA carries its operands as <frag_len x i32>, one dword per
      * slot covering four K-contiguous bytes. 8-bit LDS loads cap at 16 elements
@@ -691,18 +694,17 @@ rocke_value_t* rocke_gemm_emit_frag_smem_load(rocke_gemm_build_ctx_t* ctx,
     int max_vec = is_half ? 8 : frag_len;
     if(frag_len <= max_vec)
     {
-        return rocke_gemm_emit_smem_load(b, src, lds_row, lds_col, frag_len, ctx->storage_dtype);
+        rocke_value_t* col = swz_row ? rocke_gemm_swz_col(ctx, lds_col, swz_row) : lds_col;
+        return rocke_gemm_emit_smem_load(b, src, lds_row, col, frag_len, ctx->storage_dtype);
     }
     rocke_value_t* frag = NULL;
     for(int off = 0; off < frag_len; off += max_vec)
     {
+        rocke_value_t* col = rocke_b_add(b, lds_col, rocke_b_const_i32(b, off));
+        if(swz_row)
+            col = rocke_gemm_swz_col(ctx, col, swz_row);
         rocke_value_t* chunk
-            = rocke_gemm_emit_smem_load(b,
-                                        src,
-                                        lds_row,
-                                        rocke_b_add(b, lds_col, rocke_b_const_i32(b, off)),
-                                        max_vec,
-                                        ctx->storage_dtype);
+            = rocke_gemm_emit_smem_load(b, src, lds_row, col, max_vec, ctx->storage_dtype);
         frag = (frag == NULL) ? chunk : rocke_b_vec_concat(b, frag, chunk);
     }
     return frag;
@@ -764,15 +766,17 @@ void rocke_gemm_emit_wmma_phase_ex(rocke_gemm_build_ctx_t* ctx,
         = rocke_b_mul(b, ctx->warp_n_idx, rocke_b_const_i32(b, ctx->mfmas_n * t->warp_tile_n));
 
     /* The ring/ping-pong slot this K-tile was filled into. The load side already
-     * offsets its LDS destination by the parity; without the same shift here
-     * every WMMA reads slot 0 while the mover is filling another -- a read/write
-     * race, not a wrong-address bug. */
+     * offsets its LDS destination by the parity, under both the DTL prefetch
+     * ring and the compv4 double buffer; without the same shift here every
+     * WMMA reads slot 0 while the next tile is being filled into the other --
+     * a read/write race, not a wrong-address bug. */
     bool parity_is_value = parity_v != NULL;
+    bool two_buf = ctx->prefetch || ctx->db;
     rocke_value_t* a_par_row_v;
     rocke_value_t* b_par_row_v;
     int a_par_row_static;
     int b_par_row_static;
-    if(ctx->prefetch && parity_is_value)
+    if(two_buf && parity_is_value)
     {
         a_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_m));
         b_par_row_v = rocke_b_mul(b, parity_v, rocke_b_const_i32(b, ctx->block_n));
@@ -783,8 +787,8 @@ void rocke_gemm_emit_wmma_phase_ex(rocke_gemm_build_ctx_t* ctx,
     {
         a_par_row_v = NULL;
         b_par_row_v = NULL;
-        a_par_row_static = ctx->prefetch ? parity_imm * ctx->block_m : 0;
-        b_par_row_static = ctx->prefetch ? parity_imm * ctx->block_n : 0;
+        a_par_row_static = two_buf ? parity_imm * ctx->block_m : 0;
+        b_par_row_static = two_buf ? parity_imm * ctx->block_n : 0;
     }
 
     /* new_accs = list(iter_vars) */
@@ -804,8 +808,21 @@ void rocke_gemm_emit_wmma_phase_ex(rocke_gemm_build_ctx_t* ctx,
                 b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m + a_par_row_static));
             if(a_par_row_v != NULL)
                 atom_row = rocke_b_add(b, atom_row, a_par_row_v);
-            a_rows[mi] = rocke_gemm_emit_frag_smem_load(
-                ctx, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
+            rocke_value_t* a_swz_row
+                = ctx->swz
+                      ? rocke_b_add(
+                            b,
+                            rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m)),
+                            a_row_in_atom)
+                      : NULL;
+            a_rows[mi] = rocke_gemm_emit_frag_smem_load(ctx,
+                                                        A_src,
+                                                        a_row_in_atom,
+                                                        a_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->a_per_lane,
+                                                        a_swz_row);
         }
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
         {
@@ -813,8 +830,21 @@ void rocke_gemm_emit_wmma_phase_ex(rocke_gemm_build_ctx_t* ctx,
                 b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n + b_par_row_static));
             if(b_par_row_v != NULL)
                 atom_row = rocke_b_add(b, atom_row, b_par_row_v);
-            b_cols[ni] = rocke_gemm_emit_frag_smem_load(
-                ctx, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
+            rocke_value_t* b_swz_row
+                = ctx->swz
+                      ? rocke_b_add(
+                            b,
+                            rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n)),
+                            b_col_in_atom)
+                      : NULL;
+            b_cols[ni] = rocke_gemm_emit_frag_smem_load(ctx,
+                                                        B_src,
+                                                        b_col_in_atom,
+                                                        b_k_in_atom,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        ctx->b_per_lane,
+                                                        b_swz_row);
         }
         bool last_k_atom = kk == ctx->k_atoms - 1;
         if(after_last_reads.fn != NULL && last_k_atom)

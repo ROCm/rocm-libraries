@@ -328,11 +328,17 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
         self.assertEqual(tuple(cpp), tuple(py))
 
     def test_both_engines_agree_on_target_scope(self):
-        """The summed cshuffle budget on CDNA and the lds_swizzle reject on RDNA
-        WMMA: both engines agree, verdict and reason."""
+        """The summed cshuffle budget on CDNA, the lds_swizzle reject on the
+        unverified RDNA WMMA targets, and the gfx1201 admission of lds_swizzle
+        and the compv4 double buffer: both engines agree, verdict and reason."""
         import rocke_engine
 
-        from test_gemm_validity_gaps import CDNA_CSHUFFLE, RDNA_WMMA, _bf16_spec
+        from test_gemm_validity_gaps import (
+            CDNA_CSHUFFLE,
+            RDNA_WMMA,
+            RDNA_WMMA_COMPV4,
+            _bf16_spec,
+        )
 
         from rocke.core.backend import universal_gemm_spec_to_dict
         from rocke.instances.common.gemm_universal import is_valid_spec
@@ -344,6 +350,13 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
                 "gfx950",
             ),
             ("gfx1151 lds_swizzle", _bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1151"),
+            ("gfx1201 lds_swizzle", _bf16_spec(RDNA_WMMA, lds_swizzle=True), "gfx1201"),
+            ("gfx1201 compv4", _bf16_spec(RDNA_WMMA_COMPV4), "gfx1201"),
+            (
+                "gfx1201 compv4 lds_swizzle",
+                _bf16_spec(RDNA_WMMA_COMPV4, lds_swizzle=True),
+                "gfx1201",
+            ),
         ):
             with self.subTest(label):
                 py = is_valid_spec(spec, arch=arch)
