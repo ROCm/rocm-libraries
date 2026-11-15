@@ -48,9 +48,10 @@
  *  49  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 bf16 out
  *  50  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=4 fp32 out, lds_k_outer
  *  51  N4H12W12C24_K32Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250, split_k=2 fp16 out
- *  52-54  WMMA split-K: gfx1201 bf16 out and gfx1151 fp32 out, which both
- *         engines must reject, and gfx1250 bf16 out with the cshuffle
- *         epilogue, which both admit. Must match the Python emitter's 52-54.
+ *  52-54  WMMA split-K: gfx1201 bf16 out (admitted since gfx12 RDNA has
+ *         float global atomics), gfx1151 fp32 out, which both engines must
+ *         reject, and gfx1250 bf16 out with the cshuffle epilogue, which both
+ *         admit. Must match the Python emitter's 52-54.
  *  55-57,67-70  gfx1250 WMMA async K loop (global_load_async_to_lds
  *         ping-pong): split-K fp32 out small/big (55/56), C=3 rejected by
  *         both engines (57), bf16 operands (67), explicit vector_size_a
@@ -58,8 +59,8 @@
  *         explicit A/B load-width caps, K-outer/M-outer (69-70). Must match
  *         the Python emitter's 55-57,67-70.
  *  58-61  WMMA cshuffle epilogue: direct fp16 out, split-K bf16 out,
- *         async_dma split-K, and gfx1201 (WMMA split-K enabled only on
- *         gfx1250, rejected). Must match the Python emitter's 58-61.
+ *         async_dma split-K, and split-K on gfx1201 (float global atomics).
+ *         Must match the Python emitter's 58-61.
  *  62  both engines must reject: WMMA cshuffle split-K fp16 out with an odd
  *      store vector. Must match the Python emitter's 62.
  *  63-66  two-stage (f32 workspace) split-K on WMMA: fp16/bf16 out variants,

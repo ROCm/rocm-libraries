@@ -3267,7 +3267,7 @@ void case_memory_caps()
              .has_global_prefetch = false,
              .has_cluster_launch = false,
              .has_multicast_load = false,
-             .has_global_float_atomic_add = false,
+             .has_global_float_atomic_add = true,
          }},
         {"gfx1250",
          {

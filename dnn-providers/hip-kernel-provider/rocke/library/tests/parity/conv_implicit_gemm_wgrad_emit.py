@@ -52,10 +52,10 @@
 #   49 -- gfx1250 WMMA split-K=4, bf16 dW (zero-fill packed bf16 atomic), M-outer
 #   50 -- gfx1250 WMMA split-K=4, fp32 dW (scalar atomic), K-outer
 #   51 -- gfx1250 WMMA split-K=2, fp16 dW, C=24 (partial N tiles)
-#   52-54 -- WMMA split-K: gfx1201 bf16 dW (arch not enabled) and gfx1151 fp32
-#         dW (arch not enabled, any dtype), which both engines must reject, and
-#         gfx1250 bf16 dW with the cshuffle epilogue (M-outer), which both admit
-#         since the WMMA cshuffle epilogue
+#   52-54 -- WMMA split-K: gfx1201 bf16 dW (admitted since gfx12 RDNA has float
+#         global atomics), gfx1151 fp32 dW (arch not enabled, any dtype), which
+#         both engines must reject, and gfx1250 bf16 dW with the cshuffle
+#         epilogue (M-outer), which both admit since the WMMA cshuffle epilogue
 #   55 -- gfx1250 async_dma (global_load_async_to_lds ping-pong), K-outer,
 #         split-K=2 fp32 dW, C=24 (partial N tiles: zero-filled chunks) and odd
 #         slices (zero-fill redirect)
@@ -65,8 +65,8 @@
 #   58-60 -- gfx1250 cshuffle (WMMA fragment through LDS): direct fp16 dW,
 #         split-K bf16 dW (genuine paired atomics), and with async_dma under
 #         split-K at C=24 (partial N tiles)
-#   61 -- both engines must reject: cshuffle split-K on gfx1201 (WMMA split-K
-#         is enabled only on gfx1250)
+#   61 -- cshuffle split-K on gfx1201, which both engines admit since gfx12
+#         RDNA has float global atomics
 #   62 -- both engines must reject: gfx1250 cshuffle split-K fp16 dW whose
 #         store vector is odd (C=3 with a 2x2 filter: wg_N=12 is even, but
 #         the LDS pairing has no partner)
@@ -890,7 +890,7 @@ def _spec(idx: int):
         )
 
     if 52 <= idx <= 54:
-        # WMMA split-K specs both engines must reject.
+        # WMMA split-K: gfx1201 and gfx1250 admitted, gfx1151 rejected.
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         arch, dtype_d, epilogue, warp_tile_k = {

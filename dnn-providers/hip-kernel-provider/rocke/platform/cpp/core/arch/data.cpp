@@ -5566,7 +5566,7 @@ static constexpr rocke_arch_target_t k_target_gfx12_generic = {
         .has_global_prefetch = false,
         .has_cluster_launch = false,
         .has_multicast_load = false,
-        .has_global_float_atomic_add = false,
+        .has_global_float_atomic_add = true,
     },
     .limits = {.max_threads_per_block = 1024, .vgprs = 256, .agprs = 0, .sgprs = 106},
 };

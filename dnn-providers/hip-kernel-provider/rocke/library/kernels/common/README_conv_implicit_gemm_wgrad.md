@@ -39,14 +39,14 @@ Four epilogue paths are supported, selected automatically based on `spec.epilogu
 | CShuffleEpilogue | `epilogue="cshuffle"`, `split_k=1` | LDS-staged vectorised store |
 | Split-K direct atomic | `epilogue="default"`, `split_k > 1`, `dtype_d="fp32"` | `global_atomic_add` per MFMA-lane directly from accumulators |
 | Split-K cshuffle atomic | `epilogue="cshuffle"`, `split_k > 1` | LDS scatter + `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` from LDS |
-| Split-K WMMA atomic | wave32 with `memory.has_global_float_atomic_add` (gfx1250), `epilogue="default"`, `split_k > 1` | One atomic per WMMA accumulator element: scalar `global_atomic_add` (fp32), or a packed `<2 x dtype>` atomic with a zero partner (bf16/fp16) |
+| Split-K WMMA atomic | wave32 with `memory.has_global_float_atomic_add` (gfx1250, gfx12 RDNA), `epilogue="default"`, `split_k > 1` | One atomic per WMMA accumulator element: scalar `global_atomic_add` (fp32), or a packed `<2 x dtype>` atomic with a zero partner (bf16/fp16) |
 
 On MFMA targets, `epilogue="cshuffle"` is **required** for bf16/fp16 output when
 `split_k > 1`. The direct-atomic path emits zero-filled packed atomics at the
 scattered MFMA layout; the cshuffle path produces genuinely contiguous adjacent
 pairs after the LDS shuffle, which is necessary for correct `<2 x dtype>` packed
 atomics. On WMMA arches whose `ArchTarget` sets
-`memory.has_global_float_atomic_add` (gfx1250) the `default` split-K epilogue
+`memory.has_global_float_atomic_add` (gfx1250 and the gfx12 RDNA targets) the `default` split-K epilogue
 places each value in its half of the pair itself, and `cshuffle` pairs through
 LDS from the WMMA fragment; the two-stage path decodes the WMMA fragment
 through `op.dst_layout()`. Other wave32 arches keep `split_k=1` and have no
@@ -85,6 +85,9 @@ tagged in the kernel name and `KernelIdentity`.
   descriptor of `RegTransposeTileLoader.load_global`), behind a wave-uniform
   branch on `Wo % 8 == 0` and an 8-aligned slice start that falls back to the
   per-column decode. 2-D only, with the plain regt loop or `regt_prefetch=3`.
+- WMMA split-K on gfx12 RDNA: `gfx12-generic` (and so gfx1200 / gfx1201) sets
+  `memory.has_global_float_atomic_add` in both arch tables, which admits the
+  WMMA split-K atomic and two-stage paths there exactly as on gfx1250.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 

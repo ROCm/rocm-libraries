@@ -2313,9 +2313,10 @@ class TestWgradTwoStageOnWmma(unittest.TestCase):
             wgrad_two_stage_available,
         )
 
-        for arch in ("gfx942", "gfx950", "gfx1250"):
+        # gfx12 RDNA (gfx1200 / gfx1201) has the float global atomics too.
+        for arch in ("gfx942", "gfx950", "gfx1250", "gfx1201", "gfx1200"):
             self.assertTrue(wgrad_two_stage_available(arch), arch)
-        for arch in ("gfx1151", "gfx1201"):
+        for arch in ("gfx1151", "gfx11-generic"):
             self.assertFalse(wgrad_two_stage_available(arch), arch)
 
     def test_16bit_split_k_atomic_arch_scope(self):
@@ -2328,8 +2329,10 @@ class TestWgradTwoStageOnWmma(unittest.TestCase):
         )
         from rocke.core.arch import ArchTarget
 
-        self.assertTrue(wgrad_wmma_split_k_available("gfx1250"))
-        for arch in ("gfx1151", "gfx1201"):
+        # gfx12 RDNA (gfx1200 / gfx1201) has the packed 16-bit forms too.
+        for arch in ("gfx1250", "gfx1201", "gfx1200", "gfx12-generic"):
+            self.assertTrue(wgrad_wmma_split_k_available(arch), arch)
+        for arch in ("gfx1151", "gfx11-generic"):
             self.assertFalse(wgrad_wmma_split_k_available(arch), arch)
             self.assertFalse(
                 ArchTarget.from_gfx(arch).memory.has_global_float_atomic_add, arch
@@ -2340,8 +2343,8 @@ class TestWgradTwoStageOnWmma(unittest.TestCase):
             spec.validate()
             ok, why = is_valid_wgrad_spec(spec, "gfx1250")
             self.assertTrue(ok, f"{dtype} split-K on gfx1250 must be valid: {why}")
-            # Other wave32 arches: split-K stays off for every dW dtype.
-            for arch in ("gfx1151", "gfx1201"):
+            # gfx11 RDNA: split-K stays off for every dW dtype.
+            for arch in ("gfx1151", "gfx11-generic"):
                 other = self._gfx1250_spec(data=data, split_k=4, warp_tile_k=16)
                 ok, why = is_valid_wgrad_spec(other, arch)
                 self.assertFalse(ok, f"{dtype} split-K on {arch} must stay rejected")
