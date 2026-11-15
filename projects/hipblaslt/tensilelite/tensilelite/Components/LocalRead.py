@@ -917,7 +917,13 @@ class LocalReadMFMA(LocalRead):
                         "LDSSegmentBRotate: swizzled B vIdx=%u does not read through LocalReadAddrB+%u" \
                         % (vIdx, compByteOff // readStride)
                 reg = nt * regsPerNtile + r * regsPerLoad
-                offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
+                # 64K-window register select, mapped through the LSI read windows like the normal reader:
+                # with a component stride >= 128K, LocalReadAddr+1 holds window 2, not 1.
+                addrIdx  = off // maxLDSConstOffset
+                windows  = segOff.get("readAddressWindows" + tc)
+                regIdx   = windows.index(addrIdx) if windows is not None else addrIdx
+                offSplit = off - addrIdx * maxLDSConstOffset
+                srcAddr  = vgpr("LocalReadAddr%s+%u" % (tc, regIdx))
                 ds = DSModifiers(na=1, offset=offSplit)
                 if halfPLR:
                     destVgpr = vgpr(writer.getHalfPLRValuStr(writer.states.halfPLRGroups, reg, tc), blockWidth)
