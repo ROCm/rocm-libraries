@@ -128,6 +128,8 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         uniform_k_decode=spec.uniform_k_decode,
         # The register-prefetch K loop mode.
         regt_prefetch=spec.regt_prefetch,
+        # The XOR-swizzled unpadded A/B LDS tiles (layout and fragment reads).
+        lds_swizzle=spec.lds_swizzle,
         # The wavelet load-wave count changes the launch block and the loaders.
         num_load_waves=spec.num_load_waves,
         # The fused accumulator epilogue changes the emitted epilogue (and

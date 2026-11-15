@@ -44,6 +44,7 @@ from rocke.core.ir import (
     VectorType,
 )
 from rocke.helpers.io import smem_load_fragment
+from rocke.helpers.loads import swizzle_lds_col
 from rocke.helpers.magic_division import do_magic_division_dynamic
 from rocke.helpers.spec import choose_load_vec
 from rocke.helpers.transforms import (
@@ -925,6 +926,7 @@ def _emit_frag_smem_load(
     frag_len: int,
     *,
     smem_dtype: Optional[Type] = None,
+    col_xor: Optional[Tuple[int, int, int, int]] = None,
 ) -> Value:
     """Load one ``frag_len``-wide operand fragment from a row-major LDS tile.
 
@@ -938,6 +940,38 @@ def _emit_frag_smem_load(
     """
     lds_row = b.add(atom_mn_base, mn_in_atom)
     lds_col = b.add(k_tile_base, k_in_atom)
+    if col_xor is not None:
+        # XOR-swizzled tile (CoalescedTileLoader.col_xor): permute each
+        # 8-element chunk's column; the run stays inside its chunk. The XOR
+        # term reads row bits 0-3 only (lds_col_xor_params) and
+        # ``atom_mn_base`` is a multiple of the 16-row atom, so it is taken
+        # from the lane's in-atom row: one lane-constant per K atom, shared by
+        # every fragment, and the fragment base stays an immediate ds_load
+        # offset.
+        if col_xor[0] + col_xor[1].bit_length() > 4 or col_xor[3] > 3:
+            raise ValueError(f"col_xor {col_xor} reads row bits past the 16-row atom")
+        xor_row = mn_in_atom
+        if frag_len > 8:
+            if frag_len % 8:
+                raise ValueError(f"col_xor needs 8-element chunks (got {frag_len})")
+            parts = [
+                _emit_smem_load(
+                    b,
+                    src,
+                    lds_row,
+                    swizzle_lds_col(
+                        b, xor_row, b.add(lds_col, b.const_i32(off)), col_xor
+                    ),
+                    8,
+                    smem_dtype=smem_dtype,
+                )
+                for off in range(0, frag_len, 8)
+            ]
+            frag = parts[0]
+            for p_ in parts[1:]:
+                frag = b.vec_concat(frag, p_)
+            return frag
+        lds_col = swizzle_lds_col(b, xor_row, lds_col, col_xor)
     if frag_len <= 8:
         return _emit_smem_load(
             b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype

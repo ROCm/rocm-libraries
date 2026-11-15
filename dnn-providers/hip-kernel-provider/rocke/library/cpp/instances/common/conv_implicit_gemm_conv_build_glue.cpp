@@ -639,6 +639,26 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
     }
 
+    /* lds_swizzle: the XOR parameters (lds_col_xor_params) shared by the tile
+     * stores (CoalescedTileLoader.col_xor) and the fragment reads. */
+    if(spec->lds_swizzle)
+    {
+        if(overrides != NULL
+           && (overrides->a_load_override != NULL || overrides->a_operand_override != NULL))
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "lds_swizzle does not support loader / operand overrides");
+            return false;
+        }
+        if(rocke_lds_col_xor_params(ctx->block_k, 8, ctx->lds_col_xor) != ROCKE_OK)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "lds_swizzle: no XOR swizzle for tile_k %d", ctx->block_k);
+            return false;
+        }
+        ctx->has_lds_col_xor = true;
+    }
+
     /* smem_alloc A_smem / B_smem with storage_shape(rows) = (rows, row_stride) */
     {
         int a_shape[2];
@@ -890,6 +910,16 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* CoalescedTileLoader(..., elem_dtype=ir_dtype_a / ir_dtype_b) */
         ctx->a_sync_loader.elem_dtype = ctx->ir_dtype_a;
         ctx->b_sync_loader.elem_dtype = ctx->ir_dtype_b;
+        /* CoalescedTileLoader(..., col_xor=lds_col_xor) under lds_swizzle. */
+        if(ctx->has_lds_col_xor
+           && (rocke_coalesced_tile_loader_set_col_xor(&ctx->a_sync_loader, ctx->lds_col_xor)
+                   != ROCKE_OK
+               || rocke_coalesced_tile_loader_set_col_xor(&ctx->b_sync_loader, ctx->lds_col_xor)
+                      != ROCKE_OK))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "lds_swizzle: col_xor refused by the tile loader");
+            return false;
+        }
         ctx->have_sync_loaders = true;
     }
 

@@ -171,6 +171,9 @@ class KernelIdentity:
     dy_halo_kouter_pad: int = 0
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
+    # fwd ImplicitGemmConvSpec.lds_swizzle: the XOR-swizzled unpadded A/B LDS
+    # tiles. Left out of the hash while False.
+    lds_swizzle: bool = False
     # ---- capability: bounds which problems this binary can serve ----
     is_3d: bool = False
     is_pointwise: bool = False
@@ -273,6 +276,8 @@ class KernelIdentity:
                 del fields[name]
         if not fields["split_k_cluster"]:
             del fields["split_k_cluster"]
+        if not fields["lds_swizzle"]:
+            del fields["lds_swizzle"]
         # Same for the stream-K pair at "no stream-K".
         if fields["streamk"] == "off" and not fields["streamk_reduction"]:
             del fields["streamk"], fields["streamk_reduction"]

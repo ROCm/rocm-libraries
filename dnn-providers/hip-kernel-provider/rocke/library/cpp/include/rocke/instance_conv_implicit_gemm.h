@@ -230,6 +230,13 @@ typedef struct rocke_implicit_gemm_conv_spec
      * them to the single LDS buffer after them. Default 0: byte-identical.
      * Mirrors ImplicitGemmConvSpec.regt_prefetch. */
     int regt_prefetch; /* default 0 */
+    /* XOR-swizzled, unpadded A/B LDS tiles (kernel-name flag lxs; WMMA mem
+     * pipeline, sync loaders, tile_k 16..128): the rows are packed (no K pad)
+     * and each row's 8-element chunks are permuted by the row-dependent XOR of
+     * rocke_lds_col_xor_params, on the tile stores and the fragment reads
+     * alike. Default false: byte-identical. Mirrors
+     * ImplicitGemmConvSpec.lds_swizzle. */
+    bool lds_swizzle; /* default false */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

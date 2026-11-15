@@ -948,6 +948,13 @@ def _tf32_split_k_spec(idx: int):
 #   94: regt_prefetch 1, grouped, fp16 (the masked group-based descriptors)
 #   95: regt_prefetch 1 on gfx1250 (config 41 unsplit): rejected by both
 #       engines (gfx12 RDNA only)
+#   96: lds_swizzle, fp16
+#   97: lds_swizzle at tile_k 64, bf16
+#   98: lds_swizzle + regt_prefetch 1 + uniform_k_decode on a 128x64 tile, fp16
+#   99: lds_swizzle on gfx1250 (config 41 unsplit): 16-wide fragments, read
+#       in swizzled 8-element chunks
+#  100: lds_swizzle with lds_k_pad=0: rejected by both engines
+#  101: lds_swizzle + regt_prefetch 1 + uniform_k_decode at tile_k 128, fp16
 _RDNA4 = dict(N=2, Hi=14, Wi=14, C=64, K=128, fy=3, fx=3, pH=1, pW=1)
 _RDNA4_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2)
 _BF16 = ConvDataSpec("bf16", "bf16", "bf16")
@@ -964,11 +971,29 @@ _RDNA4_CFGS = {
     92: (_RDNA4, dict(regt_prefetch=1), "gfx1201"),
     93: (_RDNA4, dict(regt_prefetch=1, uniform_k_decode=True, data=_BF16), "gfx1201"),
     94: (_RDNA4_GROUPED, dict(regt_prefetch=1), "gfx1201"),
+    96: (_RDNA4, dict(lds_swizzle=True), "gfx1201"),
+    97: (_RDNA4, dict(lds_swizzle=True, tile_k=64, data=_BF16), "gfx1201"),
+    98: (
+        _RDNA4,
+        dict(
+            tile_m=128,
+            lds_swizzle=True,
+            regt_prefetch=1,
+            uniform_k_decode=True,
+        ),
+        "gfx1201",
+    ),
+    100: (_RDNA4, dict(lds_swizzle=True, lds_k_pad=0), "gfx1201"),
+    101: (
+        _RDNA4,
+        dict(tile_k=128, lds_swizzle=True, regt_prefetch=1, uniform_k_decode=True),
+        "gfx1201",
+    ),
 }
 
 
 # Configs built on the gfx1250 split-K binary rather than on the RDNA4 base.
-_RDNA4_SPLIT_CFGS = (90, 95)
+_RDNA4_SPLIT_CFGS = (90, 95, 99)
 
 
 def _rdna4_spec(idx: int):
@@ -991,6 +1016,9 @@ def _rdna4_spec(idx: int):
     if idx == 95:
         spec, arch = _split_k_spec(41)
         return replace(spec, split_k=1, regt_prefetch=1), arch
+    if idx == 99:
+        spec, arch = _split_k_spec(41)
+        return replace(spec, split_k=1, lds_swizzle=True), arch
     prob, kw, arch = _RDNA4_CFGS[idx]
     return ImplicitGemmConvSpec(problem=_cp(**prob), **dict(base, **kw)), arch
 

@@ -22,6 +22,7 @@
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h" /* rocke_lane_decode_t, rocke_decode_mfma_lanes */
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/instance_conv_layouts.h" /* rocke_conv_tr_lane_offsets32 */
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ====================================================================== *
  * _emit_mfma(b, atom, a, bv, c)  (py 637-638)
@@ -192,6 +193,67 @@ rocke_value_t* rocke_conv_emit_frag_smem_load(rocke_ir_builder_t* b,
     return frag;
 }
 
+rocke_value_t* rocke_conv_emit_frag_smem_load_xor(rocke_ir_builder_t* b,
+                                                  rocke_value_t* src,
+                                                  rocke_value_t* mn_in_atom,
+                                                  rocke_value_t* k_in_atom,
+                                                  rocke_value_t* atom_mn_base,
+                                                  rocke_value_t* k_tile_base,
+                                                  int frag_len,
+                                                  const rocke_type_t* smem_dtype,
+                                                  const int* col_xor)
+{
+    if(col_xor == NULL)
+        return rocke_conv_emit_frag_smem_load(
+            b, src, mn_in_atom, k_in_atom, atom_mn_base, k_tile_base, frag_len, smem_dtype);
+
+    rocke_value_t* lds_row = rocke_b_add(b, atom_mn_base, mn_in_atom);
+    rocke_value_t* lds_col = rocke_b_add(b, k_tile_base, k_in_atom);
+    /* The XOR term reads row bits 0-3 only (rocke_lds_col_xor_params) and
+     * atom_mn_base is a multiple of the 16-row atom, so it is taken from the
+     * lane's in-atom row: one lane-constant per K atom, shared by every
+     * fragment, and the fragment base stays an immediate ds_load offset. */
+    int mask_bits = 0;
+    for(int m = col_xor[1]; m > 0; m >>= 1)
+        ++mask_bits;
+    if(col_xor[0] + mask_bits > 4 || col_xor[3] > 3)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "col_xor (%d, %d, %d, %d) reads row bits past the 16-row atom",
+                        col_xor[0],
+                        col_xor[1],
+                        col_xor[2],
+                        col_xor[3]);
+        return NULL;
+    }
+    rocke_value_t* xor_row = mn_in_atom;
+    if(frag_len > 8)
+    {
+        if(frag_len % 8)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "col_xor needs 8-element chunks (got %d)", frag_len);
+            return NULL;
+        }
+        rocke_value_t* parts[16];
+        int n_parts = 0;
+        for(int off = 0; off < frag_len && n_parts < 16; off += 8)
+        {
+            rocke_value_t* c_off = rocke_b_const_i32(b, off);
+            rocke_value_t* col = rocke_b_add(b, lds_col, c_off);
+            rocke_value_t* swz = rocke_swizzle_lds_col(b, xor_row, col, col_xor);
+            parts[n_parts++] = rocke_conv_emit_smem_load(b, src, lds_row, swz, 8, smem_dtype);
+        }
+        rocke_value_t* frag = parts[0];
+        for(int p = 1; p < n_parts; ++p)
+            frag = rocke_b_vec_concat(b, frag, parts[p]);
+        return frag;
+    }
+    lds_col = rocke_swizzle_lds_col(b, xor_row, lds_col, col_xor);
+    return rocke_conv_emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype);
+}
+
 /* ====================================================================== *
  * emit_wmma_phase(A_src, B_src, iter_vars) -> new_accs  (py 1108-1162)
  *
@@ -214,6 +276,8 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
     /* a_map = op.a_layout(); b_map = op.b_layout() */
     const rocke_arch_layout_map_t* a_map = rocke_mmaop_a_layout(op, b);
     const rocke_arch_layout_map_t* b_map = rocke_mmaop_b_layout(op, b);
+    /* spec.lds_swizzle: the fragment reads take the tile stores' XOR. */
+    const int* frag_xor = ctx->has_lds_col_xor ? ctx->lds_col_xor : NULL;
 
     /* a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
      * b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0) */
@@ -259,14 +323,15 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 ctx->tr_dtype);
                 continue;
             }
-            a_rows[mi] = rocke_conv_emit_frag_smem_load(b,
-                                                        A_src,
-                                                        a_row_in_atom,
-                                                        a_k_in_atom,
-                                                        atom_row,
-                                                        k_tile_base,
-                                                        ctx->a_per_lane,
-                                                        ctx->smem_dtype);
+            a_rows[mi] = rocke_conv_emit_frag_smem_load_xor(b,
+                                                            A_src,
+                                                            a_row_in_atom,
+                                                            a_k_in_atom,
+                                                            atom_row,
+                                                            k_tile_base,
+                                                            ctx->a_per_lane,
+                                                            ctx->smem_dtype,
+                                                            frag_xor);
         }
 
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
@@ -288,14 +353,15 @@ void rocke_conv_emit_wmma_phase(rocke_conv_build_ctx_t* ctx,
                                                 ctx->tr_dtype);
                 continue;
             }
-            b_cols[ni] = rocke_conv_emit_frag_smem_load(b,
-                                                        B_src,
-                                                        b_col_in_atom,
-                                                        b_k_in_atom,
-                                                        atom_row,
-                                                        k_tile_base,
-                                                        ctx->b_per_lane,
-                                                        ctx->smem_dtype);
+            b_cols[ni] = rocke_conv_emit_frag_smem_load_xor(b,
+                                                            B_src,
+                                                            b_col_in_atom,
+                                                            b_k_in_atom,
+                                                            atom_row,
+                                                            k_tile_base,
+                                                            ctx->b_per_lane,
+                                                            ctx->smem_dtype,
+                                                            frag_xor);
         }
 
         int flat = 0;

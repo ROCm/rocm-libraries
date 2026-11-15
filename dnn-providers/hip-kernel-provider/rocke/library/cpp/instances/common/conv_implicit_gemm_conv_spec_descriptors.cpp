@@ -324,6 +324,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
     s.uniform_k_decode = false;
     s.regt_prefetch = 0;
+    s.lds_swizzle = false;
 
     s.num_load_waves = 2; /* wavelet pipeline: default 2 load waves */
     return s;
@@ -395,6 +396,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *            f"skc{split_k_cluster}": split_k_cluster > 0,
      *            "ukd": uniform_k_decode,
      *            f"rtp{regt_prefetch}": regt_prefetch > 0,
+     *            "lxs": lds_swizzle,
      *            "tf32": self.data.is_tf32}) */
     char short_buf[128];
     char t_buf[48];
@@ -406,8 +408,8 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char skc_buf[24];
     char rtp_buf[24];
     const char* parts[6];
-    const char* flag_names[9];
-    int flag_on[9];
+    const char* flag_names[10];
+    int flag_on[10];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -467,13 +469,15 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     snprintf(rtp_buf, sizeof(rtp_buf), "rtp%d", s->regt_prefetch);
     flag_names[7] = rtp_buf;
     flag_on[7] = s->regt_prefetch > 0 ? 1 : 0;
+    flag_names[8] = "lxs";
+    flag_on[8] = s->lds_swizzle ? 1 : 0;
     /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
      * from an fp32 kernel with the same atom shape. Last, and only when set,
      * so every existing name is unchanged. */
-    flag_names[8] = "tf32";
-    flag_on[8] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
+    flag_names[9] = "tf32";
+    flag_on[9] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 9, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 10, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -986,6 +990,7 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
     /* effective_lds_layout():
      *   if self.lds_layout is not None:  layout = self.lds_layout
      *   elif self.lds_k_pad is not None: layout = padded_k(tile_k, lds_k_pad)
+     *   elif self.lds_swizzle:           layout = padded_k(tile_k, 0)
      *   elif self.async_dma:             layout = packed_async(tile_k)
      *   else: layout = padded_k(tile_k, 8 if tile_k >= 16 else 0)
      *   layout.validate(); return layout
@@ -1008,6 +1013,14 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
         /* LdsLayout.padded_k(logical_cols=tile_k, k_pad=lds_k_pad) */
         l.logical_cols = s->tile_k;
         l.k_pad = s->lds_k_pad;
+        l.requires_packed_async = false;
+    }
+    else if(s->lds_swizzle)
+    {
+        /* Packed rows; the XOR swizzle replaces the bank-conflict pad:
+         * LdsLayout.padded_k(tile_k, 0). */
+        l.logical_cols = s->tile_k;
+        l.k_pad = 0;
         l.requires_packed_async = false;
     }
     else if(s->async_dma)
@@ -1498,6 +1511,31 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     if(!rocke_conv_fwd_regt_prefetch_ok(s, family, arch, reason, reason_cap))
     {
         return false;
+    }
+    if(s->lds_swizzle)
+    {
+        /* Python fwd_lds_swizzle_reason. */
+        if(strcmp(family, "wmma") != 0 || s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "lds_swizzle is wired for the WMMA mem pipeline only");
+        }
+        if(s->async_dma || s->unroll_k)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "lds_swizzle needs the synchronous single-buffer loaders");
+        }
+        if(s->lds_layout != NULL || s->has_lds_k_pad)
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "lds_swizzle sets the LDS layout itself (no lds_layout / lds_k_pad)");
+        }
+        if(s->tile_k != 16 && s->tile_k != 32 && s->tile_k != 64 && s->tile_k != 128)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "lds_swizzle needs tile_k in 16/32/64/128 (got %d)", s->tile_k);
+        }
     }
 
     if(s->split_k != 1 || s->split_k_cluster)

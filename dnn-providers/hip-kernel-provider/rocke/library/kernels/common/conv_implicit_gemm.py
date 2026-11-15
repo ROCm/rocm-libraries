@@ -72,7 +72,11 @@ from rocke.helpers.asm import lds_barrier_keep_vmem
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
-from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
+from rocke.helpers.loads import (
+    AsyncTileLoader,
+    CoalescedTileLoader,
+    lds_col_xor_params,
+)
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
@@ -382,6 +386,16 @@ class ImplicitGemmConvSpec:
     # Default 0: every existing config emits byte-identical IR and keeps its
     # kernel name.
     regt_prefetch: int = 0
+    # XOR-swizzled, unpadded A/B LDS tiles ("lxs"; WMMA ``mem`` pipeline, sync
+    # loaders). The default layout pads every K row by 8 elements so the
+    # 16-byte fragment reads of 16 consecutive rows hit distinct banks; that
+    # pad is 25% of the A/B LDS at tile_k 32 (12.5% at 64) and caps how many
+    # workgroups a WGP holds. Here the rows are packed and each row's 8-element
+    # chunks are permuted by a row-dependent XOR
+    # (rocke.helpers.loads.lds_col_xor_params), which keeps both the
+    # fragment reads and the row-major tile stores conflict-free.
+    # Default False: byte-identical, same kernel names.
+    lds_swizzle: bool = False
 
     @property
     def block_size(self) -> int:
@@ -487,6 +501,7 @@ class ImplicitGemmConvSpec:
                 f"skc{self.split_k_cluster}": self.split_k_cluster > 0,
                 "ukd": self.uniform_k_decode,
                 f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
+                "lxs": self.lds_swizzle,
                 # TF32 compute keeps fp32 storage, so nothing else in the name
                 # tells it from an fp32 kernel with the same atom shape. Last,
                 # and only when set, so every existing name is unchanged.
@@ -550,6 +565,9 @@ class ImplicitGemmConvSpec:
             layout = self.lds_layout
         elif self.lds_k_pad is not None:
             layout = LdsLayout.padded_k(self.tile_k, self.lds_k_pad)
+        elif self.lds_swizzle:
+            # Packed rows; the XOR swizzle replaces the bank-conflict pad.
+            layout = LdsLayout.padded_k(self.tile_k, 0)
         elif self.async_dma:
             layout = LdsLayout.packed_async(self.tile_k)
         else:
@@ -903,6 +921,21 @@ def fwd_regt_prefetch_reason(
     return None
 
 
+def fwd_lds_swizzle_reason(spec: ImplicitGemmConvSpec, family: str) -> Optional[str]:
+    """Why ``spec.lds_swizzle`` cannot be built, or ``None``."""
+    if not spec.lds_swizzle:
+        return None
+    if family != "wmma" or spec.pipeline != "mem":
+        return "lds_swizzle is wired for the WMMA mem pipeline only"
+    if spec.async_dma or spec.unroll_k:
+        return "lds_swizzle needs the synchronous single-buffer loaders"
+    if spec.lds_layout is not None or spec.lds_k_pad is not None:
+        return "lds_swizzle sets the LDS layout itself (no lds_layout / lds_k_pad)"
+    if spec.tile_k not in (16, 32, 64, 128):
+        return f"lds_swizzle needs tile_k in 16/32/64/128 (got {spec.tile_k})"
+    return None
+
+
 def _rpf_lds_barrier(b: IRBuilder, arch: str) -> None:
     """The in-loop barrier of the register-prefetch K loops (regt_prefetch):
     orders the LDS accesses of the tile before and after it, and leaves the
@@ -1156,6 +1189,10 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _why = fwd_regt_prefetch_reason(spec, family, target)
     if _why is not None:
         return False, _why
+    if spec.lds_swizzle:
+        _why = fwd_lds_swizzle_reason(spec, family)
+        if _why is not None:
+            return False, _why
 
 
     if spec.split_k != 1 or spec.split_k_cluster:
@@ -1719,6 +1756,13 @@ def _build_implicit_gemm_conv_impl(
     lds_layout = spec.effective_lds_layout()
     if spec.async_dma:
         lds_layout.validate_for_async()
+    # lds_swizzle: the XOR parameters (lds_col_xor_params) shared by the tile
+    # stores (CoalescedTileLoader.col_xor) and the fragment reads.
+    lds_col_xor = lds_col_xor_params(block_k) if spec.lds_swizzle else None
+    if lds_col_xor is not None and (
+        a_load_override is not None or a_operand_override is not None
+    ):
+        raise ValueError("lds_swizzle does not support loader / operand overrides")
     A_smem = b.smem_alloc(
         ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
     )
@@ -1929,12 +1973,14 @@ def _build_implicit_gemm_conv_impl(
         # routing via the descriptor's ``valid`` predicate) is centralised
         # so a future tile-shape sweep picks it up uniformly across
         # GEMM, conv, and attention loads.
+        _xor_kw = {"col_xor": lds_col_xor} if lds_col_xor is not None else {}
         a_sync_loader = CoalescedTileLoader(
             tile_rows=block_m,
             tile_cols=block_k,
             block_size=threads,
             load_vec=load_vec_a,
             elem_dtype=ir_dtype_a,
+            **_xor_kw,
         )
         b_sync_loader = CoalescedTileLoader(
             tile_rows=block_n,
@@ -1942,6 +1988,7 @@ def _build_implicit_gemm_conv_impl(
             block_size=threads,
             load_vec=load_vec_b,
             elem_dtype=ir_dtype_b,
+            **_xor_kw,
         )
         # Wavelet pipeline: load waves use a separate loader sized to the
         # number of load threads (num_load_waves * wave_size), not to
@@ -2168,6 +2215,7 @@ def _build_implicit_gemm_conv_impl(
         """
         a_map = op.a_layout()
         b_map = op.b_layout()
+        _frag_xor_kw = {"col_xor": lds_col_xor} if lds_col_xor is not None else {}
         a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
         b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
         warp_m_off = grid.warp_m_off(b)
@@ -2188,6 +2236,7 @@ def _build_implicit_gemm_conv_impl(
                         k_tile_base,
                         a_per_lane,
                         smem_dtype=_smem_dtype,
+                        **_frag_xor_kw,
                     )
                 )
             b_cols = []
@@ -2203,6 +2252,7 @@ def _build_implicit_gemm_conv_impl(
                         k_tile_base,
                         b_per_lane,
                         smem_dtype=_smem_dtype,
+                        **_frag_xor_kw,
                     )
                 )
             flat = 0

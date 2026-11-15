@@ -879,6 +879,37 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         spec->split_k = 1;
         spec->regt_prefetch = 1;
         return 0;
+    case 96: /* lds_swizzle */
+        spec->lds_swizzle = true;
+        return 0;
+    case 97:
+        spec->lds_swizzle = true;
+        spec->tile_k = 64;
+        rdna4_bf16(spec);
+        return 0;
+    case 98:
+        spec->tile_m = 128;
+        spec->lds_swizzle = true;
+        spec->regt_prefetch = 1;
+        spec->uniform_k_decode = true;
+        return 0;
+    case 99: /* gfx1250: 16-wide fragments */
+        if(make_cfg_split_k(41, spec, arch) != 0)
+            return -1;
+        spec->split_k = 1;
+        spec->lds_swizzle = true;
+        return 0;
+    case 100: /* lds_k_pad: rejected */
+        spec->lds_swizzle = true;
+        spec->has_lds_k_pad = true;
+        spec->lds_k_pad = 0;
+        return 0;
+    case 101:
+        spec->tile_k = 128;
+        spec->lds_swizzle = true;
+        spec->regt_prefetch = 1;
+        spec->uniform_k_decode = true;
+        return 0;
     default:
         return -1;
     }
