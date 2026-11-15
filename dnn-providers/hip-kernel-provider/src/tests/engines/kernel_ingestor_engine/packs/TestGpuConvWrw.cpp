@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -694,7 +696,17 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
     ASSERT_EQ(hipMemcpy(got.data(), dw, got.size() * sizeof(TO), hipMemcpyDeviceToHost),
               hipSuccess);
     int64_t mismatches = 0;
-    const int64_t groups = r.groups, taps = r.taps, kg = r.kg, cg = r.cg, splits = r.splits;
+    const int64_t groups = r.groups;
+    const int64_t taps = r.taps;
+    const int64_t kg = r.kg;
+    const int64_t cg = r.cg;
+    const int64_t splits = r.splits;
+    // A value's bits (a NaN or a signed zero compares by its encoding).
+    const auto bitsOf = [](const TO& v) {
+        std::conditional_t<sizeof(TO) == 4, uint32_t, uint16_t> u = 0;
+        std::memcpy(&u, &v, sizeof(u));
+        return u;
+    };
     for(int64_t g = 0; g < groups; ++g)
     {
         for(int64_t tap = 0; tap < taps; ++tap)
@@ -728,7 +740,7 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
                     // NaN (+inf meeting -inf) carries no defined payload: any NaN matches.
                     const bool bothNan = std::isnan(static_cast<float>(want))
                                          && std::isnan(static_cast<float>(have));
-                    if(!bothNan && std::memcmp(&want, &have, sizeof(TO)) != 0 && ++mismatches <= 5)
+                    if(!bothNan && bitsOf(want) != bitsOf(have) && ++mismatches <= 5)
                     {
                         ADD_FAILURE() << "reduce at dw offset " << offset << " (g " << g << ", k "
                                       << k << ", c " << c << ", tap " << tap
@@ -738,11 +750,16 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
             }
         }
     }
-    EXPECT_EQ(mismatches, 0) << "of " << count << " dw elements (reduce "
-                             << (r.tile == 2   ? "rows"
-                                 : r.tile == 1 ? "tile"
-                                               : "quad")
-                             << ")";
+    const char* reduce = "quad";
+    if(r.tile == 1)
+    {
+        reduce = "tile";
+    }
+    else if(r.tile == 2)
+    {
+        reduce = "rows";
+    }
+    EXPECT_EQ(mismatches, 0) << "of " << count << " dw elements (reduce " << reduce << ")";
 }
 
 /// Runs every config of @p kernels (default: the shipped catalog) the kernel match admits on

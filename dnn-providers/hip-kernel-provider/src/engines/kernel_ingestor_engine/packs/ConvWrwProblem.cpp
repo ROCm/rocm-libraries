@@ -1407,7 +1407,15 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.wk = cg * problem.taps;
     r.wc = problem.filterChannelsLast ? 1 : problem.taps;
     r.wtap = problem.filterChannelsLast ? cg : 1;
-    r.tile = reduceRows ? 2 : (reduceTile.blocks > 0 ? 1 : 0);
+    r.tile = 0;
+    if(reduceRows)
+    {
+        r.tile = 2;
+    }
+    else if(reduceTile.blocks > 0)
+    {
+        r.tile = 1;
+    }
     r.tileK = static_cast<int>(reduceTile.tileK);
     r.tileC = static_cast<int>(reduceTile.tileC);
     r.tilesK = static_cast<int>(reduceTile.tilesK);
