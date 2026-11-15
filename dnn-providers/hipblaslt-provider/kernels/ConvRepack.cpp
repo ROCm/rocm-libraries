@@ -131,6 +131,137 @@ __device__ void stridedCast(const StridedCastArgs& args)
     }
 }
 
+// The fused epilogue's steps. fp32 throughout, no fast-math: relu and clamp keep NaN, and a
+// gate that saturates to exactly 0 gives 0 rather than -inf * 0.
+__device__ inline float epilogueLoad(const ConvRepackEpilogue& e, int i, long long channel)
+{
+    const long long index = e.operandPerChannel[i] != 0 ? channel : 0;
+    switch(e.operandType[i])
+    {
+    case 1:
+        return static_cast<float>(static_cast<const _Float16*>(e.operand[i])[index]);
+    case 2:
+        return __builtin_bit_cast(
+            float,
+            static_cast<unsigned>(static_cast<const unsigned short*>(e.operand[i])[index]) << 16);
+    default:
+        return static_cast<const float*>(e.operand[i])[index];
+    }
+}
+
+__device__ inline float epilogueGated(float v, float gate)
+{
+    return gate == 0.0f ? 0.0f : v * gate;
+}
+
+__device__ inline float epilogueSigmoid(float v)
+{
+    return 1.0f / (1.0f + expf(-v));
+}
+
+__device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, long long channel)
+{
+    for(int i = 0; i < e.ops; ++i)
+    {
+        const int s = e.slot[i];
+        switch(e.op[i])
+        {
+        case CONV_REPACK_EPI_ADD_OPERAND:
+            v += epilogueLoad(e, s, channel);
+            break;
+        case CONV_REPACK_EPI_ADD_SCALAR:
+            v += e.scalar[s];
+            break;
+        case CONV_REPACK_EPI_MUL_OPERAND:
+            v *= epilogueLoad(e, s, channel);
+            break;
+        case CONV_REPACK_EPI_MUL_SCALAR:
+            v *= e.scalar[s];
+            break;
+        case CONV_REPACK_EPI_RELU:
+        {
+            const float lower = e.scalar[s];
+            const float upper = e.scalar[s + 1];
+            const float slope = e.scalar[s + 2];
+            if(v <= lower)
+            {
+                v = slope == 0.0f ? lower : lower + slope * (v - lower);
+            }
+            else if(v >= upper)
+            {
+                v = upper;
+            }
+            break;
+        }
+        case CONV_REPACK_EPI_GELU:
+            v = epilogueGated(v, 0.5f * erfcf(-v * 0.70710678118654752f));
+            break;
+        case CONV_REPACK_EPI_GELU_TANH:
+            v = epilogueGated(
+                v, 0.5f * (1.0f + tanhf(0.79788456080286536f * (v + 0.044715f * v * v * v))));
+            break;
+        case CONV_REPACK_EPI_SWISH:
+            v = epilogueGated(v, epilogueSigmoid(e.scalar[s] * v));
+            break;
+        case CONV_REPACK_EPI_SIGMOID:
+            v = epilogueSigmoid(v);
+            break;
+        case CONV_REPACK_EPI_TANH:
+            v = tanhf(v);
+            break;
+        case CONV_REPACK_EPI_ELU:
+            v = v > 0.0f ? v : e.scalar[s] * expm1f(v);
+            break;
+        case CONV_REPACK_EPI_ABS:
+            v = fabsf(v);
+            break;
+        case CONV_REPACK_EPI_SOFTPLUS:
+        {
+            const float bv = e.scalar[s] * v;
+            v = bv > 20.0f ? v : log1pf(expf(bv)) / e.scalar[s];
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return v;
+}
+
+/// A strided cast whose elements pass through the fused epilogue before the rounding. The
+/// channel is the coordinate along the epilogue's channel axis, read off the index walk the
+/// cast already does.
+template <typename OutputType>
+__device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
+{
+    const StridedCastArgs& args = a.cast;
+    auto* dst = static_cast<OutputType*>(args.dst);
+    for(long long index = firstThread(); index < args.total; index += threadStride())
+    {
+        long long rest = index;
+        long long srcOffset = 0;
+        long long dstOffset = 0;
+        long long channel = 0;
+        for(int axis = args.rank - 1; axis >= 0; --axis)
+        {
+            const long long coordinate = rest % args.dims[axis];
+            rest /= args.dims[axis];
+            srcOffset += coordinate * args.srcStrides[axis];
+            dstOffset += coordinate * args.dstStrides[axis];
+            if(axis == a.epilogue.channelAxis)
+            {
+                channel = coordinate;
+            }
+        }
+        float sum = args.src[srcOffset];
+        for(int batch = 1; batch < args.batches; ++batch)
+        {
+            sum += args.src[srcOffset + batch * args.batchStride];
+        }
+        dst[dstOffset] = static_cast<OutputType>(applyEpilogue(a.epilogue, sum, channel));
+    }
+}
+
 /// The cast of many partials into few outputs: one 64-thread block per output element, each
 /// thread summing every 64th partial in order, then a fixed tree in LDS. Deterministic (the same
 /// order on every run and GPU), one rounding; for sums of many partials, which the per-element
@@ -1306,6 +1437,21 @@ extern "C" __global__ void StridedCastFloatToHalf(StridedCastArgs args)
 extern "C" __global__ void StridedCastFloatToBfloat16(StridedCastArgs args)
 {
     stridedCast<__bf16>(args);
+}
+
+extern "C" __global__ void StridedCastEpilogueFloatToFloat(StridedCastEpilogueArgs args)
+{
+    stridedCastEpilogue<float>(args);
+}
+
+extern "C" __global__ void StridedCastEpilogueFloatToHalf(StridedCastEpilogueArgs args)
+{
+    stridedCastEpilogue<_Float16>(args);
+}
+
+extern "C" __global__ void StridedCastEpilogueFloatToBfloat16(StridedCastEpilogueArgs args)
+{
+    stridedCastEpilogue<__bf16>(args);
 }
 
 extern "C" __global__ void Im2Col2(Im2ColArgs args)

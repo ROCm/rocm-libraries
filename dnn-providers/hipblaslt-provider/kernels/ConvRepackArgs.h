@@ -52,6 +52,52 @@ struct StridedCastArgs
     int batches;
 };
 
+#define CONV_REPACK_EPI_OPERANDS 4
+#define CONV_REPACK_EPI_SCALARS 8
+#define CONV_REPACK_EPI_OPS 8
+
+// The pointwise steps a fused convolution epilogue runs, in the order of
+// hipdnn_plugin_sdk::conv_epilogue::OpCode.
+#define CONV_REPACK_EPI_ADD_OPERAND 0
+#define CONV_REPACK_EPI_ADD_SCALAR 1
+#define CONV_REPACK_EPI_MUL_OPERAND 2
+#define CONV_REPACK_EPI_MUL_SCALAR 3
+#define CONV_REPACK_EPI_RELU 4
+#define CONV_REPACK_EPI_GELU 5
+#define CONV_REPACK_EPI_GELU_TANH 6
+#define CONV_REPACK_EPI_SWISH 7
+#define CONV_REPACK_EPI_SIGMOID 8
+#define CONV_REPACK_EPI_TANH 9
+#define CONV_REPACK_EPI_ELU 10
+#define CONV_REPACK_EPI_ABS 11
+#define CONV_REPACK_EPI_SOFTPLUS 12
+
+/// A fused convolution epilogue, selected at run time step by step: the pointwise chain after
+/// the convolution, applied in fp32 to each element before its one rounding. op[i] is a
+/// CONV_REPACK_EPI_* code; slot[i] its operand (ADD_OPERAND, MUL_OPERAND) or its first value.
+/// Operands are read at the element's channel (per channel) or at 0; operandType 0 fp32,
+/// 1 fp16, 2 bf16. The channel is the coordinate of the cast's axis channelAxis, so no element
+/// pays a division for it.
+struct ConvRepackEpilogue
+{
+    const void* operand[CONV_REPACK_EPI_OPERANDS];
+    int operandType[CONV_REPACK_EPI_OPERANDS];
+    int operandPerChannel[CONV_REPACK_EPI_OPERANDS];
+    float scalar[CONV_REPACK_EPI_SCALARS];
+    int op[CONV_REPACK_EPI_OPS];
+    int slot[CONV_REPACK_EPI_OPS];
+    int ops;
+    int channelAxis;
+};
+
+/// A strided cast (StridedCastArgs) whose elements pass through `epilogue` before their
+/// rounding: the last pass of a fused explicit-GEMM convolution.
+struct StridedCastEpilogueArgs
+{
+    StridedCastArgs cast;
+    ConvRepackEpilogue epilogue;
+};
+
 /// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
 /// leading spatial axes have extent 1, pad 0, stride 1, dilation 1 and tensor stride 0.
 ///
