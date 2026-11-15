@@ -3,8 +3,11 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <set>
+#include <vector>
 
 #include "EngineInterface.hpp"
 #include "plans/PlanBuilderInterface.hpp"
@@ -18,10 +21,17 @@ namespace hipblaslt_plugin
 /// It reports HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE only when constructed with
 /// @p supportsGraphCapture: every plan its builders make must be capture-safe (no host
 /// synchronization, allocation or benchmarking on the execute path).
+///
+/// @p numericalNotes is the engine's RFC 0025 claim (`hipdnnBackendNumericalNote_t` values),
+/// written to its details as given. nullopt writes no field, which hipDNN reports as
+/// NONDETERMINISTIC; a list without HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC claims bitwise
+/// reproducible results, which a test must prove.
 class PlanBuilderEngine : public IEngine
 {
 public:
-    explicit PlanBuilderEngine(int64_t id, bool supportsGraphCapture = false);
+    explicit PlanBuilderEngine(int64_t id,
+                               bool supportsGraphCapture = false,
+                               std::optional<std::vector<int32_t>> numericalNotes = std::nullopt);
 
     int64_t id() const override;
 
@@ -44,6 +54,7 @@ public:
 private:
     int64_t _id;
     bool _supportsGraphCapture;
+    std::optional<std::vector<int32_t>> _numericalNotes;
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 };
 

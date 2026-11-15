@@ -35,7 +35,7 @@
 // ConvWrwReduce, the partials' fixed-order sum, shares the source, as do ConvWrwReduceTile, the
 // same sum written by K C T R S runs (the host's choice for K C T R S at few splits), and
 // ConvWrwReduceRows (K C T R S at one split on gfx950).
-// Three-bf16 (fp32 graphs under TF32 permission) compiles the bf16 kernel (CONV_K3_T unsigned
+// Three-bf16 (fp32 graphs, the TF32 engine's configs) compiles the bf16 kernel (CONV_K3_T unsigned
 // short) with CONV_K3_MATH 1, which adds ConvWrwSplit (the operands split into 3N bf16 images,
 // K3SplitArgs), and CONV_K3_TO float, the reduces' dw element type. Neither is defined
 // otherwise, so every other config compiles exactly as before.

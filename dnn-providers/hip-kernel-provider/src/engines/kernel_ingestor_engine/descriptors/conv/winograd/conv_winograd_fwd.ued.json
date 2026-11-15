@@ -26,6 +26,7 @@
     "runtime_compilation"
   ],
   "numerical_notes": [
-    "winograd"
+    "winograd",
+    "winograd_tile_4x4"
   ]
 }

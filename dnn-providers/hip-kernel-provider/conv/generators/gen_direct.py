@@ -534,7 +534,8 @@ add(
     [F(F33, 8, 8, 4, 16, 4, pipe=1), F(F333, 8, 8, 4, 16, 4, ring=0, pipe=1)],
 )
 add("FLOAT", ["gfx12"], [F(F333, 8, 8, 4, 16, 4, ring=0)])
-# Three-bf16 fp32 (TF32 permission only): bf16 operands, 3x reduction, fp32 output.
+# Three-bf16 fp32 (TF32 configs, the CONV_DIRECT_*_TF32 engines'): bf16 operands, 3x reduction,
+# fp32 output.
 X3 = dict(math=1)
 add(
     "FLOAT",
@@ -715,17 +716,39 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 }
             )
     total += len(kernels)
+    # The three-bf16 configs make an engine of their own, which reports the TENSOR_CORE
+    # numerical note (cuDNN's note for TF32 engines), so a caller can exclude them by note.
+    ued_tf32 = U("ued." + tag + ".tf32")
     write(
-        f"conv_direct_{tag}.kdp.json",
+        f"conv_direct_{tag}_tf32.ued.json",
         {
             "version": "1.0",
-            "id": U("kdp." + tag),
-            "name": f"hipkernel:conv_direct_{tag}",
-            "arch": [],
-            "matchers": [umd],
-            "engine": ued,
-            "dispatch": udd,
-            "kernelDescriptors": kernels,
+            "id": ued_tf32,
+            "name": f"hipkernel:CONV_DIRECT_{direction}_TF32",
+            "graph_match": {"native": f"hipkernel.conv_direct_{tag}.graph_match"},
+            "metadata": kmd,
+            "knobs": INTS,
+            "behavior_notes": ["runtime_compilation"],
+            # RFC 0025 numerical notes: TENSOR_CORE (fp32 through bf16 operand parts).
+            # Deterministic as the exact engine.
+            "numerical_notes": ["tensor_core"],
         },
     )
+    for suffix, engine, members in (
+        ("", ued, [k for k in kernels if not k["metadata"]["math"]]),
+        ("_tf32", ued_tf32, [k for k in kernels if k["metadata"]["math"]]),
+    ):
+        write(
+            f"conv_direct_{tag}{suffix}.kdp.json",
+            {
+                "version": "1.0",
+                "id": U("kdp." + tag + suffix.replace("_", ".")),
+                "name": f"hipkernel:conv_direct_{tag}{suffix}",
+                "arch": [],
+                "matchers": [umd],
+                "engine": engine,
+                "dispatch": udd,
+                "kernelDescriptors": members,
+            },
+        )
 print(total, "kernel configs")

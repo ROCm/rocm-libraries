@@ -19,9 +19,6 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::conv_tf32_test
 {
 
-/// The TF32 permission variable every hip-kernel-provider TF32 form reads.
-inline constexpr const char* TF32_ENV = "HIP_KERNEL_PROVIDER_CONV_TF32";
-
 /// Three-bf16's error bound per reduction element for values in [-1, 1]: lo x lo dropped and the
 /// lo parts rounded, about 2^-16 of each product.
 inline constexpr float THREE_BF16_BOUND = 3e-5f;

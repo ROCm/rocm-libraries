@@ -9,10 +9,10 @@ SPDX-License-Identifier:  MIT
 
 ## At a glance
 - **What:** Winograd minimal filtering for 3x3 filters.
-  - Forward and backward data: F(2,3) for every dtype; F(4,3) for fp32 multipass only, declined by default; F(3,2) on the four 2x2 phase sub-filters for stride 2.
+  - Forward and backward data: F(2,3) for every dtype; F(4,3) for fp32 multipass only, in the `CONV_WINOGRAD_FWD/BWD_F43` sibling engines; F(3,2) on the four 2x2 phase sub-filters for stride 2.
   - Backward weights: F(3,2), F(3,4) and F(3,6), by duality with F(r,3).
 - **Covers:**
-  - fwd/bwd: 2-D 3x3, stride 1 or 2 (the same on both axes), dilation 1, groups, any padding, both convolution modes, any layout (staged when a variant does not read it). fp32 and fp16; bf16 only with `HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16`.
+  - fwd/bwd: 2-D 3x3, stride 1 or 2 (the same on both axes), dilation 1, groups, any padding, both convolution modes, any layout (staged when a variant does not read it). fp32 and fp16; bf16 in the `CONV_WINOGRAD_FWD/BWD_BF16` sibling engines.
   - wrw: stride 1, fp32 / fp16 / bf16 under per-dtype accuracy rules.
   - No 1-D or 3-D, no other filter sizes, no TF32 form.
 - **Variants:**
@@ -29,10 +29,10 @@ SPDX-License-Identifier:  MIT
   - fp32 3x3 wrw on detection backbones: Mask R-CNN c256 200², 0.52-0.68x of MIOpen's time on CDNA.
 - **Loses when:**
   - RDNA fp16 small-C backward data against `ConvWinoRage/Fury` (1.4-1.7x);
-  - fp32 Mask R-CNN 200² fwd/bwd against `ConvBinWinogradRxSf2x3g1` (1.13-1.24x), with F(4,3) declined;
+  - fp32 Mask R-CNN 200² fwd/bwd against `ConvBinWinogradRxSf2x3g1` (1.13-1.24x), F(2,3) only;
   - gfx906 fwd/bwd against MIOpen's asm Winograd (about 1.55x behind, weighted).
-- **Precision:** the `WINOGRAD` numerical note on all three engines. Transforms are fp32; 16-bit operands are rounded once after their transform, except the input transform of `f16math` configs. Accumulation is fp32. An output whose window lies wholly in padding is exactly 0. Deterministic.
-- **Instances:** 420: 168 fwd, 168 bwd, 84 wrw. 16 fp32 F(4,3) multipass configs (8 fwd, 8 bwd) are present but declined by default, and all bf16 fwd/bwd configs are declined by default.
+- **Precision:** every engine reports the `WINOGRAD` numerical note, with `WINOGRAD_TILE_4x4` on the fwd/bwd and BF16 engines and `WINOGRAD_TILE_6x6` on the F43 engines (wrw mixes F(3,2), F(3,4) and F(3,6) and names no tile). Transforms are fp32; 16-bit operands are rounded once after their transform, except the input transform of `f16math` configs. Accumulation is fp32. An output whose window lies wholly in padding is exactly 0. Deterministic.
+- **Instances:** 420: `CONV_WINOGRAD_FWD/BWD` 106 each, `CONV_WINOGRAD_FWD/BWD_BF16` 54 each (every bf16 fwd/bwd config), `CONV_WINOGRAD_FWD/BWD_F43` 8 each (fp32 F(4,3) multipass), `CONV_WINOGRAD_WRW` 84. All are offered by default.
 - **vs MIOpen** (usage-weighted speedup on the graphs where it is our best engine, search mode), fwd / bwd / wrw:
 
   | GPU | fwd | bwd | wrw |
@@ -97,7 +97,7 @@ SPDX-License-Identifier:  MIT
 - **Gates.**
   - Problem gates, everything the naive parser gates, plus: 2-D; 3x3 filter; dilation 1; equal stride 1 or 2 (wrw 1); n, c·stride², k and groups within 32 bits; extents and padding within 32 bits.
   - fwd/bwd bf16 only with the switch.
-  - Per config: dtype and direction equal to the graph's; atom on the device; WMMA / coop not fp32; sreg not bf16; `f16math` only for fp16; coop bf16 MFMA from gfx90a; F(3,2) exactly for stride 2; F(4,3) only fp32 with `HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43`; a device reporting no units declined for persistent variants.
+  - Per config: dtype and direction equal to the graph's; atom on the device; WMMA / coop not fp32; sreg not bf16; `f16math` only for fp16; coop bf16 MFMA from gfx90a; F(3,2) exactly for stride 2; F(4,3) only fp32; a device reporting no units declined for persistent variants.
   - wrw per-dtype rules (below); every plan within launch, buffer and item-count limits.
 - **wrw.**
   - x and dy are read in place when packed channels-first. Packed channels-last operands go through 64 x 64 LDS transposes, which measured 3-23% faster than transforming in place on gfx906 / gfx90a UNet; others are copied.
@@ -125,7 +125,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - gfx906 wrw, where MIOpen's universal GEMM is very slow.
 - **Weak:**
   - RDNA fp16 small-C (c32-c192, k32-k64) against Rage / Fury: the cost is per-item overhead (load latency, barriers, the Z round trip), not the MMAs.
-  - RDNA fp32 large layers, where F(4,3) is declined.
+  - RDNA fp32 large layers, where F(2,3) runs (F(4,3) is the F43 engines').
   - gfx906 fused, where the Hadamard runs near peak but staging, loads and barriers cost as much again.
   - CDNA small-C: Inception c32 and EfficientNet c24 trail Rage by 1.5-1.7x, HRNet c32 by about 1.15-1.2x.
 
@@ -139,10 +139,10 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - bf16: fp32 operands only, because bf16 operands measured past output rounding.
   - fp32: F(3,2), plus F(3,4) from 512 products per dW element. F(3,6) is not admitted; it measured past MIOpen's Winograd error.
   - F(3,4) uses points 0, ±1, 1/2, -2: about 3.7x less fp32 summation error than Lavin's set.
-- **Declined forms** (env-gated; no sibling engine exists yet):
-  - **bf16 fwd/bwd** (`HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16`): matrix-core operands round the transformed tiles to bf16, about a third of bf16's unit roundoff of each tile's Σ|products|. That is past the convolution's precision model, and MIOpen has no bf16 Winograd. Cost of the decline on the full corpus in NCHW: fastest on 284 graphs on gfx1201 (503 ms call-weighted lost of 4,498 ms) and 73 on gfx1100 (440 ms); in NHWC, fastest on none.
-  - **fp32 F(4,3)** (`HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43`): transforms with entries up to 8 and 1/24 put about 27 fp32 ulps of Σ|products| into a c128 layer, against about 1 for F(2,3) and the 5.7 coefficient MIOpen's fp32 Winograd needs. Cost of the decline: F(4,3) is 25-36% faster on fp32 Mask R-CNN c256 on gfx1201 (200²: 19.1 against 24.4 ms), bounding the loss at about 300 ms call-weighted on gfx1201 NCHW.
-  - Both become tagged plans or sibling engines once callers can deselect by numerical note. Engines report notes per engine, so a tag cannot sit on individual configs.
+- **Lower-accuracy forms as sibling engines** (offered by default; a caller excludes them through the hipDNN API's cuDNN-compatible `deselect_numeric_notes`):
+  - **bf16 fwd/bwd** (`CONV_WINOGRAD_FWD/BWD_BF16`; `WINOGRAD`, `WINOGRAD_TILE_4x4`): matrix-core operands round the transformed tiles to bf16, about a third of bf16's unit roundoff of each tile's Σ|products|. That is past the convolution's precision model, and MIOpen has no bf16 Winograd. On the full corpus in NCHW it is our fastest on 284 graphs on gfx1201 (503 ms call-weighted ahead of the next engine, of 4,498 ms) and 73 on gfx1100 (440 ms); in NHWC, fastest on none.
+  - **fp32 F(4,3)** (`CONV_WINOGRAD_FWD/BWD_F43`; `WINOGRAD`, `WINOGRAD_TILE_6x6`): transforms with entries up to 8 and 1/24 put about 27 fp32 ulps of Σ|products| into a c128 layer, against about 1 for F(2,3) and the 5.7 coefficient MIOpen's fp32 Winograd needs. F(4,3) is 25-36% faster on fp32 Mask R-CNN c256 on gfx1201 (200²: 19.1 against 24.4 ms), about 300 ms call-weighted on gfx1201 NCHW.
+  - Notes are per engine, so these configs are engines of their own; the exact-tile engines list none of them.
 - **TF32:** none. A three-bf16 multipass form measured 0.21-0.58x of the exact configs. A paying form needs the split inside the fused cooperative kernel.
 - **Determinism:** fixed-order sums, no atomics. Every config is relaunched over a re-filled workspace and must reproduce its bits.
 
@@ -164,7 +164,7 @@ No code was copied.
 
 ## Next steps and deferred ideas
 1. **RDNA fp16 small-C backward data against Rage / Fury** (largest RDNA Winograd excess; 1.4-1.7x). Autotune does not pick the 16-bin config where it would win, so the planner needs register counts at plan time. Per-item overhead (loads, about 5 barriers per item) is the cost to cut.
-2. **bf16 and F(4,3) as tagged plans** after note filtering lands. Payoff: about 0.5 s (bf16) and 0.3 s (F(4,3)) call-weighted on gfx1201 NCHW. Also try F(4,3) on points 0, ±1, ±1/2 for less error.
+2. **F(4,3) accuracy:** try points 0, ±1, ±1/2 for less error.
 3. **CDNA small-C:** extra VALU and bank conflicts in V stores and B reads; LDS-resident U to fuse the 3-4 µs filter-transform launch.
 4. **gfx906 fused:** reader/writer wave specialization, or a persistent design with U in LDS.
 5. **TF32:** split inside the cooperative kernel, not in multipass.
@@ -172,12 +172,12 @@ No code was copied.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvWinogradProblem.cpp` (host):
-  - **Gates:** one refusal per field; direction exclusivity; bf16 and F(4,3) declined unless permitted; stride-2 phase gather/scatter and 16 positions.
+  - **Gates:** one refusal per field; direction exclusivity; bf16 fwd/bwd graphs and F(4,3) fp32 configs admitted by the matches (the catalogs put them in their sibling engines); stride-2 phase gather/scatter and 16 positions.
   - **Variant placement:** each variant on its arch family and dtypes; the 16-bin layout on RDNA stride 1; coop MFMA from gfx908 and bf16 from gfx90a; fused stride-2 chunking; inconsistent register-variant fields refused.
   - **Plans:** LLC slicing and workspace; occupancy-sized grids (16-bin on RDNA, CDNA); item order for a large U; fused slices clear of the out-of-range offset.
   - **wrw:** error-band admission (FMA every dtype, fp32 F(3,4) from 512 products, half-operand rules), tile splits, batch slicing, NHWC transpose staging, cuDNN compute types.
 - `TestGpuConvWinograd.cpp` (device):
-  - every admitted config, fp32/fp16/bf16 (bf16 and F(4,3) under their switches), fwd and bwd;
+  - every admitted config, fp32/fp16/bf16 (the BF16 and F43 engines' configs included), fwd and bwd;
   - NCHW, NHWC and mixed layouts, groups, padding 0-2 and asymmetric, odd extents, deep channels, true convolution;
   - the LLC plan with a forced small cache;
   - wrw against an fp64 reference with sliced and split-heavy cases;

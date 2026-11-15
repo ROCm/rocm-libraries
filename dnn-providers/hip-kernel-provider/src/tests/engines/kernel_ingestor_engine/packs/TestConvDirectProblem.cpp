@@ -9,7 +9,6 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvDirectProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
@@ -20,7 +19,7 @@
  * @brief Host-only checks of the stride-1 halo-tile direct convolution engines
  *        (CONV_DIRECT_FWD, CONV_DIRECT_BWD): what the graph match accepts, one refusal per gated
  *        field, the forward form it derives, what the kernel match admits per config and device
- *        (atom family, ship list, dtype, filter, channel vector, three-bf16 permission), and the
+ *        (atom family, ship list, dtype, filter, channel vector, three-bf16 for fp32 only), and the
  *        planner's tile, split and workspace. No device is used.
  */
 namespace
@@ -545,14 +544,11 @@ TEST(TestConvDirectKernelMatch, FmaRunsEverywhere)
     EXPECT_TRUE(admits(fmaFields(8), "gfx1201", baseShape(), "BFLOAT16"));
 }
 
-TEST(TestConvDirectKernelMatch, ThreeBf16OnlyWithTf32PermissionAndOnlyForFloat)
+TEST(TestConvDirectKernelMatch, ThreeBf16OnlyForFloat)
 {
     ConfigFields x3;
     x3.atom = "mfma16_bf16";
     x3.math = 1;
-    EXPECT_FALSE(admits(x3, "gfx942", baseShape(), "FLOAT"));
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     EXPECT_TRUE(admits(x3, "gfx942", baseShape(), "FLOAT"));
     EXPECT_FALSE(admits(x3, "gfx942", baseShape(), "BFLOAT16"));
     auto halfAtom = x3;

@@ -18,7 +18,6 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipblasltHandleFactory.hpp"
@@ -29,7 +28,6 @@
 #include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 #include "engines/conv/ConvGemmTestGraphs.hpp"
-#include "engines/conv/ConvReducedPrecision.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
 #endif
@@ -57,7 +55,6 @@ using namespace hipblaslt_plugin;
 using namespace hipblaslt_plugin::test;
 using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_test_sdk::utilities::CpuFpReferenceConvolution;
-using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 
 using Half = hipdnn_data_sdk::types::half;
 using BFloat16 = hipdnn_data_sdk::types::bfloat16;
@@ -73,21 +70,31 @@ std::string backendName(Backend backend)
     return backend == Backend::HIPBLASLT ? "Hipblaslt" : "Rocblas";
 }
 
-ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend)
+/// The plan factory of @p backend's engines, as HipblasltContainer.cpp builds it: the default
+/// engines', or (@p deterministic) the *_DETERMINISTIC siblings' (rocBLAS atomics not allowed,
+/// no hipBLASLt workspace).
+ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend, bool deterministic = false)
 {
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     if(backend == Backend::HIPBLASLT)
     {
-        return [](const HipdnnEnginePluginHandle& handle, const std::vector<GemmCall>& calls) {
-            return std::make_unique<HipblasltGemmPlan>(handle, calls);
+        return [deterministic](const HipdnnEnginePluginHandle& handle,
+                               const std::vector<GemmCall>& calls) {
+            return std::make_unique<HipblasltGemmPlan>(handle, calls, deterministic);
         };
     }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     if(backend == Backend::ROCBLAS)
     {
-        return [](const HipdnnEnginePluginHandle& /*handle*/, const std::vector<GemmCall>& calls) {
-            return std::make_unique<RocblasGemmPlan>(calls);
+        return [deterministic](const HipdnnEnginePluginHandle& /*handle*/,
+                               const std::vector<GemmCall>& calls) {
+            auto plan = std::make_unique<RocblasGemmPlan>(calls);
+            if(deterministic)
+            {
+                plan->requireBitwiseReproducible();
+            }
+            return plan;
         };
     }
 #endif
@@ -466,7 +473,9 @@ enum class Slicing
 };
 
 /// Runs @p convCase through @p backend and checks it against the CPU reference, its workspace
-/// held as @p slicing says.
+/// held as @p slicing says. With @p deterministicRepeats > 0 the plan is the deterministic
+/// sibling's, executed that many more times over a re-filled workspace, each giving the first
+/// execute's bits.
 template <typename T>
 void runCase(ConvCase convCase,
              Backend backend,
@@ -475,8 +484,10 @@ void runCase(ConvCase convCase,
              bool tf32 = false,
              bool splitReduction = false,
              ColumnLayout layout = ColumnLayout::FOLLOW_Y,
-             std::optional<ConvGemmPlanBuilder::NarrowPartials> narrowPartials = std::nullopt)
+             std::optional<ConvGemmPlanBuilder::NarrowPartials> narrowPartials = std::nullopt,
+             int deterministicRepeats = 0)
 {
+    const auto factory = factoryFor(backend, deterministicRepeats > 0);
     // The engines' own policy unless a case forces one.
     const auto narrow = narrowPartials.value_or(backend == Backend::HIPBLASLT
                                                     ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
@@ -508,8 +519,7 @@ void runCase(ConvCase convCase,
         }
         cap = *banding;
     }
-    const ConvGemmPlanBuilder builder(
-        factoryFor(backend), cap, tf32, false, splitReduction, layout, narrow);
+    const ConvGemmPlanBuilder builder(factory, cap, tf32, false, splitReduction, layout, narrow);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -548,7 +558,7 @@ void runCase(ConvCase convCase,
         {
             try
             {
-                static_cast<void>(factoryFor(backend)(*handle, stage.calls));
+                static_cast<void>(factory(*handle, stage.calls));
             }
             catch(const std::exception&)
             {
@@ -617,24 +627,40 @@ void runCase(ConvCase convCase,
         *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
     std::vector<char> firstOutput;
-    if(benchmarked != nullptr)
+    // The deterministic siblings claim bitwise-reproducible results (no NONDETERMINISTIC
+    // note): every further execute, over a re-filled workspace, gives the same bits.
+    const bool reproducible = deterministicRepeats > 0;
+    if(benchmarked != nullptr || reproducible)
     {
-        // The first execute timed every candidate; the second runs only the winner. Both must
-        // leave the same, checked, result.
-        EXPECT_GE(benchmarked->winner(), 0);
+        // A benchmarked plan's first execute timed every candidate; the second runs only the
+        // winner. Both must leave the same, checked, result.
+        if(benchmarked != nullptr)
+        {
+            EXPECT_GE(benchmarked->winner(), 0);
+        }
         const size_t bytes = written->memory().count() * sizeof(T);
         firstOutput.resize(bytes);
         ASSERT_EQ(
             hipMemcpy(firstOutput.data(), written->rawDeviceData(), bytes, hipMemcpyDeviceToHost),
             hipSuccess);
-        context.plan().execute(
-            *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
-        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
-        std::vector<char> secondOutput(bytes);
-        ASSERT_EQ(
-            hipMemcpy(secondOutput.data(), written->rawDeviceData(), bytes, hipMemcpyDeviceToHost),
-            hipSuccess);
-        EXPECT_EQ(firstOutput, secondOutput) << "the winner's rerun changed the result";
+        for(int repeat = 0; repeat < std::max(deterministicRepeats, 1); ++repeat)
+        {
+            if(reproducible && workspace != nullptr)
+            {
+                ASSERT_EQ(hipMemset(workspace, 0x5a + repeat, workspaceBytes), hipSuccess);
+                ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            }
+            context.plan().execute(
+                *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+            ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+            std::vector<char> laterOutput(bytes);
+            ASSERT_EQ(
+                hipMemcpy(
+                    laterOutput.data(), written->rawDeviceData(), bytes, hipMemcpyDeviceToHost),
+                hipSuccess);
+            ASSERT_EQ(firstOutput, laterOutput)
+                << "execute " << repeat + 2 << " changed the result";
+        }
     }
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
     if(workspace != nullptr)
@@ -1116,6 +1142,120 @@ INSTANTIATE_TEST_SUITE_P(,
                                     + backendName(std::get<1>(info.param));
                          });
 
+/// The deterministic siblings' cases: a spread of the im2col and direct cases, and the shapes
+/// where a library would split a reduction across workgroups (split-K / stream-K): long-K
+/// backward weights, and small output tiles over long reductions forward and backward data.
+std::vector<ConvCase> deterministicCases()
+{
+    std::vector<ConvCase> cases;
+    for(const auto& convCase : convCases())
+    {
+        for(const auto* name : {"OneByOneNhwc", "Padded3x3Nchw", "Grouped3x3Nhwc", "Conv3dNdhwc"})
+        {
+            if(convCase.name.rfind(name, 0) == 0
+               && convCase.name.size() == std::string(name).size() + 3)
+            {
+                cases.push_back(convCase);
+            }
+        }
+    }
+    // Backward weights reducing over 8 x 56 x 56 = 25088 positions into a 64 x 576 dw.
+    ConvGemmShape longK;
+    longK.n = 8;
+    longK.c = 64;
+    longK.k = 64;
+    longK.input = {56, 56};
+    longK.filter = {3, 3};
+    longK.prePadding = {1, 1};
+    longK.postPadding = {1, 1};
+    cases.push_back({"LongKPadded3x3NchwWrw", longK, ConvDirection::BACKWARD_WEIGHTS});
+    cases.push_back(
+        {"LongKPadded3x3NhwcWrw", channelsLast(longK), ConvDirection::BACKWARD_WEIGHTS});
+    ConvGemmShape longKPointwise = channelsLast({});
+    longKPointwise.n = 64;
+    longKPointwise.c = 32;
+    longKPointwise.k = 32;
+    longKPointwise.input = {28, 28};
+    cases.push_back({"LongKOneByOneNhwcWrw", longKPointwise, ConvDirection::BACKWARD_WEIGHTS});
+    // A 16 x 49 output over 2048 reduction channels, forward; and backward data's mirror.
+    ConvGemmShape smallTile;
+    smallTile.n = 1;
+    smallTile.c = 2048;
+    smallTile.k = 16;
+    smallTile.input = {7, 7};
+    cases.push_back({"SmallTileLongReductionNchwFwd", smallTile, ConvDirection::FORWARD});
+    cases.push_back(
+        {"SmallTileLongReductionNhwcFwd", channelsLast(smallTile), ConvDirection::FORWARD});
+    ConvGemmShape smallTileBwd = smallTile;
+    smallTileBwd.c = 16;
+    smallTileBwd.k = 2048;
+    cases.push_back({"SmallTileLongReductionNchwBwd", smallTileBwd, ConvDirection::BACKWARD_DATA});
+    cases.push_back({"SmallTileLongReductionNhwcBwd",
+                     channelsLast(smallTileBwd),
+                     ConvDirection::BACKWARD_DATA});
+    return cases;
+}
+
+/// The *_DETERMINISTIC siblings (rocBLAS atomics not allowed, no hipBLASLt workspace): each plan
+/// executed six times over a re-filled workspace must give the same bits every time, and the
+/// checked result. Their claim of no NONDETERMINISTIC note rests on this suite.
+constexpr int DETERMINISTIC_REPEATS = 5;
+
+class TestGpuConvGemmDeterministic : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmDeterministic, Fp32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()),
+                   std::get<1>(GetParam()),
+                   Slicing::NONE,
+                   false,
+                   false,
+                   false,
+                   ColumnLayout::FOLLOW_Y,
+                   std::nullopt,
+                   DETERMINISTIC_REPEATS);
+}
+
+TEST_P(TestGpuConvGemmDeterministic, Fp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(std::get<0>(GetParam()),
+                  std::get<1>(GetParam()),
+                  Slicing::NONE,
+                  false,
+                  false,
+                  false,
+                  ColumnLayout::FOLLOW_Y,
+                  std::nullopt,
+                  DETERMINISTIC_REPEATS);
+}
+
+TEST_P(TestGpuConvGemmDeterministic, Tf32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()),
+                   std::get<1>(GetParam()),
+                   Slicing::NONE,
+                   false,
+                   true,
+                   false,
+                   ColumnLayout::FOLLOW_Y,
+                   std::nullopt,
+                   DETERMINISTIC_REPEATS);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmDeterministic,
+                         ::testing::Combine(::testing::ValuesIn(deterministicCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
 /// Whether any GEMM of @p problem's plan, as fitted to the libraries' limits, is one rocBLAS
 /// would split into chunks rounded to a narrow output between them.
 bool roundsReductionChunks(const ConvProblem& problem)
@@ -1311,10 +1451,6 @@ void runRprCase(ConvCase convCase, Backend backend)
             delete owned;
         });
     const ConvGemmPlanBuilder builder(factoryFor(backend), MAX_REPACK_WORKSPACE_BYTES, false, true);
-    ScopedEnvironmentVariableSetter env(CONV_RPR_ENV_NAME);
-    ASSERT_FALSE(builder.isApplicable(*handle, graph.graph()))
-        << "a reduced-precision-reduction plan without the switch";
-    env.setValue("1");
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";

@@ -45,8 +45,8 @@ ATOMS = {
     "HALF": ["mfma16_f16", "wmma11_f16", "wmma12_f16"],
     "BFLOAT16": ["mfma16_bf16", "mfma16_bf16_908", "wmma11_bf16", "wmma12_bf16"],
     "FLOAT": ["mfma16_f32"],
-    # Three-bf16 (math 1, TF32 permission only; wide groups, forward and backward data): fp32
-    # graphs on the bf16 atoms, the kernel multiplying three bf16 parts of each operand into fp32
+    # Three-bf16 (math 1, the CONV_GROUP_*_TF32 engines' configs; wide groups, forward and
+    # backward data): fp32 graphs on the bf16 atoms, the kernel multiplying three bf16 parts of each operand into fp32
     # accumulators and writing fp32. gfx908 (mfma16_bf16_908) gets none. Small groups and
     # backward weights measured slower than exact (gfx950, gfx1201) and get none.
     "F32X3": ["mfma16_bf16", "wmma11_bf16", "wmma12_bf16"],
@@ -186,6 +186,24 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             # bitwise reproducible (fixed-order sums, no atomics), which the
             # family's device test checks by relaunching each config.
             "numerical_notes": [],
+        },
+    )
+    # The three-bf16 configs make an engine of their own, which reports the TENSOR_CORE
+    # numerical note (cuDNN's note for TF32 engines), so a caller can exclude them by note.
+    ued_tf32 = U("ued." + tag + ".tf32")
+    w(
+        f"conv_group_{tag}_tf32.ued.json",
+        {
+            "version": "1.0",
+            "id": ued_tf32,
+            "name": f"hipkernel:CONV_GROUP_{direction}_TF32",
+            "graph_match": {"native": f"hipkernel.conv_group_{tag}.graph_match"},
+            "metadata": kmd,
+            "knobs": KNOBS,
+            "behavior_notes": ["runtime_compilation"],
+            # RFC 0025 numerical notes: TENSOR_CORE (fp32 through bf16 operand parts).
+            # Deterministic as the exact engine.
+            "numerical_notes": ["tensor_core"],
         },
     )
     kernels = []
@@ -427,10 +445,10 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         )
                         i += 1
     total += len(kernels)
-    # The three-bf16 configs in a pack of their own.
-    for suffix, members in (
-        ("", [k for k in kernels if k["metadata"]["math"] == 0]),
-        ("_f32x3", [k for k in kernels if k["metadata"]["math"] == 1]),
+    # The three-bf16 configs in a pack of their own, CONV_GROUP_*_TF32's.
+    for suffix, engine, members in (
+        ("", ued, [k for k in kernels if k["metadata"]["math"] == 0]),
+        ("_f32x3", ued_tf32, [k for k in kernels if k["metadata"]["math"] == 1]),
     ):
         w(
             f"conv_group_{tag}{suffix}.kdp.json",
@@ -440,7 +458,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 "name": f"hipkernel:conv_group_{tag}{suffix}",
                 "arch": [],
                 "matchers": [umd],
-                "engine": ued,
+                "engine": engine,
                 "dispatch": udd,
                 "kernelDescriptors": members,
             },

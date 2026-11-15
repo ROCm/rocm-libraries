@@ -621,8 +621,8 @@ bool expectServed(const std::string& arch, DataType dataType)
     return false;
 }
 
-/// The configs a case runs: the graph's own element type, or three-bf16 (math 1: fp32 graphs
-/// under TF32 permission, the bf16 kernel on split operands).
+/// The configs a case runs: the graph's own element type, or three-bf16 (math 1: fp32 graphs,
+/// CONV_WRW_TF32's configs, the bf16 kernel on split operands).
 enum class Math
 {
     NATIVE,
@@ -1060,7 +1060,7 @@ TEST(TestGpuConvWrwWideTiles, BFloat16PartialChannelTiles)
     runWideTilesPartialChannels<BFloat16>();
 }
 
-/// The three-bf16 fp32 configs (TF32 permission): devices with bf16 matrix cores where three
+/// The three-bf16 fp32 configs (CONV_WRW_TF32's): devices with bf16 matrix cores where three
 /// bf16 products beat exact fp32 (gfx90a, gfx942, gfx950, gfx11, gfx12; not gfx908).
 class TestGpuConvWrwThreeBf16 : public ::testing::TestWithParam<DeviceCase>
 {
@@ -1077,8 +1077,6 @@ TEST_P(TestGpuConvWrwThreeBf16, Float)
     {
         GTEST_SKIP() << "no three-bf16 configs on " << arch;
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(GetParam(), Math::THREE_BF16);
 }
 
@@ -1094,8 +1092,6 @@ TEST_P(TestGpuConvWrwThreeBf16, FloatInfinities)
     {
         GTEST_SKIP() << "no three-bf16 configs on " << arch;
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     runCase<float>(GetParam(), Math::THREE_BF16, true);
 }
 
@@ -1150,12 +1146,10 @@ std::vector<DeviceCase> threeBf16Cases()
 }
 
 /// Opt-in (K3_TF32_TIMING=<shape CSV>): the best exact fp32 and the best three-bf16 config per
-/// shape, TF32 permitted. See ConvTf32Timing.hpp.
+/// shape. See ConvTf32Timing.hpp.
 TEST(TestGpuConvWrwTiming, ExactAgainstThreeBf16)
 {
     SKIP_IF_NO_DEVICES();
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
     conv_tf32_timing::timeByForm(
         PACK, ConvDirection::BACKWARD_WEIGHTS, catalog(), "K3_TF32_TIMING", [](const auto& kernel) {
             return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");

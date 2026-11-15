@@ -13,8 +13,6 @@
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
-
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -3364,10 +3362,6 @@ TEST(TestConvWrwComputeType, ServesCudnnsComputeTypesPerElementType)
                             [](const ConvShape& s) { return parse(specOf(s)).has_value(); });
 }
 
-using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
-
-constexpr const char* TF32_ENV = "HIP_KERNEL_PROVIDER_CONV_TF32";
-
 /// An fp32 graph three-bf16 is admitted for on CDNA (threeBf16Pays): 128 input and 64 output
 /// channels, 3x3, unit stride.
 ConvShape x3Shape()
@@ -3378,17 +3372,8 @@ ConvShape x3Shape()
     return shape;
 }
 
-TEST(TestConvWrwThreeBf16, OnlyWithTf32PermissionAndOnlyForFloatGraphs)
+TEST(TestConvWrwThreeBf16, OnlyForFloatGraphs)
 {
-    {
-        const ScopedEnvironmentVariableSetter off(TF32_ENV, "");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", x3Shape()));
-    }
-    {
-        const ScopedEnvironmentVariableSetter no(TF32_ENV, "0");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", x3Shape()));
-    }
-    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
     EXPECT_TRUE(admits(threeBf16Fields(), "gfx942", x3Shape()));
     EXPECT_TRUE(admits(threeBf16Fields(), "gfx950", x3Shape()));
     // gfx90a: three bf16 products never beat its exact fp32 MFMA here (threeBf16Pays).
@@ -3403,10 +3388,9 @@ TEST(TestConvWrwThreeBf16, OnlyWithTf32PermissionAndOnlyForFloatGraphs)
     EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", x3Shape()));
 }
 
-/// Every field three-bf16 adds, one refusal each, from a config admitted under permission.
+/// Every field three-bf16 adds, one refusal each, from an admitted config.
 TEST(TestConvWrwThreeBf16, RefusesOneFieldAtATime)
 {
-    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
     const auto shape = x3Shape();
     ASSERT_TRUE(admits(threeBf16Fields(), "gfx942", shape));
     const auto refuses = [&](const std::function<void(ConfigFields&)>& mutate) {
@@ -3448,7 +3432,6 @@ TEST(TestConvWrwThreeBf16, RefusesOneFieldAtATime)
 
 TEST(TestConvWrwThreeBf16, LaunchesTheBf16ConfigOnThreeTimesTheImagesAfterTheSplit)
 {
-    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
     const auto x3 = launchOf(threeBf16Fields(), x3Shape());
     ASSERT_TRUE(x3.has_value());
     // The bf16 config on the bf16 problem of 6 images.

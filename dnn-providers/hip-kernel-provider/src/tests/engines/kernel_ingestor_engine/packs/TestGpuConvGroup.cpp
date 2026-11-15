@@ -456,7 +456,7 @@ bool served(const ConvShape& shape, ConvDirection direction)
     return true;
 }
 
-/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// The configs a run takes: the graph's own element type, or (fp32, the TF32 engines') the
 /// three-bf16 ones.
 enum class Math
 {
@@ -727,7 +727,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
 
-/// The three-bf16 fp32 configs (TF32 permission; wide groups, forward and backward data) at
+/// The three-bf16 fp32 configs (CONV_GROUP_*_TF32's; wide groups, forward and backward data) at
 /// three-bf16's bound, and with +inf and -inf in the kernel's input (each must reach the output
 /// as itself, NaN where both meet). Small-group cases admit none and skip.
 class TestGpuConvGroupThreeBf16
@@ -742,8 +742,6 @@ TEST_P(TestGpuConvGroupThreeBf16, Float)
     {
         GTEST_SKIP() << "no three-bf16 configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16);
 }
 
@@ -755,8 +753,6 @@ TEST_P(TestGpuConvGroupThreeBf16, FloatInfinities)
     {
         GTEST_SKIP() << "no three-bf16 configs on this device";
     }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     runCase<float>(shape, std::get<1>(GetParam()), Math::THREE_BF16, true);
 }
 
@@ -772,12 +768,10 @@ INSTANTIATE_TEST_SUITE_P(,
                          });
 
 /// Opt-in (GROUP_TF32_TIMING=<shape CSV>, its direction column choosing the pack): the best
-/// exact and the best three-bf16 config per shape, TF32 permitted. See ConvTf32Timing.hpp.
+/// exact and the best three-bf16 config per shape. See ConvTf32Timing.hpp.
 TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
 {
     SKIP_IF_NO_DEVICES();
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
-                                                                           "1");
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         conv_tf32_timing::timeByForm(
@@ -794,10 +788,9 @@ TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
 
 // ---- Host-only: the graph gates, one decline per field, and the kernel gates ----
 
-/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 wide-group graphs
-/// admit some forward and backward data on every arch with bf16 matrix cores (not gfx908), and
-/// bf16 graphs, small groups and backward weights none.
-TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
+/// fp32 wide-group graphs admit three-bf16 configs forward and backward data on every arch with
+/// bf16 matrix cores (not gfx908), and bf16 graphs, small groups and backward weights none.
+TEST(TestConvGroupCatalog, ThreeBf16OnlyForFloatWideGroups)
 {
     // RegNet-like wide groups (32 channels), and ResNeXt-like small ones (4).
     auto wide = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
@@ -840,13 +833,6 @@ TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
                     }
                     return count;
                 };
-                {
-                    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
-                        conv_tf32_test::TF32_ENV, "");
-                    EXPECT_EQ(admitted(), 0);
-                }
-                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-                    conv_tf32_test::TF32_ENV, "1");
                 const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908"
                                       && shape.groups == wide.groups
                                       && direction != ConvDirection::BACKWARD_WEIGHTS;

@@ -917,13 +917,13 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    // The atom takes the graph's element type; three-bf16 runs fp32 graphs on bf16 atoms, and
-    // only with TF32 permission.
+    // The atom takes the graph's element type; three-bf16 (the CONV_DIRECT_*_TF32 engines' configs)
+    // runs fp32 graphs on bf16 atoms.
     const auto element = conv_igemm::atomElement(config->atom);
     const auto wanted = conv_igemm::dataElement(problem->base.dataType);
     if(config->math)
     {
-        if(wanted != "f32" || element != "bf16" || !conv_igemm::tf32Permitted())
+        if(wanted != "f32" || element != "bf16")
         {
             return std::nullopt;
         }

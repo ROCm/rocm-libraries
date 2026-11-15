@@ -409,31 +409,46 @@ w(
     },
 )
 total = 0
+
+
+def sibling(direction, c, dtype):
+    """The engine a forward / backward-data config belongs to: bf16 (BF16) and F(4,3) (F43)
+    configs make engines of their own, the rest the exact-tile engine."""
+    if direction == "WRW":
+        return ""
+    if dtype == "BFLOAT16":
+        return "BF16"
+    if c["m"] == 4:
+        return "F43"
+    return ""
+
+
+# Each engine's RFC 0025 numerical notes: WINOGRAD, the algorithm class, and the tile note where
+# every config of the engine has one input tile (F(2,3) and F(3,2): 4x4; F(4,3): 6x6). No
+# "nondeterministic": every config is bitwise reproducible (fixed-order sums, no atomics), which
+# the family's device test checks by relaunching each config. The weight-gradient engine mixes
+# F(3,2), F(3,4) and F(3,6), so it names no tile. bf16 forward / backward data (bf16 transformed
+# operands) and fp32 F(4,3) (transform entries up to 8) sit outside the convolution's own
+# precision model, so they are engines of their own a caller can exclude by note.
+NOTES = {
+    ("FWD", ""): ["winograd", "winograd_tile_4x4"],
+    ("BWD", ""): ["winograd", "winograd_tile_4x4"],
+    ("WRW", ""): ["winograd"],
+    ("FWD", "BF16"): ["winograd", "winograd_tile_4x4"],
+    ("BWD", "BF16"): ["winograd", "winograd_tile_4x4"],
+    ("FWD", "F43"): ["winograd", "winograd_tile_6x6"],
+    ("BWD", "F43"): ["winograd", "winograd_tile_6x6"],
+}
+TILE = {"winograd_tile_4x4": (2, 3), "winograd_tile_6x6": (4,)}
+
+total = 0
 for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
-    ued = U("ued." + tag)
-    w(
-        f"conv_winograd_{tag}.ued.json",
-        {
-            "version": "1.0",
-            "id": ued,
-            "name": f"hipkernel:CONV_WINOGRAD_{direction}",
-            "graph_match": {"native": f"hipkernel.conv_winograd_{tag}.graph_match"},
-            "metadata": kmd,
-            "knobs": KNOBS,
-            "behavior_notes": ["runtime_compilation"],
-            # RFC 0025 numerical notes: WINOGRAD, the algorithm class. No
-            # "nondeterministic": every config is bitwise reproducible (fixed-order
-            # sums, no atomics), which the family's device test checks by
-            # relaunching each config.
-            "numerical_notes": ["winograd"],
-        },
-    )
-    kernels = []
+    groups = {}
     for dtype, cfgs in (WRW_CATALOG if direction == "WRW" else CATALOG).items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         for i, c in enumerate(cfgs):
             name = f"conv_winograd.{tag}.{dt}.{label(c)}"
-            kernels.append(
+            groups.setdefault(sibling(direction, c, dtype), []).append(
                 {
                     "version": "1.0",
                     "id": U(name),
@@ -447,18 +462,41 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
                     "priority": 1000 - i,
                 }
             )
-    total += len(kernels)
-    w(
-        f"conv_winograd_{tag}.kdp.json",
-        {
-            "version": "1.0",
-            "id": U("kdp." + tag),
-            "name": f"hipkernel:conv_winograd_{tag}",
-            "arch": [],
-            "matchers": [umd],
-            "engine": ued,
-            "dispatch": udd,
-            "kernelDescriptors": kernels,
-        },
-    )
+    for suffix, kernels in sorted(groups.items()):
+        key = tag + ("." + suffix.lower() if suffix else "")
+        stem = f"conv_winograd_{tag}" + ("_" + suffix.lower() if suffix else "")
+        notes = NOTES[(direction, suffix)]
+        for note in notes:
+            assert note not in TILE or all(
+                k["metadata"]["m"] in TILE[note] for k in kernels
+            ), (stem, note)
+        ued = U("ued." + key)
+        w(
+            f"{stem}.ued.json",
+            {
+                "version": "1.0",
+                "id": ued,
+                "name": f"hipkernel:CONV_WINOGRAD_{direction}"
+                + ("_" + suffix if suffix else ""),
+                "graph_match": {"native": f"hipkernel.conv_winograd_{tag}.graph_match"},
+                "metadata": kmd,
+                "knobs": KNOBS,
+                "behavior_notes": ["runtime_compilation"],
+                "numerical_notes": notes,
+            },
+        )
+        total += len(kernels)
+        w(
+            f"{stem}.kdp.json",
+            {
+                "version": "1.0",
+                "id": U("kdp." + key),
+                "name": f"hipkernel:{stem}",
+                "arch": [],
+                "matchers": [umd],
+                "engine": ued,
+                "dispatch": udd,
+                "kernelDescriptors": kernels,
+            },
+        )
 print(total, "kernel configs")

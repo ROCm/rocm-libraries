@@ -101,7 +101,7 @@ struct Config
     std::string_view kernelType; ///< K1Atom* type of the atom; empty for FMA
     int wave = 0; ///< 64 MFMA, 32 WMMA, 0 FMA
     int ka = 1; ///< the atom's reduction step (weight format granule); 1 for FMA
-    bool math = false; ///< three-bf16 (fp32 graph, bf16 operands): TF32 permission only
+    bool math = false; ///< three-bf16 (fp32 graph, bf16 operands): a TF32 config
     int kd = 0, r = 0, s = 0;
     int bm = 0, bn = 0, bc = 0, wm = 0, wn = 0, vec = 0;
     int ring = 1, bl = 0, split = 0;

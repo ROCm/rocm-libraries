@@ -20,7 +20,6 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/ConvRepackFormulation.hpp"
 #include "engines/conv/BenchmarkedPlan.hpp"
-#include "engines/conv/ConvReducedPrecision.hpp"
 #include "engines/conv/ConvRepackPlan.hpp"
 
 namespace hipblaslt_plugin
@@ -91,12 +90,6 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         }
         if(_reducedPrecisionReduction)
         {
-            // Read per call rather than at registration, so no plan of these engines is built
-            // without the switch.
-            if(!convReducedPrecisionEnginesEnabled())
-            {
-                return std::nullopt;
-            }
             return reducedPrecisionGemmCalls(*problem);
         }
         auto calls = convGemmCalls(*problem,
