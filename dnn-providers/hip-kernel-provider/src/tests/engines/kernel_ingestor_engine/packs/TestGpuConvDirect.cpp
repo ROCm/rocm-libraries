@@ -28,6 +28,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDirectProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -801,6 +802,14 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvDirectFusedSpecials,
                          ::testing::ValuesIn(fusedShapes()),
                          [](const auto& info) { return info.param.name; });
+
+// Opt-in: each config's time with and without a fused bias + relu (shapes in $K2_EPI_TIMING).
+TEST(TestGpuConvDirectFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), "K2_EPI_TIMING");
+}
 
 } // namespace
 
