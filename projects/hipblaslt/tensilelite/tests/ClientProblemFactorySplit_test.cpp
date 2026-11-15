@@ -147,6 +147,22 @@ TEST(ClientProblemFactorySplit, RejectsMoreDevicesThanRowsToSplit)
     EXPECT_THROW(ClientProblemFactory(makeArgs({96, 3, 1, 64}, 4, "N")), std::runtime_error);
 }
 
+TEST(ClientProblemFactorySplit, OutputPeerDReachesEveryProblemAndSlice)
+{
+    {
+        ClientProblemFactory factory(makeArgs({128, 96, 1, 64}, 2, "M"));
+        EXPECT_FALSE(gemm(factory.problems()[0].get()).outputPeerD());
+    }
+
+    auto args = makeArgs({128, 96, 1, 64}, 2, "M");
+    TensileLite::TestUtils::setOption(args, "output-peerD", true);
+    ClientProblemFactory factory(args);
+    auto*                full = factory.problems()[0].get();
+    EXPECT_TRUE(gemm(full).outputPeerD());
+    for(size_t d = 0; d < factory.numSlices(); d++)
+        EXPECT_TRUE(gemm(factory.sliceProblem(full, d)).outputPeerD()) << "device " << d;
+}
+
 TEST(ClientProblemFactorySplit, RejectsAProblemFromAnotherFactory)
 {
     ClientProblemFactory factory(makeArgs({128, 96, 1, 64}, 2, "M"));
