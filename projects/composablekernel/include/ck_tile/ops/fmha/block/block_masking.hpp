@@ -630,6 +630,21 @@ struct SimplifiedGenericAttentionMask
         }
     }
 
+    // The key tiles that IsEdgeTileForValidRows reports as interior for query tile i_y, as
+    // {first, width}: tile i_x is an edge tile iff uint32_t(i_x - first) >= uint32_t(width).
+    // IsEdgeTileForValidRows is i_x < first (bottom left) or i_x > last (top right), and both
+    // bounds depend on i_y only, so a key loop forms them once and tests a tile with a subtract
+    // and an unsigned compare.
+    template <index_t TileHeight, index_t TileWidth>
+    CK_TILE_HOST_DEVICE constexpr auto
+    GetInteriorTileRangeForValidRows(index_t i_y, number<TileHeight>, number<TileWidth>) const
+    {
+        static_assert(IsMasking, "without a mask only the key tail makes an edge tile");
+        const index_t first = min(i_y + TileHeight, y_total) - y;
+        const index_t last  = min(i_y + x, x_total) - TileWidth;
+        return ck_tile::make_tuple(first, max(last - first + 1, 0));
+    }
+
     // the key sequence length, i.e. one past the last valid X index
     CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
     CK_TILE_HOST_DEVICE constexpr index_t GetYTotal() const { return y_total; }

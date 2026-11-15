@@ -214,6 +214,18 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
                !detail::fmha_tdm_is_split_partial_v<Problem> && !Problem::kHasLogitsSoftCap;
     }
 
+    // Masked tiles whose KV loop forms the mask's interior key-tile range once per query tile and
+    // drops the split tail predicate (see the pipeline): the tiles without sink tokens, KV split or
+    // logits soft cap. A KV-split partial's key range ends at the split's end, which the mask does
+    // not cover; the soft-cap D128 M128 tiles spill VGPRs with these trims (their inline-asm
+    // operands fill the low 256 VGPRs), and the P16 D128 ALiBi sink tiles spill more.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseMaskLoopTrims()
+    {
+        return !Problem::kHasSink && !detail::fmha_tdm_is_split_partial_v<Problem> &&
+               !Problem::kHasLogitsSoftCap;
+    }
+
     static constexpr float kGuardedRowSumBound = 256.0f;
 
     // Guarded row max, max path: the row max (Part01), then the output and the row sums rescaled
