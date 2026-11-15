@@ -29,8 +29,8 @@
  * SPEC AS AN EXPLICIT C STRUCT. The Python dataclass is a frozen value type with
  * defaults. In C the caller fills a rocke_mx_gemm_spec_t;
  * rocke_mx_gemm_spec_default() returns a struct with every field at the Python
- * dataclass default; the fields Python requires (M, N, K and the workgroup
- * tile block_tile_m / block_tile_n) are 0 and must still be set.
+ * dataclass default; the fields Python requires (M, N, K) are 0 and must
+ * still be set.
  *
  * Error model mirrors the rest of the C port: build/lower route errors through
  * the sticky-error IRBuilder (rocke_b_*); the validity gate returns a bool + a
@@ -60,15 +60,15 @@ typedef struct rocke_mx_gemm_spec
     int M;
     int N;
     int K;
-    int block_tile_m; /* workgroup output tile rows, required (no default) */
-    int block_tile_n; /* workgroup output tile columns, required (no default) */
+    int block_tile_m; /* workgroup output tile rows, default 32 */
+    int block_tile_n; /* workgroup output tile columns, default 128 */
     const char* mantissa_dtype; /* "fp8e4m3" (default) | "bf8e5m2"     */
     int group_k; /* MX shared-exponent block size, default 32 */
     const char* name; /* default "rocke_mx_gemm" */
 } rocke_mx_gemm_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
- * caller must still set M / N / K and block_tile_m / block_tile_n. */
+ * caller must still set M / N / K. */
 rocke_mx_gemm_spec_t rocke_mx_gemm_spec_default(void);
 
 /* MxGemmSpec.waves property: waves per workgroup, one per 32x32 tile of the
@@ -138,8 +138,8 @@ const rocke_mx_element_format_t* rocke_mx_gemm_element_format(const char* mantis
                                                               size_t err_cap);
 
 /* mx_gemm_grid(spec) -> (n_tiles, m_tiles, 1). Any out-param may be NULL.
- * A NULL spec or a workgroup tile that is not positive (as
- * rocke_mx_gemm_spec_default leaves it) gives the empty grid (0, 0, 1). */
+ * A NULL spec or a workgroup tile that is not positive (an invalid spec)
+ * gives the empty grid (0, 0, 1). */
 void rocke_mx_gemm_grid(const rocke_mx_gemm_spec_t* spec, int* out_gx, int* out_gy, int* out_gz);
 
 #ifdef __cplusplus

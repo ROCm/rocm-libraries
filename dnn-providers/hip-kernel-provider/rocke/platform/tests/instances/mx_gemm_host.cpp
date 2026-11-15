@@ -4,12 +4,12 @@
  * Host-only test of the C entries of the MX GEMM (rocke/instance_mx_gemm.h),
  * run by CTest without the Python binding: rocke_mx_gemm_grid, which no Python
  * caller reaches, and the size refusals of rocke_mx_gemm_is_valid_spec, whose
- * both-engine pytest skips without the binding. rocke_mx_gemm_grid must give the empty
- * grid (0, 0, 1) for a spec whose workgroup tile is unset, as
- * rocke_mx_gemm_spec_default leaves it, and for a NULL spec, so a launch fails
- * instead of reading unset dimensions; for a set tile it gives
- * (ceil(N / block_tile_n), ceil(M / block_tile_m), 1), also for M and N at
- * INT_MAX. rocke_mx_gemm_is_valid_spec must refuse, with the Python engine's
+ * both-engine pytest skips without the binding. rocke_mx_gemm_spec_default
+ * must give the Python default workgroup tile, 32 x 128. rocke_mx_gemm_grid
+ * must give (ceil(N / block_tile_n), ceil(M / block_tile_m), 1), also for M
+ * and N at INT_MAX, and the empty grid (0, 0, 1) for a workgroup tile that is
+ * not positive and for a NULL spec, so a launch fails instead of dividing by
+ * zero. rocke_mx_gemm_is_valid_spec must refuse, with the Python engine's
  * text, specs whose sizes leave the int and long long ranges: a workgroup of
  * 2^31 threads, one of 2^38 threads (its wave count wraps to 0 in int) and
  * M = N = 1600000000, refused for its offset into A. That last case pins the
@@ -82,14 +82,23 @@ int main(void)
     spec.M = 100;
     spec.N = 300;
     spec.K = 64;
-    expect_grid("unset workgroup tile", &spec, 0, 0, 1);
+    if(spec.block_tile_m != 32 || spec.block_tile_n != 128)
+    {
+        fprintf(stderr,
+                "FAIL default workgroup tile: %d x %d, expected 32 x 128\n",
+                spec.block_tile_m,
+                spec.block_tile_n);
+        ++failures;
+    }
+    expect_grid("default 32 x 128 tile", &spec, 3, 4, 1);
     expect_grid("NULL spec", NULL, 0, 0, 1);
 
-    spec.block_tile_m = 32;
-    expect_grid("unset block_tile_n", &spec, 0, 0, 1);
+    spec.block_tile_n = 0;
+    expect_grid("zero block_tile_n", &spec, 0, 0, 1);
 
+    spec.block_tile_m = 0;
     spec.block_tile_n = 128;
-    expect_grid("32 x 128 tile", &spec, 3, 4, 1);
+    expect_grid("zero block_tile_m", &spec, 0, 0, 1);
 
     spec.M = INT_MAX;
     spec.N = INT_MAX;

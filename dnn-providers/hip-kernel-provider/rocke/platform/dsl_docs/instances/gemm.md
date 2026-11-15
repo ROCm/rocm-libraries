@@ -482,9 +482,9 @@ ordinary f32.
 
 One wave computes a 32x32 output tile; a workgroup holds
 ``block_tile_m / 32 x block_tile_n / 32`` waves side by side. The workgroup
-tile has no default: the caller chooses it per shape and target (a tuning
-knob), any pair of multiples of 32 up to the target's workgroup size (1024
-threads, 16 waves, on gfx942 and gfx950). The waves of one tile row read the
+tile has a default (see ``MxGemmSpec``) and is a tuning knob, chosen per shape
+and target: any pair of multiples of 32 up to the target's workgroup size
+(1024 threads, 16 waves, on gfx942 and gfx950). The waves of one tile row read the
 same A rows, and those of one tile column the same B rows, at about the same
 time, so that they can share those reads in the vector L1 cache.
 Operands come through buffer descriptors: each lane's offsets stay in

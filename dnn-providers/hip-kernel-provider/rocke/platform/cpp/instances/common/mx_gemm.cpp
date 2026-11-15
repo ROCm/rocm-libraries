@@ -109,8 +109,8 @@ rocke_mx_gemm_spec_t rocke_mx_gemm_spec_default(void)
     s.M = 0;
     s.N = 0;
     s.K = 0;
-    s.block_tile_m = 0; /* caller must set (Python: required field, no default) */
-    s.block_tile_n = 0; /* caller must set (Python: required field, no default) */
+    s.block_tile_m = 32;
+    s.block_tile_n = 128;
     s.mantissa_dtype = "fp8e4m3";
     s.group_k = 32;
     s.name = "rocke_mx_gemm";
@@ -1088,8 +1088,8 @@ void rocke_mx_gemm_grid(const rocke_mx_gemm_spec_t* spec, int* out_gx, int* out_
     int m_tiles;
     if(spec == NULL || spec->block_tile_m <= 0 || spec->block_tile_n <= 0)
     {
-        /* No workgroup tile: an empty grid, so a launch fails instead of
-         * reading unset dimensions. */
+        /* A workgroup tile that is not positive (an invalid spec): an empty
+         * grid, so a launch fails instead of dividing by zero. */
         n_tiles = 0;
         m_tiles = 0;
     }

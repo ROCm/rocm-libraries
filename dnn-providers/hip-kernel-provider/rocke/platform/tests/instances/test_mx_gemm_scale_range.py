@@ -799,7 +799,7 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa):
     ],
     ids=[
         "tile",
-        "unset tile",
+        "zero tile",
         "workgroup too large",
         "workgroup size past i32",
         "wave count past i32",
@@ -822,11 +822,20 @@ def test_both_engines_refuse_invalid_specs(fields, message):
         lower_mx_gemm(spec, arch="gfx950", backend="cpp")
 
 
-def test_the_workgroup_tile_has_no_default():
-    """The workgroup tile is a tuning knob the caller chooses: leaving it out
-    is an error, not a hidden default."""
-    with pytest.raises(TypeError, match="block_tile_m"):
-        MxGemmSpec(M=64, N=64, K=64)  # type: ignore[call-arg]
+def test_the_workgroup_tile_has_a_default():
+    """Only the problem shape is required: a spec without a workgroup tile
+    gets 32 x 128, four waves side by side along N."""
+    spec = MxGemmSpec(M=64, N=64, K=64)
+    assert (spec.block_tile_m, spec.block_tile_n) == (32, 128)
+    assert spec.block_size == 256
+    assert mx_gemm_grid(spec) == (1, 2, 1)
+
+
+def test_build_takes_arch_as_a_keyword_only():
+    """The builder takes the target by keyword only, like the other builders,
+    so a target string cannot be passed by position into another parameter."""
+    with pytest.raises(TypeError, match="positional"):
+        build_mx_gemm(MxGemmSpec(M=64, N=64, K=64), "gfx942")  # type: ignore[misc]
 
 
 def test_the_spec_takes_keyword_arguments_only():

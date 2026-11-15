@@ -127,20 +127,21 @@ class MxGemmSpec:
 
     ``block_tile_m`` x ``block_tile_n`` is the output tile of one workgroup,
     both multiples of 32: one wave per 32x32 tile inside it, at most the
-    target's workgroup size in threads. It has no default: which tile is
-    fastest depends on the shape and the target, so the caller chooses it
-    (a tuning knob). M and N need not be multiples of the tile; waves past the
-    edge of C do nothing and stores past it are dropped. M must be a multiple
-    of 4 (the A scale codes of four consecutive rows are read as one dword).
-    Every field is keyword-only, so a positional argument cannot land in the
-    workgroup tile.
+    target's workgroup size in threads. It defaults to 32 x 128: four waves
+    side by side along N, which read the same A rows. Which tile is fastest
+    depends on the shape and the target, so it is a tuning knob.
+    M and N need not be multiples of the tile; waves past the edge of C do
+    nothing and stores past it are dropped. M must be a multiple of 4 (the A
+    scale codes of four consecutive rows are read as one dword). Every field
+    is keyword-only, so a positional argument cannot land in the workgroup
+    tile.
     """
 
     M: int
     N: int
     K: int
-    block_tile_m: int
-    block_tile_n: int
+    block_tile_m: int = 32
+    block_tile_n: int = 128
     mantissa_dtype: MxMantissaDType = "fp8e4m3"
     group_k: int = 32  # MX spec: shared-exponent block size
     name: str = "rocke_mx_gemm"
@@ -513,7 +514,7 @@ def _store_tile(b: IRBuilder, spec: MxGemmSpec, tile: _WaveTile, acc: Value) -> 
         )
 
 
-def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
+def build_mx_gemm(spec: MxGemmSpec, *, arch: str = "gfx950") -> KernelDef:
     """Build the IR for one MX GEMM instance.
 
     Kernel signature::
