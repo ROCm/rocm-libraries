@@ -686,6 +686,11 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE)
                 {
                     storeRaw<P, VBY>(orr, ok ? static_cast<unsigned>(e * ES) : OOB, v);
                 }
+#if defined(CONV_EPI) && CONV_EPI
+                // Each group's epilogue stays beside its store: computed all ahead of the stores, the
+                // fused values of every group would be live at once.
+                __builtin_amdgcn_sched_barrier(0);
+#endif
             }
         }
         else
@@ -702,6 +707,11 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE)
                 const bool in = ok & (ox0 + j < a.wo);
                 const int e = dn * osn + od * osd + oy * osh + (ox0 + j) * osw;
                 storeRaw<KB, VBY>(orr, in ? static_cast<unsigned>(e * ES) : OOB, v);
+#if defined(CONV_EPI) && CONV_EPI
+                // Each group's epilogue stays beside its store: computed all ahead of the stores, the
+                // fused values of every group would be live at once.
+                __builtin_amdgcn_sched_barrier(0);
+#endif
             }
         }
     }
