@@ -756,10 +756,17 @@ class GSUOn(GSU):
             if kernel["ProblemType"]["SupportUserArgs"]:
                 writer.cmpNamedArgTypeEq(module, 2, "ArgType == 2 ?")
                 module.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-                module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprAccumTiles), src1="MTOffset", comment="accumNumTiles*(MT0*MT1*bpeC)"))
+                # Skip this gemm's partial tiles and synchronizer slots: its
+                # workgroups (GSU included) times one tile, and times one counter
+                # per wave. The bases then sit past every earlier gemm, sized from
+                # the device-side sizes and packed like the host's workspace sum.
+                module.add(SMulHIU32(dst=sgpr(tmpSgpr0+1), src0=sgpr(tmpSgprNumWG0), src1="MTOffset", comment="numWG*(MT0*MT1*bpeC) hi"))
+                module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprNumWG0), src1="MTOffset", comment="numWG*(MT0*MT1*bpeC) lo"))
                 module.add(SAddU32(dst=sgpr("AddressTD"), src0=sgpr("AddressTD"), src1=sgpr(tmpSgpr0)))
-                module.add(SAddCU32(dst=sgpr("AddressTD+1"), src0=sgpr("AddressTD+1"), src1=0))
-                module.add(SAddU32(dst=sgpr("Synchronizer"), src0=sgpr("Synchronizer"), src1=hex(1638400)))
+                module.add(SAddCU32(dst=sgpr("AddressTD+1"), src0=sgpr("AddressTD+1"), src1=sgpr(tmpSgpr0+1)))
+                numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
+                module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprNumWG0), src1=numWaves * 4, comment="numWG*waves*4 bytes"))
+                module.add(SAddU32(dst=sgpr("Synchronizer"), src0=sgpr("Synchronizer"), src1=sgpr(tmpSgpr0)))
                 module.add(SAddCU32(dst=sgpr("Synchronizer+1"), src0=sgpr("Synchronizer+1"), src1=0))
                 module.add(extReadEpilogueLabeltmp)
 

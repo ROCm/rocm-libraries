@@ -238,6 +238,48 @@ def test_split_k_starts_the_scale_pointer_at_its_k_range(toolchain, gsu, algorit
     assert ("scaleA: position of the first iteration in its group" in src) == (depthU < blockSize)
 
 
+def _kernarg_offsets(src):
+    """name -> byte offset of every kernel argument in the .s metadata."""
+    return {m.group(1): int(m.group(2)) for m in re.finditer(
+        r"- \.name:\s+(\S+)\s*\n\s*\.size:\s+\d+\s*\n\s*\.offset:\s+(\d+)", src)}
+
+
+@pytest.mark.parametrize("zeroPoint", [False, True])
+def test_single_kernel_split_k_loads_dst_d_after_the_scale_pointers(toolchain, zeroPoint):
+    """MBSK reads dstD and Synchronizer after the store args. The preloaded
+    scaleA/scaleB (and zero-point) pointers sit before those and are not counted
+    in them, so the epilogue load must skip them too, or it reads a scale pointer
+    as the output."""
+    sol = _solution(toolchain, blockSize=32, depthU=64, zeroPoint=zeroPoint,
+                    GlobalSplitU=2, GlobalSplitUAlgorithm="MultipleBufferSingleKernel")
+    assert sol.get("Valid") is True
+    _, src = _emit_solution(toolchain, sol)
+    args = _kernarg_offsets(src)
+    loads = dict(re.findall(
+        r"s_load_b64 s\[sgpr(AddressTD|Synchronizer):[^\]]*\], s\[sgprKernArgAddress:[^\]]*\], (0x[0-9a-f]+)", src))
+    assert set(loads) == {"AddressTD", "Synchronizer"}, loads
+    # The non-grouped loads are relative to KernArgAddress past the common args.
+    base = args["dstD"] - int(loads["AddressTD"], 16)
+    assert args["Synchronizer"] - int(loads["Synchronizer"], 16) == base
+    assert base == 16  # KernArgAddress is past the 16-byte common args header
+
+
+def test_grouped_single_kernel_split_k_packs_gemms_in_the_workspace(toolchain):
+    """With device-side user arguments a grouped MBSK kernel moves its workspace
+    and synchronizer bases past each earlier gemm by that gemm's own workgroups.
+    The running total would grow quadratically past the workspace the host
+    sizes (the sum over gemms), and a fixed slot per gemm caps the group count."""
+    sol = _solution(toolchain, blockSize=32, depthU=64, zeroPoint=True,
+                    problemType={"GroupedGemm": True, "SupportUserArgs": True},
+                    GlobalSplitU=2, GlobalSplitUAlgorithm="MultipleBufferSingleKernel")
+    assert sol.get("Valid") is True
+    _, src = _emit_solution(toolchain, sol)
+    assert "numWG*(MT0*MT1*bpeC) lo" in src
+    assert "numWG*waves*4 bytes" in src
+    assert "accumNumTiles*(MT0*MT1*bpeC)" not in src
+    assert "0x190000" not in src
+
+
 @pytest.mark.parametrize("kw", [{"PrefetchGlobalRead": 2}, {"ScheduleIterAlg": 1}])
 def test_prefetch_and_schedule_are_each_fine_alone(toolchain, kw):
     """The reject above is on the *combination*, so pin that neither setting is

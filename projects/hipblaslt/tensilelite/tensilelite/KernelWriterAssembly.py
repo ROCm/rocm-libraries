@@ -10307,16 +10307,17 @@ class KernelWriterAssembly(KernelWriter):
       argOffset = self.argLoader.getOffset() # Backup offset
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (kernel["ProblemType"]["DataTypeA"].numRegisters() > kernel["ProblemType"]["MacDataTypeA"].numRegisters() \
                                                               or kernel["ProblemType"]["DataTypeB"].numRegisters() > kernel["ProblemType"]["MacDataTypeB"].numRegisters()):
-        self.argLoader.setOffset(argOffset + (self.states.numStoreSgprToLoad)*4 + (self.states.rpga * self.states.bpr)) # Restore offset
+        preloadedScaleBytes = self.states.rpga * self.states.bpr
+      elif kernel["ProblemType"]["UseScaleAB"] == "Block":
+        # W4A16: the scaleA, scaleB (and zero-point) pointers precede the store
+        # args and are preloaded, so numStoreSgprToLoad does not count them.
+        preloadedScaleBytes = self.states.rpga * self.states.bpr * (2 + int(bool(kernel["ProblemType"]["ScaleZeroPointA"])))
       else:
-        self.argLoader.setOffset(argOffset + (self.states.numStoreSgprToLoad)*4) # Restore offset
+        preloadedScaleBytes = 0
+      self.argLoader.setOffset(argOffset + (self.states.numStoreSgprToLoad)*4 + preloadedScaleBytes) # Restore offset
       numStoreSgprToLoad = self.states.numStoreSgprToLoad2
 
-      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (kernel["ProblemType"]["DataTypeA"].numRegisters() > kernel["ProblemType"]["MacDataTypeA"].numRegisters() \
-                                                              or kernel["ProblemType"]["DataTypeB"].numRegisters() > kernel["ProblemType"]["MacDataTypeB"].numRegisters()):
-        argOffsettmp = (argOffset + (self.states.numStoreSgprToLoad)*4 + (self.states.rpga * self.states.bpr)) # Restore offset
-      else:
-        argOffsettmp = (argOffset + (self.states.numStoreSgprToLoad)*4) # Restore offset
+      argOffsettmp = argOffset + (self.states.numStoreSgprToLoad)*4 + preloadedScaleBytes
 
       extReadEpilogueLabeltmp    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
       module.addComment0("Check if custom structure pointer is null")
