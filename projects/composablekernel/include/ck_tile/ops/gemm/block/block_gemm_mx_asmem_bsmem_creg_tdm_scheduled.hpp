@@ -16,8 +16,8 @@ namespace ck_tile {
 ///
 /// The pipeline calls it per K step: LocalPrefetchA and LocalPrefetchB read a K step's A
 /// fragments and scales and a range of its B fragments, and Run issues a range of the WMMAs of a
-/// range of B fragments, as V1's hot loop does, so that the pipeline's cluster signal or TDM
-/// refill lands between two given WMMAs.
+/// range of B fragments, as V1's hot loop does: half B issues each half's WMMAs after that half's
+/// reads.
 ///
 /// With PackMNIter, V1's M (N) index is (warp, repeat, atom row): the fragment order of the
 /// policy's MakeLdsBlockDescriptor. The reads go through word windows whose distribution is

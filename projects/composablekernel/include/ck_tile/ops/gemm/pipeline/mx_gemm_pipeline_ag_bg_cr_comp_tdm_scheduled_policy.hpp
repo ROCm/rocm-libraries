@@ -333,8 +333,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     static constexpr index_t kDscntMax = 63;
     /// VGPRs per lane, which bound the accumulators.
     static constexpr index_t kVgprs = 1024;
-    /// The cluster signal's WMMAs, before clamping to GetSignalLimit.
-    static constexpr index_t kDefaultSignalWmmas = 6;
 
     /// Whether T is an A or B type: pk_fp4_t, fp8_t or bf8_t.
     template <typename T>
@@ -468,20 +466,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
     CK_TILE_HOST_DEVICE static constexpr bool GetSplitBLdsRead()
     {
         return kPrefetchLdsRead && kSplitBLdsRead;
-    }
-
-    /// The most WMMAs the cluster signal may wait for: a K step's, half of them with half B.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSignalLimit()
-    {
-        const index_t per_step = GetWaveRepeatM<Problem>() * GetWaveRepeatN<Problem>();
-        return GetSplitBLdsRead<Problem>() ? per_step / 2 : per_step;
-    }
-    /// WMMAs of the second-to-last K step before wave 0 signals the cluster.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSignalWmmas()
-    {
-        return min_i(kDefaultSignalWmmas, GetSignalLimit<Problem>());
     }
 
     /// Bytes of an E element (fp8_t 1, half_t and bf16_t 2).

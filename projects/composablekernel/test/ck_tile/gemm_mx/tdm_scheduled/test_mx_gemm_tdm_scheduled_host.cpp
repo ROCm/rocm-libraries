@@ -170,7 +170,6 @@ TEST(MxGemmTdmScheduledHost, PolicyDerivesTheScheduleFromProblemAndParameters)
     static_assert(Default::Validate<MafProblem>() == nullptr);
     // 3 scale reads and 2 chunks of 4 x 2 A rows and 8 B fragments.
     static_assert(Default::GetReadsPerStep<MafProblem>() == 35);
-    static_assert(Default::GetSignalWmmas<MafProblem>() == 6);
     EXPECT_EQ((PipelineOf<MafProblem, Default>::GetKernelName()),
               "mx_gemm_tdm_scheduled_mxfp4_t256x256x512_c4x4_w1");
     EXPECT_EQ(Default::GetTuningName<MafProblem>(), "_c4x4");

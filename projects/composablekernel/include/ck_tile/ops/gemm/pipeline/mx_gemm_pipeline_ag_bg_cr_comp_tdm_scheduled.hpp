@@ -75,8 +75,8 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
  *
  * PipelineImpl has five roles: TdmLoader (descriptors built once, each tile patches only its LDS
  * address, global address and remaining sizes; even waves load one B component, odd waves one A
- * component), Gl2Prefetcher, LdsReader (16 B reads), TileCompute (PrefetchLdsRead, SplitBLdsRead
- * and the cluster signal) and Pipeline (PrefetchStages 2: tile k refills its own buffer with
+ * component), Gl2Prefetcher, LdsReader (16 B reads), TileCompute (PrefetchLdsRead and
+ * SplitBLdsRead) and Pipeline (PrefetchStages 2: tile k refills its own buffer with
  * tile k+2 once the cluster has read it; tile k+1 is waited for at tile k's last K step).
  *
  * The schedule is one intrawave loop, written with explicit waits rather than left to the
@@ -189,7 +189,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kClusterX         = BlockGemmShape::kclusterN;
     static constexpr index_t kClusterY         = BlockGemmShape::kclusterM;
     static constexpr index_t kClusterZ         = BlockGemmShape::kclusterK;
-    static constexpr index_t kSignalWmmas      = Policy::template GetSignalWmmas<Problem>();
     static constexpr index_t kGl2Distance      = Policy::kGl2PrefetchDistance;
     static constexpr index_t kReadsPerStep     = Policy::template GetReadsPerStep<Problem>();
     static constexpr index_t kLdsRowBytes      = Policy::template GetLdsRowBytes<Problem>();
@@ -745,17 +744,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                                                                             kGl2Distance * kTileK);
         }
 
-        /// Arrives on the cluster barrier: this wave has read the tile's buffer.
-        CK_TILE_DEVICE void arrive() const
-        {
-            if constexpr(kHasCluster)
-            {
-                sched_fence<kAluMayCross>();
-                cluster_barrier_signal_wave0(wave);
-                sched_fence<kAluMayCross>();
-            }
-        }
-
         /// The GL2 prefetch ahead of tile k0, then (with local prefetch) the wait and barrier that
         /// publish tile k0 + 1 before its first read.
         template <index_t StaticParity>
@@ -774,16 +762,16 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         }
 
         /// Refills buffer parity with the tile two K tiles on, once the cluster and the
-        /// workgroup have read it.
+        /// workgroup have read it: this wave's reads of the buffer drain, then one barrier
+        /// (cluster_barrier() includes the workgroup's) publishes every wave's.
         CK_TILE_DEVICE void fill_stage(index_t k0, index_t parity) const
         {
             sched_fence<kAluMayCross>();
-            if constexpr(kHasCluster)
-                cluster_barrier_wait();
-            // No wave drained its reads of this buffer before the signal; the workgroup barrier
-            // publishes them here.
             s_wait_dscnt_pinned<kLatePending>();
-            s_barrier();
+            if constexpr(kHasCluster)
+                cluster_barrier();
+            else
+                s_barrier();
             Issue(ClampK(k0 + 2 * kTileK), parity);
             sched_fence<kAluMayCross>();
         }
@@ -799,41 +787,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         // ---------------------------------------------------------------- TileCompute
 
         /// The WMMAs of B fragments [First, First + Count): half-B order (rn outer, rm inner) with
-        /// BOuter, else rm outer. `hook` runs before WMMA HookAt of the range, or after its last
-        /// one when HookAt is the WMMA count; -1 has no hook.
-        template <bool BOuter,
-                  index_t First,
-                  index_t Count,
-                  index_t HookAt = -1,
-                  typename Hook  = void (*)()>
-        CK_TILE_DEVICE void
-        gemm(AccTile& acc, const ATile& a, const BTile& b, const Hook& hook = nullptr) const
+        /// BOuter, else rm outer.
+        template <bool BOuter, index_t First, index_t Count>
+        CK_TILE_DEVICE void gemm(AccTile& acc, const ATile& a, const BTile& b) const
         {
-            constexpr index_t total = kRm * Count;
-            if constexpr(HookAt < 0)
-            {
-                ignore = hook;
-                block_gemm.template Run<First, Count, BOuter, 0, total>(acc, a, b);
-            }
-            else
-            {
-                block_gemm.template Run<First, Count, BOuter, 0, HookAt>(acc, a, b);
-                hook();
-                block_gemm.template Run<First, Count, BOuter, HookAt, total>(acc, a, b);
-            }
-        }
-
-        /// A one-K-step tile has no second-to-last K step to signal in: it signals just before
-        /// its cluster wait.
-        template <index_t Steps>
-        CK_TILE_DEVICE void arrive_before_fill() const
-        {
-            if constexpr(Steps == 1)
-                arrive();
+            block_gemm.template Run<First, Count, BOuter, 0, kRm * Count>(acc, a, b);
         }
 
         /// PrefetchLdsRead and SplitBLdsRead: all reads of K step s + 1 before the first wait but
         /// B's second half, which follows the first half's WMMAs.
+        /// The WMMAs run B outer (rn outer, rm inner), so each half's WMMAs use only that half's
+        /// B fragments and each B fragment feeds kRm WMMAs in a row.
+        /// The same split applies to A (A's halves, rm outer); only B's is implemented.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void k_tile_half_b(AccTile& acc,
                                           ATile& a_tile,
@@ -859,7 +824,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     a_tile = block_gemm.LocalPrefetchA(next_buffer, 0);
                     block_gemm.template LocalPrefetchB<0, kHalf>(b_tile, next_buffer, 0);
                 }
-                constexpr bool signal = kHasCluster && step + 2 == Steps;
                 s_wait_dscnt_pinned<kReadsPerStep>();
                 gemm<true, 0, kHalf>(acc, cur, cur_b);
                 if constexpr(!last)
@@ -867,12 +831,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 else
                 {
                     block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, next_buffer, 0);
-                    arrive_before_fill<Steps>();
                     fill_stage(k0, parity);
                 }
                 s_wait_dscnt_pinned<kReadsPerStep>();
-                gemm<true, kHalf, kHalf, signal ? kSignalWmmas : -1>(
-                    acc, cur, cur_b, [&] { arrive(); });
+                gemm<true, kHalf, kHalf>(acc, cur, cur_b);
             });
         }
 
@@ -901,23 +863,20 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     publish_next_tile<StaticParity>(k0);
                     a_tile = block_gemm.LocalPrefetchA(next_buffer, 0);
                     block_gemm.template LocalPrefetchB<0, kRn>(b_tile, next_buffer, 0);
-                    arrive_before_fill<Steps>();
                     fill_stage(k0, parity);
                 }
-                constexpr bool signal = kHasCluster && step + 2 == Steps;
                 s_wait_dscnt_pinned<kReadsPerStep>();
-                gemm<false, 0, kRn, signal ? kSignalWmmas : -1>(acc, cur, cur_b, [&] { arrive(); });
+                gemm<false, 0, kRn>(acc, cur, cur_b);
             });
         }
 
         /// PrefetchLdsRead off: each K step reads, drains and computes. The tile's last read is the
-        /// last K step's: its refill (GL2 prefetch, the signal) follows the drain, the cluster
-        /// wait and TDM come kSignalWmmas WMMAs later (at once without a cluster).
+        /// last K step's: its refill (GL2 prefetch, barrier, TDM) follows the drain, before the
+        /// step's WMMAs.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void
         k_tile_direct(AccTile& acc, index_t k0, index_t parity, index_t buffer) const
         {
-            constexpr index_t late_at = kHasCluster ? kSignalWmmas : 0;
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
@@ -928,10 +887,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 if constexpr(last)
                 {
                     publish_next_tile<StaticParity>(k0);
-                    arrive();
+                    fill_stage(k0, parity);
                 }
-                gemm<false, 0, kRn, last ? late_at : -1>(
-                    acc, h, b, [&] { fill_stage(k0, parity); });
+                gemm<false, 0, kRn>(acc, h, b);
             });
         }
 
@@ -992,10 +950,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             // 1; One runs the odd tile, tile 0, first and then pairs in buffers 1 and 0. Either
             // way nothing but the K tail follows a loop that may run no pair: an odd tile after
             // it, reached around the loop too, costs about 130 VGPRs (maf).
-            const index_t pairs_end =
-                TailNum == TailNumber::Full
-                    ? integer_divide_nonnegative<2>(full_tiles) * (2 * kTileK)
-                    : full_tiles * kTileK;
+            const index_t pairs_end = TailNum == TailNumber::Full
+                                          ? integer_divide_nonnegative<2>(full_tiles) * (2 * kTileK)
+                                          : full_tiles * kTileK;
             if constexpr(TailNum == TailNumber::One)
             {
                 k_tile<kKSteps, 0>(acc, a_tile, b_tile, 0, 0);
