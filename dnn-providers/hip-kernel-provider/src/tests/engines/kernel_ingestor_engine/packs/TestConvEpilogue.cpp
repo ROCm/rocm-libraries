@@ -3,6 +3,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -212,9 +213,9 @@ TEST(TestConvEpilogue, ValuesAreRuntimeSlots)
     EXPECT_EQ(scalars[5].value, 1.25F);
 
     // Launch arguments: a runtime scalar is read from its host slot at execute.
-    const float supplied = 4.5F;
-    const hipdnnPluginDeviceBuffer_t buffers[] = {{OPERAND_UID + 1, const_cast<float*>(&supplied)}};
-    const auto args = conv_epilogue::epilogueArgs(problem->epilogue, buffers, 1, 7, 6);
+    float supplied = 4.5F;
+    const std::array<hipdnnPluginDeviceBuffer_t, 1> buffers{{{OPERAND_UID + 1, &supplied}}};
+    const auto args = conv_epilogue::epilogueArgs(problem->epilogue, buffers.data(), 1, 7, 6);
     EXPECT_EQ(args.scalar[0], -0.75F);
     EXPECT_EQ(args.scalar[1], 4.5F);
     EXPECT_EQ(args.scalar[5], 1.25F);
@@ -231,6 +232,9 @@ struct DeclineCase
     std::string name;
     std::vector<Step> steps;
     std::function<void(FusedGraphSpec&)> mutate;
+    /// The shared epilogue parser itself declines it (false: the convolution's own gates do,
+    /// for the written output and the graph).
+    bool parserLevel = true;
 };
 
 // The base chains: scale (per-channel) + bias (per-channel) + relu, and a unary activation.
@@ -286,6 +290,26 @@ std::vector<DeclineCase> declineCases()
                          last.out = extra.uid;
                          s.nodes.push_back(last);
                      }});
+    Step hostValue = bias();
+    hostValue.operand = OperandKind::CONSTANT;
+    hostValue.value = 0.5F;
+    cases.push_back(
+        {"TooManyHostScalars", {relu(), relu(), hostValue, hostValue}, [](FusedGraphSpec& s) {
+             // 8 value slots, and a fifth step's constant: past the 8 the argument holds.
+             TensorEntry operand = entryOf(s, OPERAND_UID + 3);
+             operand.uid = OPERAND_UID + 50;
+             s.tensors.push_back(operand);
+             TensorEntry extra = entryOf(s, outputUid(4));
+             entryOf(s, outputUid(4)).tensor.isVirtual = true;
+             entryOf(s, outputUid(4)).tensor.dataType = DataType::FLOAT;
+             extra.uid = OUT_UID + 50;
+             s.tensors.push_back(extra);
+             NodeSpec last = s.nodes.back();
+             last.in0 = last.out;
+             last.in1 = operand.uid;
+             last.out = extra.uid;
+             s.nodes.push_back(last);
+         }});
     cases.push_back({"TooManyOperands", {bias(), bias(), bias(), bias()}, [](FusedGraphSpec& s) {
                          TensorEntry operand = entryOf(s, OPERAND_UID);
                          operand.uid = OPERAND_UID + 50;
@@ -347,10 +371,15 @@ std::vector<DeclineCase> declineCases()
         {"UnaryInputNotChain", sbr(), [](FusedGraphSpec& s) { s.nodes[2].in0 = SCALE_OUT; }});
     cases.push_back(
         {"UnaryWithIn1", sbr(), [](FusedGraphSpec& s) { s.nodes[2].in1 = BIAS_OPERAND; }});
-    cases.push_back(
-        {"OutputReusesChainTensor", sbr(), [](FusedGraphSpec& s) { s.nodes[2].out = SCALE_OUT; }});
-    cases.push_back(
-        {"OutputIsOperand", sbr(), [](FusedGraphSpec& s) { s.nodes[2].out = BIAS_OPERAND; }});
+    cases.push_back({"OutputReusesChainTensor", sbr(), [](FusedGraphSpec& s) {
+                         // The bias step writes the convolution's y again, which relu then reads.
+                         s.nodes[1].out = conv_naive_test::Y_UID;
+                         s.nodes[2].in0 = conv_naive_test::Y_UID;
+                     }});
+    cases.push_back({"OutputIsOperand",
+                     sbr(),
+                     [](FusedGraphSpec& s) { s.nodes[2].out = BIAS_OPERAND; },
+                     false});
     cases.push_back({"OutputMissing", sbr(), [](FusedGraphSpec& s) { s.nodes[2].out = 999; }});
     cases.push_back({"OperandIsConvInput", sbr(), [](FusedGraphSpec& s) {
                          s.nodes[1].in1 = conv_naive_test::X_UID;
@@ -392,18 +421,22 @@ std::vector<DeclineCase> declineCases()
     cases.push_back({"IntermediateNegativeStride", sbr(), [](FusedGraphSpec& s) {
                          entryOf(s, SCALE_OUT).tensor.strides[0] = -1;
                      }});
-    cases.push_back({"ConvOutputDims", sbr(), [](FusedGraphSpec& s) { s.conv.y.dims[2] += 1; }});
+    cases.push_back(
+        {"ConvOutputDims", sbr(), [](FusedGraphSpec& s) { s.conv.y.dims[2] += 1; }, false});
 
     // The written output.
     cases.push_back({"FinalOutputVirtual", sbr(), [](FusedGraphSpec& s) {
                          entryOf(s, FINAL_OUT).tensor.isVirtual = true;
                      }});
-    cases.push_back({"FinalOutputDims", sbr(), [](FusedGraphSpec& s) {
-                         entryOf(s, FINAL_OUT).tensor.dims[3] += 1;
-                     }});
-    cases.push_back({"FinalOutputType", sbr(), [](FusedGraphSpec& s) {
-                         entryOf(s, FINAL_OUT).tensor.dataType = DataType::FLOAT;
-                     }});
+    cases.push_back({"FinalOutputDims",
+                     sbr(),
+                     [](FusedGraphSpec& s) { entryOf(s, FINAL_OUT).tensor.dims[3] += 1; },
+                     false});
+    cases.push_back(
+        {"FinalOutputType",
+         sbr(),
+         [](FusedGraphSpec& s) { entryOf(s, FINAL_OUT).tensor.dataType = DataType::FLOAT; },
+         false});
 
     // Operands.
     cases.push_back({"OperandVirtual", sbr(), [](FusedGraphSpec& s) {
@@ -414,12 +447,12 @@ std::vector<DeclineCase> declineCases()
                      }});
     cases.push_back({"OperandSpatialExtent", sbr(), [](FusedGraphSpec& s) {
                          auto& t = entryOf(s, BIAS_OPERAND).tensor;
-                         t.dims[2] = 2;
+                         t.dims[2] = t.dims[1]; // the channel count, on another axis
                          t.strides = conv_naive_test::packedStrides(t.dims, true);
                      }});
     cases.push_back({"OperandBatchExtent", sbr(), [](FusedGraphSpec& s) {
                          auto& t = entryOf(s, BIAS_OPERAND).tensor;
-                         t.dims[0] = 2;
+                         t.dims[0] = t.dims[1]; // the channel count, on another axis
                          t.strides = conv_naive_test::packedStrides(t.dims, true);
                      }});
     cases.push_back({"OperandRank", sbr(), [](FusedGraphSpec& s) {
@@ -463,8 +496,10 @@ std::vector<DeclineCase> declineCases()
                      }});
 
     // Graph and convolution.
-    cases.push_back(
-        {"OverrideShape", sbr(), [](FusedGraphSpec& s) { s.conv.overrideShapeEnabled = true; }});
+    cases.push_back({"OverrideShape",
+                     sbr(),
+                     [](FusedGraphSpec& s) { s.conv.overrideShapeEnabled = true; },
+                     false});
     return cases;
 }
 
@@ -479,6 +514,14 @@ TEST_P(TestConvEpilogueDeclines, OneFieldChanged)
     ASSERT_TRUE(parseFused(spec).has_value()) << "the unchanged graph must be accepted";
     param.mutate(spec);
     EXPECT_FALSE(parseFused(spec).has_value());
+    if(param.parserLevel)
+    {
+        // The shared parser declines it on its own: no other gate is relied on.
+        const GraphFixture fixture(buildFusedGraph(spec));
+        EXPECT_FALSE(hipdnn_plugin_sdk::conv_epilogue::parseConvEpilogue(
+                         fixture.context().graph, conv_naive_test::Y_UID, spec.conv.y.dims)
+                         .has_value());
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -488,20 +531,32 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST(TestConvEpilogue, DeclinesFusedBackwardDirections)
 {
-    // Forward only: a backward-data or backward-weights graph never carries an epilogue.
-    for(const auto direction : {ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
-    {
-        auto conv = conv_naive_test::specFor(nhwcHalf(), direction);
-        const GraphFixture single(conv_naive_test::buildGraph(conv));
-        ASSERT_TRUE(conv_naive::parseConvNaiveProblem(single.context(), direction, Fusion::EPILOGUE)
-                        .has_value());
-        // The same graph with a pointwise node after it.
-        FusedGraphSpec spec = fusedSpecFor(nhwcHalf(), {relu()}, DataType::HALF);
-        spec.conv.direction = direction;
-        const GraphFixture fused(buildFusedGraph(spec));
-        EXPECT_FALSE(conv_naive::parseConvNaiveProblem(fused.context(), direction, Fusion::EPILOGUE)
-                         .has_value());
-    }
+    // Forward only: a backward-data graph whose dx feeds a pointwise chain is declined, though it
+    // is well formed (dx and dy have one shape here: same padding, unit stride, C == K).
+    ConvShape shape = nhwcHalf();
+    shape.c = shape.k;
+    auto conv = conv_naive_test::specFor(shape, ConvDirection::BACKWARD_DATA);
+    const GraphFixture single(conv_naive_test::buildGraph(conv));
+    ASSERT_TRUE(conv_naive::parseConvNaiveProblem(
+                    single.context(), ConvDirection::BACKWARD_DATA, Fusion::EPILOGUE)
+                    .has_value());
+    FusedGraphSpec spec = fusedSpecFor(shape, {relu()}, DataType::FLOAT);
+    spec.conv.direction = ConvDirection::BACKWARD_DATA;
+    // dy is real; dx, which the convolution writes, heads the chain.
+    spec.conv.y.isVirtual = false;
+    spec.conv.y.dataType = shape.dataType;
+    spec.conv.x.isVirtual = true;
+    spec.conv.x.dataType = DataType::FLOAT;
+    spec.nodes[0].in0 = conv_naive_test::X_UID;
+    ASSERT_EQ(spec.conv.x.dims, spec.conv.y.dims);
+    const GraphFixture fused(buildFusedGraph(spec));
+    EXPECT_FALSE(conv_naive::parseConvNaiveProblem(
+                     fused.context(), ConvDirection::BACKWARD_DATA, Fusion::EPILOGUE)
+                     .has_value());
+    // The forward direction of the same graph is not a forward convolution either.
+    EXPECT_FALSE(
+        conv_naive::parseConvNaiveProblem(fused.context(), ConvDirection::FORWARD, Fusion::EPILOGUE)
+            .has_value());
 }
 
 // ---------------------------------------------------------------------------

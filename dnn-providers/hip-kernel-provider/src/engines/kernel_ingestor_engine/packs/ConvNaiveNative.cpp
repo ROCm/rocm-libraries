@@ -194,9 +194,9 @@ const std::vector<KernelArgument>& kernelSignature(bool fused)
 class PreparedConvNaive : public IngestorPreparedDispatch
 {
 public:
-    PreparedConvNaive(IngestorKernelCode code, const ConvNaiveProblem& problem)
+    PreparedConvNaive(IngestorKernelCode code, ConvNaiveProblem problem)
         : _code(std::move(code))
-        , _problem(problem)
+        , _problem(std::move(problem))
     {
     }
 
