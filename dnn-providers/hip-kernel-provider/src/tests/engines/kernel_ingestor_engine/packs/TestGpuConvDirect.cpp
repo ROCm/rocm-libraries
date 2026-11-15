@@ -27,6 +27,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDirectProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -666,6 +667,140 @@ TEST(TestConvDirectCatalog, EveryFilterAndDtypeHasAConfigOnEveryArchitecture)
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): every code path that writes y -- the FMA store, the
+// halo-tile strip store and its split-C partials, the rows kernels' direct and LDS-staged
+// stores (2-D, batch unfold, 3-D, in-place channels-first), the split-C reduce and the
+// three-bf16 forms -- once per distinct path among the configs the kernel match admits.
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+/// The config fields that select a different store path.
+const std::vector<std::string>& fusedPathFields()
+{
+    static const std::vector<std::string> s_fields{
+        "atom", "math", "rows", "cf", "split", "epi", "pp", "un", "bl", "ring"};
+    return s_fields;
+}
+
+struct FusedShape
+{
+    std::string name;
+    ConvShape shape;
+};
+
+std::vector<FusedShape> fusedShapes()
+{
+    std::vector<FusedShape> shapes;
+    shapes.push_back({"NhwcEdge", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true)});
+    shapes.push_back({"NchwEdge", dense(24, 40, {13, 11}, {3, 3}, {1, 1}, false)});
+    // Few tiles over many channel chunks: the split-C configs and their reduce write y.
+    shapes.push_back({"SplitC", dense(200, 72, {9, 11}, {3, 3}, {1, 1}, true)});
+    // Whole 16-byte channels-first runs: the in-place channels-first configs.
+    shapes.push_back({"NchwRuns", dense(72, 136, {21, 40}, {3, 3}, {2, 2}, false)});
+    // Two images per MFMA column group, the last group one image short.
+    auto oddBatch = dense(64, 136, {11, 24}, {3, 3}, {1, 1}, true);
+    oddBatch.n = 3;
+    shapes.push_back({"OddBatch", oddBatch});
+    shapes.push_back({"Ndhwc3x3x3", dense(32, 40, {5, 7, 9}, {3, 3, 3}, {1, 1, 1}, true)});
+    shapes.push_back({"Nhwc5x5", dense(32, 48, {19, 23}, {5, 5}, {2, 2}, true)});
+    return shapes;
+}
+
+template <typename T>
+void runFused(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), fusedPathFields());
+    // The three-bf16 forms (fp32 graphs) drop the lo x lo term: about 2^-16 of each product.
+    const auto tolerance = [](int64_t reduction) {
+        return (std::is_same_v<T, float> ? 2e-5 : 1e-6) * static_cast<double>(reduction);
+    };
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials, tolerance), 1)
+        << "no catalog config serves this fused case";
+}
+
+class TestGpuConvDirectFused : public ::testing::TestWithParam<std::tuple<FusedShape, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvDirectFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvDirectFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvDirectFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> fusedChainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvDirectFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(fusedChainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvDirectFused,
+                         ::testing::Combine(::testing::Values(fusedShapes()[0], fusedShapes()[1]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvDirectFusedSpecials : public ::testing::TestWithParam<FusedShape>
+{
+};
+
+TEST_P(TestGpuConvDirectFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(GetParam().shape,
+                    {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                    Specials::NAN_INF);
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvDirectFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+        Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDirectFusedSpecials,
+                         ::testing::ValuesIn(fusedShapes()),
+                         [](const auto& info) { return info.param.name; });
 
 } // namespace
 

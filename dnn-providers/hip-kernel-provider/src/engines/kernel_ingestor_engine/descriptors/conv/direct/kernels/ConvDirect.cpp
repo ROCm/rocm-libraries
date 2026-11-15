@@ -38,7 +38,7 @@
 #define CONV_DIRECT_BLOCK (CONV_DIRECT_WM * CONV_DIRECT_WN * CONV_DIRECT_ATOM::WAVE)
 #endif
 
-extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Args a)
+extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Args a CONV_EPI_PARAM)
 {
 #if CONV_DIRECT_FMA
     k2ConvFma<CONV_DIRECT_T,
@@ -52,7 +52,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
               CONV_DIRECT_THREADS,
               CONV_DIRECT_VEC,
               CONV_DIRECT_RING,
-              CONV_DIRECT_PIPE>(a);
+              CONV_DIRECT_PIPE>(a CONV_EPI_ARG);
 #elif CONV_DIRECT_ROWS && CONV_DIRECT_CF
     k2ConvRowsCf<CONV_DIRECT_T,
                  CONV_DIRECT_ATOM,
@@ -64,7 +64,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                  CONV_DIRECT_WQ,
                  CONV_DIRECT_WK,
                  CONV_DIRECT_BC,
-                 CONV_DIRECT_TO>(a);
+                 CONV_DIRECT_TO>(a CONV_EPI_ARG);
 #elif CONV_DIRECT_ROWS && CONV_DIRECT_KD > 1
     k2ConvRows3d<CONV_DIRECT_T,
                  CONV_DIRECT_ATOM,
@@ -79,7 +79,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                  CONV_DIRECT_PP,
                  CONV_DIRECT_EPI,
                  CONV_DIRECT_TO,
-                 CONV_DIRECT_KD>(a);
+                 CONV_DIRECT_KD>(a CONV_EPI_ARG);
 #elif CONV_DIRECT_ROWS
     k2ConvRows<CONV_DIRECT_T,
                CONV_DIRECT_ATOM,
@@ -95,7 +95,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                CONV_DIRECT_EPI,
                CONV_DIRECT_TO,
                CONV_DIRECT_UN,
-               CONV_DIRECT_SPLIT>(a);
+               CONV_DIRECT_SPLIT>(a CONV_EPI_ARG);
 #else
     k2ConvMma<CONV_DIRECT_T,
               CONV_DIRECT_ATOM,
@@ -111,7 +111,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
               CONV_DIRECT_RING,
               CONV_DIRECT_BL,
               CONV_DIRECT_TO,
-              CONV_DIRECT_SPLIT>(a);
+              CONV_DIRECT_SPLIT>(a CONV_EPI_ARG);
 #endif
 }
 
@@ -134,9 +134,13 @@ extern "C" __global__ void __launch_bounds__(256) ConvDirectSplitInput(K2SplitAr
 }
 
 /// Split-C: adds the splits' fp32 partials in order into the output's element type.
-extern "C" __global__ void __launch_bounds__(256) ConvDirectReduce(K2ReduceArgs a)
+extern "C" __global__ void __launch_bounds__(256) ConvDirectReduce(K2ReduceArgs a CONV_EPI_PARAM)
 {
+#if defined(CONV_EPI) && CONV_EPI
+    k2SplitReduceEpi<CONV_DIRECT_TO>(a, ConvEpiGen{epiArgs});
+#else
     k2SplitReduce<CONV_DIRECT_TO>(a);
+#endif
 }
 
 /// Stages an operand to or from the layout the convolution reads.
