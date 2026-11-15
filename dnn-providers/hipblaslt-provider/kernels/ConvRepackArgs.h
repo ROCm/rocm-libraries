@@ -77,7 +77,9 @@ struct StridedCastArgs
 /// CONV_REPACK_EPI_* code; slot[i] its operand (ADD_OPERAND, MUL_OPERAND) or its first value.
 /// Operands are read at the element's channel (per channel) or at 0; operandType 0 fp32,
 /// 1 fp16, 2 bf16. The channel is the coordinate of the cast's axis channelAxis, so no element
-/// pays a division for it.
+/// pays a division for it; or, with channelAxis -1, the cast is one flat walk over a dense
+/// tensor and the channel of element o is (o / flatChannelStride) % flatChannels, carried along
+/// the walk by additions.
 struct ConvRepackEpilogue
 {
     const void* operand[CONV_REPACK_EPI_OPERANDS];
@@ -86,6 +88,8 @@ struct ConvRepackEpilogue
     float scalar[CONV_REPACK_EPI_SCALARS];
     int op[CONV_REPACK_EPI_OPS];
     int slot[CONV_REPACK_EPI_OPS];
+    long long flatChannelStride;
+    long long flatChannels;
     int ops;
     int channelAxis;
 };

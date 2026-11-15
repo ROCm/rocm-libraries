@@ -236,6 +236,42 @@ __device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
 {
     const StridedCastArgs& args = a.cast;
     auto* dst = static_cast<OutputType*>(args.dst);
+    if(a.epilogue.channelAxis < 0)
+    {
+        // Flat: element i of both sides. The channel advances by the step's quotient and
+        // remainder, worked out once per thread.
+        const long long first = firstThread();
+        const long long step = threadStride();
+        if(first >= args.total)
+        {
+            return;
+        }
+        const long long inner = a.epilogue.flatChannelStride;
+        const long long chans = a.epilogue.flatChannels;
+        const long long q = first / inner;
+        long long rem = first - q * inner;
+        long long channel = q % chans;
+        const long long qs = step / inner;
+        const long long remStep = step - qs * inner;
+        const long long chStep = qs % chans;
+        for(long long i = first; i < args.total; i += step)
+        {
+            dst[i] = static_cast<OutputType>(applyEpilogue(a.epilogue, args.src[i], channel));
+            rem += remStep;
+            long long carry = 0;
+            if(rem >= inner)
+            {
+                rem -= inner;
+                carry = 1;
+            }
+            channel += chStep + carry;
+            if(channel >= chans)
+            {
+                channel -= chans;
+            }
+        }
+        return;
+    }
     for(long long index = firstThread(); index < args.total; index += threadStride())
     {
         long long rest = index;

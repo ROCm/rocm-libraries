@@ -268,7 +268,11 @@ TEST(TestConvEpilogueFormulation, ChannelsFirstOneByOneTakesAnExtraPass)
     EXPECT_EQ(calls->stages.front().calls.front().d.dataType, DataType::FLOAT);
     EXPECT_NE(calls->epilogue, nullptr);
     const auto& cast = std::get<StridedCastEpilogueArgs>(last.after[0].args);
-    EXPECT_EQ(cast.epilogue.channelAxis, 1);
+    // y is dense and its fp32 copy shares its layout: one flat, coalesced walk.
+    EXPECT_EQ(cast.epilogue.channelAxis, -1);
+    EXPECT_EQ(cast.epilogue.flatChannelStride, 5 * 7);
+    EXPECT_EQ(cast.epilogue.flatChannels, 24);
+    EXPECT_EQ(cast.cast.rank, 1);
     EXPECT_EQ(cast.epilogue.ops, 2);
     EXPECT_EQ(cast.epilogue.op[0], CONV_REPACK_EPI_ADD_OPERAND);
     EXPECT_EQ(cast.epilogue.op[1], CONV_REPACK_EPI_RELU);
