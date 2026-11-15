@@ -47,11 +47,13 @@ from rocke.instances.gfx1250.mx_gemm import (
     SCALES,
     TILE_K,
     TILE_MN,
+    WALKS,
     WAVE_GROUPS,
     WMMA_REUSE,
     IntOps,
     LdsPad,
     MxGemmSpec,
+    PanelWalk,
     ScaleRegisters,
     TileCompute,
     build_mx_gemm,
@@ -94,6 +96,14 @@ _FP6_TILES = ((256, 256, 256), (256, 256, 384))
 _MAF_MED = ((3072, 4096, 65536), (2048, 2048, 65536))
 # The direct path: each K-step reads, drains and computes.
 _DIRECT = {"local_prefetch": 0, "half_plr": "none"}
+# walk "panels" at its one tile, read-ahead.
+_PANELS = {
+    "tile_m": 256,
+    "tile_n": 256,
+    "tile_k": 512,
+    "local_prefetch": 1,
+    "walk": "panels",
+}
 
 
 def _spec8(*problem, a_dtype="fp8", b_dtype="fp8", **fields) -> MxGemmSpec:
@@ -444,6 +454,116 @@ class MxGemmSpecTest(unittest.TestCase):
         for label, (spec, reason) in bad.items():
             with self.subTest(label):
                 self.assertIn(reason, validate(spec) or "")
+
+    def test_walk_validate_and_name(self):
+        """Panel walks take FP6 at the 256x256x512 tile with read-ahead, M and
+        N multiples of 256 and K of 1024; they tag the name and take four
+        panel slots of LDS."""
+        self.assertEqual(WALKS, ("tile", "panels"))
+        for fields in (
+            {"half_plr": "none"},
+            {"half_plr": "b"},
+            {"half_plr": "b", "half_b_order": "late"},
+            {
+                "half_plr": "none",
+                "k_reads": "contiguous",
+                "scale_swap": "wait",
+                "read_issue": "interleave",
+            },
+        ):
+            spec = _spec6(*_MAF_MED[0], cluster_dim=(4, 4, 1), **_PANELS, **fields)
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                self.assertTrue(spec.kernel_name().endswith("_pw"))
+                self.assertEqual(spec.pass_spec.tile_m, 128)
+                self.assertEqual(spec.pass_spec.walk, "tile")
+                self.assertEqual(spec.lds_bytes, 4 * spec.lds_layout.buffer_bytes)
+        base = {**_PANELS, "half_plr": "none"}
+        bad = {
+            "value": (_spec6(walk="strips"), "walk must be one of"),
+            "fp8": (_spec8(*_MAF_MED[0], **{**base, "tile_k": 256}), "is for FP6"),
+            "tile": (_spec6(*_MAF_MED[0], **{**base, "tile_k": 384}), "256x256x512"),
+            "direct": (
+                _spec6(*_MAF_MED[0], **{**base, "local_prefetch": 0}),
+                "needs local_prefetch 1",
+            ),
+            "buffers": (
+                _spec6(*_MAF_MED[0], **{**base, "lds_buffers": 3}),
+                "takes no lds_buffers",
+            ),
+            "edge": (_spec6(3000, 4096, 65536, **base), "multiples of 256"),
+            "k": (_spec6(3072, 4096, 65536 + 512, **base), "multiple of 1024"),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
+
+    def test_panel_layout(self):
+        """A panel slot holds four 32-row components of 384 B rows (16 B
+        after every 2 rows) and then their scales; every row and scale word
+        of the panel has its own offset inside the slot."""
+        spec = _spec6(*_MAF_MED[0], cluster_dim=(4, 4, 1), **_PANELS, half_plr="none")
+        layout = spec.lds_layout
+        self.assertEqual(layout.a, layout.b)
+        self.assertEqual(layout.a.rows, 32)
+        self.assertEqual((layout.a.iterate_rows, layout.a.iterate_stride), (2, 784))
+        data_end = 4 * layout.a.stride
+        self.assertEqual(layout.a_scale.base, data_end)
+        rows = [layout.row_offset(IntOps, "a", row) for row in range(128)]
+        self.assertEqual(len(set(rows)), 128)
+        self.assertTrue(all(0 <= r and r + 384 <= data_end for r in rows))
+        words = {
+            layout.scale_offset(IntOps, "a_scale", step, row)
+            for step in range(spec.k_steps)
+            for row in range(128)
+        }
+        self.assertEqual(len(words), 128 * spec.k_steps)
+        self.assertTrue(all(data_end <= w < layout.buffer_bytes for w in words))
+        self.assertLessEqual(spec.lds_bytes, 320 * 1024)
+
+    def test_panel_walk_schedule(self):
+        """Over six K tiles: each tile's passes cover the four quadrants once,
+        consecutive passes share a panel, a slot is refilled only after the
+        tile's last use of it and never with a panel the next pass reads, and
+        with the TDM waits of :meth:`PanelWalk.waits` (read-ahead: the wait
+        before pass j precedes the refills after pass j - 1) every pass finds
+        the panels of its own tile loaded."""
+        waits = PanelWalk.waits()
+        loads = PanelWalk.LOADS_PER_PANEL
+        issued = [(0, *panel) for panel in PanelWalk.first_use(0)]
+        done = 0
+        pending = []
+        slots = {}
+        for tile in range(6):
+            parity = tile % 2
+            order = PanelWalk.ORDERS[parity]
+            self.assertEqual(sorted(order), [(0, 0), (0, 1), (1, 0), (1, 1)])
+            for j, (a, b) in enumerate(order):
+                if j:
+                    self.assertTrue(a == order[j - 1][0] or b == order[j - 1][1])
+                count = waits["prologue" if tile == 0 and j == 0 else (parity, j)]
+                if count is not None:
+                    done = max(done, len(issued) - count // loads)
+                for entry in issued[:done]:
+                    slots[PanelWalk.slot(entry[1], entry[2])] = entry[0]
+                for operand, panel in (("a", a), ("b", b)):
+                    with self.subTest(tile=tile, j=j, panel=(operand, panel)):
+                        self.assertEqual(
+                            slots.get(PanelWalk.slot(operand, panel)), tile
+                        )
+                for entry in pending:
+                    self.assertNotIn(entry[1:], (("a", a), ("b", b)))
+                issued += pending
+                pending = [(tile + 1, *panel) for panel in PanelWalk.refills(parity)[j]]
+                later = {
+                    (op, i) for pair in order[j + 1 :] for op, i in zip("ab", pair)
+                }
+                for panel in pending:
+                    self.assertNotIn(panel[1:], later)
+            self.assertEqual(
+                sorted(p for j in range(4) for p in PanelWalk.refills(parity)[j]),
+                [("a", 0), ("a", 1), ("b", 0), ("b", 1)],
+            )
 
     def test_scale_register_halves(self):
         """Lanes 0-15 hold the first half of an operand's repeats, lanes
@@ -1113,6 +1233,38 @@ class MxGemmIrTest(unittest.TestCase):
                 steps, extra_tokens = divmod(len(rest), len(step))
                 self.assertEqual(extra_tokens, 0)
                 self.assertEqual(rest, step * steps)
+
+    def test_panel_walk_ir(self):
+        """A panel walk's loop runs two K tiles of four passes of the 128x128
+        compute (512 WMMAs); the prologue loads tile 0's four panels and each
+        tile loads the next one's four (data and scales per wave); the TDM
+        waits follow :meth:`PanelWalk.waits`."""
+        tdm = r"call void @llvm\.amdgcn\.tensor\.load\.to\.lds\("
+        tile_wait = r"call void @llvm\.amdgcn\.s\.wait\.tensorcnt\(i16 (\d+)\)"
+        waits = PanelWalk.waits()
+        expected = [waits["prologue"]] + [
+            waits[key]
+            for key in ((0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3), (0, 0))
+            if waits[key] is not None
+        ]
+        for fields in (
+            {"half_plr": "none"},
+            {"half_plr": "b"},
+            {
+                "half_plr": "none",
+                "k_reads": "contiguous",
+                "scale_swap": "wait",
+                "read_issue": "interleave",
+            },
+        ):
+            spec = _spec6(512, 512, 2048, cluster_dim=(2, 2, 1), **_PANELS, **fields)
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                llvm = _llvm(spec)
+                self.assertEqual(len(re.findall(_WMMA, llvm)), 2 * 4 * 4 * 16)
+                self.assertEqual(len(re.findall(tdm, llvm)), (4 + 2 * 4) * 2)
+                waited = [int(w) for w in re.findall(tile_wait, llvm)]
+                self.assertEqual(waited, expected + [0])
 
     def test_three_buffers_issue_wait_and_peel(self):
         """With three buffers the prologue loads three tiles and every tile
@@ -2085,6 +2237,22 @@ class MxGemmHostBuildTest(unittest.TestCase):
                     {"half_plr": "none", "read_issue": "interleave", "lds_buffers": 3},
                 )
             ),
+            # Panel walks at the MAF shape: block and interleaved reads, half-B.
+            *(
+                _spec6(
+                    *_MAF_MED[0],
+                    cluster_dim=(4, 4, 1),
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    **_PANELS,
+                    **f,
+                )
+                for f in (
+                    {"half_plr": "none", "read_issue": "interleave"},
+                    {"half_plr": "none"},
+                    {"half_plr": "b"},
+                )
+            ),
             # Interleaved reads at the MAB tiling (one N-repeat, one-word B
             # scales).
             _spec6(
@@ -2338,6 +2506,37 @@ class MxGemmDeviceTest(unittest.TestCase):
                     (_spec8, (), {"tile_m": 128, "tile_n": 128}),
                 )
                 for fields in ({**fields, "read_issue": "interleave"},)
+            ]
+            # Panel walks: every read-ahead path, clusters, two loop passes,
+            # chunked FP6.
+            + [
+                _spec6(*problem, **_PANELS, **fields)
+                for problem, fields in (
+                    (
+                        (512, 512, 2048),
+                        {
+                            "half_plr": "none",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "read_issue": "interleave",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                    ((512, 512, 2048), {"half_plr": "none", "cluster_dim": (1, 1, 1)}),
+                    (
+                        (512, 512, 4096),
+                        {
+                            "half_plr": "b",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                    (
+                        (512, 256, 2048),
+                        {"half_b_order": "late", "cluster_dim": (1, 1, 1)},
+                    ),
+                )
             ]
             # Register scales: every half packing, the reuse orders, edge
             # tiles and K tails.

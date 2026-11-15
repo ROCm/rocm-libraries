@@ -884,6 +884,7 @@ _AXES = {
     "lds_buffers": ("lds_buffers", int, "2"),
     "scale_swap": ("scale_swap", str, "read"),
     "read_issue": ("read_issue", str, "block"),
+    "walk": ("walk", str, "tile"),
     "a_lds_pad": ("a_lds_pad", _pad, "derived"),
     "b_lds_pad": ("b_lds_pad", _pad, "derived"),
     "a_scale_lds_pad": ("a_scale_lds_pad", _pad, "derived"),
