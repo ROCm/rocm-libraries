@@ -57,7 +57,7 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
             ss << "indexs_size";
         const auto& index_dims = (*indexDescs)[i].GetLengths();
         auto index_size        = std::accumulate(
-            index_dims.begin(), index_dims.begin(), 1ULL, std::multiplies<size_t>());
+            index_dims.begin(), index_dims.end(), 1ULL, std::multiplies<size_t>());
         ss << index_size << "_";
     }
 

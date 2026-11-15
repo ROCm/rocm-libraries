@@ -407,3 +407,86 @@ protected:
     std::vector<int32_t> slices_flat;
     uint32_t offset;
 };
+
+// Two problems with identical dy numel, dtype and indexCount but different index sizes must not
+// share a cached kernel (its grid size is derived from the index numel).
+inline void RunGetitemBwdFloat(const GetitemTestCase& tc)
+{
+    auto&& handle  = get_handle();
+    auto gen_value = [](auto...) { return prng::gen_descreet_uniform_sign<float>(1e-2, 100); };
+
+    std::vector<int32_t> dims = tc.dims;
+    uint32_t offset           = tc.offset;
+
+    tensor<float> dy = tensor<float>{tc.dy}.generate(gen_value);
+    tensor<int32_t> index{tc.indexs[0]};
+    for(auto& v : index.data)
+        v = prng::gen_0_to_B<int32_t>(tc.dx[dims[0]]);
+
+    tensor<float> dx{tc.dx};
+    std::fill(dx.begin(), dx.end(), 0.0f);
+    tensor<float> ref_dx{tc.dx};
+    std::fill(ref_dx.begin(), ref_dx.end(), 0.0f);
+    tensor<int32_t> error{std::vector<int32_t>{1}};
+    std::fill(error.begin(), error.end(), 0);
+    tensor<int32_t> ref_error{std::vector<int32_t>{1}};
+    std::fill(ref_error.begin(), ref_error.end(), 0);
+
+    std::vector<tensor<int32_t>> indexs{index};
+    cpu_getitem_backward<float>(
+        dy, 1, indexs, ref_dx, ref_error, dims.size(), dims.data(), 0, nullptr, offset);
+
+    const miopen::TensorDescriptor* indexDescs[] = {&index.desc};
+    auto ws_size = miopen::GetGetitemWorkspaceSize(handle, 1, indexDescs);
+    miopen::Allocator::ManageDataPtr ws_dev;
+    if(ws_size != 0)
+    {
+        tensor<float> ws{std::vector<size_t>{ws_size / sizeof(float)}};
+        std::fill(ws.begin(), ws.end(), 0.0f);
+        ws_dev = handle.Write(ws.data);
+    }
+
+    auto dy_dev    = handle.Write(dy.data);
+    auto index_dev = handle.Write(index.data);
+    auto dx_dev    = handle.Write(dx.data);
+    auto error_dev = handle.Write(error.data);
+    ConstData_t index_ptrs[] = {index_dev.get()};
+
+    auto status = miopen::GetitemBackward(handle,
+                                          ws_dev.get(),
+                                          ws_size,
+                                          dy.desc,
+                                          dy_dev.get(),
+                                          1,
+                                          indexDescs,
+                                          index_ptrs,
+                                          dx.desc,
+                                          dx_dev.get(),
+                                          error.desc,
+                                          error_dev.get(),
+                                          dims.size(),
+                                          dims.data(),
+                                          0,
+                                          nullptr,
+                                          offset);
+    ASSERT_EQ(status, miopenStatusSuccess);
+
+    dx.data = handle.Read<float>(dx_dev, dx.data.size());
+    EXPECT_LT(miopen::rms_range(ref_dx, dx), 1.5e-3)
+        << "dx mismatch for dy " << tc.dy[0] << "x" << tc.dy[1] << " index " << tc.indexs[0][0];
+}
+
+// Parameterized with a single trivial value so the test's full name carries the "Smoke/" prefix
+// that CI selects.
+struct GPU_GetitemBwdNetworkConfig_FP32 : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(GPU_GetitemBwdNetworkConfig_FP32, DifferentIndexSizesDoNotShareKernel)
+{
+    // dy {128,128}: index numel 128; dy {4096,4}: index numel 4096; same dy numel (16384).
+    RunGetitemBwdFloat({{128, 128}, {{128}}, {128, 128}, {0}, {}, 0});
+    RunGetitemBwdFloat({{4096, 4}, {{4096}}, {5000, 4}, {0}, {}, 0});
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GetitemBwdNetworkConfig_FP32, testing::Values(0));
