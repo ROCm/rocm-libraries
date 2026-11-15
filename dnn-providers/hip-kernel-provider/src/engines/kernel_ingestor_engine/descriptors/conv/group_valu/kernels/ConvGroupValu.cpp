@@ -501,14 +501,7 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE)
     const GvConstF wt = __builtin_bit_cast(GvConstF, static_cast<const float*>(a.wt))
                         + static_cast<long long>(gk) * a.ci * TAPS * KB;
 #if defined(CONV_EPI) && CONV_EPI
-    // The epilogue's per-channel operands of the wave's KB output channels.
     const ConvEpiGen epi = convEpiGen(epiArgs);
-    ConvEpiGen::Chan chans[KB];
-#pragma unroll
-    for(int k = 0; k < KB; ++k)
-    {
-        chans[k] = epi.chan(k0 + k, true);
-    }
 #define GV_EPI(value, k) epi(value, chans[k], 0, true)
 #else
 #define GV_EPI(value, k) (value)
@@ -656,6 +649,16 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE)
         }
 
         // Stores: KB output channels x P columns; columns past the row are not stored.
+#if defined(CONV_EPI) && CONV_EPI
+        // The fused epilogue's per-channel operands of the wave's KB output channels, loaded
+        // here rather than held across the reduction (wave-uniform, cached).
+        ConvEpiGen::Chan chans[KB];
+#pragma unroll
+        for(int k = 0; k < KB; ++k)
+        {
+            chans[k] = epi.chan(k0 + k, true);
+        }
+#endif
         const bool ok = rowOk & colY;
         if constexpr(NCHW)
         {
