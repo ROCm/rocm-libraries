@@ -28,6 +28,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvGroupProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvTf32TestSupport.hpp"
@@ -1832,6 +1833,157 @@ TEST(TestConvGroupComputeType, ServesCudnnsComputeTypesPerElementType)
         resnext(), {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16}, [](const ConvShape& s) {
             return parsedWrw(specFor(s, ConvDirection::BACKWARD_WEIGHTS)).has_value();
         });
+}
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): every store path -- small groups on matrix cores and on
+// FMA, wide groups (padded channels never written), channels-last and channels-first (staged and
+// in place), the three-bf16 form -- once per distinct path among the configs the kernel match
+// admits, against the CPU convolution followed by the chain in double (one rounding).
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+const std::vector<std::string>& fusedPathFields()
+{
+    static const std::vector<std::string> s_fields{"atom", "math", "cf", "nbi", "nbo", "stride"};
+    return s_fields;
+}
+
+std::vector<DeviceCase> fusedShapes()
+{
+    std::vector<DeviceCase> shapes;
+    for(const auto& c : deviceCases())
+    {
+        if(c.name == "NhwcGroups4" || c.name == "NhwcGroups2" || c.name == "NchwGroups4"
+           || c.name == "NhwcGroups4Stride2" || c.name == "NhwcGroups32" || c.name == "NchwGroups56"
+           || c.name == "NdhwcGroups24" || c.name == "NdhwcGroups4"
+           || c.name == "NcdhwGroups8Filter1x3x3")
+        {
+            shapes.push_back(c);
+        }
+    }
+    return shapes;
+}
+
+template <typename T>
+void runFused(ConvShape shape, const std::vector<Step>& steps, Specials specials)
+{
+    shape.dataType = dataTypeOf<T>();
+    if(!served(shape, ConvDirection::FORWARD))
+    {
+        GTEST_SKIP() << "no K4 config for this element type and group width on this device";
+    }
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), fusedPathFields());
+    // The three-bf16 configs carry their own error, 2^-16 relative per product.
+    const auto tolerance = [](int64_t reduction) {
+        return (std::is_same_v<T, float> ? 1e-4 : 1e-6) * static_cast<double>(reduction);
+    };
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials, tolerance), 1)
+        << "no catalog config serves this fused case";
+}
+
+class TestGpuConvGroupFused : public ::testing::TestWithParam<std::tuple<DeviceCase, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvGroupFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvGroupFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvGroupFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> fusedChainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvGroupFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(fusedChainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvGroupFused,
+                         ::testing::Combine(::testing::Values(fusedShapes()[0], fusedShapes()[5]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvGroupFusedSpecials : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvGroupFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(GetParam().shape,
+                    {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                    Specials::NAN_INF);
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvGroupFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+        Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupFusedSpecials,
+                         ::testing::ValuesIn(fusedShapes()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestConvGroupProblem, OnlyForwardTakesAnEpilogue)
+{
+    // Forward parses a fused graph (the epilogue on the problem); backward data, backward
+    // weights and a bare-conv parse decline it.
+    auto shape = resnext();
+    const auto fused = conv_epilogue_test::fusedSpecFor(
+        shape, {conv_epilogue_test::bias(), conv_epilogue_test::relu()});
+    const GraphFixture fixture(conv_epilogue_test::buildFusedGraph(fused));
+    const auto forward = conv_group::parseGroupProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(forward.has_value());
+    EXPECT_EQ(conv_epilogue::patternOf(forward->igemm.base.epilogue), "add.k.FLOAT|relu");
+    EXPECT_EQ(forward->igemm.yUid, conv_epilogue_test::outputUid(2));
+    for(const auto direction : {ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
+    {
+        auto spec = fused;
+        spec.conv.direction = direction;
+        const GraphFixture other(conv_epilogue_test::buildFusedGraph(spec));
+        EXPECT_FALSE(conv_group::parseGroupProblem(other.context(), direction).has_value());
+        EXPECT_FALSE(matchesGraph(packFor(direction), other.context()).has_value());
+    }
 }
 
 } // namespace

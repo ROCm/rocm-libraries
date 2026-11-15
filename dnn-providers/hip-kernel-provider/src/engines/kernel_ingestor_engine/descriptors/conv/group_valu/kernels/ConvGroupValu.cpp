@@ -39,8 +39,12 @@
 //   GV_RAGGED  1 when a lane's window can reach past the end of an input row (element loads, the
 //              elements past the row zeroed)
 //   GV_COLMASK 1 when a lane's output columns can reach past the output row (those are not stored)
+//   CONV_EPI   1: a fused pointwise epilogue (ConvEpilogue.h) on the forward output, applied to the
+//              fp32 sums before the single rounding; the main kernel then takes ConvEpiArgs as a
+//              second argument
 
 #include "ConvArchFamily.h"
+#include "ConvEpilogue.h"
 #include "ConvGroupValuArgs.h"
 
 #ifndef GV_DT
@@ -455,7 +459,8 @@ extern "C" __global__ void __launch_bounds__(256) ConvGroupValuPrepare(ConvGroup
 }
 
 /// Grid (rowBlocks, groups x kBlocks), NW waves a workgroup. See the file comment.
-extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE) ConvGroupValu(ConvGroupValuArgs a)
+extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE)
+    ConvGroupValu(ConvGroupValuArgs a CONV_EPI_PARAM)
 {
     const int rowBlock = static_cast<int>(blockIdx.x);
     const int gk = static_cast<int>(blockIdx.y); // group x kBlocks + k block
@@ -495,6 +500,19 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE) ConvGroupValu(ConvG
     // The wave's slice of the prepared filter: [ci][t][r][s][KB], uniform.
     const GvConstF wt = __builtin_bit_cast(GvConstF, static_cast<const float*>(a.wt))
                         + static_cast<long long>(gk) * a.ci * TAPS * KB;
+#if defined(CONV_EPI) && CONV_EPI
+    // The epilogue's per-channel operands of the wave's KB output channels.
+    const ConvEpiGen epi{epiArgs};
+    ConvEpiGen::Chan chans[KB];
+#pragma unroll
+    for(int k = 0; k < KB; ++k)
+    {
+        chans[k] = epi.chan(k0 + k, true);
+    }
+#define GV_EPI(value, k) epi(value, chans[k], 0, true)
+#else
+#define GV_EPI(value, k) (value)
+#endif
 
     for(int pr = rowBegin + wave * rpw; pr < rowEnd; pr += NW * rpw)
     {
@@ -648,7 +666,7 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE) ConvGroupValu(ConvG
 #pragma unroll
                 for(int j = 0; j < P; ++j)
                 {
-                    v[j] = fromFloat(acc[k][j]);
+                    v[j] = fromFloat(GV_EPI(acc[k][j], k));
                 }
                 const int e = dn * osn + k * osk + od * osd + oy * osh + ox0;
                 if constexpr(COLMASK)
@@ -676,7 +694,7 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE) ConvGroupValu(ConvG
 #pragma unroll
                 for(int k = 0; k < KB; ++k)
                 {
-                    v[k] = fromFloat(acc[k][j]);
+                    v[k] = fromFloat(GV_EPI(acc[k][j], k));
                 }
                 const bool in = ok & (ox0 + j < a.wo);
                 const int e = dn * osn + od * osd + oy * osh + (ox0 + j) * osw;
