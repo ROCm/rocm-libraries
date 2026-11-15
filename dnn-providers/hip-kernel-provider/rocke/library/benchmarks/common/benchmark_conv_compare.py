@@ -289,6 +289,8 @@ def _build_implicit_only_args(args) -> list[str]:
     a: list[str] = []
     if args.sample is not None:
         a += ["--sample", str(args.sample)]
+    if args.kernels_file is not None:
+        a += ["--kernels-file", args.kernels_file]
     if args.seed != 0:
         a += ["--seed", str(args.seed)]
     if args.split_k != -1:
@@ -676,6 +678,12 @@ def main() -> int:
     implicit_grp = parser.add_argument_group(
         "Implicit-GEMM options",
         "Flags forwarded only to benchmark_implicit_gemm_conv.py.",
+    )
+    implicit_grp.add_argument(
+        "--kernels-file",
+        default=None,
+        help="--run-from-cache only: run just the cached implicit-GEMM kernels whose "
+        "labels the file lists (forwarded to the implicit-GEMM benchmark)",
     )
     implicit_grp.add_argument(
         "--sample",
