@@ -502,7 +502,7 @@ extern "C" __global__ void __launch_bounds__(GV_NW* GV_WAVE)
                         + static_cast<long long>(gk) * a.ci * TAPS * KB;
 #if defined(CONV_EPI) && CONV_EPI
     // The epilogue's per-channel operands of the wave's KB output channels.
-    const ConvEpiGen epi{epiArgs};
+    const ConvEpiGen epi = convEpiGen(epiArgs);
     ConvEpiGen::Chan chans[KB];
 #pragma unroll
     for(int k = 0; k < KB; ++k)
