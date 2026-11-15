@@ -642,12 +642,7 @@ enum class Values
     Random,
     Marker,
     SparseMarker,
-    // Random V; Q all 1 and K rising along each sequence's keys, so that the scores rise by
-    // kRisingScoreLog2 (log2 units) from the first key to the last.
-    RisingScores,
 };
-
-constexpr float kRisingScoreLog2 = 140.0f;
 
 bool IsMarkerPage(Values values, int page, int pages)
 {
@@ -756,13 +751,7 @@ HostProblem MakeProblem(const Case& s,
     std::uniform_real_distribution<float> uniform(-1.0f, 1.0f);
     auto draw = [&] { return ck_tile::type_convert<Data>(uniform(rng)); };
     h.q.resize(static_cast<std::size_t>(l.seqstart_q.back()) * l.q_heads * head_dim);
-    if(values == Values::RisingScores)
-        std::fill(h.q.begin(), h.q.end(), ck_tile::type_convert<Data>(1.0f));
-    else
-        std::generate(h.q.begin(), h.q.end(), draw);
-    // RisingScores: score(key) = rise * key / seqlen_k, in log2 units after the 1 / sqrt(D) scale.
-    const float rise =
-        kRisingScoreLog2 / (std::sqrt(static_cast<float>(head_dim)) * 1.4426950408889634f);
+    std::generate(h.q.begin(), h.q.end(), draw);
     // Rows that no sequence reads as a valid key keep kUnusedRowValue.
     const Data unused = ck_tile::type_convert<Data>(kUnusedRowValue);
     h.k.assign(pool_len, unused);
@@ -778,16 +767,10 @@ HostProblem MakeProblem(const Case& s,
                 row;
             for(std::size_t x = 0; x < row; ++x)
             {
-                const Data k   = draw();
+                h.k[dst + x]   = draw();
                 const Data v   = draw();
                 const float on = IsMarkerPage(values, key / kPage, pages) ? 1.0f : 0.0f;
-                h.k[dst + x]   = values == Values::RisingScores
-                                     ? ck_tile::type_convert<Data>(rise * static_cast<float>(key) /
-                                                                 static_cast<float>(l.seqlen_k[b]))
-                                     : k;
-                h.v[dst + x]   = values == Values::Random || values == Values::RisingScores
-                                     ? v
-                                     : ck_tile::type_convert<Data>(on);
+                h.v[dst + x]   = values == Values::Random ? v : ck_tile::type_convert<Data>(on);
             }
         }
     }
@@ -1186,43 +1169,6 @@ TYPED_TEST(PageTileForward, MatchesReference)
         }
 }
 
-// Scores rising by kRisingScoreLog2 along the keys: every later key tile exceeds the row max of the
-// earlier ones, so the guarded row max (Policy::UseGuardedRowMax) rebases the rows tile after tile
-// (a fixed base would overflow); the other instances reduce their row max on the same data.
-TYPED_TEST(PageTileForward, MatchesReferenceRisingScores)
-{
-    const std::vector<Case> shapes = {
-        {"long", 4, 2, {300, 129}, {4096, 1500}},
-        {"short", 4, 2, {1, 100}, {300, 100}},
-    };
-    std::uint32_t seed = 91;
-    for(const auto& shape : shapes)
-    {
-        SCOPED_TRACE(shape.name);
-        const auto h = MakeProblem(shape,
-                                   Mapping::Permuted,
-                                   TypeParam::kHeadDim,
-                                   TypeParam::kCausal,
-                                   seed++,
-                                   Values::RisingScores);
-        DeviceProblem d(h);
-        std::vector<float> lse;
-        const auto o = Run<TypeParam>(h, d, Window{}, &lse);
-        const auto metrics =
-            CompareWithReference(h, o, TypeParam::kCausal, {}, Window{}, kLse ? &lse : nullptr);
-        std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
-                  << (TypeParam::kCausal ? " causal " : " dense ") << (kSglang ? "sglang " : "")
-                  << (kKvSplits == 2 ? "split " : "") << "rising " << shape.name
-                  << " rows=" << metrics.checked_rows << " max_abs=" << metrics.max_abs_error
-                  << " min_cos=" << metrics.min_row_cosine
-                  << " nonfinite=" << metrics.nonfinite_output_count << " passed=" << metrics.passed
-                  << '\n';
-        EXPECT_EQ(metrics.checked_rows, LogicalRows(h.layout));
-        EXPECT_EQ(metrics.nonfinite_output_count, 0u);
-        EXPECT_TRUE(metrics.passed);
-    }
-}
-
 // Top-left aligned causal mask (causal binaries only): query q sees keys 0..q. Query lengths are
 // not clipped, so sequences with more queries than keys (rows past the keys see every key) and
 // fewer queries than keys both occur; the bitwise identity/permuted check applies as above.
@@ -1313,10 +1259,8 @@ TYPED_TEST(PageTileForward, MatchesReferenceWindow)
             {
                 const std::string name = std::string(shape.name) + " " + window_name;
                 SCOPED_TRACE(name);
-                std::vector<float> lse;
-                const auto o = Run<TypeParam>(h, d, window, &lse);
-                const auto metrics =
-                    CompareWithReference(h, o, true, {}, window, kLse ? &lse : nullptr);
+                const auto o       = Run<TypeParam>(h, d, window);
+                const auto metrics = CompareWithReference(h, o, true, {}, window);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim << " window "
                           << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
