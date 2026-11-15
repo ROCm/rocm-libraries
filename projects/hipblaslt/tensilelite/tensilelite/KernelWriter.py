@@ -11565,6 +11565,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       innerKElems = int(16 / kernel["ProblemType"]["DataType%s"%cM].numBytes())
       miMorN = kernel["MatrixInstM"] if cM == "A" else kernel["MatrixInstN"]  # tile free-dim MI extent
       kMid = kernel["WavefrontSize"] // miMorN
+      bpeSwz = kernel["ProblemType"]["DataType%s"%cM].numBytes()
+      assert innerKElems > 0 and innerKElems * bpeSwz == 16, \
+        "swizzled-TDM %s: innerK (%s elements) x bpe (%s) must be one 16-byte ds_load_b128" % (cM, innerKElems, bpeSwz)
       tP["swizzleK"] = innerKElems * kMid
 
   ##############################################################################

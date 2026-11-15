@@ -25243,11 +25243,17 @@ class KernelWriterAssembly(KernelWriter):
       # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
       swzUnitShift = 1 if dtype.isFloat4() else 0
       swzRows   = (mt // swzMiN) // numWaves              # nO rows per wave
+      assert swzRows * numWaves == mt // swzMiN, \
+        "swizzled-TDM %s: %d nO rows do not split over %d waves" % (tc, mt // swzMiN, numWaves)
       # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
       # stride (setPadding(0,0) already applied above for isTdmIter). dim1 stays the full
       # nO extent (walk clamp); tile1 drops to 1 (one nO per iteration). Non-iterate (VW==1)
       # keeps tile1 = swzRows (all nO in one contiguous 2-D issue).
       swzTilePerIssue = 1 if isTdmIter else swzRows
+      # Every nO row of the macro-tile must be loaded by some component (or all, when replicated),
+      # and each issue must move a non-empty tile: a 0 here silently leaves the operand unloaded.
+      assert swzTilePerIssue > 0 and (swzTile0 >> swzUnitShift) > 0, \
+        "swizzled-TDM %s: empty TDM tile (tile0=%d, tile1=%d)" % (tc, swzTile0 >> swzUnitShift, swzTilePerIssue)
       with self.allocTmpSgpr(3, tag="swzTDM_desc") as swzTmp:
         sIdx    = swzTmp.idx        # reused for dim/tile values
         strideS = swzTmp.idx + 1    # stride0 = MI_N*paddedK, kept for the iterate global_inc
@@ -25543,6 +25549,10 @@ class KernelWriterAssembly(KernelWriter):
       # disabled. dim1 stays the full nO extent (walk clamp); tile1 drops to 1 (one nO per
       # iteration). Non-iterate (VW==1) keeps tile1 = swzRows (all nO in one 2-D issue).
       swzTilePerIssue = 1 if isTdmIter else swzRows
+      # Every nO row of the macro-tile must be loaded by some component (or all, when replicated),
+      # and each issue must move a non-empty tile: a 0 here silently leaves the operand unloaded.
+      assert swzTilePerIssue > 0 and (swzTile0 >> swzUnitShift) > 0, \
+        "swizzled-TDM %s: empty TDM tile (tile0=%d, tile1=%d)" % (tc, swzTile0 >> swzUnitShift, swzTilePerIssue)
       mod.add(comp.setIterationEnabled(descSgprName(1), False))
       if isTdmIter:
         mod.add(comp.setPadding(descSgprName(1), 0, 0))
