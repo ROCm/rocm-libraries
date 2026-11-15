@@ -14,9 +14,11 @@ The kernel must therefore gather Q straight from global memory, exactly as the
 explicit ``use_q_direct_global`` knob does. These tests check that in the
 emitted LLVM IR for two K-HBM-direct configurations (bf16 head size 128 with V
 also from HBM, and fp16 head size 64 with sinks and the causal-mask phase
-split). They also check that the spec refuses the fast paged-KV descriptor
-with K or V read from HBM: those reads address the cache through the paged-KV
-descriptor, which the fast path does not build.
+split). They also check the spec's refusals around these knobs: the fast
+paged-KV descriptor with K or V read from HBM (those reads address the cache
+through the paged-KV descriptor, which the fast path does not build) and i64
+K/V addressing with K read from HBM (the direct K read is an i32 offset into
+one buffer resource).
 
 No GPU required.
 """
@@ -150,4 +152,21 @@ def test_hbm_reads_refuse_the_fast_paged_kv_descriptor(knob):
         f"use_v_hbm_direct={knob == 'use_v_hbm_direct'}, expected both "
         "False: the direct K and V reads address the cache through the "
         "paged-KV descriptor, which the fast descriptor path does not build"
+    )
+
+
+def test_k_from_hbm_refuses_i64_kv_addressing():
+    # The i64 spec without the knob builds; with it, pages past 2 GiB would read
+    # as zero through the direct K read's i32 offset, so the spec refuses it.
+    i64_spec = dataclasses.replace(
+        _FP16_D64_K_FROM_HBM_SINKS, use_k_hbm_direct=False, use_i64_kv_addr=True
+    )
+    build_unified_attention_2d_tiled(i64_spec, arch=ARCH)
+    with pytest.raises(ValueError) as refusal:
+        dataclasses.replace(i64_spec, use_k_hbm_direct=True)
+    assert str(refusal.value) == (
+        "gfx942 tiled 2D spec failed - use_i64_kv_addr=True with "
+        "use_k_hbm_direct=True, expected use_k_hbm_direct=False: the "
+        "direct K read is an i32 offset into one K cache buffer "
+        "resource, which cannot reach pages past 2 GiB"
     )

@@ -564,6 +564,19 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                 "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k");
             return false;
         }
+        /* The direct K read is an i32 offset into the one K cache buffer
+         * resource, so it cannot reach the pages past 2 GiB that i64 addressing
+         * exists for: they would read as zero. */
+        if(s->use_i64_kv_addr)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "gfx942 tiled 2D spec failed - use_i64_kv_addr=True with "
+                                 "use_k_hbm_direct=True, expected use_k_hbm_direct=False: the "
+                                 "direct K read is an i32 offset into one K cache buffer "
+                                 "resource, which cannot reach pages past 2 GiB");
+            return false;
+        }
     }
     /* The direct K and V reads address the cache through the paged-KV
      * descriptor, which the fast descriptor path does not build. */

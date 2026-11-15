@@ -819,7 +819,8 @@ builders' i32 path stops at `0x7FFF0000` bytes (their buffer `num_records`), so
 the cache switches to i64 strictly above that. Some tiled K/V loaders have no
 i64 branch yet, so an i64 spec that enables one keeps that loader's i32 limit:
 2^31 bytes for the flat loads of gfx942 cfv and vhbm, and `0x7FFF0000`
-for the buffer loads of gfx942 khbm and of fp8-PV on both arches. The scalar,
+for the buffer loads of fp8-PV on both arches. The gfx942 khbm K read has no
+i64 branch either, and its spec refuses `use_i64_kv_addr` instead. The scalar,
 gfx942 4-warp GQA and gfx1250 kernels have no i64 path and index K/V with i32
 element offsets, so their limit is 2^31 elements. Not checked: the 3D split-KV
 path and the gfx1250 `tiled_2d_verify.py` harness, which pack their own

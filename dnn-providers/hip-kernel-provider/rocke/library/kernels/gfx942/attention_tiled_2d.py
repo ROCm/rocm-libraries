@@ -830,6 +830,16 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k"
                 )
+            # The direct K read is an i32 offset into the one K cache buffer
+            # resource, so it cannot reach the pages past 2 GiB that i64
+            # addressing exists for: they would read as zero.
+            if self.use_i64_kv_addr:
+                raise ValueError(
+                    "gfx942 tiled 2D spec failed - use_i64_kv_addr=True with "
+                    "use_k_hbm_direct=True, expected use_k_hbm_direct=False: the "
+                    "direct K read is an i32 offset into one K cache buffer "
+                    "resource, which cannot reach pages past 2 GiB"
+                )
         if self.use_global_load_lds_k and self.kv_storage_dtype is not None:
             raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
         if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
@@ -3865,6 +3875,7 @@ def build_unified_attention_2d_tiled(
         if K_HBM_DIRECT and not K_FP8_MFMA:
             # direct-HBM K via buffer_load (HW OOB->0). Causal mask
             # already zeros past-seq keys, so no software bounds-select (saves VALU).
+            # An i32 offset into key_rsrc, so the spec refuses use_i64_kv_addr with it.
             _lin = b.add(b.mul(k_row, b.const_i32(HD)), k_off)
             _vo, _ = paged_kv_desc.offset(
                 b, tile_idx=_cur_kv_tile[0], linear_half=_lin, kv_head=kv_head_idx
