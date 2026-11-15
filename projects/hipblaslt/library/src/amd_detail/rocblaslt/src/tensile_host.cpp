@@ -2462,6 +2462,7 @@ namespace
 
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
+        tensileProblem.setOutputPeerD(prob.dPeer != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -2822,6 +2823,7 @@ namespace
 
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
+        tensileProblem.setOutputPeerD(prob.dPeer != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -2990,6 +2992,7 @@ namespace
         inputs.scaleD        = reinterpret_cast<const void*>(prob.scaleD);
         inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.scaleAlphaVec);
         inputs.amaxD         = reinterpret_cast<void*>(prob.amaxD);
+        inputs.peerD         = prob.dPeer;
 
         static const std::map<rocisa::DataType, TensileLite::ConstantVariant> argument_vals = {
             {rocisa::DataType::Float, 0.0f},

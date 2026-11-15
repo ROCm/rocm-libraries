@@ -357,6 +357,10 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleAlphaScalar(const void* scaleAlphaScalar);
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.
         HIPBLASLT_EXPORT void setAmaxD(const void* amaxD); //!< Set the AmaxD input pointer.
+        /// Also store every D tile into a second buffer with the same layout as D. The problem
+        /// then runs only kernels built to do that (see PartitionedGemmInputs::storePeerD);
+        /// if there is none, the heuristic returns no algorithm.
+        HIPBLASLT_EXPORT void setDPeer(void* dPeer);
 
         HIPBLASLT_EXPORT const void* getA() const; //!< The A matrix input pointer.
         HIPBLASLT_EXPORT const void* getB() const; //!< The B matrix input pointer.
@@ -376,6 +380,7 @@ namespace hipblaslt_ext
             getScaleAlphaScalar() const; //!< The device scalar alpha pointer, or nullptr otherwise.
         HIPBLASLT_EXPORT const void* getAux() const; //!< The aux input pointer.
         HIPBLASLT_EXPORT const void* getAmaxD() const; //!< The AmaxD input pointer.
+        HIPBLASLT_EXPORT void*       getDPeer() const; //!< The second D pointer, or nullptr.
 
     private:
         friend Gemm;
@@ -1146,6 +1151,12 @@ namespace hipblaslt_ext
         std::vector<const void*> b; //!< B matrix pointers.
         std::vector<const void*> c; //!< C matrix pointers.
         std::vector<void*>       d; //!< D matrix pointers.
+        /// Every partition also stores its slice into the D of the other partition, so that both
+        /// Ds are complete once the run has finished (the partitions are joined, see run()).
+        /// It needs exactly 2 partitions and two different D pointers, and the backend needs
+        /// kernels that store a second D; without them setProblem succeeds and algoGetHeuristic
+        /// returns nothing. When it is false, the backend uses the plain kernels.
+        bool                     storePeerD = false;
         const void*              alpha = nullptr; //!< Host pointer to alpha.
         const void*              beta  = nullptr; //!< Host pointer to beta.
     };

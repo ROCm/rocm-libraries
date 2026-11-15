@@ -1250,6 +1250,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         effective_uniform_summation_order(handle, nullptr)};
     problem.int4EncodingA = problemtype.int4_encoding_a;
     problem.deviceScalarAlpha = inputs.deviceScalarAlpha;
+    if constexpr(std::is_same<Inputs, rocblaslt::RocGemmInputsV2>::value)
+        problem.dPeer = inputs.dPeer;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 

@@ -629,6 +629,7 @@ namespace hipblaslt_ext
         const void* scaleAlphaVec = nullptr;
         const void* aux           = nullptr;
         const void* amaxD         = nullptr;
+        void*       dPeer         = nullptr;
         // Keep this layout in sync with rocblaslt::RocGemmInputsV2.
         bool deviceScalarAlpha = false;
     };
@@ -739,6 +740,11 @@ namespace hipblaslt_ext
         pimpl->amaxD = amaxD;
     }
 
+    void GemmInputs::setDPeer(void* dPeer)
+    {
+        pimpl->dPeer = dPeer;
+    }
+
     const void* GemmInputs::getA() const
     {
         return pimpl->a;
@@ -817,6 +823,11 @@ namespace hipblaslt_ext
     const void* GemmInputs::getAmaxD() const
     {
         return pimpl->amaxD;
+    }
+
+    void* GemmInputs::getDPeer() const
+    {
+        return pimpl->dPeer;
     }
 
     // End of pimpl classes

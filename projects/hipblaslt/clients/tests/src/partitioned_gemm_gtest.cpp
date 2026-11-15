@@ -363,6 +363,23 @@ TEST(pre_checkin_partitioned_gemm_ext, GetSliceNeedsAProblem)
     EXPECT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
+TEST(pre_checkin_partitioned_gemm_ext, StorePeerDNeedsTwoDifferentDs)
+{
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    // Two partitions with their own D: accepted. Whether a kernel exists is up to the heuristic.
+    auto in       = buffers.inputs();
+    in.storePeerD = true;
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+
+    // The same D twice: there is no peer to write to.
+    in.d[1] = in.d[0];
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
+}
+
 TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongPointerCounts)
 {
     auto              parts = onDeviceZero(2);

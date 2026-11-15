@@ -639,6 +639,8 @@ struct RocblasltContractionProblem
     // threaded through a 60-argument constructor that every caller spells out.
     // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Set after construction, like streamKFlags.
     int32_t     int4EncodingA = 0;
+    // Second D buffer: every D tile is also stored there (OutputPeerD kernels only).
+    void*       dPeer = nullptr;
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
@@ -834,6 +836,7 @@ namespace rocblaslt
         void* scaleAlphaVec = nullptr;
         void* aux           = nullptr;
         void* amaxD         = nullptr;
+        void* dPeer         = nullptr;
         // Keep this layout in sync with hipblaslt_ext::GemmInputs::GemmInputsImpl.
         bool deviceScalarAlpha = false;
     };
