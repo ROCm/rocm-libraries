@@ -10,6 +10,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/ConvEpilogueMatch.hpp>
 
 namespace hipblaslt_plugin
 {
@@ -40,8 +41,9 @@ struct ConvOperand
  *        backward data, w is dw for backward weights, y is dy for both backward directions.
  *
  * The explicit-GEMM engines' copy of the hip-kernel-provider naive engines' acceptance rules
- * (packs/ConvNaiveProblem.cpp there): the providers share no code yet, so the two are kept to
- * the same field-by-field checks by hand.
+ * (packs/ConvNaiveProblem.cpp there), kept to the same field-by-field checks by hand. The
+ * pointwise epilogue of a fused forward graph is read by the parser both providers share
+ * (hipdnn_plugin_sdk/ConvEpilogueMatch.hpp); y is then the chain's written output.
  */
 struct ConvProblem
 {
@@ -53,6 +55,8 @@ struct ConvProblem
     ConvOperand x;
     ConvOperand w;
     ConvOperand y;
+    /// Forward only: the pointwise chain after the convolution, empty for a single-node graph.
+    hipdnn_plugin_sdk::conv_epilogue::ConvEpilogue epilogue;
 
     int64_t n = 0;
     int64_t c = 0;
@@ -81,7 +85,8 @@ struct ConvProblem
  * @brief The convolution a single-node graph of @p direction describes, or nullopt when the
  *        graph is not a well-formed convolution these engines read.
  *
- * Gates every field of the graph, the node and the operands: one node, no override shapes, a
+ * Gates every field of the graph, the node and the operands: one node (a forward convolution
+ * may be followed by a pointwise chain, gated by parseConvEpilogue), no override shapes, a
  * compute type cuDNN accepts for the element type (unset or FP32; FP16 too for FP16), a set
  * convolution mode, three distinct real device tensors of one element type among FLOAT, HALF
  * and BFLOAT16, rank 3 to 5, positive extents, non-negative

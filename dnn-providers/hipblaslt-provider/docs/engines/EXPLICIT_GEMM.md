@@ -4,7 +4,7 @@
 
 ## At a glance
 - **What:** a convolution becomes one or more strided-batched BLAS GEMMs. The GEMM reads the tensors directly where it can (1x1, point output). Otherwise HIP repack kernels move data around it: im2col, col2im, channels-last staging and fp32 partial sums. Both engines share one backend-neutral layer; the backend only runs the GEMMs.
-- **Covers:** fwd, bwd-data, wrw · fp32/fp16/bf16, with one type for all three tensors · compute type unset or fp32, and fp16 for fp16 tensors (cuDNN's set) · 1-D/2-D/3-D (rank 3-5) · any x/y strides · filter KCRS or KRSC · groups, including depthwise · any padding (asymmetric too), stride and dilation · both conv modes · tensors larger than 4 GiB.
+- **Covers:** fwd, bwd-data, wrw · fp32/fp16/bf16, with one type for all three tensors · compute type unset or fp32, and fp16 for fp16 tensors (cuDNN's set) · 1-D/2-D/3-D (rank 3-5) · any x/y strides · filter KCRS or KRSC · groups, including depthwise · any padding (asymmetric too), stride and dilation · both conv modes · tensors larger than 4 GiB · forward conv + pointwise epilogue graphs (see Fusion).
 - **Arches:** `ROCBLAS_CONV_ENGINE` runs everywhere rocBLAS ships. `HIPBLASLT_CONV_ENGINE` runs wherever hipBLASLt is built (gfx908+, gfx11, gfx12; TheRock excludes gfx906 and gfx103X).
 - **Build flags:** `HIPBLASLTPROVIDER_ENABLE_CONV` (default OFF). `HIPBLASLTPROVIDER_ENABLE_ROCBLAS` (default OFF) and `_HIPBLASLT` (default ON) choose the backends.
 - **Wins when:** pointwise (1x1) in every direction, and many 3-D, patchify and 1-D shapes. On the 9,471-shape corpus with MIOpen excluded, one of the two is our fastest engine on 37-52% of graphs per GPU and layout.
@@ -49,6 +49,21 @@
    - **16-bit wrw output:** sliced or banded wrw, and any wrw GEMM that rocBLAS would k-chunk, accumulate in an fp32 copy of w that is rounded into w once.
    - **Split-reduction candidate:** the benchmarking builder may also cut the reduction into enough fp32 partials to fill about 512 output tiles of 128x128.
 5. **Library limits** (`fitLibraryLimits`). A batch stride beyond 2^31 elements becomes one call per matrix. n beyond 2^30 becomes column chunks. k beyond 2^30 becomes accumulating chunks, which is allowed only into fp32 d.
+
+## Fusion
+Every engine but the RPR siblings (backward weights only) also claims a forward convolution followed by a chain of pointwise nodes, under its existing engine id. The chain is read by the parser every provider shares (`hipdnn_plugin_sdk/ConvEpilogueMatch.hpp`): scale and bias (per-channel or scalar, device or pass-by-value), relu (clipped, clamp, leaky), exact and tanh GELU, swish (silu), sigmoid, tanh, elu, abs and softplus. The convolution and the whole chain stay in fp32 and y is rounded once. `fuseEpilogue` (`common/ConvEpilogueFormulation.*`) places the chain, in order of preference:
+
+| Form | Where the chain runs | When |
+|---|---|---|
+| Native | hipBLASLt's own GEMM epilogue: `BIAS` or `SIGMOID` | hipBLASLt engines; every GEMM writing y has y's channels as its rows (channels-last 1x1, point output and im2col), one group, no accumulation; a per-channel bias (fp32 or y's type) alone, or sigmoid alone |
+| Fused pass | The plan's existing last pass: the GEMMs write the channels-last staging in fp32, and the copy into y becomes the epilogue's cast | y is staged channels-last (the `STAGED_CHANNELS_LAST` layout candidate for a channels-first y) |
+| Extra pass | Every GEMM (and any fp32 partials sum) writes an fp32 copy of y in the workspace; one cast applies the chain and rounds into y | everything else: rocBLAS, channels-first rows, groups, patterns hipBLASLt has no epilogue for |
+
+- hipBLASLt's relu, clamp, swish and GELU epilogues are not used: its relu and clamp turn NaN into a bound, and its swish and tanh GELU give NaN for -inf where the chain gives 0. Those patterns run in a pass, so every engine gives the same result for the same graph, special values included.
+- The epilogue cast (`StridedCastEpilogue*`) runs the chain as a run-time menu of steps; the channel is the coordinate of the cast's channel axis, read off the index walk the cast already does.
+- Operand pointers and pass-by-value scalars are bound at execution, so a plan serves the graph's values whatever they are.
+- The extra pass adds y's size in fp32 to the workspace, above the repack cap, plus one launch reading 4 bytes and writing y per element.
+- Backward data and backward weights with pointwise nodes are declined.
 
 ## Implementation design
 - **Plan shape:** a plan is a list of stages. Each stage has repack steps, then GEMM calls in order, then repack steps. All stages share one workspace, laid out in 256-byte-aligned regions with their own uids. `ConvRepackPlan` runs the stages. A direct row runs as the backend's GEMM plan alone.
@@ -189,4 +204,5 @@
   - `TestConvGemmRocblasLimits` pins both rocBLAS declines.
   - `TestGpuConvGemmLarge` is opt-in (`HIPBLASLT_PROVIDER_LARGE_TESTS=1`). It covers more than 4 GiB, n past 2^30, a batch stride past 2^31 and an image over the cap, checking sampled outputs against a double sum.
 - **RPR siblings:** `TestConvReducedPrecision` covers registration and one decline per gate.
+- **Fusion:** `TestConvEpilogueFormulation` covers which chains map to a hipBLASLt epilogue and which form each plan takes; `TestGpuConvEpilogue` runs every form on both backends in fp32, fp16 and bf16 against the CPU convolution followed by the chain in double, with NaN and infinity operands and values on the clip bounds, and counts hipBLASLt's solutions with and without a native epilogue.
 - **Notes:** `TestGpuHipblasltEnginePluginApi.ConvEnginesReportTheirNumericalNotes` checks every conv engine's notes, and that deselecting `NONDETERMINISTIC` keeps exactly the deterministic siblings.

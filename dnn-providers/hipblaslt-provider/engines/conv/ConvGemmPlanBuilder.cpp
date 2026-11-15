@@ -18,6 +18,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/ConvEpilogueFormulation.hpp"
 #include "common/ConvRepackFormulation.hpp"
 #include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvRepackPlan.hpp"
@@ -65,7 +66,8 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          bool splitReduction,
                                          ColumnLayout layout,
                                          NarrowPartials narrowPartials,
-                                         std::optional<size_t> maxBackwardWeightsRepackBytes)
+                                         std::optional<size_t> maxBackwardWeightsRepackBytes,
+                                         bool nativeEpilogue)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
@@ -74,6 +76,7 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
     , _layout(layout)
     , _narrowPartials(narrowPartials)
     , _maxBackwardWeightsRepackBytes(maxBackwardWeightsRepackBytes)
+    , _nativeEpilogue(nativeEpilogue)
 {
 }
 
@@ -127,6 +130,11 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
             {
                 return std::nullopt;
             }
+        }
+        // A fused graph: the epilogue in the GEMM, the plan's last pass or one more pass.
+        if(calls.has_value() && !problem->epilogue.empty())
+        {
+            return fuseEpilogue(*problem, std::move(*calls), _nativeEpilogue);
         }
         return calls;
     }
