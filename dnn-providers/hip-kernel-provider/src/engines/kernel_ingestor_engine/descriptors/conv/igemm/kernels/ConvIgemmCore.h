@@ -1892,6 +1892,18 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     const int lane = tid % WAVE;
     const int wave = tid / WAVE;
     const int wm = wave % WM, wn = wave / WM;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: each output column's per-channel operands, loaded before the
+    // reduction so their latency hides behind it (a short reduction otherwise waits on them at
+    // the store).
+    ConvEpiGen::Chan chans[FN];
+#pragma unroll
+    for(int j = 0; j < FN; ++j)
+    {
+        const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+        chans[j] = epi.chan(g * ncols + en, en < ncols);
+    }
+#endif
 
     K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
@@ -2297,9 +2309,7 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         for(int j = 0; j < FN; ++j)
 #if defined(CONV_EPI) && CONV_EPI
         {
-            // The fused epilogue: this column's per-channel operands, once.
-            const int en = n0 + wn * WTN + j * DIM + lane % DIM;
-            const ConvEpiGen::Chan chan = epi.chan(g * ncols + en, en < ncols);
+            const ConvEpiGen::Chan& chan = chans[j];
 #endif
 #pragma unroll
             for(int rc = 0; rc < WTM / CFR; ++rc)
@@ -2365,16 +2375,6 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     k1LdsBarrier();
     T* strip = lds + wave * DIM * OLD;
     constexpr int ROW_VECS = WTN / VEC;
-#if defined(CONV_EPI) && CONV_EPI
-    // The fused epilogue: each column's per-channel operands, once.
-    ConvEpiGen::Chan chans[FN];
-#pragma unroll
-    for(int j = 0; j < FN; ++j)
-    {
-        const int en = n0 + wn * WTN + j * DIM + lane % DIM;
-        chans[j] = epi.chan(g * ncols + en, en < ncols);
-    }
-#endif
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
@@ -2455,6 +2455,17 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
     const int n0 = blockIdx.y * BN;
     const int tid = threadIdx.x;
     const int tx = tid % TX, ty = tid / TX;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: each output column's per-channel operands, loaded before the
+    // reduction so their latency hides behind it.
+    ConvEpiGen::Chan chans[TN];
+#pragma unroll
+    for(int j = 0; j < TN; ++j)
+    {
+        const int nn = n0 + ((j / 4) * TX + tx) * 4 + j % 4;
+        chans[j] = epi.chan(g * ncols + nn, nn < ncols);
+    }
+#endif
 
     K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
@@ -2555,16 +2566,6 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
 
     T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
     float* partial = a.partial + static_cast<long long>(split) * a.outElems;
-#if defined(CONV_EPI) && CONV_EPI
-    // The fused epilogue: each column's per-channel operands, once.
-    ConvEpiGen::Chan chans[TN];
-#pragma unroll
-    for(int j = 0; j < TN; ++j)
-    {
-        const int nn = n0 + ((j / 4) * TX + tx) * 4 + j % 4;
-        chans[j] = epi.chan(g * ncols + nn, nn < ncols);
-    }
-#endif
 #pragma unroll
     for(int i = 0; i < TM; ++i)
     {

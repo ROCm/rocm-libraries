@@ -37,18 +37,27 @@
 
 #include "ConvEpilogueArgs.h"
 
-__device__ inline float convEpiLoadF32(const void* p, long long i)
+// Operand element i of a per-channel or one-element operand. The index is a channel, never
+// negative, and its byte offset fits 32 bits: as an unsigned 32-bit offset from the operand's
+// base the load addresses with one VGPR and the base's SGPRs, instead of a VGPR pair per load.
+template <class E>
+__device__ inline E convEpiLoadRaw(const void* p, unsigned i)
 {
-    return static_cast<const float*>(p)[i];
+    const unsigned offset = i * static_cast<unsigned>(sizeof(E));
+    return *reinterpret_cast<const E*>(static_cast<const char*>(p) + offset);
 }
-__device__ inline float convEpiLoadF16(const void* p, long long i)
+__device__ inline float convEpiLoadF32(const void* p, unsigned i)
 {
-    return static_cast<float>(static_cast<const _Float16*>(p)[i]);
+    return convEpiLoadRaw<float>(p, i);
 }
-__device__ inline float convEpiLoadBf16(const void* p, long long i)
+__device__ inline float convEpiLoadF16(const void* p, unsigned i)
 {
-    return __builtin_bit_cast(
-        float, static_cast<unsigned>(static_cast<const unsigned short*>(p)[i]) << 16);
+    return static_cast<float>(convEpiLoadRaw<_Float16>(p, i));
+}
+__device__ inline float convEpiLoadBf16(const void* p, unsigned i)
+{
+    return __builtin_bit_cast(float,
+                              static_cast<unsigned>(convEpiLoadRaw<unsigned short>(p, i)) << 16);
 }
 
 /// The graph's RELU_FWD: at or below the lower clip the slope line through it, at or above the

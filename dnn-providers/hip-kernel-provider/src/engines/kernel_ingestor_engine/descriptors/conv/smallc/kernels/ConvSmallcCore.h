@@ -336,17 +336,53 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
         const int ow = ow0 + wq * DIM + lane % DIM;
         const int kw = nb + wn * FN * DIM;
 #if defined(CONV_EPI) && CONV_EPI
-        // The fused epilogue's per-channel operands of each accumulator, loaded once.
-        ConvEpiGen::Chan chans[FN][ACC];
+        // Fused: per store group, its accumulators' per-channel operands are loaded once and
+        // used for every row, so only one group's operands are live at a time (holding all of
+        // a lane's channels at once costs the kernel its occupancy).
 #pragma unroll
-        for(int j = 0; j < FN; ++j)
+        for(int gs = 0; gs < FN / G; ++gs)
+        {
+            ConvEpiGen::Chan chans[G][ACC];
 #pragma unroll
-            for(int e = 0; e < ACC; ++e)
+            for(int jj = 0; jj < G; ++jj)
+#pragma unroll
+                for(int e = 0; e < ACC; ++e)
+                {
+                    const int kk = kw + bRow(gs * G + jj, Atom::dRow(lane, e));
+                    chans[jj][e] = epi.chan(kk, kk < a.k);
+                }
+            const int k0 = kw + bRow(gs * G, Atom::dRow(lane, 0));
+#pragma unroll
+            for(int i = 0; i < FM; ++i)
             {
-                const int kk = kw + bRow(j, Atom::dRow(lane, e));
-                chans[j][e] = epi.chan(kk, kk < a.k);
+                const int oh = oh0 + wm * FM + i;
+                if(oh >= a.ho || ow >= a.wo)
+                    continue;
+                TO* yp = y + oh * a.ys[3] + ow * a.ys[4];
+                if(vec && k0 + VW <= a.k)
+                {
+                    VO v;
+#pragma unroll
+                    for(int t = 0; t < VW; ++t)
+                        v[t] = K1Elem<TO>::store(epi(
+                            acc[i][gs * G + t / ACC][t % ACC], chans[t / ACC][t % ACC], 0, true));
+                    *reinterpret_cast<VO*>(yp + k0) = v;
+                }
+                else
+                {
+#pragma unroll
+                    for(int t = 0; t < G * ACC; ++t)
+                    {
+                        const int j = gs * G + t / ACC;
+                        const int kk = kw + bRow(j, Atom::dRow(lane, t % ACC));
+                        if(kk < a.k)
+                            yp[kk * a.ys[1]] = K1Elem<TO>::store(
+                                epi(acc[i][j][t % ACC], chans[t / ACC][t % ACC], 0, true));
+                    }
+                }
             }
-#endif
+        }
+#else
 #pragma unroll
         for(int i = 0; i < FM; ++i)
         {
@@ -363,14 +399,7 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
                     VO v;
 #pragma unroll
                     for(int t = 0; t < VW; ++t)
-#if defined(CONV_EPI) && CONV_EPI
-                        v[t] = K1Elem<TO>::store(epi(acc[i][gs * G + t / ACC][t % ACC],
-                                                     chans[gs * G + t / ACC][t % ACC],
-                                                     0,
-                                                     true));
-#else
                         v[t] = K1Elem<TO>::store(acc[i][gs * G + t / ACC][t % ACC]);
-#endif
                     *reinterpret_cast<VO*>(yp + k0) = v;
                 }
                 else
@@ -381,16 +410,12 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
                         const int j = gs * G + t / ACC;
                         const int kk = kw + bRow(j, Atom::dRow(lane, t % ACC));
                         if(kk < a.k)
-#if defined(CONV_EPI) && CONV_EPI
-                            yp[kk * a.ys[1]] = K1Elem<TO>::store(
-                                epi(acc[i][j][t % ACC], chans[j][t % ACC], 0, true));
-#else
                             yp[kk * a.ys[1]] = K1Elem<TO>::store(acc[i][j][t % ACC]);
-#endif
                     }
                 }
             }
         }
+#endif
         return;
     }
     // Epilogue, per wave: each output row of the wave's fragments goes through the wave's own
