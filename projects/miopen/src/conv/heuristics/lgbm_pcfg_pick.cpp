@@ -237,19 +237,8 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
                                     const conv::ProblemDescription& problem,
                                     const Handle& handle)
 {
-    const LgbmPcfgMetadata* meta_ptr = nullptr;
-    {
-        ScopedTimeLogger t("lgbm_pcfg.PickConfig.MetadataGet");
-        meta_ptr = &LgbmPcfgMetadata::Get();
-    }
-    const auto& meta = *meta_ptr;
-    if(!meta.IsReady())
-        return {};
-
-    const SolverModel* model = meta.Find(solver_name);
-    if(model == nullptr || !model->forest)
-        return {}; // no perf-config model for this solver
-
+    // Hold-out first: it needs only the device name, so a held-out combination never loads the
+    // solver's model (Find parses and caches it under the metadata mutex).
     std::string gfx_id;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
@@ -262,6 +251,19 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
                                     << ", direction " << problem.GetDirectionStr());
         return {};
     }
+
+    const LgbmPcfgMetadata* meta_ptr = nullptr;
+    {
+        ScopedTimeLogger t("lgbm_pcfg.PickConfig.MetadataGet");
+        meta_ptr = &LgbmPcfgMetadata::Get();
+    }
+    const auto& meta = *meta_ptr;
+    if(!meta.IsReady())
+        return {};
+
+    const SolverModel* model = meta.Find(solver_name);
+    if(model == nullptr || !model->forest)
+        return {}; // no perf-config model for this solver
 
     // Two-tower KTN takes precedence where it applies: defer to the solver's own
     // default-config path (which runs it) rather than preempting it here.
