@@ -657,6 +657,11 @@ public:
         }
         options.add("CONV_DW_VARIANT", variant);
         options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
+        // One partition: the partial kernel's direct dw store (compiled only then).
+        if(problem->args.direct != 0)
+        {
+            options.add("CONV_DW_DIRECT", std::string("1"));
+        }
         // Defined only for a multiplier, so the multiplier-1 programs compile as before.
         if(config.mult != 1)
         {

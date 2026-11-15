@@ -58,6 +58,11 @@
 #ifndef CONV_DW_MULT
 #define CONV_DW_MULT 1
 #endif
+// CONV_DW_DIRECT 1 (one partition): the partial kernel writes dw itself (args.direct); 0 (default):
+// fp32 partials, compiled exactly as without the direct store.
+#ifndef CONV_DW_DIRECT
+#define CONV_DW_DIRECT 0
+#endif
 
 using ElementType = CONV_DW_TYPE;
 
@@ -85,21 +90,16 @@ __device__ inline float toFloat(ElementType v)
     return static_cast<float>(v);
 }
 
-/// One (partition, output channel, tap) sum: into the fp32 partials, or under a.direct (one
-/// partition) into dw itself with the fold's rounding (the sum from +0, rounded once; taps
-/// reflected for true convolution), so no fold runs.
-__device__ inline void putPartial(
-    const ConvDepthwiseValuWrwArgs& a, int partition, long channel, int tap, int taps, float v)
+/// Under CONV_DW_DIRECT (one partition): an output channel's tap sum into dw itself, with the
+/// fold's rounding (the sum from +0, rounded once; taps reflected for true convolution), so no
+/// fold runs. Without it the kernels store fp32 partials, compiled as before.
+__device__ inline void
+    putDw(const ConvDepthwiseValuWrwArgs& a, long channel, int tap, int taps, float v)
 {
-    if(a.direct != 0)
-    {
-        float total = 0.0f;
-        total += v;
-        const int target = CONV_DW_FLIP != 0 ? taps - 1 - tap : tap;
-        static_cast<ElementType*>(a.dw)[channel * taps + target] = static_cast<ElementType>(total);
-        return;
-    }
-    a.partial[((long)partition * outChannels(a) + channel) * taps + tap] = v;
+    float total = 0.0f;
+    total += v;
+    const int target = CONV_DW_FLIP != 0 ? taps - 1 - tap : tap;
+    static_cast<ElementType*>(a.dw)[channel * taps + target] = static_cast<ElementType>(total);
 }
 
 /// Element offset of (n, c, z, y, x) in a packed tensor of c channels and extents (d, h, w).
@@ -441,7 +441,11 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                 {
                     total += lanes[(l * lanesC + tid) * CV + e];
                 }
-                putPartial(a, partition, c + e, t, TAPS, total);
+#if CONV_DW_DIRECT
+                putDw(a, c + e, t, TAPS, total);
+#else
+                a.partial[((long)partition * a.c + c + e) * TAPS + t] = total;
+#endif
             }
         }
         __syncthreads();
@@ -512,7 +516,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
                            * toFloat(x[offsetOf(n, c / MULT, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
                 }
             }
-            putPartial(a, partition, c, tap, a.taps, sum);
+#if CONV_DW_DIRECT
+            putDw(a, c, tap, a.taps, sum);
+#else
+            a.partial[((long)partition * channels + c) * a.taps + tap] = sum;
+#endif
         }
     }
 #else
@@ -558,7 +566,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
             {
                 total += lanes[l][tid % CHANNELS];
             }
-            putPartial(a, partition, c, t, TAPS, total);
+#if CONV_DW_DIRECT
+            putDw(a, c, t, TAPS, total);
+#else
+            a.partial[((long)partition * channels + c) * TAPS + t] = total;
+#endif
         }
         __syncthreads();
     }
@@ -600,7 +612,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const float total = blockSum(sum, scratch);
         if(tid == 0)
         {
-            putPartial(a, partition, c, tap, a.taps, total);
+#if CONV_DW_DIRECT
+            putDw(a, c, tap, a.taps, total);
+#else
+            a.partial[((long)partition * channels + c) * a.taps + tap] = total;
+#endif
         }
     }
 #else
@@ -640,7 +656,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const float total = blockSum(sum[t], scratch);
         if(tid == 0)
         {
-            putPartial(a, partition, c, t, TAPS, total);
+#if CONV_DW_DIRECT
+            putDw(a, c, t, TAPS, total);
+#else
+            a.partial[((long)partition * channels + c) * TAPS + t] = total;
+#endif
         }
     }
 #endif

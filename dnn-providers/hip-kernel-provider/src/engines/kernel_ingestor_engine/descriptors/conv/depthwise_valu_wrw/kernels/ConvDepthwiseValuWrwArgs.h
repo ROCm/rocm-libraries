@@ -43,7 +43,7 @@ struct ConvDepthwiseValuWrwArgs
     int partitions;
     int rowsPerPartition;
     int taps;
-    /// Nonzero (one partition): the partial kernel writes dw itself, with the fold's rounding,
-    /// and no fold runs; `partial` is unused.
+    /// Nonzero (one partition): the partial kernel, compiled with CONV_DW_DIRECT, writes dw itself
+    /// with the fold's rounding, and no fold runs; `partial` is unused.
     int direct;
 };
