@@ -105,6 +105,7 @@ listed as an accepted hint (the last row).
 | Scale, band, padding, ALiBi | as forward |
 | Bias and `dbias` | `dbias` = unscaled dS summed over every broadcast dim (SEM-014) |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`, `dropout_scale_inv`) | cuDNN's composition (SEM-015) |
+| Dropout, probability 0 (`dropout_probability = 0`, no mask or scale; seed and offset given or absent) | no dropout: bit-identical to the graph without dropout fields (SEM-015) |
 | Ragged | through the dense rewrite; origins and `seq_len` lengths for every role |
 | Philox dropout | **No**: the backward node has no `rng_dump` (needs an API change, below) |
 
