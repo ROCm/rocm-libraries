@@ -16,9 +16,9 @@ emitted LLVM IR for two K-HBM-direct configurations (bf16 head size 128 with V
 also from HBM, and fp16 head size 64 with sinks and the causal-mask phase
 split). They also check the spec's refusals around these knobs: the fast
 paged-KV descriptor with K or V read from HBM (those reads address the cache
-through the paged-KV descriptor, which the fast path does not build) and i64
-K/V addressing with K read from HBM (the direct K read is an i32 offset into
-one buffer resource).
+through the paged-KV descriptor, which the fast path does not build), i64 K/V
+addressing with K read from HBM (the direct K read is an i32 offset into one
+buffer resource), and either knob set to a non-bool.
 
 No GPU required.
 """
@@ -169,4 +169,14 @@ def test_k_from_hbm_refuses_i64_kv_addressing():
         "use_k_hbm_direct=True, expected use_k_hbm_direct=False: the "
         "direct K read is an i32 offset into one K cache buffer "
         "resource, which cannot reach pages past 2 GiB"
+    )
+
+
+@pytest.mark.parametrize("knob", ["use_k_hbm_direct", "use_v_hbm_direct"])
+def test_hbm_knobs_refuse_a_non_bool(knob):
+    # "false" is truthy: read as a flag it would turn the knob on.
+    with pytest.raises(TypeError) as refusal:
+        dataclasses.replace(_FP16_D64_K_FROM_HBM_SINKS, **{knob: "false"})
+    assert str(refusal.value) == (
+        f"gfx942 tiled 2D spec failed - {knob}='false', expected a bool"
     )
