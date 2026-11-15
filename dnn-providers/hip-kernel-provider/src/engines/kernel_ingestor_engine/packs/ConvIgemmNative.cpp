@@ -986,6 +986,26 @@ bool bufferLoads(const IgemmProblem& problem)
     return problem.blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
 }
 
+/// The atoms the patch tile runs: 16x16 matrix-core atoms of 16-bit operands.
+bool patchTileAtom(std::string_view atom)
+{
+    const bool family = atom.rfind("mfma16", 0) == 0 || atom.rfind("wmma1", 0) == 0;
+    return family && atom.find("f32") == std::string_view::npos;
+}
+
+/// LDS bytes of the patch tile (k1PatchMma): two stages of the A tile and the B tile (K-major
+/// for gfx950 backward data), or the epilogue strips if larger.
+long long patchTileLds(const Tile& tile, bool backward, std::string_view arch)
+{
+    const long long ld = tile.vec == 8 ? tile.bk : tile.bk + 8;
+    const bool kMajor
+        = backward && tile.wdirect != 0 && arch == "gfx950" && tile.atom.rfind("mfma16x32", 0) == 0;
+    const long long b = kMajor ? tile.bk * (tile.bn + 8) : tile.bn * ld;
+    const long long stages = 2 * (tile.bm * ld + b) * 2;
+    const long long out = tile.wm * tile.wn * 16 * (tile.bn / tile.wn + 8) * 2;
+    return std::max(stages, out);
+}
+
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
 {
     Tile tile;
@@ -1035,7 +1055,15 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
        || (tile.dma != 0 && (tile.dma < 2 || tile.dma > 4 || tile.swz == 0 || tile.pack == 1))
        || (tile.fuse != 0 && tile.fuse != 2 && tile.fuse != 4 && tile.fuse != 8 && tile.fuse != 16)
        || (tile.fuse != 0 && (tile.halo != 0 || tile.pack != 0))
-       || (tile.patch != 0 && (tile.patch != 1 || tile.large != 0 || tile.fuse != 0)))
+       || (tile.patch != 0
+           && (tile.patch < 0 || tile.patch > 2 || tile.large != 0 || tile.fuse != 0))
+       // The patch tile (k1PatchMma): 16-bit 16x16 matrix-core atoms, every variant knob off.
+       || (tile.patch == 2
+           && (!patchTileAtom(tile.atom) || tile.split || tile.stages != 1 || tile.xcd != 0
+               || tile.halo != 0 || tile.pack != 0 || tile.cf != 0 || tile.swz != 0 || tile.dma != 0
+               || (tile.vec != 4 && tile.vec != 8) || tile.bm % (tile.wm * 16) != 0
+               || tile.bn % (tile.wn * 16) != 0 || (tile.bk != 16 && tile.bk != 32 && tile.bk != 64)
+               || tile.info.swizzleK == 0 || tile.bk % tile.info.swizzleK != 0)))
     {
         return std::nullopt;
     }
@@ -1094,6 +1122,26 @@ bool kernelMatches(const MatchContext& context,
             const auto& v = problem->args;
             const long long run = v.c / (static_cast<long long>(v.patchT) * v.patchR);
             if(tile->cf != 0 || run % tile->vec != 0)
+            {
+                return false;
+            }
+        }
+        if(problem.has_value() && tile->patch == 2)
+        {
+            // The patch tile: 32-bit buffer offsets over the whole read operands, its LDS within
+            // the device's, and the filter's columns whole vectors (backward data).
+            const auto& v = problem->args;
+            const bool forward = *direction == ConvDirection::FORWARD;
+            const long long readElems
+                = forward ? static_cast<long long>(v.n) * v.di * v.hi * v.wi * v.c : v.m * v.k;
+            const long long filterElems = static_cast<long long>(v.k) * v.c * v.ft * v.fr * v.fs;
+            const auto arch
+                = hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName);
+            const long long ldsLimit = arch == "gfx950" ? 160 * 1024 : 64 * 1024;
+            if(readElems * problem->elementBytes >= BUFFER_LIMIT
+               || filterElems * problem->elementBytes >= BUFFER_LIMIT
+               || patchTileLds(*tile, !forward, arch) > ldsLimit
+               || (!forward && v.c % tile->vec != 0))
             {
                 return false;
             }

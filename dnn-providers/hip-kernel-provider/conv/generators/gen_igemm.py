@@ -241,7 +241,7 @@ def withPatch(cfgs, tag):
         extra += [
             dict(c, pack=2) for c in extra if c["swz"] and not (c["pack"] or c["cf"])
         ]
-    out = cfgs + twins
+    out = cfgs + twins + patchTile(cfgs, tag)
     seen = {tuple(sorted(c.items())) for c in out}
     for c in extra:
         c = dict(c, patch=1)
@@ -266,6 +266,59 @@ PATCH_TILES.update(
         for atom in ("mfma16x32_f16", "mfma16x32_bf16")
     }
 )
+# patch 2: the patch tile (k1PatchMma, ConvIgemmPatch.h), a dedicated GEMM for patch
+# convolutions: two LDS stages with one barrier a k-step, swizzled 16-byte chunks, the forward
+# filter-row cursor, backward data's filter staged [(t, r, s, c)][k] or (wdirect) read K-major in
+# place and transposed (ds_read_b64_tr_b16 on gfx950), no split. Tiles per 16-bit 16x16 atom (bm, bn, bk, wm, wn, vec); 4-wide vectors for
+# RGB runs of 4 x 3 channels.
+PATCH_TILE = {
+    "mfma16x32": [
+        (64, 64, 64, 2, 2, 8),
+        (64, 128, 64, 2, 2, 8),
+        (128, 64, 64, 2, 2, 8),
+        (128, 128, 64, 2, 2, 8),
+        (128, 128, 64, 1, 4, 8),
+        (32, 128, 64, 1, 4, 8),
+        (256, 128, 64, 2, 4, 8),
+        (256, 256, 64, 2, 4, 8),
+        (64, 64, 32, 2, 2, 4),
+        (128, 64, 32, 2, 2, 4),
+    ],
+    "mfma16": [
+        (64, 64, 32, 2, 2, 8),
+        (128, 64, 32, 2, 2, 8),
+        (128, 128, 32, 2, 2, 8),
+        (64, 64, 32, 2, 2, 4),
+    ],
+    "wmma11": [
+        (64, 64, 32, 2, 2, 8),
+        (128, 64, 32, 2, 4, 8),
+        (128, 128, 32, 2, 4, 8),
+        (64, 64, 32, 2, 2, 4),
+    ],
+}
+PATCH_TILE["wmma12"] = PATCH_TILE["wmma11"]
+
+
+def patchTile(cfgs, tag):
+    # The catalog's own 16-bit atoms (its fp32 catalog runs its three-bf16 configs on 16-bit
+    # atoms, which the patch tile does not serve).
+    atoms = {
+        c["atom"] for c in cfgs if c["math"] == "native" and "f32" not in c["atom"]
+    }
+    out = []
+    for family, tiles in PATCH_TILE.items():
+        for atom in sorted(atoms):
+            if atom.rsplit("_", 1)[0] != family or atom.endswith("_908"):
+                continue
+            out += [
+                C(atom, bm, bn, bk, wm, wn, vec=v, patch=2, wdirect=wd)
+                for bm, bn, bk, wm, wn, v in tiles
+                for wd in ((0, 1) if tag == "bwd" else (0,))
+            ]
+    return out
+
+
 PATCH_DMA_ATOMS = {"mfma16x32_f16", "mfma16x32_bf16", "mfma32x16_f16", "mfma32x16_bf16"}
 PATCH_TILES["mfma16_bf16_908"] = [(64, 64, 16, 2, 2, 4), (128, 64, 32, 2, 2, 4)]
 
@@ -550,7 +603,9 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             ) + (
                 ".large" if c["large"] else ""
             ) + (
-                ".patch" if c["patch"] else ""
+                ".patch" if c["patch"] == 1 else ""
+            ) + (
+                ".patchtile" if c["patch"] == 2 else ""
             )
             kernels.append(
                 {

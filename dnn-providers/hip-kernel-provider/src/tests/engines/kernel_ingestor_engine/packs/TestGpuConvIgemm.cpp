@@ -926,9 +926,10 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
         {
             SCOPED_TRACE(kernel.name);
             const bool cf = kernel.getIntMetadata("cf") != 0;
-            // Patch backward data writes channels-last dx only.
+            // Patch backward data writes channels-last dx only; the patch tile has no twins.
             const bool eligible = kernel.getStringMetadata("atom") != "fma"
                                   && kernel.getIntMetadata("pack") == 0
+                                  && kernel.getIntMetadata("patch") != 2
                                   && !(direction == ConvDirection::BACKWARD_DATA
                                        && kernel.getIntMetadata("patch") != 0);
             if(cf)
@@ -991,6 +992,7 @@ TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
                 = kernel.getIntMetadata("halo") == 0 && kernel.getIntMetadata("wdirect") == 0
                   && (kernel.getIntMetadata("swz") == 0 || swizzledPatch)
                   && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("fuse") == 0
+                  && kernel.getIntMetadata("patch") != 2
                   && kernel.getStringMetadata("math") == "native";
             if(kernel.getIntMetadata("pack") == 2)
             {
@@ -1514,6 +1516,34 @@ TEST(TestConvIgemmCatalog, PatchConfigsServeOnlyPatchConvolutions)
         // channel vector: 2 x 3 is not a whole 8-wide vector, 2 x 4 is.
         EXPECT_FALSE(serves(patchShape(3, 24, {8, 12}, 2, true), *patch));
         EXPECT_TRUE(serves(patchShape(4, 24, {8, 12}, 2, true), *patch));
+        // The patch tile serves the same convolutions on its 16-bit 16x16 atoms, every variant
+        // knob off.
+        const auto tile = std::find_if(kernels.begin(), kernels.end(), [](const auto& k) {
+            return k.getStringMetadata("dtype") == "HALF"
+                   && k.getStringMetadata("atom") == "mfma16_f16" && k.getIntMetadata("patch") == 2
+                   && k.getIntMetadata("vec") == 8;
+        });
+        ASSERT_NE(tile, kernels.end());
+        EXPECT_TRUE(serves(patchShape(16, 24, {8, 12}, 2, true), *tile));
+        EXPECT_FALSE(serves(dense(16, 24, {8, 12}, {3, 3}, {1, 1}, true), *tile));
+        EXPECT_FALSE(serves(patchShape(3, 24, {8, 12}, 2, true), *tile));
+        for(const char* knob : {"xcd", "halo", "pack", "cf", "swz", "dma"})
+        {
+            auto variant = *tile;
+            variant.metadata[knob] = int64_t{1};
+            EXPECT_FALSE(serves(patchShape(16, 24, {8, 12}, 2, true), variant)) << knob;
+        }
+        // The in-place filter read is backward data's only.
+        auto inPlace = *tile;
+        inPlace.metadata["wdirect"] = int64_t{1};
+        EXPECT_EQ(serves(patchShape(16, 24, {8, 12}, 2, true), inPlace),
+                  direction == ConvDirection::BACKWARD_DATA);
+        auto fp32Atom = *tile;
+        fp32Atom.metadata["atom"] = std::string("mfma16_f32");
+        EXPECT_FALSE(serves(patchShape(16, 24, {8, 12}, 2, true), fp32Atom));
+        auto wide = *tile;
+        wide.metadata["atom"] = std::string("mfma32_f16");
+        EXPECT_FALSE(serves(patchShape(16, 24, {8, 12}, 2, true), wide));
         // A patch knob other than 0 or 1, or with large images or group fusion, is not a config.
         auto two = *patch;
         two.metadata["patch"] = int64_t{2};
