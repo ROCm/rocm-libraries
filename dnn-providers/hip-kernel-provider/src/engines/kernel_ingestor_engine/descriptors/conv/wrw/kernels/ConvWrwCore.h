@@ -4338,6 +4338,44 @@ __device__ inline void k3ReduceTile(const K3ReduceArgs& a)
     }
 }
 
+/// The row reduce (ConvWrwReduceRows; K C T R S filters of 2 to K3_REDUCE_ROW_MAX_TAPS taps at one
+/// split on gfx950, where it measured 3-4 us ahead of the tile reduce in the call): a block is one
+/// output channel's run of K3_REDUCE_ROW_CHANNELS channels by all taps, contiguous in dw. Each
+/// element adds its one split to +0 (the tile and quad reduces' sum of one split), the sums are
+/// transposed in LDS, and the run is written contiguously.
+template <class T>
+__device__ inline void k3ReduceRows(const K3ReduceArgs& a)
+{
+    constexpr int CB = K3_REDUCE_ROW_CHANNELS;
+    __shared__ float tile[CB * K3_REDUCE_ROW_MAX_TAPS];
+    const int cTiles = (a.cg + CB - 1) / CB;
+    const long long gk = blockIdx.x / cTiles; // g kg + k
+    const int c0 = static_cast<int>(blockIdx.x % cTiles) * CB;
+    const int cn = a.cg - c0 < CB ? a.cg - c0 : CB;
+    const int k = static_cast<int>(gk % a.kg);
+    const long long g = gk / a.kg;
+    const int taps = a.taps;
+    for(int e = threadIdx.x; e < CB * taps; e += blockDim.x)
+    {
+        const int tap = e / CB, cl = e % CB;
+        if(cl >= cn)
+            continue;
+        const float* src
+            = a.partial + ((g * taps + tap) * a.kg + k) * static_cast<long long>(a.cg) + c0 + cl;
+        float sum = 0.0f;
+        for(int sp = 0; sp < a.splits; ++sp)
+            sum += k3PartialLoad<true>(src + sp * a.partialElems);
+        tile[cl * taps + tap] = sum;
+    }
+    k1LdsBarrier();
+    T* o = static_cast<T*>(a.dw) + gk * a.wk + static_cast<long long>(c0) * taps;
+    for(int e = threadIdx.x; e < cn * taps; e += blockDim.x)
+    {
+        const int cl = e / taps, tap = e - cl * taps;
+        o[cl * taps + (a.flip ? taps - 1 - tap : tap)] = K1Elem<T>::store(tile[e]);
+    }
+}
+
 /// Adds the splits' partials into dw (its element type and layout) in a fixed order: a block's
 /// 256 threads are 64 four-channel quads of dw by 4 split groups; group j adds splits j, j + 4,
 /// j + 8, ... in order, and the four group sums are added in group order through LDS. The

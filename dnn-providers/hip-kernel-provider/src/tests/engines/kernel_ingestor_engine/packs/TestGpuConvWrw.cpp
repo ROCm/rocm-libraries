@@ -739,7 +739,10 @@ void expectReduceIsFixedOrderSum(const conv_wrw::WrwLaunch& launch,
         }
     }
     EXPECT_EQ(mismatches, 0) << "of " << count << " dw elements (reduce "
-                             << (r.tile != 0 ? "tile" : "quad") << ")";
+                             << (r.tile == 2   ? "rows"
+                                 : r.tile == 1 ? "tile"
+                                               : "quad")
+                             << ")";
 }
 
 /// Runs every config of @p kernels (default: the shipped catalog) the kernel match admits on

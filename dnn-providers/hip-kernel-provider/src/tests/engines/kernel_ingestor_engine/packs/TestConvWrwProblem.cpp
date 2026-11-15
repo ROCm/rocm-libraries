@@ -2457,6 +2457,20 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     ASSERT_TRUE(krscFew.has_value());
     EXPECT_EQ(krscFew->reduce.splits, 2);
     EXPECT_EQ(krscFew->reduce.tile, 0);
+    // One split (one image of 3 rows: 5 steps): the tile reduce, except on gfx950, where the row
+    // reduce runs (one output channel's run of 64 channels a block: 40 blocks).
+    auto oneSplitShape = baseShape();
+    oneSplitShape.n = 1;
+    oneSplitShape.input = {3, 12};
+    const auto oneSplit942 = launchOf(ConfigFields{}, oneSplitShape, "gfx942");
+    ASSERT_TRUE(oneSplit942.has_value());
+    EXPECT_EQ(oneSplit942->reduce.splits, 1);
+    EXPECT_EQ(oneSplit942->reduce.tile, 1);
+    const auto oneSplit950 = launchOf(ConfigFields{}, oneSplitShape, "gfx950");
+    ASSERT_TRUE(oneSplit950.has_value());
+    EXPECT_EQ(oneSplit950->reduce.splits, 1);
+    EXPECT_EQ(oneSplit950->reduce.tile, 2);
+    EXPECT_EQ(oneSplit950->reduceGrid, 40u);
     // More splits than the tile reduce takes: quads.
     auto deep = baseShape();
     deep.n = 64;

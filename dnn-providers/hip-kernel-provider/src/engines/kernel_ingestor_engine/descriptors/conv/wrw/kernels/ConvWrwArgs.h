@@ -80,11 +80,12 @@ struct K3ReduceArgs
     long long wk;
     long long wc;
     long long wtap;
-    /// Nonzero: the launch runs ConvWrwReduceTile (dw K C T R S, more than one tap, at most
+    /// 1: the launch runs ConvWrwReduceTile (dw K C T R S, more than one tap, at most
     /// K3_REDUCE_TILE_MAX_SPLITS splits), a block a tile of tileK output channels by tileC
     /// input channels of one group (tilesK x tilesC tiles a group), written as contiguous runs;
-    /// zero: ConvWrwReduce, quads of channels of one tap and output channel. Both sum in the
-    /// same order.
+    /// 2: ConvWrwReduceRows (K C T R S of at most K3_REDUCE_ROW_MAX_TAPS taps at one split, on
+    /// gfx950); 0: ConvWrwReduce, quads of channels of one tap and output channel. All sum in
+    /// the same order.
     int tile;
     int tileK;
     int tileC;
@@ -111,5 +112,8 @@ struct K3SplitArgs
 /// splits: the quad blocks' four split groups in four threads read faster).
 #define K3_REDUCE_TILE_FLOATS 4096
 #define K3_REDUCE_TILE_MAX_SPLITS 8
+/// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
+#define K3_REDUCE_ROW_CHANNELS 64
+#define K3_REDUCE_ROW_MAX_TAPS 64
 
 // NOLINTEND(modernize-avoid-c-arrays,modernize-macro-to-enum)

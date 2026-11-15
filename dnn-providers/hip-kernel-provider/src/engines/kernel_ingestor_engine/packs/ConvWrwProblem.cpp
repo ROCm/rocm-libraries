@@ -1309,8 +1309,17 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         = problem.filterChannelsLast || problem.taps < 2 || splits > K3_REDUCE_TILE_MAX_SPLITS
               ? ReduceTile{}
               : reduceTileFor(a.groups, kg, cg, problem.taps, units);
-    const int64_t reduceGrid
+    // gfx950 at one split: the row reduce (one output channel's run of 64 channels a block)
+    // measured 3-4 us ahead of the tile reduce in the call (StyleGAN2 c512 8^2 n2, R(2+1)D c512).
+    const bool reduceRows = reduceTile.blocks > 0 && splits == 1
+                            && problem.taps <= K3_REDUCE_ROW_MAX_TAPS
+                            && hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx950";
+    int64_t reduceGrid
         = reduceTile.blocks > 0 ? reduceTile.blocks : divUp(quads, REDUCE_QUADS_PER_BLOCK);
+    if(reduceRows)
+    {
+        reduceGrid = a.groups * kg * divUp(cg, int64_t{K3_REDUCE_ROW_CHANNELS});
+    }
     if(splits > MAX_GRID_YZ || !workspace.has_value()
        || (direct && *workspace > MAX_WORKSPACE_BYTES) || reduceGrid > INT_LIMIT
        || (config.xcd != 0 && gridX * gridY * gridZ > UINT_LIMIT))
@@ -1398,7 +1407,7 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.wk = cg * problem.taps;
     r.wc = problem.filterChannelsLast ? 1 : problem.taps;
     r.wtap = problem.filterChannelsLast ? cg : 1;
-    r.tile = reduceTile.blocks > 0 ? 1 : 0;
+    r.tile = reduceRows ? 2 : (reduceTile.blocks > 0 ? 1 : 0);
     r.tileK = static_cast<int>(reduceTile.tileK);
     r.tileC = static_cast<int>(reduceTile.tileC);
     r.tilesK = static_cast<int>(reduceTile.tilesK);

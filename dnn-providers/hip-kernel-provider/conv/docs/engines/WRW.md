@@ -49,8 +49,8 @@ Per group, filter row (t, r) and width tap s: D[k][c] += A[k][q]·B[c][q]. A is 
 
 **Split and reduce.** Steps split evenly over grid z to fill the dispatch units. The count comes from `splitsWanted`: units x `bpu` blocks per unit, at most steps / 4, workspace ≤ 1 GiB, then the count that best fills the last round.
 - Each split writes fp32 partials [split][g][tap][k][c].
-- `ConvWrwReduce` adds them in a fixed order: 4 split groups of every-4th split, then the groups in order. It writes dW in its dtype and layout, reflected for true convolution.
-- K C T R S filters of 2-64 taps at one or two splits take a row reduce, which writes each output channel's run of 64 channels x taps contiguously.
+- `ConvWrwReduce` adds them in a fixed order: 4 split groups of every-4th split, then the groups in order. It writes dW in its dtype and layout, reflected for true convolution. Its loads are non-temporal on gfx9 (plain on gfx950 at 64 or more splits) and plain on RDNA, where a non-temporal load misses the infinity cache holding the fresh partials (3x on gfx1201).
+- K C T R S filters of more than one tap at up to 8 splits take the tile reduce (`ConvWrwReduceTile`): a block sums a tile of output by input channels with all taps in the same order and writes each output channel's run contiguously. The quad blocks' writes land `taps` elements apart, which cost the c512 3x3 reduce 6-9 µs on gfx942 and gfx950. At one split on gfx950 the row reduce (one output channel's run of 64 channels a block) runs instead; it measured 3-4 µs ahead there.
 - At one split into K T R S C (or one tap), `dws 1` configs write dW directly: no workspace and no reduce.
 
 ## Implementation design
