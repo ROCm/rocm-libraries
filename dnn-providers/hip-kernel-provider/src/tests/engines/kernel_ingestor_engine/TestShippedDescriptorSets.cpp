@@ -138,6 +138,37 @@ std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& me
     return tuple.str();
 }
 
+/// What one kernel selection of an engine reads: the whole engine when unslotted, else one
+/// slot (RFC 0021 §3), whose schema, knobs and packs the set holds per slot instead.
+struct Selection
+{
+    std::string where;
+    const MetadataSchema* schema;
+    const std::vector<std::string>* knobs;
+    const std::vector<KernelDescriptorPack>* packs;
+};
+
+std::vector<Selection> selectionsOf(const DescriptorSet& set)
+{
+    const std::string engine = "engine '" + set.engine.name + "'";
+    if(set.slots.empty())
+    {
+        return {{engine, &set.schema, &set.engine.knobs, &set.packs}};
+    }
+    static const std::vector<std::string> s_noKnobs;
+    std::vector<Selection> selections;
+    selections.reserve(set.slots.size());
+    for(size_t i = 0; i < set.slots.size(); ++i)
+    {
+        const auto& slot = set.slots[i];
+        // The knobs live on the UED's slot, which the loader keeps parallel to set.slots.
+        const auto* knobs = i < set.engine.slots.size() ? &set.engine.slots[i].knobs : &s_noKnobs;
+        selections.push_back(
+            {engine + " slot '" + slot.name + "'", &slot.schema, knobs, &slot.packs});
+    }
+    return selections;
+}
+
 /// Parameterized over the staged trees; each tree is loaded once and shared across cases.
 class TestShippedDescriptorSets : public ::testing::TestWithParam<StagedTree>
 {
@@ -189,8 +220,11 @@ TEST_P(TestShippedDescriptorSets, EveryEngineResolvesItsMetadataSchema)
     // RFC 0019 §4: without its KMD schema an engine cannot type-check its knobs.
     for(const auto& set : sets())
     {
-        EXPECT_FALSE(set.schema.fields.empty())
-            << "engine '" << set.engine.name << "' resolved no metadata schema";
+        for(const auto& selection : selectionsOf(set))
+        {
+            EXPECT_FALSE(selection.schema->fields.empty())
+                << selection.where << " resolved no metadata schema";
+        }
     }
 }
 
@@ -200,17 +234,20 @@ TEST_P(TestShippedDescriptorSets, EveryAdvertisedKnobIsDeclaredInTheSchema)
     // returns nothing.
     for(const auto& set : sets())
     {
-        std::set<std::string> declared;
-        for(const auto& field : set.schema.fields)
+        for(const auto& selection : selectionsOf(set))
         {
-            declared.insert(field.name);
-        }
+            std::set<std::string> declared;
+            for(const auto& field : selection.schema->fields)
+            {
+                declared.insert(field.name);
+            }
 
-        for(const auto& knob : set.engine.knobs)
-        {
-            EXPECT_TRUE(declared.count(knob) != 0)
-                << "engine '" << set.engine.name << "' advertises knob '" << knob
-                << "' that its metadata schema does not declare";
+            for(const auto& knob : *selection.knobs)
+            {
+                EXPECT_TRUE(declared.count(knob) != 0)
+                    << selection.where << " advertises knob '" << knob
+                    << "' that its metadata schema does not declare";
+            }
         }
     }
 }
@@ -295,21 +332,24 @@ TEST_P(TestShippedDescriptorSets, NoTwoKernelsOfAPackShareAMetadataTuple)
     // catalog order. Scoped per pack: different packs answer different graphs.
     for(const auto& set : sets())
     {
-        if(set.schema.fields.empty())
+        for(const auto& selection : selectionsOf(set))
         {
-            continue; // reported by EveryEngineResolvesItsMetadataSchema
-        }
-
-        for(const auto& pack : set.packs)
-        {
-            std::map<std::string, std::string> seen; // tuple -> first kernel that claimed it
-            for(const auto& kernel : pack.kernels)
+            if(selection.schema->fields.empty())
             {
-                const auto tuple = metadataTuple(set.schema, kernel.metadata);
-                const auto [entry, inserted] = seen.emplace(tuple, kernel.name);
-                EXPECT_TRUE(inserted) << "engine '" << set.engine.name << "' pack '" << pack.name
-                                      << "': kernels '" << entry->second << "' and '" << kernel.name
-                                      << "' share metadata tuple " << tuple;
+                continue; // reported by EveryEngineResolvesItsMetadataSchema
+            }
+
+            for(const auto& pack : *selection.packs)
+            {
+                std::map<std::string, std::string> seen; // tuple -> first kernel that claimed it
+                for(const auto& kernel : pack.kernels)
+                {
+                    const auto tuple = metadataTuple(*selection.schema, kernel.metadata);
+                    const auto [entry, inserted] = seen.emplace(tuple, kernel.name);
+                    EXPECT_TRUE(inserted) << selection.where << " pack '" << pack.name
+                                          << "': kernels '" << entry->second << "' and '"
+                                          << kernel.name << "' share metadata tuple " << tuple;
+                }
             }
         }
     }
