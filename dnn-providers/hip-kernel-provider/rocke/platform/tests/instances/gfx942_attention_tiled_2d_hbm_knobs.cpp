@@ -8,8 +8,9 @@
  * configs compare its kernels with the Python builder's. This test pins what
  * the parity gate cannot see, because that gate only compares specs both
  * engines accept:
- *   1. the spec checks that refuse a K-from-HBM spec the kernel cannot build
- *      (the same refusals the Python spec makes at construction);
+ *   1. the spec checks that refuse a K-from-HBM spec the kernel cannot build or
+ *      cannot read correctly, such as one with i64 K/V addressing (the same
+ *      refusals the Python spec makes at construction);
  *   2. the refusal of use_v_hbm_direct, which this engine does not emit yet and
  *      so must not drop silently;
  *   3. the K-from-HBM token in the kernel name.
@@ -170,6 +171,17 @@ static void test_refusals(void)
     expect_refused("k_excludes_sliced_ring",
                    &spec,
                    "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring");
+
+    spec = transposed_x8_spec();
+    spec.use_i64_kv_addr = true;
+    expect_accepted("i64_kv_addr_base", &spec);
+    spec.use_k_hbm_direct = true;
+    expect_refused("k_excludes_i64_kv_addr",
+                   &spec,
+                   "gfx942 tiled 2D spec failed - use_i64_kv_addr=True with "
+                   "use_k_hbm_direct=True, expected use_k_hbm_direct=False: the "
+                   "direct K read is an i32 offset into one K cache buffer "
+                   "resource, which cannot reach pages past 2 GiB");
 
     spec = fast_kv_desc_spec();
     spec.use_k_hbm_direct = true;

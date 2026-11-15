@@ -954,7 +954,8 @@ void rocke_gfx942_attn2d_issue_v(rocke_gfx942_attn2d_build_ctx_t* ctx,
  * row `k_row` starting at head-dim offset `k_off`, from K_lds slot `buf_idx`.
  * With use_k_hbm_direct K_lds is a stub and the operand is read straight from
  * the paged K cache of the current KV tile instead, through the K buffer
- * resource: an out-of-range read returns 0, and the causal mask already zeroes
+ * resource at an i32 offset (so the spec refuses use_i64_kv_addr with it): an
+ * out-of-range read returns 0, and the causal mask already zeroes
  * the scores of keys past the sequence, so no bounds select is needed. fp8 K
  * is rejected on gfx942, so the plain dtype read is the only K_lds path.
  * ========================================================================== */

@@ -435,6 +435,8 @@ _CODEPATH_KNOBS: Mapping[Tuple[str, str], Mapping[str, object]] = {
 
 # Kernel knobs held out of the feasible space until an fp32-reference sweep
 # passes: gfx942 transposed-x8 K-HBM-direct prefill produced wrong outputs.
+# Admitting use_k_hbm_direct also needs the selector to drop it for i64 caches:
+# its spec refuses use_i64_kv_addr.
 KNOWN_WRONG_KNOBS: Mapping[str, frozenset] = {
     "gfx942": frozenset({"use_k_hbm_direct"}),
     "gfx950": frozenset(),

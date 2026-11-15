@@ -765,6 +765,9 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_conflict_free_v_store",
         }
     )
+    # Loader flags with no I64_KV_ADDR branch whose spec refuses
+    # use_i64_kv_addr, so no i64 kernel selects them and nothing needs capping.
+    _I64_REFUSED_KV_FLAGS = frozenset({"use_k_hbm_direct"})
     _NO_KV_ADDRESS_FLAGS = frozenset(
         {
             # Masking, bias and softmax state.
@@ -812,11 +815,15 @@ class TestKvAddrLimit(unittest.TestCase):
 
     def test_every_tiled_flag_is_classified_for_kv_addressing(self):
         # A new loader flag must be placed before it ships: one with no
-        # I64_KV_ADDR branch goes in _I32_ONLY_KV_LOADERS, or an i64 spec that
-        # selects it reads wrong data past the i32 range with no cap.
+        # I64_KV_ADDR branch goes in _I32_ONLY_KV_LOADERS (capped at launch),
+        # or in _I64_REFUSED_KV_FLAGS if its spec refuses use_i64_kv_addr
+        # (test_gfx942_k_hbm_direct_q_staging.py checks the refusal);
+        # otherwise an i64 spec that selects it reads wrong data past the i32
+        # range with no cap.
         classes = (
             frozenset(_au._I32_ONLY_KV_LOADERS),
             self._I64_SAFE_KV_FLAGS,
+            self._I64_REFUSED_KV_FLAGS,
             self._NO_KV_ADDRESS_FLAGS,
         )
         for spec_cls in (Gfx942TiledSpec, Gfx950TiledSpec):
@@ -834,7 +841,8 @@ class TestKvAddrLimit(unittest.TestCase):
                         1,
                         f"{f.name}: classify it in exactly one of "
                         "_I32_ONLY_KV_LOADERS (no I64_KV_ADDR branch), "
-                        "_I64_SAFE_KV_FLAGS or _NO_KV_ADDRESS_FLAGS",
+                        "_I64_SAFE_KV_FLAGS, _I64_REFUSED_KV_FLAGS or "
+                        "_NO_KV_ADDRESS_FLAGS",
                     )
 
     def test_i32_only_loader_caps_an_i64_spec(self):
@@ -842,7 +850,6 @@ class TestKvAddrLimit(unittest.TestCase):
         expected = {
             "use_conflict_free_v": 2**31,
             "use_v_hbm_direct": 2**31,
-            "use_k_hbm_direct": 0x7FFF0000,
             "use_fp8_mfma_pv": 0x7FFF0000,
         }
         self.assertEqual(set(expected), set(_au._I32_ONLY_KV_LOADERS))
@@ -855,11 +862,11 @@ class TestKvAddrLimit(unittest.TestCase):
                 )
         # Several loaders: the tightest one bounds the kernel and names the cause.
         both = SimpleNamespace(
-            use_i64_kv_addr=True, use_conflict_free_v=True, use_k_hbm_direct=True
+            use_i64_kv_addr=True, use_conflict_free_v=True, use_fp8_mfma_pv=True
         )
         self.assertEqual(
             _au._spec_kv_addr_limit(p, both),
-            _au._KvAddrLimit(0x7FFF0000, "use_k_hbm_direct"),
+            _au._KvAddrLimit(0x7FFF0000, "use_fp8_mfma_pv"),
         )
         self.assertIsNone(
             _au._spec_kv_addr_limit(p, SimpleNamespace(use_i64_kv_addr=True))
