@@ -559,6 +559,8 @@ def test_data_seed_can_be_fixed_and_is_validated():
 # tensor of an optional input or output, node_patches edits the node)
 FEATURE_KEYS = {
     "SdpaBackward/Default": {"node_patches"},
+    "SdpaBackward/FlydslBwdSplit": {"node_patches"},
+    "SdpaBackward/FlydslBwdSplitBias": {"add_tensors", "node_patches"},
     "SdpaFwd/Default": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151Decode": {"add_tensors", "node_patches"},
@@ -614,6 +616,9 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "RMSNormBackward/Default",
         "ResampleFwd/Default",
         "SdpaBackward/Default",
+        "SdpaBackward/FlydslBwdSplit",
+        "SdpaBackward/FlydslBwdSplitBias",
+        "SdpaBackward/FlydslBwdSplitStride",
         "SdpaFwd/AsmStride",
         "SdpaFwd/Default",
         "SdpaFwd/Flash2",
@@ -637,6 +642,7 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "Matmul/Probe",
         "RMSNorm/MlopsProbe",
         "SdpaBackward/AsmProbe",
+        "SdpaBackward/FlydslBwdSplitProbe",
         "SdpaFwd/AsmProbe",
         "SdpaFwd/Flash2Probe",
         "SdpaFwd/FlydslCdnaProbe",
@@ -1435,6 +1441,8 @@ LARGE_SCALE = {
     "RMSNormBackward/Default": 4,
     "SdpaFwd/Default": 8,
     "SdpaBackward/Default": 8,
+    "SdpaBackward/FlydslBwdSplit": 8,
+    "SdpaBackward/FlydslBwdSplitBias": 8,
     "SdpaFwd/Gfx950Dense": 8,
     "SdpaFwd/Flash2Region": 8,
     "SdpaFwd/Gfx1151": 8,
@@ -1478,11 +1486,16 @@ OPERAND_DOMAIN = {
     # V and dO of the backward keep magnitude 1 where wide and large widen Q and K (the
     # outputs grow with |dO| * |V| and the engine tolerances are calibrated at magnitude 1)
     **{
-        ("SdpaBackward/Default", name): {
+        (space, name): {
             "wide": (-1, 1, 1),
             "positive": (0.25, 1, 1),
             "large": (-1, 1, 1),
         }
+        for space in (
+            "SdpaBackward/Default",
+            "SdpaBackward/FlydslBwdSplit",
+            "SdpaBackward/FlydslBwdSplitBias",
+        )
         for name in ("V", "dO")
     },
 }
@@ -1517,6 +1530,8 @@ PRIMARY_OPERANDS = {
     "SdpaFwd/Gfx1151": ["Q", "K", "V"],
     "SdpaFwd/Gfx1151Decode": ["Q", "K", "V"],
     "SdpaBackward/Default": ["Q", "K", "V", "dO"],
+    "SdpaBackward/FlydslBwdSplit": ["Q", "K", "V", "dO"],
+    "SdpaBackward/FlydslBwdSplitBias": ["Q", "K", "V", "dO"],
 }
 # The operands that carry the `special` fill in the nan and inf domains, per space. The other
 # primary operands keep the default range there. Each choice keeps the non-finite positions
@@ -1532,6 +1547,8 @@ POISONED_OPERANDS = {
     "ResampleFwd/Default": ["X"],
     "SdpaFwd/Default": ["V"],
     "SdpaBackward/Default": [],  # nan and inf are not drawn: see that space's description
+    "SdpaBackward/FlydslBwdSplit": [],  # as SdpaBackward/Default
+    "SdpaBackward/FlydslBwdSplitBias": [],  # as SdpaBackward/Default
     "SdpaFwd/Gfx950Dense": ["V"],
     "SdpaFwd/FlydslCdna": ["V"],
     "SdpaFwd/FlydslCdnaDecode": ["V"],
@@ -1555,6 +1572,7 @@ STRIDE_SPACES = [
     "SdpaFwd/FlydslCdnaStride",
     "SdpaFwd/FlydslDecodeStride",
     "SdpaFwd/FlydslDualwaveStride",
+    "SdpaBackward/FlydslBwdSplitStride",
 ]  # fmt: skip
 NO_DOMAIN_SPACES = FIXED_SHAPE_SPACES + STRIDE_SPACES
 NO_DTYPE_SPACES = FIXED_SHAPE_SPACES + ["Matmul/Stride"]
@@ -1577,6 +1595,9 @@ PLACEMENT_OPERAND = {
     "RMSNormBackward/Default": "x",
     "ResampleFwd/Default": "X",
     "SdpaBackward/Default": "Q",
+    "SdpaBackward/FlydslBwdSplit": "Q",
+    "SdpaBackward/FlydslBwdSplitBias": "Q",
+    "SdpaBackward/FlydslBwdSplitStride": "Q",
     "SdpaFwd/AsmStride": "Q",
     "SdpaFwd/Default": "Q",
     "SdpaFwd/Flash2": "Q",
@@ -1597,7 +1618,11 @@ PATCHED_OPERANDS = (
 )
 
 # the spaces whose domain axis leaves out nan and inf (each space's description says why)
-NONFINITE_EXCLUDED = {"SdpaBackward/Default"}
+NONFINITE_EXCLUDED = {
+    "SdpaBackward/Default",
+    "SdpaBackward/FlydslBwdSplit",
+    "SdpaBackward/FlydslBwdSplitBias",
+}
 # the spaces that draw half only: an infinity never poisons there (P underflows), see
 # test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree
 HALF_ONLY_SPACES = {"SdpaFwd/Flash2Region"}
@@ -1622,6 +1647,22 @@ PADS = {
     "SdpaFwd/FlydslCdnaStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
     "SdpaFwd/FlydslDecodeStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
     "SdpaFwd/FlydslDualwaveStride": [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 24, 31],
+    "SdpaBackward/FlydslBwdSplitStride": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        15,
+        16,
+        17,
+        24,
+        31,
+    ],
 }
 # pad_on value -> the uids of the tensors whose leading stride it pads
 PAD_ON_UIDS = {
@@ -1631,6 +1672,10 @@ PAD_ON_UIDS = {
     "SdpaFwd/FlydslCdnaStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
     "SdpaFwd/FlydslDecodeStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
     "SdpaFwd/FlydslDualwaveStride": {"q": {1}, "k": {0}, "v": {3}, "o": {2}, "all": {0, 1, 2, 3}},
+    "SdpaBackward/FlydslBwdSplitStride": {
+        "q": {2, 4}, "k": {0, 3}, "v": {5, 6}, "o": {1, 7}, "stats": {8},
+        "all": {0, 1, 2, 3, 4, 5, 6, 7, 8},
+    },
 }  # fmt: skip
 
 
@@ -1649,6 +1694,9 @@ def _padded_rows(space_id, uid, axes, dims):
     """How many rows (the leading-stride steps) a padded tensor of the stride space has."""
     if space_id == "Matmul/Stride":
         return dims[0] * dims[1]  # batch * matrix rows
+    if space_id == "SdpaBackward/FlydslBwdSplitStride" and uid == 8:
+        # the LSE [B, H, Sq, 1]: a row is one head's Sq entries
+        return dims[0] * dims[1]
     bshd = space_id == "SdpaFwd/Gfx950DenseStride" or axes["layout"] == "bshd"
     # BSHD: the row is a whole sequence position (batch * seqlen of them); BHSD: a position of
     # one head (batch * heads * seqlen)
@@ -1723,6 +1771,9 @@ def test_a_pad_of_zero_renders_the_packed_layout(space_id):
         for t in tensors:
             if space_id == "Matmul/Stride":
                 order = (0, 1, 2)
+            elif space_id == "SdpaBackward/FlydslBwdSplitStride" and t["uid"] == 8:
+                # the LSE [B, H, Sq, 1] is [B, H, Sq] in memory in either layout
+                order = (0, 1, 2, 3)
             elif space_id == "SdpaFwd/Gfx950DenseStride" or axes["layout"] == "bshd":
                 order = (0, 2, 1, 3)
             else:
