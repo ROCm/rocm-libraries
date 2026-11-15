@@ -718,14 +718,16 @@ if(ROCKE_INSTALL_TESTS)
     endif()
 
     # Both engines lower each MMA atom and operand register type to the same HIP
-    # source, or refuse it alike. These files hold the both-engine checks and
-    # the checks of the helpers they use, so they run here, with the program,
-    # rather than in rocke_pytest_core, whose time limit has no room for them;
-    # hipcc checks the source where ROCm is found. The paths are under tests/,
-    # all in rocke_pytest_core's directory.
+    # source, or refuse it alike, and resolve a serialized kernel's reused SSA
+    # names alike. These files hold the both-engine checks and the checks of
+    # the helpers they use, so they run here, with the program, rather than in
+    # rocke_pytest_core, whose time limit has no room for them and which has no
+    # C++ HIP lowering; hipcc checks the source where ROCm is found. The paths
+    # are under tests/, all in rocke_pytest_core's directory.
     set(_ROCKE_HIP_LOWERING_PARITY_TESTS
         "core/test_hip_lowering_parity.py"
-        "core/test_mma_operand_register_type.py")
+        "core/test_mma_operand_register_type.py"
+        "core/test_serialized_ir_name_scopes.py")
     if(_ROCKE_IR_LOWER_CLI_ENVIRONMENT)
       list(TRANSFORM _ROCKE_HIP_LOWERING_PARITY_TESTS
            PREPEND "\"${ROCKE_TEST_CTEST_REL}tests/" OUTPUT_VARIABLE _rocke_parity_paths)
@@ -805,9 +807,11 @@ if(ROCKE_INSTALL_TESTS)
       # categories tier them by that prefix.
       set(_ROCKE_PLATFORM_PYTEST_GROUPS core instances_dispatch runtime_tools)
       # The HIP source identity test and the HIP lowering parity files run in
-      # their own entries (above), and on Windows, where those are not
-      # registered, in none: every check in them needs the C++ HIP lowering,
-      # which the installed tree reaches only through rocke_ir_lower_cli.
+      # their own entries (above): their both-engine checks need the C++ HIP
+      # lowering, which the installed tree reaches only through
+      # rocke_ir_lower_cli. On Windows, where those entries are not
+      # registered, the files run in none, so their other checks do not run
+      # there either.
       list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_instances_dispatch
            ${_ROCKE_HIP_SOURCE_IDENTITY_TEST})
       list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_core ${_ROCKE_HIP_LOWERING_PARITY_TESTS})

@@ -497,6 +497,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             "rocke_hip_lowering_parity": (
                 ("core", "tests/core/test_hip_lowering_parity.py"),
                 ("core", "tests/core/test_mma_operand_register_type.py"),
+                ("core", "tests/core/test_serialized_ir_name_scopes.py"),
             ),
             "rocke_hip_source_identity": (
                 (
