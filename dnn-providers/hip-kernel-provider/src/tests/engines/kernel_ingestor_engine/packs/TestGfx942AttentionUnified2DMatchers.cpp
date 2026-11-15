@@ -1059,7 +1059,7 @@ constexpr auto HALF = data_objects::DataType::HALF;
 
 /// Where rocKE builds its light narrow geometry (bf16 at every ratio, fp16 GQA, 1 < Sq <= 768)
 /// and the cell ships narrow kernels, the narrow kernel nearest rocKE's geometry (16 rows per
-/// warp, then the tile nearest 64, then the warps nearest 1 for MHA or 2 for GQA) ranks first
+/// warp, then the tile nearest rocKE's, then the warps nearest 1 for MHA or 2 for GQA) ranks first
 /// up to and at Sq 768; one row past it the cell's own order returns (the production stack,
 /// else the default). These are every cell of the shipped catalog where that holds.
 TEST(TestGfx942AttentionUnified2DMatchers,
@@ -1132,6 +1132,28 @@ TEST(TestGfx942AttentionUnified2DMatchers,
             EXPECT_EQ(ranking(c.cell, sq).front(), c.longFirst) << c.cell.name << " at Sq " << sq;
         }
     }
+}
+
+/// rocKE's narrow tile is one paged-KV block at D64 and 64 tokens at D128
+/// (`_select_2d_tile_size`), so between two otherwise equal narrow kernels the D64 graph prefers
+/// the block-sized tile and the D128 graph the 64-token one.
+TEST(TestGfx942AttentionUnified2DMatchers, ScoreKeysTheNarrowTileOnTheHeadSizeAsRockeDoes)
+{
+    const Cell d64{
+        "bf16 D64 ratio 1",
+        BF16,
+        64,
+        1,
+        {cellKernel("BF16", 64, 1, 16, 1, 16, 0), cellKernel("BF16", 64, 1, 64, 1, 16, 0)}};
+    EXPECT_EQ(ranking(d64, 128).front(), "t16_nw1_mw16_x00_f00000");
+
+    const Cell d128{
+        "bf16 D128 ratio 1",
+        BF16,
+        128,
+        1,
+        {cellKernel("BF16", 128, 1, 16, 1, 16, 0), cellKernel("BF16", 128, 1, 64, 1, 16, 0)}};
+    EXPECT_EQ(ranking(d128, 128).front(), "t64_nw1_mw16_x00_f00000");
 }
 
 /// Everywhere else the ranking is the same on both sides of Sq 768: in a cell that ships no

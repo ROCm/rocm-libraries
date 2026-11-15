@@ -334,9 +334,11 @@ constexpr double NARROW_KEY_SPAN = 2199023255552.0; // 2^41
 /// rocKE's short-prefill bound (`1 < max_seqlen_q <= 768`, _enable_gfx942_small_q_narrow).
 constexpr int64_t SHORT_PREFILL_MAX_SEQ_LEN_Q = 768;
 /// rocKE's light narrow geometry (_enable_gfx942_small_q_narrow's docstring and the selectors
-/// it gates): 16 rows per warp, a 64-token KV tile, 1 warp for MHA and 2 for GQA.
+/// it gates): 16 rows per warp, 1 warp for MHA and 2 for GQA, and the KV tile
+/// `_select_2d_tile_size` (:1311-1324) picks off its flash stack: one paged-KV block at D64,
+/// 64 tokens at D128.
 constexpr int64_t NARROW_BLOCK_M_PER_WARP = 16;
-constexpr int64_t NARROW_TILE_SIZE = 64;
+constexpr int64_t NARROW_D128_TILE_SIZE = 64;
 
 /// rocKE's production stack for a (dtype, head size): the mask limit and invariant hoist the
 /// production spec turns on together with the rest of the mask stack. A geometry's default
@@ -385,7 +387,8 @@ bool isNarrow(const AttentionUnified2DCandidate& candidate)
  *  - `_enable_gfx942_bf16_flash` (:2413-2456) excludes every small-q narrow shape (:2455),
  *    MHA and GQA alike.
  *  - The geometry selectors then build the narrow geometry for exactly those shapes:
- *    `_select_2d_num_warps` (:1484-1485) and `_select_2d_block_m_per_warp` (:3516-3519).
+ *    `_select_2d_num_warps` (:1484-1485), `_select_2d_block_m_per_warp` (:3516-3519) and
+ *    `_select_2d_tile_size` (:1311-1324).
  *
  * graph_match declines a window, sinks, softcap, a score bias and every head size but 64 and
  * 128, and serves dense graphs, so max_seqlen_q is the Q tensor's sequence extent.
@@ -443,14 +446,15 @@ int64_t alternativeKey(const AttentionUnified2DCandidate& candidate)
 }
 
 /// A narrow kernel's score when rocKE routes the graph to its narrow geometry: nearest that
-/// geometry first (16 rows per warp, then the tile nearest 64, then the warp count nearest
-/// rocKE's), then alternativeKey.
+/// geometry first (16 rows per warp, then the tile nearest rocKE's, then the warp count
+/// nearest rocKE's), then alternativeKey.
 double narrowScore(const AttentionUnified2DCandidate& candidate, const SdpaShape& problem)
 {
     const int64_t wantWarps = problem.numQueryHeads == problem.numKvHeads ? 1 : 2;
+    const int64_t wantTile = candidate.headSize == 64 ? candidate.blockSize : NARROW_D128_TILE_SIZE;
     // rows penalty <= 1, tile distance < 1024, warp distance < 16: below 2^15.
     int64_t preference = candidate.blockMPerWarp == NARROW_BLOCK_M_PER_WARP ? 0 : 1;
-    preference = preference * 1024 + std::abs(candidate.tileSize - NARROW_TILE_SIZE);
+    preference = preference * 1024 + std::abs(candidate.tileSize - wantTile);
     preference = preference * 16 + std::abs(candidate.numWarps - wantWarps);
     const double key = static_cast<double>(preference) * NARROW_PREFERENCE_STRIDE
                        + static_cast<double>(alternativeKey(candidate));
