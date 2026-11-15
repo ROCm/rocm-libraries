@@ -231,6 +231,8 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
     }
     if has_library:
         expected_names.add("rocke_library_sdpa_pytest")
+    if os.name != "nt":
+        expected_names |= {"rocke_hip_source_identity", "rocke_hip_lowering_parity"}
     assert expected_names <= pytest_entries.keys(), sorted(pytest_entries)
     gpu_reference_names = {
         name
