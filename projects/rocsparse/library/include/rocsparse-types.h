@@ -42,6 +42,18 @@
 #define ROCSPARSE_KERNEL(MAX_THREADS_PER_BLOCK) \
     __launch_bounds__(MAX_THREADS_PER_BLOCK) static __global__
 #define ROCSPARSE_DEVICE_ILF static __device__ __forceinline__
+
+// The standard attribute is allowed on enumerators from C++17 and C23. Older C and C++ use the GNU
+// form, which gcc and clang accept there.
+#if(defined(__cplusplus) && __cplusplus >= 201703L)   \
+    || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) \
+    || (!defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L)
+#define ROCSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
+#elif defined(__GNUC__) || defined(__clang__)
+#define ROCSPARSE_DEPRECATED_MSG(MSG) __attribute__((__deprecated__(MSG)))
+#else
+#define ROCSPARSE_DEPRECATED_MSG(MSG)
+#endif
 /// \endcond
 
 /*! \ingroup types_module
@@ -604,10 +616,10 @@ typedef enum rocsparse_indextype_
 // so that the library can still recognize and gracefully reject the value without
 // triggering -Wswitch warnings.
 #ifdef ROCSPARSE_KEEP_INTERNAL_U16
-    rocsparse_indextype_u16
-    [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
-                 "release. Use "
-                 "rocsparse_indextype_i32 or rocsparse_indextype_i64 instead.")]]
+    rocsparse_indextype_u16 ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_indextype_u16 is no longer supported and will be removed "
+        "in a future release. Use rocsparse_indextype_i32 or "
+        "rocsparse_indextype_i64 instead.")
     = 1, /**< 16-bit unsigned integer. \deprecated This index type is unsupported and will be
             removed in a future release. Use \ref rocsparse_indextype_i32 or \ref
             rocsparse_indextype_i64 instead. */
@@ -745,8 +757,10 @@ typedef enum rocsparse_itilu0_alg_
     = 2, /**< Asynchronous ITILU0 algorithm with explicit storage splitting. */
     rocsparse_itilu0_alg_sync_split
     = 3, /**< Synchronous ITILU0 algorithm with explicit storage splitting. */
-    rocsparse_itilu0_alg_sync_split_fusion [[deprecated]]
-    = 4 /**< Semi-synchronous ITILU0 algorithm with explicit storage splitting. */
+    rocsparse_itilu0_alg_sync_split_fusion ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_itilu0_alg_sync_split_fusion is deprecated and will be removed in a future "
+        "release.")
+    = 4 /**< Semi-synchronous ITILU0 algorithm with explicit storage splitting. \deprecated This algorithm will be removed in a future release. */
 } rocsparse_itilu0_alg;
 
 /*! \ingroup types_module
@@ -859,8 +873,10 @@ typedef enum rocsparse_spmv_alg_
     rocsparse_spmv_alg_csr_lrb      = 7, /**< CSR SpMV algorithm 3 (LRB) for CSR matrices. */
     rocsparse_spmv_alg_csr_nnzsplit = 8, /**< CSR SpMV algorithm 4 (nnzsplit) for CSR matrices. */
     rocsparse_spmv_alg_sell         = 9, /**< SLICED ELL SpMV algorithm for SLICED ELL matrices. */
-    rocsparse_spmv_alg_csr_stream [[deprecated]]
-    = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. */
+    rocsparse_spmv_alg_csr_stream ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_spmv_alg_csr_stream is deprecated and will be removed in a future release. Use "
+        "rocsparse_spmv_alg_csr_rowsplit instead.")
+    = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. \deprecated This algorithm will be removed in a future release. Use \ref rocsparse_spmv_alg_csr_rowsplit instead. */
 } rocsparse_spmv_alg;
 
 /*! \ingroup types_module
@@ -974,10 +990,9 @@ typedef enum rocsparse_spmm_alg_
 typedef enum rocsparse_sddmm_alg_
 {
     rocsparse_sddmm_alg_default = 0, /**< Default sddmm algorithm for the given format. */
-    rocsparse_sddmm_alg_dense
-    [[deprecated("rocsparse_sddmm_alg_dense is deprecated and will be removed "
-                 "in a future release. Use rocsparse_sddmm_alg_default "
-                 "instead.")]]
+    rocsparse_sddmm_alg_dense ROCSPARSE_DEPRECATED_MSG(
+        "rocsparse_sddmm_alg_dense is deprecated and will be removed in a "
+        "future release. Use rocsparse_sddmm_alg_default instead.")
     = 1 /**< Sddmm algorithm using dense blas operations. \deprecated This algorithm will be removed in a future release. Use \ref rocsparse_sddmm_alg_default instead. */
 } rocsparse_sddmm_alg;
 
@@ -1319,13 +1334,13 @@ typedef enum rocsparse_spildlt0_input_
     rocsparse_spildlt0_input_boost_tolerance, /**< Select diagonal boosting tolerance on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_boost_value, /**< Select diagonal boosting value on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_singularity_tolerance, /**< Select singularity tolerance for input on a SpILDLT0 descriptor. */
-    rocsparse_spildlt0_input_diag [[deprecated(
+    rocsparse_spildlt0_input_diag ROCSPARSE_DEPRECATED_MSG(
         "rocsparse_spildlt0_input_diag is deprecated and "
         "will be removed in a future "
         "release. The diagonal D is always stored in-place "
         "on the (implicit unit) diagonal "
         "of the L factor and can be read back from "
-        "there.")]], /**< Optionally set the device pointer to a dense array of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ as an output of SpILDLT0 (\p m entries per batch, batch \p b at offset \p b * \p m). \f$D\f$ is always real, even for complex matrices (\p float* for \p s and \p c, \p double* for \p d and \p z). \deprecated \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor; read it back from there instead. */
+        "there."), /**< Optionally set the device pointer to a dense array of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ as an output of SpILDLT0 (\p m entries per batch, batch \p b at offset \p b * \p m). \f$D\f$ is always real, even for complex matrices (\p float* for \p s and \p c, \p double* for \p d and \p z). \deprecated \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor; read it back from there instead. */
 } rocsparse_spildlt0_input;
 
 /*! \ingroup types_module

@@ -3,12 +3,17 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
@@ -22,9 +27,11 @@
 /**
  * @file SdpaGraphMatch.hpp
  * @brief The graph-reading helpers every ingestor pack that serves a single dense BSHD
- *        SDPA-forward node shares: finding the node and its operands, the operand checks
- *        made before anything indexes an axis, the problem read from Q and K, the f32
- *        compute-type rule for the packs that apply it, and the decline-line head.
+ *        SDPA node shares: finding the node and its operands, the operand checks made before
+ *        anything indexes an axis, the problem read from Q and K, the f32 compute-type rule
+ *        for the packs that apply it, the declared-alignment, checked-product and
+ *        overlap checks and the limits the FlyDSL SDPA families bound by, and the
+ *        decline-line head.
  *
  * Pack-family rules (mask kinds, dtypes, the decode rule) stay with the family, e.g.
  * UnifiedAttentionGraphMatch.hpp.
@@ -42,11 +49,85 @@ inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_SIZE_AXIS = 3;
 inline constexpr uint32_t SDPA_RANK = 4;
 
+/// The largest value a 32-bit offset or extent holds.
+inline constexpr int64_t INT32_LIMIT = 2147483647LL;
+
+/// The largest softmax scale magnitude every FlyDSL SDPA kernel serves. Real graphs use
+/// 1/sqrt(d) or a temperature near 1; far above this each family overflows f32 at a different
+/// point (the CDNA causal objects' running-max floor times scale * log2(e) passes FLT_MAX near
+/// 2.4e8), so one bound here makes all of them decline alike rather than diverge.
+inline constexpr double MAX_SOFTMAX_SCALE = 1048576.0; // 2^20
+
 inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
 {
     const auto& tensors = context.graph.getTensorMap();
     auto it = tensors.find(uid);
     return it == tensors.end() ? nullptr : it->second;
+}
+
+/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
+/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
+/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
+inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
+{
+    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
+}
+
+/// The product of @p factors, or nullopt when it does not fit in int64_t. Every product of
+/// graph-controlled extents goes through this: an unchecked one is signed overflow, and a
+/// wrapped value can pass a bound it should fail. A factor of 0 or below is a factor like any
+/// other (pack_features::checkedProduct rejects it).
+inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
+{
+    int64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(__builtin_mul_overflow(product, factor, &product))
+        {
+            return std::nullopt;
+        }
+    }
+    return product;
+}
+
+/// Whether no two elements of @p tensor share an address, which an output needs: concurrent
+/// workgroups writing one location race. Its axes of more than one element, ordered by
+/// stride, must each step past everything the axes inside it span. With @p ignoreBatch the
+/// batch axis is left out (a ragged tensor's batches are placed by its offsets). Conservative:
+/// a layout interleaving two axes inside one another's gaps declines too.
+inline bool elementsDoNotOverlap(const data_objects::TensorAttributes& tensor,
+                                 bool ignoreBatch = false)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
+    {
+        return false;
+    }
+    std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
+    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
+    {
+        if(dims->Get(axis) > 1 && (!ignoreBatch || axis != 0))
+        {
+            axes.emplace_back(strides->Get(axis), dims->Get(axis));
+        }
+    }
+    std::sort(axes.begin(), axes.end());
+    int64_t span = 1; // elements the inner axes reach, from the first
+    for(const auto& [stride, extent] : axes)
+    {
+        if(stride < span)
+        {
+            return false;
+        }
+        const auto reach = checkedProduct({extent - 1, stride});
+        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
+        {
+            return false;
+        }
+        span += *reach;
+    }
+    return true;
 }
 
 /// The node an SDPA pack's matchers read, or nullptr if the graph is not a single
@@ -65,14 +146,6 @@ inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
     }
 
     return &node.attributesAs<data_objects::SdpaAttributes>();
-}
-
-/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
-/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
-/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
-inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
-{
-    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
 }
 
 /// Total over an UNVALIDATED graph: rank, stride/dim agreement and positive extents,
