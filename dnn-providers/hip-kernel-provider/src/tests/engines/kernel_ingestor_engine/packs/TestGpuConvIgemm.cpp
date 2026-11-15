@@ -930,8 +930,8 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
             const bool eligible = kernel.getStringMetadata("atom") != "fma"
                                   && kernel.getIntMetadata("pack") == 0
                                   && kernel.getIntMetadata("patch") != 2
-                                  && !(direction == ConvDirection::BACKWARD_DATA
-                                       && kernel.getIntMetadata("patch") != 0);
+                                  && (direction != ConvDirection::BACKWARD_DATA
+                                      || kernel.getIntMetadata("patch") == 0);
             if(cf)
             {
                 EXPECT_TRUE(eligible);
