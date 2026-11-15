@@ -66,21 +66,30 @@ std::string backendName(Backend backend)
     return backend == Backend::HIPBLASLT ? "Hipblaslt" : "Rocblas";
 }
 
-ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend)
+/// The plan factory of @p backend's engines, or (@p deterministic) of their *_DETERMINISTIC
+/// siblings, as HipblasltContainer.cpp builds them.
+ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend, bool deterministic = false)
 {
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     if(backend == Backend::HIPBLASLT)
     {
-        return [](const HipdnnEnginePluginHandle& handle, const std::vector<GemmCall>& calls) {
-            return std::make_unique<HipblasltGemmPlan>(handle, calls, false);
+        return [deterministic](const HipdnnEnginePluginHandle& handle,
+                               const std::vector<GemmCall>& calls) {
+            return std::make_unique<HipblasltGemmPlan>(handle, calls, deterministic);
         };
     }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     if(backend == Backend::ROCBLAS)
     {
-        return [](const HipdnnEnginePluginHandle& /*handle*/, const std::vector<GemmCall>& calls) {
-            return std::make_unique<RocblasGemmPlan>(calls);
+        return [deterministic](const HipdnnEnginePluginHandle& /*handle*/,
+                               const std::vector<GemmCall>& calls) {
+            auto plan = std::make_unique<RocblasGemmPlan>(calls);
+            if(deterministic)
+            {
+                plan->requireBitwiseReproducible();
+            }
+            return plan;
         };
     }
 #endif
@@ -256,7 +265,8 @@ template <typename T>
 void runFused(const EpilogueCase& convCase,
               const std::vector<Step>& steps,
               Backend backend,
-              Specials specials = Specials::NONE)
+              Specials specials = Specials::NONE,
+              bool deterministic = false)
 {
     ConvGemmShape shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -274,7 +284,7 @@ void runFused(const EpilogueCase& convCase,
     const auto narrow = backend == Backend::HIPBLASLT
                             ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
                             : ConvGemmPlanBuilder::NarrowPartials::NEVER;
-    const ConvGemmPlanBuilder builder(factoryFor(backend),
+    const ConvGemmPlanBuilder builder(factoryFor(backend, deterministic),
                                       MAX_REPACK_WORKSPACE_BYTES,
                                       false,
                                       false,
@@ -610,6 +620,83 @@ INSTANTIATE_TEST_SUITE_P(,
                                                               menuChains()[14]),
                                             ::testing::ValuesIn(enabledBackends())),
                          caseName);
+
+// Real-model channels-first fp16 convolutions (inception_v3, resnet50) whose fused graphs need an
+// fp32-output GEMM: every engine, the deterministic siblings included, claims the fused graph
+// exactly where it claims the bare convolution, and computes it.
+ConvGemmShape realModel(int64_t n, int64_t c, int64_t k, int64_t hw, int64_t f, int64_t pad)
+{
+    ConvGemmShape shape;
+    shape.n = n;
+    shape.c = c;
+    shape.k = k;
+    shape.input = {hw, hw};
+    shape.filter = {f, f};
+    shape.prePadding = {pad, pad};
+    shape.postPadding = {pad, pad};
+    shape.dataType = DataType::HALF;
+    return shape;
+}
+
+std::vector<EpilogueCase> realModelCases()
+{
+    return {{"InceptionDense", realModel(1, 448, 384, 8, 3, 1)},
+            {"InceptionPointOutput", realModel(16, 128, 768, 5, 5, 0)},
+            {"Resnet50Dense", realModel(1, 512, 512, 14, 3, 1)}};
+}
+
+class TestGpuConvEpilogueClaims
+    : public ::testing::TestWithParam<std::tuple<EpilogueCase, Chain, Backend, bool>>
+{
+};
+
+TEST_P(TestGpuConvEpilogueClaims, FusedWhereBare)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& [convCase, chain, backend, deterministic] = GetParam();
+    hipdnnEnginePluginHandle_t rawHandle = nullptr;
+    HipblasltHandleFactory::createHipblasltHandle(&rawHandle);
+    const std::unique_ptr<HipdnnEnginePluginHandle, void (*)(HipdnnEnginePluginHandle*)> handle(
+        rawHandle, [](HipdnnEnginePluginHandle* owned) {
+            HipblasltHandleFactory::destroyHipblasltHandle(owned);
+            delete owned;
+        });
+    const ConvGemmPlanBuilder builder(factoryFor(backend, deterministic),
+                                      MAX_REPACK_WORKSPACE_BYTES,
+                                      false,
+                                      false,
+                                      false,
+                                      ColumnLayout::FOLLOW_Y,
+                                      backend == Backend::HIPBLASLT
+                                          ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
+                                          : ConvGemmPlanBuilder::NarrowPartials::NEVER,
+                                      std::nullopt,
+                                      backend == Backend::HIPBLASLT);
+    const ConvGemmGraph bare(convCase.shape, ConvDirection::FORWARD);
+    const FusedConvGraph fused(convCase.shape, chain.second);
+    const bool bareClaimed = builder.isApplicable(*handle, bare.graph());
+    EXPECT_EQ(builder.isApplicable(*handle, fused.graph()), bareClaimed);
+    if(bareClaimed)
+    {
+        runFused<Half>(convCase, chain.second, backend, Specials::NONE, deterministic);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvEpilogueClaims,
+                         ::testing::Combine(::testing::ValuesIn(realModelCases()),
+                                            ::testing::Values(menuChains()[14],
+                                                              menuChains()[0],
+                                                              menuChains()[6],
+                                                              menuChains()[1]),
+                                            ::testing::ValuesIn(enabledBackends()),
+                                            ::testing::Bool()),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first + "_"
+                                    + backendName(std::get<2>(info.param))
+                                    + (std::get<3>(info.param) ? "_Deterministic" : "");
+                         });
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 /// hipBLASLt's solutions for one conv GEMM shape (y^T = w x^T, channels as rows), with and
