@@ -214,11 +214,10 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
 // on gfx950 data only and has no gfx1250 buckets, and no model has been checked on gfx1250
 // hardware.
 //
-// ConvHipConv on gfx950, backward weights: on MI355X, 300 sampled picks that differ from the
-// default config gave default time / picked time 1.0078 (geomean, 95% CI 0.9868 to 1.0283), but
-// their summed time grew 1.21x, 69 ran more than 3% slower and the worst ran 0.30x. Offline the
-// model gains 0.15% there with a worse worst case than the default. Forward and backward data
-// gain on both and stay enabled.
+// ConvHipConv on gfx950, backward weights: on MI355X the sampled picks that differ from the
+// default config were no faster overall and some were much slower, and the model's offline gain
+// there is negligible with a worse worst case than the default. Forward and backward data gain
+// on both and stay enabled.
 //
 // Gated here, rather than by dropping the gfx950 backward-weights buckets from lgbm_pcfg.bin, so
 // enabling them is a one-line change.
