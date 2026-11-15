@@ -113,6 +113,9 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 |---|---|---|
 | Data type | `INT32` or `INT64` | `INT32` only |
 | 1-D `(B+1)` tensor | Promoted to `(B+1,1,1,1)` in `infer_properties_node` | Promoted in place during validation, so either call order works; the tensor keeps its uid and handle |
+| Mixed per-side form (`cu_seq_len_*` on one side, `seq_len_*` on the other) | Rejected by cudnn-frontend v1.25.0 and v1.26.0; accepted from v1.27.0 | Accepted (`SdpaFwdNode` Rule 6c) |
+| `padding_mask` | Must be `true` whenever any length tensor (`seq_len_*` or `cu_seq_len_*`) is set | Required for `cu_seq_len_*` only; `seq_len_*` with `padding_mask=false` still validates |
+| Paged K/V with `cu_seq_len_*` | Accepted by cudnn-frontend v1.25.0 | Rejected: `SdpaFwdNode::validatePagedKv` requires `seq_len_q` and `seq_len_kv` for paged K/V |
 | Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer; no in-tree engine or reference implements them yet |
 
 ## Build and execute
