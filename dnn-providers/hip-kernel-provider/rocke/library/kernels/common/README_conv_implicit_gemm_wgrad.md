@@ -101,6 +101,11 @@ tagged in the kernel name and `KernelIdentity`.
   wide X loads. `wgrad_x_run_problem_reason` states the problem conditions;
   `is_valid_wgrad_spec` and `identity_supports_problem` enforce them. Refused
   with `async_dma`, `lds_k_outer`, `group_merge`, stream-K and 3-D.
+- Split-K degree on gfx12 RDNA: a `WgradSplitPolicy` entry per target (CK
+  formula, two CTAs per CU, no slice-depth floor) that fills a launch of
+  fewer than `num_cus / 4` tiles to one CTA per CU (`small_grid_tiles` /
+  `small_grid_target_ctas`) and keeps the grouped CK formula for grouped
+  launches (`grouped_ck_formula`), under the common 16-bit atomic caps.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 
