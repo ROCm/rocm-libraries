@@ -17,7 +17,7 @@ def emit_asm(isa_info_map, assembler, params):
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.SolutionStructs.Solution import Solution
     from tensilelite.create_library.run import generateKernelObjectsFromSolutions, processKernelSource
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from rocisa_test_state import preserve_rocisa_kernel_state
 
     sol = Solution(params, False, True, False, assembler, isa_info_map)
     if not sol.get("Valid"):

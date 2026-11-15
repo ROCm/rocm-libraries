@@ -28,7 +28,7 @@ _LEVELS = [1, 2, 3]
 
 # The ProblemType keys an override of _state may name; every other override goes to the solution.
 _PROBLEM_TYPE_KEYS = {
-  "DestDataType", "ComputeDataType", "HighPrecisionAccumulate", "FusedGemmA2A", "UseE", "Gradient",
+  "DestDataType", "ComputeDataType", "HighPrecisionAccumulate", "FusedA2A", "UseE", "Gradient",
   "UseGateResidual", "GroupedGemm", "UseBias", "UseScaleAlphaVec", "UseScaleAB", "UseScaleCD",
   "ActivationType", "OutputAmaxD",
 }
@@ -41,7 +41,7 @@ def _state(**overrides):
     "DestDataType": DataType("b"),
     "ComputeDataType": DataType("s"),
     "HighPrecisionAccumulate": True,
-    "FusedGemmA2A": False,
+    "FusedA2A": "Disabled",
     "UseE": False,
     "Gradient": False,
     "UseGateResidual": False,
@@ -170,7 +170,7 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"DestDataType": DataType("z")}, _OUTPUT),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
-  ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
+  ({"FusedA2A": "GemmA2A"}, "TDMStoreInst does not support FusedA2A"),
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason

@@ -49,6 +49,7 @@ from rocisa.instruction import DSLoadD16HIU16, DSLoadU8, SAddCU32, SAddU32, SCBr
 
 from ..AsmMemoryHelpers import dsLoad, dsStore
 from ..ExecutionPolicy import isPersistent
+from ..SolutionStructs.Problem import isFusedA2A
 from .NonTemporal import tdmCacheModifiers
 
 # PackData and TensorDataMover are imported where they are used: they load every component
@@ -126,8 +127,8 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"
   if state["UseSubtileImpl"]:
     return "TDMStoreInst does not support UseSubtileImpl"
-  if pt["FusedGemmA2A"]:
-    return "TDMStoreInst does not support FusedGemmA2A"
+  if isFusedA2A(pt):
+    return "TDMStoreInst does not support FusedA2A"
   return None
 
 
