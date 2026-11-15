@@ -3,6 +3,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -212,9 +213,9 @@ TEST(TestConvEpilogue, ValuesAreRuntimeSlots)
     EXPECT_EQ(scalars[5].value, 1.25F);
 
     // Launch arguments: a runtime scalar is read from its host slot at execute.
-    const float supplied = 4.5F;
-    const hipdnnPluginDeviceBuffer_t buffers[] = {{OPERAND_UID + 1, const_cast<float*>(&supplied)}};
-    const auto args = conv_epilogue::epilogueArgs(problem->epilogue, buffers, 1, 7, 6);
+    float supplied = 4.5F;
+    const std::array<hipdnnPluginDeviceBuffer_t, 1> buffers{{{OPERAND_UID + 1, &supplied}}};
+    const auto args = conv_epilogue::epilogueArgs(problem->epilogue, buffers.data(), 1, 7, 6);
     EXPECT_EQ(args.scalar[0], -0.75F);
     EXPECT_EQ(args.scalar[1], 4.5F);
     EXPECT_EQ(args.scalar[5], 1.25F);
