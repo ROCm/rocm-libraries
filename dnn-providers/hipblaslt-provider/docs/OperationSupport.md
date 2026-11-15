@@ -108,8 +108,8 @@ How a convolution runs, in order of preference:
 Fused forward graphs (every engine but the RPR siblings): the convolution, then a chain of pointwise nodes: scale and bias
 (per-channel or scalar), relu (clipped, clamp, leaky), GELU (exact and tanh), swish/silu, sigmoid, tanh, elu, abs and softplus.
 The chain runs in FP32 and y is rounded once:
-- **Native:** hipBLASLt's epilogue in the GEMM (bias, relu, clamp, tanh GELU, swish with beta 1, sigmoid) when y is channels-last
-  with one group and the GEMM writes it directly
+- **Native:** hipBLASLt's epilogue in the GEMM (a bias alone, or sigmoid alone) when y is channels-last with one group and the
+  GEMM writes it directly
 - **Fused into the pass:** a channels-first y staged channels-last; the copy back into y applies the chain
 - **Extra pass:** otherwise (rocBLAS, channels-first rows, groups, other activations): the GEMMs write y in FP32 to the workspace
   and one cast applies the chain

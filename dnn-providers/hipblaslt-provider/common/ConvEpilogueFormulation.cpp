@@ -6,7 +6,6 @@
 #include "common/GemmFormulation.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -390,63 +389,14 @@ std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem)
     {
         return std::nullopt;
     }
-    const bool withBias = native.biasUid.has_value();
-    const auto& op = ops[next];
-    const auto value = [&epilogue](int slot) -> std::optional<float> {
-        const auto& scalar = epilogue.scalars[static_cast<size_t>(slot)];
-        return scalar.runtime.has_value() ? std::nullopt : std::make_optional(scalar.value);
-    };
-    switch(op.code)
+    // hipBLASLt's activation epilogues do not keep the chain's special-value rules: its relu
+    // and clamp map NaN to a bound, and its swish and tanh GELU give NaN for -inf where the
+    // chain gives 0. Only sigmoid matches them, so the other activations run in a pass, where
+    // every engine gives the same result.
+    if(ops[next].code == OpCode::SIGMOID && !native.biasUid.has_value())
     {
-    case OpCode::RELU:
-    {
-        const auto lower = value(op.slot);
-        const auto upper = value(op.slot + 1);
-        const auto slope = value(op.slot + 2);
-        if(!lower || !upper || !slope || *slope != 0.0F)
-        {
-            return std::nullopt;
-        }
-        if(std::isinf(*upper) && *upper > 0.0F)
-        {
-            if(*lower != 0.0F)
-            {
-                return std::nullopt;
-            }
-            native.mode = withBias ? NATIVE_EPILOGUE_RELU_BIAS : NATIVE_EPILOGUE_RELU;
-            return native;
-        }
-        if(!std::isfinite(*lower) || !std::isfinite(*upper) || *lower > *upper)
-        {
-            return std::nullopt;
-        }
-        native.mode = withBias ? NATIVE_EPILOGUE_CLAMP_BIAS : NATIVE_EPILOGUE_CLAMP;
-        native.act0 = *lower;
-        native.act1 = *upper;
-        return native;
-    }
-    case OpCode::GELU_TANH:
-        native.mode = withBias ? NATIVE_EPILOGUE_GELU_BIAS : NATIVE_EPILOGUE_GELU;
-        return native;
-    case OpCode::SWISH:
-    {
-        const auto beta = value(op.slot);
-        if(!beta || *beta != 1.0F)
-        {
-            return std::nullopt;
-        }
-        native.mode = withBias ? NATIVE_EPILOGUE_SWISH_BIAS : NATIVE_EPILOGUE_SWISH;
-        return native;
-    }
-    case OpCode::SIGMOID:
-        if(withBias)
-        {
-            return std::nullopt;
-        }
         native.mode = NATIVE_EPILOGUE_SIGMOID;
         return native;
-    default:
-        break;
     }
     return std::nullopt;
 }

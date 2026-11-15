@@ -158,19 +158,16 @@ std::vector<NativeCase> nativeCases()
     return {
         {"Bias", {bias(DataType::HALF)}, NATIVE_EPILOGUE_BIAS},
         {"Fp32Bias", {bias(DataType::FLOAT)}, NATIVE_EPILOGUE_BIAS},
-        {"Relu", {relu()}, NATIVE_EPILOGUE_RELU},
-        {"BiasRelu",
-         {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)},
-         NATIVE_EPILOGUE_RELU_BIAS},
-        {"BiasClamp", {bias(), relu(-1.0F, 6.0F)}, NATIVE_EPILOGUE_CLAMP_BIAS},
-        {"ClippedRelu", {relu(std::nullopt, 6.0F)}, NATIVE_EPILOGUE_CLAMP},
-        {"BiasGeluTanh",
-         {bias(), unary(PointwiseMode::GELU_APPROX_TANH_FWD)},
-         NATIVE_EPILOGUE_GELU_BIAS},
-        {"BiasSilu", {bias(), unary(PointwiseMode::SWISH_FWD)}, NATIVE_EPILOGUE_SWISH_BIAS},
-        {"Swish1", {swish1}, NATIVE_EPILOGUE_SWISH},
         {"Sigmoid", {unary(PointwiseMode::SIGMOID_FWD)}, NATIVE_EPILOGUE_SIGMOID},
-        // No native form: the pass applies them.
+        // hipBLASLt's activations differ from the chain on NaN or infinity: the pass applies
+        // them.
+        {"Relu", {relu()}, 0},
+        {"BiasRelu", {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)}, 0},
+        {"BiasClamp", {bias(), relu(-1.0F, 6.0F)}, 0},
+        {"ClippedRelu", {relu(std::nullopt, 6.0F)}, 0},
+        {"BiasGeluTanh", {bias(), unary(PointwiseMode::GELU_APPROX_TANH_FWD)}, 0},
+        {"BiasSilu", {bias(), unary(PointwiseMode::SWISH_FWD)}, 0},
+        {"Swish1", {swish1}, 0},
         {"Swish2", {swish2}, 0},
         {"BiasSigmoid", {bias(), unary(PointwiseMode::SIGMOID_FWD)}, 0},
         {"ExactGelu", {bias(), unary(PointwiseMode::GELU_FWD)}, 0},
@@ -216,25 +213,23 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(nativeCases()),
                          [](const auto& info) { return info.param.name; });
 
-TEST(TestConvEpilogueFormulation, NativeClampCarriesItsBounds)
+TEST(TestConvEpilogueFormulation, NativeBiasRidesOnTheGemm)
 {
-    const auto problem = parse(oneByOneNhwc(), {bias(DataType::HALF), relu(-0.5F, 3.0F)});
+    const auto problem = parse(oneByOneNhwc(), {bias(DataType::HALF)});
     ASSERT_TRUE(problem.has_value());
     const auto native = nativeEpilogueFor(*problem);
     ASSERT_TRUE(native.has_value());
-    EXPECT_EQ(native->act0, -0.5F);
-    EXPECT_EQ(native->act1, 3.0F);
     ASSERT_TRUE(native->biasUid.has_value());
     EXPECT_EQ(*native->biasUid, EPI_OPERAND_UID);
     EXPECT_EQ(native->biasType, DataType::HALF);
 
-    const auto calls = fused(oneByOneNhwc(), {bias(DataType::HALF), relu(-0.5F, 3.0F)}, true);
+    const auto calls = fused(oneByOneNhwc(), {bias(DataType::HALF)}, true);
     ASSERT_TRUE(calls.has_value());
     ASSERT_EQ(calls->stages.size(), 1U);
     for(const auto& call : calls->stages[0].calls)
     {
         ASSERT_TRUE(call.epilogue.has_value());
-        EXPECT_EQ(call.d.uid, epilogueOutputUid(2));
+        EXPECT_EQ(call.d.uid, epilogueOutputUid(1));
         EXPECT_EQ(call.m, 24) << "the GEMM's rows are the output channels";
     }
 }
@@ -242,7 +237,7 @@ TEST(TestConvEpilogueFormulation, NativeClampCarriesItsBounds)
 TEST(TestConvEpilogueFormulation, ImplicitColumnsChannelsLastIsNative)
 {
     // im2col into a channels-last y: the GEMM writes y with channels as rows.
-    const auto calls = fused(threeByThree(true), {bias(DataType::HALF), relu()}, true);
+    const auto calls = fused(threeByThree(true), {bias(DataType::HALF)}, true);
     ASSERT_TRUE(calls.has_value());
     EXPECT_EQ(calls->epilogueForm, EpilogueForm::NATIVE);
 }
@@ -252,7 +247,7 @@ TEST(TestConvEpilogueFormulation, GroupsTakeThePass)
     // hipBLASLt has no per-batch bias stride: grouped bias goes through the pass.
     ConvGemmShape shape = oneByOneNhwc();
     shape.groups = 2;
-    const auto calls = fused(shape, {bias(DataType::HALF), relu()}, true);
+    const auto calls = fused(shape, {bias(DataType::HALF)}, true);
     ASSERT_TRUE(calls.has_value());
     EXPECT_EQ(calls->epilogueForm, EpilogueForm::EXTRA_PASS);
 }

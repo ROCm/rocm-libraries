@@ -24,10 +24,11 @@ inline constexpr int NATIVE_EPILOGUE_CLAMP = 131072;
 inline constexpr int NATIVE_EPILOGUE_CLAMP_BIAS = 131076;
 
 /**
- * @brief The hipBLASLt epilogue that computes @p problem's pointwise chain, or nullopt when it
- *        has none: an optional per-channel bias of fp32 or y's type, then at most one of relu
- *        (lower clip 0, no slope), clamp (both clips, no slope), the tanh GELU, swish with beta
- *        1, or (without a bias) sigmoid.
+ * @brief The hipBLASLt epilogue that computes @p problem's pointwise chain exactly as the
+ *        chain's own rules do, special values included, or nullopt when it has none: a
+ *        per-channel bias of fp32 or y's type alone, or sigmoid alone. hipBLASLt's relu, clamp,
+ *        swish and GELU epilogues differ from the chain on NaN or infinite inputs, so those
+ *        patterns run in a pass.
  */
 std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem);
 

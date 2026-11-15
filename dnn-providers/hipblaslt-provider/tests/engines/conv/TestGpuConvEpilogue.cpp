@@ -597,14 +597,19 @@ TEST_P(TestGpuConvEpilogueSpecials, ClipBoundaries)
     runFused<float>(convCase, chain.second, backend, Specials::CLIP_BOUNDARY);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    ,
-    TestGpuConvEpilogueSpecials,
-    ::testing::Combine(
-        ::testing::Values(epilogueCases()[0], epilogueCases()[3], epilogueCases()[4]),
-        ::testing::Values(menuChains()[0], menuChains()[1], menuChains()[3], menuChains()[4]),
-        ::testing::ValuesIn(enabledBackends())),
-    caseName);
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvEpilogueSpecials,
+                         ::testing::Combine(::testing::Values(epilogueCases()[0],
+                                                              epilogueCases()[3],
+                                                              epilogueCases()[4]),
+                                            ::testing::Values(menuChains()[0],
+                                                              menuChains()[1],
+                                                              menuChains()[3],
+                                                              menuChains()[4],
+                                                              menuChains()[9],
+                                                              menuChains()[14]),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         caseName);
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 /// hipBLASLt's solutions for one conv GEMM shape (y^T = w x^T, channels as rows), with and
@@ -636,7 +641,7 @@ int solutionCount(const HipdnnEnginePluginHandle& handle,
     const HipblasltMatrixLayout d(type, static_cast<uint64_t>(m), static_cast<uint64_t>(n), m);
     hipblasLtMatmulPreference_t preference = nullptr;
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&preference));
-    std::array<hipblasLtMatmulHeuristicResult_t, 128> results{};
+    std::vector<hipblasLtMatmulHeuristicResult_t> results(1024);
     int returned = 0;
     const auto status = hipblasLtMatmulAlgoGetHeuristic(handle.hipblasltHandle,
                                                         desc.matmulDesc(),
@@ -666,17 +671,17 @@ TEST(TestGpuConvEpilogueHipblaslt, SolutionCountWithNativeEpilogue)
     for(const auto type : {HIP_R_16F, HIP_R_16BF, HIP_R_32F})
     {
         const int plain = solutionCount(*handle, type, 256, 32 * 56 * 56, 64, std::nullopt);
+        const int withBias
+            = solutionCount(*handle, type, 256, 32 * 56 * 56, 64, HIPBLASLT_EPILOGUE_BIAS);
         const int biasRelu
             = solutionCount(*handle, type, 256, 32 * 56 * 56, 64, HIPBLASLT_EPILOGUE_RELU_BIAS);
-        const int biasGelu
-            = solutionCount(*handle, type, 256, 32 * 56 * 56, 64, HIPBLASLT_EPILOGUE_GELU_BIAS);
         std::cout << "hipBLASLt solutions, type " << static_cast<int>(type) << ": plain " << plain
-                  << ", bias+relu " << biasRelu << ", bias+gelu " << biasGelu << "\n";
+                  << ", bias " << withBias << ", bias+relu " << biasRelu << "\n";
         ::testing::Test::RecordProperty("solutions_" + std::to_string(static_cast<int>(type)),
-                                        std::to_string(plain) + "/" + std::to_string(biasRelu) + "/"
-                                            + std::to_string(biasGelu));
+                                        std::to_string(plain) + "/" + std::to_string(withBias) + "/"
+                                            + std::to_string(biasRelu));
         EXPECT_GT(plain, 0);
-        EXPECT_GT(biasRelu, 0) << "no hipBLASLt solution with a bias + relu epilogue";
+        EXPECT_GT(withBias, 0) << "no hipBLASLt solution with a bias epilogue";
     }
 }
 #endif

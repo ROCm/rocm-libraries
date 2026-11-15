@@ -55,10 +55,11 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
 
 | Form | Where the chain runs | When |
 |---|---|---|
-| Native | hipBLASLt's own GEMM epilogue: `BIAS`, `RELU`, `CLAMP`, `GELU` (tanh), `SWISH` (beta 1), `SIGMOID`, and their `_BIAS` forms | hipBLASLt engines; every GEMM writing y has y's channels as its rows (channels-last 1x1, point output and im2col), one group, no accumulation; an optional fp32 or y-typed bias, then at most one of those activations |
+| Native | hipBLASLt's own GEMM epilogue: `BIAS` or `SIGMOID` | hipBLASLt engines; every GEMM writing y has y's channels as its rows (channels-last 1x1, point output and im2col), one group, no accumulation; a per-channel bias (fp32 or y's type) alone, or sigmoid alone |
 | Fused pass | The plan's existing last pass: the GEMMs write the channels-last staging in fp32, and the copy into y becomes the epilogue's cast | y is staged channels-last (the `STAGED_CHANNELS_LAST` layout candidate for a channels-first y) |
 | Extra pass | Every GEMM (and any fp32 partials sum) writes an fp32 copy of y in the workspace; one cast applies the chain and rounds into y | everything else: rocBLAS, channels-first rows, groups, patterns hipBLASLt has no epilogue for |
 
+- hipBLASLt's relu, clamp, swish and GELU epilogues are not used: its relu and clamp turn NaN into a bound, and its swish and tanh GELU give NaN for -inf where the chain gives 0. Those patterns run in a pass, so every engine gives the same result for the same graph, special values included.
 - The epilogue cast (`StridedCastEpilogue*`) runs the chain as a run-time menu of steps; the channel is the coordinate of the cast's channel axis, read off the index walk the cast already does.
 - Operand pointers and pass-by-value scalars are bound at execution, so a plan serves the graph's values whatever they are.
 - The extra pass adds y's size in fp32 to the workspace, above the repack cap, plus one launch reading 4 bytes and writing y per element.
