@@ -1,0 +1,70 @@
+{
+  "//": "UHD training branch only: new ids for conv UEDs whose descriptors changed under an unchanged id, so the UHD pipeline keeps their measurements apart from earlier datasets. Applied at configure time to a production source root that is a copy (the pipeline's), to the UED and to every descriptor naming it (the KDPs' engine field). Brad's branch keeps the original ids.",
+  "overrides": {
+    "5462bae3-cc0b-5f05-a9e7-1275528cfe71": {
+      "id": "f467fd26-7745-4e49-afd4-a9c76bc6fd6d",
+      "engine": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
+      "file": "conv/depthwise_valu_wrw/conv_depthwise_valu_wrw.ued.json"
+    },
+    "d8d82507-3ff6-5011-9f2d-a0557da9f59b": {
+      "id": "48d46311-1bfc-437c-9a17-1b44efe2a893",
+      "engine": "hipkernel:CONV_DIRECT_BWD",
+      "file": "conv/direct/conv_direct_bwd.ued.json"
+    },
+    "0801742c-fd7e-5df0-a5d9-724b19c01390": {
+      "id": "7f9533f9-a6d5-413f-94d0-3203863378f3",
+      "engine": "hipkernel:CONV_DIRECT_FWD",
+      "file": "conv/direct/conv_direct_fwd.ued.json"
+    },
+    "035d3bf1-2851-5015-9c75-f2613b7d4071": {
+      "id": "0efac01b-213e-418c-abd5-2450f0c41951",
+      "engine": "hipkernel:CONV_GROUP_BWD",
+      "file": "conv/group/conv_group_bwd.ued.json"
+    },
+    "ebca2f9e-0b82-5b43-9c8d-3720c7563f5e": {
+      "id": "6230506d-33b3-464a-93b3-3bd78e65fe65",
+      "engine": "hipkernel:CONV_GROUP_FWD",
+      "file": "conv/group/conv_group_fwd.ued.json"
+    },
+    "2c407c72-862e-5af2-8c7d-b69c37a08699": {
+      "id": "d0cda484-c4ef-4cd3-ac35-16038b5db1b0",
+      "engine": "hipkernel:CONV_IGEMM_BWD",
+      "file": "conv/igemm/conv_igemm_bwd.ued.json"
+    },
+    "965f0e4d-9f29-5625-a68e-114f31cfe090": {
+      "id": "411c6fc7-b461-48f1-8425-e09e5bc5ec1c",
+      "engine": "hipkernel:CONV_IGEMM_FWD",
+      "file": "conv/igemm/conv_igemm_fwd.ued.json"
+    },
+    "c0ba21a8-0fe2-5d0b-9c09-fe129e540ebc": {
+      "id": "98e61948-46dc-4411-829d-14e333a3c113",
+      "engine": "hipkernel:CONV_IGEMM_NCHW_BWD",
+      "file": "conv/igemm_nchw/conv_igemm_nchw_bwd.ued.json"
+    },
+    "994e1c62-3036-5462-aca1-c67661aa84ab": {
+      "id": "e8981616-a801-40a7-90df-054b07013693",
+      "engine": "hipkernel:CONV_SMALLC_FWD",
+      "file": "conv/smallc/conv_smallc_fwd.ued.json"
+    },
+    "abbafa58-214d-59ae-a968-0bec9aa15c9c": {
+      "id": "1436f30b-0f3b-45cd-b1bc-1de1208949de",
+      "engine": "hipkernel:CONV_STEM_BWD",
+      "file": "conv/stem_bwd/conv_stem_bwd.ued.json"
+    },
+    "023e5412-cf94-56a7-ad94-5636ccc1042f": {
+      "id": "9e4edf00-189e-48d3-803d-85da907aa1d8",
+      "engine": "hipkernel:CONV_WINOGRAD_BWD",
+      "file": "conv/winograd/conv_winograd_bwd.ued.json"
+    },
+    "e7d8dd17-9293-5868-8a9d-2caf8d618bf0": {
+      "id": "dd2e7291-82c5-40dc-af42-b590de2b4924",
+      "engine": "hipkernel:CONV_WINOGRAD_FWD",
+      "file": "conv/winograd/conv_winograd_fwd.ued.json"
+    },
+    "3b9b941c-fca6-5028-b311-9b0cca026c2b": {
+      "id": "04895874-7a98-498d-b651-edf5d4c15e88",
+      "engine": "hipkernel:CONV_WRW",
+      "file": "conv/wrw/conv_wrw.ued.json"
+    }
+  }
+}

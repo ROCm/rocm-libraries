@@ -620,6 +620,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The conv families whose catalogs were not pulled join HKP_PRODUCT_EXCLUDED_BUNDLES,
     # so this must run before hkp_add_packaging() wires the product root.
     if(HIPKERNELPROVIDER_ENABLE_CONV)
+        include("${CMAKE_CURRENT_SOURCE_DIR}/conv/UhdUedIdOverrides.cmake")
         include("${CMAKE_CURRENT_SOURCE_DIR}/conv/ConvContent.cmake")
     endif()
 
