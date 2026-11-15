@@ -162,22 +162,25 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
     }
 
     // A group the catalog ships no kernel for would pass every check below and then empty the
-    // catalog at kernel_match, with no line to say why.
+    // catalog at kernel_match, with no line to say why. Every group reaching here is one the
+    // kernel runs (the check above), so this is catalog coverage, not a kernel limit.
     if(!servesGqaRatio(arch, *ratio))
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{arch.engineName, "gqa"})
                                << "a GQA group of " << *ratio
-                               << " is not supported; the catalog ships groups of "
+                               << " has no kernel in this catalog yet; the kernel runs groups "
+                                  "up to "
+                               << arch.traits->maxQueriesPerKv << ", the catalog ships "
                                << describeShippedGqaRatios(arch));
         return std::nullopt;
     }
 
-    // head_size 64 or 128: the catalog is built for those two.
+    // head_size 64 or 128: the catalog contains only those two.
     if(problem.headSize != 64 && problem.headSize != 128)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{arch.engineName, "head_size"})
                                << "head size " << problem.headSize
-                               << " is not supported; this catalog is built for 64 and 128");
+                               << ": this catalog contains kernels for 64 and 128 only");
         return std::nullopt;
     }
 
