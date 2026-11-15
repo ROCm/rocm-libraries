@@ -366,6 +366,9 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
                 T* o = out
                        + ((static_cast<long long>(img) * a.co + g * cgo + k) * a.ho + th * 2) * a.wo
                        + tw * 2;
+#if defined(CONV_EPI) && CONV_EPI
+                const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                 for(int i = 0; i < 2; ++i)
                 {
@@ -378,11 +381,8 @@ __device__ void k5WmmaConv(const K5Args& a CONV_EPI_FN_PARAM)
                         const int ow = tw * 2 + jj;
 #if defined(CONV_EPI) && CONV_EPI
                         if(ow < a.wo)
-                            o[i * a.wo + jj]
-                                = K5Elem<T>::store(epi(k5Live(a, oh, ow) ? y[i * 2 + jj] : 0.0f,
-                                                       epi.chan(g * cgo + k, true),
-                                                       0,
-                                                       true));
+                            o[i * a.wo + jj] = K5Elem<T>::store(
+                                epi(k5Live(a, oh, ow) ? y[i * 2 + jj] : 0.0f, chan, 0, true));
 #else
                         if(ow < a.wo)
                             o[i * a.wo + jj]

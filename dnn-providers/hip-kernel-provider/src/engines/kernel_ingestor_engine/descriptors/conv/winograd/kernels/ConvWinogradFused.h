@@ -844,6 +844,9 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                     K5Wino<M>::at(tmp + i * A, 1, y + i * M, 1);
                 const int tw = t % a.tw, r1 = t / a.tw;
                 const int th = r1 % a.th, img = r1 / a.th;
+#if defined(CONV_EPI) && CONV_EPI
+                const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                 for(int i = 0; i < M; ++i)
                 {
@@ -855,8 +858,13 @@ __device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
                     {
                         const int ow = tw * M + j;
                         if(ow < a.wo)
-                            k5StoreOut<T, K5_NCHW>(
-                                a, out, img, g * cgo + k, oh, ow, y[i * M + j] CONV_EPI_FN_ARG);
+                            k5StoreOut<T, K5_NCHW>(a,
+                                                   out,
+                                                   img,
+                                                   g * cgo + k,
+                                                   oh,
+                                                   ow,
+                                                   y[i * M + j] CONV_EPI_FN_ARG K5_EPI_CHAN_ARG);
                     }
                 }
             }

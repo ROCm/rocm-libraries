@@ -890,6 +890,9 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
                             z[i][1] = m1 - m2 - m3;
                         }
                         T* o = out + base + static_cast<long long>(k) * eChan;
+#if defined(CONV_EPI) && CONV_EPI
+                        const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                         for(int r = 0; r < 2; ++r)
                         {
@@ -900,7 +903,6 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
                             const float y1 = r == 0 ? z[0][1] + z[1][1] + z[2][1]
                                                     : z[1][1] - z[2][1] - z[3][1];
 #if defined(CONV_EPI) && CONV_EPI
-                            const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
                             const T v0 = K5Elem<T>::store(
                                 epi(((mask >> (2 * r)) & 1u) ? y0 : 0.0f, chan, 0, true));
                             const T v1 = K5Elem<T>::store(
@@ -1020,6 +1022,9 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
                                       + eTh * 3)
                                          * a.wo
                                    + eTw * 3;
+#if defined(CONV_EPI) && CONV_EPI
+                            const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                             for(int r = 0; r < 3; ++r)
 #pragma unroll
@@ -1029,10 +1034,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
 #if defined(CONV_EPI) && CONV_EPI
                                     if(oh < a.ho && ow < a.wo)
                                         o[r * a.wo + s] = K5Elem<T>::store(
-                                            epi(k5Live(a, oh, ow) ? y[r][s] : 0.0f,
-                                                epi.chan(g * cgo + k, true),
-                                                0,
-                                                true));
+                                            epi(k5Live(a, oh, ow) ? y[r][s] : 0.0f, chan, 0, true));
 #else
                                     if(oh < a.ho && ow < a.wo)
                                         o[r * a.wo + s]
@@ -1211,13 +1213,15 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
                     }
                     T* o = ESTEP ? eOut + static_cast<long long>(kc) * eChan
                                  : out + eBase + static_cast<long long>(k) * eChan;
+#if defined(CONV_EPI) && CONV_EPI
+                    const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                     for(int r = 0; r < 2; ++r)
                     {
                         if(!((eMask >> (4 + r)) & 1u))
                             continue; // row past the output
 #if defined(CONV_EPI) && CONV_EPI
-                        const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
                         const T v0 = K5Elem<T>::store(
                             epi(((eMask >> (2 * r)) & 1u) ? y[r][0] : 0.0f, chan, 0, true));
                         const T v1 = K5Elem<T>::store(

@@ -315,6 +315,9 @@ __device__ __attribute__((always_inline)) void k5SregBody(const K5Args& a,
             const int th = r1 % a.th, img = r1 / a.th;
             T* o = out + ((static_cast<long long>(img) * a.co + g * cgo + k) * a.ho + th * 2) * a.wo
                    + tw * 2;
+#if defined(CONV_EPI) && CONV_EPI
+            const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
             for(int r = 0; r < 2; ++r)
             {
@@ -329,8 +332,8 @@ __device__ __attribute__((always_inline)) void k5SregBody(const K5Args& a,
                         = r == 0 ? z[0][s] + z[1][s] + z[2][s] : z[1][s] - z[2][s] - z[3][s];
 #if defined(CONV_EPI) && CONV_EPI
                     if(ow < a.wo)
-                        o[r * a.wo + s] = K5Elem<T>::store(epi(
-                            k5Live(a, oh, ow) ? y : 0.0f, epi.chan(g * cgo + k, true), 0, true));
+                        o[r * a.wo + s]
+                            = K5Elem<T>::store(epi(k5Live(a, oh, ow) ? y : 0.0f, chan, 0, true));
 #else
                     if(ow < a.wo)
                         o[r * a.wo + s] = K5Elem<T>::store(k5Live(a, oh, ow) ? y : 0.0f);
