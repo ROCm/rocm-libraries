@@ -594,6 +594,27 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsEqualHalfABType
         << recorder.getRecordedLogsAsString();
 }
 
+// The cuDNN v8 mixed-precision fused shape: half operands, bias and final output, with
+// float virtual intermediates (matmul and bias outputs). No type check may decline it.
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsCudnnV8MixedPrecisionFusedGraph)
+{
+    using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto builder = createFusedGraph(true, PointwiseMode::RELU_FWD);
+    for(const char* name : {"A", "B", "bias", "C"})
+    {
+        builder = withTensorDataType(builder, name, DataType::HALF);
+    }
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    (void)_planBuilder.isApplicable(_handle, graph);
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "data type"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "tensor must be"))
+        << recorder.getRecordedLogsAsString();
+}
+
 // The activation output is the tensor the plan writes; its type must be one hipBLASLt serves.
 struct ActivOutputTypeCase
 {
