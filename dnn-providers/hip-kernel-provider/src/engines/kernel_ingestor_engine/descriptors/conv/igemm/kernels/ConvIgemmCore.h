@@ -1823,9 +1823,8 @@ template <class T,
           int PACK = 0,
           int CF = 0,
           int SWZ = 0,
-          int DMA = 0,
-          class Epi = ConvEpiNone>
-__device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
+          int DMA = 0>
+__device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -2296,9 +2295,12 @@ __device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
         walk.template init<DIR>(a, gather);
 #pragma unroll
         for(int j = 0; j < FN; ++j)
+#if defined(CONV_EPI) && CONV_EPI
         {
+            // The fused epilogue: this column's per-channel operands, once.
             const int en = n0 + wn * WTN + j * DIM + lane % DIM;
-            const typename Epi::Chan chan = epi.chan(g * ncols + en, en < ncols);
+            const ConvEpiGen::Chan chan = epi.chan(g * ncols + en, en < ncols);
+#endif
 #pragma unroll
             for(int rc = 0; rc < WTM / CFR; ++rc)
             {
@@ -2306,17 +2308,12 @@ __device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
                 for(int i = 0; i < CFR / DIM; ++i)
 #pragma unroll
                     for(int e = 0; e < Atom::ACC; ++e)
-                    {
-                        const long long em
-                            = m0 + wm * WTM + rc * CFR + i * DIM + Atom::dRow(lane, e);
-                        const bool live = em < gather.rows && en < ncols;
-                        long long eo = 0;
-                        if constexpr(Epi::NEEDS_OFFSET)
-                            eo = live ? k1OutIndexCf<DIR>(a, gather, g, phase, em, en) : 0;
                         strip[(lane % DIM) * OLDC + i * DIM + Atom::dRow(lane, e)]
-                            = K1Elem<T>::store(
-                                epi(acc[rc * (CFR / DIM) + i][j][e], chan, eo, live));
-                    }
+#if defined(CONV_EPI) && CONV_EPI
+                            = K1Elem<T>::store(epi(acc[rc * (CFR / DIM) + i][j][e], chan, 0, true));
+#else
+                            = K1Elem<T>::store(acc[rc * (CFR / DIM) + i][j][e]);
+#endif
                 __builtin_amdgcn_wave_barrier();
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -2357,7 +2354,9 @@ __device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
             }
+#if defined(CONV_EPI) && CONV_EPI
         }
+#endif
         return;
     }
 
@@ -2366,13 +2365,16 @@ __device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
     k1LdsBarrier();
     T* strip = lds + wave * DIM * OLD;
     constexpr int ROW_VECS = WTN / VEC;
-    typename Epi::Chan chans[FN];
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: each column's per-channel operands, once.
+    ConvEpiGen::Chan chans[FN];
 #pragma unroll
     for(int j = 0; j < FN; ++j)
     {
         const int en = n0 + wn * WTN + j * DIM + lane % DIM;
         chans[j] = epi.chan(g * ncols + en, en < ncols);
     }
+#endif
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
@@ -2380,16 +2382,12 @@ __device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
         for(int j = 0; j < FN; ++j)
 #pragma unroll
             for(int e = 0; e < Atom::ACC; ++e)
-            {
-                const long long em = m0 + wm * WTM + i * DIM + Atom::dRow(lane, e);
-                const int en = n0 + wn * WTN + j * DIM + lane % DIM;
-                const bool live = em < gather.rows && en < ncols;
-                long long eo = 0;
-                if constexpr(Epi::NEEDS_OFFSET)
-                    eo = live ? k1OutIndex<DIR>(a, gather, g, phase, em, en) : 0;
                 strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
-                    = K1Elem<T>::store(epi(acc[i][j][e], chans[j], eo, live));
-            }
+#if defined(CONV_EPI) && CONV_EPI
+                    = K1Elem<T>::store(epi(acc[i][j][e], chans[j], 0, true));
+#else
+                    = K1Elem<T>::store(acc[i][j][e]);
+#endif
         __builtin_amdgcn_wave_barrier();
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -2429,17 +2427,8 @@ __device__ void k1ConvMma(const K1Args& a, const Epi& epi = Epi{})
 #define CONV_IGEMM_FMA_DOT2 1
 #endif
 
-template <class T,
-          int BM,
-          int BN,
-          int BK,
-          int THREADS,
-          int VEC,
-          int DIR,
-          int WD = 0,
-          int PACK = 0,
-          class Epi = ConvEpiNone>
-__device__ void k1ConvFma(const K1Args& a, const Epi& epi = Epi{})
+template <class T, int BM, int BN, int BK, int THREADS, int VEC, int DIR, int WD = 0, int PACK = 0>
+__device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int TX = 16, TY = THREADS / TX; // threads along n, along m
     constexpr int TM = BM / TY, TN = BN / TX;
@@ -2566,13 +2555,16 @@ __device__ void k1ConvFma(const K1Args& a, const Epi& epi = Epi{})
 
     T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
     float* partial = a.partial + static_cast<long long>(split) * a.outElems;
-    typename Epi::Chan chans[TN];
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: each column's per-channel operands, once.
+    ConvEpiGen::Chan chans[TN];
 #pragma unroll
     for(int j = 0; j < TN; ++j)
     {
         const int nn = n0 + ((j / 4) * TX + tx) * 4 + j % 4;
         chans[j] = epi.chan(g * ncols + nn, nn < ncols);
     }
+#endif
 #pragma unroll
     for(int i = 0; i < TM; ++i)
     {
@@ -2587,7 +2579,11 @@ __device__ void k1ConvFma(const K1Args& a, const Epi& epi = Epi{})
                 if(splits > 1)
                     partial[o] = acc[i][j];
                 else
+#if defined(CONV_EPI) && CONV_EPI
                     out[o] = K1Elem<T>::store(epi(acc[i][j], chans[j], o, true));
+#else
+                    out[o] = K1Elem<T>::store(acc[i][j]);
+#endif
             }
         }
     }
