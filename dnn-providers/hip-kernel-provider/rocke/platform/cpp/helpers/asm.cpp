@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * helper_helpers.asm.c -- C99 port of rocke.helpers.asm
- * (mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster).
+ * (mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster, lds_barrier_keep_vmem).
  *
  * Byte-faithful translation: the builder-call sequence is reproduced in the
  * exact same order as the Python so the emitted IR (and SSA value numbering)
@@ -19,6 +19,10 @@
  */
 
 #include "rocke/helper_helpers.asm.h"
+
+#include <string.h>
+
+#include "rocke/arch_target.h"
 
 #include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live           */
 #include "rocke/strbuf.h" /* growable template assembly          */
@@ -299,4 +303,51 @@ int rocke_mfma_f8f6f4_agpr_cluster(rocke_ir_builder_t* b,
         rc = 0;
     }
     return rc;
+}
+
+/* Python `_LDS_BARRIER_ASM`: the inline-asm body per target family. */
+static const char* lds_barrier_asm(const char* target_family)
+{
+    if(target_family == NULL)
+    {
+        return NULL;
+    }
+    if(strcmp(target_family, "gfx12_rdna") == 0)
+    {
+        return "s_wait_dscnt 0x0\ns_barrier_signal -1\ns_barrier_wait -1";
+    }
+    return NULL;
+}
+
+void rocke_lds_barrier_keep_vmem(rocke_ir_builder_t* b, const char* arch)
+{
+    const rocke_arch_target_t* target;
+    const char* body;
+    rocke_inline_asm_opts_t opts;
+
+    if(!rocke_i_live(b))
+    {
+        return;
+    }
+    target = arch != NULL ? rocke_arch_target_from_gfx(arch) : NULL;
+    if(target == NULL)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "lds_barrier_keep_vmem: unknown arch %s",
+                        arch != NULL ? arch : "(null)");
+        return;
+    }
+    body = lds_barrier_asm(target->target_family);
+    if(body == NULL)
+    {
+        rocke_b_sync_lds_only(b);
+        return;
+    }
+    /* Python: b.inline_asm(body, "~{memory}", convergent=True) */
+    opts.sideeffect = true;
+    opts.sideeffect_set = true;
+    opts.convergent = true;
+    opts.convergent_set = true;
+    rocke_b_inline_asm(b, body, "~{memory}", NULL, 0, NULL, 0, &opts);
 }
