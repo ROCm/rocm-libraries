@@ -71,6 +71,8 @@ constexpr int64_t BLOCK = 256;
 constexpr int64_t CHANNELS_PER_BLOCK = 64;
 /// Blocks per compute unit the partial kernel's partitions aim for.
 constexpr int64_t BLOCKS_PER_CU = 4;
+/// Partitions of fewer rows than this may be traded for whole rounds of blocks (partitionFor).
+constexpr int64_t SHORT_PARTITION_ROWS = 32;
 
 int64_t divUp(int64_t value, int64_t divisor)
 {
@@ -318,7 +320,12 @@ void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& co
     const auto partitionsOf = [&](int64_t p) { return divUp(a.rows, divUp(a.rows, p)); };
     int64_t partitions = partitionsOf(most);
     int64_t bestCost = std::numeric_limits<int64_t>::max();
-    for(int64_t p = most; p >= std::max({int64_t{1}, most / 2, most - 64}); --p)
+    // Only short partitions (small batches) move: at 32 rows a partition and more the target
+    // stays (n128 ConvNeXt and EfficientNet ran 3-5% slower on fewer, longer partitions).
+    const int64_t least = divUp(a.rows, most) < SHORT_PARTITION_ROWS
+                              ? std::max({int64_t{1}, most / 2, most - 64})
+                              : most;
+    for(int64_t p = most; p >= least; --p)
     {
         const int64_t actual = partitionsOf(p);
         const int64_t cost = divUp(actual * blocksPerPartition, units) * divUp(a.rows, actual);
