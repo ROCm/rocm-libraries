@@ -455,6 +455,10 @@ class SignatureDefault(Signature):
             if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] :
                 signature.addArg(       "activationType", SVK.SIG_VALUE,               "u32")
 
+        # Second D output (OutputPeerD): one address, loaded with the other post-loop arguments.
+        if kernel["ProblemType"]["OutputPeerD"]:
+            signature.addArg("PeerD", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
+
         # TODO- combine one workspace
         if (kernel["ProblemType"]["OutputAmaxD"]):
             signature.addArg(    "AddrAmaxOut", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")

@@ -2049,6 +2049,10 @@ namespace TensileLite
             }
         }
 
+        // After the activation arguments and before the amax ones, as in the kernel signature.
+        if(problemType.outputPeerD)
+            args.template append<const void*>("AddressPeerD", inputs.peerD);
+
         if(problemType.outputAmaxD)
         {
             args.template append<const void*>("AddrAmaxOut", inputs.amaxD);

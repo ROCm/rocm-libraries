@@ -11336,6 +11336,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
 
+    # The peer D address follows the activation arguments, as in the kernel signature.
+    if kernel["ProblemType"]["OutputPeerD"]:
+      storeSgprLoad += self.states.rpga
+      self.states.numStoreSgprNames.append("AddressPeerD")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)
+
     self.states.numStoreSgprToLoad = storeSgprLoad
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
@@ -12715,6 +12721,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         _reg(actArgType, "ActivationArg", idx)
       if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
         _reg("uint32", "ActivationTypeArg")
+
+    # -- Peer D output ---------------------------------------------------------
+    if kernel["ProblemType"]["OutputPeerD"]:
+      _reg("address", "AddressPeerD")
 
     # -- Amax output -----------------------------------------------------------
     if kernel["ProblemType"]["OutputAmaxD"]:

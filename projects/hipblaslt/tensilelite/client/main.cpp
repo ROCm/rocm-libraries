@@ -432,6 +432,7 @@ namespace TensileLite
                 ("rotating-buffer-size",      po::value<int32_t>()->default_value(0), "Size of rotating buffer in the unit of MB.")
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
+                ("output-peerD",              po::value<bool>()->default_value(false), "Every device also stores D into the other device's D (needs --split-devices 2): both end up with the complete D.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
                 ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
                 ("metadata-layout",           po::value<int32_t>()->default_value(0), "Sparse Metadata Layout")
@@ -950,6 +951,10 @@ int main(int argc, const char* argv[])
                                                      ". Narrow them with --world-filter."));
         }
         // --split-devices N: every problem runs as N slices on N consecutive devices.
+        if(args["output-peerD"].as<bool>()
+           && (args["split-devices"].as<int>() != 2
+               || args["split-placement"].as<std::string>()[3] != 'R'))
+            throw std::runtime_error("--output-peerD needs --split-devices 2 and a replicated D");
         {
             auto const placement = args["split-placement"].as<std::string>();
             if(placement.size() != 4
@@ -1221,6 +1226,7 @@ int main(int argc, const char* argv[])
                 static_cast<void>(hipGetLastError());
             }
         fullOutputs.resize(devices.size());
+        std::vector<size_t> sliceBytes(devices.size(), 0);
         for(size_t d = 0; d < devices.size(); d++)
         {
             const int    id     = devices[d]->deviceId;
@@ -1241,6 +1247,7 @@ int main(int argc, const char* argv[])
             }
             const size_t offsetBytes = static_cast<size_t>(
                 problemFactory.sliceOffsetInD(problem, d) * full->d().elementBytes());
+            sliceBytes[d] = offsetBytes;
             for(size_t r = firstSlot; r < endSlot; r++)
             {
                 auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
@@ -1270,6 +1277,18 @@ int main(int argc, const char* argv[])
                 }
             }
         }
+        // OutputPeerD: device d also stores its slice into the other device's full D, at the
+        // same offset, so each ends up with the complete D.
+        if(full->outputPeerD())
+            for(size_t d = 0; d < devices.size(); d++)
+            {
+                const size_t peer = (d + 1) % devices.size();
+                for(size_t r = firstSlot; r < endSlot; r++)
+                {
+                    auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
+                    inputs.peerD = static_cast<char*>(fullOutputs[peer][r].get()) + sliceBytes[d];
+                }
+            }
     };
 
     bool  useUserArgs = args["use-user-args"].as<bool>();

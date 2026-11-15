@@ -2447,6 +2447,25 @@ class Solution(collections.abc.Mapping):
     dcpAutoSkip=None
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
+    if state["ProblemType"].get("OutputPeerD", False):
+      # The second D store is added to the plain buffer-store epilogue only (addStore, tc 'D').
+      peerDLimits = (
+        (state.get("BufferStore", 1) == 1, "BufferStore=1"),
+        (state.get("GlobalSplitU", 1) == 1, "GlobalSplitU=1"),
+        (not isPersistent(state), "no StreamK / persistent kernel"),
+        (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
+        (not state.get("UseSubtileImpl", False), "UseSubtileImpl=False"),
+        (state.get("WorkGroup", [0, 0, 1])[2] == 1, "no LocalSplitU"),
+        (not state["ProblemType"].get("SupportUserArgs", False), "SupportUserArgs=False"),
+        (not state["ProblemType"].get("GroupedGemm", False), "no GroupedGemm"),
+        (not state["ProblemType"].get("OutputAmaxD", False), "no OutputAmaxD"),
+        (not state["ProblemType"].get("UseE", False), "no UseE"),
+        (not state["ProblemType"].get("FusedGemmA2A", False), "no FusedGemmA2A"),
+      )
+      unmet = [what for ok, what in peerDLimits if not ok]
+      if unmet:
+        reject(state, printRejectionReason, "OutputPeerD needs: " + ", ".join(unmet))
+        return
     if isPersistent(state) and state["ProblemType"].get("OutputAmaxD", False):
       reject(state, printRejectionReason,
              "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
