@@ -53,8 +53,8 @@ public:
     /// reduced-precision-reduction engine (ConvReducedPrecision.hpp). @p splitReduction makes
     /// the split reduction (convGemmCalls) the default plan rather than only a benchmarking
     /// candidate, and @p layout does the same for a layout candidate; tests use them to check
-    /// those plans. @p narrowPartials: see NarrowPartials. @p maxBackwardWeightsRepackBytes bounds
-    /// a backward weights plan's repack workspace instead, when set.
+    /// those plans. @p narrowPartials: see NarrowPartials. @p maxBackwardWeightsRepackBytes, when
+    /// set, bounds a further backward weights benchmarking candidate's repack workspace.
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
                                  bool tf32 = false,
@@ -78,11 +78,14 @@ public:
                    HipdnnEnginePluginExecutionContext& executionContext) const override;
 
 private:
-    /// The plan calls for @p opGraph in whichever direction it is, or nullopt.
+    /// The plan calls for @p opGraph in whichever direction it is, or nullopt. @p
+    /// wideBackwardWeights: a backward weights plan under maxBackwardWeightsRepackBytes, nullopt
+    /// for another direction or without that cap.
     std::optional<ConvGemmPlanCalls>
         callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                  ColumnLayout layout = ColumnLayout::FOLLOW_Y,
-                 bool splitReduction = false) const;
+                 bool splitReduction = false,
+                 bool wideBackwardWeights = false) const;
 
     /// The backend's plan for @p calls' GEMMs, wrapped in their repack steps when there are any.
     std::unique_ptr<IPlan> planFor(const HipdnnEnginePluginHandle& handle,

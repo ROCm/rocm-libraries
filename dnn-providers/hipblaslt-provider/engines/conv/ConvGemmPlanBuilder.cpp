@@ -81,7 +81,8 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
 std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     ColumnLayout layout,
-    bool splitReduction) const
+    bool splitReduction,
+    bool wideBackwardWeights) const
 {
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
@@ -90,6 +91,12 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         if(!problem.has_value())
         {
             continue;
+        }
+        if(wideBackwardWeights
+           && (direction != ConvDirection::BACKWARD_WEIGHTS
+               || !_maxBackwardWeightsRepackBytes.has_value() || _reducedPrecisionReduction))
+        {
+            return std::nullopt;
         }
         if(_reducedPrecisionReduction)
         {
@@ -101,14 +108,13 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
             }
             return reducedPrecisionGemmCalls(*problem);
         }
-        auto calls
-            = convGemmCalls(*problem,
-                            direction == ConvDirection::BACKWARD_WEIGHTS
-                                ? _maxBackwardWeightsRepackBytes.value_or(_maxRepackWorkspaceBytes)
+        auto calls = convGemmCalls(
+            *problem,
+            wideBackwardWeights ? _maxBackwardWeightsRepackBytes.value_or(_maxRepackWorkspaceBytes)
                                 : _maxRepackWorkspaceBytes,
-                            layout,
-                            splitReduction,
-                            narrowPartials(_narrowPartials));
+            layout,
+            splitReduction,
+            narrowPartials(_narrowPartials));
         if(calls.has_value() && _tf32)
         {
             // A TF32 engine serves only convolutions with an fp32 GEMM; for the rest it would
@@ -220,6 +226,16 @@ void ConvGemmPlanBuilder::buildPlan(
         {
             seen.push_back(signature(*split));
             candidates.push_back({"split_reduction", planFor(handle, std::move(*split))});
+        }
+        // Backward weights under the larger cap: fewer image slices, each an accumulating GEMM
+        // (and, for 16-bit w, an fp32 accumulator), against the default cap's smaller column
+        // matrices. Neither wins everywhere: the same 7x7 fp32 stem runs 4x faster wide on gfx906
+        // and 12% slower on MI325X.
+        auto wide = callsFor(opGraph, ColumnLayout::FOLLOW_Y, false, true);
+        if(wide.has_value() && std::find(seen.begin(), seen.end(), signature(*wide)) == seen.end())
+        {
+            seen.push_back(signature(*wide));
+            candidates.push_back({"wide_backward_weights", planFor(handle, std::move(*wide))});
         }
         if(candidates.size() > 1)
         {

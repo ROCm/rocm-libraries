@@ -19,12 +19,13 @@ namespace hipblaslt_plugin
 /// and a 256 MiB cap 0.96x (MI325X).
 inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 30;
 
-/// The backward weights engines' cap: slicing backward weights costs an accumulating GEMM per
-/// slice (and an fp32 accumulator for 16-bit w), where forward and backward data only gain from
-/// smaller column matrices. Measured with dnnb autotune on the 2K conv-kpi subset (the backward
-/// weights graphs whose explicit-GEMM plan is within 2x of the best engine): gfx906 explicit GEMM
-/// 1.19x geomean at 2 GiB, best engine 3.05x on a 7x7 fp32 stem and 1.17x on a 1x1 fp16 layer,
-/// no best-engine loss; MI325X 1.02x, best unchanged. 4 GiB adds nothing over 2 GiB.
+/// The cap of the explicit-GEMM engines' further backward weights benchmarking candidate
+/// (ConvGemmPlanBuilder): slicing backward weights costs an accumulating GEMM per slice (and an
+/// fp32 accumulator for 16-bit w). Measured with dnnb autotune on the 2K conv-kpi subset backward
+/// weights graphs whose explicit-GEMM plan is within 2x of the best engine, every plan at 2 GiB:
+/// gfx906 explicit GEMM 1.19x geomean, best engine 3.05x on a 7x7 fp32 stem and 1.17x on a 1x1
+/// fp16 layer; MI325X explicit GEMM 1.02x, but that stem 0.88x (it was best). 4 GiB measured no
+/// better than 2 GiB.
 inline constexpr size_t MAX_BACKWARD_WEIGHTS_REPACK_WORKSPACE_BYTES = static_cast<size_t>(2) << 30;
 
 /// How a plan that has a choice lays out what it computes through: an IM2COL plan's column
