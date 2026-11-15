@@ -163,6 +163,17 @@ __device__ void k4ConvMma(const K4Args& a CONV_EPI_FN_PARAM)
     const int tid = threadIdx.x;
     const int lane = tid % WAVE, wave = tid / WAVE;
     const int row = lane % 16;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue's per-channel operands, loaded before the (short) reduction so their
+    // latency hides behind it. Item it's channel block (wave + 4 it) % CB repeats every NCB
+    // items, so a lane loads NCB columns' operands.
+    static_assert(CB % 4 == 0 || 4 % CB == 0, "items' channel blocks repeat");
+    constexpr int NCB = CB % 4 == 0 ? CB / 4 : 1;
+    ConvEpiGen::Chan chans[NCB];
+#pragma unroll
+    for(int it = 0; it < NCB; ++it)
+        chans[it] = epi.chan(cbt * CH + (wave + 4 * it) % CB * 16 + lane % 16, true);
+#endif
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     constexpr int VP = CH / VEC; // vectors a staged pixel takes
 
@@ -287,8 +298,7 @@ __device__ void k4ConvMma(const K4Args& a CONV_EPI_FN_PARAM)
             if(oh0 + r >= a.ho)
                 continue;
 #if defined(CONV_EPI) && CONV_EPI
-            // The fused epilogue: this column's per-channel operands, once.
-            const ConvEpiGen::Chan chan = epi.chan(cbt * CH + cbi * 16 + lane % 16, true);
+            const ConvEpiGen::Chan& chan = chans[it % NCB];
 #endif
 #pragma unroll
             for(int p = 0; p < WP; ++p)
@@ -326,8 +336,7 @@ __device__ void k4ConvMma(const K4Args& a CONV_EPI_FN_PARAM)
             continue;
         const int cb = cbt * CB + cbi;
 #if defined(CONV_EPI) && CONV_EPI
-        // The fused epilogue: this column's per-channel operands, once.
-        const ConvEpiGen::Chan chan = epi.chan(cb * 16 + lane % 16, true);
+        const ConvEpiGen::Chan& chan = chans[it % NCB];
 #endif
 #pragma unroll
         for(int p = 0; p < WP; ++p)
@@ -562,6 +571,14 @@ __device__ void k4ConvFma(const K4Args& a CONV_EPI_FN_PARAM)
     const int r = pg / CGS, col0 = (pg % CGS) * PX;
     const int ch0 = q * OC; // the thread's first output channel in the tile
     const int n0 = ch0 % 16; // ... in its 16-channel block
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: the thread's OC channels' per-channel operands, loaded before the
+    // (short) reduction so their latency hides behind it.
+    ConvEpiGen::Chan chans[OC];
+#pragma unroll
+    for(int o = 0; o < OC; ++o)
+        chans[o] = epi.chan(cbt * CH + ch0 + o, true);
+#endif
     // The chunk's block of the expanded filter: w16[block][tap][n][k].
     const T* wq = w + static_cast<long long>(cbt * CB + ch0 / 16) * TAPS * 256;
 
@@ -617,13 +634,6 @@ __device__ void k4ConvFma(const K4Args& a CONV_EPI_FN_PARAM)
     }
 
     const int oh = oh0 + r;
-#if defined(CONV_EPI) && CONV_EPI
-    // The fused epilogue: the thread's OC channels' per-channel operands, once.
-    ConvEpiGen::Chan chans[OC];
-#pragma unroll
-    for(int o = 0; o < OC; ++o)
-        chans[o] = epi.chan(cbt * CH + ch0 + o, true);
-#endif
     if constexpr(CF != 0)
     {
         constexpr int OP = TW + 1;
@@ -776,6 +786,18 @@ __device__ void k4ConvMmaWide(const K4Args& a CONV_EPI_FN_PARAM)
     const int row = lane % 16;
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     const int c0 = g * a.cg; // the group's first channel
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: each output block's per-channel operands, loaded before the
+    // reduction so their latency hides behind it. The group's padded channels past cg are
+    // staged but never written out, and load nothing.
+    ConvEpiGen::Chan chans[NBO];
+#pragma unroll
+    for(int ob = 0; ob < NBO; ++ob)
+    {
+        const int gch = (ot * NBO + ob) * 16 + lane % 16;
+        chans[ob] = epi.chan(c0 + gch, gch < a.cg);
+    }
+#endif
 
     // A wave's register tile: RPW rows x WP 16-column fragments x NBO output blocks; each A
     // fragment serves NBO multiplies, each B fragment RPW x WP.
@@ -898,17 +920,6 @@ __device__ void k4ConvMmaWide(const K4Args& a CONV_EPI_FN_PARAM)
         constexpr int OP = TW + 1;
         TO* tile = reinterpret_cast<TO*>(halo);
         __syncthreads();
-#if defined(CONV_EPI) && CONV_EPI
-        // The fused epilogue: each output block's per-channel operands, once. The group's padded
-        // channels past cg are staged but never written out, and load nothing.
-        ConvEpiGen::Chan chans[NBO];
-#pragma unroll
-        for(int ob = 0; ob < NBO; ++ob)
-        {
-            const int gch = (ot * NBO + ob) * 16 + lane % 16;
-            chans[ob] = epi.chan(c0 + gch, gch < a.cg);
-        }
-#endif
 #pragma unroll
         for(int rr = 0; rr < RPW; ++rr)
 #pragma unroll
@@ -949,8 +960,7 @@ __device__ void k4ConvMmaWide(const K4Args& a CONV_EPI_FN_PARAM)
             if(oh >= a.ho || gch >= a.cg)
                 continue;
 #if defined(CONV_EPI) && CONV_EPI
-            // The fused epilogue: this column's per-channel operands, once.
-            const ConvEpiGen::Chan chan = epi.chan(c0 + gch, true);
+            const ConvEpiGen::Chan& chan = chans[ob];
 #endif
 #pragma unroll
             for(int p = 0; p < WP; ++p)
