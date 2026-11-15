@@ -943,6 +943,11 @@ def _tf32_split_k_spec(idx: int):
 #       decode starts at the slice's k_lo and ends at its k_hi
 #   91: uniform_k_decode on a pointwise (1x1, stride 1, pad 0) problem: rejected
 #       by both engines
+#   92: regt_prefetch 1, fp16
+#   93: regt_prefetch 1 over uniform_k_decode, bf16
+#   94: regt_prefetch 1, grouped, fp16 (the masked group-based descriptors)
+#   95: regt_prefetch 1 on gfx1250 (config 41 unsplit): rejected by both
+#       engines (gfx12 RDNA only)
 _RDNA4 = dict(N=2, Hi=14, Wi=14, C=64, K=128, fy=3, fx=3, pH=1, pW=1)
 _RDNA4_GROUPED = dict(N=1, Hi=10, Wi=10, C=128, K=128, fy=3, fx=3, pH=1, pW=1, groups=2)
 _BF16 = ConvDataSpec("bf16", "bf16", "bf16")
@@ -956,11 +961,14 @@ _RDNA4_CFGS = {
         dict(uniform_k_decode=True),
         "gfx1201",
     ),
+    92: (_RDNA4, dict(regt_prefetch=1), "gfx1201"),
+    93: (_RDNA4, dict(regt_prefetch=1, uniform_k_decode=True, data=_BF16), "gfx1201"),
+    94: (_RDNA4_GROUPED, dict(regt_prefetch=1), "gfx1201"),
 }
 
 
 # Configs built on the gfx1250 split-K binary rather than on the RDNA4 base.
-_RDNA4_SPLIT_CFGS = (90,)
+_RDNA4_SPLIT_CFGS = (90, 95)
 
 
 def _rdna4_spec(idx: int):
@@ -980,6 +988,9 @@ def _rdna4_spec(idx: int):
     if idx == 90:
         spec, arch = _split_k_spec(41)
         return replace(spec, uniform_k_decode=True), arch
+    if idx == 95:
+        spec, arch = _split_k_spec(41)
+        return replace(spec, split_k=1, regt_prefetch=1), arch
     prob, kw, arch = _RDNA4_CFGS[idx]
     return ImplicitGemmConvSpec(problem=_cp(**prob), **dict(base, **kw)), arch
 

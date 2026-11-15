@@ -146,6 +146,10 @@ class KernelIdentity:
     # wgrad only (WgradConvSpec.prefetch_global_regs): the register-prefetch K loop.
     # Left out of the hash while False, like prefetch_addr.
     prefetch_global_regs: bool = False
+    # fwd ImplicitGemmConvSpec.regt_prefetch (the wgrad register-prefetch
+    # loops share it): the register-prefetch K loop mode (0 off, 1 single
+    # LDS buffer). Left out of the hash at 0.
+    regt_prefetch: int = 0
     # dgrad / fwd (DgradConvSpec / ImplicitGemmConvSpec.uniform_k_decode): the
     # per-tile reduction decode K loop. Left out of the hash while False, like
     # prefetch_addr.
@@ -256,6 +260,8 @@ class KernelIdentity:
             del fields["prefetch_addr"]
         if not fields["prefetch_global_regs"]:
             del fields["prefetch_global_regs"]
+        if not fields["regt_prefetch"]:
+            del fields["regt_prefetch"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["patch"]:

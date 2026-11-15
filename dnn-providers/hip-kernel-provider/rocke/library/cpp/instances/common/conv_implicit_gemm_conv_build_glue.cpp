@@ -1054,6 +1054,11 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
         /* uniform per-tile reduction decode (+ the plain loop) */
         rocke_conv_emit_kloop_uniform_decode(&ctx);
     }
+    else if(spec->regt_prefetch)
+    {
+        /* register-prefetch K loop */
+        rocke_conv_emit_kloop_regt_prefetch(&ctx);
+    }
     else if(!ctx.async_dma)
     {
         rocke_conv_emit_kloop_simple(&ctx);

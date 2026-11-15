@@ -285,6 +285,14 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
     rocke_conv_set_final_accs(ctx, for_op.op->results, for_op.op->num_results);
 }
 
+/* Python _rpf_lds_barrier(b, arch): the in-loop barrier of the
+ * register-prefetch K loops (regt_prefetch); orders the LDS accesses of the
+ * tile before and after it. */
+void rocke_conv_rpf_lds_barrier(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_b_sync_lds_only(ctx->b);
+}
+
 /* ===================================================================== *
  * rocke_conv_emit_kloop_uniform_decode   (Python ``elif spec.uniform_k_decode:``)
  *
@@ -423,6 +431,38 @@ static void ukd_next(rocke_conv_build_ctx_t* ctx,
     out[2] = ny;
 }
 
+/* Python _uk_fetch(k_tile, ct, xd, yd): the tile's uniform terms, then its
+ * A/B loads masked by k_tile < uk_end (_uk_masked). */
+static void ukd_fetch(rocke_conv_build_ctx_t* ctx,
+                      rocke_conv_ukd_env_t* env,
+                      rocke_value_t* k_tile,
+                      rocke_value_t* uk_end,
+                      rocke_value_t* ct,
+                      rocke_value_t* xd,
+                      rocke_value_t* yd,
+                      rocke_ctl_staged_t* a_staged,
+                      rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ukd_tile(env, ct, xd, yd);
+    ctx->k_off_capture = k_tile;
+    env->tile_ok = rocke_b_cmp_lt(b, k_tile, uk_end);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->a_sync_loader, ctx->tid, ukd_a_descriptor, env, ctx->a_rsrc, NULL, a_staged);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->b_sync_loader, ctx->tid, ukd_b_descriptor, env, ctx->b_rsrc, NULL, b_staged);
+}
+
+/* Python _uk_store(staged) / _store(staged): the prefetched tile into LDS. */
+static void ukd_store(rocke_conv_build_ctx_t* ctx,
+                      const rocke_ctl_staged_t* a_staged,
+                      const rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, a_staged);
+    rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, b_staged);
+}
+
 void rocke_conv_emit_kloop_uniform_decode(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -466,43 +506,108 @@ void rocke_conv_emit_kloop_uniform_decode(rocke_conv_build_ctx_t* ctx)
     uk_iter[n_acc + 2].name = "uk_y";
     uk_iter[n_acc + 2].init = uk_y0;
 
-    rocke_for_t for_uk = rocke_b_scf_for_iter(b,
-                                              uk_lo,
-                                              uk_end,
-                                              ctx->c_block_k,
-                                              uk_iter,
-                                              n_acc + 3,
-                                              "k_uk",
-                                              /*unroll=*/false,
-                                              /*elide_trailing_barrier=*/true);
-    rocke_b_region_enter(b, for_uk.body);
+    rocke_for_t for_uk;
+    if(ctx->spec->regt_prefetch)
     {
-        rocke_value_t* ct = for_uk.iter_vars[n_acc + 0];
-        rocke_value_t* xd = for_uk.iter_vars[n_acc + 1];
-        rocke_value_t* yd = for_uk.iter_vars[n_acc + 2];
-        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
-        rocke_value_t* yields[ROCKE_CONV_MAX_ACCS + 3];
+        /* Mode-1 register prefetch over the uniform decode (regt_prefetch):
+         * the next tile's (c0, x, y) is advanced and its loads issued before
+         * the MMAs; a tile at or past uk_end is masked to the out-of-range
+         * sentinel and reads zero. */
         rocke_ctl_staged_t a_staged;
         rocke_ctl_staged_t b_staged;
-
-        ukd_tile(&env, ct, xd, yd);
-        ctx->k_off_capture = for_uk.iv;
-        rocke_coalesced_tile_loader_load_global(
-            b, &ctx->a_sync_loader, ctx->tid, ukd_a_descriptor, &env, ctx->a_rsrc, NULL, &a_staged);
-        rocke_coalesced_tile_loader_load_global(
-            b, &ctx->b_sync_loader, ctx->tid, ukd_b_descriptor, &env, ctx->b_rsrc, NULL, &b_staged);
-        rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_staged);
-        rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_staged);
+        ukd_fetch(ctx, &env, uk_lo, uk_end, uk_c0, uk_x0, uk_y0, &a_staged, &b_staged);
+        ukd_store(ctx, &a_staged, &b_staged);
         rocke_b_sync(b);
-        rocke_conv_emit_mfma_phase(
-            ctx, ctx->A_smem, ctx->B_smem, for_uk.iter_vars, n_acc, new_accs);
-        rocke_b_sync(b);
-        for(i = 0; i < n_acc; ++i)
-            yields[i] = new_accs[i];
-        ukd_next(ctx, c1, ct, xd, yd, &yields[n_acc]);
-        rocke_b_scf_yield(b, yields, n_acc + 3);
+        for_uk = rocke_b_scf_for_iter(b,
+                                      uk_lo,
+                                      uk_end,
+                                      ctx->c_block_k,
+                                      uk_iter,
+                                      n_acc + 3,
+                                      "k_uk",
+                                      /*unroll=*/false,
+                                      /*elide_trailing_barrier=*/false);
+        rocke_b_region_enter(b, for_uk.body);
+        {
+            rocke_value_t* nxt[3];
+            rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+            rocke_value_t* yields[ROCKE_CONV_MAX_ACCS + 3];
+            ukd_next(ctx,
+                     c1,
+                     for_uk.iter_vars[n_acc + 0],
+                     for_uk.iter_vars[n_acc + 1],
+                     for_uk.iter_vars[n_acc + 2],
+                     nxt);
+            rocke_value_t* k_next = rocke_b_add(b, for_uk.iv, ctx->c_block_k);
+            ukd_fetch(ctx, &env, k_next, uk_end, nxt[0], nxt[1], nxt[2], &a_staged, &b_staged);
+            rocke_b_sched_barrier(b, 0);
+            ctx->k_off_capture = for_uk.iv;
+            rocke_conv_emit_mfma_phase(
+                ctx, ctx->A_smem, ctx->B_smem, for_uk.iter_vars, n_acc, new_accs);
+            rocke_conv_rpf_lds_barrier(ctx);
+            ukd_store(ctx, &a_staged, &b_staged);
+            rocke_conv_rpf_lds_barrier(ctx);
+            for(i = 0; i < n_acc; ++i)
+                yields[i] = new_accs[i];
+            yields[n_acc + 0] = nxt[0];
+            yields[n_acc + 1] = nxt[1];
+            yields[n_acc + 2] = nxt[2];
+            rocke_b_scf_yield(b, yields, n_acc + 3);
+        }
+        rocke_b_region_leave(b);
     }
-    rocke_b_region_leave(b);
+    else
+    {
+        for_uk = rocke_b_scf_for_iter(b,
+                                      uk_lo,
+                                      uk_end,
+                                      ctx->c_block_k,
+                                      uk_iter,
+                                      n_acc + 3,
+                                      "k_uk",
+                                      /*unroll=*/false,
+                                      /*elide_trailing_barrier=*/true);
+        rocke_b_region_enter(b, for_uk.body);
+        {
+            rocke_value_t* ct = for_uk.iter_vars[n_acc + 0];
+            rocke_value_t* xd = for_uk.iter_vars[n_acc + 1];
+            rocke_value_t* yd = for_uk.iter_vars[n_acc + 2];
+            rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+            rocke_value_t* yields[ROCKE_CONV_MAX_ACCS + 3];
+            rocke_ctl_staged_t a_staged;
+            rocke_ctl_staged_t b_staged;
+
+            ukd_tile(&env, ct, xd, yd);
+            ctx->k_off_capture = for_uk.iv;
+            rocke_coalesced_tile_loader_load_global(b,
+                                                    &ctx->a_sync_loader,
+                                                    ctx->tid,
+                                                    ukd_a_descriptor,
+                                                    &env,
+                                                    ctx->a_rsrc,
+                                                    NULL,
+                                                    &a_staged);
+            rocke_coalesced_tile_loader_load_global(b,
+                                                    &ctx->b_sync_loader,
+                                                    ctx->tid,
+                                                    ukd_b_descriptor,
+                                                    &env,
+                                                    ctx->b_rsrc,
+                                                    NULL,
+                                                    &b_staged);
+            rocke_coalesced_tile_loader_store_lds(b, &ctx->a_sync_loader, ctx->A_smem, &a_staged);
+            rocke_coalesced_tile_loader_store_lds(b, &ctx->b_sync_loader, ctx->B_smem, &b_staged);
+            rocke_b_sync(b);
+            rocke_conv_emit_mfma_phase(
+                ctx, ctx->A_smem, ctx->B_smem, for_uk.iter_vars, n_acc, new_accs);
+            rocke_b_sync(b);
+            for(i = 0; i < n_acc; ++i)
+                yields[i] = new_accs[i];
+            ukd_next(ctx, c1, ct, xd, yd, &yields[n_acc]);
+            rocke_b_scf_yield(b, yields, n_acc + 3);
+        }
+        rocke_b_region_leave(b);
+    }
 
     /* Loop 2: the plain loop over [uk_end, uk_hi), its accs named fb_<acc>. */
     rocke_iter_arg_t fb_iter[ROCKE_CONV_MAX_ACCS];
@@ -534,6 +639,134 @@ void rocke_conv_emit_kloop_uniform_decode(rocke_conv_build_ctx_t* ctx)
     }
     rocke_b_region_leave(b);
     rocke_conv_set_final_accs(ctx, for_fb.op->results, for_fb.op->num_results);
+}
+
+/* ===================================================================== *
+ * rocke_conv_emit_kloop_regt_prefetch   (Python ``elif spec.regt_prefetch:``)
+ *
+ * Register-prefetch K loop (ImplicitGemmConvSpec.regt_prefetch = 1):
+ *   prologue: tile k_lo -> buf; barrier
+ *   per tile: regs <- tile k+1; MMA(buf); barrier; buf <- regs; barrier
+ * Every tile at or past the reduction (split-K slice) end is masked to the
+ * out-of-range sentinel, so it reads zero and adds nothing.
+ * ===================================================================== */
+
+/* Python _masked(fn, tile_ok): the plain descriptor ANDed with tile_ok (or
+ * tile_ok alone where the descriptor has no predicate). */
+typedef struct rocke_conv_rpf_env
+{
+    rocke_conv_build_ctx_t* ctx;
+    rocke_loads_descriptor_fn fn;
+    rocke_value_t* tile_ok;
+} rocke_conv_rpf_env_t;
+
+static rocke_value_t* rpf_masked_descriptor(rocke_ir_builder_t* b,
+                                            rocke_value_t* row,
+                                            rocke_value_t* col,
+                                            rocke_value_t** out_valid,
+                                            void* user)
+{
+    rocke_conv_rpf_env_t* env = (rocke_conv_rpf_env_t*)user;
+    rocke_value_t* ok = NULL;
+    rocke_value_t* off = env->fn(b, row, col, &ok, env->ctx);
+    *out_valid = (ok == NULL) ? env->tile_ok : rocke_b_land(b, ok, env->tile_ok);
+    return off;
+}
+
+/* Python _fetch(k_tile). */
+static void rpf_fetch(rocke_conv_build_ctx_t* ctx,
+                      rocke_conv_rpf_env_t* a_env,
+                      rocke_conv_rpf_env_t* b_env,
+                      rocke_value_t* k_tile,
+                      rocke_value_t* k_upper,
+                      rocke_ctl_staged_t* a_staged,
+                      rocke_ctl_staged_t* b_staged)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k_tile;
+    rocke_value_t* tile_ok = rocke_b_cmp_lt(b, k_tile, k_upper);
+    a_env->tile_ok = tile_ok;
+    b_env->tile_ok = tile_ok;
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->a_sync_loader,
+                                            ctx->tid,
+                                            rpf_masked_descriptor,
+                                            a_env,
+                                            ctx->a_rsrc,
+                                            NULL,
+                                            a_staged);
+    rocke_coalesced_tile_loader_load_global(b,
+                                            &ctx->b_sync_loader,
+                                            ctx->tid,
+                                            rpf_masked_descriptor,
+                                            b_env,
+                                            ctx->b_rsrc,
+                                            NULL,
+                                            b_staged);
+}
+
+void rocke_conv_emit_kloop_regt_prefetch(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int n_acc = ctx->num_accs;
+    int i;
+
+    if(ctx->ov != NULL && ctx->ov->a_load_override != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "regt_prefetch does not support an a_load_override");
+        return;
+    }
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* k_upper = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
+
+    rocke_conv_rpf_env_t a_env;
+    rocke_conv_rpf_env_t b_env;
+    a_env.ctx = ctx;
+    a_env.fn = rocke_conv_a_descriptor;
+    a_env.tile_ok = NULL;
+    b_env.ctx = ctx;
+    b_env.fn = (ctx->b_descriptor_fn != NULL) ? ctx->b_descriptor_fn : rocke_conv_b_descriptor;
+    b_env.tile_ok = NULL;
+
+    rocke_ctl_staged_t a_staged;
+    rocke_ctl_staged_t b_staged;
+    rpf_fetch(ctx, &a_env, &b_env, k_lo, k_upper, &a_staged, &b_staged);
+    ukd_store(ctx, &a_staged, &b_staged);
+    rocke_b_sync(b);
+
+    rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
+    for(i = 0; i < n_acc; ++i)
+    {
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    rocke_for_t for_op = rocke_b_scf_for_iter(b,
+                                              k_lo,
+                                              k_upper,
+                                              ctx->c_block_k,
+                                              iter_args,
+                                              n_acc,
+                                              "k_rpf",
+                                              /*unroll=*/false,
+                                              /*elide_trailing_barrier=*/false);
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_value_t* k_next = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rpf_fetch(ctx, &a_env, &b_env, k_next, k_upper, &a_staged, &b_staged);
+        /* Pin the prefetch ahead of the MMAs: the machine scheduler otherwise
+         * sinks the loads to the end of the WMMA block. */
+        rocke_b_sched_barrier(b, 0);
+        ctx->k_off_capture = for_op.iv;
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, for_op.iter_vars, n_acc, new_accs);
+        rocke_conv_rpf_lds_barrier(ctx);
+        ukd_store(ctx, &a_staged, &b_staged);
+        rocke_conv_rpf_lds_barrier(ctx);
+        rocke_b_scf_yield(b, new_accs, n_acc);
+    }
+    rocke_b_region_leave(b);
+    rocke_conv_set_final_accs(ctx, for_op.op->results, for_op.op->num_results);
 }
 
 /* ===================================================================== *

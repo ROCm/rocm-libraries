@@ -45,6 +45,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h" /* rocke_arch_target_from_gfx: target_family */
 #include "rocke/arena.h"
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_*, has_shape, op_for_shape */
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom */
@@ -322,6 +323,7 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
     s.uniform_k_decode = false;
+    s.regt_prefetch = 0;
 
     s.num_load_waves = 2; /* wavelet pipeline: default 2 load waves */
     return s;
@@ -392,6 +394,7 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *            "splitk": split_k > 1,
      *            f"skc{split_k_cluster}": split_k_cluster > 0,
      *            "ukd": uniform_k_decode,
+     *            f"rtp{regt_prefetch}": regt_prefetch > 0,
      *            "tf32": self.data.is_tf32}) */
     char short_buf[128];
     char t_buf[48];
@@ -401,9 +404,10 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char tag_buf[256];
     char gm_buf[24];
     char skc_buf[24];
+    char rtp_buf[24];
     const char* parts[6];
-    const char* flag_names[8];
-    int flag_on[8];
+    const char* flag_names[9];
+    int flag_on[9];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -460,13 +464,16 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
     flag_names[6] = "ukd";
     flag_on[6] = s->uniform_k_decode ? 1 : 0;
+    snprintf(rtp_buf, sizeof(rtp_buf), "rtp%d", s->regt_prefetch);
+    flag_names[7] = rtp_buf;
+    flag_on[7] = s->regt_prefetch > 0 ? 1 : 0;
     /* TF32 compute keeps fp32 storage, so nothing else in the name tells it
      * from an fp32 kernel with the same atom shape. Last, and only when set,
      * so every existing name is unchanged. */
-    flag_names[7] = "tf32";
-    flag_on[7] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
+    flag_names[8] = "tf32";
+    flag_on[8] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 8, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 9, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -1147,6 +1154,59 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     return true;
 }
 
+/* Python fwd_regt_prefetch_reason: why spec.regt_prefetch cannot be built
+ * (false + reason), or true. Built for the gfx12 RDNA targets only. */
+static bool rocke_conv_fwd_regt_prefetch_ok(const rocke_implicit_gemm_conv_spec_t* s,
+                                            const char* family,
+                                            const char* arch,
+                                            char* reason,
+                                            size_t reason_cap)
+{
+    if(!s->regt_prefetch)
+        return true;
+    if(s->regt_prefetch != 1)
+    {
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "regt_prefetch (fwd) must be 0 or 1 (got %d)", s->regt_prefetch);
+    }
+    if(family == NULL || strcmp(family, "wmma") != 0)
+    {
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "regt_prefetch (fwd) is enabled only on WMMA (wave32) targets");
+    }
+    if(arch != NULL)
+    {
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
+        const char* tf = (target != NULL) ? target->target_family : NULL;
+        if(target != NULL && (tf == NULL || strcmp(tf, "gfx12_rdna") != 0))
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets "
+                            "(got %s)",
+                            tf != NULL ? tf : "None");
+        }
+    }
+    if(s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "regt_prefetch is the 'mem' pipeline's K loop (got '%s')",
+                        s->pipeline != NULL ? s->pipeline : "None");
+    }
+    if(s->async_dma || s->unroll_k)
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "regt_prefetch is its own K loop; it does not combine with "
+                        "async_dma or unroll_k");
+    }
+    if(s->split_k_cluster)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "regt_prefetch does not combine with split_k_cluster");
+    }
+    return true;
+}
 /* ===================================================================== *
  *  is_valid_spec(spec, arch)   (Python lines 383-466)
  * ===================================================================== */
@@ -1434,6 +1494,10 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                     reason, reason_cap, "uniform_k_decode does not support %s", ukd_flags[i].label);
             }
         }
+    }
+    if(!rocke_conv_fwd_regt_prefetch_ok(s, family, arch, reason, reason_cap))
+    {
+        return false;
     }
 
     if(s->split_k != 1 || s->split_k_cluster)

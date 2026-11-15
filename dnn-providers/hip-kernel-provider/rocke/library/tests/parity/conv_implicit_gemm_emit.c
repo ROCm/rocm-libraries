@@ -860,6 +860,25 @@ static int make_cfg_rdna4(int idx, rocke_implicit_gemm_conv_spec_t* spec, const 
         spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 128, 1, 1, 1, 1, 0, 0, 1, 1);
         spec->uniform_k_decode = true;
         return 0;
+    case 92: /* regt_prefetch */
+        spec->regt_prefetch = 1;
+        return 0;
+    case 93:
+        spec->regt_prefetch = 1;
+        spec->uniform_k_decode = true;
+        rdna4_bf16(spec);
+        return 0;
+    case 94:
+        spec->problem = rocke_conv_problem_make(1, 10, 10, 128, 128, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 2;
+        spec->regt_prefetch = 1;
+        return 0;
+    case 95: /* gfx1250: rejected */
+        if(make_cfg_split_k(41, spec, arch) != 0)
+            return -1;
+        spec->split_k = 1;
+        spec->regt_prefetch = 1;
+        return 0;
     default:
         return -1;
     }

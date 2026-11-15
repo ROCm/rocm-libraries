@@ -224,6 +224,12 @@ typedef struct rocke_implicit_gemm_conv_spec
      * same binary. WMMA mem pipeline, 2-D. Default false: byte-identical.
      * Mirrors ImplicitGemmConvSpec.uniform_k_decode. */
     bool uniform_k_decode; /* default false */
+    /* Register-prefetch K loop (kernel-name flag rtp<N>; gfx12 RDNA, WMMA mem
+     * pipeline, sync loaders): 0 off, 1 = each K step issues the next tile's
+     * global loads into registers before the current tile's MMAs and stores
+     * them to the single LDS buffer after them. Default 0: byte-identical.
+     * Mirrors ImplicitGemmConvSpec.regt_prefetch. */
+    int regt_prefetch; /* default 0 */
 } rocke_implicit_gemm_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

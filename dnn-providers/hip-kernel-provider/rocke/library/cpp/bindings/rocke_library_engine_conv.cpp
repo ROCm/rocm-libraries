@@ -191,6 +191,8 @@ rocke_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
     s.split_k_cluster = dict_int(d, "split_k_cluster", s.split_k_cluster);
     /* The uniform-decode K loop. */
     s.uniform_k_decode = dict_bool(d, "uniform_k_decode", s.uniform_k_decode);
+    /* The register-prefetch K loop mode. */
+    s.regt_prefetch = dict_int(d, "regt_prefetch", s.regt_prefetch);
     /* The wavelet load-wave count sizes the launch block and the load-wave
      * loaders; dropped, a non-default count builds a different kernel. */
     s.num_load_waves = dict_int(d, "num_load_waves", s.num_load_waves);

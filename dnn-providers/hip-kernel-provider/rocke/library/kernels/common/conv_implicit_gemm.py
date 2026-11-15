@@ -366,6 +366,21 @@ class ImplicitGemmConvSpec:
     # loop, which the binary also carries, so it serves the same problems.
     # WMMA mem pipeline, 2-D, not group-merged. Default False: byte-identical.
     uniform_k_decode: bool = False
+    # Register-prefetch K loop ("rtp<mode>"; gfx12 RDNA, WMMA ``mem``
+    # pipeline, the sync coalesced loaders). Each K step issues the NEXT
+    # tile's global loads into registers (the loaders' load_global) and runs
+    # the current tile's MMAs out of LDS while they are in flight; only then
+    # is the prefetched tile stored (store_lds), so the global latency hides
+    # behind the MMAs instead of stalling every tile.
+    #   0 -- off (the plain load / barrier / MMA / barrier loop).
+    #   1 -- single LDS buffer: MMA, barrier, store, barrier.
+    # A tile at or past the reduction (or split-K slice) end -- the prefetch
+    # issued on the last step -- is masked to the buffer resource's
+    # out-of-range sentinel and reads zero. The identity field
+    # (``regt_prefetch``) is shared with the wgrad register-prefetch loops.
+    # Default 0: every existing config emits byte-identical IR and keeps its
+    # kernel name.
+    regt_prefetch: int = 0
 
     @property
     def block_size(self) -> int:
@@ -470,6 +485,7 @@ class ImplicitGemmConvSpec:
                 "splitk": self.split_k > 1,
                 f"skc{self.split_k_cluster}": self.split_k_cluster > 0,
                 "ukd": self.uniform_k_decode,
+                f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
                 # TF32 compute keeps fp32 storage, so nothing else in the name
                 # tells it from an fp32 kernel with the same atom shape. Last,
                 # and only when set, so every existing name is unchanged.
@@ -853,6 +869,45 @@ def is_valid_spec_for_problem(
     return True, "ok"
 
 
+def fwd_regt_prefetch_reason(
+    spec: ImplicitGemmConvSpec, family: str, target=None
+) -> Optional[str]:
+    """Why ``spec.regt_prefetch`` cannot be built, or ``None``.
+
+    The register-prefetch K loop replaces the plain ``mem`` loop of the sync
+    coalesced loaders. It is written for (and only built on) the gfx12 RDNA
+    targets, whose in-loop LDS-only barrier keeps the prefetch in flight;
+    ``target`` (an ``ArchTarget``) gates that when given.
+    """
+    if not spec.regt_prefetch:
+        return None
+    if spec.regt_prefetch != 1:
+        return f"regt_prefetch (fwd) must be 0 or 1 (got {spec.regt_prefetch})"
+    if family != "wmma":
+        return "regt_prefetch (fwd) is enabled only on WMMA (wave32) targets"
+    if target is not None and target.target_family != "gfx12_rdna":
+        return (
+            "regt_prefetch (fwd) is enabled only on the gfx12 RDNA targets "
+            f"(got {target.target_family})"
+        )
+    if spec.pipeline != "mem":
+        return f"regt_prefetch is the 'mem' pipeline's K loop (got {spec.pipeline!r})"
+    if spec.async_dma or spec.unroll_k:
+        return (
+            "regt_prefetch is its own K loop; it does not combine with "
+            "async_dma or unroll_k"
+        )
+    if spec.split_k_cluster:
+        return "regt_prefetch does not combine with split_k_cluster"
+    return None
+
+
+def _rpf_lds_barrier(b: IRBuilder, arch: str) -> None:
+    """The in-loop barrier of the register-prefetch K loops (regt_prefetch):
+    orders the LDS accesses of the tile before and after it."""
+    b.sync_lds_only()
+
+
 def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
     """LDS a forward spec allocates: ``(total, a_b_bytes, c_bytes, double)``.
 
@@ -1095,6 +1150,9 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         ):
             if flag:
                 return False, f"uniform_k_decode does not support {label}"
+    _why = fwd_regt_prefetch_reason(spec, family, target)
+    if _why is not None:
+        return False, _why
 
 
     if spec.split_k != 1 or spec.split_k_cluster:
@@ -2655,23 +2713,73 @@ def _build_implicit_gemm_conv_impl(
 
         n_acc = len(accs)
         uk_iter = list(accs) + [("uk_c", uk_c0), ("uk_x", uk_x0), ("uk_y", uk_y0)]
-        for_uk = b.scf_for_iter(_uk_lo, uk_end, c_block_k, uk_iter, iv_name="k_uk")
-        with for_uk as (k_uk, iter_vars):
-            ct, xd, yd = iter_vars[n_acc:]
-            uk_cap[0] = _uk_tile(ct, xd, yd)
-            k_off_capture[0] = k_uk
-            a_staged = a_sync_loader.load_global(
-                b, tid=tid, descriptor=_a_uk, rsrc=a_rsrc
-            )
-            b_staged = b_sync_loader.load_global(
-                b, tid=tid, descriptor=_b_uk, rsrc=b_rsrc
-            )
-            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
-            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
+        if spec.regt_prefetch:
+            # Mode-1 register prefetch over the uniform decode (regt_prefetch):
+            # the next tile's (c0, x, y) is advanced and its loads issued
+            # before the MMAs; a tile at or past uk_end is masked to the
+            # out-of-range sentinel and reads zero.
+            def _uk_masked(fn, tile_ok):
+                def desc(b_, row, col):
+                    off, ok = fn(b_, row, col)
+                    return off, b_.land(ok, tile_ok)
+
+                return desc
+
+            def _uk_fetch(k_tile: Value, ct: Value, xd: Value, yd: Value):
+                uk_cap[0] = _uk_tile(ct, xd, yd)
+                k_off_capture[0] = k_tile
+                tile_ok = b.cmp_lt(k_tile, uk_end)
+                return (
+                    a_sync_loader.load_global(
+                        b, tid=tid, descriptor=_uk_masked(_a_uk, tile_ok), rsrc=a_rsrc
+                    ),
+                    b_sync_loader.load_global(
+                        b, tid=tid, descriptor=_uk_masked(_b_uk, tile_ok), rsrc=b_rsrc
+                    ),
+                )
+
+            def _uk_store(staged) -> None:
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=staged[0])
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=staged[1])
+
+            _uk_store(_uk_fetch(_uk_lo, uk_c0, uk_x0, uk_y0))
             b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
-            b.sync()
-            b.scf_yield(*new_accs, *_uk_next(ct, xd, yd))
+            for_uk = b.scf_for_iter(
+                _uk_lo,
+                uk_end,
+                c_block_k,
+                uk_iter,
+                iv_name="k_uk",
+                elide_trailing_barrier=False,
+            )
+            with for_uk as (k_uk, iter_vars):
+                nxt = _uk_next(*iter_vars[n_acc:])
+                _st = _uk_fetch(b.add(k_uk, c_block_k), *nxt)
+                b.sched_barrier(0)
+                k_off_capture[0] = k_uk
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+                _rpf_lds_barrier(b, arch)
+                _uk_store(_st)
+                _rpf_lds_barrier(b, arch)
+                b.scf_yield(*new_accs, *nxt)
+        else:
+            for_uk = b.scf_for_iter(_uk_lo, uk_end, c_block_k, uk_iter, iv_name="k_uk")
+            with for_uk as (k_uk, iter_vars):
+                ct, xd, yd = iter_vars[n_acc:]
+                uk_cap[0] = _uk_tile(ct, xd, yd)
+                k_off_capture[0] = k_uk
+                a_staged = a_sync_loader.load_global(
+                    b, tid=tid, descriptor=_a_uk, rsrc=a_rsrc
+                )
+                b_staged = b_sync_loader.load_global(
+                    b, tid=tid, descriptor=_b_uk, rsrc=b_rsrc
+                )
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=b_staged)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:n_acc]))
+                b.sync()
+                b.scf_yield(*new_accs, *_uk_next(ct, xd, yd))
         uk_accs = list(for_uk.results)[:n_acc]
 
         fb_iter = [(f"fb_{name}", v) for (name, _), v in zip(accs, uk_accs)]
@@ -2683,6 +2791,66 @@ def _build_implicit_gemm_conv_impl(
             b.sync()
             b.scf_yield(*new_accs)
         final_accs = list(for_fb.results)
+    elif spec.regt_prefetch:
+        # Register-prefetch K loop (regt_prefetch): see the spec field.
+        #   prologue: tile k_lo -> buf; barrier
+        #   per tile: regs <- tile k+1; MMA(buf); barrier; buf <- regs; barrier
+        # The buffer is rewritten only after the barrier that follows the last
+        # MMA reading it. Every tile at or past _k_upper is masked to the
+        # out-of-range sentinel, so it reads zero and adds nothing.
+        if a_load_override is not None:
+            raise ValueError("regt_prefetch does not support an a_load_override")
+        _k_lo = split_k_lo if split else c0
+        _k_upper = split_k_hi if split else c_K_gemm
+
+        def _masked(fn, tile_ok):
+            def desc(b_, row, col):
+                off, ok = fn(b_, row, col)
+                return off, (tile_ok if ok is None else b_.land(ok, tile_ok))
+
+            return desc
+
+        def _fetch(k_tile):
+            k_off_capture[0] = k_tile
+            tile_ok = b.cmp_lt(k_tile, _k_upper)
+            return (
+                a_sync_loader.load_global(
+                    b, tid=tid, descriptor=_masked(a_descriptor, tile_ok), rsrc=a_rsrc
+                ),
+                b_sync_loader.load_global(
+                    b, tid=tid, descriptor=_masked(b_descriptor, tile_ok), rsrc=b_rsrc
+                ),
+            )
+
+        def _store(staged):
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=staged[0])
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=staged[1])
+
+        _store(_fetch(_k_lo))
+        b.sync()
+        for_op = b.scf_for_iter(
+            _k_lo,
+            _k_upper,
+            c_block_k,
+            accs,
+            iv_name="k_rpf",
+            elide_trailing_barrier=False,
+        )
+        with for_op as (k_rp, iter_accs):
+            _st = _fetch(b.add(k_rp, c_block_k))
+            # Pin the prefetch ahead of the MMAs: the machine scheduler
+            # otherwise sinks the loads (and their address math) to the
+            # end of the WMMA block, leaving nothing to overlap.
+            b.sched_barrier(0)
+            k_off_capture[0] = k_rp
+            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
+            # The in-loop barriers order LDS only (_rpf_lds_barrier); each
+            # ds_store already waits for its own load's data.
+            _rpf_lds_barrier(b, arch)
+            _store(_st)
+            _rpf_lds_barrier(b, arch)
+            b.scf_yield(*new_accs)
+        final_accs = list(for_op.results)
     elif not spec.async_dma:
         # mem / compv3 / compv4 / basic: all use scf_for_iter — only bound changes to runtime.
         for_op = (
