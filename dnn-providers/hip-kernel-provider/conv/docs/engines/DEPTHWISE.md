@@ -13,9 +13,9 @@ SPDX-License-Identifier:  MIT
 - **Large tensors:** VALU floors switch to a 64-bit index body past 2^31 bytes, and the rowtile core needs only rows below 2^31 bytes (a device test runs fp16 past 2 GiB). The other tile cores, the MFMA kernel and the Hankel configs need each image (or folded image group) under 2 GiB, with 64-bit image bases. ROWS uses 64-bit plane bases.
 - **Arches:** VALU, ROWS and VALU_WRW (VALU configs) run on every architecture, wave32 and wave64, gfx906 through gfx12. MFMA runs on gfx908 (fp16) and gfx90a, gfx94x and gfx950; its 16x16x32 atom is dense on gfx950 and the 2:4-sparse `smfmac` on gfx94x (NHWC only). Hankel runs on gfx908 (fp16) and gfx90a, gfx942 and gfx950. RDNA has no matrix-core depthwise.
 - **Wins when:** almost every depthwise layer on RDNA, gfx906-gfx942 (the class runs 8-16x faster than MIOpen search in usage-weighted time). On gfx950, the class is at 1.0-1.3x depending on direction and layout. Strided bwd-data (phase blocks), dilated and 1-D vocoder rows, and ConvTranspose1d are the largest margins.
-- **Loses when:** gfx950 NHWC 16-bit wrw (0.84-0.88x of MIOpen's hipconv kernel). Large filters (31x31) go to `CONV_FFT_*`. Depth multiplier above 1 in fwd/bwd goes to the grouped implicit GEMM, BLAS or naive.
+- **Loses when:** gfx950 NHWC 16-bit wrw on some shapes: ConvNeXt 7x7 bf16 is 1.03x behind MIOpen's hipconv kernel overall (same node), from 0.85x (ahead) on 7x7 images to 1.49x behind on n16 64x64. Large filters (31x31) go to `CONV_FFT_*`. Depth multiplier above 1 in fwd/bwd goes to the grouped implicit GEMM, BLAS or naive.
 - **Precision:** fp32 accumulation, one explicit `fmaf` per tap (never a separate multiply and add), and one rounding at the store. No numerical notes. Every config is bitwise deterministic, with no atomics; wrw folds its partials in a fixed order.
-- **Instances:** MFMA 640 (384 fwd, 256 bwd); ROWS 222; VALU 342 (162 fwd, 180 bwd); VALU_WRW 222 (66 VALU tile/floor, 132 Hankel, 24 vtile). Counted from the generators.
+- **Instances:** MFMA 640 (384 fwd, 256 bwd); ROWS 222; VALU 342 (162 fwd, 180 bwd); VALU_WRW 438 (66 VALU tile/floor, 348 Hankel, 24 vtile). Counted from the generators.
 - **vs MIOpen:** replaces `ConvHipConv` (hipconv's MFMA depthwise and Hankel wgrad), the CK grouped depthwise forward, MIOpen's direct depthwise solvers, `ConvHipDirectFwd`, the GEMM and Winograd fallbacks and `ConvDirectNaive` on depthwise graphs.
 
 ## Selection guide
@@ -84,6 +84,9 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - **Parity masks (inf/NaN).** The kernel never keeps a product whose dy operand is not one of the convolution's, so an inf or NaN in x never meets a (row, column) pairing that the convolution does not have.
   - Columns: where wo is not whole tiles, each step ANDs the lane's A with a block-uniform column mask.
   - Rows: an input row whose filter row has no dy row here (outside the image or partition, or at stride 2 the other parity) saves the accumulators before its products and restores them after. This costs a few moves a row, not a select per product.
+- **Two kernel bodies (`form`).** Both compute the same products in the same order, with the same masks; they differ in the work around the matrix instructions.
+  - `form` 0: any thread stages any unit of the step's rows, so each load selects its row offset and bounds per lane, and each lane derives its dy ring slot with a division per input row.
+  - `form` 1: each wave stages whole rows. A row loads through its own buffer descriptor (a row outside the image or partition has zero records, so its loads read zeros); a lane's column offsets and LDS offset are computed once per tile. The ring slot of a lane's B column is the wave-uniform slot of the row stepped back by the lane's tap (a compare-free wrap and a 24-bit multiply), and only the tap groups with a missing filter row save and restore their sums. The kernel is bound by instruction issue, not by the MFMAs: on gfx950, ConvNeXt c512 14x14 bf16 at one schedule issues 7.3 VALU and 6.1 SALU instructions per MFMA in `form` 0 and 5.9 and 5.6 in `form` 1, with 18% fewer wave cycles.
 
 ## Implementation design
 
@@ -115,16 +118,16 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - Catalog: per filter class a list of (waves, depth, fold, rows) tuples, small filters and large filters, x atoms 16 and 32 x 2 layouts x fp16/bf16. Stride-2 lists are forward only.
 
 ### VALU_WRW
-- Gates: `floor` takes everything. `tile` needs its filter. `hankel` must pass every field: arch and dtype; multiplier 1; NHWC 2-D; its filter; stride s on both axes (s = 2 only for filters at most 8 wide); unit dilation; C a multiple of 8; each image under 2 GiB; q in 4..64 (multiple of 4); g 1-4; nwg 1/2/4; bpc 1/2/4/8; LDS within 160 KiB on gfx950 or 64 KiB elsewhere; x and dy pointers declared 16-byte aligned. `vtile` needs NHWC 2-D, multiplier 1, its filter, unit width stride and dilation, `cv` in {1, 2, 4, 8} dividing C, `strip` in {2, 4, 8}, and pointers aligned to a `cv` vector. A device reporting no dispatch units is declined.
+- Gates: `floor` takes everything. `tile` needs its filter. `hankel` must pass every field: arch and dtype; multiplier 1; NHWC 2-D; its filter; stride s on both axes (s = 2 only for filters at most 8 wide); unit dilation; C a multiple of 8; each image under 2 GiB; q in 4..64 (multiple of 4); g 1-4; nwg 1/2/4; bpc 1/2/4/8; `form` 0 or 1; LDS within 160 KiB on gfx950 or 64 KiB elsewhere; x and dy pointers declared 16-byte aligned. Only `hankel` configs may set `form`. `vtile` needs NHWC 2-D, multiplier 1, its filter, unit width stride and dilation, `cv` in {1, 2, 4, 8} dividing C, `strip` in {2, 4, 8}, and pointers aligned to a `cv` vector. A device reporting no dispatch units is declined.
 - Hankel block: 4 waves x `nwg` groups of 16 channels. Each step stages `g` input rows and the dy rows entering the ring, with the next step's global loads in flight under the current step's MFMAs. LDS rows use an odd number of dword pairs as pitch, plus a skew every 8 rows, so the 16 channel rows of an operand read hit distinct banks. There is no swizzle.
-- Catalog: floor plus 6 tiles, plus 4 multiplier-2 configs, x 2 layouts x 3 dtypes (66). 11 Hankel schedules (q, g, nwg, bpc) x filters 3/5/7 x stride 1/2 x fp16/bf16 (132); the schedules are those that won on gfx950 ConvNeXt, EfficientNet and MobileNet shapes. 8 vtile shapes x 3 dtypes (24). Floors come first.
+- Catalog: floor plus 6 tiles, plus 4 multiplier-2 configs, x 2 layouts x 3 dtypes (66). Hankel: 11 schedules (q, g, nwg, bpc) in both forms plus 7 in `form` 1 alone (8-, 24- and 28-column tiles for 7-, 24- and 28-column images, and four blocks a unit at two rows a step), x filters 3/5/7 x stride 1/2 x fp16/bf16 (348); each schedule won on some gfx950 ConvNeXt, EfficientNet or MobileNet shape. 8 vtile shapes x 3 dtypes (24). Floors come first.
 
 ## Strengths and weaknesses
 - **Usage-weighted, depthwise class, all engines, against MIOpen search** (model corpus; the class is served almost entirely by these engines and FFT):
   - Full corpus, native layouts: gfx942 MI325X 16.0x, gfx1201 12.3x, gfx1100 17.9x, gfx950 1.31x.
   - 2K-shape subset: gfx90a 24.4x; usage-weighted MIOpen/ours about 13x on MI325X, 16x on gfx90a, 8x on gfx1201, 12x on gfx1100 and 8x on gfx906.
-- **gfx950:** on a dedicated depthwise set the class runs 1.28x overall: wrw about 1.13x, NCHW fp16 wrw about 1.67x, NHWC 16-bit wrw 0.84-0.88x. MFMA forward and backward data are about at parity with hipconv (1.02x). MFMA is the best engine on about 110 graphs.
-- **gfx942:** Hankel runs ConvNeXt c128 wrw in 0.187 ms against MIOpen's 17.3 ms.
+- **gfx950:** on a dedicated depthwise set the class runs 1.28x overall: wrw about 1.13x, NCHW fp16 wrw about 1.67x. NHWC 16-bit Hankel wrw: `form` 1 runs 1.11-1.47x faster than `form` 0 on the ConvNeXt 7x7 bf16 shapes (1.18x usage-weighted) and 1.09-1.15x on EfficientNet, MobileNet, MobileFaceNet and YOLO NHWC fp16 wrw (autotuned, same node), which puts ConvNeXt at 1.03x behind hipconv overall. MFMA forward and backward data are about at parity with hipconv (1.02x). MFMA is the best engine on about 110 graphs.
+- **gfx942:** Hankel runs ConvNeXt c128 wrw in 0.187 ms against MIOpen's 17.3 ms. `form` 1 measures 1.04-1.37x over `form` 0 on MI325X, 1.07-1.49x on gfx90a and 0.98-1.53x on gfx908 (kernel bench, ConvNeXt 7x7 and EfficientNet 3x3 shapes).
 - **VALU rowtile + `v_fma_mix`:** measured against the VALU cores without `rowtile` in a 60-cell, three-dtype bench (cold, L2 flushed; indicative):
   - gfx950: 1.16x over all cells, 1.35x on the 18 NHWC 16-bit cells.
   - gfx942: 1.15x and 1.33x.
@@ -171,7 +174,7 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - No code was copied from CK, rocKE or FlyDSL.
 
 ## Next steps and deferred ideas
-1. **gfx950 NHWC 16-bit wrw (0.84-0.88x).** The Hankel inner loop is VALU/SALU issue-bound. The candidate is operand staging beyond transpose-read staging, which is already measured. This is the only class where the family trails MIOpen.
+1. **gfx950 NHWC 16-bit wrw (ConvNeXt 1.03x behind hipconv; n16 64x64 1.49x).** The Hankel kernel is still issue-bound (about 6 VALU and 6 SALU instructions per MFMA). Measured and rejected: reading each lane's A window at its own 2-byte LDS offset (no byte align) runs 1.23x slower from unaligned-access stalls; a DPP form of the tap shift cannot fold into the byte align (VOP3, no DPP on gfx9) and adds instructions. Remaining candidates: the stride-2 parity lanes (every row saves and restores), the per-step barriers, and the fold launch on small shapes.
 2. **inf/NaN parity for VALU `tile`/`vtile` wrw and dy-side padding.** This is required for behaviour parity with cuDNN and PyTorch. Masks can cost several percent of kernel time, so measure the cost against the compiled-out build.
 3. **NCHW 7x7 forward on RDNA.** This is the largest depthwise excess in the full corpus (on the order of 60 ms over about 165 shapes on one RDNA GPU).
 4. **Host-computed magic numbers for the thread decode.** These measured +8-10% on gfx1201 NCHW floors. They need an argument-block change.
