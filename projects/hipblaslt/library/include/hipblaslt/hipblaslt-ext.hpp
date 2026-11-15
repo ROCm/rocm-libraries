@@ -40,6 +40,7 @@ namespace hipblaslt_ext
     class GemmInstance;
     class Gemm;
     class GroupedGemm;
+    class PartitionedGemm;
 
     using HipBufferDeleter = hipError_t (*)(void*);
     using HipBufferPtr     = std::unique_ptr<void, HipBufferDeleter>;
@@ -357,10 +358,6 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setScaleAlphaScalar(const void* scaleAlphaScalar);
         HIPBLASLT_EXPORT void setAux(const void* aux); //!< Set the aux input pointer.
         HIPBLASLT_EXPORT void setAmaxD(const void* amaxD); //!< Set the AmaxD input pointer.
-        /// Also store every D tile into a second buffer with the same layout as D. The problem
-        /// then runs only kernels built to do that (see PartitionedGemmInputs::storePeerD);
-        /// if there is none, the heuristic returns no algorithm.
-        HIPBLASLT_EXPORT void setDPeer(void* dPeer);
 
         HIPBLASLT_EXPORT const void* getA() const; //!< The A matrix input pointer.
         HIPBLASLT_EXPORT const void* getB() const; //!< The B matrix input pointer.
@@ -380,11 +377,11 @@ namespace hipblaslt_ext
             getScaleAlphaScalar() const; //!< The device scalar alpha pointer, or nullptr otherwise.
         HIPBLASLT_EXPORT const void* getAux() const; //!< The aux input pointer.
         HIPBLASLT_EXPORT const void* getAmaxD() const; //!< The AmaxD input pointer.
-        HIPBLASLT_EXPORT void*       getDPeer() const; //!< The second D pointer, or nullptr.
 
     private:
         friend Gemm;
         friend GroupedGemm;
+        friend PartitionedGemm; // sets the second D of a storePeerD slice
         class GemmInputsImpl;
         std::unique_ptr<GemmInputsImpl> pimpl;
     };
@@ -1153,7 +1150,8 @@ namespace hipblaslt_ext
         std::vector<void*>       d; //!< D matrix pointers.
         /// Every partition also stores its slice into the D of the other partition, so that both
         /// Ds are complete once the run has finished (the partitions are joined, see run()).
-        /// It needs exactly 2 partitions and two different D pointers, and the backend needs
+        /// It needs exactly 2 partitions and a replicated D (two different pointers, in any
+        /// order: the peer of each partition is found by device), and the backend needs
         /// kernels that store a second D; without them setProblem succeeds and algoGetHeuristic
         /// returns nothing. When it is false, the backend uses the plain kernels.
         bool                     storePeerD = false;

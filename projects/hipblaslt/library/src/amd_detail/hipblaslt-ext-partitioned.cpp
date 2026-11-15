@@ -5,6 +5,7 @@
 // DPX card). It owns one hipblaslt_ext::Gemm per partition and uses the public Gemm API, plus
 // the device of each handle to give every partition the slice whose memory is on its device.
 
+#include "hipblaslt-ext-inputs.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_internal.hpp"
 #include "utility.hpp"
@@ -571,7 +572,8 @@ namespace hipblaslt_ext
             slice.setBeta(inputs.beta);
             // The peer is the other partition's D, at this partition's slice offset.
             if(inputs.storePeerD)
-                slice.setDPeer(const_cast<void*>(advance(dPointers[1 - i], elems[3], bytes[3])));
+                slice.pimpl->dPeer
+                    = const_cast<void*>(advance(dPointers[1 - i], elems[3], bytes[3]));
 
             GemmEpilogue    epilogue;
             GemmProblemType type(s.opA, s.opB, s.typeA, s.typeB, s.typeC, s.typeD, s.typeCompute);

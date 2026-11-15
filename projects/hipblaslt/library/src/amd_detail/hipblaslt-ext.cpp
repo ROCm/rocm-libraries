@@ -26,6 +26,7 @@
 
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
+#include "hipblaslt-ext-inputs.hpp"
 #include "hipblaslt_internal.hpp"
 #include "utility.hpp"
 #include <Debug.hpp>
@@ -610,30 +611,6 @@ namespace hipblaslt_ext
         return pimpl->wgm;
     }
 
-    class GemmInputs::GemmInputsImpl
-    {
-    public:
-        const void* a     = nullptr;
-        const void* b     = nullptr;
-        const void* c     = nullptr;
-        const void* d     = nullptr;
-        const void* alpha = nullptr;
-        const void* beta  = nullptr;
-        // Epilogue inputs
-        const void* bias          = nullptr;
-        const void* scaleA        = nullptr;
-        const void* scaleB        = nullptr;
-        const void* scaleC        = nullptr;
-        const void* scaleD        = nullptr;
-        const void* scaleAux      = nullptr;
-        const void* scaleAlphaVec = nullptr;
-        const void* aux           = nullptr;
-        const void* amaxD         = nullptr;
-        void*       dPeer         = nullptr;
-        // Keep this layout in sync with rocblaslt::RocGemmInputsV2.
-        bool deviceScalarAlpha = false;
-    };
-
     GemmInputs::GemmInputs()
         : pimpl(std::make_unique<GemmInputsImpl>())
     {
@@ -740,11 +717,6 @@ namespace hipblaslt_ext
         pimpl->amaxD = amaxD;
     }
 
-    void GemmInputs::setDPeer(void* dPeer)
-    {
-        pimpl->dPeer = dPeer;
-    }
-
     const void* GemmInputs::getA() const
     {
         return pimpl->a;
@@ -823,11 +795,6 @@ namespace hipblaslt_ext
     const void* GemmInputs::getAmaxD() const
     {
         return pimpl->amaxD;
-    }
-
-    void* GemmInputs::getDPeer() const
-    {
-        return pimpl->dPeer;
     }
 
     // End of pimpl classes

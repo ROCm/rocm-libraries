@@ -375,6 +375,10 @@ TEST(pre_checkin_partitioned_gemm_ext, StorePeerDNeedsTwoDifferentDs)
     in.storePeerD = true;
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
 
+    // The D list in the other order: the peer of each partition is found by device.
+    std::swap(in.d[0], in.d[1]);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+
     // The same D twice: there is no peer to write to.
     in.d[1] = in.d[0];
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
