@@ -122,6 +122,11 @@ RS_TILES = [
 ]
 
 
+# Row streaming for small groups (nbi 0) and for wide groups of exactly 2 or 4 blocks (32 or 64
+# channels a group; a workgroup holds whole groups).
+RS_NBI = [0, 2, 4]
+
+
 # (t, r, s): filter depth, rows and columns (depth 1 serves 2-D graphs too).
 FILTERS = [(1, 3, 3), (3, 3, 3)]
 
@@ -322,7 +327,12 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         for atom in atoms:
             for t, r, s in FILTERS:
                 for st in (1,) if tag == "fwd" else (1, 2):
-                    for th, wp, cb, depth in RS_TILES:
+                    for (th, wp, cb, depth), nbi in [
+                        (tile, nbi)
+                        for nbi in RS_NBI
+                        for tile in RS_TILES
+                        if tile[2] % max(nbi, 1) == 0
+                    ]:
                         # Two row segments and a 16-byte slot within 64 KB of LDS.
                         vec = 16 // EB[dtype]
                         kws = s if tag == "fwd" else -(-s // st)
@@ -343,7 +353,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             oc=0,
                             px=0,
                             pf=0,
-                            nbi=0,
+                            nbi=nbi,
                             nbo=0,
                             tw=0,
                             bpu=0,
@@ -351,7 +361,11 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             rs=depth,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
-                        name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.rs{th}x{wp}x{cb}d{depth}"
+                        name = (
+                            f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}"
+                            + (f".w{nbi}" if nbi else "")
+                            + f".rs{th}x{wp}x{cb}d{depth}"
+                        )
                         kernels.append(
                             {
                                 "version": "1.0",

@@ -446,7 +446,7 @@ struct K4RowsLcm
     static constexpr int value = A / gcd(A, B) * B;
 };
 
-template <class T, class Atom, int FT, int R, int S, int TH, int WP, int CB, int DEPTH>
+template <class T, class Atom, int FT, int R, int S, int TH, int WP, int CB, int DEPTH, int NBI = 0>
 __device__ void k4ConvMmaRows(const K4Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -460,7 +460,11 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     constexpr int LOADS = (HC * VP + THREADS - 1) / THREADS;
     constexpr int TAPS = FT * R * S;
     constexpr int KC = 16 / Atom::KA; // atom k-steps per tap
+    // Input blocks a wave multiplies: its own (small groups), or its group's NBI (wide groups of
+    // exactly NBI blocks: a workgroup holds whole groups, a wave one output block of one).
+    constexpr int NB = NBI > 0 ? NBI : 1;
     static_assert(Atom::DIM == 16 && 16 % Atom::KA == 0, "16x16 atoms with k-steps dividing 16");
+    static_assert(NBI == 0 || CB % NBI == 0, "whole groups a workgroup");
     typedef typename K1Raw<16>::type Raw;
     // Two row buffers and one 16-byte slot the idle staging threads write.
     __shared__ __attribute__((aligned(16))) T rows[2 * HC * PITCH + VEC];
@@ -488,22 +492,32 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     const int cb = cbt * CB + wave;
 
-    // The block's expanded filter, every tap, held for the whole band; in registers before the
-    // row loop, so the loop's waits count row loads only.
+    // The block's expanded filter, every tap (and, wide groups, every input block of the group),
+    // held for the whole band; in registers before the row loop, so the loop's waits count row
+    // loads only. Small groups: w16[block][tap][n][k]; wide groups:
+    // w16[group][output block][tap][input block][n][k].
     const T* w = static_cast<const T*>(a.w);
-    typename Atom::frag wf[TAPS][KC];
+    const int ob = NBI > 0 ? cb % NB : 0; // the wave's output block within its group
+    typename Atom::frag wf[NB][TAPS][KC];
 #pragma unroll
-    for(int tap = 0; tap < TAPS; ++tap)
+    for(int ib = 0; ib < NB; ++ib)
 #pragma unroll
-        for(int q = 0; q < KC; ++q)
-            wf[tap][q]
-                = k1Frag<Atom>(w + ((static_cast<long long>(cb) * TAPS + tap) * 16 + col) * 16
-                               + q * Atom::KA + kb);
+        for(int tap = 0; tap < TAPS; ++tap)
 #pragma unroll
-    for(int tap = 0; tap < TAPS; ++tap)
+            for(int q = 0; q < KC; ++q)
+            {
+                const long long frag = NBI > 0
+                                           ? ((static_cast<long long>(cb) * TAPS + tap) * NB + ib)
+                                           : static_cast<long long>(cb) * TAPS + tap;
+                wf[ib][tap][q] = k1Frag<Atom>(w + (frag * 16 + col) * 16 + q * Atom::KA + kb);
+            }
 #pragma unroll
-        for(int q = 0; q < KC; ++q)
-            asm volatile("" : "+v"(wf[tap][q]));
+    for(int ib = 0; ib < NB; ++ib)
+#pragma unroll
+        for(int tap = 0; tap < TAPS; ++tap)
+#pragma unroll
+            for(int q = 0; q < KC; ++q)
+                asm volatile("" : "+v"(wf[ib][tap][q]));
 
     // This thread's staging slots: pixel p, vector v of a row segment, as a byte offset into the
     // input row (a column past the input reads past the row: zero).
@@ -653,45 +667,48 @@ __device__ void k4ConvMmaRows(const K4Args& a)
                 long long base = 0;
                 if(stepBase(k, base))
                 {
-                    const T* src = rows + cur * HC * PITCH + wave * 16 + kb;
 #pragma unroll
-                    for(int p = 0; p < WP; ++p)
+                    for(int ib = 0; ib < NB; ++ib)
 #pragma unroll
-                        for(int s = 0; s < S; ++s)
-                        {
-                            typename Atom::frag xf[KC];
-                            bool special = false;
+                        for(int p = 0; p < WP; ++p)
 #pragma unroll
-                            for(int q = 0; q < KC; ++q)
+                            for(int s = 0; s < S; ++s)
                             {
-                                xf[q]
-                                    = k1Frag<Atom>(src + (p * 16 + col + s) * PITCH + q * Atom::KA);
-                                special |= k4NonFinite<T, Atom>(xf[q]);
-                            }
-                            // Groups narrower than the block: an infinity or NaN would meet the
-                            // expanded filter's structural zeros (0 x inf = NaN in another
-                            // group's outputs), so such a fragment multiplies one group at a time.
-                            if(a.cg < 16 && k4AnyLane<Atom::WAVE>(special))
-                            {
-#pragma unroll
-                                for(int r = 0; r < R; ++r)
-                                    k4MmaByGroup<T, Atom, KC>(wf[(ft * R + r) * S + s],
-                                                              xf,
-                                                              acc[((j - r) % R + R) % R][p],
-                                                              a.cg,
-                                                              kb,
-                                                              lane);
-                                continue;
-                            }
-#pragma unroll
-                            for(int r = 0; r < R; ++r)
+                                // The input block: the wave's own, or input block ib of its group.
+                                const T* src = rows + cur * HC * PITCH + (wave - ob + ib) * 16 + kb;
+                                typename Atom::frag xf[KC];
+                                bool special = false;
 #pragma unroll
                                 for(int q = 0; q < KC; ++q)
-                                    acc[((j - r) % R + R) % R][p]
-                                        = Atom::mma(wf[(ft * R + r) * S + s][q],
-                                                    xf[q],
-                                                    acc[((j - r) % R + R) % R][p]);
-                        }
+                                {
+                                    xf[q] = k1Frag<Atom>(src + (p * 16 + col + s) * PITCH
+                                                         + q * Atom::KA);
+                                    special |= k4NonFinite<T, Atom>(xf[q]);
+                                }
+                                // Groups narrower than the block: an infinity or NaN would meet the
+                                // expanded filter's structural zeros (0 x inf = NaN in another
+                                // group's outputs), so such a fragment multiplies one group at a time.
+                                if(NBI == 0 && a.cg < 16 && k4AnyLane<Atom::WAVE>(special))
+                                {
+#pragma unroll
+                                    for(int r = 0; r < R; ++r)
+                                        k4MmaByGroup<T, Atom, KC>(wf[ib][(ft * R + r) * S + s],
+                                                                  xf,
+                                                                  acc[((j - r) % R + R) % R][p],
+                                                                  a.cg,
+                                                                  kb,
+                                                                  lane);
+                                    continue;
+                                }
+#pragma unroll
+                                for(int r = 0; r < R; ++r)
+#pragma unroll
+                                    for(int q = 0; q < KC; ++q)
+                                        acc[((j - r) % R + R) % R][p]
+                                            = Atom::mma(wf[ib][(ft * R + r) * S + s][q],
+                                                        xf[q],
+                                                        acc[((j - r) % R + R) % R][p]);
+                            }
                 }
                 cur ^= 1;
             }

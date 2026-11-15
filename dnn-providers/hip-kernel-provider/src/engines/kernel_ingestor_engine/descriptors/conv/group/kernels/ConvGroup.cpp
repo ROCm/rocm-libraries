@@ -15,7 +15,8 @@
 //   CONV_GROUP_PF       1: phase-fused backward data at stride 2 (k4ConvMmaPhased)
 //   CONV_GROUP_RS       row streaming (k4ConvMmaRows) with CONV_GROUP_RS input rows in flight:
 //                       CONV_GROUP_CB waves, one 16-channel block each, 16 CONV_GROUP_WP output
-//                       columns and a band of CONV_GROUP_TH rows
+//                       columns and a band of CONV_GROUP_TH rows; CONV_GROUP_NBI > 0: wide groups
+//                       of exactly that many blocks (a wave owns one output block of a group)
 //   CONV_GROUP_WIDE     1: wide groups (k4ConvMmaWide), CONV_GROUP_NBI blocks a group,
 //                       CONV_GROUP_NBO output blocks a workgroup
 //   CONV_GROUP_WRW      1: backward weights (k4WrwMma; k4WrwFma under CONV_GROUP_FMA,
@@ -35,6 +36,9 @@
 #endif
 #ifndef CONV_GROUP_P
 #define CONV_GROUP_P 1
+#endif
+#ifndef CONV_GROUP_NBI
+#define CONV_GROUP_NBI 0
 #endif
 #include "ConvGroupCore.h"
 
@@ -158,7 +162,8 @@ extern "C" __global__ void __launch_bounds__(CONV_GROUP_CB* CONV_GROUP_ATOM::WAV
                   CONV_GROUP_TH,
                   CONV_GROUP_WP,
                   CONV_GROUP_CB,
-                  CONV_GROUP_RS>(a);
+                  CONV_GROUP_RS,
+                  CONV_GROUP_NBI>(a);
 }
 #elif defined(CONV_GROUP_PF) && CONV_GROUP_PF
 extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)

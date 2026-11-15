@@ -774,7 +774,7 @@ INSTANTIATE_TEST_SUITE_P(,
 /// The row-streaming configs with +inf and -inf in the kernel's input (x forward, dy backward
 /// data): each must reach exactly the outputs of its own group (the same infinity, or NaN where
 /// both meet), never another group's through the block-diagonal filter's zeros. Groups of 2, 4,
-/// 8 and 16 channels, channels-last, unit stride and backward data at stride 2.
+/// 8, 16 and 32 channels, channels-last, unit stride and backward data at stride 2.
 class TestGpuConvGroupRowsInfinities
     : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
 {
@@ -783,7 +783,7 @@ class TestGpuConvGroupRowsInfinities
 std::vector<DeviceCase> rowsInfinityCases()
 {
     std::vector<DeviceCase> cases;
-    for(const int64_t cg : {2, 4, 8, 16})
+    for(const int64_t cg : {2, 4, 8, 16, 32})
     {
         auto shape = dense(64, 64, {7, 37}, {3, 3}, {1, 1}, true);
         shape.groups = 64 / cg;
@@ -1279,7 +1279,8 @@ TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
         EXPECT_TRUE(declines("cf", int64_t{1})); // channels-last only
         EXPECT_TRUE(declines("pf", int64_t{1}));
         EXPECT_TRUE(declines("math", int64_t{1}));
-        EXPECT_TRUE(declines("nbi", int64_t{2}));
+        EXPECT_TRUE(declines("nbi", int64_t{2})); // small groups
+        EXPECT_TRUE(declines("nbi", int64_t{1}));
         EXPECT_TRUE(declines("nbo", int64_t{1}));
         EXPECT_TRUE(declines("wp", int64_t{3})); // 1, 2 or 4 fragments
         EXPECT_TRUE(declines("wp", int64_t{0}));
@@ -1296,6 +1297,33 @@ TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
         EXPECT_TRUE(declines("atom", std::string("fma")));
         EXPECT_TRUE(declines("atom", std::string("wmma12_f16"))); // not on gfx942
         EXPECT_TRUE(declines("dtype", std::string("BFLOAT16")));
+        // Wide groups of 32 channels: a 2-block config with whole groups a workgroup; groups of
+        // 24 (padded blocks) and other block counts are declined.
+        auto wide = dense(128, 128, {12, 13}, {3, 3}, {1, 1}, true);
+        wide.groups = 4;
+        wide.dataType = DataType::HALF;
+        const GraphFixture wideGroups(buildGraph(specFor(wide, direction)), properties);
+        const auto wideGroupsBound = matchesGraph(pack, wideGroups.context());
+        ASSERT_TRUE(wideGroupsBound.has_value());
+        auto wide2 = *base;
+        wide2.metadata["nbi"] = int64_t{2};
+        EXPECT_TRUE(matchesKernel(pack, wideGroups.context(), wide2, *wideGroupsBound));
+        EXPECT_FALSE(matchesKernel(pack, wideGroups.context(), *base, *wideGroupsBound));
+        auto wide4 = *base;
+        wide4.metadata["nbi"] = int64_t{4};
+        EXPECT_FALSE(matchesKernel(pack, wideGroups.context(), wide4, *wideGroupsBound));
+        auto wideOdd = wide2;
+        wideOdd.metadata["cb"] = int64_t{3}; // not whole groups
+        EXPECT_FALSE(matchesKernel(pack, wideGroups.context(), wideOdd, *wideGroupsBound));
+        auto padded = dense(96, 96, {12, 13}, {3, 3}, {1, 1}, true);
+        padded.groups = 4; // 24 channels a group: 2 blocks, the second padded
+        padded.dataType = DataType::HALF;
+        const GraphFixture paddedFixture(buildGraph(specFor(padded, direction)), properties);
+        const auto paddedBound = matchesGraph(pack, paddedFixture.context());
+        ASSERT_TRUE(paddedBound.has_value());
+        auto padded2 = wide2;
+        padded2.metadata["cb"] = int64_t{2};
+        EXPECT_FALSE(matchesKernel(pack, paddedFixture.context(), padded2, *paddedBound));
         // Forward at stride 2 gathers at stride 2: declined. Backward data at stride 2 runs unit
         // stride phases: admitted (a stride 2 config).
         auto strided = resnext();
@@ -1521,10 +1549,12 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
             // Output columns a workgroup: 16 wp (matrix core), or the FMA kernel's 256 threads
             // in chunks of oc channels, th rows of px-column threads.
             const int th = static_cast<int>(kernel.getIntMetadata("th"));
-            // Wide-group configs stage nbi blocks of a group (no channel blocks).
+            // Wide-group configs stage nbi blocks of a group (no channel blocks); row-streaming
+            // ones stage cb blocks, whole groups of them.
             const int nbi = static_cast<int>(kernel.getIntMetadata("nbi"));
-            const int cb = nbi != 0 ? nbi : static_cast<int>(kernel.getIntMetadata("cb"));
-            if(nbi != 0)
+            const bool rows = kernel.getIntMetadata("rs") != 0;
+            const int cb = nbi != 0 && !rows ? nbi : static_cast<int>(kernel.getIntMetadata("cb"));
+            if(nbi != 0 && !rows)
             {
                 EXPECT_EQ(kernel.getIntMetadata("cb"), 0);
                 EXPECT_EQ(nbi % kernel.getIntMetadata("nbo"), 0);
@@ -1536,13 +1566,16 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                       : static_cast<int>(16 * kernel.getIntMetadata("wp"));
             if(kernel.getIntMetadata("rs") != 0)
             {
-                // Row streaming: channels-last, small groups, unit gather stride (forward at
-                // stride 1), 1 to 4 rows in flight, at most 1024 threads, two row segments in LDS.
+                // Row streaming: channels-last, small groups or wide groups of 2 or 4 blocks (whole
+                // groups a workgroup), unit gather stride (forward at stride 1), 1 to 4 rows in
+                // flight, at most 1024 threads, two row segments in LDS.
                 EXPECT_TRUE(forward ? stride == 1 : stride <= 2);
                 EXPECT_LE(kernel.getIntMetadata("rs"), 4);
                 EXPECT_EQ(kernel.getIntMetadata("cf"), 0);
                 EXPECT_EQ(kernel.getIntMetadata("pf"), 0);
-                EXPECT_EQ(nbi, 0);
+                EXPECT_EQ(kernel.getIntMetadata("nbo"), 0);
+                EXPECT_TRUE(nbi == 0 || nbi == 2 || nbi == 4);
+                EXPECT_EQ(cb % std::max(nbi, 1), 0);
                 EXPECT_LE(cb * 64, 1024);
                 EXPECT_LE(conv_group::groupRowsLdsBytes(bytes, taps("s"), tw, cb), 64 * 1024);
             }
