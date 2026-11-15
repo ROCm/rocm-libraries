@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -268,6 +269,32 @@ ConvShape dense(int64_t c,
     return shape;
 }
 
+/// A patch convolution: filter @p f on every axis at stride f, no padding.
+ConvShape patchShape(int64_t c, int64_t k, std::vector<int64_t> input, int64_t f, bool channelsLast)
+{
+    const std::vector<int64_t> filter(input.size(), f);
+    const std::vector<int64_t> pad(input.size(), 0);
+    auto shape = dense(c, k, std::move(input), filter, pad, channelsLast);
+    shape.stride.assign(shape.input.size(), f);
+    return shape;
+}
+
+std::vector<DeviceCase> patchCases()
+{
+    std::vector<DeviceCase> cases;
+    cases.push_back({"NhwcPatch4x4Rgb", patchShape(3, 24, {12, 20}, 4, true)});
+    cases.push_back({"NhwcPatch16x16Rgb", patchShape(3, 40, {32, 48}, 16, true)});
+    cases.push_back({"NhwcPatch2x2", patchShape(16, 24, {6, 10}, 2, true)});
+    cases.push_back({"NchwPatch2x2", patchShape(16, 24, {6, 10}, 2, false)});
+    cases.push_back({"NdhwcPatch2x2x2", patchShape(8, 16, {4, 6, 8}, 2, true)});
+    cases.push_back({"NhwcPatch1d", patchShape(8, 16, {40}, 4, true)});
+    auto convolution = patchShape(16, 24, {6, 10}, 2, true);
+    convolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"NhwcPatch2x2ConvolutionMode", convolution});
+    cases.push_back({"NhwcPatch2x2RaggedWidth", patchShape(16, 16, {8, 11}, 2, true)});
+    return cases;
+}
+
 // Row counts are not multiples of the tiles and channel counts are not multiples of the column
 // tiles, so every edge runs; 24 and 40 channels admit the 8-wide vectors, 3 only the scalar ones.
 std::vector<DeviceCase> deviceCases()
@@ -345,6 +372,15 @@ std::vector<DeviceCase> deviceCases()
     auto toOneDeep = dense(16, 16, {3, 6, 6}, {3, 3, 3}, {0, 1, 1}, true);
     toOneDeep.stride = {2, 2, 2};
     cases.push_back({"Ndhwc3x3x3Stride2OutputOneDeep", toOneDeep});
+
+    // Patch convolutions (filter equal to the stride, no padding): the patch configs. RGB runs
+    // of 4 x 3 and 16 x 3 channels (4- and 8-wide vectors; 48 is a flat reduction for 32- and
+    // 64-wide k-steps), wide channels, 3-D, 1-D, channels-first (staged), true convolution, and
+    // a width the stride does not divide (served by the plain configs only).
+    for(const auto& patchCase : patchCases())
+    {
+        cases.push_back(patchCase);
+    }
     return cases;
 }
 
@@ -386,11 +422,19 @@ bool matches(float got, float want, float tolerance)
     return std::fabs(got - want) <= tolerance;
 }
 
+/// Which configs a case must run: any, or at least one patch config (and only those).
+enum class Configs
+{
+    ANY,
+    PATCH,
+};
+
 template <typename T>
 void runCase(ConvShape shape,
              ConvDirection direction,
              Math math = Math::NATIVE,
-             bool infinities = false)
+             bool infinities = false,
+             Configs configs = Configs::ANY)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -464,6 +508,10 @@ void runCase(ConvShape shape,
         {
             continue;
         }
+        if(configs == Configs::PATCH && kernel.getIntMetadata("patch") == 0)
+        {
+            continue;
+        }
         // xf32 rounds each operand to 10 mantissa bits (about 2^-11 of a product each);
         // three-bf16 drops lo x lo (about 2^-16).
         float perTermBound = 2e-6f;
@@ -534,6 +582,60 @@ void runCase(ConvShape shape,
     }
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
 }
+
+/// Patch convolutions through the patch configs only (every architecture has them: the FMA kernel
+/// takes every type).
+class TestGpuConvIgemmPatch : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+// The patch configs alone, with +inf and -inf in the input: every output an infinity reaches is
+// that infinity (NaN where both meet), as the reference gives. No padded run or ragged lane may
+// multiply a zero into an infinity.
+TEST_P(TestGpuConvIgemmPatch, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, Configs::PATCH);
+}
+
+TEST_P(TestGpuConvIgemmPatch, HalfInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, Configs::PATCH);
+}
+
+TEST_P(TestGpuConvIgemmPatch, BFloat16Infinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, Configs::PATCH);
+}
+
+std::vector<DeviceCase> servedPatchCases()
+{
+    std::vector<DeviceCase> cases;
+    for(const auto& patchCase : patchCases())
+    {
+        if(patchCase.name != "NhwcPatch2x2RaggedWidth")
+        {
+            cases.push_back(patchCase);
+        }
+    }
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvIgemmPatch,
+                         ::testing::Combine(::testing::ValuesIn(servedPatchCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
 
 class TestGpuConvIgemm : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
 {
@@ -709,25 +811,9 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 19> KNOBS{"atom",
-                                                       "math",
-                                                       "bm",
-                                                       "bn",
-                                                       "bk",
-                                                       "wm",
-                                                       "wn",
-                                                       "threads",
-                                                       "vec",
-                                                       "stages",
-                                                       "xcd",
-                                                       "halo",
-                                                       "wdirect",
-                                                       "pack",
-                                                       "cf",
-                                                       "swz",
-                                                       "dma",
-                                                       "fuse",
-                                                       "large"};
+    static constexpr std::array<const char*, 20> KNOBS{
+        "atom", "math", "bm",      "bn",   "bk", "wm",  "wn",  "threads", "vec",   "stages",
+        "xcd",  "halo", "wdirect", "pack", "cf", "swz", "dma", "fuse",    "large", "patch"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -802,7 +888,7 @@ conv_igemm::IgemmProblem parsedProblem(ConvShape shape, ConvDirection direction)
 
 TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOutputTwin)
 {
-    static constexpr std::array<const char*, 17> SHAPE{"atom",
+    static constexpr std::array<const char*, 18> SHAPE{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -818,7 +904,8 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
                                                        "pack",
                                                        "swz",
                                                        "dma",
-                                                       "fuse"};
+                                                       "fuse",
+                                                       "patch"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         const auto& kernels = catalog(direction);
@@ -839,8 +926,11 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
         {
             SCOPED_TRACE(kernel.name);
             const bool cf = kernel.getIntMetadata("cf") != 0;
-            const bool eligible
-                = kernel.getStringMetadata("atom") != "fma" && kernel.getIntMetadata("pack") == 0;
+            // Patch backward data writes channels-last dx only.
+            const bool eligible = kernel.getStringMetadata("atom") != "fma"
+                                  && kernel.getIntMetadata("pack") == 0
+                                  && !(direction == ConvDirection::BACKWARD_DATA
+                                       && kernel.getIntMetadata("patch") != 0);
             if(cf)
             {
                 EXPECT_TRUE(eligible);
@@ -859,8 +949,20 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
 
 TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
 {
-    static constexpr std::array<const char*, 12> SHAPE{
-        "atom", "math", "bm", "bn", "bk", "wm", "wn", "threads", "vec", "stages", "xcd", "cf"};
+    static constexpr std::array<const char*, 14> SHAPE{"atom",
+                                                       "math",
+                                                       "bm",
+                                                       "bn",
+                                                       "bk",
+                                                       "wm",
+                                                       "wn",
+                                                       "threads",
+                                                       "vec",
+                                                       "stages",
+                                                       "xcd",
+                                                       "cf",
+                                                       "swz",
+                                                       "patch"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         const auto& kernels = catalog(direction);
@@ -880,10 +982,14 @@ TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
         for(const auto& kernel : kernels)
         {
             SCOPED_TRACE(kernel.name);
+            // Patch forward also runs the flat reduction on swizzled tiles (DMA included), for
+            // runs such as ViT's 16 x 3 that its k-steps do not divide.
+            const bool swizzledPatch
+                = kernel.getIntMetadata("patch") != 0 && direction == ConvDirection::FORWARD;
             const bool plain
                 = kernel.getIntMetadata("halo") == 0 && kernel.getIntMetadata("wdirect") == 0
-                  && kernel.getIntMetadata("swz") == 0 && kernel.getIntMetadata("cf") == 0
-                  && kernel.getIntMetadata("fuse") == 0
+                  && (kernel.getIntMetadata("swz") == 0 || swizzledPatch)
+                  && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("fuse") == 0
                   && kernel.getStringMetadata("math") == "native";
             if(kernel.getIntMetadata("pack") == 2)
             {
@@ -965,7 +1071,13 @@ TEST(TestConvIgemmCatalog, SwizzledTileConfigsAreSixteenBitVectorEightPlainTiles
             EXPECT_EQ(kernel.getIntMetadata("vec"), 8);
             EXPECT_EQ(kernel.getIntMetadata("halo"), 0);
             EXPECT_EQ(kernel.getIntMetadata("wdirect"), 0);
-            EXPECT_EQ(kernel.getIntMetadata("pack"), 0);
+            // Swizzled flat reductions: patch forward only.
+            if(kernel.getIntMetadata("pack") != 0)
+            {
+                EXPECT_EQ(kernel.getIntMetadata("pack"), 2);
+                EXPECT_EQ(kernel.getIntMetadata("patch"), 1);
+                EXPECT_EQ(direction, ConvDirection::FORWARD);
+            }
         }
     }
     EXPECT_GT(swizzled, 0);
@@ -1055,7 +1167,7 @@ TEST(TestConvIgemmCatalog, DmaConfigsAreSwizzledAndServeOnlyGfx950)
             EXPECT_GE(kernel.getIntMetadata("dma"), 2);
             EXPECT_LE(kernel.getIntMetadata("dma"), 4);
             if(kernel.getStringMetadata("dtype") != "HALF" || kernel.getIntMetadata("cf") != 0
-               || kernel.getIntMetadata("bk") != 32)
+               || kernel.getIntMetadata("bk") != 32 || kernel.getIntMetadata("patch") != 0)
             {
                 continue;
             }
@@ -1231,6 +1343,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                    || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
                    || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
                    || kernel.getIntMetadata("fuse") != 0 || kernel.getIntMetadata("large") != 0
+                   || kernel.getIntMetadata("patch") != 0
                    || !conv_igemm::blockOrderServes(kernel.getIntMetadata("bm"),
                                                     kernel.getIntMetadata("bn"),
                                                     0,
@@ -1245,6 +1358,177 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                 ++checked;
             }
             EXPECT_GT(checked, 1);
+        }
+    }
+}
+
+std::optional<conv_igemm::IgemmProblem> patchView(ConvShape shape, ConvDirection direction)
+{
+    shape.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(shape, direction)));
+    const auto problem = conv_igemm::parseIgemmProblem(fixture.context(), direction);
+    if(!problem.has_value())
+    {
+        ADD_FAILURE() << "the plain parse declined a patch test case";
+        return std::nullopt;
+    }
+    return conv_igemm::withPatchView(*problem);
+}
+
+TEST(TestConvIgemmCatalog, PatchForwardFoldsTheWidthTapsIntoChannels)
+{
+    // 16x16 stride 16 over RGB: W / 16 pixels of 48 channels, filter rows of one tap.
+    const auto vit = patchView(patchShape(3, 64, {32, 64}, 16, true), ConvDirection::FORWARD);
+    ASSERT_TRUE(vit.has_value());
+    EXPECT_EQ(vit->args.c, 48);
+    EXPECT_EQ(vit->args.wi, 4);
+    EXPECT_EQ(vit->args.wo, 4);
+    EXPECT_EQ(vit->args.fs, 1);
+    EXPECT_EQ(vit->args.sw, 1);
+    EXPECT_EQ(vit->args.fr, 16);
+    EXPECT_EQ(vit->args.sh, 16);
+    EXPECT_FALSE(vit->w.needed); // K T R S C is K T R 1 (S C): read as given
+    // Only the width needs to fold: any height geometry stays a gather.
+    auto widthOnly = patchShape(8, 16, {9, 12}, 4, true);
+    widthOnly.filter = {3, 4};
+    widthOnly.stride = {1, 4};
+    widthOnly.prePadding = {1, 0};
+    widthOnly.postPadding = {1, 0};
+    EXPECT_TRUE(patchView(widthOnly, ConvDirection::FORWARD).has_value());
+    // Channels-first activations are staged packed channels-last, which the view reads alike.
+    EXPECT_TRUE(patchView(patchShape(16, 24, {6, 10}, 2, false), ConvDirection::FORWARD));
+}
+
+TEST(TestConvIgemmCatalog, PatchBackwardDataIsOneGemmOverDyPositions)
+{
+    const auto view = patchView(patchShape(16, 24, {6, 10}, 2, true), ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->args.c, 64); // 2 x 2 x 16 columns
+    EXPECT_EQ(view->args.k, 24);
+    EXPECT_EQ(view->args.hi, 3);
+    EXPECT_EQ(view->args.wi, 5);
+    EXPECT_EQ(view->args.fr * view->args.fs * view->args.ft, 1);
+    EXPECT_EQ(view->args.sh * view->args.sw * view->args.sd, 1);
+    EXPECT_EQ(view->args.patchT, 1);
+    EXPECT_EQ(view->args.patchR, 2);
+    EXPECT_EQ(view->phases, 1);
+    EXPECT_EQ(view->rows, 2 * 3 * 5);
+    // A packed K R S C filter: the parse's transpose to [(r, s, c)][k].
+    EXPECT_TRUE(view->w.needed && view->w.transpose);
+    EXPECT_TRUE(view->filterKtrsc);
+    // A K C R S filter, or a reflected one: the strided copy to [t][r][s][c][k].
+    const auto kcrs
+        = patchView(patchShape(16, 24, {6, 10}, 2, false), ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(kcrs.has_value());
+    EXPECT_TRUE(kcrs->w.needed && !kcrs->w.transpose);
+    EXPECT_EQ(kcrs->w.copy.total, 2 * 2 * 16 * 24);
+    auto convolution = patchShape(16, 24, {6, 10}, 2, true);
+    convolution.mode = ConvMode::CONVOLUTION;
+    const auto reflected = patchView(convolution, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(reflected.has_value());
+    EXPECT_TRUE(reflected->w.needed && !reflected->w.transpose);
+    EXPECT_NE(reflected->w.graphOffset, 0);
+    // 3-D: the depth taps join the columns too.
+    const auto deep
+        = patchView(patchShape(8, 16, {4, 6, 8}, 2, true), ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(deep.has_value());
+    EXPECT_EQ(deep->args.c, 64);
+    EXPECT_EQ(deep->args.patchT, 2);
+}
+
+TEST(TestConvIgemmCatalog, PatchViewDeclinesEveryNonPatchField)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        SCOPED_TRACE(direction == ConvDirection::FORWARD ? "forward" : "backward data");
+        const auto base = patchShape(16, 24, {8, 12}, 4, true);
+        EXPECT_TRUE(patchView(base, direction).has_value());
+        auto grouped = base;
+        grouped.groups = 2;
+        EXPECT_FALSE(patchView(grouped, direction).has_value());
+        auto overlap = base; // the width stride below the filter
+        overlap.stride = {4, 2};
+        EXPECT_FALSE(patchView(overlap, direction).has_value());
+        auto padded = base;
+        padded.prePadding = {0, 2};
+        padded.postPadding = {0, 2};
+        EXPECT_FALSE(patchView(padded, direction).has_value());
+        auto dilated = base; // (a dilated filter never tiles the width exactly either)
+        dilated.input = {8, 28};
+        dilated.dilation = {1, 2};
+        EXPECT_FALSE(patchView(dilated, direction).has_value());
+        auto ragged = base; // the width not a whole number of tiles
+        ragged.input = {8, 14};
+        EXPECT_FALSE(patchView(ragged, direction).has_value());
+        auto unit = base; // nothing to fold along the width
+        unit.filter = {4, 1};
+        unit.stride = {4, 1};
+        EXPECT_EQ(patchView(unit, direction).has_value(), direction != ConvDirection::FORWARD);
+    }
+    // Backward data folds every axis: the height must tile exactly too.
+    auto rowsOverlap = patchShape(16, 24, {8, 12}, 4, true);
+    rowsOverlap.stride = {2, 4};
+    EXPECT_TRUE(patchView(rowsOverlap, ConvDirection::FORWARD).has_value());
+    EXPECT_FALSE(patchView(rowsOverlap, ConvDirection::BACKWARD_DATA).has_value());
+    auto raggedRows = patchShape(16, 24, {10, 12}, 4, true);
+    EXPECT_TRUE(patchView(raggedRows, ConvDirection::FORWARD).has_value());
+    EXPECT_FALSE(patchView(raggedRows, ConvDirection::BACKWARD_DATA).has_value());
+    auto paddedRows = patchShape(16, 24, {8, 12}, 4, true);
+    paddedRows.prePadding = {2, 0};
+    paddedRows.postPadding = {2, 0};
+    EXPECT_FALSE(patchView(paddedRows, ConvDirection::BACKWARD_DATA).has_value());
+    // A 1x1 filter folds nothing.
+    EXPECT_FALSE(patchView(patchShape(16, 24, {8, 12}, 1, true), ConvDirection::BACKWARD_DATA));
+    // Images past 2^31 - 1 pixels take the large-image configs, never a patch config.
+    auto huge = patchShape(1, 1, {46342, 46342}, 2, true);
+    huge.n = 1;
+    EXPECT_FALSE(patchView(huge, ConvDirection::FORWARD).has_value());
+}
+
+TEST(TestConvIgemmCatalog, PatchConfigsServeOnlyPatchConvolutions)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto pack = packFor(direction);
+        const auto serves = [&](ConvShape shape, const auto& kernel) {
+            shape.dataType = DataType::HALF;
+            const GraphFixture fixture(buildGraph(specFor(shape, direction)),
+                                       deviceOf("gfx942:sramecc+:xnack-", 304));
+            const auto bound = matchesGraph(pack, fixture.context());
+            return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
+        const auto& kernels = catalog(direction);
+        const auto patch = std::find_if(kernels.begin(), kernels.end(), [](const auto& k) {
+            return k.getStringMetadata("dtype") == "HALF"
+                   && k.getStringMetadata("atom") == "mfma32_f16" && k.getIntMetadata("patch") == 1
+                   && k.getIntMetadata("pack") == 0 && k.getIntMetadata("swz") == 0
+                   && k.getIntMetadata("cf") == 0 && k.getIntMetadata("xcd") == 0
+                   && k.getIntMetadata("wdirect") == 0 && k.getIntMetadata("vec") == 8;
+        });
+        ASSERT_NE(patch, kernels.end());
+        SCOPED_TRACE(patch->name);
+        EXPECT_TRUE(serves(patchShape(16, 24, {8, 12}, 2, true), *patch));
+        EXPECT_FALSE(serves(dense(16, 24, {8, 12}, {3, 3}, {1, 1}, true), *patch));
+        // Runs of S C channels (forward's reduction channels, backward data's dx stores) take the
+        // channel vector: 2 x 3 is not a whole 8-wide vector, 2 x 4 is.
+        EXPECT_FALSE(serves(patchShape(3, 24, {8, 12}, 2, true), *patch));
+        EXPECT_TRUE(serves(patchShape(4, 24, {8, 12}, 2, true), *patch));
+        // A patch knob other than 0 or 1, or with large images or group fusion, is not a config.
+        auto two = *patch;
+        two.metadata["patch"] = int64_t{2};
+        EXPECT_FALSE(serves(patchShape(16, 24, {8, 12}, 2, true), two));
+        auto fused = *patch;
+        fused.metadata["fuse"] = int64_t{2};
+        EXPECT_FALSE(serves(patchShape(16, 24, {8, 12}, 2, true), fused));
+        auto large = *patch;
+        large.metadata["large"] = int64_t{1};
+        EXPECT_FALSE(serves(patchShape(16, 24, {8, 12}, 2, true), large));
+        if(direction == ConvDirection::BACKWARD_DATA)
+        {
+            // dx is written channels-last: no channels-first output.
+            auto channelsFirst = *patch;
+            channelsFirst.metadata["cf"] = int64_t{1};
+            EXPECT_FALSE(serves(patchShape(16, 24, {8, 12}, 2, false), channelsFirst));
         }
     }
 }
@@ -1379,6 +1663,9 @@ TEST(TestConvIgemmSplitPlan, Gfx9SplitsBelowTwoBlocksPerComputeUnit)
     const auto shallow
         = parsedProblem(dense(32, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
     EXPECT_EQ(splitsOf(shallow, "gfx942", 304), 4);
+    // Patch configs run one launch whatever the fill.
+    EXPECT_EQ(conv_igemm::splitPlanFor(deep, 128, 128, 32, deviceOf("gfx942", 304), 0, true).splits,
+              1);
 }
 
 TEST(TestConvIgemmSplitPlan, FlatReductionCountsKStepsOverTheTapsEndToEnd)
