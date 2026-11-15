@@ -126,7 +126,7 @@ __device__ __forceinline__ int k4HaloColumn(int hc)
 // gathered along its rows (consecutive threads, consecutive columns of one channel), and the
 // accumulators go out through LDS so each row of output columns is written contiguously.
 template <class T, class Atom, int FT, int R, int S, int ST, int TH, int WP, int CB, int CF = 0>
-__device__ void k4ConvMma(const K4Args& a)
+__device__ void k4ConvMma(const K4Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = 4 * WAVE;
@@ -286,12 +286,20 @@ __device__ void k4ConvMma(const K4Args& a)
             const int r = item / CB, cbi = item % CB;
             if(oh0 + r >= a.ho)
                 continue;
+#if defined(CONV_EPI) && CONV_EPI
+            // The fused epilogue: this column's per-channel operands, once.
+            const ConvEpiGen::Chan chan = epi.chan(cbt * CH + cbi * 16 + lane % 16, true);
+#endif
 #pragma unroll
             for(int p = 0; p < WP; ++p)
 #pragma unroll
                 for(int e = 0; e < Atom::ACC; ++e)
                     halo[(r * CH + cbi * 16 + lane % 16) * OP + p * 16 + Atom::dRow(lane, e)]
+#if defined(CONV_EPI) && CONV_EPI
+                        = K1Elem<T>::store(epi(acc[it][p][e], chan, 0, true));
+#else
                         = K1Elem<T>::store(acc[it][p][e]);
+#endif
         }
         __syncthreads();
         const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
@@ -317,6 +325,10 @@ __device__ void k4ConvMma(const K4Args& a)
         if(oh >= a.ho)
             continue;
         const int cb = cbt * CB + cbi;
+#if defined(CONV_EPI) && CONV_EPI
+        // The fused epilogue: this column's per-channel operands, once.
+        const ConvEpiGen::Chan chan = epi.chan(cb * 16 + lane % 16, true);
+#endif
 #pragma unroll
         for(int p = 0; p < WP; ++p)
 #pragma unroll
@@ -327,7 +339,11 @@ __device__ void k4ConvMma(const K4Args& a)
                     out[((outPlane * a.outH + oh * a.osh + a.ooh) * a.outW + ow * a.osw + a.oow)
                             * a.c
                         + cb * 16 + lane % 16]
+#if defined(CONV_EPI) && CONV_EPI
+                        = K1Elem<T>::store(epi(acc[it][p][e], chan, 0, true));
+#else
                         = K1Elem<T>::store(acc[it][p][e]);
+#endif
             }
     }
 }
@@ -501,7 +517,7 @@ __device__ void k4ConvMmaPhased(const K4Args& a)
 // stages the plane's halo in LDS; per (row, column) tap a thread holds its OC x CG filter values
 // and accumulates its PX pixels' CG group inputs. CG is the graph's channels a group.
 template <class T, int FT, int R, int S, int ST, int CG, int OC, int TH, int PX, int CB, int CF = 0>
-__device__ void k4ConvFma(const K4Args& a)
+__device__ void k4ConvFma(const K4Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int THREADS = 256;
     constexpr int CH = 16 * CB;
@@ -601,6 +617,13 @@ __device__ void k4ConvFma(const K4Args& a)
     }
 
     const int oh = oh0 + r;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: the thread's OC channels' per-channel operands, once.
+    ConvEpiGen::Chan chans[OC];
+#pragma unroll
+    for(int o = 0; o < OC; ++o)
+        chans[o] = epi.chan(cbt * CH + ch0 + o, true);
+#endif
     if constexpr(CF != 0)
     {
         constexpr int OP = TW + 1;
@@ -609,7 +632,12 @@ __device__ void k4ConvFma(const K4Args& a)
         for(int p = 0; p < PX; ++p)
 #pragma unroll
             for(int o = 0; o < OC; ++o)
+#if defined(CONV_EPI) && CONV_EPI
+                halo[(r * CH + ch0 + o) * OP + col0 + p]
+                    = K1Elem<T>::store(epi(acc[p][o], chans[o], 0, true));
+#else
                 halo[(r * CH + ch0 + o) * OP + col0 + p] = K1Elem<T>::store(acc[p][o]);
+#endif
         __syncthreads();
         k4StoreTileChannelsFirst<T, TH, TW, CH, THREADS>(a, out, halo, img, od, cbt, oh0, ow0, tid);
         return;
@@ -628,7 +656,11 @@ __device__ void k4ConvFma(const K4Args& a)
                      + static_cast<long long>(cbt) * CH + ch0;
 #pragma unroll
             for(int o = 0; o < OC; ++o)
+#if defined(CONV_EPI) && CONV_EPI
+                dst[o] = K1Elem<T>::store(epi(acc[p][o], chans[o], 0, true));
+#else
                 dst[o] = K1Elem<T>::store(acc[p][o]);
+#endif
         }
     }
 }
@@ -697,7 +729,7 @@ template <class T,
           int CF = 0,
           class TO = T,
           int P = 1>
-__device__ void k4ConvMmaWide(const K4Args& a)
+__device__ void k4ConvMmaWide(const K4Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = 4 * WAVE;
@@ -866,6 +898,17 @@ __device__ void k4ConvMmaWide(const K4Args& a)
         constexpr int OP = TW + 1;
         TO* tile = reinterpret_cast<TO*>(halo);
         __syncthreads();
+#if defined(CONV_EPI) && CONV_EPI
+        // The fused epilogue: each output block's per-channel operands, once. The group's padded
+        // channels past cg are staged but never written out, and load nothing.
+        ConvEpiGen::Chan chans[NBO];
+#pragma unroll
+        for(int ob = 0; ob < NBO; ++ob)
+        {
+            const int gch = (ot * NBO + ob) * 16 + lane % 16;
+            chans[ob] = epi.chan(c0 + gch, gch < a.cg);
+        }
+#endif
 #pragma unroll
         for(int rr = 0; rr < RPW; ++rr)
 #pragma unroll
@@ -876,7 +919,11 @@ __device__ void k4ConvMmaWide(const K4Args& a)
                     for(int e = 0; e < Atom::ACC; ++e)
                         tile[((wave + 4 * rr) * OCH + ob * 16 + lane % 16) * OP + p * 16
                              + Atom::dRow(lane, e)]
+#if defined(CONV_EPI) && CONV_EPI
+                            = K1Elem<TO>::store(epi(acc[rr][p][ob][e], chans[ob], 0, true));
+#else
                             = K1Elem<TO>::store(acc[rr][p][ob][e]);
+#endif
         __syncthreads();
         const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
         for(int i = tid; i < TH * OCH * TW; i += THREADS)
@@ -901,6 +948,10 @@ __device__ void k4ConvMmaWide(const K4Args& a)
             const int gch = (ot * NBO + ob) * 16 + lane % 16;
             if(oh >= a.ho || gch >= a.cg)
                 continue;
+#if defined(CONV_EPI) && CONV_EPI
+            // The fused epilogue: this column's per-channel operands, once.
+            const ConvEpiGen::Chan chan = epi.chan(c0 + gch, true);
+#endif
 #pragma unroll
             for(int p = 0; p < WP; ++p)
 #pragma unroll
@@ -911,7 +962,11 @@ __device__ void k4ConvMmaWide(const K4Args& a)
                         out[((outPlane * a.outH + oh * a.osh + a.ooh) * a.outW + ow * a.osw + a.oow)
                                 * a.c
                             + c0 + gch]
+#if defined(CONV_EPI) && CONV_EPI
+                            = K1Elem<TO>::store(epi(acc[rr][p][ob][e], chan, 0, true));
+#else
                             = K1Elem<TO>::store(acc[rr][p][ob][e]);
+#endif
                 }
         }
 }

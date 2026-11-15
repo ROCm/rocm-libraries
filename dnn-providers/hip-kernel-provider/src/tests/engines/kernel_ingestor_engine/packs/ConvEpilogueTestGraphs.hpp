@@ -16,6 +16,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
@@ -299,10 +300,15 @@ inline flatbuffers::FlatBufferBuilder buildFusedGraph(const FusedGraphSpec& spec
     }
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
-    // The convolution node of the spec's direction (backward data writes x, as dx).
-    const bool backwardData = conv.direction == conv_naive::ConvDirection::BACKWARD_DATA;
-    const auto convAttributes
-        = backwardData ? data_objects::CreateConvolutionBwdAttributesDirect(builder,
+    // The convolution node of the spec's direction: a backward node followed by pointwise nodes
+    // is a graph every engine declines (fusion is forward only).
+    auto convType = data_objects::NodeAttributes::ConvolutionFwdAttributes;
+    ::flatbuffers::Offset<void> convAttributes;
+    switch(conv.direction)
+    {
+    case conv_naive::ConvDirection::BACKWARD_DATA:
+        convType = data_objects::NodeAttributes::ConvolutionBwdAttributes;
+        convAttributes = data_objects::CreateConvolutionBwdAttributesDirect(builder,
                                                                             conv.yUid,
                                                                             conv.wUid,
                                                                             conv.xUid,
@@ -311,8 +317,23 @@ inline flatbuffers::FlatBufferBuilder buildFusedGraph(const FusedGraphSpec& spec
                                                                             &conv.stride,
                                                                             &conv.dilation,
                                                                             conv.mode)
-                             .Union()
-                       : data_objects::CreateConvolutionFwdAttributesDirect(builder,
+                             .Union();
+        break;
+    case conv_naive::ConvDirection::BACKWARD_WEIGHTS:
+        convType = data_objects::NodeAttributes::ConvolutionWrwAttributes;
+        convAttributes = data_objects::CreateConvolutionWrwAttributesDirect(builder,
+                                                                            conv.xUid,
+                                                                            conv.yUid,
+                                                                            conv.wUid,
+                                                                            &conv.prePadding,
+                                                                            &conv.postPadding,
+                                                                            &conv.stride,
+                                                                            &conv.dilation,
+                                                                            conv.mode)
+                             .Union();
+        break;
+    default:
+        convAttributes = data_objects::CreateConvolutionFwdAttributesDirect(builder,
                                                                             conv.xUid,
                                                                             conv.wUid,
                                                                             conv.yUid,
@@ -322,13 +343,10 @@ inline flatbuffers::FlatBufferBuilder buildFusedGraph(const FusedGraphSpec& spec
                                                                             &conv.dilation,
                                                                             conv.mode)
                              .Union();
+        break;
+    }
     nodes.push_back(data_objects::CreateNodeDirect(
-        builder,
-        "conv",
-        conv.computeType,
-        backwardData ? data_objects::NodeAttributes::ConvolutionBwdAttributes
-                     : data_objects::NodeAttributes::ConvolutionFwdAttributes,
-        convAttributes));
+        builder, "conv", conv.computeType, convType, convAttributes));
     for(const auto& node : spec.nodes)
     {
         if(!node.pointwise)
