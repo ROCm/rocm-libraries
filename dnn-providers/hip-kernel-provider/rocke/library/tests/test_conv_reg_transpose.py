@@ -203,5 +203,42 @@ class TestRegtPrefetch(unittest.TestCase):
         )
 
 
+class TestRegtAddrStep(unittest.TestCase):
+    def test_tag_and_gates(self):
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        self.assertIn("_ras", _wgrad(regt_addr_step=True).kernel_name())
+        self.assertEqual(
+            is_valid_wgrad_spec(
+                _wgrad(regt_addr_step=True, regt_prefetch=3), "gfx1201"
+            ),
+            (True, "ok"),
+        )
+        for kw in (
+            dict(reg_transpose=False, regt_addr_step=True),
+            dict(regt_addr_step=True, streamk="dp_sk"),
+        ):
+            with self.assertRaises(ValueError):
+                _wgrad(**kw).validate()
+        ras = _ident(reg_transpose=True, regt_prefetch=3, regt_addr_step=True)
+        self.assertIn("-rtp3-regt-ras-", ras.label())
+        self.assertEqual(KernelIdentity.from_label(ras.label()), ras)
+        self.assertNotEqual(
+            ras.stable_hash(), replace(ras, regt_addr_step=False).stable_hash()
+        )
+
+    def test_same_loads_fewer_decodes_on_the_fast_path(self):
+        off = _ir(_wgrad())
+        on = _ir(_wgrad(regt_addr_step=True))
+        loads = r"buffer_load"
+        # Both branches carry their loads' offsets; the loads themselves are
+        # issued once, after the branch.
+        self.assertEqual(len(re.findall(loads, on)), len(re.findall(loads, off)))
+        self.assertIn("scf.if_else", on)
+        # And under the mode-3 prefetch loop.
+        self.assertIn("scf.if_else", _ir(_wgrad(regt_addr_step=True, regt_prefetch=3)))
+
+
 if __name__ == "__main__":
     unittest.main()

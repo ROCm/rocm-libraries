@@ -156,6 +156,9 @@ class KernelIdentity:
     # wgrad (WgradConvSpec.reg_transpose): the register-transpose operand
     # load. Left out of the hash while False, like prefetch_addr.
     reg_transpose: bool = False
+    # wgrad regt_addr_step: the stepped micro-tile address decode. Left out
+    # of the hash while False.
+    regt_addr_step: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
     # identity_supports_problem). Left out of the hash while False.
@@ -268,6 +271,8 @@ class KernelIdentity:
             del fields["uniform_k_decode"]
         if not fields["reg_transpose"]:
             del fields["reg_transpose"]
+        if not fields["regt_addr_step"]:
+            del fields["regt_addr_step"]
         if not fields["patch"]:
             del fields["patch"]
         if not fields["tap_outer_k"]:

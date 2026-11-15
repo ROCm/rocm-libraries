@@ -152,5 +152,30 @@ class TestRegtPrefetchCrossEngine(_CrossEngine):
         )
 
 
+class TestRegtAddrStepCrossEngine(_CrossEngine):
+    def test_identical_ir(self):
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
+
+        bf16 = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+        self.assert_same(
+            (
+                dict(regt_addr_step=True),
+                dict(regt_addr_step=True, regt_prefetch=3),
+                dict(
+                    regt_addr_step=True,
+                    data=bf16,
+                    vector_size_a=2,
+                    vector_size_b=2,
+                    problem=ConvProblem(
+                        N=1, Hi=16, Wi=16, C=32, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1
+                    ),
+                ),
+            )
+        )
+
+    def test_rejected_alike(self):
+        self.assert_rejected_alike((dict(regt_addr_step=True, reg_transpose=False),))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

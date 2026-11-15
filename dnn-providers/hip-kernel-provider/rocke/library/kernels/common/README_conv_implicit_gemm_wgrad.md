@@ -80,6 +80,11 @@ tagged in the kernel name and `KernelIdentity`.
   and 3. Rejected with `unroll_k` and stream-K. Not `register_prefetch`
   (`rpf`) and not `prefetch_global_regs` (`pgr`), both refused with
   `reg_transpose`.
+- `regt_addr_step` (tag `ras`): each micro-tile decodes its first K position
+  `(n, ho, wo)` once and steps `wo` for the other 7 columns (the run
+  descriptor of `RegTransposeTileLoader.load_global`), behind a wave-uniform
+  branch on `Wo % 8 == 0` and an 8-aligned slice start that falls back to the
+  per-column decode. 2-D only, with the plain regt loop or `regt_prefetch=3`.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 

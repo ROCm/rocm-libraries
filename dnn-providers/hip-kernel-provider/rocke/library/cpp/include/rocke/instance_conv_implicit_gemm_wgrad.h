@@ -249,6 +249,14 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * reg_transpose; rejected with unroll_k and stream-K, and off gfx12 RDNA.
      * Mirrors WgradConvSpec.regt_prefetch. Default 0: byte-identical IR. */
     int regt_prefetch; /* default 0 */
+    /* regt_addr_step: reg_transpose only. Decode each micro-tile's first K
+     * position (n, ho, wo) once and step the other 7 (one embed and a bounds
+     * check per column) instead of a magic-number decode per column, behind a
+     * wave-uniform branch on Wo % 8 == 0 and an 8-aligned slice start that
+     * falls back to the per-column decode. 2-D, the plain regt loop and
+     * regt_prefetch mode 3 only. Mirrors WgradConvSpec.regt_addr_step.
+     * Default false: byte-identical IR. */
+    bool regt_addr_step; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

@@ -89,6 +89,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from rocke.core.ir import (
     F16,
     F32,
+    I1,
     I32,
     IRBuilder,
     KernelDef,
@@ -641,6 +642,16 @@ class WgradConvSpec:
     # byte-identical IR and keeps its kernel name.
     regt_prefetch: int = 0
 
+    # reg_transpose only: decode each micro-tile's first K_wg position
+    # (n, ho, wo) once and step the other 7 instead of running the magic-
+    # number decode for every one of the 8 K columns (A and B). When Wo is a
+    # multiple of 8 (and the slice starts 8-aligned, which tile_k >= 8 makes
+    # it), the 8 positions of a micro-tile share (n, ho) and only wo moves, so
+    # the per-column cost is one embed and a bounds check; otherwise a
+    # wave-uniform branch takes the per-column decode, so every problem stays
+    # correct. Tag "ras". Default False: byte-identical when off.
+    regt_addr_step: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -830,6 +841,7 @@ class WgradConvSpec:
                 "regt": self.reg_transpose,
                 # A different K-loop body; only tagged when set.
                 f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
+                "ras": self.regt_addr_step,
                 # An explicit lds_k_pad changes the LDS row stride and so the
                 # emitted code, but nothing else in the name reflects it. Two
                 # pads would otherwise collide on one symbol and the compile
@@ -1463,6 +1475,13 @@ def _reg_transpose_conflict(spec: "WgradConvSpec") -> str:
     Arch-free half of the gate (is_valid_wgrad_spec adds the arch family).
     Shared by ``validate`` and ``is_valid_wgrad_spec`` so the two cannot drift.
     """
+    if spec.regt_addr_step and not spec.reg_transpose:
+        return "regt_addr_step applies to the reg_transpose path only"
+    if spec.regt_addr_step and (spec.problem.is_3d or spec.streamk != "off"):
+        return (
+            "regt_addr_step is written for the plain 2-D regt K loop and "
+            "regt_prefetch mode 3 (not 3-D, not stream-K)"
+        )
     if spec.regt_prefetch not in _REGT_PREFETCH_MODES:
         return (
             f"regt_prefetch must be one of {_REGT_PREFETCH_MODES} "
@@ -3120,6 +3139,102 @@ def build_implicit_gemm_conv_wgrad(
             return X_desc.offset(b_, m=m_val, k=k_val, group=group_v)
         return X_desc.offset(b_, m=m_val, k=k_val)
 
+    # regt_addr_step: per-unit run descriptors for the register-transpose
+    # loaders (see the spec field). The pointwise path's flat addressing has
+    # no decode to save, so it keeps the per-column descriptors.
+    a_run_desc = b_run_desc = None
+    if spec.regt_addr_step and not p.is_pointwise:
+        from rocke.helpers.loads import REGT_K_RUN
+        from rocke.helpers.transforms import CoordVar
+
+        _k_unmerge = spatial_unmerge_dynamic(
+            params, upper="k_wg", prefix="k_", is_3d=False
+        )
+        dY_desc_nm = DynamicTensorDescriptor.create(
+            "dY_nhwk",
+            coord_names=["n", "ho", "wo", "k_out"],
+            strides=[
+                params["p_dY_stride_n"],
+                params["p_dY_stride_ho"],
+                params["p_dY_stride_wo"],
+                b.const_i32(1),
+            ],
+        )
+        X_desc_nm = make_a_descriptor_dynamic(
+            b,
+            x_params,
+            is_3d=False,
+            grouped=_grouped,
+            decompose_m=False,
+            spatial_prefix="k_",
+            channel_prefix="n_",
+            stride_prefix="p_X_stride_",
+            name="X_nhwc",
+        )
+        _c8 = b.const_i32(REGT_K_RUN)
+        # Wave-uniform: every run of 8 starts at a multiple of 8 (k_lo and
+        # the tile_k steps are) and stays inside one output row.
+        _step_ok = b.land(
+            b.cmp_eq(b.mod(p_Wo, _c8), c0), b.cmp_eq(b.mod(k_lo, _c8), c0)
+        )
+        _true = b.cmp_eq(c0, c0)
+
+        def _run_desc(stepped, per_col):
+            def run(b_, row, col):
+                branch = b_.scf_if_else(
+                    _step_ok, result_types=[I32] * REGT_K_RUN + [I1] * REGT_K_RUN
+                )
+                with branch as (then_ctx, else_ctx):
+                    with then_ctx:
+                        k0 = b_.add(k_off_capture[0], col)
+                        nhw = _k_unmerge.apply(b_, {"k_wg": CoordVar("k_wg", k0)})
+                        pairs = [
+                            stepped(
+                                b_,
+                                row,
+                                nhw["n"].value,
+                                nhw["ho"].value,
+                                (
+                                    b_.add(nhw["wo"].value, b_.const_i32(j))
+                                    if j
+                                    else nhw["wo"].value
+                                ),
+                            )
+                            for j in range(REGT_K_RUN)
+                        ]
+                        b_.scf_yield(
+                            *[o for o, _ in pairs],
+                            *[_true if v is None else v for _, v in pairs],
+                        )
+                    with else_ctx:
+                        pairs = [
+                            per_col(b_, row, b_.add(col, b_.const_i32(j)) if j else col)
+                            for j in range(REGT_K_RUN)
+                        ]
+                        b_.scf_yield(
+                            *[o for o, _ in pairs],
+                            *[_true if v is None else v for _, v in pairs],
+                        )
+                res = list(branch.results)
+                return list(zip(res[:REGT_K_RUN], res[REGT_K_RUN:]))
+
+            return run
+
+        def _dy_stepped(b_, row, n, ho, wo):
+            k_out = b_.add(block_m_off_v, row)
+            if grouped:
+                k_out = b_.add(k_out, b_.mul(group_v, c_kpg))
+            return dY_desc_nm.offset(b_, n=n, ho=ho, wo=wo, k_out=k_out)
+
+        def _x_stepped(b_, row, n, ho, wo):
+            k_val = b_.add(block_n_off_v, row)
+            if grouped:
+                return X_desc_nm.offset(b_, n=n, ho=ho, wo=wo, k=k_val, group=group_v)
+            return X_desc_nm.offset(b_, n=n, ho=ho, wo=wo, k=k_val)
+
+        a_run_desc = _run_desc(_dy_stepped, dy_descriptor)
+        b_run_desc = _run_desc(_x_stepped, x_descriptor)
+
     if spec.async_dma and not _wmma_async:
         # K-outer: rows are K_wg, columns are the free axis. A chunk is then a
         # run along the free axis at one k_wg, which is contiguous in global for
@@ -3295,6 +3410,26 @@ def build_implicit_gemm_conv_wgrad(
             )
             return
 
+        if a_run_desc is not None:
+            # regt_addr_step: the register-transpose loaders take the per-unit
+            # run descriptors (M-outer tile, so no coordinate swap).
+            a_sync_loader.load(
+                b,
+                tid=tid,
+                smem_dst=A_dst,
+                descriptor=a_desc_fn,
+                rsrc=dy_rsrc,
+                run_descriptor=a_run_desc,
+            )
+            b_sync_loader.load(
+                b,
+                tid=tid,
+                smem_dst=B_dst,
+                descriptor=b_desc_fn,
+                rsrc=x_rsrc,
+                run_descriptor=b_run_desc,
+            )
+            return
         a_sync_loader.load(
             b, tid=tid, smem_dst=A_dst, descriptor=a_desc_fn, rsrc=dy_rsrc
         )
@@ -3873,12 +4008,33 @@ def build_implicit_gemm_conv_wgrad(
 
             return desc
 
+        def _masked_run(fn, tile_ok):
+            def run(b_, row, col):
+                return [
+                    (off, tile_ok if ok is None else b_.land(ok, tile_ok))
+                    for off, ok in fn(b_, row, col)
+                ]
+
+            return run
+
         def _fetch(k_tile):
             k_off_capture[0] = k_tile
             tile_ok = b.cmp_lt(k_tile, _k_upper)
             # The reads of a partially loading tile are branched
             # (RegTransposeTileLoader guard) so they are not sunk behind the
             # MMAs into the store's branch.
+            # regt_addr_step (mode 3 only): the run descriptors, masked the
+            # same way.
+            _ra = (
+                {}
+                if a_run_desc is None
+                else {"run_descriptor": _masked_run(a_run_desc, tile_ok)}
+            )
+            _rb = (
+                {}
+                if b_run_desc is None
+                else {"run_descriptor": _masked_run(b_run_desc, tile_ok)}
+            )
             return (
                 a_sync_loader.load_global(
                     b,
@@ -3886,6 +4042,7 @@ def build_implicit_gemm_conv_wgrad(
                     descriptor=_masked(_a_fn, tile_ok),
                     rsrc=dy_rsrc,
                     guard=True,
+                    **_ra,
                 ),
                 b_sync_loader.load_global(
                     b,
@@ -3893,6 +4050,7 @@ def build_implicit_gemm_conv_wgrad(
                     descriptor=_masked(_b_fn, tile_ok),
                     rsrc=x_rsrc,
                     guard=True,
+                    **_rb,
                 ),
             )
 

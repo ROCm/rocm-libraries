@@ -94,6 +94,8 @@
  *         (rejected). Must match the Python _REGT_CFGS.
  *  114-116 regt_prefetch: mode 3, mode 3 bf16 at width 2 on gfx12-generic;
  *         mode 2 (rejected). Must match the Python _REGT_CFGS.
+ *  117-118 regt_addr_step on a stride-2 problem with Wo = 8: the plain loop
+ *         and regt_prefetch mode 3. Must match the Python _REGT_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -370,6 +372,13 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         /* rejected: no mode 2 */
         spec->regt_prefetch = 2;
         break;
+    case 117:
+    case 118:
+        /* Python _P_S2: N2 16x16 C32 K64 3x3, stride 2, pad 1 (Wo = 8). */
+        spec->problem = rocke_conv_problem_make(2, 16, 16, 32, 64, 3, 3, 2, 2, 1, 1, 1, 1);
+        spec->regt_addr_step = true;
+        spec->regt_prefetch = idx == 118 ? 3 : 0;
+        break;
     default:
         return -1;
     }
@@ -380,7 +389,7 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
-    if(idx >= 109 && idx <= 116)
+    if(idx >= 109 && idx <= 118)
         return make_regt_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);

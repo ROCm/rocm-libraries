@@ -123,6 +123,9 @@
 #         register-transpose loaders, see _REGT_CFGS): mode 3 (guarded reads
 #         under partial participation), mode 3 in bf16 at width 2 on
 #         gfx12-generic; mode 2, which both engines must reject.
+#   117-118 -- regt_addr_step (the stepped micro-tile address decode) on a
+#         stride-2 problem with Wo = 8: the plain register-transpose loop and
+#         regt_prefetch mode 3.
 #   (Grouped wgrad reaches the C++ engine only through stream-K. The
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -138,7 +141,7 @@
 #   207 -- streamk with unroll_k (must raise ValueError)
 #   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-121, so run_diff.py stops at the shared END before reaching 200+; these
+# 0-118, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -235,6 +238,9 @@ _PGR_BASES = {
 }
 
 
+# A stride-2 problem whose Wo (8) takes the stepped regt_addr_step decode.
+_P_S2 = ConvProblem(N=2, Hi=16, Wi=16, C=32, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1)
+
 # The register-transpose knobs on the gfx1201 WMMA base (config 6): index ->
 # (extra overrides, arch). dtype_* keys replace the base's data. Keep in
 # lockstep with make_regt_cfg() in conv_implicit_gemm_wgrad_emit.c.
@@ -273,6 +279,11 @@ _REGT_CFGS = {
     ),
     # rejected: no mode 2
     116: (dict(reg_transpose=True, regt_prefetch=2), "gfx1201"),
+    117: (dict(reg_transpose=True, regt_addr_step=True, problem=_P_S2), "gfx1201"),
+    118: (
+        dict(reg_transpose=True, regt_addr_step=True, regt_prefetch=3, problem=_P_S2),
+        "gfx1201",
+    ),
 }
 
 

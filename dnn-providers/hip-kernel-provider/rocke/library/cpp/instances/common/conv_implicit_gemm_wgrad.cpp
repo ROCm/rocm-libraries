@@ -82,6 +82,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.prefetch_global_regs = false;
     s.reg_transpose = false;
     s.regt_prefetch = 0;
+    s.regt_addr_step = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -356,7 +357,7 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
      *     flags={"async": async_dma, "kouter": lds_k_outer, "regt": ...,
-     *            "rtp{N}": ..., "pad{N}": ...,
+     *            "rtp{N}": ..., "ras": ..., "pad{N}": ...,
      *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
      *            "wsr{N}": ..., "unroll": unroll_k, "pfa": prefetch_addr},
      *   )
@@ -386,13 +387,14 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, regt, rtp{N}, pad{N}, spk/spkauto, twostage, wsr{N},
-     * unroll, pfa, rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most WGRAD_NAME_MAX_FLAGS
+    /* flags: async, kouter, regt, rtp{N}, ras, pad{N}, spk/spkauto, twostage,
+     * wsr{N}, unroll, pfa, rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most
+     * WGRAD_NAME_MAX_FLAGS
      * when every conditional tag is present. The name is built before
      * validation, so an invalid spec can reach the maximum too. */
     enum
     {
-        WGRAD_NAME_MAX_FLAGS = 16
+        WGRAD_NAME_MAX_FLAGS = 17
     };
     char pad_flag[32] = {0};
     const char* flag_names[WGRAD_NAME_MAX_FLAGS];
@@ -421,6 +423,9 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         flag_on[n_flags] = 1;
         n_flags++;
     }
+    flag_names[n_flags] = "ras";
+    flag_on[n_flags] = s->regt_addr_step ? 1 : 0;
+    n_flags++;
 
     /* An explicit lds_k_pad changes the LDS row stride and so the emitted code;
      * without it in the name two pads collide on one symbol and a cache keyed on
@@ -825,6 +830,21 @@ static bool wgrad_reg_transpose_conflict(const rocke_implicit_gemm_conv_wgrad_sp
                                          char* reason,
                                          size_t reason_cap)
 {
+    if(s->regt_addr_step && !s->reg_transpose)
+    {
+        if(reason && reason_cap)
+            snprintf(reason, reason_cap, "regt_addr_step applies to the reg_transpose path only");
+        return true;
+    }
+    if(s->regt_addr_step && (s->problem.is_3d || wgrad_streamk_on(s)))
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "regt_addr_step is written for the plain 2-D regt K loop and regt_prefetch "
+                     "mode 3 (not 3-D, not stream-K)");
+        return true;
+    }
     if(s->regt_prefetch != 0 && s->regt_prefetch != 3)
     {
         if(reason && reason_cap)
@@ -4443,6 +4463,253 @@ static void wgrad_emit_kloop_prefetch_global_regs(rocke_conv_build_ctx_t* ctx)
 }
 
 // ---------------------------------------------------------------------------
+// regt_addr_step run descriptors
+// ---------------------------------------------------------------------------
+
+/* Closure state of the regt_addr_step run descriptors (Python _run_desc and
+ * its captures). */
+typedef struct wgrad_ras
+{
+    rocke_conv_build_ctx_t* ctx;
+    rocke_tensor_descriptor_t* dy_nm; /* dY_desc_nm: (n, ho, wo, k_out) */
+    rocke_tensor_descriptor_t* x_nm; /* X_desc_nm: (n, ho, wo, k[, group]) */
+    rocke_value_t* step_ok; /* Wo % 8 == 0 and k_lo % 8 == 0 */
+    rocke_value_t* true_v; /* cmp_eq(c0, c0) */
+} wgrad_ras_t;
+
+/* Python _dy_stepped(b, row, n, ho, wo). */
+static rocke_value_t* wgrad_ras_dy_stepped(rocke_ir_builder_t* b,
+                                           const wgrad_ras_t* r,
+                                           rocke_value_t* row,
+                                           rocke_value_t* n,
+                                           rocke_value_t* ho,
+                                           rocke_value_t* wo,
+                                           rocke_value_t** out_valid)
+{
+    rocke_conv_build_ctx_t* ctx = r->ctx;
+    rocke_value_t* k_out = rocke_b_add(b, ctx->block_m_off_v, row);
+    if(ctx->wgrad_c_kpg != NULL)
+    {
+        rocke_value_t* g_base = rocke_b_mul(b, ctx->group_idx, ctx->wgrad_c_kpg);
+        k_out = rocke_b_add(b, k_out, g_base);
+    }
+    const char* names[4] = {"n", "ho", "wo", "k_out"};
+    rocke_value_t* vals[4] = {n, ho, wo, k_out};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    rocke_transforms_descriptor_offset(b, r->dy_nm, names, vals, 4, &off, &valid);
+    *out_valid = valid;
+    return off;
+}
+
+/* Python _x_stepped(b, row, n, ho, wo). */
+static rocke_value_t* wgrad_ras_x_stepped(rocke_ir_builder_t* b,
+                                          const wgrad_ras_t* r,
+                                          rocke_value_t* row,
+                                          rocke_value_t* n,
+                                          rocke_value_t* ho,
+                                          rocke_value_t* wo,
+                                          rocke_value_t** out_valid)
+{
+    rocke_conv_build_ctx_t* ctx = r->ctx;
+    rocke_value_t* k_val = rocke_b_add(b, ctx->block_n_off_v, row);
+    const char* names[5] = {"n", "ho", "wo", "k", "group"};
+    rocke_value_t* vals[5] = {n, ho, wo, k_val, ctx->group_idx};
+    const int n_coords = ctx->wgrad_c_kpg != NULL ? 5 : 4;
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    rocke_transforms_descriptor_offset(b, r->x_nm, names, vals, n_coords, &off, &valid);
+    *out_valid = valid;
+    return off;
+}
+
+/* Python _run_desc(stepped, per_col)(b, row, col): a wave-uniform if/else on
+ * step_ok yielding the 8 offsets and 8 predicates of the unit -- the stepped
+ * decode (one k_wg -> (n, ho, wo) decode, wo + j per column) or the
+ * per-column descriptors. */
+static void wgrad_ras_run(rocke_ir_builder_t* b,
+                          const wgrad_ras_t* r,
+                          bool is_x,
+                          rocke_value_t* row,
+                          rocke_value_t* col,
+                          rocke_value_t** out_off,
+                          rocke_value_t** out_valid)
+{
+    rocke_conv_build_ctx_t* ctx = r->ctx;
+    const rocke_type_t* types[2 * ROCKE_REGT_K_RUN];
+    for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+    {
+        types[j] = rocke_i32();
+        types[ROCKE_REGT_K_RUN + j] = rocke_i1();
+    }
+    rocke_if_else_t branch
+        = rocke_b_scf_if_else_results(b, r->step_ok, types, 2 * ROCKE_REGT_K_RUN);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    rocke_value_t* ys[2 * ROCKE_REGT_K_RUN];
+
+    rocke_b_region_enter(b, branch.then_region);
+    {
+        rocke_value_t* k0 = rocke_b_add(b, ctx->k_off_capture, col);
+        /* _k_unmerge.apply: k_wg -> (n, ho, wo), the last coord first. */
+        rocke_value_t* hi_w = rocke_b_umul_hi_i32(b, k0, ctx->p_magic_k_Wo_mult);
+        rocke_value_t* sum_w = rocke_b_add_nuw(b, hi_w, k0);
+        rocke_value_t* q_w = rocke_b_lshr(b, sum_w, ctx->p_magic_k_Wo_shift);
+        rocke_value_t* m_w = rocke_b_mul(b, q_w, ctx->p_Wo);
+        rocke_value_t* wo = rocke_b_sub(b, k0, m_w);
+        rocke_value_t* hi_h = rocke_b_umul_hi_i32(b, q_w, ctx->p_magic_k_Ho_mult);
+        rocke_value_t* sum_h = rocke_b_add_nuw(b, hi_h, q_w);
+        rocke_value_t* q_h = rocke_b_lshr(b, sum_h, ctx->p_magic_k_Ho_shift);
+        rocke_value_t* m_h = rocke_b_mul(b, q_h, ctx->p_Ho);
+        rocke_value_t* ho = rocke_b_sub(b, q_w, m_h);
+        rocke_value_t* n = q_h;
+        for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+        {
+            rocke_value_t* wo_j = wo;
+            if(j)
+            {
+                rocke_value_t* c_j = rocke_b_const_i32(b, j);
+                wo_j = rocke_b_add(b, wo, c_j);
+            }
+            rocke_value_t* v = NULL;
+            ys[j] = is_x ? wgrad_ras_x_stepped(b, r, row, n, ho, wo_j, &v)
+                         : wgrad_ras_dy_stepped(b, r, row, n, ho, wo_j, &v);
+            ys[ROCKE_REGT_K_RUN + j] = v == NULL ? r->true_v : v;
+        }
+        rocke_b_scf_yield(b, ys, 2 * ROCKE_REGT_K_RUN);
+    }
+    rocke_b_region_leave(b);
+
+    rocke_b_region_enter(b, branch.else_region);
+    {
+        rocke_loads_descriptor_fn per_col = is_x ? ctx->b_descriptor_fn : ctx->a_descriptor_fn;
+        for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+        {
+            rocke_value_t* cj = col;
+            if(j)
+            {
+                rocke_value_t* c_j = rocke_b_const_i32(b, j);
+                cj = rocke_b_add(b, col, c_j);
+            }
+            rocke_value_t* v = NULL;
+            ys[j] = per_col(b, row, cj, &v, ctx);
+            ys[ROCKE_REGT_K_RUN + j] = v == NULL ? r->true_v : v;
+        }
+        rocke_b_scf_yield(b, ys, 2 * ROCKE_REGT_K_RUN);
+    }
+    rocke_b_region_leave(b);
+    if(!rocke_ir_builder_ok(b))
+        return;
+    for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+    {
+        out_off[j] = branch.op->results[j];
+        out_valid[j] = branch.op->results[ROCKE_REGT_K_RUN + j];
+    }
+}
+
+static void wgrad_ras_run_a(rocke_ir_builder_t* b,
+                            rocke_value_t* row,
+                            rocke_value_t* col,
+                            rocke_value_t** out_off,
+                            rocke_value_t** out_valid,
+                            void* user)
+{
+    wgrad_ras_run(b, (const wgrad_ras_t*)user, false, row, col, out_off, out_valid);
+}
+
+static void wgrad_ras_run_b(rocke_ir_builder_t* b,
+                            rocke_value_t* row,
+                            rocke_value_t* col,
+                            rocke_value_t** out_off,
+                            rocke_value_t** out_valid,
+                            void* user)
+{
+    wgrad_ras_run(b, (const wgrad_ras_t*)user, true, row, col, out_off, out_valid);
+}
+
+/* The regt_addr_step block of the Python builder (after the buffer resources,
+ * before the schedule prologue): the non-merged dY / X descriptors, the
+ * wave-uniform step predicate, and the run descriptors on ctx. */
+static bool wgrad_ras_init(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    wgrad_ras_t* r = (wgrad_ras_t*)rocke_arena_alloc(&b->arena, sizeof(wgrad_ras_t));
+    if(r == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "regt_addr_step: arena alloc failed");
+        return false;
+    }
+    memset(r, 0, sizeof(*r));
+    r->ctx = ctx;
+
+    /* dY_desc_nm = DynamicTensorDescriptor.create("dY_nhwk", (n, ho, wo, k_out)) */
+    {
+        const char* names[4] = {"n", "ho", "wo", "k_out"};
+        rocke_value_t* strides[4];
+        strides[0] = ctx->p_dY_stride_n;
+        strides[1] = ctx->p_dY_stride_ho;
+        strides[2] = ctx->p_dY_stride_wo;
+        strides[3] = rocke_b_const_i32(b, 1);
+        rocke_dynamic_tensor_descriptor_t* d
+            = rocke_tensor_descriptor_naive_dynamic(b, "dY_nhwk", names, 4, strides);
+        if(d == NULL)
+            return false;
+        r->dy_nm = &d->base;
+    }
+
+    /* X_desc_nm = make_a_descriptor_dynamic(..., decompose_m=False): the X
+     * descriptor without the leading k_wg unmerge. The builder records the
+     * negated pads on ctx; the main X descriptor's are kept. */
+    {
+        rocke_conv_dyn_desc_opts_t x_opts;
+        memset(&x_opts, 0, sizeof(x_opts));
+        x_opts.name = "X_nhwc";
+        x_opts.spatial_upper = "k_wg";
+        x_opts.channel_upper = "k";
+        x_opts.stride_n = ctx->p_X_stride_n;
+        x_opts.stride_di = ctx->p_X_stride_di;
+        x_opts.stride_hi = ctx->p_X_stride_hi;
+        x_opts.stride_wi = ctx->p_X_stride_wi;
+        x_opts.spatial_hi.mult = ctx->p_magic_k_Ho_mult;
+        x_opts.spatial_hi.shift = ctx->p_magic_k_Ho_shift;
+        x_opts.spatial_wi.mult = ctx->p_magic_k_Wo_mult;
+        x_opts.spatial_wi.shift = ctx->p_magic_k_Wo_shift;
+        x_opts.channel_y.mult = ctx->p_magic_n_Y_mult;
+        x_opts.channel_y.shift = ctx->p_magic_n_Y_shift;
+        x_opts.channel_x.mult = ctx->p_magic_n_X_mult;
+        x_opts.channel_x.shift = ctx->p_magic_n_X_shift;
+        x_opts.channel_c.mult = ctx->p_magic_n_cpg_mult;
+        x_opts.channel_c.shift = ctx->p_magic_n_cpg_shift;
+        rocke_value_t* keep_ph = ctx->p_pH_neg;
+        rocke_value_t* keep_pw = ctx->p_pW_neg;
+        rocke_dynamic_tensor_descriptor_t* d
+            = (rocke_dynamic_tensor_descriptor_t*)rocke_conv_make_a_descriptor_dynamic_opts(
+                b, ctx, /*decompose_m=*/false, &x_opts);
+        ctx->p_pH_neg = keep_ph;
+        ctx->p_pW_neg = keep_pw;
+        if(d == NULL)
+            return false;
+        r->x_nm = &d->base;
+    }
+
+    /* _step_ok = land(cmp_eq(mod(p_Wo, 8), c0), cmp_eq(mod(k_lo, 8), c0));
+     * _true = cmp_eq(c0, c0) */
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* c8 = rocke_b_const_i32(b, ROCKE_REGT_K_RUN);
+    rocke_value_t* wo_mod = rocke_b_mod(b, ctx->p_Wo, c8);
+    rocke_value_t* wo_ok = rocke_b_cmp_eq(b, wo_mod, ctx->c0);
+    rocke_value_t* lo_mod = rocke_b_mod(b, k_lo, c8);
+    rocke_value_t* lo_ok = rocke_b_cmp_eq(b, lo_mod, ctx->c0);
+    r->step_ok = rocke_b_land(b, wo_ok, lo_ok);
+    r->true_v = rocke_b_cmp_eq(b, ctx->c0, ctx->c0);
+
+    ctx->a_run_fn = wgrad_ras_run_a;
+    ctx->b_run_fn = wgrad_ras_run_b;
+    ctx->run_user = r;
+    return rocke_ir_builder_ok(b);
+}
+
+// ---------------------------------------------------------------------------
 // regt_prefetch K loop
 // ---------------------------------------------------------------------------
 
@@ -4996,6 +5263,12 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* Plain global pointers for the gfx1250 async copy (no IR emitted). */
     ctx.a_ptr = dY;
     ctx.b_ptr = X;
+
+    /* regt_addr_step: the run-descriptor block, which Python emits between
+     * the buffer resources and the schedule prologue. The pointwise path's
+     * flat addressing has no decode to save. */
+    if(spec->regt_addr_step && !ctx.is_pointwise && !wgrad_ras_init(&ctx))
+        return NULL;
 
     /* Emit schedule prologue AFTER buffer resources -- mirrors Python ordering:
      *   make_buffer_resource(dY/X/dW) then schedule.emit_prologue(b). */
