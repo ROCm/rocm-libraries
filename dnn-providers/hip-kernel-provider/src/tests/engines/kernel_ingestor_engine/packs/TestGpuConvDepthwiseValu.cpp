@@ -672,13 +672,16 @@ struct WrwConfig
     /// The vector tiles' channels a thread and output columns a strip; 0 otherwise.
     int64_t cv = 0;
     int64_t strip = 0;
+    /// 1: partitions traded for whole rounds of blocks.
+    int64_t fill = 0;
 
     std::string tag() const
     {
         return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
                + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult) + "s"
-               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip);
+               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip) + "f"
+               + std::to_string(fill);
     }
 };
 
@@ -729,6 +732,13 @@ const std::vector<WrwConfig>& wrwCatalog()
                 configs.push_back(config);
             }
         }
+        // The 3x3 tile with its partitions traded for whole rounds (fill 1), both layouts.
+        for(const auto* layout : {"NHWC", "NCHW"})
+        {
+            WrwConfig config{layout, "tile", 1, 3, 3};
+            config.fill = 1;
+            configs.push_back(config);
+        }
         // Vector tiles: (filter, cv, strip).
         for(const auto& [k, cv, strip] : std::vector<std::array<int64_t, 3>>{{3, 4, 8},
                                                                              {3, 8, 4},
@@ -760,6 +770,10 @@ const std::vector<WrwConfig>& wrwCatalog()
                 {
                     configs.push_back({"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride});
                 }
+                // One schedule with its partitions traded for whole rounds (fill 1).
+                WrwConfig filled{"NHWC", "hankel", 1, k, k, 32, 2, 1, 2, 1, stride};
+                filled.fill = 1;
+                configs.push_back(filled);
             }
         }
         return configs;
@@ -802,7 +816,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"mult", config.mult},
            {"s", config.s},
            {"cv", config.cv},
-           {"strip", config.strip}};
+           {"strip", config.strip},
+           {"fill", config.fill}};
     return kernel;
 }
 
@@ -1923,6 +1938,19 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
              c.bpc = 8;
          },
          true},
+        {"ValuTileFillOne",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.fill = 1;
+         },
+         true},
+        {"FillTwo", [](ConvShape&, WrwConfig& c, std::string&) { c.fill = 2; }, false},
+        {"FloorFillOne",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "floor", 0, 0, 0};
+             c.fill = 1;
+         },
+         false},
         {"ValuTileBpcFour",
          [](ConvShape&, WrwConfig& c, std::string&) {
              c = {"NHWC", "tile", 1, 3, 3};
@@ -1962,7 +1990,8 @@ TEST(TestConvDepthwiseValuWrwPartitions, LeastRoundsTimesRowsAndOnePartitionWrit
     };
     // EfficientNet c960 30^2 n16 on 256 units, hankel q32 g2 nwg1 at 2 blocks a unit: 15 blocks
     // a partition. The target 35 (rows of 14) runs three rounds (42 rows on the busiest unit);
-    // 17 partitions of 29 rows are 255 blocks, one round (29 rows), the least of 17 .. 35.
+    // with fill 1, 17 partitions of 29 rows are 255 blocks, one round (29 rows), the least of
+    // 17 .. 35.
     auto shape = depthwise(960, {30, 30}, {3, 3}, {1, 1}, true);
     shape.n = 16;
     auto problem = problemOf(shape, 256);
@@ -1977,6 +2006,11 @@ TEST(TestConvDepthwiseValuWrwPartitions, LeastRoundsTimesRowsAndOnePartitionWrit
     hankel.bpc = 2;
     hankel.mult = 1;
     hankel.s = 1;
+    // fill 0 keeps the target: 35 partitions of 14 rows.
+    dw::partitionFor(*problem, 256, hankel);
+    EXPECT_EQ(problem->args.partitions, 35);
+    EXPECT_EQ(problem->args.rowsPerPartition, 14);
+    hankel.fill = 1;
     dw::partitionFor(*problem, 256, hankel);
     EXPECT_EQ(problem->args.partitions, 17);
     EXPECT_EQ(problem->args.rowsPerPartition, 29);

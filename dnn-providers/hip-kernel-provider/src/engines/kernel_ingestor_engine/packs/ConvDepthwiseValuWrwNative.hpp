@@ -73,6 +73,8 @@ struct WrwConfig
     /// The vector tile's ("vtile") channels a thread and output columns a strip; 0 otherwise.
     int64_t cv = 0;
     int64_t strip = 0;
+    /// 1: the partitions are traded for whole rounds of blocks (partitionFor); 0: the target.
+    int64_t fill = 0;
 };
 
 /// The LDS a hankel config's partial kernel declares (ConvDepthwiseHankelWrw.h's arithmetic).
@@ -104,9 +106,8 @@ bool vtileAdmits(const WrwProblem& problem, const WrwConfig& config, int xAlign,
 /// Splits @p problem's reduction rows into partitions enough to fill @p computeUnits, counted in
 /// dispatch units (device_units: CUs on gfx9, WGPs on gfx10+), at @p config's blocks per unit
 /// (bpc; 4 for a VALU variant's bpc 0) and channels per block: at most that many partitions (and
-/// rows / 4 lanes' worth for a vector tile), and, when those partitions are under 32 rows, of
-/// most / 2 .. most the count with the least rounds of blocks over the units times rows a
-/// partition (the most on a tie). One partition
+/// rows / 4 lanes' worth for a vector tile), and, for fill 1, of most / 2 .. most the count with
+/// the least rounds of blocks over the units times rows a partition (the most on a tie). One partition
 /// sets args.direct: the partial kernel writes dw itself.
 void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& config);
 

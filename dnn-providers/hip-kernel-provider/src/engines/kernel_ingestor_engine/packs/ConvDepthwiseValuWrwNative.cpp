@@ -71,8 +71,6 @@ constexpr int64_t BLOCK = 256;
 constexpr int64_t CHANNELS_PER_BLOCK = 64;
 /// Blocks per compute unit the partial kernel's partitions aim for.
 constexpr int64_t BLOCKS_PER_CU = 4;
-/// Partitions of fewer rows than this may be traded for whole rounds of blocks (partitionFor).
-constexpr int64_t SHORT_PARTITION_ROWS = 32;
 
 int64_t divUp(int64_t value, int64_t divisor)
 {
@@ -313,18 +311,15 @@ void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& co
               : 1;
     const int64_t most = std::clamp<int64_t>(
         divUp(wanted, blocksPerPartition), 1, std::max<int64_t>(1, a.rows / rowsAtLeast));
-    // Whole rounds of blocks over the units: of most / 2 .. most partitions (each taken as the
-    // rows split into equal runs), the one with the least rounds x rows a partition, the busiest
-    // unit's rows (the most partitions on a tie). gfx950 EfficientNet c960 30^2 n16: 35
-    // partitions of 15 blocks ran a third round for 13 blocks (26.8 us); 32 run two rounds.
+    // fill 1: whole rounds of blocks over the units. Of most / 2 .. most partitions (each taken
+    // as the rows split into equal runs), the one with the least rounds x rows a partition, the
+    // busiest unit's rows (the most partitions on a tie). gfx950 EfficientNet c960 30^2 n16: 35
+    // partitions of 15 blocks ran a third round for 13 blocks (26.8 us); 17 run one (1.12x).
+    // fill 0 keeps the target, which some n128 shapes need; autotune picks between them.
     const auto partitionsOf = [&](int64_t p) { return divUp(a.rows, divUp(a.rows, p)); };
     int64_t partitions = partitionsOf(most);
     int64_t bestCost = std::numeric_limits<int64_t>::max();
-    // Only short partitions (small batches) move: at 32 rows a partition and more the target
-    // stays (n128 ConvNeXt and EfficientNet ran 3-5% slower on fewer, longer partitions).
-    const int64_t least = divUp(a.rows, most) < SHORT_PARTITION_ROWS
-                              ? std::max({int64_t{1}, most / 2, most - 64})
-                              : most;
+    const int64_t least = config.fill != 0 ? std::max({int64_t{1}, most / 2, most - 64}) : most;
     for(int64_t p = most; p >= least; --p)
     {
         const int64_t actual = partitionsOf(p);
@@ -442,6 +437,7 @@ conv_depthwise_valu_wrw::WrwConfig configOf(const KernelDefinition& kernel)
     config.s = kernel.getIntMetadata("s");
     config.cv = kernel.getIntMetadata("cv");
     config.strip = kernel.getIntMetadata("strip");
+    config.fill = kernel.getIntMetadata("fill");
     return config;
 }
 
@@ -498,6 +494,11 @@ bool kernelMatches(const MatchContext& context,
     if(!hankel
        && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.s != 0
            || (config.bpc != 0 && config.bpc != 1 && config.bpc != 2 && config.bpc != 8)))
+    {
+        return false;
+    }
+    // fill 0 or 1; the floor keeps its target (fill 0).
+    if((config.fill != 0 && config.fill != 1) || (config.fill != 0 && config.variant == "floor"))
     {
         return false;
     }
