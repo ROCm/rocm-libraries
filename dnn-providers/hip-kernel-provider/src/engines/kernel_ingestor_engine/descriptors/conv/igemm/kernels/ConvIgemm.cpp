@@ -117,7 +117,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvIgemmTranspose(ConvIgemmTr
 extern "C" __global__ void __launch_bounds__(256) ConvIgemmReduce(K1ReduceArgs a CONV_EPI_PARAM)
 {
 #if defined(CONV_EPI) && CONV_EPI
-    k1ReduceSplitsEpi<CONV_IGEMM_T>(a, ConvEpiGen{epiArgs});
+    k1ReduceSplitsEpi<CONV_IGEMM_T>(a, convEpiGen(epiArgs));
 #else
     k1ReduceSplits<CONV_IGEMM_T>(a);
 #endif
