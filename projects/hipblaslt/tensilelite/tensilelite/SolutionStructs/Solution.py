@@ -5748,6 +5748,7 @@ class Solution(collections.abc.Mapping):
           if swizzleAIsTDM and state["VectorWidthA"] > 1 and mOStrideBytes > 1024:
             state["LdsBlockSizePerPadA"] = mOStrideBytes
             state["LdsPadA"] = int(16 / bpeA)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
+            assert state["LdsPadA"] * bpeA == 16, "swizzled-TDM A pad must be 16 bytes"
             state["_TDMIterateModeA"] = True
             state["TDMIterateMode"] = state["TDMIterateMode"] | 1              # kernel naming (bit0 = A)
           else:
@@ -5789,6 +5790,7 @@ class Solution(collections.abc.Mapping):
           if swizzleBIsTDM and state["VectorWidthB"] > 1 and nOStrideBytes > 1024:
             state["LdsBlockSizePerPadB"] = nOStrideBytes
             state["LdsPadB"] = int(16 / bpeB)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
+            assert state["LdsPadB"] * bpeB == 16, "swizzled-TDM B pad must be 16 bytes"
             state["_TDMIterateModeB"] = True
             state["TDMIterateMode"] = state["TDMIterateMode"] | 2              # kernel naming (bit1 = B)
           else:

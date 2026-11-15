@@ -922,6 +922,10 @@ class LocalReadMFMA(LocalRead):
                 addrIdx  = off // maxLDSConstOffset
                 windows  = segOff.get("readAddressWindows" + tc)
                 regIdx   = windows.index(addrIdx) if windows is not None else addrIdx
+                numLra   = writer.states.a.numVgprLocalReadAddr if tP["isA"] else writer.states.b.numVgprLocalReadAddr
+                assert 0 <= regIdx < numLra, \
+                    "swizzledTDM %s read at LDS offset %d needs LocalReadAddr%s+%d, but only %d address registers exist" \
+                    % (tc, off, tc, regIdx, numLra)
                 offSplit = off - addrIdx * maxLDSConstOffset
                 srcAddr  = vgpr("LocalReadAddr%s+%u" % (tc, regIdx))
                 ds = DSModifiers(na=1, offset=offSplit)
