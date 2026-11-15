@@ -6,7 +6,7 @@
 // site declares the channel's operands once and applies the epilogue per element before the
 // single rounding:
 //
-//   DW_EPI_DECL(name, ch, ok)   the per-channel operands of channel ch (loaded only when ok)
+//   DW_EPI_DECL(name, ch, ok)   the per-channel operands of channel ch (ok false: past the edge)
 //   DW_EPI_APPLY(v, name)       the fused fp32 value of v
 //
 // They read the functor `dwEpi`: a core takes it through DW_EPI_PARAM / DW_EPI_ARG, or binds it
@@ -23,7 +23,16 @@
 #define DW_EPI_ARG , dwEpi
 #define DW_EPI_BIND(p) const ConvEpiGen& dwEpi = (p).epi;
 #define DW_EPI_DECL(name, ch, ok) const ConvEpiGen::Chan name = dwEpi.chan((ch), (ok));
-#define DW_EPI_APPLY(v, name) dwEpi((v), (name), 0, true)
+#define DW_EPI_APPLY(v, name) dwEpiApply(dwEpi, (v), (name))
+
+/// The epilogue of one result. The value passes an empty asm first: with the chain visible to
+/// the 16-bit FMA-mix combines, instruction selection fails for some chains ("Cannot select:
+/// f32 = Constant<-1>").
+__device__ inline float dwEpiApply(const ConvEpiGen& epi, float v, const ConvEpiGen::Chan& chan)
+{
+    asm("" : "+v"(v));
+    return epi(v, chan, 0, true);
+}
 #else
 #define DW_EPI_PARAM
 #define DW_EPI_ARG
