@@ -2178,7 +2178,12 @@ Tests:
 - name: matmul_bias_stride
   category: pre_checkin
   function:
-    matmul: *real_precisions
+    # The bf16 entry carries its own gpu_arch_exclude (1030), which overrides the
+    # test-level value, so repeat the gfx11/gfx12 exclusion for it.
+    matmul:
+      - *hpa_half_precision
+      - { <<: *hpa_bf16_precision, gpu_arch_exclude: '1030|11\d\d|12[^5]\d' }
+      - *single_precision
   matrix_size:
     - {M: 128, N: 128, K: 128, bias_stride: 128}
     - {M: 128, N: 128, K: 128, bias_stride: 150}
