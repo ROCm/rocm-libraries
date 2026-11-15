@@ -949,7 +949,7 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
 
 TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
 {
-    static constexpr std::array<const char*, 14> SHAPE{"atom",
+    static constexpr std::array<const char*, 15> SHAPE{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -962,6 +962,7 @@ TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
                                                        "xcd",
                                                        "cf",
                                                        "swz",
+                                                       "dma",
                                                        "patch"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
