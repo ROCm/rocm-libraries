@@ -359,8 +359,9 @@ Key semantics:
   `tests/core/test_hip_lowering_parity.py` (every MMA atom of each target) and
   `tests/core/test_mma_operand_register_type.py`, run there the same way, as
   the `rocke_hip_lowering_parity` CTest; the `rocke_pytest_*` parts do not
-  collect these files. Both CTests are registered on every platform but
-  Windows, whose CI shards run close to their time limit, so CI does not
+  collect these files. Both CTests run only their CI shard's share of their
+  tests (rocKE item sharding, §5.0.2), and are registered on every platform
+  but Windows, whose CI shards run close to their time limit, so CI does not
   compare the MSVC-built engine's HIP output with Python's. `tests/run_all.py`
   supplies the program from a configured build as well, so a developer run
   checks it against the binding.

@@ -712,7 +712,7 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_HIP_SOURCE_IDENTITY_TEST "instances/differential/test_hip_source_identity.py")
     if(_ROCKE_IR_LOWER_CLI_ENVIRONMENT)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_hip_source_identity python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/${_ROCKE_HIP_SOURCE_IDENTITY_TEST}\" -v -rs --timeout=120)\n")
+             "add_test(rocke_hip_source_identity ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/${_ROCKE_HIP_SOURCE_IDENTITY_TEST}\" -v -rs --timeout=120)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_hip_source_identity PROPERTIES LABELS \"ckc;python;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\" TIMEOUT 300)\n")
     endif()
@@ -734,7 +734,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_hip_lowering_parity_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH};${_ROCKE_IR_LOWER_CLI_ENVIRONMENT}\")\n"
              "list(APPEND _rocke_hip_lowering_parity_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_hip_lowering_parity python -m pytest ${_rocke_parity_paths} -v -rs --timeout=60)\n"
+             "add_test(rocke_hip_lowering_parity ${_ROCKE_INSTALLED_PYTEST} ${_rocke_parity_paths} -v -rs --timeout=60)\n"
              "set_tests_properties(rocke_hip_lowering_parity PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
              "  ENVIRONMENT \"\${_rocke_hip_lowering_parity_environment}\"\n"
