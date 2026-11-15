@@ -56,6 +56,8 @@ _RDNA_WMMA_FEATURES = {
     "layout_ragged",
     "layout_paged",
     "runtime_head_dims",
+    "dense_q",
+    "seqused_q",
 }
 EXPECTED_FEATURES = {
     "attention_strided_decode": {

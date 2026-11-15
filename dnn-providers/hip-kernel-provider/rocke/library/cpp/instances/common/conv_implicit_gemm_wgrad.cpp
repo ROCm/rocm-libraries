@@ -169,7 +169,9 @@ bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad
 
 /* Per-arch CU counts. Mirrors the static table rocke.helpers.split_k
  * ARCH_NUM_CUS / DEFAULT_NUM_CUS that Python wgrad_streamk_default_pool
- * reads; test_conv_wgrad_streamk.py checks the two agree key by key. */
+ * reads; test_conv_wgrad_streamk.py checks the two agree key by key. The
+ * other gfx11 processors are left out on purpose, as in Python: the repo has
+ * no CU count for them, so they take the default. */
 static int wgrad_arch_num_cus(const char* arch)
 {
     static const struct
@@ -180,6 +182,11 @@ static int wgrad_arch_num_cus(const char* arch)
         {"gfx942", 304}, /* MI300X: 8 XCDs * 38 CUs */
         {"gfx950", 256}, /* MI350X: 8 XCDs * 32 CUs */
         {"gfx1151", 64}, /* RDNA gfx1151 (WMMA) */
+        {"gfx1201", 64}, /* RDNA4 Navi48 */
+        {"gfx1200", 32}, /* RDNA4 Navi44 */
+        {"gfx12-generic", 64}, /* one binary for gfx1200/gfx1201: the larger part */
+        {"gfx1100", 96}, /* RDNA3 Navi31 */
+        {"gfx11-generic", 96}, /* one binary for gfx1100-gfx1153: the largest part */
     };
     if(arch != NULL)
         for(const auto& e : table)
@@ -3432,6 +3439,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->a_sync_loader.vector_axis_row = axis_a;
         ctx->a_sync_loader.has_inner_dim = false;
         ctx->a_sync_loader.inner_dim = 0;
+        ctx->a_sync_loader.has_col_xor = false;
         ctx->a_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
 
         ctx->b_sync_loader.tile_rows = spec->lds_k_outer ? ctx->block_k : ctx->block_n;
@@ -3444,6 +3452,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->b_sync_loader.vector_axis_row = axis_b;
         ctx->b_sync_loader.has_inner_dim = false;
         ctx->b_sync_loader.inner_dim = 0;
+        ctx->b_sync_loader.has_col_xor = false;
         ctx->b_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_b);
 
         ctx->have_sync_loaders = true;

@@ -281,7 +281,8 @@ class WmmaFmhaDecodeSpec:
     # hipkernel:Gfx1151WmmaAttentionDecode ships this spec, and
     # hipkernel:Gfx1151WmmaAttention WmmaFmhaFwdV2Spec; both IngestorGenerator
     # specializations bind each matcher field to one accessor both specs define
-    # (configs/gfx1151_wmma_attention_decode.yaml, configs/gfx1151_wmma_attention.yaml).
+    # (configs/gfx1151_wmma_attention_decode.yaml, configs/gfx1151_wmma_attention.yaml);
+    # the prefill spec alone defines the paged fields, as only its catalog is paged.
     def catalog_kind(self) -> str:
         """``"decode"``: this object runs the split-KV decode (with its merge)."""
         return "decode"
@@ -603,6 +604,7 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
     ``WS_CNT`` follow :func:`wmma_fmha_decode_workspace` (unused with one split).
     """
     from rocke.core.codegen_policy import CodegenPolicy, apply_codegen_policy
+    from rocke.helpers.rdna_attention import rdna_attention_scaled_ptr
 
     spec = resolve_wmma_fmha_decode_spec(spec, arch=arch)
     ok, reason = is_valid_spec(spec, arch=arch)
@@ -689,7 +691,10 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
                 b.global_load_i32(p["cu_seqlens_k"], b.add(batch, c1)), k_start
             )
         else:
-            Sk_b = b.global_load_i32(p["seqused_k"], batch)
+            # seqlen_k bounds the keys a block_table row maps (the binding
+            # checks it against the table width * page); a longer seqused_k is
+            # clamped so the page lookup stays within this sequence's row.
+            Sk_b = b.smin(b.global_load_i32(p["seqused_k"], batch), Sk)
         rows_b = b.mul(g, Sq_b)
         Sq_d = b.smax(
             Sq_b, c1
@@ -743,38 +748,33 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
     def kv_bytes(x):
         return x if kv_eb == 1 else b.mul(x, c2)
 
-    def batch_ptr(ptr, stride, elem_bytes):
-        off = b.mul(
-            b.mul(b.zext(batch, I64), b.zext(stride, I64)), b.const_i64(elem_bytes)
-        )
-        return b.global_ptr_add(ptr, off)
-
-    def token_ptr(ptr, start, stride, elem_bytes):
-        off = b.mul(
-            b.mul(b.zext(start, I64), b.zext(stride, I64)), b.const_i64(elem_bytes)
-        )
-        return b.global_ptr_add(ptr, off)
+    def scaled_ptr(ptr, idx, stride, elem_bytes):
+        return rdna_attention_scaled_ptr(b, ptr, idx, stride, elem_bytes)
 
     if spec.packed:
         # An empty trailing sequence starts one past the last Q row; its (dead) Q loads
         # read the first row instead.
         q_base = b.select(b.cmp_gt(Sq_b, c0), q_start, c0)
-        Qb = token_ptr(p["Q"], q_base, p["stride_q_token"], 2)
-        Ob = token_ptr(p["O"], q_start, p["stride_o_token"], 2)
+        Qb = scaled_ptr(p["Q"], q_base, p["stride_q_token"], 2)
+        Ob = scaled_ptr(p["O"], q_start, p["stride_o_token"], 2)
     else:
-        Qb = batch_ptr(p["Q"], p["stride_q_batch"], 2)
-        Ob = batch_ptr(p["O"], p["stride_o_batch"], 2)
+        Qb = scaled_ptr(p["Q"], batch, p["stride_q_batch"], 2)
+        Ob = scaled_ptr(p["O"], batch, p["stride_o_batch"], 2)
     k_ss, v_ss = p["stride_k_token"], p["stride_v_token"]
-    if spec.layout == "dense":
-        k_base = lambda: batch_ptr(p["K"], p["stride_k_batch"], kv_eb)  # noqa: E731
-        v_base = lambda: batch_ptr(p["V"], p["stride_v_batch"], kv_eb)  # noqa: E731
-    elif spec.layout == "ragged":
-        k_base = lambda: token_ptr(p["K"], k_start, k_ss, kv_eb)  # noqa: E731
-        v_base = lambda: token_ptr(p["V"], k_start, v_ss, kv_eb)  # noqa: E731
-    else:  # paged: the cache base; pages are added per tile / row
-        k_base, v_base = (lambda: p["K"]), (lambda: p["V"])
-    k_slice = b.global_ptr_add(k_base(), kv_bytes(b.mul(kvh, p["stride_k_head"])))
-    v_slice = b.global_ptr_add(v_base(), kv_bytes(b.mul(vh, p["stride_v_head"])))
+
+    def kv_base(name, batch_stride, token_stride):
+        """This sequence's K / V rows; paged: the cache base (pages are added per
+        tile / row)."""
+        if spec.layout == "dense":
+            return scaled_ptr(p[name], batch, p[batch_stride], kv_eb)
+        if spec.layout == "ragged":
+            return scaled_ptr(p[name], k_start, token_stride, kv_eb)
+        return p[name]
+
+    k_base = kv_base("K", "stride_k_batch", k_ss)
+    k_slice = b.global_ptr_add(k_base, kv_bytes(b.mul(kvh, p["stride_k_head"])))
+    v_base = kv_base("V", "stride_v_batch", v_ss)
+    v_slice = b.global_ptr_add(v_base, kv_bytes(b.mul(vh, p["stride_v_head"])))
     sk1 = b.sub(Sk_b, c1)
     k_extent = kv_bytes(b.add(b.mul(sk1, k_ss), d_rt))
     v_extent = kv_bytes(b.add(b.mul(sk1, v_ss), b.add(dv0, ci(DVT))))
@@ -820,6 +820,9 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
         kv0_ = b.mul(t, ci(T))
         phys = b.readfirstlane(page_of(kv0_, valid))
         in_cache = page_ok(phys)
+        # A page id outside [0, num_blocks) is based at page 0 instead (its
+        # resource has no records), so no out-of-cache pointer is formed.
+        phys = b.select(in_cache, phys, c0)
         page_off = b.mul(
             b.mul(b.zext(phys, I64), b.zext(blk_stride, I64)), b.const_i64(kv_eb)
         )
@@ -974,12 +977,8 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
     if spec.bias:
         bias_elem = F32 if spec.bias == "f32" else elem
         bias_bytes = 4 if spec.bias == "f32" else 2
-        bias_base = b.global_ptr_add(
-            p["attn_bias_ptr"],
-            b.mul(
-                b.mul(b.zext(batch, I64), b.zext(p["bias_stride_b"], I64)),
-                b.const_i64(bias_bytes),
-            ),
+        bias_base = scaled_ptr(
+            p["attn_bias_ptr"], batch, p["bias_stride_b"], bias_bytes
         )
         bias_extent = b.add(
             b.add(
