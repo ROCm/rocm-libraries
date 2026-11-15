@@ -37,19 +37,6 @@ bool extentProductAtMost(const std::vector<int64_t>& dims, size_t first, int64_t
 
 } // namespace
 
-void ResampleValidator::checkTensorsNotVirtual(const std::vector<int64_t>& tensorIds)
-{
-    for(const auto& id : tensorIds)
-    {
-        if(findTensorAttributes(_tensorMap, id).virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Resample operands are read or written by the kernel and must not be virtual.");
-        }
-    }
-}
-
 void ResampleValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     std::vector<TensorDescriptor> tensors;
@@ -220,7 +207,8 @@ void ResampleValidator::checkTensorConfigSupported(
         tensorIds.push_back(resampleAttr.index_tensor_uid().value());
     }
 
-    checkTensorsNotVirtual(tensorIds);
+    validateNoVirtualTensors(
+        tensorIds, "Resample operands are read or written by the kernel and must not be virtual.");
     checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleAttr.index_tensor_uid());
     checkTensorShapesSupported(resampleAttr);
@@ -267,7 +255,8 @@ void ResampleValidator::checkBwdTensorConfigSupported(
         tensorIds.push_back(resampleBwdAttr.index_tensor_uid().value());
     }
 
-    checkTensorsNotVirtual(tensorIds);
+    validateNoVirtualTensors(
+        tensorIds, "Resample operands are read or written by the kernel and must not be virtual.");
     checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported({tensorIds[0], tensorIds[1]}, resampleBwdAttr.index_tensor_uid());
     checkBwdTensorShapesSupported(resampleBwdAttr);

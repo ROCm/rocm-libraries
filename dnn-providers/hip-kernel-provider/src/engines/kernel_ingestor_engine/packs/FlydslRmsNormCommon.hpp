@@ -107,8 +107,9 @@ inline bool isPackedRowMajor(const data_objects::TensorAttributes& tensor)
 
 /// The largest operand the kernel addresses: it views each operand as one buffer whose
 /// offsets are 32-bit bytes, and takes M and N as int32. Both matchers bound the row
-/// operands' bytes (x, and y/dy/dx of the same shape and dtype) by it; only the forward
-/// matcher also bounds gamma's bytes (columns times its own element size).
+/// operands' bytes (x, and y/dy/dx of the same shape and dtype) and inv_rms's bytes (one
+/// f32 per row) by it; only the forward matcher also bounds gamma's bytes (columns times
+/// its own element size).
 constexpr int64_t MAX_OPERAND_BYTES = 2147483647LL;
 
 /// Product of x's extents over [begin, end). -1 for a non-positive extent or a product

@@ -301,6 +301,11 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
         {
             return std::nullopt;
         }
+        // inv_rms is its own buffer view of one f32 per row.
+        if(rows > MAX_OPERAND_BYTES / elementBytes(invRms->data_type()))
+        {
+            return std::nullopt;
+        }
     }
 
     BoundTokens bound;

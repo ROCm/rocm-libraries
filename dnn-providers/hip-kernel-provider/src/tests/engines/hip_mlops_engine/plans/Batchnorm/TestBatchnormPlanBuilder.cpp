@@ -903,13 +903,13 @@ BatchnormAttributesT& batchnormAttrs(GraphT& graph)
 // An epsilon uid no tensor of the graph carries.
 constexpr int64_t UNRESOLVABLE_UID = 9999;
 
-// Turns the epsilon tensor into a pure runtime pass-by-value scalar: no baked value, read from
-// the device buffer slot of its uid at execute.
-void makeEpsilonRuntime(GraphT& graph, int64_t epsilonUid)
+// Turns a scalar tensor (epsilon, momentum) into a pure runtime pass-by-value scalar: no baked
+// value, read from the device buffer slot of its uid at execute.
+void makeScalarRuntime(GraphT& graph, int64_t scalarUid)
 {
-    auto& epsilon = tensorByUid(graph, epsilonUid);
-    epsilon.is_runtime_pass_by_value = true;
-    epsilon.value.Reset();
+    auto& scalar = tensorByUid(graph, scalarUid);
+    scalar.is_runtime_pass_by_value = true;
+    scalar.value.Reset();
 }
 
 flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(GraphT&)>& mutate
@@ -1023,7 +1023,18 @@ TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedB
 TEST_F(TestBatchnormTrainingGraphDecline, RuntimeEpsilonGraphIsAcceptedByBothBuilders)
 {
     auto builder = mutatedTrainingGraph(
-        [](GraphT& g) { makeEpsilonRuntime(g, batchnormAttrs(g).epsilon_tensor_uid); });
+        [](GraphT& g) { makeScalarRuntime(g, batchnormAttrs(g).epsilon_tensor_uid); });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormTrainingGraphDecline, RuntimeMomentumGraphIsAcceptedByBothBuilders)
+{
+    auto builder = mutatedTrainingGraph(
+        [](GraphT& g) { makeScalarRuntime(g, *batchnormAttrs(g).momentum_tensor_uid); });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1110,8 +1121,8 @@ TEST_P(TestBatchnormVarianceInferenceEpsilon, BakedEpsilonIsApplicable)
 
 TEST_P(TestBatchnormVarianceInferenceEpsilon, RuntimeEpsilonIsApplicable)
 {
-    EXPECT_TRUE(isApplicable(
-        [](GraphT& g) { makeEpsilonRuntime(g, varianceAttrs(g).epsilon_tensor_uid); }));
+    EXPECT_TRUE(
+        isApplicable([](GraphT& g) { makeScalarRuntime(g, varianceAttrs(g).epsilon_tensor_uid); }));
 }
 
 TEST_P(TestBatchnormVarianceInferenceEpsilon, UnresolvableEpsilonIsNotApplicable)
