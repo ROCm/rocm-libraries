@@ -96,8 +96,10 @@ template <class T,
           int WM,
           int WQ,
           int WN,
-          int EP = 0>
-__device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
+          int EP = 0,
+          class Epi = ConvEpiNone>
+__device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a,
+                                                          const Epi& epi = Epi{})
 {
     constexpr int WAVE = Atom::WAVE, DIM = Atom::DIM, KA = Atom::KA, KPL = Atom::KPL;
     constexpr int SP = SmallcPow2<S>::value;
@@ -335,6 +337,19 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
                          && (reinterpret_cast<unsigned long long>(y) % (VW * sizeof(TO))) == 0;
         const int ow = ow0 + wq * DIM + lane % DIM;
         const int kw = nb + wn * FN * DIM;
+        // The fused epilogue's per-channel operands of each accumulator, loaded once.
+        typename Epi::Chan chans[FN][ACC];
+        if constexpr(!__is_same(Epi, ConvEpiNone))
+        {
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+#pragma unroll
+                for(int e = 0; e < ACC; ++e)
+                {
+                    const int kk = kw + bRow(j, Atom::dRow(lane, e));
+                    chans[j][e] = epi.chan(kk, kk < a.k);
+                }
+        }
 #pragma unroll
         for(int i = 0; i < FM; ++i)
         {
@@ -351,7 +366,10 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
                     VO v;
 #pragma unroll
                     for(int t = 0; t < VW; ++t)
-                        v[t] = K1Elem<TO>::store(acc[i][gs * G + t / ACC][t % ACC]);
+                        v[t] = K1Elem<TO>::store(epi(acc[i][gs * G + t / ACC][t % ACC],
+                                                     chans[gs * G + t / ACC][t % ACC],
+                                                     0,
+                                                     true));
                     *reinterpret_cast<VO*>(yp + k0) = v;
                 }
                 else
@@ -362,7 +380,8 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
                         const int j = gs * G + t / ACC;
                         const int kk = kw + bRow(j, Atom::dRow(lane, t % ACC));
                         if(kk < a.k)
-                            yp[kk * a.ys[1]] = K1Elem<TO>::store(acc[i][j][t % ACC]);
+                            yp[kk * a.ys[1]] = K1Elem<TO>::store(
+                                epi(acc[i][j][t % ACC], chans[j][t % ACC], 0, true));
                     }
                 }
             }
@@ -375,6 +394,18 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
     TO* slot = reinterpret_cast<TO*>(lds + WIN_BYTES + W_BYTES) + wave * SLOT;
     TO* y = static_cast<TO*>(a.y) + img * a.ys[0] + od * a.ys[2];
     const bool colFast = a.ys[4] == 1;
+    // The fused epilogue runs before the slot (which holds the rounded output): a lane's column
+    // of fragment j is output channel nb + wn FN 16 + 16 j + lane % 16.
+    typename Epi::Chan chans[FN];
+    if constexpr(!__is_same(Epi, ConvEpiNone))
+    {
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+        {
+            const int kk = nb + wn * FN * DIM + j * DIM + lane % DIM;
+            chans[j] = epi.chan(kk, kk < a.k);
+        }
+    }
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
@@ -383,7 +414,7 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a)
 #pragma unroll
             for(int e = 0; e < Atom::ACC; ++e)
                 slot[(j * DIM + lane % DIM) * DIM + Atom::dRow(lane, e)]
-                    = K1Elem<TO>::store(acc[i][j][e]);
+                    = K1Elem<TO>::store(epi(acc[i][j][e], chans[j], 0, true));
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
         __builtin_amdgcn_wave_barrier();
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -435,8 +466,10 @@ template <class T,
           int FN,
           int WM,
           int WQ,
-          int WN>
-__device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a)
+          int WN,
+          class Epi = ConvEpiNone>
+__device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a,
+                                                             const Epi& epi = Epi{})
 {
     constexpr int THREADS = 256;
     constexpr int SP = SmallcPow2<S>::value;
@@ -569,6 +602,14 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
         return;
     const int k0 = nb + g * FN, ow0t = ow0 + pcol;
     TO* yr = y + oh * a.ys[3];
+    // The fused epilogue's per-channel operands of the thread's FN channels, loaded once.
+    typename Epi::Chan chans[FN];
+    if constexpr(!__is_same(Epi, ConvEpiNone))
+    {
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            chans[j] = epi.chan(k0 + j, k0 + j < a.k);
+    }
     // Vector stores where the layout makes a thread's outputs adjacent: its FN channels of one
     // pixel (channels fastest) or its FM pixels of one channel (columns fastest).
     if(a.ys[1] == 1 && k0 + FN <= a.k && (a.k % FN) == 0 && ((a.ys[4] % FN) == 0))
@@ -583,7 +624,7 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
                 VF v;
 #pragma unroll
                 for(int j = 0; j < FN; ++j)
-                    v[j] = K1Elem<TO>::store(acc[p][j]);
+                    v[j] = K1Elem<TO>::store(epi(acc[p][j], chans[j], 0, true));
                 *reinterpret_cast<VF*>(yr + ow * a.ys[4] + k0) = v;
             }
         }
@@ -602,7 +643,7 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
                 VM v;
 #pragma unroll
                 for(int p = 0; p < FM; ++p)
-                    v[p] = K1Elem<TO>::store(acc[p][j]);
+                    v[p] = K1Elem<TO>::store(epi(acc[p][j], chans[j], 0, true));
                 *reinterpret_cast<VM*>(yr + kk * a.ys[1] + ow0t) = v;
             }
         }
@@ -619,7 +660,8 @@ __device__ __attribute__((always_inline)) void smallcConvFma(const SmallcArgs& a
         {
             const int ow = ow0t + p;
             if(ow < a.wo)
-                yr[kk * a.ys[1] + ow * a.ys[4]] = K1Elem<TO>::store(acc[p][j]);
+                yr[kk * a.ys[1] + ow * a.ys[4]]
+                    = K1Elem<TO>::store(epi(acc[p][j], chans[j], 0, true));
         }
     }
 }

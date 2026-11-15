@@ -104,7 +104,8 @@ std::string elementTypeFor(data_objects::DataType dataType)
 
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_fft::parseFftProblem(context, direction);
+    const auto problem
+        = conv_fft::parseFftProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value())
     {
         return std::nullopt;
@@ -136,7 +137,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
-    auto problem = conv_fft::parseFftProblem(context, *direction);
+    auto problem = conv_fft::parseFftProblem(context, *direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value()
        || kernel.getStringMetadata("dtype")
               != data_objects::EnumNameDataType(problem->base.dataType))
@@ -164,11 +165,21 @@ bool kernelMatches(const MatchContext& context,
     return resolve(context, kernel).has_value();
 }
 
-const std::vector<KernelArgument>& kernelSignature()
+/// ConvFftArgs by value, and a ConvEpiArgs after it for a fused output pass.
+const std::vector<KernelArgument>& kernelSignature(bool fused)
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(ConvFftArgs)), 0, ""}};
-    return s_signature;
+    static const std::vector<KernelArgument> s_fusedSignature{
+        {"by_value", static_cast<uint32_t>(sizeof(ConvFftArgs)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fusedSignature : s_signature;
+}
+
+/// The passes that write y (or dx), where a fused epilogue runs.
+bool writesOutput(std::string_view entry)
+{
+    return entry == "ConvFftOutput" || entry == "ConvFftDepthwise";
 }
 
 /// The four launches of a plan: forward / backward data (filter, data, product, output), or
@@ -283,12 +294,24 @@ public:
                         {"ConvFftOutput", plan.dataGrid(plan.chunk, a.cb), config.tb}};
         }
         std::vector<IngestorKernelCode> kernels;
+        const auto& epilogue = resolved->problem.base.epilogue;
         for(const auto& launch : launches)
         {
             KernelDefinition entry = kernel;
             entry.source.entryPoint = launch.entry;
+            // Only the pass that writes y carries the generated epilogue; the transforms and the
+            // product compile exactly as unfused.
+            const bool fused = !epilogue.empty() && writesOutput(launch.entry);
+            if(fused)
+            {
+                conv_epilogue::addEpilogueDefines(options, epilogue);
+            }
+            else
+            {
+                conv_epilogue::removeEpilogueDefines(options);
+            }
             auto code = buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, entry, options, kernelSignature());
+                _kernelCompiler, _kpackLoader, context, entry, options, kernelSignature(fused));
             code.setBlockSize(static_cast<unsigned int>(launch.threads), 1, 1);
             code.setGridSize(static_cast<unsigned int>(launch.grid), 1, 1);
             kernels.push_back(std::move(code));
@@ -323,6 +346,23 @@ public:
         auto* specA = reinterpret_cast<ConvFftComplex*>(base + plan.aOffset);
         auto* specB = reinterpret_cast<ConvFftComplex*>(base + plan.bOffset);
         const auto stream = handle.getStream();
+        // The output pass of a fused graph takes the epilogue's operands; its channel comes from
+        // the block, so no flat walk is needed.
+        const bool fusedEpilogue = !problem.base.epilogue.empty();
+        const ConvEpiArgs epiArgs
+            = fusedEpilogue ? conv_epilogue::epilogueArgs(
+                                  problem.base.epilogue, deviceBuffers, numDeviceBuffers)
+                            : ConvEpiArgs{};
+        const auto launchOutput = [&](size_t index, const ConvFftArgs& args) {
+            if(fusedEpilogue)
+            {
+                dispatch.kernel(index, stream).launch(stream, args, epiArgs);
+            }
+            else
+            {
+                dispatch.kernel(index, stream).launch(stream, args);
+            }
+        };
         // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- mirrors the kernel argument block's C arrays
         const auto copy4 = [](long long(&to)[4], const long long(&from)[4]) {
             for(int i = 0; i < 4; ++i)
@@ -380,7 +420,7 @@ public:
             fused.wsB = fixed;
             fused.dst = bwd ? xPtr : yPtr;
             copy4(fused.dstStr, bwd ? problem.xStr : problem.yStr);
-            dispatch.kernel(1, stream).launch(stream, fused);
+            launchOutput(1, fused);
             return;
         }
         if(resolved.direction == ConvDirection::BACKWARD_WEIGHTS)
@@ -461,7 +501,7 @@ public:
             output.wsY = specB;
             output.dst = bwd ? xPtr : yPtr;
             copy4(output.dstStr, bwd ? problem.xStr : problem.yStr);
-            dispatch.kernel(3, stream).launch(stream, output);
+            launchOutput(3, output);
         }
     }
 
