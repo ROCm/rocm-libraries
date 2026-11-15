@@ -1989,8 +1989,10 @@ check that.
 Every layer of a network but the last is followed by SiLU, `x / (1 + exp(-x))`; the last has one output.
 The networks run in float32 with the ensemble mean in double. An estimate costs a few small matrix
 products: about 2 us in the portable build for three networks of two 64-wide layers, against 6-15 us
-for a 500-tree `tree_data` model, whose cost rises as more engines' models compete for the CPU cache. One estimate is
-made per applicable engine and graph, so that cost grows with the number of engines.
+for a 500-tree `tree_data` model, whose cost rises as more engines' models compete for the CPU cache
+(one Ryzen AI MAX+ 395 core, clang -O3, SSE2 build, one convolution graph with 77 inputs; the 15 us end
+is per engine when 32 engines' models are scored in turn). One estimate is made per applicable engine
+and graph, so that cost grows with the number of engines.
 Training (`uhd_gen train --adapter mlp_data`) fits each network on the engine's own rows with an L1
 loss on the standardized log metric, so engines stay independent; whether a catalog ranker should be
 `mlp_data` or `tree_data` is the evaluation's to decide. The adapter loads under the checks of

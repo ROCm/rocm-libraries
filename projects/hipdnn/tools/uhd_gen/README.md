@@ -1256,11 +1256,15 @@ python -m uhd_gen train --adapter linear_data \
 fully connected networks to the log of one metric (`MlpDataAdapter`, `mlp_model.fbs`,
 identifier `HMLP`). It serves both roles. With `--role predict_engine` it is one engine's L1
 estimate: the same job a `tree_data` L1 model does, for about 2 us per engine at run time
-(the portable build; about 1.3 us with the opt-in AVX2 path) where a 500-tree model takes
-6-15 us, more as engines' models crowd the CPU cache. Pick it when the cost of scoring every
-engine of a graph matters; compare the two with `evaluate` on a held-out corpus first: that
-evaluation, not this adapter, decides between `mlp_data` and `tree_data`. With `--role sort_kernel_catalog` it is a catalog ranker, an ungrouped one
-like a single-layer `tree_data` model (see the end of this section). `--group-by-feature` is
+where a 500-tree model takes 6-15 us, more as engines' models crowd the CPU cache. Those
+figures are from one Ryzen AI MAX+ 395 core (clang -O3, the portable SSE2 build, median of 7
+runs, one NHWC convolution graph, 77 inputs, three 64-64 networks): 2.0-2.2 us per
+`mlp_data` estimate (about 1.3 us with the opt-in AVX2 path), 6.0-7.0 us for one 500-tree,
+127-leaf model, and 10-15 us per engine when 32 engines' models are scored in turn. Pick it
+when the cost of scoring every engine of a graph matters; compare the two with `evaluate` on
+a held-out corpus first: that evaluation, not this adapter, decides between `mlp_data` and
+`tree_data`. With `--role sort_kernel_catalog` it is a catalog ranker, an ungrouped one like
+a single-layer `tree_data` model (see the end of this section). `--group-by-feature` is
 refused: there is one ensemble per model and no grouped artifact.
 
 What it predicts. The network estimates the **log** of the registered ranking metric
