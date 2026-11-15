@@ -2469,7 +2469,7 @@ class Solution(collections.abc.Mapping):
         (not state["ProblemType"].get("GroupedGemm", False), "no GroupedGemm"),
         (not state["ProblemType"].get("OutputAmaxD", False), "no OutputAmaxD"),
         (not state["ProblemType"].get("UseE", False), "no UseE"),
-        (not state["ProblemType"].get("FusedGemmA2A", False), "no FusedGemmA2A"),
+        (state["ProblemType"].get("FusedA2A", "Disabled") == "Disabled", "FusedA2A=Disabled"),
       )
       unmet = [what for ok, what in peerDLimits if not ok]
       if unmet:
