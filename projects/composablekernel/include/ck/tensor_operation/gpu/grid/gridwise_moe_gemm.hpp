@@ -335,10 +335,8 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     static constexpr index_t KLane =
         mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
 
-    // When GemmSpec pads N and/or K, each expert's B stays at its logical N x K in memory and
-    // the descriptor addresses each row and K vector, so the padding costs LDS rather than HBM.
-    // N need only be a multiple of 8 (gate and up weights) or 16, and K of the K vector.
-    // A and E keep their logical K and N.
+    // When GemmSpec pads N or K, each expert's B stays at its logical N x K in memory, so the
+    // padding costs LDS rather than HBM. K must be a multiple of the K vector.
     static constexpr bool PadN =
         GemmSpec == tensor_operation::device::GemmSpecialization::NPadding ||
         GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
@@ -609,10 +607,17 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
             static_assert(NkSwizzleNumber == KLane * NLane * KSub * KVec,
                           "unexpected preshuffle swizzle size");
             const index_t KVecs     = K / KVec;
-            const index_t RowBlocks = math::integer_divide_ceil((IsInputGemm ? 2 : 1) * N, NLane);
+            const index_t Rows      = (IsInputGemm ? 2 : 1) * N;
+            const index_t RowBlocks = math::integer_divide_ceil(Rows, NLane);
+            // When the rows do not fill whole row blocks, B is preshuffled as one block of all its
+            // rows, so it needs no rows beyond its logical size.
+            const bool whole_blocks = Rows % NLane == 0;
             const auto b_rb_desc    = make_naive_tensor_descriptor(
                 make_tuple(RowBlocks, KVecs, Number<NLane>{}, Number<KVec>{}),
-                make_tuple(K * NLane, Number<NLane * KVec>{}, Number<KVec>{}, I1));
+                make_tuple(whole_blocks ? K * NLane : NLane * KVec,
+                           whole_blocks ? NLane * KVec : Rows * KVec,
+                           Number<KVec>{},
+                           I1));
             const auto b_row_desc = transform_tensor_descriptor(
                 b_rb_desc,
                 make_tuple(make_merge_transform(make_tuple(RowBlocks, Number<NLane>{})),

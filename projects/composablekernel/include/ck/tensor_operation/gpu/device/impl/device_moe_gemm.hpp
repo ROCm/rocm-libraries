@@ -460,16 +460,6 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
         {
             return false;
         }
-        if constexpr(GridwiseGemm64::PadN)
-        {
-            // B keeps its logical N x K in memory, and its rows are addressed in whole
-            // preshuffle row blocks of NPerXDL. The gate and up halves share a row block, so
-            // their combined rows must fill those blocks exactly.
-            if((arg.N * (IsInputGemm ? 2 : 1)) % NPerXDL != 0)
-            {
-                return false;
-            }
-        }
         if constexpr(GridwiseGemm64::PadN || GridwiseGemm64::PadK)
         {
             // Masked loads/stores in the padded region are offset by 2GB, which only lands

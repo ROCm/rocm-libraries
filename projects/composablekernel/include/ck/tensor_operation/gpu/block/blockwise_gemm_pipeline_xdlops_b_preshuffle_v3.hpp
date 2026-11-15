@@ -805,13 +805,13 @@ struct BlockwiseGemmXdlops_pipeline_bpreshuffle_v3<BlockGemmPipelineScheduler::I
     }
 
     protected:
+    // Each A thread copy moves one K group of KPack / KGroup elements, which is the
+    // stride between K groups in the thread buffer.
+    static constexpr index_t AKGroupStride = KPack / KGroup;
+
     // MRepeat MWave MLane KRepeat KLane KPack
     // KRepeat -> MRepeat-> Mwave->KLane->MLane->KPack
     // Reduce the vgpr usage here.
-    // Each A thread-copy call moves one K group of KPack / KGroup elements, so that
-    // is the stride between groups in the thread buffer's K dimension.
-    static constexpr index_t AKGroupStride = KPack / KGroup;
-
     static constexpr auto a_thread_desc_ = make_naive_tensor_descriptor_packed(
         make_tuple(I2, I1, I1, Number<KRepeat>{}, I1, Number<KPack>{}));
 

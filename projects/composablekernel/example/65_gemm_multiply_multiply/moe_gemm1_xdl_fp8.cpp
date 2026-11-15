@@ -170,7 +170,7 @@ struct Example
     using AElementOp = PassThrough;
     using BElementOp = PassThrough;
 
-    // MOE_PAD_NK tests an N that no tile divides, where the gate and up rows share a row block.
+    // MOE_PAD_NK tests an N that no tile divides.
 #ifdef MOE_PAD_NK
     static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::NKPadding;
 #else
