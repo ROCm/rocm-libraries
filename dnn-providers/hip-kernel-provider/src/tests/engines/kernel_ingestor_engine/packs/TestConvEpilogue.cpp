@@ -505,6 +505,61 @@ TEST(TestConvEpilogue, DeclinesFusedBackwardDirections)
 }
 
 // ---------------------------------------------------------------------------
+// Naive's claim set: fusion never widens it. A fused graph is claimed exactly when the bare
+// convolution is, over a grid of shapes on both sides of the workload budget.
+// ---------------------------------------------------------------------------
+
+TEST(TestConvEpilogue, NaiveClaimsFusedExactlyWhereItClaimsTheBareConv)
+{
+    const PackSymbols pack{"", "hipkernel.conv_naive_fwd.graph_match", "", "", "", "", "", "", ""};
+    hipdnn_plugin_sdk::ingestor::DeviceProperties device = testDeviceProperties();
+    device.gcnArchName = "gfx942";
+    device.multiProcessorCount = 304;
+    const std::vector<std::vector<Step>> chains{
+        {bias(DataType::HALF)},
+        {bias(DataType::HALF), relu()},
+        {bias(DataType::HALF), unary(PointwiseMode::GELU_FWD)},
+        {bias(DataType::HALF), unary(PointwiseMode::SWISH_FWD)}};
+    int claimed = 0;
+    int declined = 0;
+    for(const int64_t n : {1, 8, 64})
+    {
+        for(const int64_t channels : {3, 32, 256})
+        {
+            for(const int64_t extent : {7, 56, 224})
+            {
+                for(const int64_t filter : {1, 3, 7})
+                {
+                    ConvShape shape = nhwcHalf();
+                    shape.n = n;
+                    shape.c = channels;
+                    shape.k = channels * 2;
+                    shape.input = {extent, extent};
+                    shape.filter = {filter, filter};
+                    shape.prePadding = {filter / 2, filter / 2};
+                    shape.postPadding = {filter / 2, filter / 2};
+                    const auto bare = conv_naive_test::specFor(shape, ConvDirection::FORWARD);
+                    const GraphFixture bareFixture(conv_naive_test::buildGraph(bare), device);
+                    const bool bareClaimed = matchesGraph(pack, bareFixture.context()).has_value();
+                    (bareClaimed ? claimed : declined) += 1;
+                    for(const auto& chain : chains)
+                    {
+                        const GraphFixture fused(buildFusedGraph(fusedSpecFor(shape, chain)),
+                                                 device);
+                        EXPECT_EQ(matchesGraph(pack, fused.context()).has_value(), bareClaimed)
+                            << "n " << n << " c " << channels << " hw " << extent << " f " << filter
+                            << ", " << chain.size() << " steps";
+                    }
+                }
+            }
+        }
+    }
+    // The grid reaches both sides of the budget.
+    EXPECT_GT(claimed, 0);
+    EXPECT_GT(declined, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Compile identity: the code-object key follows the pattern, never values or shapes.
 // ---------------------------------------------------------------------------
 
