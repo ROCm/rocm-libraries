@@ -40,7 +40,8 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common._lse_store import reduce_lse_store
+from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
     tiled_reduce_unsupported_reason,
@@ -1351,10 +1352,7 @@ class UnifiedAttentionReduceTiledSpec:
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1525,22 +1523,16 @@ def build_unified_attention_reduce_tiled(
         b.global_store(out, out_idx, scalar_out, align=2)
 
     if spec.emit_lse:
-        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
-        # lane writes. overall_max is in log2 units (segm_max carries
-        # scale*log2e); lse_store converts to natural log and writes -inf for a
-        # row with no mass (every segment empty, sum 0), whose O is already 0.
-        # A NaN sum (NaN query row) keeps NaN, as O does: the same !(l == 0)
-        # test the tiled 2D epilogues use, never l > 0.
-        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-            lse_index = b.add(b.mul(q_token, num_qh_p), q_head)
-            lse_store(
-                b,
-                lse,
-                lse_index,
-                overall_max,
-                overall_expsum,
-                row_has_mass=lse_row_has_mass(b, overall_expsum),
-            )
+        reduce_lse_store(
+            b,
+            lse,
+            tid=tid,
+            q_token=q_token,
+            q_head=q_head,
+            num_heads=num_qh_p,
+            overall_max=overall_max,
+            overall_expsum=overall_expsum,
+        )
 
     return b.kernel
 
