@@ -24,6 +24,7 @@
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
+#include "engines/conv/ConvRepackWorkspaceCap.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
 #endif
@@ -76,27 +77,38 @@ HipblasltContainer::HipblasltContainer()
     //   rocBLAS with atomics not allowed, or offers hipBLASLt no workspace (as MIOpen's
     //   deterministic GEMMs do), and claims bitwise-reproducible results
     //   (TestGpuConvGemmDeterministic reruns each plan). The RPR engines have one form.
+    const auto capOverride = repackWorkspaceCapOverride();
+    if(capOverride.has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO(CONV_REPACK_WORKSPACE_CAP_ENV_NAME
+                               << " set: explicit-GEMM convolution repack workspace cap "
+                               << *capOverride << " bytes in every direction");
+    }
+    const size_t repackCap = capOverride.value_or(MAX_REPACK_WORKSPACE_BYTES);
+    const size_t wrwRepackCap = capOverride.value_or(MAX_BACKWARD_WEIGHTS_REPACK_WORKSPACE_BYTES);
     using Notes = std::vector<int32_t>;
     [[maybe_unused]] constexpr int32_t NONDETERMINISTIC = HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC;
     [[maybe_unused]] constexpr int32_t TF32 = HIPDNN_NUMERICAL_NOTE_TENSOR_CORE;
     [[maybe_unused]] constexpr int32_t RPR = HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION;
-    const auto addConvEngine = [this](int64_t engineId,
-                                      ConvGemmPlanBuilder::PlanFactory factory,
-                                      bool tf32,
-                                      ConvGemmPlanBuilder::NarrowPartials narrowPartials,
-                                      Notes numericalNotes,
-                                      bool reducedPrecisionReduction = false) {
-        auto engine
-            = std::make_unique<PlanBuilderEngine>(engineId, false, std::move(numericalNotes));
-        engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
-                                                                     MAX_REPACK_WORKSPACE_BYTES,
-                                                                     tf32,
-                                                                     reducedPrecisionReduction,
-                                                                     false,
-                                                                     ColumnLayout::FOLLOW_Y,
-                                                                     narrowPartials));
-        _engineManager->addEngine(std::move(engine));
-    };
+    const auto addConvEngine =
+        [this, repackCap, wrwRepackCap](int64_t engineId,
+                                        ConvGemmPlanBuilder::PlanFactory factory,
+                                        bool tf32,
+                                        ConvGemmPlanBuilder::NarrowPartials narrowPartials,
+                                        Notes numericalNotes,
+                                        bool reducedPrecisionReduction = false) {
+            auto engine
+                = std::make_unique<PlanBuilderEngine>(engineId, false, std::move(numericalNotes));
+            engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
+                                                                         repackCap,
+                                                                         tf32,
+                                                                         reducedPrecisionReduction,
+                                                                         false,
+                                                                         ColumnLayout::FOLLOW_Y,
+                                                                         narrowPartials,
+                                                                         wrwRepackCap));
+            _engineManager->addEngine(std::move(engine));
+        };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     const auto hipblasltGemm = [](bool deterministic) -> ConvGemmPlanBuilder::PlanFactory {
         return [deterministic](const HipdnnEnginePluginHandle& handle,
