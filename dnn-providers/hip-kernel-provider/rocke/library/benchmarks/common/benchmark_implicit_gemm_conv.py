@@ -1530,7 +1530,7 @@ def main() -> int:
     parser.add_argument(
         "--two-stage",
         default="auto",
-        choices=["auto", "always", "never"],
+        choices=["auto", "always", "never", "only"],
         dest="two_stage",
         help=(
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
@@ -1540,6 +1540,9 @@ def main() -> int:
             "two-stage kernels always compete with the packed-atomic ones; "
             "always = time the two-stage kernels alongside the packed-atomic ones "
             "(nothing is dropped), so both split-K reductions compete; "
+            "only = --run-from-cache: time the two-stage kernels and nothing "
+            "else (a re-sweep of just that family, to merge with an earlier "
+            "full sweep; the JIT sweep treats it as always); "
             "never = skip two-stage entirely (default: auto)"
         ),
     )
@@ -3676,13 +3679,15 @@ def _run_wgrad_sweep(
     # what lets the wide exact tiles run at a K depth the cshuffle leg cannot
     # afford. Those tiles are the reason the set exists, so measure them on
     # both legs.
-    _run_two_stage = args.two_stage == "always" or (
+    _run_two_stage = args.two_stage in ("always", "only") or (
         args.two_stage == "auto" and (_cpg_is_odd or bool(_exact))
     )
     # When only the exact tiles triggered it, run the second leg on just those
     # rather than on the whole cartesian grid -- the grid has already been
     # measured on the atomic leg and doubling it buys nothing.
-    _two_stage_src = combos if (args.two_stage == "always" or _cpg_is_odd) else _exact
+    _two_stage_src = (
+        combos if (args.two_stage in ("always", "only") or _cpg_is_odd) else _exact
+    )
     if _run_two_stage:
         if args.two_stage == "auto" and _cpg_is_odd:
             print(
@@ -4880,9 +4885,12 @@ def _filter_wgrad_two_stage_candidates(candidates, two_stage_mode):
     whatever C/groups is -- the JIT sweep builds them for odd C/groups only,
     but here they are already compiled, and deep f32-workspace splits beat
     the atomic ones on many even shapes. Only an explicit
-    ``--two-stage never`` drops them outright; "auto" and "always" leave
-    ``candidates`` untouched regardless of C/groups parity.
+    ``--two-stage never`` drops them outright and ``only`` keeps nothing
+    else; "auto" and "always" leave ``candidates`` untouched regardless of
+    C/groups parity.
     """
+    if two_stage_mode == "only":
+        return [c for c in candidates if c[0].two_stage]
     if two_stage_mode != "never":
         return candidates
     return [c for c in candidates if not c[0].two_stage]

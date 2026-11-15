@@ -718,11 +718,11 @@ def main() -> int:
     implicit_grp.add_argument(
         "--two-stage",
         default="auto",
-        choices=["auto", "always", "never"],
+        choices=["auto", "always", "never", "only"],
         dest="two_stage",
         help=(
-            "two-stage (f32 workspace) wgrad split-K kernels: auto, always or "
-            "never, as benchmark_implicit_gemm_conv.py takes it. "
+            "two-stage (f32 workspace) wgrad split-K kernels: auto, always, "
+            "never or only, as benchmark_implicit_gemm_conv.py takes it. "
             "Forwarded to implicit-GEMM only."
         ),
     )
