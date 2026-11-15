@@ -644,6 +644,154 @@ L3 ↔ [§4.3](#43-do-the-two-implementations-agree-the-migration-gate), L5 ↔
 [§4.2](#42-does-the-platforms-output-stay-stable), L6 ↔
 [§3.1](#31-are-the-kernels-correct).
 
+### 5.0.2 CI shards and rocKE item sharding
+
+Each term below has one meaning in this document:
+
+| Term | Meaning | Who controls it |
+|---|---|---|
+| **CI shard** | One TheRock test job. It runs one `ctest -L ^<tier>$` invocation in one Test step. | TheRock, through the pinned TheRock revision |
+| **Tier** | The CTest label that a CI run selects: quick, standard, comprehensive or full. An entry with the label of one tier also has the labels of all later tiers (`tier_labels` in `shared/ctest/parse_ctest_categories.py`). | The labels in `ROCKE_ENGINE_test_categories_external.yaml`; TheRock selects the tier for each run |
+| **gtest sharding** | A gtest binary runs only its share of its cases. `GTEST_SHARD_INDEX` (0-based) and `GTEST_TOTAL_SHARDS` select the share. TheRock exports these two variables to every CTest entry. | gtest |
+| **ctest striding** | Each CI shard runs every n-th CTest entry (`ctest -I`). TheRock does not use it for hipkernelprovider. | TheRock |
+| **rocKE item sharding** | A rocKE pytest entry runs only its share of its pytest items. A stable hash of each item's shard key selects the share. In installed CI, the `rocke.tests.ctest_shard` plugin does this. In developer runs, `ROCKE_TEST_SHARD=i/n` does this in the library tests and in any run that loads the plugin with `-p rocke.tests.ctest_shard`. | rocKE |
+
+**What is split.** TheRock shards hipkernelprovider with gtest sharding only.
+Thus each CI shard starts every CTest entry of its tier. In each installed rocKE
+pytest entry that uses `_ROCKE_INSTALLED_PYTEST`, the `rocke.tests.ctest_shard`
+plugin keeps only the items of this CI shard. Each CI shard collects the whole
+entry and runs only its share.
+
+**How items are assigned.** The shard key of an item is its module path plus
+its parameter id. An item without parameters uses its node id. A SHA-256 hash
+of the key selects the shard. Thus all tests of one parameter set run on the
+same CI shard. `ROCKE_TEST_SHARD`,
+`library/tests/run_device_shards.py` and the library conftest use the same
+rule. The plugin splits the items that remain after `-k`, `-m`, `--deselect`
+and the conftest filters. Thus every CI shard divides the same set of items,
+and each item runs on exactly one CI shard. On a large entry, the hash spreads
+the items about evenly by count. The split does not use the run time.
+
+**How an entry turns on sharding.** `platform/CMakeLists.txt` defines
+`_ROCKE_INSTALLED_PYTEST` as
+`python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`.
+Every installed rocKE pytest entry starts its command with this variable,
+except the explicit gates. Use it for each new installed pytest entry. The
+plugin takes the shard from the first source that applies:
+
+1. A non-blank `ROCKE_TEST_SHARD` (`i/n` or `i,j,.../n`, 0-based).
+2. `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` (0-based), only when the
+   command line has `--rocke-shard-from-gtest-env`.
+3. No source: every item runs.
+
+The plugin does not read TheRock's 1-based `SHARD_INDEX` and `TOTAL_SHARDS`.
+Without the flag, the plugin ignores the gtest variables. Thus exported gtest
+variables do not split a developer's pytest run. A child pytest process that a
+test starts without the flag is also not split by the gtest variables. When
+`ROCKE_TEST_SHARD` is non-blank, the plugin does not read the gtest variables.
+Then the header line names only `ROCKE_TEST_SHARD` as the source. A malformed
+`ROCKE_TEST_SHARD` is a usage error. With the flag and a blank
+`ROCKE_TEST_SHARD`, the gtest pair gives the shard. Then a malformed gtest
+value is a usage error. A gtest pair with only one variable set is also a
+usage error. On a usage error, pytest stops with exit code 4 before
+collection.
+
+**What the log shows.** The plugin prints one header line, for example:
+
+```text
+rocke-ctest-shard: 1/4 (GTEST_SHARD_INDEX=1, GTEST_TOTAL_SHARDS=4)
+```
+
+When no source applies, the line is `rocke-ctest-shard: off`. The plugin adds
+this line to the pytest header. It also prints the line again at the end of
+the run, so the line shows with `-q` and `--no-header`. TheRock runs CTest with
+`-V`, so the CI log shows these lines also for a passing entry. When a shard
+applies, the plugin prints the whole split after the header line at the end of
+the run, for example:
+
+```text
+rocke-ctest-shard 1/4: split 3/2/4/3 of 12; kept 2
+```
+
+The total after `of` is the number of selected items before the split. The
+counts before `of` give the items of each shard, and they add up to the total.
+`kept` is the count of this shard. The `split ... of ...` part is the same on
+every CI shard of one entry. The shard before the colon and `kept` are
+different on each CI shard. To prove that no item is lost, compare the
+`split ... of ...` part of one entry in the logs of all CI shards. The quick
+tier uses one CI shard. There, the header line shows
+`0/1 (GTEST_SHARD_INDEX=0, GTEST_TOTAL_SHARDS=1)` and the split line shows
+`split N of N; kept N`. An entry that does not load the plugin prints none of
+these lines. It runs all its items on every CI shard.
+
+**Exit codes.**
+
+- The selection has items, but none of them falls in this CI shard: the entry
+  passes (exit 0). After the split line, the plugin prints
+  `rocke-ctest-shard <shard>: no test of this entry falls in this shard; the entry passes`.
+- The selection is empty before the split, for example a `-k` or `-m`
+  expression that matches no item: pytest exits with 5 on every CI shard. The
+  split line shows `of 0; kept 0`.
+- A collection or import error: pytest exits with 2 on every CI shard, also on
+  a CI shard that gets no items.
+- A malformed shard value: exit 4, as above.
+- A test path that does not exist: pytest exits with 4 on every CI shard.
+
+The plugin never sets exit code 77. Some entries use 77 as their CTest skip
+code when they cannot run on this machine.
+
+**The explicit gates are never sharded.** `rocke_library_counted_structural_gate`
+and `rocke_library_counted_compiler_gate` do not use `_ROCKE_INSTALLED_PYTEST`.
+Their command does not load the plugin. The gate conftest stops the session
+on a partial run: a non-blank `ROCKE_TEST_SHARD`, a selection filter or a
+deselected item. The gate entries set `ROCKE_EXPLICIT_GATE_PARTIAL=0`, so a
+partial run is not permitted. A split would stop the gate on every CI shard.
+Thus each gate runs whole on every CI shard of its tier.
+
+**Dependency on TheRock.** Item sharding needs two TheRock behaviours.
+TheRock exports `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` to every CTest
+entry. TheRock also shards hipkernelprovider with gtest sharding only
+(`hipkernelprovider` is in `GTEST_ONLY_SHARDING_COMPONENTS` in TheRock's
+`test_runner.py`). If TheRock also applies ctest striding to hipkernelprovider,
+each entry runs on one CI shard only. That CI shard keeps only its own share of
+the items. With n CI shards, only about 1/n of the items then run, and no test
+fails. The logs show this problem: the split line of an entry is on one CI
+shard only, not on all of them.
+
+**Run one CI shard locally.** From a provider install, with the rocKE wheels
+installed in the `python` on `PATH`:
+
+```bash
+GTEST_SHARD_INDEX=1 GTEST_TOTAL_SHARDS=4 \
+  ctest --test-dir <install>/bin/hip_kernel_provider -V -R '^rocke_library_sdpa_pytest$'
+```
+
+From a source checkout, in `platform/`:
+
+```bash
+PYTHONPATH=python ROCKE_TEST_SHARD=1/4 \
+  python -m pytest -p rocke.tests.ctest_shard tests/core -m "not integration" -v
+```
+
+Run each shard index of the same total, and compare the split lines.
+An installed tree and a source checkout collect slightly different tests. Only
+the installed tree has the hipDNN golden-bundle cases, and some source tests do
+not install. Thus the split total of an entry can differ between the two trees.
+A test in both trees has the same id and lands on the same shard.
+The tests of the plugin, `platform/tests/test_ctest_shard.py`, run in their own
+installed entry, `rocke_ctest_shard_pytest`, in the standard tier.
+
+**The `rocke` package must be importable.** Each installed pytest entry,
+except the gates, loads `rocke.tests.ctest_shard` before it collects. If the
+`python` on `PATH` cannot import `rocke`, the entry fails before it runs a
+test. A provider install puts the `rocke` package in the CTest directory.
+CTest starts each entry in that directory, and `python -m` puts that directory
+first on `sys.path`. A standalone install puts the package in `site-packages`,
+outside the CTest directory. There, entries that put only `tests/library` on
+`PYTHONPATH` need `rocke` installed in the `python` on `PATH`. Examples are
+`rocke_library_attention_pytest` and the
+`rocke_<operation>_reference_unit_pytest` entries.
+
 ### 5.1 Before merging: source backends and installed CI
 
 Run both lanes below when changing backend selection, rejection tests, test
@@ -754,6 +902,8 @@ They run the platform pytest suite in parts, each a group of directories under
 `_ROCKE_PLATFORM_PYTEST_GROUPS` in [`platform/CMakeLists.txt`](platform/CMakeLists.txt)
 names the groups. `rocke_pytest_other` runs the rest of `tests/` without
 `tests/library`: the files at its top level and every directory no group names.
+It does not run `tests/test_ctest_shard.py`, which `rocke_ctest_shard_pytest`
+runs in the standard tier.
 To print each part's command and environment:
 
 ```text
