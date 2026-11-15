@@ -1153,9 +1153,10 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   set their own, must name spec fields (checked when the section is read, in every section),
   and applies after `spec_overrides` (a section may
   override and hold the same field: the override moves the default, the hold keeps every spec
-  there). The gfx942 unified 2D engine uses the pair for rocKE's production stacks: four
-  `also` sections override a (dtype, head size)'s stack on the geometry rocKE selects, while
-  every geometry section holds the five stack fields (`configs/gfx942_attention_unified_2d.engine.yaml`).
+  there). The gfx942 unified 2D engine uses the pair for rocKE's production stacks: three
+  `also` sections override the stack on the geometry rocKE selects (D64 for both dtypes,
+  fp16 D128, bf16 D128), while every geometry section holds the five stack fields
+  (`configs/gfx942_attention_unified_2d.engine.yaml`).
 
 Without any of the five keys (or with all empty) the output is byte-identical to a manifest
 that never had them. `--plan-space` counts merged cells and prints the combo count beside

@@ -17,8 +17,9 @@ plan's workspace (`packs/Gfx942AttentionUnified2DGeometry.hpp`).
   geometry plus the alternatives a correctness-checked gfx942 sweep measured as needed. The
   production stack (mask limit, hoist, conflict-free V stores, K ring; direct-global Q at D64)
   is what rocKE's own dispatcher builds for a long prefill; it ships in every fp16 cell and
-  every bf16 D64 cell, and only the default geometry ships at bf16 D128, where it lost on
-  every sweep graph.
+  every bf16 D64 cell, and the reduction kept no bf16 D128 production kernel. Narrow (16x16
+  MFMA) kernels ship in the ratio-1 cells of D64 and fp16 D128, and at bf16 D128 ratios 1, 2,
+  4 and 8.
 - Cells: head size x dtype x GQA ratio. The kernels read the head counts as kernel arguments
   and bake only the ratio (KMD `num_queries_per_kv`), so one variant serves every head pair of
   its ratio.
