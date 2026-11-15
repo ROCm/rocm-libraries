@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include "engines/kernel_ingestor_engine/packs/ConvDirectProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -326,6 +327,92 @@ TEST(TestConvDirectDirection, RefusesWeightGradientsAndTheOtherDirection)
         parseDirectProblem(forward.context(), ConvDirection::BACKWARD_WEIGHTS).has_value());
     const GraphFixture wrw(buildGraph(specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS)));
     EXPECT_FALSE(parseDirectProblem(wrw.context(), ConvDirection::BACKWARD_WEIGHTS).has_value());
+}
+
+// A pointwise epilogue: forward graphs carry it only where the engine asks for it; a backward-data
+// graph with a pointwise node after its convolution is never one the engine serves.
+TEST(TestConvDirectFusion, ForwardTakesTheEpilogueOnlyWhenAsked)
+{
+    using namespace conv_epilogue_test;
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    const GraphFixture fused(
+        buildFusedGraph(fusedSpecFor(shape, {conv_epilogue_test::bias(), relu()})));
+    const auto problem
+        = parseDirectProblem(fused.context(), ConvDirection::FORWARD, conv_naive::Fusion::EPILOGUE);
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_EQ(problem->yUid, outputUid(2));
+    EXPECT_FALSE(problem->base.epilogue.empty());
+    EXPECT_FALSE(parseDirectProblem(fused.context(), ConvDirection::FORWARD).has_value());
+    EXPECT_TRUE(
+        matchesGraph(
+            PackSymbols{"", "hipkernel.conv_direct_fwd.graph_match", "", "", "", "", "", "", ""},
+            fused.context())
+            .has_value());
+}
+
+TEST(TestConvDirectFusion, BackwardDataDeclinesAPointwiseNodeAfterItsConvolution)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    auto spec = specFor(baseShape(), ConvDirection::BACKWARD_DATA);
+    const GraphFixture bare(buildGraph(spec));
+    const PackSymbols bwd{"", "hipkernel.conv_direct_bwd.graph_match", "", "", "", "", "", "", ""};
+    ASSERT_TRUE(matchesGraph(bwd, bare.context()).has_value());
+
+    // dx virtual, then relu(dx) -> DX.
+    constexpr int64_t OUT = 100;
+    spec.x.isVirtual = true;
+    TensorSpec out = specFor(baseShape(), ConvDirection::BACKWARD_DATA).x;
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+        serializeTensor(builder, spec.xUid, spec.x),
+        serializeTensor(builder, spec.wUid, spec.w),
+        serializeTensor(builder, spec.yUid, spec.y),
+        serializeTensor(builder, OUT, out)};
+    const auto conv = data_objects::CreateConvolutionBwdAttributesDirect(builder,
+                                                                         spec.yUid,
+                                                                         spec.wUid,
+                                                                         spec.xUid,
+                                                                         &spec.prePadding,
+                                                                         &spec.postPadding,
+                                                                         &spec.stride,
+                                                                         &spec.dilation,
+                                                                         spec.mode)
+                          .Union();
+    const auto relu = data_objects::CreatePointwiseAttributes(builder,
+                                                              data_objects::PointwiseMode::RELU_FWD,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              spec.xUid,
+                                                              ::flatbuffers::nullopt,
+                                                              ::flatbuffers::nullopt,
+                                                              OUT)
+                          .Union();
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes{
+        data_objects::CreateNodeDirect(builder,
+                                       "dgrad",
+                                       DataType::FLOAT,
+                                       data_objects::NodeAttributes::ConvolutionBwdAttributes,
+                                       conv),
+        data_objects::CreateNodeDirect(builder,
+                                       "relu",
+                                       DataType::FLOAT,
+                                       data_objects::NodeAttributes::PointwiseAttributes,
+                                       relu)};
+    builder.Finish(data_objects::CreateGraphDirect(builder,
+                                                   "dgrad_relu",
+                                                   DataType::UNSET,
+                                                   DataType::UNSET,
+                                                   DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes));
+    const GraphFixture fused(std::move(builder));
+    EXPECT_FALSE(matchesGraph(bwd, fused.context()).has_value());
+    EXPECT_FALSE(parseDirectProblem(
+                     fused.context(), ConvDirection::BACKWARD_DATA, conv_naive::Fusion::EPILOGUE)
+                     .has_value());
 }
 
 TEST(TestConvDirectSize, RefusesAnImageBeyondTheBufferOffsets)
