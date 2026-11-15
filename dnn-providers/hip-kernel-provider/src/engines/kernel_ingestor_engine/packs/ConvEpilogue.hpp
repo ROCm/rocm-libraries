@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_plugin_sdk/ConvEpilogueMatch.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
@@ -35,66 +36,15 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_epilogue
 {
 
-/// One step of the chain, applied to the running fp32 value v.
-enum class OpCode
-{
-    ADD_OPERAND, ///< v + operand (bias)
-    ADD_SCALAR, ///< v + value
-    MUL_OPERAND, ///< v * operand (scale)
-    MUL_SCALAR, ///< v * value
-    RELU, ///< relu / clipped relu / clamp / leaky relu: values lower, upper, slope
-    GELU, ///< exact (erf)
-    GELU_TANH, ///< tanh approximation
-    SWISH, ///< v * sigmoid(beta v): value beta (silu at 1)
-    SIGMOID,
-    TANH,
-    ELU, ///< value alpha
-    ABS,
-    SOFTPLUS, ///< log(1 + e^(beta v)) / beta, v past 20 / beta: value beta
-};
+using hipdnn_plugin_sdk::conv_epilogue::ConvEpilogue;
+using hipdnn_plugin_sdk::conv_epilogue::Op;
+using hipdnn_plugin_sdk::conv_epilogue::OpCode;
+using hipdnn_plugin_sdk::conv_epilogue::Operand;
+using hipdnn_plugin_sdk::conv_epilogue::Scalar;
 
-/// A tensor operand the epilogue reads: a per-channel vector ([1, K, 1, ...]) or a one-element
-/// device tensor, indexed by the channel or by 0.
-struct Operand
-{
-    int64_t uid = 0;
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
-    bool perChannel = true;
-};
-
-/// A value slot of ConvEpiArgs::scalar: fixed at plan build (an attribute, a constant scalar
-/// tensor, a runtime scalar with a default), or read at execute (a runtime pass-by-value scalar
-/// tensor the caller supplies).
-struct Scalar
-{
-    float value = 0.0F;
-    std::optional<hipdnn_plugin_sdk::ScalarOperand> runtime;
-};
-
-struct Op
-{
-    OpCode code = OpCode::ADD_OPERAND;
-    /// The operand index (ADD_OPERAND, MUL_OPERAND) or the first scalar slot.
-    int slot = 0;
-};
-
-/// The epilogue of a forward convolution graph. Empty for a single-node graph.
-struct ConvEpilogue
-{
-    std::vector<Op> ops;
-    std::vector<Operand> operands;
-    std::vector<Scalar> scalars;
-    /// The convolution node's own output (virtual in a fused graph).
-    int64_t convOutputUid = 0;
-    /// The graph's written output: the last pointwise node's.
-    int64_t outputUid = 0;
-
-    bool empty() const
-    {
-        return ops.empty();
-    }
-};
+static_assert(hipdnn_plugin_sdk::conv_epilogue::MAX_OPERANDS == CONV_EPI_OPERANDS
+                  && hipdnn_plugin_sdk::conv_epilogue::MAX_SCALARS == CONV_EPI_SCALARS,
+              "the shared parser's bounds are the kernel argument block's");
 
 /// The graph's pointwise chain after its convolution node, or nullopt when the graph has nodes
 /// after the convolution that the generator cannot fuse. @p convOutputUid is the conv node's y and

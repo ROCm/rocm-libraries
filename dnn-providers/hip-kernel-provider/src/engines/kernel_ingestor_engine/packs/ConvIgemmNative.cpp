@@ -1184,7 +1184,7 @@ public:
                       long long rowTiles,
                       std::optional<IngestorKernelCode> reduce,
                       std::array<std::optional<IngestorKernelCode>, 3> copies,
-                      const IgemmProblem& problem,
+                      IgemmProblem problem,
                       const conv_igemm::SplitPlan& plan)
         : _conv(std::move(conv))
         , _convTail(std::move(convTail))
@@ -1192,7 +1192,7 @@ public:
         , _rowTiles(rowTiles)
         , _reduce(std::move(reduce))
         , _copies(std::move(copies))
-        , _problem(problem)
+        , _problem(std::move(problem))
         , _plan(plan)
     {
     }
