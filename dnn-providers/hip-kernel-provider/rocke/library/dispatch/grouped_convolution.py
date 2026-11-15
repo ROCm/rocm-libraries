@@ -7,10 +7,10 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950. Weight-gradient
-(wgrad), gfx942 forward and gfx1250 forward have no list registered at all:
-this rewrite moved fwd/dgrad onto the instance-list machinery but has not yet
-ported those onto it, so those
+forward and backward-data (dgrad) convolutions on gfx950 and backward-data
+convolutions on gfx1250. Weight-gradient (wgrad), gfx942 forward and gfx1250
+forward have no list registered at all: this rewrite moved fwd/dgrad onto the
+instance-list machinery but has not yet ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
 default.
@@ -55,8 +55,9 @@ WHAT DISPATCH DECIDES
   The instances are shape-generic binaries built against a probe problem, so
   admission never builds a kernel. The LLVM flavor is part of an instance's
   name, and admission checks it against ``ConvGroupedRequest.llvm_flavor``
-  (default :data:`DEFAULT_LLVM_FLAVOR`, the flavor the registered lists are
-  built for): a request for another flavor admits none of them. Selection is
+  (default: the arch's :data:`DEFAULT_LLVM_FLAVORS` entry, the flavor its
+  registered lists are built for): a request for another flavor admits none
+  of them. Selection is
   a pure function of the request -- it never probes the process
   (``ROCKE_LLVM_FLAVOR``, COMGR) for a flavor.
 * **Selection** among admitted instances, with no ``ranker``, is the first one
@@ -95,7 +96,12 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from rocke.core.arch import ArchTarget
-from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
+from kernels.conv.aot_jobs import (
+    job_for_identity,
+    kernel_for_job,
+    spec_for_job,
+    spec_launch_block_size,
+)
 from kernels.conv.direct_aot_jobs import (
     direct_job_for_identity,
     direct_kernel_for_job,
@@ -154,6 +160,7 @@ __all__ = [
     "CONV_GROUPED_ABI_VERSION",
     "CONV_WINOGRAD_ABI_VERSION",
     "DEFAULT_LLVM_FLAVOR",
+    "DEFAULT_LLVM_FLAVORS",
     "ConvGroupedRequest",
     "ConvInstanceSpec",
     "ConvLaunchPlan",
@@ -193,12 +200,15 @@ _INSTANCE_DIR = Path(__file__).resolve().with_name("grouped_convolution_instance
 _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
+    ("gfx1250", "dgrad"): "gfx1250_dgrad.json",
 }
 
-# The LLVM flavor a request is admitted against unless it names its own: the
-# one every registered list is built for (pinned by
-# test_default_llvm_flavor_is_the_registered_one).
+# The LLVM flavor a request is admitted against unless it names its own: per
+# arch, the one its registered lists are built for (pinned by
+# test_default_llvm_flavor_is_the_registered_one); DEFAULT_LLVM_FLAVOR for an
+# arch with no list.
 DEFAULT_LLVM_FLAVOR = "llvm22"
+DEFAULT_LLVM_FLAVORS: dict[str, str] = {"gfx950": "llvm22", "gfx1250": "llvm24"}
 
 # The buffers bound to an instance's A, B and D operands, by direction.
 _OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
@@ -241,11 +251,21 @@ class ConvGroupedRequest(OperatorRequest):
     algorithm: str = "auto"
     spec_id: str = "auto"
     # LLVM flavor the caller lowers to; instances built for another flavor are
-    # not admitted. Part of the request, never read from the process.
-    llvm_flavor: str = DEFAULT_LLVM_FLAVOR
+    # not admitted. Part of the request, never read from the process. None (the
+    # default) stays None in the field and means the arch's DEFAULT_LLVM_FLAVORS
+    # entry, resolved where it is read (resolved_llvm_flavor), so
+    # dataclasses.replace(req, arch=...) follows the new arch's default.
+    llvm_flavor: str | None = None
+
+    def resolved_llvm_flavor(self) -> str:
+        """``llvm_flavor``, or the arch's default when the request names none."""
+        if self.llvm_flavor is not None:
+            return self.llvm_flavor
+        return DEFAULT_LLVM_FLAVORS.get(self.arch, DEFAULT_LLVM_FLAVOR)
 
     def normalized(self) -> dict:
         d = asdict(self)
+        d["llvm_flavor"] = self.resolved_llvm_flavor()
         d["dtype"] = d["dtype"].lower()
         d["layout"] = d["layout"].upper()
         d["direction"] = d["direction"].lower()
@@ -394,9 +414,10 @@ def _request_errors(req: OperatorRequest) -> tuple[str, ...]:
         errors.append(f"unsupported dtype {req.dtype!r}; fp16 or bf16 only")
     if req.layout.upper() != "NHWC":
         errors.append(f"unsupported layout {req.layout!r}; NHWC only")
-    if req.llvm_flavor not in LLVM_FLAVORS:
+    flavor = req.resolved_llvm_flavor()
+    if flavor not in LLVM_FLAVORS:
         errors.append(
-            f"unknown llvm_flavor {req.llvm_flavor!r}; one of {', '.join(LLVM_FLAVORS)}"
+            f"unknown llvm_flavor {flavor!r}; one of {', '.join(LLVM_FLAVORS)}"
         )
     try:
         ArchTarget.from_gfx(req.arch)
@@ -505,7 +526,9 @@ def _direct_launch_spec(
 def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, str]:
     """Can the AOT binary of ``identity`` run ``req``?"""
     if not identity.is_direct:
-        return identity_supports_problem(identity, _gemm_problem(req), req.llvm_flavor)
+        return identity_supports_problem(
+            identity, _gemm_problem(req), req.resolved_llvm_flavor()
+        )
     if identity.algorithm == "direct_nongrouped" and req.G != 1:
         # The non-grouped family only exists for one group (the AOT run path,
         # direct_kernel_sweep.direct_plans, applies the same rule).
@@ -513,7 +536,7 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
     problem, why = _direct_problem(req)
     if problem is None:
         return False, why
-    ok, why = identity_supports_problem(identity, problem, req.llvm_flavor)
+    ok, why = identity_supports_problem(identity, problem, req.resolved_llvm_flavor())
     if not ok:
         return False, why
     spec, why = _direct_launch_spec(identity, req)
@@ -523,7 +546,11 @@ def _admits(identity: KernelIdentity, req: ConvGroupedRequest) -> tuple[bool, st
 def _instance_block(identity: KernelIdentity) -> tuple[int, int, int]:
     """Workgroup size of an instance, from its tuning alone."""
     if not identity.is_direct:
-        return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        if identity.pipeline != "wavelet":
+            return (identity.warp_m * identity.warp_n * identity.wave_size, 1, 1)
+        # Wavelet appends load waves to the workgroup; the spec knows how many.
+        spec = spec_for_job(job_for_identity(identity), identity.dtype_a)
+        return (spec_launch_block_size(spec), 1, 1)
     # threads_per_block reads only the knobs, so any shape the spec accepts
     # at construction answers it.
     probe = DirectConvProblem(
@@ -1143,10 +1170,6 @@ def load_instance_list(path: Path) -> InstanceList:
     for i, record in enumerate(records):
         where = f"{path.name}: instances[{i}]"
         identity = lst.identity(record, where)
-        if identity.pipeline == "wavelet":
-            # Wavelet appends load waves to the workgroup, which _instance_block
-            # does not model; no registered arch builds it.
-            raise InstanceListError(f"{where}: wavelet instances are not supported")
         if identity in seen:
             raise InstanceListError(
                 f"{where}: {identity.label()} is already instances[{seen[identity]}]"
@@ -1344,7 +1367,7 @@ def _winograd_spec(
     problem = _conv_problem(req)
     dtype = req.dtype.lower()
     steps, _ = winograd_steps(problem, dtype, plan)
-    why = winograd_flavor_reason(problem, dtype, plan, req.llvm_flavor)
+    why = winograd_flavor_reason(problem, dtype, plan, req.resolved_llvm_flavor())
     if why is not None:
         raise ValueError(f"{name}:{plan.label}: {why}")
     return ConvWinogradSpec(

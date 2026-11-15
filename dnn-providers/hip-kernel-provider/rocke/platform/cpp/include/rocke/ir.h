@@ -1950,10 +1950,10 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 /* Abort the kernel (Python IRBuilder.trap): llvm.trap, which the backend emits
- * as s_trap 2 (gfx11: its simulated trap, s_trap 2 then s_sendmsg then an
- * s_sethalt loop). A taken trap aborts the process on Linux (ROCr), never
- * returns from the launch on Windows, and stops the wave under a debugger, so
- * it is a last resort. */
+ * as s_trap 2 or, on some processors, as its simulated trap. Which processors,
+ * and what a taken trap does on each host, is stated in the tile.trap section
+ * of dsl_docs/reference/op_vocabulary.md. A taken trap does not let the process
+ * carry on, so it is a last resort. */
 void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);

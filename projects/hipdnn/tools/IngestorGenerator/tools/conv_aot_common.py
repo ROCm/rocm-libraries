@@ -52,8 +52,8 @@ def bind_rocke(rocke_root: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def read_rocke_catalog(direction: str) -> list:
-    """rocKE's own registered instances of ``(ARCH, direction)``, as dicts, in
+def read_rocke_catalog(direction: str, arch: str = ARCH) -> list:
+    """rocKE's own registered instances of ``(arch, direction)``, as dicts, in
     rocKE's on-disk order (a set sorted by label for dgrad, the priority order for
     fwd: ``dispatch.grouped_convolution``'s module docstring). rocKE must already be
     bound (:func:`bind_rocke`)."""
@@ -63,7 +63,7 @@ def read_rocke_catalog(direction: str) -> list:
         load_instance_list,
     )
 
-    path = _INSTANCE_DIR / _INSTANCE_LISTS[(ARCH, direction)]
+    path = _INSTANCE_DIR / _INSTANCE_LISTS[(arch, direction)]
     return [i.to_dict() for i in load_instance_list(path).identities]
 
 
