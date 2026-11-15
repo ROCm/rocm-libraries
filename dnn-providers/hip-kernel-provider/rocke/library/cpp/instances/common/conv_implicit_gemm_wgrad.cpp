@@ -84,6 +84,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.regt_prefetch = 0;
     s.regt_addr_step = false;
     s.wmma_atomic_pair = false;
+    s.x_run = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -358,7 +359,7 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
      *     flags={"async": async_dma, "kouter": lds_k_outer, "regt": ...,
-     *            "rtp{N}": ..., "ras": ..., "apr": ..., "pad{N}": ...,
+     *            "rtp{N}": ..., "ras": ..., "apr": ..., "xrun": ..., "pad{N}": ...,
      *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
      *            "wsr{N}": ..., "unroll": unroll_k, "pfa": prefetch_addr},
      *   )
@@ -388,14 +389,14 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, regt, rtp{N}, ras, apr, pad{N}, spk/spkauto, twostage,
+    /* flags: async, kouter, regt, rtp{N}, ras, apr, xrun, pad{N}, spk/spkauto, twostage,
      * wsr{N}, unroll, pfa, rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most
      * WGRAD_NAME_MAX_FLAGS
      * when every conditional tag is present. The name is built before
      * validation, so an invalid spec can reach the maximum too. */
     enum
     {
-        WGRAD_NAME_MAX_FLAGS = 18
+        WGRAD_NAME_MAX_FLAGS = 19
     };
     char pad_flag[32] = {0};
     const char* flag_names[WGRAD_NAME_MAX_FLAGS];
@@ -430,6 +431,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* A different split-K epilogue; only tagged when set. Mirrors Python. */
     flag_names[n_flags] = "apr";
     flag_on[n_flags] = s->wmma_atomic_pair ? 1 : 0;
+    n_flags++;
+    /* A different B vector width rule; only tagged when set. Mirrors Python. */
+    flag_names[n_flags] = "xrun";
+    flag_on[n_flags] = s->x_run ? 1 : 0;
     n_flags++;
 
     /* An explicit lds_k_pad changes the LDS row stride and so the emitted code;
@@ -710,6 +715,35 @@ static int wgrad_free_axis_vec(int chan, const char* dtype, bool has_override, i
     return (has_override && override_vec < v) ? override_vec : v;
 }
 
+/* Python WgradConvSpec.b_run: the contiguous run the X (B) free-axis vector
+ * may span over the merged problem -- cpg, or the X * cpg filter-row run
+ * under x_run. */
+static int wgrad_b_run(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+{
+    const int gm = s->group_merge > 1 ? s->group_merge : 1;
+    const int cpg = rocke_conv_problem_cpg(&s->problem) * gm;
+    return s->x_run ? s->problem.X * cpg : cpg;
+}
+
+/* Python wgrad_x_run_problem_reason: why the problem cannot run an x_run
+ * kernel. The (x, c) run of a filter row is contiguous and in bounds only for
+ * an ungrouped 2-D problem without W padding or W dilation. */
+static bool wgrad_x_run_problem_reason(const rocke_conv_problem_t* p, char* reason, size_t cap)
+{
+    const char* why = NULL;
+    if(p->groups != 1)
+        why = "x_run needs an ungrouped problem (the x step is C, not cpg)";
+    else if(p->is_3d || rocke_conv_problem_is_pointwise(p))
+        why = "x_run needs a 2-D, non-pointwise problem";
+    else if(p->pW != 0 || p->dW != 1)
+        why = "x_run needs pW == 0 and dW == 1 (contiguous, in-bounds filter row)";
+    if(why == NULL)
+        return false;
+    if(reason && cap)
+        snprintf(reason, cap, "%s", why);
+    return true;
+}
+
 /* Python _sync_staged_chunks: the (A, B) global loads per thread of the
  * synchronous tile loaders, with the widths the builder picks when async_dma
  * is off (row-axis on an M-outer tile, scalar when no width above 1 fits;
@@ -720,14 +754,12 @@ static bool wgrad_sync_staged_chunks(const rocke_implicit_gemm_conv_wgrad_spec_t
     const int threads = s->warp_m * s->warp_n * s->wave_size;
     /* spec.merged_problem: folding Gm groups multiplies kpg and cpg by Gm. */
     const int gm = s->group_merge > 1 ? s->group_merge : 1;
-    const int caps[2] = {wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem) * gm,
-                                             s->dtype_a,
-                                             s->has_vector_size_a,
-                                             s->vector_size_a),
-                         wgrad_free_axis_vec(rocke_conv_problem_cpg(&s->problem) * gm,
-                                             s->dtype_b,
-                                             s->has_vector_size_b,
-                                             s->vector_size_b)};
+    const int caps[2]
+        = {wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem) * gm,
+                               s->dtype_a,
+                               s->has_vector_size_a,
+                               s->vector_size_a),
+           wgrad_free_axis_vec(wgrad_b_run(s), s->dtype_b, s->has_vector_size_b, s->vector_size_b)};
     const int frees[2] = {s->tile_m, s->tile_n};
     if(threads <= 0)
         return false;
@@ -747,7 +779,7 @@ static bool wgrad_sync_staged_chunks(const rocke_implicit_gemm_conv_wgrad_spec_t
 }
 
 /* Python wgrad_reg_transpose_vecs: the register-transpose free-axis widths
- * (A over the kpg run, B over the cpg run of the merged problem). An explicit
+ * (A over the kpg run, B over the b_run of the merged problem). An explicit
  * vector_size_a / vector_size_b is taken exactly; otherwise the widest width
  * the channel run allows and the tile splits into. Returns false with Python's
  * reason when a side has none. */
@@ -761,8 +793,7 @@ static bool wgrad_reg_transpose_vecs(const rocke_implicit_gemm_conv_wgrad_spec_t
     const int gm = s->group_merge > 1 ? s->group_merge : 1;
     const char* sides[2] = {"A", "B"};
     const int rows[2] = {s->tile_m, s->tile_n};
-    const int chans[2]
-        = {rocke_conv_problem_kpg(&s->problem) * gm, rocke_conv_problem_cpg(&s->problem) * gm};
+    const int chans[2] = {rocke_conv_problem_kpg(&s->problem) * gm, wgrad_b_run(s)};
     const bool has_ov[2] = {s->has_vector_size_a, s->has_vector_size_b};
     const int ov[2] = {s->vector_size_a, s->vector_size_b};
     int out[2] = {0, 0};
@@ -1076,6 +1107,8 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         rocke_implicit_gemm_conv_spec_t probe = rocke_implicit_gemm_conv_spec_default();
         return rocke_implicit_gemm_conv_is_valid_spec(&probe, arch, reason, reason_cap);
     }
+    if(s->x_run && wgrad_x_run_problem_reason(&s->problem, reason, reason_cap))
+        return false;
 
     /* First: a TF32 spelling mix-up would otherwise be sized as a 2-byte dtype
      * by the vector-width and LDS gates below. */
@@ -1444,7 +1477,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             {"vector_size_b",
              s->has_vector_size_b,
              s->vector_size_b,
-             rocke_conv_problem_cpg(&s->problem)},
+             s->x_run ? wgrad_b_run(s) : rocke_conv_problem_cpg(&s->problem)},
         };
         for(const auto& c : caps)
         {
@@ -1630,6 +1663,19 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          "and an fp16 / bf16 dW");
             return false;
         }
+    }
+    /* x_run: the sync X loader's filter-row run. Mirrors the
+     * WgradConvSpec.validate() gate. */
+    if(s->x_run
+       && (s->async_dma || s->lds_k_outer || s->group_merge != 1 || wgrad_streamk_on(s)
+           || s->problem.is_3d))
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "x_run widens the sync X loader's free-axis run; it does not combine with "
+                     "async_dma, lds_k_outer, group_merge, stream-K or 3-D");
+        return false;
     }
 
     /* The wgrad builder has no load/math wave split, so "wavelet" would build
@@ -3764,10 +3810,12 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                                                   spec->dtype_a,
                                                   spec->has_vector_size_a,
                                                   spec->vector_size_a);
-            const int cap_b = wgrad_free_axis_vec(rocke_conv_problem_cpg(&spec->problem),
-                                                  spec->dtype_b,
-                                                  spec->has_vector_size_b,
-                                                  spec->vector_size_b);
+            const int cap_b = wgrad_free_axis_vec(
+                spec->x_run ? spec->problem.X * rocke_conv_problem_cpg(&spec->problem)
+                            : rocke_conv_problem_cpg(&spec->problem),
+                spec->dtype_b,
+                spec->has_vector_size_b,
+                spec->vector_size_b);
             /* Mirror the Python choose_vec, which RAISES ValueError when the tile
              * geometry admits no usable width (not even 1): fail fast here too so
              * a bad geometry surfaces as a clear error instead of silently

@@ -94,6 +94,13 @@ tagged in the kernel name and `KernelIdentity`.
   instead of one zero-partner packed atomic per element. Needs `split_k > 1`
   (not two-stage, not stream-K), wave32, the `default` epilogue and an fp16 /
   bf16 dW; independent of `reg_transpose`.
+- `x_run` (tag `xrun`): the X (operand B) free-axis vector spans the
+  `X * cpg` elements of one filter row (`WgradConvSpec.b_run`) instead of one
+  channel run. For an ungrouped 2-D problem without W padding or W dilation
+  they are contiguous in NHWC, so small-C stems (C = 3, stride == filter) get
+  wide X loads. `wgrad_x_run_problem_reason` states the problem conditions;
+  `is_valid_wgrad_spec` and `identity_supports_problem` enforce them. Refused
+  with `async_dma`, `lds_k_outer`, `group_merge`, stream-K and 3-D.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 

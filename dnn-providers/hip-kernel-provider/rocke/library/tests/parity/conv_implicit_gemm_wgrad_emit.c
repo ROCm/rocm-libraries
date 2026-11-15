@@ -100,6 +100,9 @@
  *  119-121 wmma_atomic_pair: fp16 dW with reg_transpose, bf16 dW on the
  *         default loader, and two-stage (rejected). Must match the Python
  *         _REGT_CFGS.
+ *  122-124 x_run on the stem probe N1 16x16 C8 K64 4x4 stride 4: the
+ *         regt_prefetch mode-3 loop, bf16 on the default loader, and a W
+ *         padded problem (rejected). Must match the Python _REGT_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -400,6 +403,27 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         spec->two_stage = true;
         spec->wmma_atomic_pair = true;
         break;
+    case 122:
+    case 123:
+    case 124:
+        /* Python _P_XR: N1 16x16 C8 K64 4x4, stride 4, no padding. */
+        spec->problem = rocke_conv_problem_make(1, 16, 16, 8, 64, 4, 4, 4, 4, 0, 0, 1, 1);
+        spec->x_run = true;
+        if(idx == 122)
+            spec->regt_prefetch = 3;
+        if(idx == 123)
+        {
+            spec->reg_transpose = false;
+            spec->dtype_a = "bf16";
+            spec->dtype_b = "bf16";
+            spec->dtype_d = "bf16";
+        }
+        if(idx == 124)
+        {
+            /* rejected: W padding (the filter-row run leaves the image) */
+            spec->problem = rocke_conv_problem_make(1, 16, 16, 8, 64, 4, 4, 4, 4, 1, 1, 1, 1);
+        }
+        break;
     default:
         return -1;
     }
@@ -410,7 +434,7 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
-    if(idx >= 109 && idx <= 121)
+    if(idx >= 109 && idx <= 124)
         return make_regt_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);

@@ -129,6 +129,10 @@
 #   119-121 -- wmma_atomic_pair (the paired-lane split-K atomic epilogue):
 #         fp16 dW over the register-transpose loader, bf16 dW over the default
 #         loader, and two-stage, which both engines must reject.
+#   122-124 -- x_run (the X loads along the filter-row run) on the ungrouped
+#         stem probe N1 16x16 C8 K64 4x4 stride 4 (X * C = 32): the
+#         register-prefetch regt loop, bf16 on the default loader, and a W
+#         padded problem, which both engines must reject.
 #   (Grouped wgrad reaches the C++ engine only through stream-K. The
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -144,7 +148,7 @@
 #   207 -- streamk with unroll_k (must raise ValueError)
 #   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-121, so run_diff.py stops at the shared END before reaching 200+; these
+# 0-124, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -243,6 +247,8 @@ _PGR_BASES = {
 
 # A stride-2 problem whose Wo (8) takes the stepped regt_addr_step decode.
 _P_S2 = ConvProblem(N=2, Hi=16, Wi=16, C=32, K=64, Y=3, X=3, sH=2, sW=2, pH=1, pW=1)
+# An ungrouped stem (stride == filter, no padding) for x_run: X * C = 32.
+_P_XR = ConvProblem(N=1, Hi=16, Wi=16, C=8, K=64, Y=4, X=4, sH=4, sW=4)
 
 # The register-transpose knobs on the gfx1201 WMMA base (config 6): index ->
 # (extra overrides, arch). dtype_* keys replace the base's data. Keep in
@@ -291,6 +297,31 @@ _REGT_CFGS = {
     120: (dict(split_k=2, wmma_atomic_pair=True, dtype_d="bf16"), "gfx1201"),
     # rejected: the two-stage scratch has no packed atomics
     121: (dict(split_k=2, two_stage=True, wmma_atomic_pair=True), "gfx1201"),
+    122: (
+        dict(reg_transpose=True, regt_prefetch=3, x_run=True, problem=_P_XR),
+        "gfx1201",
+    ),
+    123: (
+        dict(
+            x_run=True,
+            problem=_P_XR,
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+        ),
+        "gfx1201",
+    ),
+    # rejected: W padding (the filter-row run leaves the image)
+    124: (
+        dict(
+            reg_transpose=True,
+            x_run=True,
+            problem=ConvProblem(
+                N=1, Hi=16, Wi=16, C=8, K=64, Y=4, X=4, sH=4, sW=4, pH=1, pW=1
+            ),
+        ),
+        "gfx1201",
+    ),
 }
 
 

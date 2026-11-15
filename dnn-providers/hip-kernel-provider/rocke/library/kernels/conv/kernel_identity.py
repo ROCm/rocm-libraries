@@ -162,6 +162,9 @@ class KernelIdentity:
     # wgrad wmma_atomic_pair: the paired-lane WMMA split-K atomic epilogue.
     # Left out of the hash while False.
     wmma_atomic_pair: bool = False
+    # wgrad x_run: the X vector spans the (x, c) filter-row run. Left out
+    # of the hash while False.
+    x_run: bool = False
     # dgrad only (DgradConvSpec.patch): a patch embedding as one GEMM over the
     # filter's (y, x, c). Changes the store and the problems served (see
     # identity_supports_problem). Left out of the hash while False.
@@ -278,6 +281,8 @@ class KernelIdentity:
             del fields["regt_addr_step"]
         if not fields["wmma_atomic_pair"]:
             del fields["wmma_atomic_pair"]
+        if not fields["x_run"]:
+            del fields["x_run"]
         if not fields["patch"]:
             del fields["patch"]
         if not fields["tap_outer_k"]:
@@ -506,6 +511,14 @@ def identity_supports_problem(
         extents = ((kpg, "kpg"), (cpg, "cpg"), (cpg, "cpg"))
     else:
         extents = ((cpg, "cpg"), (cpg, "cpg"), (kpg, "kpg"))
+    if identity.x_run:
+        # wgrad x_run: X loads along the (x, c) run of one filter row.
+        from kernels.common.conv_implicit_gemm_wgrad import wgrad_x_run_problem_reason
+
+        why = wgrad_x_run_problem_reason(problem)
+        if why:
+            return False, why
+        extents = (extents[0], (int(problem.X) * cpg, "X*cpg"), extents[2])
     if identity.patch:
         # One GEMM over the filter's (y, x, c): dY along K, W along Y*X*C,
         # dX along the X*C of one filter row, which starts at a multiple of
@@ -738,6 +751,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "is_3d",
     "is_pointwise",
     "grouped",
+    "x_run",
     "patch",
     "group_merge",
     "tile_m",

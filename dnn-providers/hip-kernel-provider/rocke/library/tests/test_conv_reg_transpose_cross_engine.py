@@ -207,5 +207,44 @@ class TestWmmaAtomicPairCrossEngine(_CrossEngine):
         )
 
 
+def _stem(**kw):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    # An ungrouped stem (stride == filter, no padding): X * C = 12.
+    base = dict(N=2, Hi=32, Wi=32, C=3, K=64, Y=4, X=4, sH=4, sW=4)
+    base.update(kw)
+    return ConvProblem(**base)
+
+
+class TestXRunCrossEngine(_CrossEngine):
+    def test_identical_ir(self):
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        bf16 = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+        self.assert_same(
+            (
+                dict(x_run=True, problem=_stem(), regt_prefetch=3),
+                dict(x_run=True, problem=_stem(), vector_size_b=4),
+                dict(x_run=True, problem=_stem(), data=bf16, reg_transpose=False),
+                dict(
+                    x_run=True,
+                    problem=_stem(),
+                    split_k=2,
+                    wmma_atomic_pair=True,
+                    regt_prefetch=3,
+                ),
+            )
+        )
+
+    def test_rejected_alike(self):
+        self.assert_rejected_alike(
+            (
+                # Problem conditions.
+                dict(x_run=True, problem=_stem(pW=1)),
+                dict(x_run=True, problem=_stem(C=6, groups=2)),
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

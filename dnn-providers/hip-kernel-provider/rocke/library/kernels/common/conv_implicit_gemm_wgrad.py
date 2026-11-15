@@ -663,6 +663,16 @@ class WgradConvSpec:
     # Tag "apr". Default False: byte-identical when off.
     wmma_atomic_pair: bool = False
 
+    # The X (operand B) free-axis vector spans the (x, c) run of one filter row
+    # instead of one channel run: for N_wg = (y, x, c) the X*cpg elements of a
+    # fixed (k_wg, y) are contiguous in NHWC whenever the problem is ungrouped
+    # with no W padding and no W dilation (wi = wo*sW + x), so the width is
+    # bounded by X*C instead of C. Built for the small-C patch stems (C = 3,
+    # stride == filter), where the per-channel run forces scalar X loads. The
+    # problem conditions are checked at launch (identity_supports_problem) and
+    # in is_valid_wgrad_spec. Tag "xrun". Default False: byte-identical when off.
+    x_run: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -793,6 +803,13 @@ class WgradConvSpec:
     # two are equal, which is what keeps the default path byte-identical.
 
     @property
+    def b_run(self) -> int:
+        """Contiguous extent the X (B) free-axis vector may span: cpg, or the
+        X*cpg filter-row run under ``x_run``."""
+        p = self.merged_problem
+        return p.X * p.cpg if self.x_run else p.cpg
+
+    @property
     def merged_problem(self) -> ConvProblem:
         """``problem`` with Gm groups folded into one.
 
@@ -855,6 +872,8 @@ class WgradConvSpec:
                 "ras": self.regt_addr_step,
                 # A different split-K epilogue; only tagged when set.
                 "apr": self.wmma_atomic_pair,
+                # A different B vector width rule; only tagged when set.
+                "xrun": self.x_run,
                 # An explicit lds_k_pad changes the LDS row stride and so the
                 # emitted code, but nothing else in the name reflects it. Two
                 # pads would otherwise collide on one symbol and the compile
@@ -1111,6 +1130,17 @@ class WgradConvSpec:
                 "wmma_atomic_pair is the 16-bit WMMA split-K atomic epilogue: it "
                 "needs split_k > 1 (not two-stage, not stream-K), wave32, the "
                 "default epilogue and an fp16 / bf16 dW"
+            )
+        if self.x_run and (
+            self.async_dma
+            or self.lds_k_outer
+            or self.group_merge != 1
+            or self.streamk != "off"
+            or self.problem.is_3d
+        ):
+            raise ValueError(
+                "x_run widens the sync X loader's free-axis run; it does not "
+                "combine with async_dma, lds_k_outer, group_merge, stream-K or 3-D"
             )
         layout = self.effective_lds_layout()
         if self.async_dma:
@@ -1568,7 +1598,7 @@ def wgrad_reg_transpose_vecs(spec: "WgradConvSpec") -> Tuple[int, int, str]:
     out = []
     for side, rows, chan, override in (
         ("A", spec.tile_m, p.kpg, spec.vector_size_a),
-        ("B", spec.tile_n, p.cpg, spec.vector_size_b),
+        ("B", spec.tile_n, spec.b_run, spec.vector_size_b),
     ):
         if override is not None:
             if chan % override:
@@ -1631,7 +1661,11 @@ def _sync_staged_chunks(spec: "WgradConvSpec") -> Optional[Tuple[int, int]]:
     threads = spec.block_size
     caps = (
         _wgrad_free_axis_vec(p.kpg, spec.data.dtype_a, spec.vector_size_a),
-        _wgrad_free_axis_vec(p.cpg, spec.data.dtype_b, spec.vector_size_b),
+        _wgrad_free_axis_vec(
+            spec.b_run if spec.x_run else p.cpg,
+            spec.data.dtype_b,
+            spec.vector_size_b,
+        ),
     )
     chunks = []
     for free, cap in zip((spec.tile_m, spec.tile_n), caps):
@@ -2251,6 +2285,19 @@ def wgrad_group_merge_available(
     return True, "ok"
 
 
+def wgrad_x_run_problem_reason(p) -> Optional[str]:
+    """Why ``p`` cannot run an ``x_run`` kernel (None if it can): the (x, c)
+    run of a filter row is contiguous and in bounds only for an ungrouped 2-D
+    problem without W padding or W dilation."""
+    if int(getattr(p, "groups", 1)) != 1:
+        return "x_run needs an ungrouped problem (the x step is C, not cpg)"
+    if bool(getattr(p, "is_3d", False)) or bool(getattr(p, "is_pointwise", False)):
+        return "x_run needs a 2-D, non-pointwise problem"
+    if int(getattr(p, "pW", 0)) != 0 or int(getattr(p, "dW", 1)) != 1:
+        return "x_run needs pW == 0 and dW == 1 (contiguous, in-bounds filter row)"
+    return None
+
+
 def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for ``spec`` on ``arch``.
 
@@ -2264,6 +2311,10 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
+    if spec.x_run:
+        _xr = wgrad_x_run_problem_reason(spec.problem)
+        if _xr:
+            return False, _xr
 
     # First: a TF32 spelling mix-up would otherwise be sized as a 2-byte dtype
     # by the vector-width and LDS gates below.
@@ -2450,7 +2501,11 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
 
     for _nm, _v, _chan in (
         ("vector_size_a", spec.vector_size_a, spec.problem.kpg),
-        ("vector_size_b", spec.vector_size_b, spec.problem.cpg),
+        (
+            "vector_size_b",
+            spec.vector_size_b,
+            spec.b_run if spec.x_run else spec.problem.cpg,
+        ),
     ):
         if _v is None:
             continue
@@ -3078,7 +3133,9 @@ def build_implicit_gemm_conv_wgrad(
             tile_cols=block_k,
             block_size=threads,
             max_vec=_wgrad_free_axis_vec(
-                p_load.cpg, spec.data.dtype_b, spec.vector_size_b
+                spec.b_run if spec.x_run else p_load.cpg,
+                spec.data.dtype_b,
+                spec.vector_size_b,
             ),
             vector_axis="row",
         )

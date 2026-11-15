@@ -288,5 +288,80 @@ class TestWmmaAtomicPair(unittest.TestCase):
         )
 
 
+class TestXRun(unittest.TestCase):
+    def _spec(self, **kw):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        base = dict(
+            problem=ConvProblem(N=2, Hi=64, Wi=64, C=3, K=64, Y=16, X=16, sH=16, sW=16),
+            reg_transpose=False,
+            tile_k=16,
+            vector_size_a=8,
+            vector_size_b=8,
+            x_run=True,
+        )
+        base.update(kw)
+        return _wgrad(**base)
+
+    def test_run_tag_and_problem_gates(self):
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+            wgrad_x_run_problem_reason,
+        )
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+        sp = self._spec()
+        self.assertEqual(sp.b_run, 48)
+        self.assertEqual(self._spec(x_run=False).b_run, 3)
+        self.assertIn("_xrun", sp.kernel_name())
+        self.assertEqual(is_valid_wgrad_spec(sp, "gfx1201"), (True, "ok"))
+        # without x_run a C=3 problem cannot take an 8-wide X vector
+        self.assertFalse(is_valid_wgrad_spec(self._spec(x_run=False), "gfx1201")[0])
+        for bad in (
+            dict(pW=1),
+            dict(dW=2, Wi=80),
+            dict(C=6, groups=2, K=64),
+        ):
+            p = ConvProblem(
+                **{
+                    **dict(N=2, Hi=64, Wi=64, C=3, K=64, Y=16, X=16, sH=16, sW=16),
+                    **bad,
+                }
+            )
+            self.assertIsNotNone(wgrad_x_run_problem_reason(p))
+        with self.assertRaises(ValueError):
+            self._spec(lds_k_outer=True).validate()
+
+    def test_wider_x_loads(self):
+        on = _ll(self._spec())
+        off = _ll(self._spec(x_run=False, vector_size_b=1))
+        loads = r"call <\d+ x i32> @llvm\.amdgcn\.raw\.ptr\.buffer\.load"
+        self.assertGreater(len(re.findall(loads, on)), len(re.findall(loads, off)))
+
+    def test_identity_supports_only_eligible_problems(self):
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.conv.kernel_identity import (
+            KernelIdentity,
+            identity_supports_problem,
+        )
+
+        lab = (
+            "wgrad-implicit_gemm-bf16-2d-t144x128x16-w1x8-a16x16x16-v8x8x1-mem-"
+            "default-xrun-wave32-gfx1201-llvm24"
+        )
+        ident = KernelIdentity.from_label(lab)
+        self.assertTrue(ident.x_run)
+        self.assertEqual(ident.label(), lab)
+        ok = ConvProblem(N=2, Hi=64, Wi=64, C=3, K=64, Y=16, X=16, sH=16, sW=16)
+        kw = dict(llvm_flavor="llvm24")
+        self.assertTrue(identity_supports_problem(ident, ok, **kw)[0])
+        padded = ConvProblem(
+            N=2, Hi=64, Wi=64, C=3, K=64, Y=16, X=16, sH=16, sW=16, pW=1
+        )
+        self.assertFalse(identity_supports_problem(ident, padded, **kw)[0])
+        odd = ConvProblem(N=2, Hi=64, Wi=64, C=3, K=64, Y=3, X=3, sH=1, sW=1)
+        self.assertFalse(identity_supports_problem(ident, odd, **kw)[0])  # X*C = 9
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -265,6 +265,13 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * bf16 dW. Mirrors WgradConvSpec.wmma_atomic_pair. Default false:
      * byte-identical IR. */
     bool wmma_atomic_pair; /* default false */
+    /* x_run: the X (operand B) free-axis vector spans the (x, c) run of one
+     * filter row (X * cpg elements, contiguous in NHWC for an ungrouped 2-D
+     * problem without W padding or W dilation) instead of one channel run.
+     * Refused with async_dma, lds_k_outer, group_merge, stream-K and 3-D, and
+     * on problems that do not meet those conditions. Mirrors
+     * WgradConvSpec.x_run. Default false: byte-identical IR. */
+    bool x_run; /* default false */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
