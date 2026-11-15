@@ -26,6 +26,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWinogradProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -832,6 +833,160 @@ TEST(TestConvWinogradCatalog, EveryConfigParses)
             EXPECT_TRUE(conv_winograd::configOf(kernel).has_value());
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): every kernel that writes y -- the multipass output pass
+// (both layouts), the fused VALU, register VALU, WMMA, register WMMA and cooperative kernels,
+// F(2,3), F(3,2) by phases and F(4,3) -- once per distinct path among the configs the kernel
+// match admits, on the menu chains. Outputs whose window lies in the padding (exact 0 from the
+// convolution) get the epilogue of 0.
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+/// The config fields that select a different kernel or store path.
+const std::vector<std::string>& fusedPathFields()
+{
+    static const std::vector<std::string> s_fields{
+        "variant", "arch", "m", "layout", "bins", "f16math", "pf", "llc"};
+    return s_fields;
+}
+
+std::vector<DeviceCase> fusedShapes()
+{
+    std::vector<DeviceCase> cases;
+    cases.push_back({"Nchw", dense(8, 12, {13, 11}, 1, false)});
+    cases.push_back({"Nhwc", dense(8, 12, {13, 11}, 1, true)});
+    cases.push_back({"NchwPad2", dense(8, 6, {6, 7}, 2, false)});
+    auto grouped = dense(16, 16, {9, 10}, 1, false);
+    grouped.groups = 4;
+    cases.push_back({"NchwGrouped", grouped});
+    const auto strided = [](ConvShape shape) {
+        shape.stride = {2, 2};
+        return shape;
+    };
+    cases.push_back({"NchwStride2", strided(dense(8, 12, {13, 11}, 1, false))});
+    cases.push_back({"NhwcStride2", strided(dense(8, 12, {13, 11}, 1, true))});
+    return cases;
+}
+
+template <typename T>
+void runFused(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter llc(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES", "4096");
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), fusedPathFields());
+    // Winograd's error is relative to the sum of |products| of the tile (the bound of the study:
+    // F(4,3) for fp32); with x and w in [-1, 1] that sum is at most half the reduction.
+    const auto tolerance = [](int64_t reduction) {
+        return static_cast<double>(winogradBound<T>(4)) * 0.5 * static_cast<double>(reduction);
+    };
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials, tolerance), 1)
+        << "no catalog config serves this fused case";
+}
+
+class TestGpuConvWinogradFused : public ::testing::TestWithParam<std::tuple<DeviceCase, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvWinogradFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvWinogradFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvWinogradFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> fusedChainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvWinogradFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(fusedChainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvWinogradFused,
+                         ::testing::Combine(::testing::Values(fusedShapes()[0], fusedShapes()[4]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvWinogradFusedSpecials : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvWinogradFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(GetParam().shape,
+                    {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                    Specials::NAN_INF);
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvWinogradFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+        Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWinogradFusedSpecials,
+                         ::testing::ValuesIn(fusedShapes()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestConvWinogradFusion, OnlyForwardMatchersClaimFusedGraphs)
+{
+    ConvShape shape = dense(8, 12, {13, 11}, 1, false);
+    shape.dataType = DataType::HALF;
+    const auto spec = conv_epilogue_test::fusedSpecFor(
+        shape, {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu()});
+    const GraphFixture fixture(conv_epilogue_test::buildFusedGraph(spec));
+    EXPECT_TRUE(matchesGraph(packFor(ConvDirection::FORWARD), fixture.context()).has_value());
+    EXPECT_FALSE(
+        matchesGraph(packFor(ConvDirection::BACKWARD_DATA), fixture.context()).has_value());
+    EXPECT_FALSE(
+        matchesGraph(packFor(ConvDirection::BACKWARD_WEIGHTS), fixture.context()).has_value());
+    // The parse gives the epilogue only when the caller asks for it.
+    EXPECT_FALSE(
+        conv_winograd::parseWinogradProblem(fixture.context(), ConvDirection::FORWARD).has_value());
+    const auto fused = conv_winograd::parseWinogradProblem(
+        fixture.context(), ConvDirection::FORWARD, conv_naive::Fusion::EPILOGUE);
+    ASSERT_TRUE(fused.has_value());
+    EXPECT_FALSE(fused->base.epilogue.empty());
+    EXPECT_EQ(fused->yUid, conv_epilogue_test::outputUid(2));
 }
 
 } // namespace

@@ -106,6 +106,27 @@ SPDX-License-Identifier:  MIT
 - **Large tensors.** Fused slices are capped so one slice's input is under about 1 GiB. Multipass and wrw slice the batch under the workspace limit. A single image past those limits is declined, and other engines serve it.
 - **Catalog.** Variants x tiles per dtype and arch family. The knobs are `m`, `llc`, the GEMM tile, `bk`, `bt`, `ccv`, `tm`, `tn`, `waves`, `bins`, `f16math` and `pf`. Configs ship where they win measured layers (realesrgan, UNet, Mask R-CNN, HRNet, Inception, IGM).
 
+## Fusion
+
+The forward engines (`CONV_WINOGRAD_FWD`, `_FWD_BF16`, `_FWD_F43`) also claim a convolution followed
+by a chain of pointwise nodes, under the same engine ids and catalog configs: scale and bias (per
+channel, a device scalar or a pass-by-value scalar), relu / clipped relu / clamp / leaky relu, gelu,
+gelu-tanh, swish / silu, sigmoid, tanh, elu, abs and softplus. The chain is generated into the
+kernel that writes y (`ConvEpilogue.h`) and runs on the fp32 result before its single rounding:
+
+| Variant | Where the epilogue runs |
+|---|---|
+| multipass | the output-transform pass (`ConvWinogradOutput`), both layouts |
+| fused VALU, register VALU | the in-kernel output transform |
+| WMMA, register WMMA | the in-kernel output transform |
+| cooperative (F(2,3), F(3,2) by phases, 16-bin layout) | the in-kernel epilogue, per stored pair |
+
+An output whose 3x3 window lies wholly in the padding is exactly 0 from the convolution and gets the
+epilogue of 0, like every other output. The filter, input and GEMM passes and the staging copies
+take no epilogue. The generated code depends on the chain's pattern only; values and operand
+pointers are a second kernel argument. With no epilogue the kernels compile to the same code as
+without the hook. Backward data and backward weights decline fused graphs.
+
 ## Strengths and weaknesses
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts our-best graphs that are more than 5% faster or slower. Losses are counted against MIOpen's best, which is often its own Winograd.
 
@@ -181,5 +202,8 @@ No code was copied.
   - NCHW, NHWC and mixed layouts, groups, padding 0-2 and asymmetric, odd extents, deep channels, true convolution;
   - the LLC plan with a forced small cache;
   - wrw against an fp64 reference with sliced and split-heavy cases;
-  - the determinism relaunch; every config parses.
+  - the determinism relaunch; every config parses;
+  - fused forward cases: each distinct kernel path among the admitted configs on the pointwise menu,
+    NaN/infinity operands and clip boundaries, against the CPU convolution followed by the chain in
+    double; only the forward matcher claims a fused graph.
 - `TestConvDescriptorShards.cpp` checks that all three engines report `WINOGRAD` and nothing else.
