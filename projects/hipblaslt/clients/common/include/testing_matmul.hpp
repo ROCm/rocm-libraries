@@ -1203,6 +1203,18 @@ inline std::string partitioned_unsupported_reason(const Arguments& arg,
                + std::to_string(devices);
     if(arg.split_dim != 'M' && arg.split_dim != 'N' && arg.split_dim != 'B')
         return "split_dim must be M, N or B";
+    // The partitions are devices 0 .. partitions-1, and partition 0 runs on the current device.
+    int current = 0;
+    if(hipGetDevice(&current) != hipSuccess || current != 0)
+        return "--partitions needs the benchmark on device 0 (the partitions are devices 0 ...)";
+    // Every partition needs at least one index of the split dimension.
+    const int64_t splitSize = arg.split_dim == 'M'   ? arg.M[0]
+                              : arg.split_dim == 'N' ? arg.N[0]
+                                                     : int64_t(arg.batch_count);
+    if(splitSize < int64_t(arg.partitions))
+        return std::string("the split dimension (") + arg.split_dim + " = "
+               + std::to_string(splitSize) + ") is smaller than --partitions "
+               + std::to_string(int(arg.partitions));
     if(arg.grouped_gemm > 0 || arg.batch_mode != 0)
         return "partitions support a single strided-batched GEMM only";
     if(arg.bias_vector || arg.activation_type != hipblaslt_activation_type::none || arg.use_e
@@ -2183,38 +2195,56 @@ public:
     {
         for(int t = 0; t < 4; t++)
             m_replicated[t] = arg.part_place[t] == 'R';
+        // Only a shared tensor is reached across devices; replicas are copied with hipMemcpy.
+        const bool anyShared = std::any_of(
+            std::begin(m_replicated), std::end(m_replicated), [](bool r) { return !r; });
         int previous = 0;
         check(hipGetDevice(&previous), "hipGetDevice");
-        std::vector<hipblasLtHandle_t> handles{handle0};
-        m_streams.push_back(stream0);
-        check(hipEventCreate(&m_start), "hipEventCreate");
-        for(int i = 1; i < int(arg.partitions); i++)
+        try
         {
-            check(hipSetDevice(i), "hipSetDevice");
-            m_handleOwners.push_back(std::make_unique<hipblaslt_local_handle>(arg));
-            handles.push_back(static_cast<hipblasLtHandle_t&>(*m_handleOwners.back()));
-            hipStream_t stream = nullptr;
-            check(hipStreamCreate(&stream), "hipStreamCreate");
-            m_streams.push_back(stream);
-            // reach the device 0 buffers
-            hipError_t peer = hipDeviceEnablePeerAccess(previous, 0);
-            if(peer != hipSuccess && peer != hipErrorPeerAccessAlreadyEnabled)
-                throw std::runtime_error("no peer access from device " + std::to_string(i)
-                                         + " to device " + std::to_string(previous));
-            static_cast<void>(hipGetLastError());
+            std::vector<hipblasLtHandle_t> handles{handle0};
+            m_streams.push_back(stream0);
+            check(hipEventCreate(&m_start), "hipEventCreate");
+            for(int i = 1; i < int(arg.partitions); i++)
+            {
+                check(hipSetDevice(i), "hipSetDevice");
+                m_handleOwners.push_back(std::make_unique<hipblaslt_local_handle>(arg));
+                handles.push_back(static_cast<hipblasLtHandle_t&>(*m_handleOwners.back()));
+                hipStream_t stream = nullptr;
+                check(hipStreamCreate(&stream), "hipStreamCreate");
+                m_streams.push_back(stream);
+                if(anyShared) // reach the device 0 buffers
+                {
+                    hipError_t peer = hipDeviceEnablePeerAccess(previous, 0);
+                    if(peer != hipSuccess && peer != hipErrorPeerAccessAlreadyEnabled)
+                        throw std::runtime_error("no peer access from device " + std::to_string(i)
+                                                 + " to device " + std::to_string(previous));
+                    static_cast<void>(hipGetLastError());
+                }
+            }
+            check(hipSetDevice(previous), "hipSetDevice");
+            m_gemm = std::make_unique<hipblaslt_ext::PartitionedGemm>(handles,
+                                                                      transA,
+                                                                      transB,
+                                                                      arg.a_type,
+                                                                      arg.b_type,
+                                                                      arg.c_type,
+                                                                      arg.d_type,
+                                                                      arg.compute_type);
         }
-        check(hipSetDevice(previous), "hipSetDevice");
-        m_gemm = std::make_unique<hipblaslt_ext::PartitionedGemm>(handles,
-                                                                  transA,
-                                                                  transB,
-                                                                  arg.a_type,
-                                                                  arg.b_type,
-                                                                  arg.c_type,
-                                                                  arg.d_type,
-                                                                  arg.compute_type);
+        catch(...)
+        {
+            release(); // a throwing constructor does not run the destructor
+            throw;
+        }
     }
 
     ~PartitionedRun()
+    {
+        release();
+    }
+
+    void release()
     {
         int previous = 0;
         static_cast<void>(hipGetDevice(&previous));
@@ -2230,7 +2260,13 @@ public:
                     static_cast<void>(hipFree(replica[i - 1]));
         }
         static_cast<void>(hipSetDevice(previous));
-        static_cast<void>(hipEventDestroy(m_start));
+        if(m_start != nullptr)
+            static_cast<void>(hipEventDestroy(m_start));
+        m_start = nullptr;
+        m_streams.resize(std::min<size_t>(m_streams.size(), 1));
+        m_workspaces.clear();
+        for(auto& replica : m_replica)
+            replica.clear();
     }
     PartitionedRun(const PartitionedRun&)            = delete;
     PartitionedRun& operator=(const PartitionedRun&) = delete;

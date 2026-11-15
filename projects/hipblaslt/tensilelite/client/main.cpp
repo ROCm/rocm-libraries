@@ -970,6 +970,10 @@ int main(int argc, const char* argv[])
             throw std::runtime_error("--split-devices does not support --use-user-args");
         if(splitM > 1 && args["grouped-gemm"].as<bool>())
             throw std::runtime_error("--split-devices does not support --grouped-gemm");
+        // With C = D each device's C is redirected to its own zeroed full-size D, so beta * C would
+        // read zeros: the combination is not supported.
+        if(splitM > 1 && args["c-equal-d"].as<bool>())
+            throw std::runtime_error("--split-devices does not support --c-equal-d");
         if(splitM > 1 && args["best-solution"].as<bool>())
             throw std::runtime_error(
                 "--split-devices needs the all-solutions run (not --best-solution): a "

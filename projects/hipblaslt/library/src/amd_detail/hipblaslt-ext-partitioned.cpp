@@ -290,7 +290,14 @@ namespace hipblaslt_ext
     {
         auto&        s     = *pimpl;
         const size_t parts = s.count();
+        // All or nothing: a failure below must not leave the previous problem usable with some
+        // partitions already switched to the new one.
+        s.hasProblem = false;
         if(parts == 0 || m <= 0 || n <= 0 || k <= 0 || batch_count <= 0)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        // A batch split writes different batches of D from different partitions, so D must have
+        // a batch stride; with stride 0 they would all write the same matrix.
+        if(dim == SplitDim::Batch && batch_count > 1 && strideD == 0)
             return HIPBLAS_STATUS_INVALID_VALUE;
         if((s.opA != HIPBLAS_OP_N && s.opA != HIPBLAS_OP_T)
            || (s.opB != HIPBLAS_OP_N && s.opB != HIPBLAS_OP_T))

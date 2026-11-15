@@ -940,3 +940,68 @@ TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
     }
     EXPECT_EQ(covered, batch);
 }
+
+// A batch split gives different batches of D to different partitions, so D needs a batch stride.
+TEST(pre_checkin_partitioned_gemm_ext, BatchSplitNeedsABatchStrideOfD)
+{
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+    auto              in = buffers.inputs();
+
+    EXPECT_EQ(gemm.setProblem(kM,
+                              kN,
+                              kK,
+                              4,
+                              kLda,
+                              kLdb,
+                              kLdc,
+                              kLdd,
+                              kLda * kM,
+                              kLdb * kN,
+                              kLdc * kN,
+                              0,
+                              SplitDim::Batch,
+                              in),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    // The same sizes with a stride of D are fine, and a stride of 0 is fine for one batch.
+    EXPECT_EQ(gemm.setProblem(kM,
+                              kN,
+                              kK,
+                              4,
+                              kLda,
+                              kLdb,
+                              kLdc,
+                              kLdd,
+                              kLda * kM,
+                              kLdb * kN,
+                              kLdc * kN,
+                              kLdd * kN,
+                              SplitDim::Batch,
+                              in),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(gemm.setProblem(kM, kN, kK, 1, kLda, kLdb, kLdc, kLdd, 0, 0, 0, 0, SplitDim::N, in),
+              HIPBLAS_STATUS_SUCCESS);
+}
+
+// A setProblem that fails must not leave the previous problem usable.
+TEST(pre_checkin_partitioned_gemm_ext, FailedSetProblemClearsTheProblem)
+{
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+    auto              in = buffers.inputs();
+
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+    int64_t offset = 0, size = 0;
+    ASSERT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_SUCCESS);
+
+    in.a.pop_back(); // one pointer too few
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_INVALID_VALUE);
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+    GemmPreference                                pref;
+    EXPECT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_INVALID_VALUE);
+}
