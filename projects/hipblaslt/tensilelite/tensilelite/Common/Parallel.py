@@ -95,6 +95,55 @@ def poolSizeBudget():
     return max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
 
 
+def shutdownWorkerPool():
+    """Terminate the idle joblib (loky) worker pool, if one exists.
+
+    loky keeps its workers alive between Parallel calls so they can be reused.
+    Between build phases that reuse buys little (the next phase pays a few
+    seconds to respawn) while the workers keep every page their last phase
+    touched: a worker that parsed a 60 MB logic YAML or generated a few hundred
+    kernels retains hundreds of MiB of freed-but-unreturned heap. Shutting the
+    pool down returns all of it, and the next ParallelMap2 call starts from
+    fresh ~90 MiB processes. No-op when no pool was created (CpuThreads <= 1).
+    """
+    try:
+        from joblib.externals.loky import reusable_executor
+    except ImportError:  # pragma: no cover - joblib without loky
+        return
+    executor = getattr(reusable_executor, "_executor", None)
+    if executor is None:
+        return
+    executor.shutdown(wait=True, kill_workers=False)
+
+
+_libc = None
+
+
+def releaseFreedMemory():
+    """Hand freed heap pages back to the OS (glibc malloc_trim).
+
+    glibc only shrinks the heap from its top, so the 20-100 MiB a worker
+    allocates and frees while generating one kernel (rocisa module tree,
+    source text, temporaries) usually stays resident. Calling this after each
+    task keeps a worker's RSS near its live size instead of its historical
+    peak. Costs a few ms; a no-op where libc has no malloc_trim.
+    """
+    global _libc
+    if _libc is False:
+        return
+    if _libc is None:
+        try:
+            import ctypes
+
+            _libc = ctypes.CDLL("libc.so.6")
+            _libc.malloc_trim.argtypes = [ctypes.c_size_t]
+            _libc.malloc_trim.restype = ctypes.c_int
+        except (OSError, AttributeError):
+            _libc = False
+            return
+    _libc.malloc_trim(0)
+
+
 def CPUThreadCount(enable=True):
     from .GlobalParameters import globalParameters
 
