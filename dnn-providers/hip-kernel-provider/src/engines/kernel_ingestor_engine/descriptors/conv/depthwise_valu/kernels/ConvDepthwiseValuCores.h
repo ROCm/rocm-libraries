@@ -58,6 +58,7 @@
 #pragma once
 
 #include "ConvArchFamily.h"
+#include "ConvDepthwiseEpilogue.h"
 
 namespace conv_depthwise_valu
 {
@@ -124,6 +125,9 @@ struct ValuParams
     int N, C, Hi, Wi, Ho, Wo;
     int kh, kw, ph, pw, sh, sw, dh, dw;
     int Di, Do, kd, pd, sd, dd; // depth axis (3D only)
+#if defined(CONV_EPI) && CONV_EPI
+    ConvEpiGen epi; // the fused epilogue the forward stores apply (ConvDepthwiseEpilogue.h)
+#endif
 };
 
 // The barrier between the LDS stage and its reads. The waves exchange only LDS, so on gfx12
@@ -402,12 +406,14 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
         }
     }
 
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, true)
 #pragma unroll
     for(int j = 0; j < WSTRIP; ++j)
     {
         const int wo = wo_base + j;
         const I o = (((I)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
-        Y.store(o, wo < p.Wo, acc[j]);
+        Y.store(o, wo < p.Wo, DW_EPI_APPLY(acc[j], dwEc));
     }
 }
 
@@ -473,8 +479,9 @@ __device__ inline void v2_nchw_body(const T* __restrict__ A,
         }
     }
 
-    const I o = (((I)n * p.C + k) * p.Ho + ho) * p.Wo + wo;
-    Y.store(o, true, acc);
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, true) const I o = (((I)n * p.C + k) * p.Ho + ho) * p.Wo + wo;
+    Y.store(o, true, DW_EPI_APPLY(acc, dwEc));
 }
 
 template <typename T>
@@ -553,12 +560,14 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
         }
     }
 
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, true)
 #pragma unroll
     for(int j = 0; j < WSTRIP; ++j)
     {
         const int wo = wo_base + j;
         const I o = ((((I)n * p.Do + do_) * p.Ho + ho) * p.Wo + wo) * p.C + k;
-        Y.store(o, wo < p.Wo, acc[j]);
+        Y.store(o, wo < p.Wo, DW_EPI_APPLY(acc[j], dwEc));
     }
 }
 
@@ -629,8 +638,10 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
         }
     }
 
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, true)
     const I o = ((((I)n * p.C + k) * p.Do + do_) * p.Ho + ho) * p.Wo + wo;
-    Y.store(o, true, acc);
+    Y.store(o, true, DW_EPI_APPLY(acc, dwEc));
 }
 
 template <typename T>
@@ -720,6 +731,8 @@ __device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
                 for(int tx = 0; tx < TW; ++tx)
                     acc[ty][tx] = dwFma(w[ky][kx], patch[ty + ky][tx + kx], acc[ty][tx]);
 
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, true)
 #pragma unroll
     for(int ty = 0; ty < TH; ++ty)
     {
@@ -729,7 +742,7 @@ __device__ inline void v3a_microtile_nhwc_body(const T* __restrict__ A,
         {
             const int wo = wo0 + tx;
             const I o = (((I)n * p.Ho + ho) * p.Wo + wo) * p.C + k;
-            Y.store(o, (ho < p.Ho) & (wo < p.Wo), acc[ty][tx]);
+            Y.store(o, (ho < p.Ho) & (wo < p.Wo), DW_EPI_APPLY(acc[ty][tx], dwEc));
         }
     }
 }
@@ -906,6 +919,8 @@ __device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
 
     const I nOut = (I)n * p.Ho * p.Wo * p.C;
     const bool kv = k < p.C;
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, kv)
 #pragma unroll
     for(int ty = 0; ty < RH; ++ty)
     {
@@ -915,7 +930,7 @@ __device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
         {
             const int wo = wo_base + ox + tx;
             const I o = nOut + ((I)ho * p.Wo + wo) * p.C + k;
-            Y.store(o, kv & (ho < p.Ho) & (wo < p.Wo), acc[ty][tx]);
+            Y.store(o, kv & (ho < p.Ho) & (wo < p.Wo), DW_EPI_APPLY(acc[ty][tx], dwEc));
         }
     }
 }
@@ -1006,6 +1021,8 @@ __device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
 
     const I nOut = (I)n * p.Ho * p.Wo * p.C;
     const bool kv = k < p.C;
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, kv)
 #pragma unroll
     for(int ty = 0; ty < RH; ++ty)
     {
@@ -1015,7 +1032,7 @@ __device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
         {
             const int wo = wo_base + ox + tx;
             const I o = nOut + ((I)ho * p.Wo + wo) * p.C + k;
-            Y.store(o, kv & (ho < p.Ho) & (wo < p.Wo), acc[ty][tx]);
+            Y.store(o, kv & (ho < p.Ho) & (wo < p.Wo), DW_EPI_APPLY(acc[ty][tx], dwEc));
         }
     }
 }
@@ -1134,6 +1151,8 @@ __device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
 
     const I nOut = (I)n * p.Do * p.Ho * p.Wo * p.C;
     const bool kv = k < p.C;
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, k, kv)
 #pragma unroll
     for(int tz = 0; tz < RD; ++tz)
     {
@@ -1147,7 +1166,9 @@ __device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
             {
                 const int wo = wo_base + ox + tx;
                 const I o = nOut + (((I)do_ * p.Ho + ho) * p.Wo + wo) * p.C + k;
-                Y.store(o, kv & (do_ < p.Do) & (ho < p.Ho) & (wo < p.Wo), acc[tz][ty][tx]);
+                Y.store(o,
+                        kv & (do_ < p.Do) & (ho < p.Ho) & (wo < p.Wo),
+                        DW_EPI_APPLY(acc[tz][ty][tx], dwEc));
             }
         }
     }
@@ -1308,6 +1329,8 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
         }
     }
     const I nOut = (I)n * p.C * p.Ho * p.Wo;
+    DW_EPI_BIND(p)
+    DW_EPI_DECL(dwEc, c, true)
 #pragma unroll
     for(int r = 0; r < RH; ++r)
     {
@@ -1317,7 +1340,7 @@ __device__ inline void v3b_lds_nchw_body(const T* __restrict__ A,
         for(int j = 0; j < RW; ++j)
         {
             const int ox = ox0 + tx * RW + j;
-            Y.store(orow + ox, (oy < p.Ho) & (ox < p.Wo), acc[r][j]);
+            Y.store(orow + ox, (oy < p.Ho) & (ox < p.Wo), DW_EPI_APPLY(acc[r][j], dwEc));
         }
     }
 }
@@ -1830,6 +1853,13 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
 
     const int wo0 = wt * TW;
     const unsigned outRowBytes = static_cast<unsigned>(p.Wo) * p.C * EB;
+    DW_EPI_BIND(p)
+#if defined(CONV_EPI) && CONV_EPI
+    ConvEpiGen::Chan dwEcR[CPL];
+#pragma unroll
+    for(int c = 0; c < CPL; ++c)
+        dwEcR[c] = dwEpi.chan(k0 + c, true);
+#endif
 #pragma unroll
     for(int ty = 0; ty < TH; ++ty)
     {
@@ -1843,7 +1873,7 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
             float v[CPL];
 #pragma unroll
             for(int c = 0; c < CPL; ++c)
-                v[c] = acc[c][ty][tx];
+                v[c] = DW_EPI_APPLY(acc[c][ty][tx], dwEcR[c]);
             dwRowStore<T, CPL>(yr, static_cast<unsigned>((wo0 + tx) * p.C + k0) * EB, v);
         }
     }

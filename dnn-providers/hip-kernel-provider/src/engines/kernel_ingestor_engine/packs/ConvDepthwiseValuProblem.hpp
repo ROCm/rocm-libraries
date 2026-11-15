@@ -80,11 +80,13 @@ struct DepthwiseValuProblem
  *
  * Everything parseConvNaiveProblem gates, plus: forward or backward data; depthwise (k == c ==
  * groups); x and y packed in the same layout, channels-last or channels-first, and w packed;
- * every extent and padding within 32 bits.
+ * every extent and padding within 32 bits. With @p fusion EPILOGUE a forward graph may carry a
+ * pointwise epilogue (base.epilogue), which the forward kernels apply at their stores.
  */
 std::optional<DepthwiseValuProblem>
     parseDepthwiseValuProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                              conv_naive::ConvDirection direction);
+                              conv_naive::ConvDirection direction,
+                              conv_naive::Fusion fusion = conv_naive::Fusion::NONE);
 
 /// The layout x and y of @p args are both packed in, with w packed as (c, 1, spatial...), or
 /// nullopt when there is none.

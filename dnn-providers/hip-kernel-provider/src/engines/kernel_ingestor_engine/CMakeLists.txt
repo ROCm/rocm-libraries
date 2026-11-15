@@ -283,6 +283,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValu.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValuArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValuCores.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseEpilogue.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrw.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrwArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseHankelWrw.h"
@@ -341,6 +342,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         kernels/ConvDepthwiseValu.cpp
         ConvDepthwiseValuArgs.h
         ConvDepthwiseValuCores.h
+        ConvDepthwiseEpilogue.h
         kernels/ConvDepthwiseValuWrw.cpp
         ConvDepthwiseValuWrwArgs.h
         ConvDepthwiseHankelWrw.h

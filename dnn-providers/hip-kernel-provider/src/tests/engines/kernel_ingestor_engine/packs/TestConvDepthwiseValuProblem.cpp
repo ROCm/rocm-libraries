@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -346,6 +347,101 @@ TEST(TestConvDepthwiseValuComputeType, ServesCudnnsComputeTypesPerElementType)
             depthwise(),
             {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
             [direction](const ConvShape& s) { return parse(s, direction).has_value(); });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues: forward only, and only when the engines ask for it.
+// ---------------------------------------------------------------------------
+
+/// A backward-data depthwise convolution whose dx is the virtual head of a relu, field for field.
+flatbuffers::FlatBufferBuilder backwardFusedGraph(const ConvShape& shape)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    auto spec = specFor(shape, ConvDirection::BACKWARD_DATA);
+    const TensorSpec written = spec.x;
+    spec.x.isVirtual = true;
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+        serializeTensor(builder, spec.xUid, spec.x),
+        serializeTensor(builder, spec.wUid, spec.w),
+        serializeTensor(builder, spec.yUid, spec.y),
+        serializeTensor(builder, 100, written)};
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.push_back(data_objects::CreateNodeDirect(
+        builder,
+        "conv",
+        data_objects::DataType::FLOAT,
+        data_objects::NodeAttributes::ConvolutionBwdAttributes,
+        data_objects::CreateConvolutionBwdAttributesDirect(builder,
+                                                           spec.yUid,
+                                                           spec.wUid,
+                                                           spec.xUid,
+                                                           &spec.prePadding,
+                                                           &spec.postPadding,
+                                                           &spec.stride,
+                                                           &spec.dilation,
+                                                           spec.mode)
+            .Union()));
+    nodes.push_back(data_objects::CreateNodeDirect(
+        builder,
+        "relu",
+        data_objects::DataType::FLOAT,
+        data_objects::NodeAttributes::PointwiseAttributes,
+        data_objects::CreatePointwiseAttributes(builder,
+                                                data_objects::PointwiseMode::RELU_FWD,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                spec.xUid,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                100)
+            .Union()));
+    builder.Finish(data_objects::CreateGraphDirect(builder,
+                                                   "dw_bwd_fused",
+                                                   data_objects::DataType::UNSET,
+                                                   data_objects::DataType::UNSET,
+                                                   data_objects::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes));
+    return builder;
+}
+
+TEST(TestConvDepthwiseValuProblemFusion, ForwardTakesTheEpilogueOnlyWhenAsked)
+{
+    namespace epi = conv_epilogue_test;
+    for(const bool channelsLast : {true, false})
+    {
+        const auto spec = epi::fusedSpecFor(depthwise(6, channelsLast),
+                                            {epi::bias(), epi::relu()},
+                                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        const GraphFixture fixture(epi::buildFusedGraph(spec));
+        const auto fused = parseDepthwiseValuProblem(
+            fixture.context(), ConvDirection::FORWARD, conv_naive::Fusion::EPILOGUE);
+        ASSERT_TRUE(fused.has_value());
+        EXPECT_EQ(conv_epilogue::patternOf(fused->base.epilogue), "add.k.FLOAT|relu");
+        // The kernels write the chain's output.
+        EXPECT_EQ(fused->outUid, epi::outputUid(2));
+        EXPECT_FALSE(
+            parseDepthwiseValuProblem(fixture.context(), ConvDirection::FORWARD).has_value());
+    }
+}
+
+TEST(TestConvDepthwiseValuProblemFusion, BackwardDataDeclinesAFusedGraph)
+{
+    for(const bool channelsLast : {true, false})
+    {
+        const auto shape = depthwise(6, channelsLast);
+        ASSERT_TRUE(parse(shape, ConvDirection::BACKWARD_DATA).has_value());
+        const GraphFixture fixture(backwardFusedGraph(shape));
+        EXPECT_FALSE(parseDepthwiseValuProblem(fixture.context(),
+                                               ConvDirection::BACKWARD_DATA,
+                                               conv_naive::Fusion::EPILOGUE)
+                         .has_value());
+        EXPECT_FALSE(
+            parseDepthwiseValuProblem(fixture.context(), ConvDirection::BACKWARD_DATA).has_value());
     }
 }
 

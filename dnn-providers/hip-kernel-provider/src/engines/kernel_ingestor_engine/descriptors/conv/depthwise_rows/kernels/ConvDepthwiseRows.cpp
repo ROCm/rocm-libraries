@@ -19,6 +19,8 @@
 //   CONV_DWR_TX/TY/RH/RW, CONV_DWR_BH, CONV_DWR_THREADS, CONV_DWR_STRIDE, CONV_DWR_Q,
 //   CONV_DWR_LDS, CONV_DWR_MMAX
 //                      the variant's block shape, stride, LDS capacity and taps-per-phase bound
+//   CONV_EPI           1: a forward variant applies the fused pointwise epilogue at its stores
+//                      (ConvDepthwiseEpilogue.h) and takes ConvEpiArgs as a second argument
 
 // Embedded headers are keyed by bare file name (src/cmake/KernelEmbedding.cmake).
 #include "ConvDepthwiseRowsCores.h"
@@ -82,13 +84,16 @@
 using ElementType = CONV_DWR_TYPE;
 
 extern "C" __global__ void __launch_bounds__(CONV_DWR_BLOCK)
-    ConvDepthwiseRows(ConvDepthwiseValuArgs args)
+    ConvDepthwiseRows(ConvDepthwiseValuArgs args CONV_EPI_PARAM)
 {
     namespace dwr = conv_depthwise_rows;
     const auto* in = static_cast<const ElementType*>(args.in);
     const auto* filter = static_cast<const ElementType*>(args.filter);
     auto* out = static_cast<ElementType*>(args.out);
     constexpr bool FLIP = CONV_DWR_FLIP != 0;
+#if defined(CONV_EPI) && CONV_EPI
+    const ConvEpiGen dwEpi{epiArgs};
+#endif
 
 #if CONV_DWR_VARIANT == 0
     dwr::rowsFwdNchw<ElementType,
@@ -99,7 +104,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DWR_BLOCK)
                      CONV_DWR_RH,
                      CONV_DWR_RW,
                      CONV_DWR_LDS,
-                     FLIP>(in, filter, out, args);
+                     FLIP>(in, filter, out, args DW_EPI_ARG);
 #elif CONV_DWR_VARIANT == 1
     dwr::rowsFwdBandNchw<ElementType,
                          CONV_DWR_KH,
@@ -108,7 +113,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DWR_BLOCK)
                          CONV_DWR_RH,
                          CONV_DWR_THREADS,
                          CONV_DWR_LDS,
-                         FLIP>(in, filter, out, args);
+                         FLIP>(in, filter, out, args DW_EPI_ARG);
 #elif CONV_DWR_VARIANT == 2
     dwr::rowsBwdPhase<ElementType,
                       CONV_DWR_KW,
