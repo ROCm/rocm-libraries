@@ -376,8 +376,14 @@ def _sum_scaled_groups(
         b_code = _byte(
             b, tile.b_scale_rsrc, b_col, b.mul(group, b.const_i32(spec.N)), I8
         )
-        # Issue the scale-byte loads before the operand loads: no global load
-        # may be scheduled across this point (every other instruction may).
+        # The loop body is one scale group: these scale loads, the group's A
+        # and B operand loads, the previous group's ldexp-add (which reads the
+        # previous iteration's codes) and the group's two MFMAs (which wait
+        # for this iteration's operands). The codes loaded here are first read
+        # by the next iteration's ldexp-add, so they are issued first and have
+        # the whole iteration to arrive. No global load may be scheduled
+        # across this point (every other instruction may), so the compiler
+        # cannot sink them behind the operand loads.
         b.sched_barrier(_SCALE_LOADS_FIRST)
         operands = []
         for atom_in_group in range(atoms_per_group):
