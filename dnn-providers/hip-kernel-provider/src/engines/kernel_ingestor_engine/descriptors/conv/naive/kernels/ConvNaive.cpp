@@ -63,9 +63,7 @@ __device__ inline long long threadStride()
 extern "C" __global__ void ConvNaiveFwd(ConvNaiveArgs args CONV_EPI_PARAM)
 {
 #if defined(CONV_EPI) && CONV_EPI
-    const ConvEpiGen epi{epiArgs};
-#else
-    const ConvEpiNone epi{};
+    const ConvEpiGen epi = convEpiGen(epiArgs);
 #endif
     const auto* x = static_cast<const ElementType*>(args.x);
     const auto* w = static_cast<const ElementType*>(args.w);
@@ -129,10 +127,17 @@ extern "C" __global__ void ConvNaiveFwd(ConvNaiveArgs args CONV_EPI_PARAM)
             }
         }
 
+#if defined(CONV_EPI) && CONV_EPI
         const long long yOffset = n * args.yStrides[0] + k * args.yStrides[1]
                                   + od * args.yStrides[2] + oh * args.yStrides[3]
                                   + ow * args.yStrides[4];
         store(y, yOffset, epi(accumulator, epi.chan(static_cast<int>(k), true), yOffset, true));
+#else
+        store(y,
+              n * args.yStrides[0] + k * args.yStrides[1] + od * args.yStrides[2]
+                  + oh * args.yStrides[3] + ow * args.yStrides[4],
+              accumulator);
+#endif
     }
 }
 
