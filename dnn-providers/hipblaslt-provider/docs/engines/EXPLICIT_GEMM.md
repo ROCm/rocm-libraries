@@ -119,6 +119,22 @@
   - The deterministic siblings share the default engines' code; one flag picks the plan's library settings. rocBLAS runs with `rocblas_atomics_not_allowed`, the handle's mode saved and restored around the plan (as MIOpen's `DisableRocblasAtomics`). hipBLASLt is offered no workspace (`HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES` 0, as MIOpen's deterministic GEMMs), so it declines a GEMM it has no workspace-free algorithm for. The repack workspace is separate and unaffected.
   - The provider's own repack and cast steps are deterministic: every sum has one owning thread in a fixed order.
   - `TestGpuConvGemmDeterministic` executes each deterministic sibling's plan six times over a re-filled workspace and requires identical bits, on long-K backward weights and small-tile, long-reduction forward and backward data (where split-K would apply) and a spread of im2col shapes.
+  - **Cost.** Deterministic sibling time over default engine time (above 1 means the deterministic sibling is slower), each engine autotuned (dnn-benchmarking `--autotune --iters 20`, median kernel time), on the graphs of the internal real-model corpus where an explicit-GEMM engine is the fastest engine: 886 graphs on MI350X (gfx950), 912 on MI325X (gfx942). TF32 rows cover the fp32 graphs. "Declined" counts graphs the default engine serves and its deterministic sibling does not (hipBLASLt has no workspace-free algorithm).
+
+    | GPU | Pair | Graphs | Declined | Geomean | Total time | Graphs > 1.10x | Worst |
+    |---|---|---|---|---|---|---|---|
+    | MI350X | rocBLAS | 886 | 0 | 0.99 | 1.00 | 7 | 1.26x |
+    | MI350X | hipBLASLt | 886 | 0 | 1.11 | 2.28 | 129 | 68x |
+    | MI350X | rocBLAS TF32 | 188 | 0 | 1.00 | 1.00 | 1 | 1.35x |
+    | MI350X | hipBLASLt TF32 | 188 | 0 | 1.18 | 2.84 | 42 | 32x |
+    | MI325X | rocBLAS | 912 | 0 | 0.98 | 0.99 | 5 | 1.29x |
+    | MI325X | hipBLASLt | 896 | 16 | 1.01 | 1.04 | 42 | 17x |
+    | MI325X | rocBLAS TF32 | 191 | 0 | 0.98 | 0.98 | 1 | 1.11x |
+    | MI325X | hipBLASLt TF32 | 191 | 0 | 1.08 | 1.63 | 17 | 19x |
+
+    - rocBLAS costs nothing measurable without atomics: the geomeans sit within run-to-run noise of 1.
+    - hipBLASLt without workspace loses its split-reduction algorithms. The cost is in backward weights with long reductions over few output elements (MI350X backward weights: geomean 1.27, total time 3.6x; forward 1.08; backward data 1.00), worst on stems such as 7x7 three-channel layers over 800x800 images.
+    - A caller that deselects `NONDETERMINISTIC` keeps both deterministic siblings, and the faster of the two is close to the faster default engine: best deterministic over best default, geomean 1.00 on both GPUs (total time 1.00 MI350X, 1.00 MI325X; 2 and 5 graphs past 1.10x). With TF32 allowed (fp32 graphs): geomean 1.03 and total 1.04 on MI350X, 1.00 on MI325X.
 - **Error model:** correctness runs use the #15481 reduction-length-aware tolerance, including large tensors past 2 GiB on gfx950. Three library behaviours would round partials to 16 bits, and each is handled:
   - rocBLAS k-chunking into bf16 is declined;
   - rocBLAS gfx11 bf16 GEMV is declined;
