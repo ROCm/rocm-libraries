@@ -23,9 +23,9 @@
 #define K5_SREG_UNROLL 2
 #endif
 
-template <class T, int BK, bool F16MATH, int I, class Epi = ConvEpiNone>
-__device__ __attribute__((always_inline)) void
-    k5SregBody(const K5Args& a, float* Zs, const Epi& epi = Epi{})
+template <class T, int BK, bool F16MATH, int I>
+__device__ __attribute__((always_inline)) void k5SregBody(const K5Args& a,
+                                                          float* Zs CONV_EPI_FN_PARAM)
 {
     constexpr bool HALF = __is_same(T, k5_half);
     constexpr int VW = HALF ? 2 : 1, BT = 64, THREADS = 256;
@@ -327,9 +327,14 @@ __device__ __attribute__((always_inline)) void
                     const int ow = tw * 2 + s;
                     const float y
                         = r == 0 ? z[0][s] + z[1][s] + z[2][s] : z[1][s] - z[2][s] - z[3][s];
+#if defined(CONV_EPI) && CONV_EPI
                     if(ow < a.wo)
                         o[r * a.wo + s] = K5Elem<T>::store(epi(
                             k5Live(a, oh, ow) ? y : 0.0f, epi.chan(g * cgo + k, true), 0, true));
+#else
+                    if(ow < a.wo)
+                        o[r * a.wo + s] = K5Elem<T>::store(k5Live(a, oh, ow) ? y : 0.0f);
+#endif
                 }
             }
         }
@@ -337,23 +342,23 @@ __device__ __attribute__((always_inline)) void
     }
 }
 
-template <class T, int BK = 16, bool F16MATH = true, class Epi = ConvEpiNone>
-__device__ void k5SregConv(const K5Args& a, const Epi& epi = Epi{})
+template <class T, int BK = 16, bool F16MATH = true>
+__device__ void k5SregConv(const K5Args& a CONV_EPI_FN_PARAM)
 {
     __shared__ float Zs[8 * BK * 64];
     switch(threadIdx.x / 64)
     {
     case 0:
-        k5SregBody<T, BK, F16MATH, 0>(a, Zs, epi);
+        k5SregBody<T, BK, F16MATH, 0>(a, Zs CONV_EPI_FN_ARG);
         break;
     case 1:
-        k5SregBody<T, BK, F16MATH, 1>(a, Zs, epi);
+        k5SregBody<T, BK, F16MATH, 1>(a, Zs CONV_EPI_FN_ARG);
         break;
     case 2:
-        k5SregBody<T, BK, F16MATH, 2>(a, Zs, epi);
+        k5SregBody<T, BK, F16MATH, 2>(a, Zs CONV_EPI_FN_ARG);
         break;
     default:
-        k5SregBody<T, BK, F16MATH, 3>(a, Zs, epi);
+        k5SregBody<T, BK, F16MATH, 3>(a, Zs CONV_EPI_FN_ARG);
         break;
     }
 }

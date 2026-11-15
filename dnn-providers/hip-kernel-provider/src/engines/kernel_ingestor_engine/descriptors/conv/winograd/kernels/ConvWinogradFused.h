@@ -196,9 +196,8 @@ template <class T,
           int TM,
           int TN,
           bool DMA = false,
-          int PFD = 1,
-          class Epi = ConvEpiNone>
-__device__ void k5FusedConv2(const K5Args& a, const Epi& epi = Epi{})
+          int PFD = 1>
+__device__ void k5FusedConv2(const K5Args& a CONV_EPI_FN_PARAM)
 {
     typedef K5F2Cfg<T, M, DOT2, BK, BT, CCV, TM, TN, DMA> C;
     static_assert(!DMA || C::NPS == 1, "DMA: one patch task per lane");
@@ -857,7 +856,7 @@ __device__ void k5FusedConv2(const K5Args& a, const Epi& epi = Epi{})
                         const int ow = tw * M + j;
                         if(ow < a.wo)
                             k5StoreOut<T, K5_NCHW>(
-                                a, out, img, g * cgo + k, oh, ow, y[i * M + j], epi);
+                                a, out, img, g * cgo + k, oh, ow, y[i * M + j] CONV_EPI_FN_ARG);
                     }
                 }
             }

@@ -115,17 +115,9 @@ __device__ inline unsigned k5AsU(k5h2 v)
     return __builtin_bit_cast(unsigned, v);
 }
 
-template <class T,
-          bool GFX12,
-          int BK,
-          int TG,
-          bool F16MATH,
-          int BINS,
-          int I,
-          int J,
-          class Epi = ConvEpiNone>
-__device__ __attribute__((always_inline)) void
-    k5WregBody(const K5Args& a, float* Zs, const Epi& epi = Epi{})
+template <class T, bool GFX12, int BK, int TG, bool F16MATH, int BINS, int I, int J>
+__device__ __attribute__((always_inline)) void k5WregBody(const K5Args& a,
+                                                          float* Zs CONV_EPI_FN_PARAM)
 {
     typedef K5Wmma<T, GFX12> W;
     typedef K5WregCfg<T, GFX12, BK, TG, BINS> C;
@@ -572,11 +564,16 @@ __device__ __attribute__((always_inline)) void
                 for(int s = 0; s < 2; ++s)
                 {
                     const int ow = tw * 2 + s;
+#if defined(CONV_EPI) && CONV_EPI
                     if(ow < a.wo)
                         o[r * a.wo + s] = K5Elem<T>::store(epi(k5Live(a, oh, ow) ? y[r][s] : 0.0f,
                                                                epi.chan(g * cgo + k, true),
                                                                0,
                                                                true));
+#else
+                    if(ow < a.wo)
+                        o[r * a.wo + s] = K5Elem<T>::store(k5Live(a, oh, ow) ? y[r][s] : 0.0f);
+#endif
                 }
             }
         }
@@ -584,14 +581,8 @@ __device__ __attribute__((always_inline)) void
     }
 }
 
-template <class T,
-          bool GFX12,
-          int BK = 64,
-          int TG = 1,
-          bool F16MATH = true,
-          int BINS = 4,
-          class Epi = ConvEpiNone>
-__device__ __attribute__((always_inline)) void k5WregConv(const K5Args& a, const Epi& epi = Epi{})
+template <class T, bool GFX12, int BK = 64, int TG = 1, bool F16MATH = true, int BINS = 4>
+__device__ __attribute__((always_inline)) void k5WregConv(const K5Args& a CONV_EPI_FN_PARAM)
 {
     typedef K5WregCfg<T, GFX12, BK, TG, BINS> C;
     __shared__ float Zs[C::LDS];
@@ -602,16 +593,16 @@ __device__ __attribute__((always_inline)) void k5WregConv(const K5Args& a, const
         switch(w)
         {
         case 0:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 0, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 0, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 1:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 1, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 1, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 2:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 2, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 2, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         default:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 3, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 4, 3, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         }
     }
@@ -620,28 +611,28 @@ __device__ __attribute__((always_inline)) void k5WregConv(const K5Args& a, const
         switch(w)
         {
         case 0:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 0, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 0, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 1:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 0, 1>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 0, 1>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 2:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 1, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 1, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 3:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 1, 1>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 1, 1>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 4:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 2, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 2, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 5:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 2, 1>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 2, 1>(a, Zs CONV_EPI_FN_ARG);
             break;
         case 6:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 3, 0>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 3, 0>(a, Zs CONV_EPI_FN_ARG);
             break;
         default:
-            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 3, 1>(a, Zs, epi);
+            k5WregBody<T, GFX12, BK, TG, F16MATH, 2, 3, 1>(a, Zs CONV_EPI_FN_ARG);
             break;
         }
     }
