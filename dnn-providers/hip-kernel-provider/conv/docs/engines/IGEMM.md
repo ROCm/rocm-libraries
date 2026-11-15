@@ -15,7 +15,7 @@ SPDX-License-Identifier:  MIT
 - **Wins when:** compute-bound dense and grouped layers in fwd and bwd-data, NCHW 16-bit backward data, 3-D fp32, and everything on gfx906 (where MIOpen falls to im2col + rocBLAS). It serves every fwd/bwd graph of the 2K subset.
 - **Loses when:** gfx90a/gfx908 NCHW fp16 forward vs MIOpen's older XDLOPS implicit GEMMs (1.2-1.4x behind), gfx906 NCHW fp16 forward vs its V4R1 kernel (1.55x), stride-1 3x3 where Winograd (K5) or direct (K2) win, strided NCHW bwd-data where K7 wins.
 - **Precision:** fp32 accumulation, one rounding (split-K partials in fp32, summed in split order). Deterministic. No numerical notes.
-- **Instances:** 1622 fwd + 1226 bwd configs, all runtime-geometry (no compile-time shape tier); 37 large-image twins and 39 TF32-class configs per direction; 717 fwd + 409 bwd patch configs, admitted only on patch convolutions.
+- **Instances:** 1666 fwd + 1314 bwd configs, all runtime-geometry (no compile-time shape tier); 37 large-image twins and 39 TF32-class configs per direction; 761 fwd + 497 bwd patch configs (44 fwd + 88 bwd of them the patch tile), admitted only on patch convolutions.
 - **vs MIOpen:** competes with CK grouped implicit GEMM (`ConvHipImplicitGemm{,3D}Group{Fwd,Bwd}Xdlops`), the older HIP and asm implicit GEMMs, and `GemmFwdRest`/`GemmBwdRest`. Call-weighted factor where K1 is our best: 0.93-1.44x fwd, 1.15-1.47x bwd on matrix-core GPUs; 3.0x / 1.8x on gfx906.
 
 ## Why it exists
@@ -34,6 +34,7 @@ Backward data runs one GEMM per (group, stride phase): rows are the dx positions
 - Forward folds the width: the channels-last input is read as W / S pixels of S C channels and the K T R S C filter as K T R 1 (S C), the same bytes. Each filter row's taps become one contiguous run of the reduction, so the loads are whole vectors (ViT's 16 x 3 = 48-channel runs on 8-wide vectors) where the plain configs gather 3 channels per tap. Only the width must tile exactly; the height can be any geometry.
 - Backward data folds every axis: `dx[(n, od, oh, ow)][(t, r, s, c)] = sum_k dy[(n, od, oh, ow)][k] w[k][(t, r, s, c)]`, one GEMM over dy's positions with T R S C columns (`K1_PATCH`: the epilogue writes column runs of S C to dx pixel `(od T + t, oh R + r, ow S + s)`). Every dx element is written once, with no stride phases; N is the whole filter rather than C per phase (3 for RGB stems).
 - Patch configs never split K: their GEMMs run in microseconds, where the reduce launch and the partials cost more than an under-filled grid.
+- The patch tile (`patch` 2, `k1PatchMma` in `ConvIgemmPatch.h`) is a dedicated GEMM for the same view: two XOR-swizzled LDS stages with one barrier a k-step (the next step's global loads in flight under the current step's matrix-core work), a forward cursor that walks a thread's 16-byte granule through the filter rows without division, and backward data reading either the staged `[(t, r, s, c)][k]` filter or, with `wdirect`, the graph's K T R S C filter in place: K-major in LDS and read by `ds_read_b64_tr_b16` on gfx950, stored transposed elsewhere. It runs on the 16-bit 16x16 matrix-core atoms of every matrix-core architecture (fp32 patch convolutions run on the patch view of the general loop), needs the read operands within 32-bit buffer offsets and its two stages within the device's LDS, and serves 4- and 8-wide channel vectors.
 
 ```
 grid = (row tiles, column tiles, groups x stride phases x splits)
@@ -62,7 +63,7 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 | `cf` | channels-first output from the epilogue | packed NCHW/NCDHW output |
 | `fuse` 2-16 | run F small groups as one block-diagonal group (filter expanded in the workspace) | fused group <= 64 channels each way |
 | `large` | 64-bit positions within an image | only images past 2^31 - 1 pixels (and only them) |
-| `patch` | the patch view above (forward width fold, backward data one GEMM with the patch scatter) | patch convolutions only; backward data writes channels-last dx with a vector dividing S C |
+| `patch` | 1: the patch view above on the general loop (forward width fold, backward data one GEMM with the patch scatter); 2: the patch tile | patch convolutions only; backward data writes channels-last dx with a vector dividing S C |
 | `math` `bf16x3` | three-bf16 TF32 form | fp32 graphs, TF32 permitted |
 
 **Host side:**
@@ -130,7 +131,7 @@ K1 differs in kind: one source compiled at first use for the device in hand, run
 
 ## Next steps and deferred ideas
 
-1. **Patch GEMMs at microsecond scale** (gfx950, NHWC bf16, autotuned, same GPU): the patch configs run ViT-B/16 forward 1.6-1.85x faster than the previous best engine and ConvNeXt 2x2 forward up to 1.25x, with every patch graph's time unchanged or better outside noise. They still trail MIOpen's hipconv patch kernel by 1.2-1.4x (ViT forward) and 1.4-1.9x (backward data, ConvNeXt and U-Net 2x2), where its single double-buffered, transpose-read GEMM keeps more work per barrier. A dedicated patch tile (deeper k-chunks, transposed-read B for backward data) is the remaining step.
+1. **Patch GEMMs at microsecond scale** (gfx950, NHWC bf16, autotuned, same GPU): with the patch tile, ViT-B/16 runs 1.6-1.8x (forward) and 1.3x (backward data) faster than the previous best engine, ConvNeXt 2x2 backward data 1.5x and the ConvNeXt 4x4 RGB stem 1.1-1.35x. MIOpen's hipconv patch kernel stays 1.1-1.45x ahead on these graphs: at the same 64 x 64 x 64 tile its kernel runs 1.35x faster on ViT-B/16 batch 16 (11 against 15 us), so the remaining gap is the inner loop (load and LDS-read scheduling against the matrix-core work), not the launch count or the tile shape; the patch tile's 256-row tiles also trail the general loop's at batch 128.
 2. **Fragment read-ahead for BK-64 tiles** (load a k-step's fragments before its MMA loop): the largest same-config residual to the rocKE port (1.20x on gfx1201 BK-64). Gain bounded by that residual on the BK-64 picks.
 3. **gfx90a/gfx908 forward pipeline** (more work per barrier, deeper load/LDS/MMA overlap) for NCHW fp16 and the Wan-VAE 3-D bf16 layers, the heaviest K1 losses on those GPUs. RDNA pipelining of the same kind (ring, register prefetch) measured no gain, so this needs a structural change.
 4. **gfx906 FMA forward for NCHW fp16** (1.55x behind V4R1 on 65 graphs, the largest K1 weighted loss anywhere), beyond the `v_dot2` fp16 path the FMA kernel has.
