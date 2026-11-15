@@ -151,8 +151,8 @@ struct K5WmmaCfg
     static_assert(P % WAVES == 0 && (THREADS / 2) % BK == 0 && UB % (8 * THREADS) == 0, "config");
 };
 
-template <class T, bool GFX12, int BK = 64, int WAVES = 8>
-__device__ void k5WmmaConv(const K5Args& a)
+template <class T, bool GFX12, int BK = 64, int WAVES = 8, class Epi = ConvEpiNone>
+__device__ void k5WmmaConv(const K5Args& a, const Epi& epi = Epi{})
 {
     typedef K5Wmma<T, GFX12> W;
     typedef K5WmmaCfg<T, GFX12, BK, WAVES> C;
@@ -378,7 +378,10 @@ __device__ void k5WmmaConv(const K5Args& a)
                         const int ow = tw * 2 + jj;
                         if(ow < a.wo)
                             o[i * a.wo + jj]
-                                = K5Elem<T>::store(k5Live(a, oh, ow) ? y[i * 2 + jj] : 0.0f);
+                                = K5Elem<T>::store(epi(k5Live(a, oh, ow) ? y[i * 2 + jj] : 0.0f,
+                                                       epi.chan(g * cgo + k, true),
+                                                       0,
+                                                       true));
                     }
                 }
             }

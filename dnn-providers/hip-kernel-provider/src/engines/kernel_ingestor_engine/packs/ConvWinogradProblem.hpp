@@ -69,11 +69,13 @@ struct WinogradProblem
  * channel count and padding within 32 bits. Any padding,
  * asymmetric included (the output extent the graph declares is the one computed), both
  * convolution modes, groups, fp32 / fp16 / bf16, and any operand layout (staged when the
- * variant does not read it).
+ * variant does not read it). With @p fusion EPILOGUE a forward graph may carry a pointwise
+ * epilogue (base.epilogue), which the kernels that write y apply before their single rounding.
  */
 std::optional<WinogradProblem>
     parseWinogradProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                         conv_naive::ConvDirection direction);
+                         conv_naive::ConvDirection direction,
+                         conv_naive::Fusion fusion = conv_naive::Fusion::NONE);
 
 // bf16 forward and backward data, and the fp32 F(4,3) configs, are engines of their own
 // (CONV_WINOGRAD_{FWD,BWD}_BF16, CONV_WINOGRAD_{FWD,BWD}_F43), which report the WINOGRAD

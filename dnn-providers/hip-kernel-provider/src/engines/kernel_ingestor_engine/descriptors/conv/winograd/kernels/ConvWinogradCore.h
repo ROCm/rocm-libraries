@@ -30,6 +30,7 @@
 // All transform arithmetic is fp32; the GEMM accumulates in fp32.
 #pragma once
 
+#include "ConvEpilogue.h"
 #include "ConvWinogradArgs.h"
 
 typedef _Float16 k5_half;
@@ -516,9 +517,11 @@ __device__ inline bool k5LiveBwd2(const K5Args& a, int h, int w)
 
 /// Stores one forward-form output (virtual channel kk over all groups, virtual position oh < ho,
 /// ow < wo): in place (stride 1, stride-2 forward) or phase-scattered into dx (stride-2
-/// backward data), with outputs whose window is all padding exactly 0.
-template <class T, int LAYOUT>
-__device__ inline void k5StoreOut(const K5Args& a, T* out, int img, int kk, int oh, int ow, float v)
+/// backward data), with outputs whose window is all padding exactly 0. A fused epilogue (forward)
+/// runs on that value, the exact 0 included, before the single rounding.
+template <class T, int LAYOUT, class Epi = ConvEpiNone>
+__device__ inline void k5StoreOut(
+    const K5Args& a, T* out, int img, int kk, int oh, int ow, float v, const Epi& epi = Epi{})
 {
     int ch = kk, channels = a.co, h = oh, w = ow, hs = a.ho, ws = a.wo;
     bool live;
@@ -540,7 +543,7 @@ __device__ inline void k5StoreOut(const K5Args& a, T* out, int img, int kk, int 
     const long long off = LAYOUT == K5_NCHW
                               ? ((static_cast<long long>(img) * channels + ch) * hs + h) * ws + w
                               : ((static_cast<long long>(img) * hs + h) * ws + w) * channels + ch;
-    out[off] = K5Elem<T>::store(live ? v : 0.0f);
+    out[off] = K5Elem<T>::store(epi(live ? v : 0.0f, epi.chan(ch, true), off, true));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -548,8 +551,8 @@ __device__ inline void k5StoreOut(const K5Args& a, T* out, int img, int kk, int 
 // tile-fast. NCHW writes rows of m outputs per thread; NHWC stages through LDS and writes
 // channel-fast.
 
-template <class T, int M, int LAYOUT>
-__device__ void k5OutputTransform(const K5Args& a)
+template <class T, int M, int LAYOUT, class Epi = ConvEpiNone>
+__device__ void k5OutputTransform(const K5Args& a, const Epi& epi = Epi{})
 {
     constexpr int A = K5Wino<M>::A, P = A * A;
     typedef K5XformBlock<LAYOUT> B;
@@ -595,7 +598,7 @@ __device__ void k5OutputTransform(const K5Args& a)
                 {
                     const int ow = tw * M + j;
                     if(ow < a.wo)
-                        k5StoreOut<T, K5_NCHW>(a, out, img, kk, oh, ow, y[i * M + j]);
+                        k5StoreOut<T, K5_NCHW>(a, out, img, kk, oh, ow, y[i * M + j], epi);
                 }
             }
         }
@@ -631,7 +634,8 @@ __device__ void k5OutputTransform(const K5Args& a)
                                                kk,
                                                oh,
                                                ow,
-                                               s[((i * M + j) * B::TB + tl2) * (B::CB + 1) + kl2]);
+                                               s[((i * M + j) * B::TB + tl2) * (B::CB + 1) + kl2],
+                                               epi);
                 }
             }
         }

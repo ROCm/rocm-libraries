@@ -253,8 +253,9 @@ template <class T,
           int M = 2,
           int DIR = K5_FORWARD,
           int PF = 0,
-          int TW = 0>
-__device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
+          int TW = 0,
+          class Epi = ConvEpiNone>
+__device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a, const Epi& epi = Epi{})
 {
     typedef K5CoopCfg<T, W, MT, NT, KW, M, TW, DIR> C;
     constexpr bool B16 = C::B16;
@@ -899,8 +900,11 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                                                     : z[1][0] - z[2][0] - z[3][0];
                             const float y1 = r == 0 ? z[0][1] + z[1][1] + z[2][1]
                                                     : z[1][1] - z[2][1] - z[3][1];
-                            const T v0 = K5Elem<T>::store(((mask >> (2 * r)) & 1u) ? y0 : 0.0f);
-                            const T v1 = K5Elem<T>::store(((mask >> (2 * r + 1)) & 1u) ? y1 : 0.0f);
+                            const typename Epi::Chan chan = epi.chan(g * cgo + k, true);
+                            const T v0 = K5Elem<T>::store(
+                                epi(((mask >> (2 * r)) & 1u) ? y0 : 0.0f, chan, 0, true));
+                            const T v1 = K5Elem<T>::store(
+                                epi(((mask >> (2 * r + 1)) & 1u) ? y1 : 0.0f, chan, 0, true));
                             if(pair)
                             {
                                 const unsigned lo = __builtin_bit_cast(unsigned short, v0);
@@ -1019,8 +1023,11 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                                 {
                                     const int oh = eTh * 3 + r, ow = eTw * 3 + s;
                                     if(oh < a.ho && ow < a.wo)
-                                        o[r * a.wo + s]
-                                            = K5Elem<T>::store(k5Live(a, oh, ow) ? y[r][s] : 0.0f);
+                                        o[r * a.wo + s] = K5Elem<T>::store(
+                                            epi(k5Live(a, oh, ow) ? y[r][s] : 0.0f,
+                                                epi.chan(g * cgo + k, true),
+                                                0,
+                                                true));
                                 }
                         }
                     }
@@ -1199,9 +1206,11 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                     {
                         if(!((eMask >> (4 + r)) & 1u))
                             continue; // row past the output
-                        const T v0 = K5Elem<T>::store(((eMask >> (2 * r)) & 1u) ? y[r][0] : 0.0f);
-                        const T v1
-                            = K5Elem<T>::store(((eMask >> (2 * r + 1)) & 1u) ? y[r][1] : 0.0f);
+                        const typename Epi::Chan chan = epi.chan(g * cgo + k, true);
+                        const T v0 = K5Elem<T>::store(
+                            epi(((eMask >> (2 * r)) & 1u) ? y[r][0] : 0.0f, chan, 0, true));
+                        const T v1 = K5Elem<T>::store(
+                            epi(((eMask >> (2 * r + 1)) & 1u) ? y[r][1] : 0.0f, chan, 0, true));
                         if(ePair)
                         {
                             // Both columns, a 4-byte aligned pair (even output width).
