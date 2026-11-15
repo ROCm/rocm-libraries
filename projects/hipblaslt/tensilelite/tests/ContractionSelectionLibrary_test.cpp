@@ -421,3 +421,35 @@ TEST(ContractionSelectionLibraryTest, AlphaSupportModesControlInternalArgBit11An
                 EXPECT_EQ(arg1, 0u);
             }
 }
+
+TEST(ContractionSelectionLibraryTest, Gsu2MbskSolutionsLaunchWithoutWgmxccRemap)
+{
+    // MBSK (globalAccumulation == 3) at GSU=2 busy-waits in the last workgroup of a tile; such launches must not
+    // use the wgmXCC remap (rocm-libraries#14746). Other GSU values and other accumulations keep the requested
+    // WGMXCC, in both internalArg1 layouts.
+    ContractionSolution solution;
+    solution.internalArgsSupport.version  = 3;
+    solution.internalArgsSupport.wgm      = true;
+    solution.internalArgsSupport.useSFC   = false;
+    solution.internalArgsSupport.staggerU = false;
+    solution.sizeMapping.globalSplitUCoalesced                  = false;
+    solution.sizeMapping.globalSplitUWorkGroupMappingRoundRobin = false;
+    solution.sizeMapping.workGroupMappingXCCGroup               = 304;
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+
+    for(int layoutXCC : {-1, 8})
+        for(int ga : {1, 2, 3})
+            for(int gsu : {1, 2, 3})
+            {
+                SCOPED_TRACE(::testing::Message() << "workGroupMappingXCC=" << layoutXCC
+                                                 << " globalAccumulation=" << ga << " GSU=" << gsu);
+                solution.sizeMapping.workGroupMappingXCC = layoutXCC;
+                solution.sizeMapping.globalAccumulation  = ga;
+                problem.setParams().setGSU(gsu);
+                uint32_t arg0 = 0, arg1 = 0;
+                ASSERT_NO_THROW(solution.calculateInternalArgs<false>(
+                    arg0, arg1, nullptr, problem.getParams(), 4, 8, 0, 0, 0, 0, 0, 1, {}));
+                const uint32_t xcc = layoutXCC == -1 ? (arg1 >> 10) & 0xFu : (arg1 >> 16) & 0x3Fu;
+                EXPECT_EQ(xcc, (gsu == 2 && ga == 3) ? 1u : 8u);
+            }
+}
