@@ -1074,20 +1074,26 @@ bool kernelMatches(const MatchContext& context,
     const auto tw = static_cast<int>(tile->tw);
     // Wide groups stage nbi blocks of a group's channels (cb's role).
     const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
-    const long long lds
-        = tile->rs != 0 ? conv_group::groupRowsLdsBytes(
-                              bytes, problem->kernelS, tw, static_cast<int>(tile->cb))
-          : tile->pf != 0
-              ? conv_group::groupPhasedLdsBytes(bytes,
-                                                problem->kernelR,
-                                                problem->kernelS,
-                                                th,
-                                                tw,
-                                                cb,
-                                                tile->cf != 0,
-                                                static_cast<int>(tile->nbo))
-              : conv_group::groupLdsBytes(
-                    bytes, problem->kernelR, problem->kernelS, problem->kernelStride, th, tw, cb);
+    const long long lds = [&] {
+        if(tile->rs != 0)
+        {
+            return conv_group::groupRowsLdsBytes(
+                bytes, problem->kernelS, tw, static_cast<int>(tile->cb));
+        }
+        if(tile->pf != 0)
+        {
+            return conv_group::groupPhasedLdsBytes(bytes,
+                                                   problem->kernelR,
+                                                   problem->kernelS,
+                                                   th,
+                                                   tw,
+                                                   cb,
+                                                   tile->cf != 0,
+                                                   static_cast<int>(tile->nbo));
+        }
+        return conv_group::groupLdsBytes(
+            bytes, problem->kernelR, problem->kernelS, problem->kernelStride, th, tw, cb);
+    }();
     if(lds > LDS_LIMIT)
     {
         return false;
