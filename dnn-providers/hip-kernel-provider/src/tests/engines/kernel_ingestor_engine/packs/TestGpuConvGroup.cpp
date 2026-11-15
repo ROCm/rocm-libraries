@@ -1299,10 +1299,10 @@ TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
         EXPECT_TRUE(declines("dtype", std::string("BFLOAT16")));
         // Wide groups of 32 channels: a 2-block config with whole groups a workgroup; groups of
         // 24 (padded blocks) and other block counts are declined.
-        auto wide = dense(128, 128, {12, 13}, {3, 3}, {1, 1}, true);
-        wide.groups = 4;
-        wide.dataType = DataType::HALF;
-        const GraphFixture wideGroups(buildGraph(specFor(wide, direction)), properties);
+        auto wideShape = dense(128, 128, {12, 13}, {3, 3}, {1, 1}, true);
+        wideShape.groups = 4;
+        wideShape.dataType = DataType::HALF;
+        const GraphFixture wideGroups(buildGraph(specFor(wideShape, direction)), properties);
         const auto wideGroupsBound = matchesGraph(pack, wideGroups.context());
         ASSERT_TRUE(wideGroupsBound.has_value());
         auto wide2 = *base;
