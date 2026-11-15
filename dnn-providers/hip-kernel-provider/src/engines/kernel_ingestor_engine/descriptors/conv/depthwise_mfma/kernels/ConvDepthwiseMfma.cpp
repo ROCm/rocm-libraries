@@ -644,7 +644,7 @@ extern "C" __global__ void __launch_bounds__(64 * CONV_DWM_WAVES)
     ConvDepthwiseMfma(ConvDepthwiseMfmaArgs args CONV_EPI_PARAM)
 {
 #if defined(CONV_EPI) && CONV_EPI
-    const ConvEpiGen dwEpi{epiArgs};
+    const ConvEpiGen dwEpi = convEpiGen(epiArgs);
 #endif
 #if CONV_DWM_LAYOUT == 0
     conv_depthwise_mfma::depthwiseMfma<ElementType,

@@ -1871,9 +1871,22 @@ __device__ inline void v7_rowtile_core_nhwc(const T* __restrict__ A,
         for(int tx = 0; tx < TW; ++tx)
         {
             float v[CPL];
+#if defined(CONV_EPI) && CONV_EPI
+            // The accumulator passes an empty asm before the epilogue: with the chain visible to
+            // the FMA-mix combines, instruction selection fails on 16-bit rowtiles ("Cannot
+            // select: f32 = Constant<-1>") for several chains (gelu-tanh, bias + relu).
 #pragma unroll
             for(int c = 0; c < CPL; ++c)
-                v[c] = DW_EPI_APPLY(acc[c][ty][tx], dwEcR[c]);
+            {
+                float a = acc[c][ty][tx];
+                asm("" : "+v"(a));
+                v[c] = DW_EPI_APPLY(a, dwEcR[c]);
+            }
+#else
+#pragma unroll
+            for(int c = 0; c < CPL; ++c)
+                v[c] = acc[c][ty][tx];
+#endif
             dwRowStore<T, CPL>(yr, static_cast<unsigned>((wo0 + tx) * p.C + k0) * EB, v);
         }
     }

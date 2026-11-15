@@ -92,7 +92,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DWR_BLOCK)
     auto* out = static_cast<ElementType*>(args.out);
     constexpr bool FLIP = CONV_DWR_FLIP != 0;
 #if defined(CONV_EPI) && CONV_EPI
-    const ConvEpiGen dwEpi{epiArgs};
+    const ConvEpiGen dwEpi = convEpiGen(epiArgs);
 #endif
 
 #if CONV_DWR_VARIANT == 0

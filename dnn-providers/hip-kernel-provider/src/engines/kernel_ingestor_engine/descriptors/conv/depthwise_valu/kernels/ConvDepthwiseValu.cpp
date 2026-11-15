@@ -138,7 +138,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
     p.sd = args.sd;
     p.dd = args.dd;
 #if defined(CONV_EPI) && CONV_EPI
-    p.epi = ConvEpiGen{epiArgs};
+    p.epi = convEpiGen(epiArgs);
 #endif
 
     const auto* in = static_cast<const ElementType*>(args.in);
