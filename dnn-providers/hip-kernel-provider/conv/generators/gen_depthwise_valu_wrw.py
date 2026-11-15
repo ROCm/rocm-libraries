@@ -28,11 +28,13 @@ FIELDS = [
     "s",
     "cv",
     "strip",
+    "form",
 ]
 STRINGS = {"dtype", "layout", "variant"}
 # The matrix-core fields (q output columns a tile, g input rows a step, nwg 16-channel groups a
-# wave, bpc blocks per dispatch unit, s the stride of both axes) are 0 for the VALU variants.
-NO_MMA = dict(q=0, g=0, nwg=0, bpc=0, s=0, cv=0, strip=0)
+# wave, bpc blocks per dispatch unit, s the stride of both axes, form the kernel body) are 0
+# for the VALU variants.
+NO_MMA = dict(q=0, g=0, nwg=0, bpc=0, s=0, cv=0, strip=0, form=0)
 CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA, mult=1)] + [
     dict(variant="tile", kd=kd, kh=kh, kw=kw, **NO_MMA, mult=1)
     for kd, kh, kw in (
@@ -65,8 +67,21 @@ HANKEL_SCHEDULES = (
     (16, 4, 1, 1),
     (32, 4, 1, 1),
 )
+# Schedules of the row-staging body (form 1) only: tiles that fit 7-, 24- and 28-column images
+# (ConvNeXt 7x7 at 7 and 28 columns, EfficientNet at 24) and four blocks a dispatch unit at two
+# rows a step, each the best form-1 schedule on some gfx950 ConvNeXt or EfficientNet shape.
+HANKEL_FORM1_SCHEDULES = (
+    (8, 4, 2, 2),
+    (8, 4, 1, 4),
+    (8, 4, 1, 1),
+    (16, 2, 1, 4),
+    (24, 4, 1, 2),
+    (28, 2, 1, 1),
+    (28, 4, 1, 1),
+)
 # Stride 2 (both axes; EfficientNet / MobileNet downsampling layers) stages each x row as its
-# even and odd columns: the same schedules.
+# even and odd columns: the same schedules. Every schedule ships in both bodies (form 0 and 1),
+# the form-1 schedules in form 1 alone.
 HANKEL = [
     dict(
         variant="hankel",
@@ -81,10 +96,13 @@ HANKEL = [
         s=s,
         cv=0,
         strip=0,
+        form=form,
     )
     for s in (1, 2)
     for k in (3, 5, 7)
-    for q, g, nwg, bpc in HANKEL_SCHEDULES
+    for (q, g, nwg, bpc), forms in [(c, (0, 1)) for c in HANKEL_SCHEDULES]
+    + [(c, (1,)) for c in HANKEL_FORM1_SCHEDULES]
+    for form in forms
 ]
 
 # Vector tiles (VALU, channels-last, unit width stride, every type and architecture): cv
@@ -109,6 +127,7 @@ VTILE = [
         s=0,
         cv=cv,
         strip=strip,
+        form=0,
     )
     for k, shapes in VTILE_SHAPES.items()
     for cv, strip in shapes
@@ -153,7 +172,18 @@ w(
         "name": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
         "graph_match": {"native": "hipkernel.conv_depthwise_valu_wrw.graph_match"},
         "metadata": kmd,
-        "knobs": ["variant", "q", "g", "nwg", "bpc", "mult", "s", "cv", "strip"],
+        "knobs": [
+            "variant",
+            "q",
+            "g",
+            "nwg",
+            "bpc",
+            "mult",
+            "s",
+            "cv",
+            "strip",
+            "form",
+        ],
         "behavior_notes": ["runtime_compilation"],
         # RFC 0025 numerical notes. No "nondeterministic": every config is
         # bitwise reproducible (fixed-order sums, no atomics), which the
@@ -191,6 +221,7 @@ for c in HANKEL:
     for dtype, dt in (("HALF", "f16"), ("BFLOAT16", "bf16")):
         tag = f"hankel_k{c['kh']}x{c['kw']}.q{c['q']}g{c['g']}w{c['nwg']}b{c['bpc']}"
         tag += f".s{c['s']}" if c["s"] != 1 else ""
+        tag += f".f{c['form']}" if c["form"] != 0 else ""
         name = f"conv_depthwise_valu_wrw.{dt}.nhwc.{tag}"
         kernels.append(
             {

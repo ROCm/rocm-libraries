@@ -671,13 +671,16 @@ struct WrwConfig
     /// The vector tiles' channels a thread and output columns a strip; 0 otherwise.
     int64_t cv = 0;
     int64_t strip = 0;
+    /// The hankel configs' kernel body; 0 otherwise.
+    int64_t form = 0;
 
     std::string tag() const
     {
         return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
                + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult) + "s"
-               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip);
+               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip) + "f"
+               + std::to_string(form);
     }
 };
 
@@ -695,6 +698,19 @@ const std::vector<std::array<int64_t, 4>>& hankelSchedules()
                                                                  {16, 4, 1, 2},
                                                                  {16, 4, 1, 1},
                                                                  {32, 4, 1, 1}};
+    return s_schedules;
+}
+
+/// The schedules the generator ships in the row-staging body (form 1) alone.
+const std::vector<std::array<int64_t, 4>>& hankelForm1Schedules()
+{
+    static const std::vector<std::array<int64_t, 4>> s_schedules{{8, 4, 2, 2},
+                                                                 {8, 4, 1, 4},
+                                                                 {8, 4, 1, 1},
+                                                                 {16, 2, 1, 4},
+                                                                 {24, 4, 1, 2},
+                                                                 {28, 2, 1, 1},
+                                                                 {28, 4, 1, 1}};
     return s_schedules;
 }
 
@@ -738,7 +754,18 @@ const std::vector<WrwConfig>& wrwCatalog()
             {
                 for(const auto& [q, g, nwg, bpc] : hankelSchedules())
                 {
-                    configs.push_back({"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride});
+                    for(const int64_t form : {0, 1})
+                    {
+                        WrwConfig config{"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride};
+                        config.form = form;
+                        configs.push_back(config);
+                    }
+                }
+                for(const auto& [q, g, nwg, bpc] : hankelForm1Schedules())
+                {
+                    WrwConfig config{"NHWC", "hankel", 1, k, k, q, g, nwg, bpc, 1, stride};
+                    config.form = 1;
+                    configs.push_back(config);
                 }
             }
         }
@@ -782,7 +809,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"mult", config.mult},
            {"s", config.s},
            {"cv", config.cv},
-           {"strip", config.strip}};
+           {"strip", config.strip},
+           {"form", config.form}};
     return kernel;
 }
 
@@ -1837,6 +1865,23 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
          [](ConvShape&, WrwConfig& c, std::string&) {
              c = {"NHWC", "tile", 1, 3, 3};
              c.s = 1;
+         },
+         false},
+        {"FormOne", [](ConvShape&, WrwConfig& c, std::string&) { c.form = 1; }, true},
+        {"FormTwo", [](ConvShape&, WrwConfig& c, std::string&) { c.form = 2; }, false},
+        {"FormNegative", [](ConvShape&, WrwConfig& c, std::string&) { c.form = -1; }, false},
+        {"ValuTileWithAForm",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "tile", 1, 3, 3};
+             c.form = 1;
+         },
+         false},
+        {"VectorTileWithAForm",
+         [](ConvShape&, WrwConfig& c, std::string&) {
+             c = {"NHWC", "vtile", 1, 3, 3};
+             c.cv = 4;
+             c.strip = 8;
+             c.form = 1;
          },
          false},
     };

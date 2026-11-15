@@ -15,7 +15,8 @@
     "mult",
     "s",
     "cv",
-    "strip"
+    "strip",
+    "form"
   ],
   "behavior_notes": [
     "runtime_compilation"
