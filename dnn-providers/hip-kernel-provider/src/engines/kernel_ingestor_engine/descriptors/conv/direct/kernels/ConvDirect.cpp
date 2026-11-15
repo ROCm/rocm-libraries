@@ -137,7 +137,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvDirectSplitInput(K2SplitAr
 extern "C" __global__ void __launch_bounds__(256) ConvDirectReduce(K2ReduceArgs a CONV_EPI_PARAM)
 {
 #if defined(CONV_EPI) && CONV_EPI
-    k2SplitReduceEpi<CONV_DIRECT_TO>(a, ConvEpiGen{epiArgs});
+    k2SplitReduceEpi<CONV_DIRECT_TO>(a, convEpiGen(epiArgs));
 #else
     k2SplitReduce<CONV_DIRECT_TO>(a);
 #endif

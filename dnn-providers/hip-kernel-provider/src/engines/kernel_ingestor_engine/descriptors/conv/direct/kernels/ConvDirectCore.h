@@ -640,9 +640,8 @@ template <class T,
           int BL = 0,
           class TO = T,
           int SPLIT = 0,
-          int HALO = k2HaloMax(BM, R, S),
-          class Epi = ConvEpiNone>
-__device__ void k2ConvMma(const K2Args& a, const Epi& epi = Epi{})
+          int HALO = k2HaloMax(BM, R, S)>
+__device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -683,14 +682,16 @@ __device__ void k2ConvMma(const K2Args& a, const Epi& epi = Epi{})
     const int wm = wave % WM, wn = wave / WM;
     const int kb = Atom::template kBase<Atom::KPL>(lane);
     const int tilePix = a.th * a.tw;
-    // The fused epilogue's per-channel operands of the lane's output columns (none unfused).
-    typename Epi::Chan chans[FN];
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue's per-channel operands of the lane's output columns.
+    ConvEpiGen::Chan chans[FN];
 #pragma unroll
     for(int j = 0; j < FN; ++j)
     {
         const int en = n0 + wn * WTN + j * DIM + lane % DIM;
         chans[j] = epi.chan(en, en < a.k);
     }
+#endif
 
     Loader ld;
     ld.init(a, b, tid);
@@ -997,13 +998,18 @@ __device__ void k2ConvMma(const K2Args& a, const Epi& epi = Epi{})
             for(int j = 0; j < FN; ++j)
 #pragma unroll
                 for(int e = 0; e < Atom::ACC; ++e)
+#if defined(CONV_EPI) && CONV_EPI
                 {
                     // Split partials stay raw: the reduce applies the epilogue to their sum.
                     float v = acc[set][i][j][e];
-                    if constexpr(SPLIT == 0 && !__is_same(Epi, ConvEpiNone))
+                    if constexpr(SPLIT == 0)
                         v = epi(v, chans[j], 0, true);
                     strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM] = K1Elem<TS>::store(v);
                 }
+#else
+                    strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
+                        = K1Elem<TS>::store(acc[set][i][j][e]);
+#endif
             __builtin_amdgcn_wave_barrier();
             __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -1071,9 +1077,8 @@ template <class T,
           int VEC,
           int RING = 1,
           int PIPE = 0,
-          int HALO = k2HaloMax((THREADS / NT) * TM, R, S),
-          class Epi = ConvEpiNone>
-__device__ void k2ConvFma(const K2Args& a, const Epi& epi = Epi{})
+          int HALO = k2HaloMax((THREADS / NT) * TM, R, S)>
+__device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int BN = NT * TN;
     constexpr int LDH = HALO + 1;
@@ -1259,24 +1264,25 @@ __device__ void k2ConvFma(const K2Args& a, const Epi& epi = Epi{})
     };
 
     T* out = static_cast<T*>(a.y);
-    // The fused epilogue's per-channel operands of the thread's TN channels (none unfused).
-    typename Epi::Chan chans[TN];
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue's per-channel operands of the thread's TN channels.
+    ConvEpiGen::Chan chans[TN];
 #pragma unroll
     for(int j = 0; j < TN; ++j)
     {
         const int en = n0 + tn * TN + j;
         chans[j] = epi.chan(en, en < a.k);
     }
+#endif
     auto store = [&](int set, int od, int) {
         const int nb = n0 + tn * TN;
-        if constexpr(!__is_same(Epi, ConvEpiNone))
-        {
+#if defined(CONV_EPI) && CONV_EPI
 #pragma unroll
-            for(int i = 0; i < TM; ++i)
+        for(int i = 0; i < TM; ++i)
 #pragma unroll
-                for(int j = 0; j < TN; ++j)
-                    acc[set][i][j] = epi(acc[set][i][j], chans[j], 0, true);
-        }
+            for(int j = 0; j < TN; ++j)
+                acc[set][i][j] = epi(acc[set][i][j], chans[j], 0, true);
+#endif
 #pragma unroll
         for(int i = 0; i < TM; ++i)
         {

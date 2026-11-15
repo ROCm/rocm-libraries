@@ -356,9 +356,8 @@ template <class T,
           int EPI,
           class TO = T,
           int UN = 1,
-          int SPLIT = 0,
-          class Epi = ConvEpiNone>
-__device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a, const Epi& epi = Epi{})
+          int SPLIT = 0>
+__device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64;
     constexpr int DIM = 16;
@@ -734,12 +733,13 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a, const
             k2rBarrier();
     };
 
+#if defined(CONV_EPI) && CONV_EPI
     // The fused epilogue, applied to the tile's accumulators in place before its store (a staged
     // store's LDS transpose then copies rounded values bitwise). The lane holds channels
-    // nb + j * DIM + (l / DIM) * 4 + i. Unfused (ConvEpiNone), and for split partials, which the reduce finishes, it is nothing.
+    // nb + j * DIM + (l / DIM) * 4 + i. Split partials stay raw: the reduce applies it to their sum.
     auto epilogue = [&](int nb) __attribute__((always_inline))
     {
-        if constexpr(SPLIT == 0 && !__is_same(Epi, ConvEpiNone))
+        if constexpr(SPLIT == 0)
         {
             const int l = olane();
 #pragma unroll
@@ -748,13 +748,14 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a, const
                 for(int i = 0; i < 4; ++i)
                 {
                     const int n = nb + j * DIM + (l / DIM) * 4 + i;
-                    const auto ch = epi.chan(n, n < a.k);
+                    const ConvEpiGen::Chan ch = epi.chan(n, n < a.k);
 #pragma unroll
                     for(int p = 0; p < PW; ++p)
                         acc[p][j][i] = epi(acc[p][j][i], ch, 0, true);
                 }
         }
     };
+#endif
 
     // Direct epilogue: the lane holds channels n .. n + 3 of column ow for each row p.
     auto store = [&](const Tile& tc, int nb) __attribute__((always_inline))
@@ -885,8 +886,10 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a, const
             ++cc;
             return true;
         }
+#if defined(CONV_EPI) && CONV_EPI
         // Once per tile, ahead of whichever store runs.
         epilogue(nb);
+#endif
         if constexpr(STAGED && PP == 1)
         {
             // Ping-pong: a group's last post-MMA barrier pairs with the other group's pre-MMA
@@ -951,9 +954,8 @@ template <class T,
           int PP,
           int EPI,
           class TO,
-          int KD,
-          class Epi = ConvEpiNone>
-__device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a, const Epi& epi = Epi{})
+          int KD>
+__device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a CONV_EPI_FN_PARAM)
 {
     static_assert(KD > 1, "k2ConvRows3d is the 3-D form; 2-D configs run k2ConvRows");
     constexpr int WAVE = 64;
@@ -1302,27 +1304,26 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a, con
                       : static_cast<long long>(tc.img);
     };
 
+#if defined(CONV_EPI) && CONV_EPI
     // The fused epilogue, applied to the tile's accumulators in place before its store (a staged
     // store's LDS transpose then copies rounded values bitwise). The lane holds channels
-    // nb + j * DIM + (l / DIM) * 4 + i. Unfused (ConvEpiNone) it is nothing.
+    // nb + j * DIM + (l / DIM) * 4 + i.
     auto epilogue = [&](int nb) __attribute__((always_inline))
     {
-        if constexpr(!__is_same(Epi, ConvEpiNone))
-        {
-            const int l = olane();
+        const int l = olane();
 #pragma unroll
-            for(int j = 0; j < FN; ++j)
+        for(int j = 0; j < FN; ++j)
 #pragma unroll
-                for(int i = 0; i < 4; ++i)
-                {
-                    const int n = nb + j * DIM + (l / DIM) * 4 + i;
-                    const auto ch = epi.chan(n, n < a.k);
+            for(int i = 0; i < 4; ++i)
+            {
+                const int n = nb + j * DIM + (l / DIM) * 4 + i;
+                const ConvEpiGen::Chan ch = epi.chan(n, n < a.k);
 #pragma unroll
-                    for(int p = 0; p < PW; ++p)
-                        acc[p][j][i] = epi(acc[p][j][i], ch, 0, true);
-                }
-        }
+                for(int p = 0; p < PW; ++p)
+                    acc[p][j][i] = epi(acc[p][j][i], ch, 0, true);
+            }
     };
+#endif
 
     // Direct epilogue: the lane holds channels n .. n + 3 of column ow for each row p.
     auto store = [&](const Tile& tc, int nb) __attribute__((always_inline))
@@ -1457,8 +1458,10 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a, con
             ++cc;
             return true;
         }
+#if defined(CONV_EPI) && CONV_EPI
         // Once per tile, ahead of whichever store runs.
         epilogue(nb);
+#endif
         if constexpr(STAGED)
         {
             // 16-byte stores need whole granules of output channels. The chunk just read
@@ -1513,9 +1516,8 @@ template <class T,
           int WQ,
           int WK,
           int BC,
-          class TO = T,
-          class Epi = ConvEpiNone>
-__device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a, const Epi& epi = Epi{})
+          class TO = T>
+__device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64;
     constexpr int DIM = 16;
@@ -1728,32 +1730,33 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a, con
         }
     };
 
+#if defined(CONV_EPI) && CONV_EPI
     // The fused epilogue, applied to the tile's accumulators in place before its store (a staged
     // store's LDS transpose then copies rounded values bitwise). The lane holds channels
-    // nb + j * DIM + (l / DIM) * 4 + i. Unfused (ConvEpiNone) it is nothing.
+    // nb + j * DIM + (l / DIM) * 4 + i.
     auto epilogue = [&](int nb) __attribute__((always_inline))
     {
-        if constexpr(!__is_same(Epi, ConvEpiNone))
-        {
-            const int l = olane();
+        const int l = olane();
 #pragma unroll
-            for(int j = 0; j < FN; ++j)
+        for(int j = 0; j < FN; ++j)
 #pragma unroll
-                for(int i = 0; i < 4; ++i)
-                {
-                    const int n = nb + j * DIM + (l / DIM) * 4 + i;
-                    const auto ch = epi.chan(n, n < a.k);
+            for(int i = 0; i < 4; ++i)
+            {
+                const int n = nb + j * DIM + (l / DIM) * 4 + i;
+                const ConvEpiGen::Chan ch = epi.chan(n, n < a.k);
 #pragma unroll
-                    for(int p = 0; p < PW; ++p)
-                        acc[p][j][i] = epi(acc[p][j][i], ch, 0, true);
-                }
-        }
+                for(int p = 0; p < PW; ++p)
+                    acc[p][j][i] = epi(acc[p][j][i], ch, 0, true);
+            }
     };
+#endif
 
     // Channels-first epilogue: the lane holds channels n .. n + 3 of column ow for each row p.
     auto store = [&](const Tile& tc, int nb) __attribute__((always_inline))
     {
+#if defined(CONV_EPI) && CONV_EPI
         epilogue(nb);
+#endif
         TO* y = static_cast<TO*>(a.y);
         const int l = olane();
         const int ow = tc.ow0 + wq * DIM + l % DIM;
