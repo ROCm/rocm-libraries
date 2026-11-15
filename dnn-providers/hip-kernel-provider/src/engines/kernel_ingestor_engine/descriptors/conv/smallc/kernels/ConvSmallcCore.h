@@ -163,32 +163,6 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
     const int img = bx / a.dout;
     const int oh0 = tp * TH, ow0 = tq * TW;
     const int nb = blockIdx.y * BN;
-#if defined(CONV_EPI) && CONV_EPI
-    // The fused epilogue's per-channel operands, loaded before the (short) reduction so their
-    // latency hides behind it: EP 0 a lane's column of each fragment j (output channel
-    // nb + wn FN 16 + 16 j + lane % 16), EP != 0 the first store group's (see the epilogue).
-    constexpr int EPI_G = PAIRS ? 2 : 1;
-    ConvEpiGen::Chan chans[EP == 0 ? FN : EPI_G * Atom::ACC];
-    if constexpr(EP == 0)
-    {
-#pragma unroll
-        for(int j = 0; j < FN; ++j)
-        {
-            const int kk = nb + wn * FN * DIM + j * DIM + lane % DIM;
-            chans[j] = epi.chan(kk, kk < a.k);
-        }
-    }
-    else
-    {
-#pragma unroll
-        for(int t = 0; t < EPI_G * Atom::ACC; ++t)
-        {
-            const int kk
-                = nb + wn * FN * DIM + bRow(t / Atom::ACC, Atom::dRow(lane, t % Atom::ACC));
-            chans[t] = epi.chan(kk, kk < a.k);
-        }
-    }
-#endif
 
     // Stage the window: element (c, t, row, col) <- x(img, c, od SD - pd + t DD,
     // oh0 SH - ph + row, ow0 SW - pw + col), zero outside (one buffer over the image, 32-bit
@@ -362,25 +336,21 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
         const int ow = ow0 + wq * DIM + lane % DIM;
         const int kw = nb + wn * FN * DIM;
 #if defined(CONV_EPI) && CONV_EPI
-        // Fused: per store group, its accumulators' per-channel operands are used for every
-        // row; the next group's load while this one stores, so at most two groups' operands are
-        // live (holding all of a lane's channels at once costs the kernel its occupancy).
+        // Fused: per store group, its accumulators' per-channel operands are loaded once and
+        // used for every row, so only one group's operands are live at a time (holding all of
+        // a lane's channels at once costs the kernel its occupancy).
 #pragma unroll
         for(int gs = 0; gs < FN / G; ++gs)
         {
-            ConvEpiGen::Chan cur[G * ACC];
+            ConvEpiGen::Chan chans[G][ACC];
 #pragma unroll
-            for(int t = 0; t < G * ACC; ++t)
-                cur[t] = chans[t];
-            if(gs + 1 < FN / G)
-            {
+            for(int jj = 0; jj < G; ++jj)
 #pragma unroll
-                for(int t = 0; t < G * ACC; ++t)
+                for(int e = 0; e < ACC; ++e)
                 {
-                    const int kk = kw + bRow((gs + 1) * G + t / ACC, Atom::dRow(lane, t % ACC));
-                    chans[t] = epi.chan(kk, kk < a.k);
+                    const int kk = kw + bRow(gs * G + jj, Atom::dRow(lane, e));
+                    chans[jj][e] = epi.chan(kk, kk < a.k);
                 }
-            }
             const int k0 = kw + bRow(gs * G, Atom::dRow(lane, 0));
 #pragma unroll
             for(int i = 0; i < FM; ++i)
@@ -394,8 +364,8 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
                     VO v;
 #pragma unroll
                     for(int t = 0; t < VW; ++t)
-                        v[t] = K1Elem<TO>::store(
-                            epi(acc[i][gs * G + t / ACC][t % ACC], cur[t], 0, true));
+                        v[t] = K1Elem<TO>::store(epi(
+                            acc[i][gs * G + t / ACC][t % ACC], chans[t / ACC][t % ACC], 0, true));
                     *reinterpret_cast<VO*>(yp + k0) = v;
                 }
                 else
@@ -406,8 +376,8 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
                         const int j = gs * G + t / ACC;
                         const int kk = kw + bRow(j, Atom::dRow(lane, t % ACC));
                         if(kk < a.k)
-                            yp[kk * a.ys[1]]
-                                = K1Elem<TO>::store(epi(acc[i][j][t % ACC], cur[t], 0, true));
+                            yp[kk * a.ys[1]] = K1Elem<TO>::store(
+                                epi(acc[i][j][t % ACC], chans[t / ACC][t % ACC], 0, true));
                     }
                 }
             }
@@ -454,6 +424,17 @@ __device__ __attribute__((always_inline)) void smallcConv(const SmallcArgs& a CO
     TO* slot = reinterpret_cast<TO*>(lds + WIN_BYTES + W_BYTES) + wave * SLOT;
     TO* y = static_cast<TO*>(a.y) + img * a.ys[0] + od * a.ys[2];
     const bool colFast = a.ys[4] == 1;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue runs before the slot (which holds the rounded output): a lane's column
+    // of fragment j is output channel nb + wn FN 16 + 16 j + lane % 16.
+    ConvEpiGen::Chan chans[FN];
+#pragma unroll
+    for(int j = 0; j < FN; ++j)
+    {
+        const int kk = nb + wn * FN * DIM + j * DIM + lane % DIM;
+        chans[j] = epi.chan(kk, kk < a.k);
+    }
+#endif
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
