@@ -159,6 +159,7 @@ extern "C" __global__ void __launch_bounds__(CONV_GROUP_CB* CONV_GROUP_ATOM::WAV
                   CONV_GROUP_FT,
                   CONV_GROUP_R,
                   CONV_GROUP_S,
+                  CONV_GROUP_ST,
                   CONV_GROUP_TH,
                   CONV_GROUP_WP,
                   CONV_GROUP_CB,

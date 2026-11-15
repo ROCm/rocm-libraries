@@ -436,6 +436,21 @@ __device__ inline void k4MmaByGroup(const typename Atom::frag (&wf)[KC],
 // through empty or out-of-range buffer records), so the loop has no branch around a memory
 // operation and its waits count exactly the rows in flight. Grid: (channel tiles) x (column
 // tiles) x (row bands) x output planes x images, flattened, as k4ConvMma.
+// The ring slot of band output row u = (t - r) / ST for band input row t = t0 + j (t0 a multiple of
+// ST R): input row t takes filter row r only where ST divides t - r.
+template <int R, int ST>
+struct K4RowsSlot
+{
+    static constexpr bool takes(int j, int r)
+    {
+        return ((j - r) % ST + ST) % ST == 0;
+    }
+    static constexpr int of(int d)
+    {
+        return ((d / ST) % R + R) % R;
+    }
+};
+
 template <int A, int B>
 struct K4RowsLcm
 {
@@ -446,7 +461,17 @@ struct K4RowsLcm
     static constexpr int value = A / gcd(A, B) * B;
 };
 
-template <class T, class Atom, int FT, int R, int S, int TH, int WP, int CB, int DEPTH, int NBI = 0>
+template <class T,
+          class Atom,
+          int FT,
+          int R,
+          int S,
+          int ST,
+          int TH,
+          int WP,
+          int CB,
+          int DEPTH,
+          int NBI = 0>
 __device__ void k4ConvMmaRows(const K4Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -455,7 +480,7 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     constexpr int CH = 16 * CB;
     constexpr int VEC = 16 / static_cast<int>(sizeof(T));
     constexpr int PITCH = CH + VEC; // elements a staged pixel takes (16-byte pad: no conflicts)
-    constexpr int HC = TW + S - 1;
+    constexpr int HC = (TW - 1) * ST + S; // a row segment's pixels
     constexpr int VP = CH / VEC; // vectors a staged pixel takes
     constexpr int LOADS = (HC * VP + THREADS - 1) / THREADS;
     constexpr int TAPS = FT * R * S;
@@ -529,20 +554,20 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     {
         const int i = tid + l * THREADS;
         const int v = i % VP, p = i / VP;
-        const int iw = ow0 - a.pw + p;
+        const int iw = ow0 * ST - a.pw + p;
         active[l] = i < HC * VP;
         srcOff[l] = active[l] && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
                         ? static_cast<unsigned>((iw * a.c + cbt * CH + v * VEC) * sizeof(T))
                         : K1_OUT_OF_RANGE;
-        dstOff[l] = active[l] ? p * PITCH + v * VEC : 2 * HC * PITCH;
+        dstOff[l] = active[l] ? k4HaloColumn<ST, HC>(p) * PITCH + v * VEC : 2 * HC * PITCH;
     }
     // Step k = (t, ft) = (k / FT, k % FT): band input row t (input row oh0 - ph + t) of depth tap
     // ft's plane. Outside the input it contributes nothing.
-    const int steps = band + R - 1; // band rows plus the rows below that finish them
+    const int steps = (band - 1) * ST + R; // the input rows the band's output rows read
     const int total = steps * FT;
     const auto stepBase = [&](int k, long long& base) {
         const int t = k / FT, ft = k % FT;
-        const int id = od * a.sd - a.pd + ft, ih = oh0 - a.ph + t;
+        const int id = od * a.sd - a.pd + ft, ih = oh0 * ST - a.ph + t;
         base = ((img * a.di + id) * a.hi + ih) * static_cast<long long>(a.wi) * a.c;
         return k < total && static_cast<unsigned>(id) < static_cast<unsigned>(a.di)
                && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi);
@@ -644,7 +669,7 @@ __device__ void k4ConvMmaRows(const K4Args& a)
     }
     // Rows a pass of the unrolled loop: a multiple of R (static ring slots) and of DEPTH (static
     // stage slots).
-    constexpr int U = K4RowsLcm<R, DEPTH>::value;
+    constexpr int U = K4RowsLcm<ST * R, DEPTH>::value;
     int cur = 0;
     for(int t0 = 0; t0 < steps; t0 += U)
     {
@@ -681,8 +706,9 @@ __device__ void k4ConvMmaRows(const K4Args& a)
 #pragma unroll
                                 for(int q = 0; q < KC; ++q)
                                 {
-                                    xf[q] = k1Frag<Atom>(src + (p * 16 + col + s) * PITCH
-                                                         + q * Atom::KA);
+                                    xf[q] = k1Frag<Atom>(
+                                        src + k4HaloColumn<ST, HC>((p * 16 + col) * ST + s) * PITCH
+                                        + q * Atom::KA);
                                     special |= k4NonFinite<T, Atom>(xf[q]);
                                 }
                                 // Groups narrower than the block: an infinity or NaN would meet the
@@ -692,31 +718,43 @@ __device__ void k4ConvMmaRows(const K4Args& a)
                                 {
 #pragma unroll
                                     for(int r = 0; r < R; ++r)
-                                        k4MmaByGroup<T, Atom, KC>(wf[ib][(ft * R + r) * S + s],
-                                                                  xf,
-                                                                  acc[((j - r) % R + R) % R][p],
-                                                                  a.cg,
-                                                                  kb,
-                                                                  lane);
+                                    {
+                                        if(K4RowsSlot<R, ST>::takes(j, r))
+                                            k4MmaByGroup<T, Atom, KC>(
+                                                wf[ib][(ft * R + r) * S + s],
+                                                xf,
+                                                acc[K4RowsSlot<R, ST>::of(j - r)][p],
+                                                a.cg,
+                                                kb,
+                                                lane);
+                                    }
                                     continue;
                                 }
 #pragma unroll
                                 for(int r = 0; r < R; ++r)
+                                {
+                                    if(!K4RowsSlot<R, ST>::takes(j, r))
+                                        continue;
 #pragma unroll
                                     for(int q = 0; q < KC; ++q)
-                                        acc[((j - r) % R + R) % R][p]
+                                        acc[K4RowsSlot<R, ST>::of(j - r)][p]
                                             = Atom::mma(wf[ib][(ft * R + r) * S + s][q],
                                                         xf[q],
-                                                        acc[((j - r) % R + R) % R][p]);
+                                                        acc[K4RowsSlot<R, ST>::of(j - r)][p]);
+                                }
                             }
                 }
                 cur ^= 1;
             }
-            // Output row t - (R - 1) has every tap row: store it, and free its slot.
-            flush(acc[(j + 1) % R], t - (R - 1));
+            // Output row (t - (R - 1)) / ST has every tap row: store it, and free its slot.
+            if(K4RowsSlot<R, ST>::takes(j, R - 1))
+            {
+                const int done = K4RowsSlot<R, ST>::of(j - (R - 1));
+                flush(acc[done], (t - (R - 1)) / ST);
 #pragma unroll
-            for(int p = 0; p < WP; ++p)
-                acc[(j + 1) % R][p] = typename Atom::acc{};
+                for(int p = 0; p < WP; ++p)
+                    acc[done][p] = typename Atom::acc{};
+            }
         }
     }
 }

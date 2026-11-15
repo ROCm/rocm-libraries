@@ -1324,8 +1324,8 @@ TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
         auto padded2 = wide2;
         padded2.metadata["cb"] = int64_t{2};
         EXPECT_FALSE(matchesKernel(pack, paddedFixture.context(), padded2, *paddedBound));
-        // Forward at stride 2 gathers at stride 2: declined. Backward data at stride 2 runs unit
-        // stride phases: admitted (a stride 2 config).
+        // Stride 2: forward gathers at stride 2, backward data runs unit-stride phases; both are
+        // admitted for a stride-2 config.
         auto strided = resnext();
         strided.dataType = DataType::HALF;
         strided.stride = {2, 2};
@@ -1334,8 +1334,7 @@ TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
         ASSERT_TRUE(stridedBound.has_value());
         auto stride2 = *base;
         stride2.metadata["stride"] = int64_t{2};
-        EXPECT_EQ(matchesKernel(pack, stridedFixture.context(), stride2, *stridedBound),
-                  direction == ConvDirection::BACKWARD_DATA);
+        EXPECT_TRUE(matchesKernel(pack, stridedFixture.context(), stride2, *stridedBound));
         // An input or output row of 2 GiB or more: one buffer record per row cannot hold it.
         auto wideRow = dense(1024, 1024, {1, int64_t{1} << 20}, {3, 3}, {1, 1}, true);
         wideRow.groups = 64;
@@ -1569,7 +1568,7 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 // Row streaming: channels-last, small groups or wide groups of 2 or 4 blocks (whole
                 // groups a workgroup), unit gather stride (forward at stride 1), 1 to 4 rows in
                 // flight, at most 1024 threads, two row segments in LDS.
-                EXPECT_TRUE(forward ? stride == 1 : stride <= 2);
+                EXPECT_LE(stride, 2);
                 EXPECT_LE(kernel.getIntMetadata("rs"), 4);
                 EXPECT_EQ(kernel.getIntMetadata("cf"), 0);
                 EXPECT_EQ(kernel.getIntMetadata("pf"), 0);
@@ -1577,7 +1576,9 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 EXPECT_TRUE(nbi == 0 || nbi == 2 || nbi == 4);
                 EXPECT_EQ(cb % std::max(nbi, 1), 0);
                 EXPECT_LE(cb * 64, 1024);
-                EXPECT_LE(conv_group::groupRowsLdsBytes(bytes, taps("s"), tw, cb), 64 * 1024);
+                EXPECT_LE(
+                    conv_group::groupRowsLdsBytes(bytes, taps("s"), forward ? stride : 1, tw, cb),
+                    64 * 1024);
             }
             else if(kernel.getIntMetadata("pf") != 0)
             {

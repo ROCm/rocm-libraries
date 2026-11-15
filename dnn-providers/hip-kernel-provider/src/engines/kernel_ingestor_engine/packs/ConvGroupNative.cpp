@@ -84,10 +84,10 @@ long long divUp(long long a, long long b)
 
 } // namespace
 
-long long groupRowsLdsBytes(int elementBytes, int s, int tw, int cb)
+long long groupRowsLdsBytes(int elementBytes, int s, int stride, int tw, int cb)
 {
     const long long vec = 16 / elementBytes;
-    return (2LL * (tw + s - 1) * (16LL * cb + vec) + vec) * elementBytes;
+    return (2LL * ((tw - 1LL) * stride + s) * (16LL * cb + vec) + vec) * elementBytes;
 }
 
 long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb)
@@ -1073,9 +1073,10 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     // Row streaming gathers at unit stride (forward at stride 1, backward data's phases).
-    // Wide row streaming: groups of exactly nbi blocks (no padded channels).
+    // Row streaming gathers at stride 1 or 2 (backward data: its unit-stride phases); wide groups
+    // of exactly nbi blocks (no padded channels).
     if(tile->rs != 0
-       && (problem->kernelStride != 1
+       && (problem->kernelStride > 2
            || (tile->nbi != 0 && problem->phases.front().args.cg != 16 * tile->nbi)))
     {
         return false;
@@ -1100,7 +1101,7 @@ bool kernelMatches(const MatchContext& context,
         if(tile->rs != 0)
         {
             return conv_group::groupRowsLdsBytes(
-                bytes, problem->kernelS, tw, static_cast<int>(tile->cb));
+                bytes, problem->kernelS, problem->kernelStride, tw, static_cast<int>(tile->cb));
         }
         if(tile->pf != 0)
         {

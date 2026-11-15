@@ -326,7 +326,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         dt = DT[dtype]
         for atom in atoms:
             for t, r, s in FILTERS:
-                for st in (1,) if tag == "fwd" else (1, 2):
+                for st in (1, 2):
                     for (th, wp, cb, depth), nbi in [
                         (tile, nbi)
                         for nbi in RS_NBI
@@ -335,8 +335,9 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     ]:
                         # Two row segments and a 16-byte slot within 64 KB of LDS.
                         vec = 16 // EB[dtype]
-                        kws = s if tag == "fwd" else -(-s // st)
-                        rows = 2 * (16 * wp + kws - 1) * (16 * cb + vec) + vec
+                        # Backward data gathers its stride phases at unit stride.
+                        kws, kst = (s, st) if tag == "fwd" else (-(-s // st), 1)
+                        rows = 2 * ((16 * wp - 1) * kst + kws) * (16 * cb + vec) + vec
                         if rows * EB[dtype] > 64 * 1024:
                             continue
                         c = dict(
