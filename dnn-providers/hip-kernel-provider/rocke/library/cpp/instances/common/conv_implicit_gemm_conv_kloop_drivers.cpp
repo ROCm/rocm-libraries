@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "rocke/arena.h" /* rocke_arena_strdup */
+#include "rocke/helper_helpers.asm.h" /* rocke_lds_barrier_keep_vmem */
 #include "rocke/helper_rocke.helpers.pipeline.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -287,10 +288,11 @@ void rocke_conv_emit_kloop_simple(rocke_conv_build_ctx_t* ctx)
 
 /* Python _rpf_lds_barrier(b, arch): the in-loop barrier of the
  * register-prefetch K loops (regt_prefetch); orders the LDS accesses of the
- * tile before and after it. */
+ * tile before and after it, and leaves the prefetch's global loads in flight
+ * (rocke_lds_barrier_keep_vmem). */
 void rocke_conv_rpf_lds_barrier(rocke_conv_build_ctx_t* ctx)
 {
-    rocke_b_sync_lds_only(ctx->b);
+    rocke_lds_barrier_keep_vmem(ctx->b, ctx->arch);
 }
 
 /* ===================================================================== *

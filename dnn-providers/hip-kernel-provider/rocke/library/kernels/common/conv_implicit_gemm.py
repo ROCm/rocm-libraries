@@ -68,6 +68,7 @@ from rocke.core.ir import (
     Value,
 )
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
+from rocke.helpers.asm import lds_barrier_keep_vmem
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.layouts import LdsLayout
@@ -904,8 +905,10 @@ def fwd_regt_prefetch_reason(
 
 def _rpf_lds_barrier(b: IRBuilder, arch: str) -> None:
     """The in-loop barrier of the register-prefetch K loops (regt_prefetch):
-    orders the LDS accesses of the tile before and after it."""
-    b.sync_lds_only()
+    orders the LDS accesses of the tile before and after it, and leaves the
+    prefetch's global loads in flight (a full barrier -- on gfx12 RDNA also
+    the backend's own LDS-only one -- waits for them)."""
+    lds_barrier_keep_vmem(b, arch)
 
 
 def implicit_gemm_lds_bytes(spec: ImplicitGemmConvSpec) -> Tuple[int, int, int, bool]:
