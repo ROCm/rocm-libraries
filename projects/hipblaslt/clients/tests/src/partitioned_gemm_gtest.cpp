@@ -379,6 +379,14 @@ TEST(pre_checkin_partitioned_gemm_ext, StorePeerDNeedsTwoDifferentDs)
     std::swap(in.d[0], in.d[1]);
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
 
+    // Overlapping Ds: one partition would overwrite the other's slice.
+    in            = buffers.inputs();
+    in.storePeerD = true;
+    in.d[1]       = static_cast<char*>(in.d[0]) + 64;
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
+
+    in            = buffers.inputs();
+    in.storePeerD = true;
     // The same D twice: there is no peer to write to.
     in.d[1] = in.d[0];
     EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);

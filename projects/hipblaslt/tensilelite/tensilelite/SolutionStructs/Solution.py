@@ -2359,6 +2359,11 @@ class Solution(collections.abc.Mapping):
     if "PostLoopStoreInNll" not in state:
       state["PostLoopStoreInNll"] = True
 
+    # The fused post-loop store has no peer D store (OutputPeerD adds it to the regular epilogue).
+    if state["ProblemType"].get("OutputPeerD", False):
+      state["PostLoopStoreInNll"] = False
+      return
+
     isa = tuple(state["ISA"])
 
     if state["PostLoopStoreInNll"]:
@@ -2451,6 +2456,10 @@ class Solution(collections.abc.Mapping):
       # The second D store is added to the plain buffer-store epilogue only (addStore, tc 'D').
       peerDLimits = (
         (state.get("BufferStore", 1) == 1, "BufferStore=1"),
+        # The peer store is a system-scope store: gfx12 has the scope field, gfx9 has no equivalent
+        # here, and SCOPE_SYS with the LU/WB hint is not accepted by the assembler.
+        (tuple(state.get("ISA", (0, 0, 0)))[0] == 12, "gfx12"),
+        (state.get("TemporalHintD", 0) != 3, "TemporalHintD != 3"),
         (state.get("GlobalSplitU", 1) == 1, "GlobalSplitU=1"),
         (not isPersistent(state), "no StreamK / persistent kernel"),
         (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),

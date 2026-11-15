@@ -254,6 +254,8 @@ namespace TensileLite
                     if(m_split != nullptr && problem->outputPeerD())
                     {
                         auto const* full   = dynamic_cast<ContractionProblemGemm const*>(m_problem);
+                        if(full == nullptr)
+                            throw std::runtime_error("OutputPeerD needs a plain GEMM problem.");
                         const auto  bytes  = static_cast<int64_t>(full->d().elementBytes());
                         const auto  mine   = static_cast<int64_t>(m_split->sliceOffsetInD(m_problem, card));
                         for(size_t other = 0; other < m_devices->size(); other++)
@@ -264,7 +266,11 @@ namespace TensileLite
                             const auto theirs = static_cast<int64_t>(m_split->sliceOffsetInD(m_problem, other));
                             peer.d = static_cast<char*>(result->d) + (theirs - mine) * bytes;
                             ContractionInputs otherReference = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[other]);
-                            rv &= validate(*dynamic_cast<ContractionProblemGemm*>(deviceProblem(other)), otherReference, peer);
+                            auto* otherProblem
+                                = dynamic_cast<ContractionProblemGemm*>(deviceProblem(other));
+                            if(otherProblem == nullptr)
+                                throw std::runtime_error("OutputPeerD needs a plain GEMM problem.");
+                            rv &= validate(*otherProblem, otherReference, peer);
                         }
                     }
                 }

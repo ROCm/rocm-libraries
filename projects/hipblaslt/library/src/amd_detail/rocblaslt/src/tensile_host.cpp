@@ -3973,6 +3973,7 @@ TensileLite::ProblemOverride
     po.hasScaleE        = problem.scaleE != nullptr;
     po.hasScaleAlphaVec = problem.scaleAlphaVec != nullptr;
     po.hasAmaxD         = problem.amaxD != nullptr;
+    po.hasPeerD         = problem.dPeer != nullptr;
 
     po.swizzleA              = problem.swizzleA;
     po.swizzleB              = problem.swizzleB;

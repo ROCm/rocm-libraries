@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -338,8 +339,19 @@ namespace hipblaslt_ext
             return HIPBLAS_STATUS_INVALID_VALUE;
         // storePeerD: partition i also writes the other partition's D. Two partitions and two
         // different D buffers only.
-        if(inputs.storePeerD && (parts != 2 || inputs.d[0] == inputs.d[1]))
-            return HIPBLAS_STATUS_INVALID_VALUE;
+        if(inputs.storePeerD)
+        {
+            if(parts != 2)
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            // Two separate buffers of the whole D: the same pointer or overlapping extents would
+            // have a partition write the other one's slice.
+            const uint64_t extent
+                = uint64_t((batch_count - 1) * std::abs(strideD) + (n - 1) * ldd + m) * bytes[3];
+            const auto d0 = reinterpret_cast<uintptr_t>(inputs.d[0]);
+            const auto d1 = reinterpret_cast<uintptr_t>(inputs.d[1]);
+            if((d0 > d1 ? d0 - d1 : d1 - d0) < extent)
+                return HIPBLAS_STATUS_INVALID_VALUE;
+        }
 
         // A matrix passed as different pointers (copies) is matched to the partitions by device:
         // partition p uses the copy on its device, whatever the order of the list. All copied

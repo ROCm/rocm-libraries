@@ -951,10 +951,6 @@ int main(int argc, const char* argv[])
                                                      ". Narrow them with --world-filter."));
         }
         // --split-devices N: every problem runs as N slices on N consecutive devices.
-        if(args["output-peerD"].as<bool>()
-           && (args["split-devices"].as<int>() != 2
-               || args["split-placement"].as<std::string>()[3] != 'R'))
-            throw std::runtime_error("--output-peerD needs --split-devices 2 and a replicated D");
         {
             auto const placement = args["split-placement"].as<std::string>();
             if(placement.size() != 4
@@ -962,6 +958,10 @@ int main(int argc, const char* argv[])
                 throw std::runtime_error(
                     "--split-placement needs 4 letters (A, B, C, D), each R or S, got '" + placement
                     + "'");
+            if(args["output-peerD"].as<bool>()
+               && (args["split-devices"].as<int>() != 2 || placement[3] != 'R'))
+                throw std::runtime_error(
+                    "--output-peerD needs --split-devices 2 and a replicated D");
         }
         int splitM = args["split-devices"].as<int>();
         if(splitM < 1)
@@ -1222,7 +1222,10 @@ int main(int argc, const char* argv[])
             for(size_t d = 0; d < devices.size(); d++)
                 for(size_t other = 0; other < devices.size(); other++)
                 {
-                    if(other == d || (d > 0 && other > 0 && !full->outputPeerD()))
+                    // Shared tensors: every device after the first reaches the first one. A peer D
+                    // store also needs every other pair.
+                    const bool toFirst = d > 0 && other == 0;
+                    if(other == d || (!full->outputPeerD() && !toFirst))
                         continue;
                     ScopedDevice device(devices[d]->deviceId);
                     hipError_t   pe = hipDeviceEnablePeerAccess(devices[other]->deviceId, 0);
