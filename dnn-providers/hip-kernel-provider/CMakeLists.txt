@@ -73,6 +73,13 @@ option(HIPKERNELPROVIDER_ENABLE_FLYDSL
        "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
+# The megakernel descriptor family (descriptors/megakernel/, packs/MegakernelNative.cpp):
+# persistent decode megakernels served through a hipDNN custom op. The same name is the
+# HKP_DESCRIPTOR_FAMILIES entry and the compile definition that builds the native pack.
+option(ENABLE_MEGAKERNEL_ENGINE "Build the megakernel custom-op ingestor family" OFF)
+if(ENABLE_MEGAKERNEL_ENGINE AND NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(FATAL_ERROR "ENABLE_MEGAKERNEL_ENGINE requires HIPDNN_ENABLE_KERNEL_INGESTOR=ON")
+endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)

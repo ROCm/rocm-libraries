@@ -38,6 +38,12 @@ public:
     void setGridSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;
     void setSharedMemBytes(unsigned int bytes) override;
 
+    /// The resolved function, for queries the launch path does not make (occupancy).
+    hipFunction_t function() const
+    {
+        return _kernel;
+    }
+
     ~Kernel() override = default;
 
 protected:

@@ -673,6 +673,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         // the pack above, the others are probed beside it.
         "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
 #endif
+#ifdef ENABLE_MEGAKERNEL_ENGINE
+        "megakernel.dispatch",
+#endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
