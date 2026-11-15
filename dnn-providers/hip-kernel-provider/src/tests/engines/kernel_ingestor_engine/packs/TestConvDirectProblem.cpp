@@ -362,9 +362,9 @@ TEST(TestConvDirectFusion, BackwardDataDeclinesAPointwiseNodeAfterItsConvolution
     // dx virtual, then relu(dx) -> DX.
     constexpr int64_t OUT = 100;
     spec.x.isVirtual = true;
-    TensorSpec out = specFor(baseShape(), ConvDirection::BACKWARD_DATA).x;
+    const TensorSpec out = specFor(baseShape(), ConvDirection::BACKWARD_DATA).x;
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+    const std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
         serializeTensor(builder, spec.xUid, spec.x),
         serializeTensor(builder, spec.wUid, spec.w),
         serializeTensor(builder, spec.yUid, spec.y),
@@ -390,7 +390,7 @@ TEST(TestConvDirectFusion, BackwardDataDeclinesAPointwiseNodeAfterItsConvolution
                                                               ::flatbuffers::nullopt,
                                                               OUT)
                           .Union();
-    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes{
+    const std::vector<::flatbuffers::Offset<data_objects::Node>> nodes{
         data_objects::CreateNodeDirect(builder,
                                        "dgrad",
                                        DataType::FLOAT,

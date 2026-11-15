@@ -355,11 +355,18 @@ std::optional<ConvNaiveProblem>
             return std::nullopt;
         }
         epilogue = std::move(*parsed);
-        auto& role = fields->writtenUid == fields->operands.x
-                         ? fields->operands.x
-                         : (fields->writtenUid == fields->operands.w ? fields->operands.w
-                                                                     : fields->operands.y);
-        role = epilogue.outputUid;
+        if(fields->writtenUid == fields->operands.x)
+        {
+            fields->operands.x = epilogue.outputUid;
+        }
+        else if(fields->writtenUid == fields->operands.w)
+        {
+            fields->operands.w = epilogue.outputUid;
+        }
+        else
+        {
+            fields->operands.y = epilogue.outputUid;
+        }
         fields->writtenUid = epilogue.outputUid;
     }
 

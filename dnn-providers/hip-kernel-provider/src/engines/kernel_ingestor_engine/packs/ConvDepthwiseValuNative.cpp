@@ -264,9 +264,9 @@ const std::vector<KernelArgument>& kernelSignature(bool fused)
 class PreparedConvDepthwiseValu : public IngestorPreparedDispatch
 {
 public:
-    PreparedConvDepthwiseValu(IngestorKernelCode code, const DepthwiseValuProblem& problem)
+    PreparedConvDepthwiseValu(IngestorKernelCode code, DepthwiseValuProblem problem)
         : _code(std::move(code))
-        , _problem(problem)
+        , _problem(std::move(problem))
     {
     }
 

@@ -1226,7 +1226,7 @@ public:
                          conv_group::GroupWrwLaunch launch)
         : _conv(std::move(conv))
         , _reduce(std::move(reduce))
-        , _problem(problem)
+        , _problem(std::move(problem))
         , _launch(launch)
     {
     }

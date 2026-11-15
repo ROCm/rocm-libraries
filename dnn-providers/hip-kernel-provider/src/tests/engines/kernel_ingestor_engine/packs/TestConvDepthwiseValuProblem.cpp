@@ -368,7 +368,7 @@ flatbuffers::FlatBufferBuilder backwardFusedGraph(const ConvShape& shape)
     const TensorSpec written = spec.x;
     spec.x.isVirtual = true;
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+    const std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
         serializeTensor(builder, spec.xUid, spec.x),
         serializeTensor(builder, spec.wUid, spec.w),
         serializeTensor(builder, spec.yUid, spec.y),
@@ -572,6 +572,7 @@ TEST_P(TestConvDepthwiseValuFusedCompile, CompilesThroughHiprtc)
     conv_epilogue::addEpilogueDefines(options, problem->base.epilogue);
     const std::vector<std::string> optionStrings = options;
     std::vector<const char*> optionPointers;
+    optionPointers.reserve(optionStrings.size());
     for(const auto& option : optionStrings)
     {
         optionPointers.push_back(option.c_str());
@@ -582,8 +583,9 @@ TEST_P(TestConvDepthwiseValuFusedCompile, CompilesThroughHiprtc)
     std::vector<std::string_view> includeTexts;
     std::vector<const char*> includeNames;
     hip_plugin::getKernelIncList(includeTexts, includeNames);
-    std::vector<std::string> includeStrings(includeTexts.begin(), includeTexts.end());
+    const std::vector<std::string> includeStrings(includeTexts.begin(), includeTexts.end());
     std::vector<const char*> includePointers;
+    includePointers.reserve(includeStrings.size());
     for(const auto& text : includeStrings)
     {
         includePointers.push_back(text.c_str());

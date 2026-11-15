@@ -189,7 +189,7 @@ class PreparedConvFft : public IngestorPreparedDispatch
 public:
     PreparedConvFft(std::vector<IngestorKernelCode> kernels, Resolved resolved)
         : _kernels(std::move(kernels))
-        , _resolved(resolved)
+        , _resolved(std::move(resolved))
     {
     }
 

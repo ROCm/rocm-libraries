@@ -659,7 +659,7 @@ std::vector<DeviceCase> fusedShapes()
 }
 
 template <typename T>
-void runFused(ConvShape shape, const std::vector<Step>& steps, Specials specials)
+void runFused(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
 {
     const auto device = currentDeviceProperties();
     const auto kernels = catalog(device.gcnArchName, "conv_group_valu_fwd_");
