@@ -983,12 +983,15 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         TS* strip = reinterpret_cast<TS*>(lds + (stage ^ 1) * SLOT) + wave * STRIP;
 #if defined(CONV_EPI) && CONV_EPI
         // The fused epilogue's per-channel operands of the lane's output columns, loaded per
-        // store so they hold no registers through the main loop.
+        // store so they hold no registers through the main loop: the column goes through an
+        // empty asm, so the loop-invariant loads are not hoisted to the kernel's start.
+        int col = n0 + wn * WTN + lane % DIM;
+        asm volatile("" : "+v"(col));
         ConvEpiGen::Chan chans[FN];
 #pragma unroll
         for(int j = 0; j < FN; ++j)
         {
-            const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+            const int en = col + j * DIM;
             chans[j] = epi.chan(en, en < a.k);
         }
 #endif
@@ -1268,11 +1271,15 @@ __device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
     auto store = [&](int set, int od, int) {
         const int nb = n0 + tn * TN;
 #if defined(CONV_EPI) && CONV_EPI
-        // The fused epilogue, one channel's operands at a time, on the accumulators in place.
+        // The fused epilogue, one channel's operands at a time, on the accumulators in place. The
+        // column goes through an empty asm, so the loop-invariant loads stay in the store rather
+        // than being hoisted to hold registers through the main loop.
+        int col = nb;
+        asm volatile("" : "+v"(col));
 #pragma unroll
         for(int j = 0; j < TN; ++j)
         {
-            const ConvEpiGen::Chan ch = epi.chan(nb + j, nb + j < a.k);
+            const ConvEpiGen::Chan ch = epi.chan(col + j, col + j < a.k);
 #pragma unroll
             for(int i = 0; i < TM; ++i)
                 acc[set][i][j] = epi(acc[set][i][j], ch, 0, true);
