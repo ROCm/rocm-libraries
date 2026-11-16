@@ -35,7 +35,6 @@
 #include <set>
 #include <map>
 #include <mutex>
-#include <thread>
 
 #include <math.h>
 #include <stdio.h>
@@ -75,8 +74,8 @@ struct CachingDeviceAllocator
         unsigned int    bin;                // Bin enumeration
         int             device;             // device ordinal
         hipStream_t     associated_stream;  // Associated associated_stream
+        unsigned long long associated_stream_id; // Unique id of the stream associated_stream resolved to when associated
         hipEvent_t      ready_event;        // Signal when associated stream has run to the point at which this block was freed
-        std::thread::id associated_thread;  // Host thread that associated the block with associated_stream
 
         // Constructor (suitable for searching maps for a specific block, given its pointer and device)
         BlockDescriptor(void *d_ptr, int device) :
@@ -85,8 +84,8 @@ struct CachingDeviceAllocator
             bin(INVALID_BIN),
             device(device),
             associated_stream(0),
-            ready_event(0),
-            associated_thread()
+            associated_stream_id(0),
+            ready_event(0)
         {}
 
         // Constructor (suitable for searching maps for a range of suitable blocks, given a device)
@@ -96,8 +95,8 @@ struct CachingDeviceAllocator
             , bin(INVALID_BIN)
             , device(device)
             , associated_stream(0)
+            , associated_stream_id(0)
             , ready_event(0)
-            , associated_thread()
         {}
 
         // Comparison functor for comparing device pointers
@@ -163,32 +162,39 @@ struct CachingDeviceAllocator
 
 
     /**
-     * Whether \p stream names a different stream on each host thread, so that equal handle
-     * values only identify the same stream when used from the same thread.
+     * Get the id of the stream that \p stream resolves to on \p device from the calling thread.
+     *
+     * Unlike stream handles, ids identify a single stream for the lifetime of the process:
+     * hipStreamPerThread (and stream 0 with per-thread default streams) has the same handle value
+     * on every thread but resolves to a different stream on each.
      */
-    static bool IsPerThreadStream(
-        hipStream_t     stream)
+    static hipError_t GetStreamId(
+        int                 device,
+        hipStream_t         stream,
+        unsigned long long  *stream_id)
     {
 #ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
+        // hipStreamGetId has no per-thread variant, so resolve stream 0 explicitly
         if (stream == 0)
-            return true;
+            stream = hipStreamPerThread;
 #endif
-        return stream == hipStreamPerThread;
-    }
+        // The null and per-thread streams are per-device, so query with device current
+        int entrypoint_device   = INVALID_DEVICE_ORDINAL;
+        hipError_t error        = hipSuccess;
+        if (HipcubDebug(error = hipGetDevice(&entrypoint_device))) return error;
+        if (entrypoint_device != device)
+        {
+            if (HipcubDebug(error = hipSetDevice(device))) return error;
+        }
 
+        error = HipcubDebug(hipStreamGetId(stream, stream_id));
 
-    /**
-     * Whether a block associated with \p block_stream on \p block_thread can be reused on
-     * \p active_stream from the calling thread without waiting for its ready event.
-     */
-    static bool IsSameStream(
-        hipStream_t             active_stream,
-        hipStream_t             block_stream,
-        const std::thread::id&  block_thread)
-    {
-        if (active_stream != block_stream)
-            return false;
-        return !IsPerThreadStream(active_stream) || (block_thread == std::this_thread::get_id());
+        if (entrypoint_device != device)
+        {
+            hipError_t set_error = hipSetDevice(entrypoint_device);
+            if (error == hipSuccess) error = HipcubDebug(set_error);
+        }
+        return error;
     }
 
 
@@ -349,7 +355,7 @@ struct CachingDeviceAllocator
         bool found = false;
         BlockDescriptor search_key(device);
         search_key.associated_stream = active_stream;
-        search_key.associated_thread = std::this_thread::get_id();
+        if ((error = GetStreamId(device, active_stream, &search_key.associated_stream_id))) return error;
         NearestPowerOf(search_key.bin, search_key.bytes, bin_growth, bytes);
 
         if (search_key.bin > max_bin)
@@ -381,16 +387,17 @@ struct CachingDeviceAllocator
                 // To prevent races with reusing blocks returned by the host but still
                 // in use by the device, only consider cached blocks that are
                 // either (from the active stream) or (from an idle stream).
-                // hipStreamPerThread (and stream 0 with per-thread default streams) names a
-                // different stream on each thread, so it only matches on the same thread.
-                if (IsSameStream(active_stream, block_itr->associated_stream, block_itr->associated_thread) ||
+                // Compare stream ids rather than handles: hipStreamPerThread (and stream 0 with
+                // per-thread default streams) names a different stream on each thread.
+                if ((search_key.associated_stream_id == block_itr->associated_stream_id) ||
                     (hipEventQuery(block_itr->ready_event) != hipErrorNotReady))
                 {
                     // Reuse existing cache block.  Insert into live blocks.
                     found = true;
+                    unsigned long long active_stream_id = search_key.associated_stream_id;
                     search_key = *block_itr;
                     search_key.associated_stream = active_stream;
-                    search_key.associated_thread = std::this_thread::get_id();
+                    search_key.associated_stream_id = active_stream_id;
                     live_blocks.insert(search_key);
 
                     // Remove from free blocks
@@ -514,6 +521,35 @@ struct CachingDeviceAllocator
 
 
     /**
+     * Whether the ready event that DeviceFree records on \p block.associated_stream from the
+     * calling thread would cover the work on the stream the block was associated with.
+     *
+     * This is not the case when a block associated with hipStreamPerThread (or stream 0 with
+     * per-thread default streams) is freed from a different thread, since the event would then
+     * be recorded on the freeing thread's stream instead.
+     */
+    bool IsFreedOnAssociatedStream(
+        const BlockDescriptor   &block)
+    {
+        unsigned long long free_stream_id;
+        if (GetStreamId(block.device, block.associated_stream, &free_stream_id) != hipSuccess)
+        {
+            // E.g. the associated stream has been destroyed. Don't recache the block.
+            (void)hipGetLastError();    // Reset error
+            return false;
+        }
+
+        if (free_stream_id != block.associated_stream_id)
+        {
+            if (debug) _HipcubLog("\tDevice %d block at %p (%lld bytes) freed from a different stream than its associated stream %lld; not caching it.\n",
+                block.device, block.d_ptr, (long long) block.bytes, (long long) block.associated_stream);
+            return false;
+        }
+        return true;
+    }
+
+
+    /**
      * \brief Frees a live allocation of device memory on the specified device, returning it to the allocator.
      *
      * Once freed, the allocation becomes available immediately for reuse within the \p active_stream
@@ -549,7 +585,8 @@ struct CachingDeviceAllocator
             cached_bytes[device].live -= search_key.bytes;
 
             // Keep the returned allocation if bin is valid and we won't exceed the max cached threshold
-            if ((search_key.bin != INVALID_BIN) && (cached_bytes[device].free + search_key.bytes <= max_cached_bytes))
+            if ((search_key.bin != INVALID_BIN) && (cached_bytes[device].free + search_key.bytes <= max_cached_bytes)
+                && IsFreedOnAssociatedStream(search_key))
             {
                 // Insert returned allocation into free blocks
                 recached = true;

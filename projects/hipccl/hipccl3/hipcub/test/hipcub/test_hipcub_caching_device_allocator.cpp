@@ -482,3 +482,37 @@ TEST(HipcubCachingDeviceAllocatorTests, PerThreadStreamReuseAcrossThreads)
     HIP_CHECK(allocator.DeviceFree(d_c));
 }
 #endif // __HIP_PLATFORM_AMD__
+
+#ifdef __HIP_PLATFORM_AMD__
+// A block associated with hipStreamPerThread and freed from another thread cannot get a ready
+// event on the stream it was used on, so it must not be cached for reuse.
+TEST(HipcubCachingDeviceAllocatorTests, PerThreadStreamFreeFromOtherThread)
+{
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+
+    hipcub::CachingDeviceAllocator allocator;
+    allocator.debug = true;
+
+    char* d_a;
+    HIP_CHECK(allocator.DeviceAllocate((void**)&d_a, 999, hipStreamPerThread));
+    ASSERT_EQ(allocator.live_blocks.size(), 1u);
+
+    std::thread other(
+        [&]
+        {
+            HIP_CHECK(hipSetDevice(device));
+            HIP_CHECK(allocator.DeviceFree(d_a));
+        });
+    other.join();
+
+    ASSERT_EQ(allocator.live_blocks.size(), 0u);
+    ASSERT_EQ(allocator.cached_blocks.size(), 0u);
+
+    // Freeing from the same thread still caches the block
+    char* d_b;
+    HIP_CHECK(allocator.DeviceAllocate((void**)&d_b, 999, hipStreamPerThread));
+    HIP_CHECK(allocator.DeviceFree(d_b));
+    ASSERT_EQ(allocator.cached_blocks.size(), 1u);
+}
+#endif // __HIP_PLATFORM_AMD__
