@@ -238,7 +238,6 @@ def TensileRetuneLibrary(userArgs):
     isaInfoMap = makeIsaInfoMap([gfxToIsa(logicArchName)], str(cxxCompiler))
     applyArchCapOverrides(isaInfoMap, [logicArchName])
     assignGlobalParameters({"LibraryFormat": libraryFormat, "OutputPath": outputPath}, isaInfoMap)
-    globalParameters["SleepPercent"] = 0
 
     overrideParameters = argUpdatedGlobalParameters(args)
     for key, value in overrideParameters.items():
