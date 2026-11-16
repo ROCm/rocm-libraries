@@ -70,6 +70,7 @@ enum class Wiring
     SELECT_IN2_PRODUCED, ///< z = ADD(y, bias); BINARY_SELECT(bias, bias, z): in_2 is produced
     SELECT_IN2_INPUT, ///< z = ADD(y, bias); BINARY_SELECT(z, bias, bias): in_2 is a graph input
     INDEPENDENT_ADD, ///< ADD(bias, bias): a result that does not depend on the convolution
+    INDEPENDENT_MUL, ///< z = ADD(bias, bias); MUL(z, scale): a multiply that carries no convolution
 };
 
 struct GraphSpec
@@ -309,6 +310,10 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
         break;
     case Wiring::INDEPENDENT_ADD:
         addPointwise(PointwiseMode::ADD, BIAS_UID, BIAS_UID, ADD_OUT_UID);
+        break;
+    case Wiring::INDEPENDENT_MUL:
+        addPointwise(PointwiseMode::ADD, BIAS_UID, BIAS_UID, ADD_OUT_UID);
+        addPointwise(PointwiseMode::MUL, ADD_OUT_UID, SCALE_UID, MUL_OUT_UID);
         break;
     default:
         break;
@@ -1343,6 +1348,12 @@ TEST(TestConvFwdDynamicTolerance, OutputThatIsNoResultOfTheConvolutionIsNotModel
     const auto inIndependent = defaultInputs(independent);
     EXPECT_TRUE(errorScale(independent, inIndependent, Y_UID).has_value());
     EXPECT_FALSE(errorScale(independent, inIndependent, ADD_OUT_UID).has_value());
+
+    GraphSpec multiplied;
+    multiplied.wiring = Wiring::INDEPENDENT_MUL;
+    const auto inMultiplied = defaultInputs(multiplied);
+    EXPECT_TRUE(errorScale(multiplied, inMultiplied, Y_UID).has_value());
+    EXPECT_FALSE(errorScale(multiplied, inMultiplied, MUL_OUT_UID).has_value());
 }
 
 // The graded output's own storage is the model's rtol, not a point: y stored in bfloat16 and read
