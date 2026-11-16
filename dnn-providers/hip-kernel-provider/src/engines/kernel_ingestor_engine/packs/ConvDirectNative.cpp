@@ -278,11 +278,15 @@ std::optional<Tile>
 {
     const int pixels = config.blockPixels();
     const int run = config.fma ? config.tm : 1;
-    const int haloMax = k2HaloMax(pixels, config.r, config.s);
+    // Channels-first tiles: K2_CF_MIN_TW columns wide where the output is (8 at least), within
+    // the larger halo bound (k2CfHaloMax).
+    const int haloMax = config.cf != 0 ? k2CfHaloMax(pixels, config.r, config.s)
+                                       : k2HaloMax(pixels, config.r, config.s);
+    const int narrowest = config.cf != 0 ? std::min(K2_CF_MIN_TW, std::max(8, a.wo)) : run;
     Tile best;
     double bestCost = -1.0;
     const int widest = std::min(pixels, static_cast<int>(divUp(a.wo, run) * run));
-    for(int tw = run; tw <= widest; tw += run)
+    for(int tw = narrowest; tw <= widest; tw += run)
     {
         int th = std::min(pixels / tw, a.ho);
         while(th > 0 && (th + config.r - 1) * (tw + config.s - 1) > haloMax)
@@ -513,8 +517,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     }
     // The rows knobs belong to rows configs only; the halo-tile knobs to the others.
     const bool rowsFields = config.pw != 0 || config.fn != 0 || config.wp != 0 || config.wq != 0
-                            || config.wk != 0 || config.pp != 0 || config.epi != 0 || config.un != 0
-                            || config.cf != 0;
+                            || config.wk != 0 || config.pp != 0 || config.epi != 0
+                            || config.un != 0;
     if(config.rows)
     {
         if(config.pw < 1 || config.fn < 1 || config.wp < 1 || config.wq < 1 || config.wk < 1
@@ -533,8 +537,12 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             return std::nullopt;
         }
     }
-    else if(rowsFields)
+    else if(rowsFields
+            || (config.cf != 0
+                && (config.cf != 1 || config.atom == "fma" || config.bl != 0 || config.split != 0
+                    || math != 0 || conv_igemm::atomElement(config.atom) == "f32")))
     {
+        // Channels-first halo tiles: 16-bit matrix-core, register-path weights, no split.
         return std::nullopt;
     }
     config.math = math == 1;
@@ -707,6 +715,14 @@ std::optional<Plan>
     }
     else
     {
+        // Channels-first halo tiles: both activations packed channels-first, input rows of whole
+        // 4-element runs, and outputs at least 8 columns wide.
+        if(config.cf != 0
+           && (!problem.in.needed || !problem.in.transpose || !problem.out.needed
+               || !problem.out.transpose || a.wi % 4 != 0 || a.wo < 8))
+        {
+            return std::nullopt;
+        }
         tile = tileFor(a, config, columnBlocks, computeUnits);
     }
     if(!tile.has_value())
@@ -1158,6 +1174,10 @@ public:
             options.add("CONV_DIRECT_WN", std::to_string(config.wn));
             options.add("CONV_DIRECT_BL", std::to_string(config.bl));
             options.add("CONV_DIRECT_SPLIT", std::to_string(config.split));
+            if(config.cf != 0)
+            {
+                options.add("CONV_DIRECT_CF", std::to_string(config.cf));
+            }
         }
 
         auto build = [&](std::string_view entry, const std::vector<KernelArgument>& signature) {

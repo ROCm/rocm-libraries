@@ -84,8 +84,9 @@ F33, F55, F77, F17, F71, F333, F555 = (
 FILTERS2D = [F33, F55, F77, F17, F71]
 
 
-def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0):
-    return dict(
+def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0, cf=0):
+    """Halo-tile matrix-core kernel; cf 1 (16-bit): packed channels-first activations in place."""
+    c = dict(
         kind="mma",
         atom=atom,
         atom_id=ATOMS.index(atom),
@@ -109,6 +110,8 @@ def M(atom, f, bm, bn, bc, wm, wn, vec, ring=1, bl=0, split=0, math=0):
         pipe=0,
         **ROWS0,
     )
+    c["cf"] = cf
+    return c
 
 
 def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
@@ -420,6 +423,29 @@ for dt in ("HALF", "BFLOAT16"):
                 for f in (F55, F77, F17, F71)
             ],
         )
+    # Packed channels-first activations in place on the halo tile (wide tiles, a register
+    # transpose of 8-channel runs): RDNA 2-D and 3-D, and CDNA 3-D (the rows tiles take 2-D).
+    for fam in ("11", "12"):
+        a = f"wmma{fam}_{e}"
+        add(
+            dt,
+            [f"gfx{fam}"],
+            [
+                M(a, F33, 128, 128, 16, 2, 4, 8, cf=1),
+                M(a, F33, 128, 128, 32, 2, 4, 8, cf=1),
+                M(a, F33, 128, 64, 32, 4, 2, 8, cf=1),
+                M(a, F333, 128, 128, 16, 2, 4, 8, ring=0, cf=1),
+                M(a, F333, 128, 128, 32, 2, 4, 8, ring=0, cf=1),
+            ],
+        )
+    add(
+        dt,
+        ["gfx90a", "gfx942", "gfx950"],
+        [
+            M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0, cf=1),
+            M(f"mfma16_{e}", F333, 128, 64, 16, 2, 2, 8, ring=0, cf=1),
+        ],
+    )
     # CDNA, other filters
     cdna = ["gfx90a", "gfx942", "gfx950"]
     # 96-, 32- and 16-wide K blocks for K = 96, 32 and <= 16 layers.
@@ -742,6 +768,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                     f"conv_direct.{tag}.{dt}.{c['kd']}x{c['r']}x{c['s']}.{c['atom']}.{mathTag}"
                     f".{c['bm']}x{c['bn']}c{c['bc']}.w{c['wm']}x{c['wn']}.t{c['tm']}x{c['tn']}n{c['nt']}"
                     f".v{c['vec']}.ring{c['ring']}.bl{c['bl']}.split{c['split']}.pipe{c['pipe']}"
+                    + (".cf" if c["cf"] else "")
                 )
             kernels.append(
                 {

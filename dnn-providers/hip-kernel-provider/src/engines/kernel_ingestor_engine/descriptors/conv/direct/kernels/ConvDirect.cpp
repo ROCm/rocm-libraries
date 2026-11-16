@@ -13,8 +13,9 @@
 //   CONV_DIRECT_ROWS    0: the halo-tile kernel, _BM, _BN, _WM, _WN, _RING, _BL, _SPLIT
 //                       1: the filter-row reuse kernel (ConvDirectRows.h, 2-D and 3-D), _PW,
 //                       _FN, _WP, _WQ, _WK, _PP, _EPI, and (2-D) _UN, images per MFMA column
-//                       group (default 1), and _CF: 1 reads and writes packed channels-first
-//                       activations in place (2-D, gfx950; default 0)
+//                       group (default 1)
+//   CONV_DIRECT_CF      1: packed channels-first activations read and written in place (16-bit;
+//                       rows 2-D, halo tile 2-D and 3-D; default 0)
 
 #include "ConvDirectCore.h"
 #ifndef CONV_DIRECT_ROWS
@@ -25,9 +26,9 @@
 #ifndef CONV_DIRECT_UN
 #define CONV_DIRECT_UN 1
 #endif
+#endif
 #ifndef CONV_DIRECT_CF
 #define CONV_DIRECT_CF 0
-#endif
 #endif
 
 #if CONV_DIRECT_FMA
@@ -111,7 +112,11 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
               CONV_DIRECT_RING,
               CONV_DIRECT_BL,
               CONV_DIRECT_TO,
-              CONV_DIRECT_SPLIT>(a CONV_EPI_ARG);
+              CONV_DIRECT_SPLIT,
+              CONV_DIRECT_CF ? k2CfHaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S)
+                             : k2HaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S),
+              CONV_DIRECT_CF,
+              4>(a CONV_EPI_ARG);
 #endif
 }
 

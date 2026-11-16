@@ -828,6 +828,46 @@ TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivati
     }
 }
 
+TEST(TestConvDirectKernelMatch, ChannelsFirstHaloTilesTakePackedChannelsFirstActivations)
+{
+    ConfigFields f;
+    f.atom = "wmma11_f16";
+    f.archs = "gfx11";
+    f.wm = 2;
+    f.wn = 4;
+    f.bn = 128;
+    f.bc = 16;
+    f.cf = 1;
+    auto shape = baseShape();
+    shape.input = {7, 16};
+    EXPECT_TRUE(admits(f, "gfx1101", shape));
+    // Channels-last activations take the staged-free plain configs.
+    auto last = shape;
+    last.channelsLast = true;
+    EXPECT_FALSE(admits(f, "gfx1101", last));
+    // Input rows of whole 4-element runs: width 6 is not.
+    EXPECT_FALSE(admits(f, "gfx1101", baseShape()));
+    // Outputs at least 8 columns wide.
+    auto narrow = shape;
+    narrow.input = {7, 4};
+    EXPECT_FALSE(admits(f, "gfx1101", narrow));
+    // 16-bit matrix-core, register-path weights, no split, cf 0 or 1.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"cf", [](ConfigFields& g) { g.cf = 2; }},
+        {"bl", [](ConfigFields& g) { g.bl = 1; }},
+        {"split", [](ConfigFields& g) { g.split = 1; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = f;
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx1101", shape)) << name;
+    }
+    auto exact = f;
+    exact.atom = "wmma11_f16";
+    EXPECT_FALSE(admits(exact, "gfx1101", shape, "FLOAT"));
+}
+
 TEST(TestConvDirectKernelMatch, RowsConfigsDeclineHaloStagesPastTheDeviceLds)
 {
     EXPECT_EQ(conv_direct::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
@@ -922,14 +962,14 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
         EXPECT_FALSE(admits(f, "gfx950")) << name;
     }
     // The rows knobs belong to rows configs only.
-    for(int field = 0; field < 9; ++field)
+    for(int field = 0; field < 8; ++field)
     {
         ConfigFields mma;
         mma.atom = "mfma16x32_f16";
         mma.archs = "gfx950";
         ASSERT_TRUE(admits(mma, "gfx950"));
-        std::array<int64_t*, 9> knobs{
-            &mma.pw, &mma.fn, &mma.wp, &mma.wq, &mma.wk, &mma.pp, &mma.epi, &mma.un, &mma.cf};
+        std::array<int64_t*, 8> knobs{
+            &mma.pw, &mma.fn, &mma.wp, &mma.wq, &mma.wk, &mma.pp, &mma.epi, &mma.un};
         *knobs[static_cast<size_t>(field)] = 1;
         EXPECT_FALSE(admits(mma, "gfx950")) << "rows knob " << field << " on an mma config";
     }

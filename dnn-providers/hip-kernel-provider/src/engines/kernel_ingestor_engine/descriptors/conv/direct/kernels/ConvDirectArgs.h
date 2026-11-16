@@ -98,4 +98,13 @@ constexpr int k2HaloMax(int bm, int r, int s)
     return best;
 }
 
+/// Channels-first halo tiles (CF 1) are at least K2_CF_MIN_TW columns wide where the output is,
+/// so a channel row's halo run is long and contiguous; their halo bound is 3/2 of k2HaloMax so
+/// the wide, short tiles fit.
+constexpr int K2_CF_MIN_TW = 32;
+constexpr int k2CfHaloMax(int bm, int r, int s)
+{
+    return k2HaloMax(bm, r, s) * 3 / 2;
+}
+
 // NOLINTEND(modernize-avoid-c-arrays,readability-use-std-min-max)
