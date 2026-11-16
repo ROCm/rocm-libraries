@@ -159,7 +159,7 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, GfxVocabCoversEveryBucketArch)
     ASSERT_GT(gfx_solvers, 0) << "no gfx_code solver in the bundle";
 }
 
-// A0 gfx1250 parts report their device name as "gfx1250-strict". The bucket keys and the
+// gfx1250 parts report their device name as "gfx1250-strict". The bucket keys and the
 // gfx_code vocab only have the base name, so a gfx1250-strict problem must land in the same
 // bucket, get the same gfx_code and therefore the same ranking as on gfx1250; an arch outside
 // the catalog must still find no bucket.

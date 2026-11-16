@@ -246,7 +246,7 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
         return {};
     }
 
-    // GetDeviceName() already strips the :sramecc+:xnack- feature suffix, but A0 gfx1250 parts
+    // GetDeviceName() already strips the :sramecc+:xnack- feature suffix, but gfx1250 parts
     // report "gfx1250-strict"; the model vocab only knows the base name, so look up the
     // normalized name and keep the raw one for the logs.
     const std::string device_name = handle.GetDeviceName();

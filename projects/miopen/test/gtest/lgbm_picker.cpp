@@ -144,7 +144,7 @@ TEST_F(CPU_LgbmPicker_NONE, ScoresCandidateMatrix)
     EXPECT_EQ(ScoreCandidateMatrixForTest({}), -1);
 }
 
-// A0 gfx1250 parts report their device name as "gfx1250-strict". The model vocab only has the
+// gfx1250 parts report their device name as "gfx1250-strict". The model vocab only has the
 // base name, so the L1 lookup must treat both the same (and stay strict about anything else).
 TEST_F(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
 {

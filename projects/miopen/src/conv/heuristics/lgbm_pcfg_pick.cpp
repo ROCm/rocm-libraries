@@ -250,7 +250,7 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
         return {}; // no perf-config model for this solver
 
     // GetDeviceName() strips the :sramecc+:xnack- feature suffix but not a target-variant suffix
-    // (A0 gfx1250 parts report "gfx1250-strict"). The bucket keys and the gfx_code vocab use the
+    // (gfx1250 parts report "gfx1250-strict"). The bucket keys and the gfx_code vocab use the
     // base name: gfx_id is the normalized name for the arch predicates below, device_name the raw
     // one handed to BucketKey/GfxCode (which normalize it) and kept for the logs.
     std::string device_name;
