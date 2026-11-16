@@ -680,6 +680,7 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached coomv info object, instead of relying
                 // on the descriptor-wide mat->analysed flag.
+                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
                 rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
                 if(coomv_info == nullptr)
                 {
@@ -880,7 +881,9 @@ namespace rocsparse
                                                             const_row_data,
                                                             col_type,
                                                             const_col_data,
-                                                            mat->info->get_coomv_info(),
+                                                            mat->info->is_spmv_info_current(mat->pattern_stamp)
+                                                                ? mat->info->get_coomv_info()
+                                                                : nullptr,
                                                             x_data_type,
                                                             x_const_values,
                                                             compute_datatype,

@@ -4021,15 +4021,12 @@ catch(...)
 namespace
 {
     // The line profile and the SpMV analysis describe the arrays that the
-    // descriptor is leaving.
+    // descriptor is leaving. Nothing is freed here: this must not synchronize
+    // the device, which another stream may be capturing.
     void discard_pattern_analysis(rocsparse_spmat_descr descr)
     {
         descr->line_profile.known = false;
         descr->pattern_stamp      = rocsparse::next_spmat_pattern_stamp();
-        if(descr->info != nullptr)
-        {
-            descr->info->clear_spmv_info();
-        }
     }
 }
 

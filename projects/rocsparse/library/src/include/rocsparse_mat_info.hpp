@@ -49,6 +49,10 @@ protected:
     rocsparse_bsrmv_info bsrmv_info{};
     rocsparse_coomv_info coomv_info{};
 
+    // pattern_stamp of the matrix descriptor arrays that csrmv_info, bsrmv_info
+    // and coomv_info were computed for.
+    uint64_t m_spmv_stamp{};
+
     rocsparse::sorted_coo2csr_info_t* m_sorted_coo2csr_info{};
     rocsparse::trm_t                  m_trm;
 
@@ -165,6 +169,12 @@ public:
 
     // Destroys the csrmv, bsrmv and coomv info that SpMV keeps for the matrix.
     void clear_spmv_info();
+
+    // rocsparse_*_set_pointers only renews the pattern_stamp of the matrix
+    // descriptor, because it must not synchronize the device; the SpMV info
+    // of the previous arrays is ignored until the next preprocess destroys it.
+    bool is_spmv_info_current(uint64_t pattern_stamp) const;
+    void clear_spmv_info_if_stale(uint64_t pattern_stamp);
 
     void set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value);
     rocsparse::sorted_coo2csr_info_t* get_sorted_coo2csr_info();

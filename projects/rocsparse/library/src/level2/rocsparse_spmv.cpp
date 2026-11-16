@@ -425,6 +425,7 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached coomv info object, instead of relying
                 // on the descriptor-wide mat->analysed flag.
+                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
                 rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
                 if(coomv_info == nullptr)
                 {
@@ -463,7 +464,9 @@ namespace rocsparse
                                                             mat->const_row_data,
                                                             mat->col_type,
                                                             mat->const_col_data,
-                                                            mat->info->get_coomv_info(),
+                                                            mat->info->is_spmv_info_current(mat->pattern_stamp)
+                                                                ? mat->info->get_coomv_info()
+                                                                : nullptr,
                                                             x->data_type,
                                                             x->const_values,
                                                             beta_type,
@@ -534,6 +537,7 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
+                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
                 rocsparse_bsrmv_info bsrmv_info = mat->info->get_bsrmv_info();
                 if(bsrmv_info == nullptr)
                 {
@@ -576,7 +580,9 @@ namespace rocsparse
                                                             mat->col_type,
                                                             mat->const_col_data,
                                                             mat->block_dim,
-                                                            mat->info->get_bsrmv_info(),
+                                                            mat->info->is_spmv_info_current(mat->pattern_stamp)
+                                                                ? mat->info->get_bsrmv_info()
+                                                                : nullptr,
                                                             x->data_type,
                                                             x->const_values,
                                                             beta_type,
@@ -609,6 +615,7 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
+                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
                 if(csrmv_info == nullptr)
                 {
@@ -653,7 +660,9 @@ namespace rocsparse
                                           + rocsparse::indextype_sizeof(mat->row_type),
                                       mat->col_type,
                                       mat->const_col_data,
-                                      mat->info->get_csrmv_info(),
+                                      mat->info->is_spmv_info_current(mat->pattern_stamp)
+                                          ? mat->info->get_csrmv_info()
+                                          : nullptr,
                                       x->data_type,
                                       x->const_values,
                                       beta_type,
@@ -688,6 +697,7 @@ namespace rocsparse
                 // detected via the cached info object (CSC reuses the csrmv_info
                 // slot), instead of relying on the descriptor-wide mat->analysed
                 // flag.
+                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
                 if(csrmv_info == nullptr)
                 {
@@ -727,7 +737,9 @@ namespace rocsparse
                                                             mat->const_col_data,
                                                             mat->row_type,
                                                             mat->const_row_data,
-                                                            mat->info->get_csrmv_info(),
+                                                            mat->info->is_spmv_info_current(mat->pattern_stamp)
+                                                                ? mat->info->get_csrmv_info()
+                                                                : nullptr,
                                                             x->data_type,
                                                             x->const_values,
                                                             beta_type,

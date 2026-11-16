@@ -2780,12 +2780,12 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
  *  \brief Set the row indices, column indices, and values array in the sparse COO matrix descriptor.
  *
  *  \note
- *  The analysis that \p rocsparse_spmv computed for the previous arrays is discarded, also when the same
- *  pointers are passed after their contents changed. Call the buffer size and preprocess stages of
- *  \p rocsparse_spmv again before the next compute stage; a compute stage without them still computes the
- *  product, with an algorithm that does not need preprocessing. The analysis of a \p rocsparse_spmv_descr does
- *  not apply to the new arrays: its compute stage returns \ref rocsparse_status_invalid_value, and a new
- *  \p rocsparse_spmv_descr has to be created and analysed.
+ *  The analysis that \p rocsparse_spmv or \p rocsparse_v2_spmv computed for the previous arrays is no longer
+ *  used, also when the same pointers are passed after their contents changed. Call the buffer size and
+ *  preprocess stages of \p rocsparse_spmv again to analyse the new arrays; a compute stage without them still
+ *  computes the product, with an algorithm that does not need preprocessing. The compute stage of an analysed
+ *  \p rocsparse_spmv_descr also still computes the product. Analyses computed by \p rocsparse_spsv,
+ *  \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
  *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
@@ -2826,12 +2826,13 @@ rocsparse_status
  *  \brief Set the row offsets, column indices, and values array in the sparse CSR matrix descriptor.
  *
  *  \note
- *  The analysis that \p rocsparse_spmv computed for the previous arrays is discarded, also when the same
+ *  The analysis that \p rocsparse_spmv computed for the previous arrays is no longer used, also when the same
  *  pointers are passed after their contents changed. Call the buffer size and preprocess stages of
- *  \p rocsparse_spmv again before the next compute stage; a compute stage without them still computes the
- *  product, with an algorithm that does not need preprocessing. The analysis of a \p rocsparse_spmv_descr does
- *  not apply to the new arrays: its compute stage returns \ref rocsparse_status_invalid_value, and a new
- *  \p rocsparse_spmv_descr has to be created and analysed.
+ *  \p rocsparse_spmv again to analyse the new arrays; a compute stage without them still computes the
+ *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
+ *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
+ *  \p rocsparse_spmv_descr has to be created and analysed. Analyses computed by \p rocsparse_spsv,
+ *  \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
  *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
@@ -2855,12 +2856,13 @@ rocsparse_status rocsparse_csr_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the column offsets, row indices, and values array in the sparse CSC matrix descriptor.
  *
  *  \note
- *  The analysis that \p rocsparse_spmv computed for the previous arrays is discarded, also when the same
+ *  The analysis that \p rocsparse_spmv computed for the previous arrays is no longer used, also when the same
  *  pointers are passed after their contents changed. Call the buffer size and preprocess stages of
- *  \p rocsparse_spmv again before the next compute stage; a compute stage without them still computes the
- *  product, with an algorithm that does not need preprocessing. The analysis of a \p rocsparse_spmv_descr does
- *  not apply to the new arrays: its compute stage returns \ref rocsparse_status_invalid_value, and a new
- *  \p rocsparse_spmv_descr has to be created and analysed.
+ *  \p rocsparse_spmv again to analyse the new arrays; a compute stage without them still computes the
+ *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
+ *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
+ *  \p rocsparse_spmv_descr has to be created and analysed. Analyses computed by \p rocsparse_spsv,
+ *  \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
  *
  *  @param[inout]
  *  descr       the pointer to the sparse matrix descriptor.
@@ -2901,12 +2903,13 @@ rocsparse_status
  *  \brief Set the row offsets, column indices, and values array in the sparse BSR matrix descriptor
  *
  *  \note
- *  The analysis that \p rocsparse_spmv computed for the previous arrays is discarded, also when the same
+ *  The analysis that \p rocsparse_spmv computed for the previous arrays is no longer used, also when the same
  *  pointers are passed after their contents changed. Call the buffer size and preprocess stages of
- *  \p rocsparse_spmv again before the next compute stage; a compute stage without them still computes the
- *  product, with an algorithm that does not need preprocessing. The analysis of a \p rocsparse_spmv_descr does
- *  not apply to the new arrays: its compute stage returns \ref rocsparse_status_invalid_value, and a new
- *  \p rocsparse_spmv_descr has to be created and analysed.
+ *  \p rocsparse_spmv again to analyse the new arrays; a compute stage without them still computes the
+ *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
+ *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
+ *  \p rocsparse_spmv_descr has to be created and analysed. Analyses computed by \p rocsparse_spsv,
+ *  \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
  *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.

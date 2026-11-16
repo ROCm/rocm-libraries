@@ -345,6 +345,20 @@ void _rocsparse_mat_info::clear_spmv_info()
     }
 }
 
+bool _rocsparse_mat_info::is_spmv_info_current(uint64_t pattern_stamp) const
+{
+    return this->m_spmv_stamp == pattern_stamp;
+}
+
+void _rocsparse_mat_info::clear_spmv_info_if_stale(uint64_t pattern_stamp)
+{
+    if(this->m_spmv_stamp != pattern_stamp)
+    {
+        this->clear_spmv_info();
+        this->m_spmv_stamp = pattern_stamp;
+    }
+}
+
 void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
 {
     this->m_sorted_coo2csr_info = value;
@@ -382,23 +396,7 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     //
     // TRM_INFO data are automatically destroyed.
     //
-    if(this->csrmv_info != nullptr)
-    {
-        delete this->csrmv_info;
-        this->csrmv_info = nullptr;
-    }
-
-    if(this->bsrmv_info != nullptr)
-    {
-        delete this->bsrmv_info;
-        this->bsrmv_info = nullptr;
-    }
-
-    if(this->coomv_info != nullptr)
-    {
-        delete this->coomv_info;
-        this->coomv_info = nullptr;
-    }
+    this->clear_spmv_info();
 
     rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();
     if(sorted_coo2csr_info != nullptr)

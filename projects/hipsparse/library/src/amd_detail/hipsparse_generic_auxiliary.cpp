@@ -53,11 +53,11 @@ hipsparseSpMVDescr_st::Entry::Entry(Entry&& other) noexcept
 hipsparseSpMVDescr_st::Entry::~Entry()
 {
     // Destructors cannot propagate status codes, so the rocsparse / hip
-    // return values are intentionally discarded here. Entries are only
-    // destroyed at sparse-matrix-descriptor tear-down time (via
-    // m_entries.clear() in the implicit destructor), so failures
-    // here would only mean a leaked rocsparse descriptor or hip buffer
-    // (already on the tear-down path).
+    // return values are intentionally discarded here. Entries are destroyed
+    // at sparse-matrix-descriptor tear-down time (via m_entries.clear() in
+    // the implicit destructor), or by release_discarded_entries, which frees
+    // the compute buffers first, so failures here would only mean a leaked
+    // rocsparse descriptor or hip buffer.
     if(this->spmv_descr != nullptr)
     {
         (void)rocsparse_destroy_spmv_descr(this->spmv_descr);
@@ -69,6 +69,29 @@ hipsparseSpMVDescr_st::Entry::~Entry()
         (void)hipFree(this->compute_buffer);
         this->compute_buffer = nullptr;
     }
+}
+
+void hipsparseSpMVDescr_st::discard_entries()
+{
+    this->m_entries_stale = true;
+}
+
+hipsparseStatus_t hipsparseSpMVDescr_st::release_discarded_entries(hipStream_t stream)
+{
+    if(this->m_entries_stale)
+    {
+        for(auto& entry : this->m_entries)
+        {
+            if(entry.compute_buffer != nullptr)
+            {
+                RETURN_IF_HIP_ERROR(hipFreeAsync(entry.compute_buffer, stream));
+                entry.compute_buffer = nullptr;
+            }
+        }
+        this->m_entries.clear();
+        this->m_entries_stale = false;
+    }
+    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 hipsparseSpMVDescr_st::Entry* hipsparseSpMVDescr_st::find_entry(rocsparse_operation operation,
@@ -1129,9 +1152,9 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 csrColInd,
                                           void*                 csrValues)
 {
-
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_csr_set_pointers(
-        to_rocsparse_spmat_descr(spMatDescr), csrRowOffsets, csrColInd, csrValues));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(to_rocsparse_spmat_descr(spMatDescr), csrRowOffsets, csrColInd, csrValues));
+    spMatDescr->get_hip_spmv_descr()->discard_entries();
+    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 hipsparseStatus_t hipsparseCscGet(const hipsparseSpMatDescr_t spMatDescr,
@@ -1215,8 +1238,9 @@ hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cscRowInd,
                                           void*                 cscValues)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_csc_set_pointers(
-        to_rocsparse_spmat_descr(spMatDescr), cscColOffsets, cscRowInd, cscValues));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csc_set_pointers(to_rocsparse_spmat_descr(spMatDescr), cscColOffsets, cscRowInd, cscValues));
+    spMatDescr->get_hip_spmv_descr()->discard_entries();
+    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
@@ -1224,8 +1248,9 @@ hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cooColInd,
                                           void*                 cooValues)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_coo_set_pointers(
-        to_rocsparse_spmat_descr(spMatDescr), cooRowInd, cooColInd, cooValues));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_coo_set_pointers(to_rocsparse_spmat_descr(spMatDescr), cooRowInd, cooColInd, cooValues));
+    spMatDescr->get_hip_spmv_descr()->discard_entries();
+    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 hipsparseStatus_t hipsparseBlockedEllSetPointers(hipsparseSpMatDescr_t spMatDescr,

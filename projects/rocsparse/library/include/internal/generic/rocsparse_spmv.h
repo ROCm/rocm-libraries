@@ -60,7 +60,7 @@ extern "C" {
 *  by calling \p rocsparse_spmv with the stage parmeter set to \ref rocsparse_spmv_stage_compute. The buffer size, buffer allocation, and
 *  preprocess stages only need to be called once for a given sparse matrix \f$op(A)\f$, while the computation stage can be repeatedly used
 *  with different \f$x\f$ and \f$y\f$ vectors. After the arrays of the sparse matrix are replaced with \ref rocsparse_csr_set_pointers, \ref rocsparse_csc_set_pointers, \ref rocsparse_coo_set_pointers, or
-*  \ref rocsparse_bsr_set_pointers, the buffer size and preprocess stages must be called again. After all calls to \p rocsparse_spmv are complete, the temporary buffer can be deallocated.
+*  \ref rocsparse_bsr_set_pointers, call the buffer size and preprocess stages again to analyse the new arrays; a computation stage without them still computes the product, with an algorithm that does not need preprocessing. After all calls to \p rocsparse_spmv are complete, the temporary buffer can be deallocated.
 *
 *  \p rocsparse_spmv supports multiple different algorithms. These algorithms have different trade-offs depending on the sparsity
 *  pattern of the matrix, whether or not the results need to be deterministic, and how many times the sparse-vector product will

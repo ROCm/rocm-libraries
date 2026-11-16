@@ -112,6 +112,11 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
     }
 
     hipsparseSpMVDescr_st*        hip_spmv_descr = matA->get_hip_spmv_descr();
+    {
+        hipStream_t stream{};
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_stream((rocsparse_handle)handle, &stream));
+        RETURN_IF_HIPSPARSE_ERROR(hip_spmv_descr->release_discarded_entries(stream));
+    }
     hipsparseSpMVDescr_st::Entry* entry          = nullptr;
 
     RETURN_IF_HIPSPARSE_ERROR(hipsparseSpMV_get_or_add_entry(
@@ -196,6 +201,11 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
     }
 
     hipsparseSpMVDescr_st*        hip_spmv_descr = matA->get_hip_spmv_descr();
+    {
+        hipStream_t stream{};
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_stream((rocsparse_handle)handle, &stream));
+        RETURN_IF_HIPSPARSE_ERROR(hip_spmv_descr->release_discarded_entries(stream));
+    }
     hipsparseSpMVDescr_st::Entry* entry          = nullptr;
 
     RETURN_IF_HIPSPARSE_ERROR(hipsparseSpMV_get_or_add_entry(
@@ -277,6 +287,11 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
     }
 
     hipsparseSpMVDescr_st*        hip_spmv_descr = matA->get_hip_spmv_descr();
+    {
+        hipStream_t stream{};
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_stream((rocsparse_handle)handle, &stream));
+        RETURN_IF_HIPSPARSE_ERROR(hip_spmv_descr->release_discarded_entries(stream));
+    }
     hipsparseSpMVDescr_st::Entry* entry
         = hip_spmv_descr->find_entry(operation, spmv_alg, datatype, datatype);
 
