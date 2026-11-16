@@ -13,7 +13,8 @@
 # A test that is in library/tests but in no list here does not run in CI.
 #
 # A pytest entry starts its command with ${_ROCKE_INSTALLED_PYTEST}, which
-# platform/CMakeLists.txt defines. The explicit gates do not.
+# platform/CMakeLists.txt defines. The explicit gates do not. The configure
+# fails for any other pytest entry that does not.
 
 # Oracle-free uniform-probability launches of the shipped dense kernels. Only
 # the GPU module runs here; its CPU contracts run in the attention CPU lane.

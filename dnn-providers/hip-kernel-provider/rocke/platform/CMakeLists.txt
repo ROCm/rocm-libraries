@@ -875,6 +875,40 @@ if(ROCKE_INSTALL_TESTS)
 
   endif()
 
+  # TheRock starts every installed entry on every hipkernelprovider CI shard. A
+  # pytest entry runs only its shard's share when its command starts with
+  # ${_ROCKE_INSTALLED_PYTEST}; otherwise it runs whole on every shard. Stop the
+  # configure for such an entry. The explicit gates stop on a partial run, so
+  # they must not load the shard plugin.
+  set(_rocke_unsharded_gates
+      rocke_library_counted_structural_gate rocke_library_counted_compiler_gate)
+  string(REGEX MATCHALL "add_test\\([A-Za-z0-9_]+ [^\n]*-m pytest[^\n]*"
+         _rocke_pytest_adds "${_ROCKE_INSTALLED_CTEST_ENTRIES}")
+  set(_rocke_bad_pytest_entries "")
+  foreach(_rocke_add IN LISTS _rocke_pytest_adds)
+    string(REGEX REPLACE "^add_test\\(([A-Za-z0-9_]+) .*" "\\1" _rocke_name "${_rocke_add}")
+    if(_rocke_name IN_LIST _rocke_unsharded_gates)
+      if(_rocke_add MATCHES "rocke\\.tests\\.ctest_shard")
+        list(APPEND _rocke_bad_pytest_entries
+             "${_rocke_name} (an explicit gate must not load the shard plugin)")
+      endif()
+    else()
+      string(FIND "${_rocke_add}" "add_test(${_rocke_name} ${_ROCKE_INSTALLED_PYTEST}"
+             _rocke_prefix_pos)
+      if(NOT _rocke_prefix_pos EQUAL 0)
+        list(APPEND _rocke_bad_pytest_entries "${_rocke_name}")
+      endif()
+    endif()
+  endforeach()
+  if(_rocke_bad_pytest_entries)
+    list(JOIN _rocke_bad_pytest_entries "\n  " _rocke_bad_pytest_entries)
+    message(FATAL_ERROR
+            "Each installed rocKE pytest entry must start its command with "
+            "\${_ROCKE_INSTALLED_PYTEST}, so that each hipkernelprovider CI shard "
+            "runs only its share of the entry's tests (see rocke/TESTING.md):\n"
+            "  ${_rocke_bad_pytest_entries}")
+  endif()
+
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
     set_property(GLOBAL APPEND_STRING PROPERTY
                  "EXTERNAL_TEST_INSTALL_STAGING_${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}"
