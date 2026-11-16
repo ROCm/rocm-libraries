@@ -36,11 +36,13 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
-_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {
+_GFX950_DENSE_GRID_BODY_FEATURES = _GFX950_DENSE_FEATURES | {
     "causal_bottom_right",
     "alibi",
     "alibi_external_slopes",
 }
+# fp8 KV is validated only on the default-order grid variant.
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_GRID_BODY_FEATURES | {"fp8"}
 _RDNA_WMMA_FEATURES = {
     "causal",
     "causal_bottom_right",
@@ -60,6 +62,8 @@ _RDNA_WMMA_FEATURES = {
     "layout_ragged",
     "layout_paged",
     "runtime_head_dims",
+    "dense_q",
+    "seqused_q",
 }
 EXPECTED_FEATURES = {
     "attention_strided_decode": {
@@ -121,7 +125,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
-    "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_FEATURES),
+    "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_BODY_FEATURES),
     "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal", "causal_bottom_right"},

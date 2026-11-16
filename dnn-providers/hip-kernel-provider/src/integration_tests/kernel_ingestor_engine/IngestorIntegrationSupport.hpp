@@ -23,15 +23,19 @@
 #include <hip/hip_runtime.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -73,6 +77,33 @@ struct ServedEngine
     const char* name;
     const char* arch;
 };
+
+// The one winner shard an engine's cache holds for @p arch, or an empty path if none is
+// there yet: <engine>/<uhd id>/<revision>-<model hash>/<arch>/winners.jsonl. The engine
+// keys its shard by its full identity (revision, UHD id, model hash), which only the
+// loaded descriptor set knows, so each test's fresh cache is searched for its one shard
+// instead of the path being derived directly.
+inline std::filesystem::path winnerShardPath(const std::string& engineName, const std::string& arch)
+{
+    const auto engineDir = hipdnn_data_sdk::utilities::cacheRoot() / "ingestor-winners"
+                           / std::string(hipdnn_plugin_sdk::ingestor::winnerCacheVersion())
+                           / hipdnn_data_sdk::utilities::sanitizeForPath(engineName);
+    const std::string strippedArch(hipdnn_plugin_sdk::stripArchFeatures(arch));
+    std::vector<std::filesystem::path> shards;
+    std::error_code error;
+    for(auto it = std::filesystem::recursive_directory_iterator(engineDir, error);
+        !error && it != std::filesystem::recursive_directory_iterator();
+        it.increment(error))
+    {
+        const auto& path = it->path();
+        if(path.filename() == "winners.jsonl" && path.parent_path().filename() == strippedArch)
+        {
+            shards.push_back(path);
+        }
+    }
+    EXPECT_LE(shards.size(), 1U) << "more than one winner shard under " << engineDir;
+    return shards.empty() ? std::filesystem::path{} : shards.front();
+}
 
 namespace detail
 {
