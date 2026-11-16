@@ -32,7 +32,7 @@ SPDX-License-Identifier:  MIT
   - fp32 Mask R-CNN 200² fwd/bwd against `ConvBinWinogradRxSf2x3g1` (1.13-1.24x), F(2,3) only;
   - gfx906 fwd/bwd against MIOpen's asm Winograd (about 1.55x behind, weighted).
   - NHWC 3x3 fp16 backward weights and backward data against MIOpen's transpose-wrapped asm (`Transposed*`); other engines serve those graphs.
-  - Kernel against kernel, K5 trails MIOpen's Winograd on gfx906 and RDNA (0.55-0.70x) and is near parity on gfx90a/gfx908 (0.96-0.98x); it leads on gfx950/gfx942 (1.04-1.30x) except against Rage. See "Next steps".
+  - Kernel against kernel, K5 trails MIOpen's Winograd on gfx906 and RDNA (0.55-0.70x) and is near parity on gfx90a/gfx908 (0.96-0.98x); it leads on gfx950/gfx942 (1.03-1.32x) except against Rage (0.93x). See "Next steps".
 - **Precision:** every engine reports the `WINOGRAD` numerical note, with `WINOGRAD_TILE_4x4` on the fwd/bwd and BF16 engines and `WINOGRAD_TILE_6x6` on the F43 engines (wrw mixes F(3,2), F(3,4) and F(3,6) and names no tile). Transforms are fp32; 16-bit operands are rounded once after their transform, except the input transform of `f16math` configs. Accumulation is fp32. An output whose window lies wholly in padding is exactly 0. Deterministic.
 - **Instances:** 432: `CONV_WINOGRAD_FWD/BWD` 112 each, `CONV_WINOGRAD_FWD/BWD_BF16` 54 each (every bf16 fwd/bwd config), `CONV_WINOGRAD_FWD/BWD_F43` 8 each (fp32 F(4,3) multipass), `CONV_WINOGRAD_WRW` 84. All are offered by default.
 - **vs MIOpen** (usage-weighted speedup on the graphs where it is our best engine, search mode), fwd / bwd / wrw:
@@ -151,7 +151,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - RDNA fp16 small-C (c32-c192, k32-k64) against Rage / Fury: the cost is per-item overhead (load latency, barriers, the Z round trip), not the MMAs.
   - RDNA fp32 large layers, where F(2,3) runs (F(4,3) is the F43 engines').
   - gfx906 fused, where the Hadamard runs near peak but staging, loads and barriers cost as much again.
-  - CDNA small-C: Inception c32 and EfficientNet c24 trail Rage by 1.5-1.7x, HRNet c32 by about 1.15-1.2x.
+  - CDNA small-C against Rage: Inception c32 149² trails by 1.6-1.75x, realesrgan c160 k32 backward data by 1.33-1.38x, HRNet c32 56² by 1.18x (gfx950) and 1.27x (MI325X).
 
 ## Numerical precision
 - **Error model.** Winograd's rounding error scales with the magnitude of the whole tile it shares, Σ|products| over the neighbourhood, not with the output alone. An infinity in a tile poisons its neighbours (inf x structural zero gives NaN). Both are what the `WINOGRAD` note declares; the non-finite behaviour is documented, not fixed.
@@ -196,8 +196,8 @@ No code was copied.
 
 | GPU | K5 vs MIOpen Winograd | Graphs (K5 faster / slower by >5%) | K5 excess (all / without `Transposed*`) |
 |---|---|---|---|
-| gfx950 | 1.04x | 159 (67 / 68) | 16 / 8 ms |
-| gfx942 (MI325X) | 1.30x | 213 (89 / 103) | 37 / 18 ms |
+| gfx950 | 1.03x | 159 (66 / 69) | 16 / 9 ms |
+| gfx942 (MI325X) | 1.32x | 213 (88 / 100) | 34 / 14 ms |
 | gfx90a | 0.96x | 88 (25 / 50) | 50 / 11 ms |
 | gfx908 | 0.98x | 148 (61 / 71) | 155 / 78 ms |
 | gfx906 | 0.56x | 286 (29 / 249) | 3405 / 742 ms |
@@ -220,11 +220,15 @@ No code was copied.
 2. **RDNA fp16 small-C against Fury / Rage** (0.39-0.72x).
    - Autotune does not pick the 16-bin config where it would win, so the planner needs register counts at plan time.
    - Per-item overhead (loads, about 5 barriers per item) is the cost to cut.
-3. **gfx942 / gfx950 against Rage** (0.88-0.93x; mostly fp16 small-C backward data).
-   - Remove the extra VALU and the bank conflicts in V stores and B reads.
-   - Fold the 3-4 µs filter-transform launch into the kernel with an LDS-resident U.
-   - Use 32-bit/scalar index math, and per-arch tile shapes as on gfx950.
-   - Use scheduling hints (`__builtin_amdgcn_sched_group_barrier`, wave priority) and `launch_bounds` register budgets.
+3. **gfx942 / gfx950 against Rage** (0.93x on both; 7 / 6 ms excess, mostly fp16 small-C backward data: realesrgan c160 k32, HRNet c32, Inception c32 149²).
+   - What is left is per-item overhead at low occupancy. Profiled on MI325X (HRNet c32 56² forward), K5 issues about 1.2x Rage's VALU, and Rage keeps 12 waves a CU against K5's 12 with the single input buffer (8 with two). Most of an item is load latency, transform VALU and the epilogue's LDS round trip with 2 barriers per 16-channel slab, not MFMA (about 3% busy).
+   - Measured and not taken:
+     - An in-kernel filter transform (U built per block in registers, filter staged through LDS) costs more than the 3-4 µs filter launch it removes.
+     - A 32-bank V swizzle for gfx942 removes the modelled bank conflicts but times the same.
+     - 4 waves a SIMD (128 VGPRs) spills.
+     - Multiply-shift division for the tile index split is neutral.
+   - Next: a cheaper epilogue (fewer barriers per item, Z in fewer passes), 16x16x32 MFMA with 32-channel chunks on gfx950, and transform VALU.
+   - Autotune ranks some coop configs by a tuning time that differs from their steady-state time by up to 10% (e.g. 2 x 4 tiles without prefetch). It then picks the prefetch sibling, 3-5% slower in steady state, on a few large-C layers.
 4. **gfx908 against `ConvBinWinograd3x3U`** (0.77x).
 5. **gfx906 fused** (0.56-0.77x): reader/writer wave specialization, or a persistent design with U in LDS, aimed at near-peak fp32 VALU.
 6. **gfx90a / gfx908 multipass backward weights** against `ConvWinograd3x3MultipassWrW` (0.66-0.93x on its graphs).
