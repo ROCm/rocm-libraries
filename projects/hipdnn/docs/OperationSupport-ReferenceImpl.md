@@ -142,9 +142,9 @@ Beyond FP16, BFP16 and FP32, the reference registers FP64, INT32, BOOLEAN and th
 `FP8_E4M3` and `FP8_E5M2`:
 
 - FP64 supports every implemented mode and computes in FP64.
-- INT32 computes in FP32, so integer values above 2^24 lose exactness. It supports the arithmetic,
-  comparison and selection modes that are meaningful for integers; the transcendental modes are
-  declined.
+- INT32 computes in FP32, so integer values above 2^24 lose exactness in arithmetic; comparisons of
+  integer inputs are exact. It supports the arithmetic, comparison and selection modes that are
+  meaningful for integers; the transcendental modes are declined.
 - BOOLEAN supports `BINARY_SELECT` and the logical modes.
 - FP8 inputs compute in FP32 and produce an output in the input's FP8 format or FP32.
 - `CMP_GT` also accepts inputs of different floating-point types (FP16, BFP16, FP32 and FP64).

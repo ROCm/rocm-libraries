@@ -97,13 +97,20 @@ struct AddSquare
     }
 };
 
+// Two integral inputs are compared exactly, since rounding them through ComputeType (such as float)
+// would make large values compare equal
+template <typename ComputeType, typename X0, typename X1>
+using CompareType
+    = std::conditional_t<std::is_integral_v<X0> && std::is_integral_v<X1>, int64_t, ComputeType>;
+
 template <typename ComputeType>
 struct CompareGreater
 {
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) > static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) > static_cast<T>(x1);
     }
 };
 
@@ -113,7 +120,8 @@ struct CompareEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) == static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) == static_cast<T>(x1);
     }
 };
 
@@ -123,7 +131,8 @@ struct CompareNotEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) != static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) != static_cast<T>(x1);
     }
 };
 
@@ -133,7 +142,8 @@ struct CompareGreaterEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) >= static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) >= static_cast<T>(x1);
     }
 };
 
@@ -143,7 +153,8 @@ struct CompareLess
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) < static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) < static_cast<T>(x1);
     }
 };
 
@@ -153,7 +164,8 @@ struct CompareLessEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) <= static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) <= static_cast<T>(x1);
     }
 };
 
