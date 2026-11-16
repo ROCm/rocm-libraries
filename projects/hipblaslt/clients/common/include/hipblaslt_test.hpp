@@ -73,16 +73,32 @@
 #define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
 #define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
 
-// True when HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP is set to a value other than 0, so that a run on a
-// large-memory host fails, rather than skips, any case that does not fit.
-inline bool hipblaslt_memory_skip_fails()
+// Whether test `test_name` fails, rather than skips, when memory is short. `setting` is the value
+// of HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP: 0 always skips and any other value always fails. Unset or
+// empty, the tests that the quick and standard tiers select (smoke, quick and pre_checkin, matched
+// as clients/tests/test_categories.yaml matches them) fail, since their cases fit every CI host,
+// and the rest skip.
+inline bool hipblaslt_memory_stop_fails(const char* setting, const std::string& test_name)
 {
-    const char* value = std::getenv("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP");
-    return value && *value && strcmp(value, "0") != 0;
+    if(setting && *setting)
+        return strcmp(setting, "0") != 0;
+    for(const char* category : {"smoke", "quick", "pre_checkin"})
+        if(test_name.find(category) != std::string::npos)
+            return true;
+    return false;
 }
 
-// Ends the test because memory is short, as WHY explains: a skip, or a failure under
-// HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP.
+// hipblaslt_memory_stop_fails for the running test.
+inline bool hipblaslt_memory_skip_fails()
+{
+    const auto*       info = ::testing::UnitTest::GetInstance()->current_test_info();
+    const std::string name
+        = info ? std::string(info->test_suite_name()) + "." + info->name() : std::string();
+    return hipblaslt_memory_stop_fails(std::getenv("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP"), name);
+}
+
+// Ends the test because memory is short, as WHY explains: a failure or a skip, as
+// hipblaslt_memory_skip_fails decides.
 #define SKIP_FOR_MEMORY(WHY)                                 \
     do                                                       \
     {                                                        \

@@ -866,6 +866,13 @@ namespace
         EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
     }
 
+    TEST(MatmulMemory_pre_checkin, memory_stop_fails_a_pre_checkin_test_by_default)
+    {
+        ScopedVariable limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "64M");
+        ScopedVariable unset("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", nullptr);
+        EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
+    }
+
     // A pointer-array f16 GEMM whose batches start at the given element offsets, as in the
     // matmul_batch_offset cases.
     Arguments batch_offset_case(int64_t offset_a, int64_t offset_b, int64_t offset_c)

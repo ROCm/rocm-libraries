@@ -292,6 +292,25 @@ namespace
                   "[ MEMORY   ] Suite.huge: a device allocation failed: out of memory\n");
     }
 
+    TEST(HostMemory_pre_checkin, memory_stop_fails_the_tests_the_pr_tiers_run)
+    {
+        EXPECT_TRUE(hipblaslt_memory_stop_fails(nullptr, "_/matmul_test.matmul/pre_checkin_gemm"));
+        EXPECT_TRUE(hipblaslt_memory_stop_fails(nullptr, "_/matmul_test.matmul/quick_gemm"));
+        EXPECT_TRUE(hipblaslt_memory_stop_fails("", "_/matmul_test.matmul/smoke_gemm"));
+        EXPECT_TRUE(hipblaslt_memory_stop_fails(nullptr, "MatmulMemory_pre_checkin.case"));
+        EXPECT_FALSE(hipblaslt_memory_stop_fails(nullptr, "_/matmul_test.matmul/nightly_gemm"));
+        EXPECT_FALSE(hipblaslt_memory_stop_fails(nullptr, "_/matmul_test.matmul/stress_gemm"));
+        EXPECT_FALSE(hipblaslt_memory_stop_fails(nullptr, "_/matmul_test.matmul/HMM_gemm"));
+        EXPECT_FALSE(hipblaslt_memory_stop_fails(nullptr, ""));
+    }
+
+    TEST(HostMemory_pre_checkin, memory_stop_setting_overrides_the_category)
+    {
+        EXPECT_FALSE(hipblaslt_memory_stop_fails("0", "_/matmul_test.matmul/pre_checkin_gemm"));
+        EXPECT_TRUE(hipblaslt_memory_stop_fails("1", "_/matmul_test.matmul/stress_gemm"));
+        EXPECT_TRUE(hipblaslt_memory_stop_fails("yes", "_/matmul_test.matmul/nightly_gemm"));
+    }
+
 #ifndef _WIN32
     constexpr uint64_t kGiB = uint64_t(1) << 30;
 
