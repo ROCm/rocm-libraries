@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-find_package(Catch2 3 QUIET CONFIG)
+find_package(Catch2 3.3 QUIET CONFIG)
 if(NOT Catch2_FOUND)
     if(ORIGAMI_ENABLE_FETCH)
         include(FetchContent)

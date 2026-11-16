@@ -8,11 +8,13 @@
 #include "origami/nn/twrec/rank.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace origami::nn::detail {
@@ -86,6 +88,20 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
   // dangle after a concurrent unload.
   std::shared_ptr<const twrec::detail::LoadedModel> model = model_payload(handle);
   if (model == nullptr) return std::nullopt;
+
+  // The weights are fit to one architecture. Checked here, not at load, because one process
+  // can serve several devices. A mismatch declines the model, so nn_fallback goes analytical.
+  const std::string_view hardware_arch = hardware_t::arch_enum_to_name(hardware.arch);
+  if (model->arch != hardware_arch) {
+    if (std::getenv("ORIGAMI_NN_DIAG") != nullptr) {
+      std::fprintf(stderr,
+                   "[ORIGAMI_NN_DIAG] model arch %s does not match hardware %.*s; not using NN\n",
+                   model->arch.c_str(),
+                   static_cast<int>(hardware_arch.size()),
+                   hardware_arch.data());
+    }
+    return std::nullopt;
+  }
 
   TilewrightRecommender recommender(handle, std::move(model));
   auto results = recommender.rank(problem, hardware, configs, options);
