@@ -67,18 +67,12 @@ namespace
         return value ? std::strtoll(value, nullptr, 10) : fallback;
     }
 
-    // The current device's scope, e.g. gfx942_CU304, gfx950_CU256_ID75a3 or
-    // gfx1250v0_CU<n>. TensileLite reads a PCI chip ID on gfx950 only, and
-    // gfx1250 A0 is a target of its own, as for the shipped library.
+    // The current device's scope, e.g. gfx942_CU304 or gfx950_CU256_ID75a3.
+    // TensileLite reads a PCI chip ID on gfx950 only.
     std::string deviceScope()
     {
-        int             device = 0, chip = 0;
-        hipDeviceProp_t prop{};
-        std::string     target = deviceArch();
-        if(target == "gfx1250" && hipGetDevice(&device) == hipSuccess
-           && hipGetDeviceProperties(&prop, device) == hipSuccess && prop.asicRevision == 0)
-            target += "v0";
-        std::string scope = target + "_CU" + std::to_string(deviceCuCount());
+        int         device = 0, chip = 0;
+        std::string scope  = deviceArch() + "_CU" + std::to_string(deviceCuCount());
         if(deviceArch() == "gfx950" && hipGetDevice(&device) == hipSuccess
            && hipDeviceGetAttribute(&chip, hipDeviceAttributePciChipId, device) == hipSuccess)
         {

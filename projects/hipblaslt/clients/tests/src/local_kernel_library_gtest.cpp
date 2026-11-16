@@ -623,31 +623,31 @@ TEST(LocalKernelLibrary, smoke_MappingIsForOneDeviceClass)
     EXPECT_EQ(LocalDeviceClass::of(mapped).target, "gfx950") << "target features are dropped";
 }
 
-// gfx1250 A0, served by the shipped library from gfx1250v0, and gfx1250-strict
-// are targets of their own, though Processor folds both into gfx1250: neither
-// takes a mapping made on another gfx1250.
+// gfx1250-strict is a target of its own, though Processor folds it into
+// gfx1250, and does not take a mapping made on a gfx1250. The target is the
+// reported name alone, so the ASIC revision does not split gfx1250.
 TEST(LocalKernelLibrary, smoke_DeviceClassTellsGfx1250TargetsApart)
 {
-    hip::HipAMDGPU a0{}, b0{}, strict{};
-    for(auto [gpu, name, revision] : {std::make_tuple(&a0, "gfx1250", 0),
-                                      std::make_tuple(&b0, "gfx1250:xnack-", 1),
+    hip::HipAMDGPU first{}, later{}, strict{};
+    for(auto [gpu, name, revision] : {std::make_tuple(&first, "gfx1250", 0),
+                                      std::make_tuple(&later, "gfx1250:xnack-", 1),
                                       std::make_tuple(&strict, "gfx1250-strict", 0)})
     {
-        gpu->processor        = AMDGPU::Processor::gfx1250;
-        gpu->computeUnitCount = 128;
+        gpu->processor               = AMDGPU::Processor::gfx1250;
+        gpu->computeUnitCount        = 128;
         gpu->properties.asicRevision = revision;
         std::snprintf(gpu->properties.gcnArchName, sizeof(gpu->properties.gcnArchName), "%s", name);
     }
-    EXPECT_EQ(LocalDeviceClass::of(a0).target, "gfx1250v0");
-    EXPECT_EQ(LocalDeviceClass::of(b0).target, "gfx1250");
+    EXPECT_EQ(LocalDeviceClass::of(first).target, "gfx1250");
+    EXPECT_TRUE(LocalDeviceClass::of(first) == LocalDeviceClass::of(later))
+        << "one class across revisions";
     EXPECT_EQ(LocalDeviceClass::of(strict).target, "gfx1250-strict");
 
     auto         problem = makeProblem();
     LocalLibrary library;
     int          index = library.addSolutions({makeSolution(problem)}).at(0);
     ASSERT_TRUE(
-        library.setExactMatch(localExactShapeFor(problem), index, LocalDeviceClass::of(b0)));
-    EXPECT_EQ(library.findExact(problem, a0), nullptr);
+        library.setExactMatch(localExactShapeFor(problem), index, LocalDeviceClass::of(later)));
     EXPECT_EQ(library.findExact(problem, strict), nullptr);
 }
 

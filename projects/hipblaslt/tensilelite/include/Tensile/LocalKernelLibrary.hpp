@@ -29,7 +29,6 @@
 #include <Tensile/LocalKernelIndex.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Task.hpp>
-#include <Tensile/hip/HipHardware.hpp>
 
 #include <tensilelitehost/export.h>
 
@@ -55,10 +54,9 @@ namespace TensileLite
      * kind of device, so another kind in the same process does not take it,
      * even where the kernel could run there.
      *
-     * The target tells apart devices that Processor folds together but that
-     * the shipped library serves from different files: gfx1250-strict, which
-     * the runtime names as such, and gfx1250 A0 (asicRevision 0 in the
-     * device properties), served from gfx1250v0.
+     * The target is the architecture name the runtime reports, which tells
+     * apart devices that Processor folds together but that the shipped
+     * library serves from different directories, such as gfx1250-strict.
      *
      * findExact takes the class from the Hardware it is given. hipBLASLt
      * gives every query the one Hardware it keeps for the device's
@@ -73,17 +71,14 @@ namespace TensileLite
         AMDGPU::Processor  processor        = AMDGPU::Processor::gfx000;
         int                computeUnitCount = 0;
         std::optional<int> pciChipId;
-        // The architecture the runtime reports, without target features, and
-        // "v0" for gfx1250 A0; e.g. "gfx942", "gfx1250-strict" or "gfx1250v0".
+        // The architecture the runtime reports, without target features; e.g.
+        // "gfx942" or "gfx1250-strict".
         std::string target;
 
         static LocalDeviceClass of(AMDGPU const& gpu)
         {
             std::string target = gpu.archName();
             target             = target.substr(0, target.find(':'));
-            auto const* device = dynamic_cast<hip::HipAMDGPU const*>(&gpu);
-            if(target == "gfx1250" && device && device->properties.asicRevision == 0)
-                target += "v0";
             return LocalDeviceClass{
                 gpu.processor, gpu.computeUnitCount, gpu.pciChipId(), std::move(target)};
         }

@@ -9178,7 +9178,7 @@ namespace
 #endif
 
     // A device class as a name, e.g. "gfx942_CU304", "gfx950_CU256_ID75a3" or
-    // "gfx1250v0_CU<n>", or empty if its target is unknown.
+    // "gfx1250-strict_CU<n>", or empty if its target is unknown.
     std::string localDeviceClassName(TensileLite::LocalDeviceClass const& kind)
     {
         std::string name = kind.target + "_CU" + std::to_string(kind.computeUnitCount);

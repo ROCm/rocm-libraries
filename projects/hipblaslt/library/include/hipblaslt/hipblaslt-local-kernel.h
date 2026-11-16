@@ -16,15 +16,15 @@
  *
  *  - Kernels and mappings are saved for the kind of device they were made
  *    on, and for the build of hipBLASLt that made them. A kind of device is
- *    an architecture as the runtime reports it (with gfx1250 A0 apart from
- *    later gfx1250 revisions, as for the shipped kernels), a compute unit
- *    count and, on architectures that report one, a PCI chip ID. Those saved
- *    for a device are loaded when this build of hipBLASLt first initializes
- *    it, before any heuristic query. A saved kernel is loaded only if its
- *    files still match what was saved and it can run on the device;
- *    otherwise it is skipped with a warning. One skipped for its files is
- *    tried again by \ref hipblasLtLocalKernelRefresh once they change. Its
- *    code object is loaded when one of its kernels first runs.
+ *    an architecture name as the runtime reports it (so gfx1250-strict is
+ *    apart from gfx1250), a compute unit count and, on architectures that
+ *    report one, a PCI chip ID. Those saved for a device are loaded when this
+ *    build of hipBLASLt first initializes it, before any heuristic query.
+ *    A saved kernel is loaded only if its files still match what was saved
+ *    and it can run on the device; otherwise it is skipped with a warning.
+ *    One skipped for its files is tried again by
+ *    \ref hipblasLtLocalKernelRefresh once they change. Its code object is
+ *    loaded when one of its kernels first runs.
  *  - \ref hipblasLtLocalKernelRegister and \ref hipblasLtLocalKernelSetExactMatch
  *    save to it before they return, and fail if they cannot.
  *  - \ref hipblasLtLocalKernelRefresh loads what other processes have saved
@@ -39,8 +39,8 @@
  *  architecture name in a process by one of them, and heuristic queries on
  *  any of them see that one's kind. Local kernels are therefore not
  *  supported on a device of another kind than that one, as in a process whose
- *  devices of one architecture name differ in compute unit count, chip ID or
- *  gfx1250 revision: \ref hipblasLtLocalKernelRegister,
+ *  devices of one architecture name differ in compute unit count or chip ID:
+ *  \ref hipblasLtLocalKernelRegister,
  *  \ref hipblasLtLocalKernelSetExactMatch and \ref hipblasLtLocalKernelRefresh
  *  fail on it with HIPBLAS_STATUS_ARCH_MISMATCH.
  */
