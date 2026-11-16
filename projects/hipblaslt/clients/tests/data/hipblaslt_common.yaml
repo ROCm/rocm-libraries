@@ -39,6 +39,8 @@ Datatypes:
         c_f64_pedantic_r: 8
         c_i32_r: 9
         c_i32_pedantic_r: 10
+        c_f64_emulated_fixedpoint_r: 200
+        c_f32_emulated_fixedpoint_r: 201
   - { half: f16_r }
   - hipblaslt_initialization:
       bases: [ c_int ]

@@ -178,9 +178,20 @@ The hipBLASLt compute modes are listed in the following table.
         or emulated TF32 computation (on the gfx950 platform) for matrices with 32-bit input and output.
 
 .. note::
-   
+
    For information on how to override certain compute types,
    see the :ref:`environmental variables <env-type_overrides>` documentation.
+
+.. note::
+
+   On supported hardware, hipBLASLt can emulate ``HIPBLAS_COMPUTE_64F`` and
+   ``HIPBLAS_COMPUTE_32F`` matmuls on INT8 matrix cores instead of running them
+   natively, which can raise throughput where INT8 peak throughput is much
+   higher than FP64 or FP32 peak throughput. Emulation is opt-in and changes
+   the arithmetic: results are about as accurate as the native path at the
+   default precision target, but the emulated path doesn't promise IEEE 754
+   compliance. For the supported hardware, accuracy targets, and limitations,
+   see :doc:`FP32/FP64 fixed-point emulation <../how-to/fp-emulation>`.
 
 Data type combinations
 ======================
