@@ -18,10 +18,14 @@ namespace hip_kernel_provider
 ///
 /// Kept out of HipMlopsSelectorRevision.cmake's inputs: adding a model for one
 /// architecture must not expire the others.
-inline constexpr std::array<std::pair<std::string_view, std::string_view>, 2>
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 6>
     HIP_MLOPS_L1_MODEL_IDS{{
+        {"gfx90a", "76136ea3-7124-4781-99d6-e27ba741f4f2"}, // tflops
         {"gfx942", "1c541b68-06c6-4b6e-b2a5-18bcdcc03fea"}, // tflops
         {"gfx950", "163d8e83-807f-43cc-979e-8a1333b1beb4"}, // tflops
+        {"gfx1100", "05461550-533b-401a-8798-fadbebd29591"}, // tflops
+        {"gfx1101", "38a133f1-0a44-411c-83fa-10d9b3ae56b2"}, // tflops
+        {"gfx1201", "9d41203b-4c0b-4f20-b568-80ae53a99508"}, // tflops
     }};
 
 } // namespace hip_kernel_provider
