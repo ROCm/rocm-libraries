@@ -15,19 +15,20 @@ and in a loop) or before the end of a branch of one with results, directly or
 in an scf.if within the branch, of an LDS allocation or a packed-only type as a
 result, of a result or yielded value with no type (the Python engine only;
 serialized IR cannot carry one to the C++ engine), of an if/else without one
-condition and two branches, of an scf.if without exactly one then region
-(also in an unrolled loop of zero trips), of a yield in the kernel body or in
-an scf.if in a loop body, and of a malformed if/else in an unrolled loop of
-zero trips, directly in its body or in an scf.if there; a loop in a branch
-keeps its own yield; and, when a GPU is present, a kernel whose lanes take
-both branches on the LLVM and the hipcc route. The refusals run the verifier
-and the Python lowerings everywhere, and the C++ lowerings where the
-``rocke_engine`` binding is built.
+condition and two branches, of an scf.if without exactly one condition and
+one then region (also in an unrolled loop of zero trips), of a yield in the
+kernel body or in an scf.if in a loop body, and of a malformed if/else in an
+unrolled loop of zero trips, directly in its body or in an scf.if there; a
+loop in a branch keeps its own yield; and, when a GPU is present, a kernel
+whose lanes take both branches on the LLVM and the hipcc route. The refusals
+run the verifier and the Python lowerings everywhere, and the C++ lowerings
+where the ``rocke_engine`` binding is built.
 """
 
 from __future__ import annotations
 
 import ctypes
+import re
 import shutil
 import struct
 import subprocess
@@ -761,21 +762,60 @@ def test_an_scf_if_without_exactly_one_then_region_is_refused(regions_text, coun
     _assert_refused(kernel, ValueError, f"scf.if: expected 1 then region, got {count}")
 
 
-@pytest.mark.parametrize("count", [0, 2], ids=["no_region", "two_regions"])
-def test_an_unrolled_loop_of_zero_trips_refuses_an_scf_if_without_one_region(count):
-    """An unrolled loop of zero trips lowers no body, yet its scf.if with no
-    then region or a second one is refused, as it is wherever the body is
-    lowered."""
+CONDITION_COUNT_MESSAGE = "scf.if expects exactly 1 condition operand"
+
+
+@pytest.mark.parametrize("count", [0, 2], ids=["no_condition", "two_conditions"])
+def test_an_scf_if_without_exactly_one_condition_is_refused(count):
+    """The lowerings read an scf.if's one condition, so serialized IR with none
+    or two is refused: the parser accepts it, and the verifier and every
+    lowering refuse the parsed scf.if, before reading the condition."""
+    text = serialize(_scf_if_kernel("if_conditions"))
+    ((condition_list, condition),) = re.findall(r"scf\.if (\( (%\w+) \))", text)
+    operands = ", ".join([condition] * count)
+    kernel = parse(text.replace(condition_list, f"( {operands} )" if count else "(  )"))
+    (if_op,) = [op for op in kernel.body.ops if op.name == "scf.if"]
+    assert len(if_op.operands) == count
+    _assert_refused(kernel, ValueError, CONDITION_COUNT_MESSAGE)
+
+
+def _set_regions(if_op, count):
+    if_op.regions[:] = [Region("then") for _ in range(count)]
+
+
+def _set_conditions(if_op, count):
+    if_op.operands[:] = if_op.operands[:1] * count
+
+
+@pytest.mark.parametrize(
+    "reshape,count,message",
+    [
+        pytest.param(
+            _set_regions, 0, "scf.if: expected 1 then region, got 0", id="no_region"
+        ),
+        pytest.param(
+            _set_regions, 2, "scf.if: expected 1 then region, got 2", id="two_regions"
+        ),
+        pytest.param(_set_conditions, 0, CONDITION_COUNT_MESSAGE, id="no_condition"),
+        pytest.param(_set_conditions, 2, CONDITION_COUNT_MESSAGE, id="two_conditions"),
+    ],
+)
+def test_an_unrolled_loop_of_zero_trips_refuses_a_malformed_scf_if(
+    reshape, count, message
+):
+    """An unrolled loop of zero trips lowers no body, yet its scf.if without
+    exactly one condition and one then region is refused, as it is wherever
+    the body is lowered."""
 
     def fill(b, _k):
         with b.scf_if(b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT))):
             pass
 
-    kernel = _carrying_loop_kernel("zero_trip_if_regions", 0, fill, unroll=True)
+    kernel = _carrying_loop_kernel("zero_trip_malformed_if", 0, fill, unroll=True)
     (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
     (if_op,) = [op for op in loop.regions[0].ops if op.name == "scf.if"]
-    if_op.regions[:] = [Region("then") for _ in range(count)]
-    _assert_refused(kernel, ValueError, f"scf.if: expected 1 then region, got {count}")
+    reshape(if_op, count)
+    _assert_refused(kernel, ValueError, message)
 
 
 # --------------------------------------------------------------------------
