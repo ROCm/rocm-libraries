@@ -10768,11 +10768,12 @@ namespace rocalution
 
         // Initialize G and inverse indexing for G
         Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
+        int     rGsizec = this->nrow_;
+        int64_t rGcsize = static_cast<int64_t>(Gsize) * rGsizec;
+        int*    rGc     = NULL;
+        allocate_host(rGcsize, &rGc);
 
-        for(int i = 0; i < Gsize * rGsizec; ++i)
+        for(int64_t i = 0; i < rGcsize; ++i)
         {
             rGc[i] = -1;
         }
@@ -10806,7 +10807,7 @@ namespace rocalution
             U[i] = 1;
 
             // Fill G and rG
-            for(int r = 0; r < Gsize / 2; ++r)
+            for(int64_t r = 0; r < Gsize / 2; ++r)
             {
                 rGc[r * rGsizec + nc] = (*rG)[r * rGsize + i];
 
@@ -10889,7 +10890,7 @@ namespace rocalution
                 // Add j if conditions are fulfilled
                 if(val_j < max_a_ij)
                 {
-                    for(int r = 0; r < Gsize / 2; ++r)
+                    for(int64_t r = 0; r < Gsize / 2; ++r)
                     {
                         rGc[(r + Gsize / 2) * rGsizec + nc] = (*rG)[r * rGsize + col_j];
 
@@ -10992,11 +10993,12 @@ namespace rocalution
 
         // Initialize G and inverse indexing for G
         Gsize *= 2;
-        int  rGsizec = this->nrow_;
-        int* rGc     = NULL;
-        allocate_host(Gsize * rGsizec, &rGc);
+        int     rGsizec = this->nrow_;
+        int64_t rGcsize = static_cast<int64_t>(Gsize) * rGsizec;
+        int*    rGc     = NULL;
+        allocate_host(rGcsize, &rGc);
 
-        for(int i = 0; i < Gsize * rGsizec; ++i)
+        for(int64_t i = 0; i < rGcsize; ++i)
         {
             rGc[i] = -1;
         }
@@ -11030,7 +11032,7 @@ namespace rocalution
             U[i] = 1;
 
             // Fill G and rG
-            for(int r = 0; r < Gsize / 2; ++r)
+            for(int64_t r = 0; r < Gsize / 2; ++r)
             {
                 rGc[r * rGsizec + nc] = (*rG)[r * rGsize + i];
 
@@ -11148,7 +11150,7 @@ namespace rocalution
                     {
                         if(min_j == col_j)
                         {
-                            for(int r = 0; r < Gsize / 2; ++r)
+                            for(int64_t r = 0; r < Gsize / 2; ++r)
                             {
                                 rGc[(r + Gsize / 2) * rGsizec + nc] = (*rG)[r * rGsize + min_j];
 
@@ -11233,7 +11235,7 @@ namespace rocalution
 
             int m = 0;
 
-            for(int r = 0; r < Gsize; ++r)
+            for(int64_t r = 0; r < Gsize; ++r)
             {
                 int i = rG[r * rGsize + k];
 

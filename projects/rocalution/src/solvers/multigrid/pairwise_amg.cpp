@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -261,6 +261,15 @@ namespace rocalution
 
         op.InitialPairwiseAggregation(
             this->beta_, nc, trans, Gsize, &rG, rGsize, this->aggregation_ordering_);
+
+        // Every row is strongly diagonally dominant, so there is no aggregate to coarsen. With a
+        // GlobalMatrix, nc is 0 on every process when it is 0 on one.
+        if(nc == 0)
+        {
+            free_host(&rG);
+            return false;
+        }
+
         op.CoarsenOperator(coarse, nc, nc, *trans, Gsize, rG, rGsize);
 
         int cycle = 0;
@@ -274,13 +283,13 @@ namespace rocalution
                 this->beta_, nc, trans, Gsize, &rG, rGsize, this->aggregation_ordering_);
             op.CoarsenOperator(coarse, nc, nc, *trans, Gsize, rG, rGsize);
 
-            // A pass that formed no pair leaves the coarse operator as it was, so the next pass
-            // would not form one either
-            if(coarse->GetM() == coarse_m)
+            // Each pass doubles the size of the aggregate map. A pass that pairs fewer than half
+            // of the nodes ends the level, and the next level starts again from pairs.
+            if(4 * coarse->GetM() > 3 * coarse_m)
             {
                 LOG_VERBOSE_INFO(2,
-                                 "*** warning: PairwiseAMG::Build() Pairwise aggregation formed "
-                                 "no pair, coarsening factor not reached");
+                                 "*** warning: PairwiseAMG::Build() Pairwise aggregation paired "
+                                 "fewer than half of the nodes, coarsening factor not reached");
                 break;
             }
 
