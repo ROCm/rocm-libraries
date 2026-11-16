@@ -79,7 +79,8 @@ Additive bias (``use_additive_bias``, grid body only): an fp32 ``[B|1, Hq|1, Sq|
 Skv]`` tensor added to the scaled scores before the mask. With it on, each score is
 moved into the log2 domain (``s * qk_scale + bias / ln2``) right after the QK MFMA,
 and the row max and exp2 use it as is; the bias-off body keeps the raw-score form
-and its IR is unchanged.
+and its IR is unchanged. The spec refuses the bias with fp8 KV storage: the pair
+has no numeric test.
 
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
 staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
@@ -428,6 +429,11 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError(
                     "use_additive_bias is not supported with kv_segments > 1"
                 )
+            # The fp8 loader dequantizes K/V and the epilogue adds the bias. Each
+            # is computed against a reference alone; no test computes the pair, so
+            # it is refused until one does.
+            if self.kv_storage_dtype is not None:
+                raise ValueError("use_additive_bias is not supported with fp8 KV")
         if self.kv_storage_dtype == "fp8e4m3":
             # First-cut fp8 KV lands on the default-grid, aligned contiguous builder.
             # The sync-dequant loader uses a plain in-bounds global load, so ragged /

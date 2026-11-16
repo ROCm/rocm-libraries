@@ -259,6 +259,27 @@ def test_bias_is_refused_with_a_kv_segment_split():
         replace(_BASE, kv_segments=2, use_additive_bias=True)
 
 
+def test_bias_is_refused_with_fp8_kv():
+    # The fp8 loader dequantizes K/V and the epilogue adds the bias. Each path is
+    # computed against a reference alone; no test computes the pair, so the spec
+    # refuses it until one does.
+    replace(_BASE, kv_storage_dtype="fp8e4m3")  # the fp8 spec itself is valid
+    with pytest.raises(
+        ValueError, match=r"use_additive_bias is not supported with fp8 KV"
+    ):
+        replace(_BASE, kv_storage_dtype="fp8e4m3", use_additive_bias=True)
+
+
+def test_a_bias_request_for_fp8_kv_is_refused_by_the_grid_candidate():
+    from dispatch.attention import attention_tuning_spec
+    from rocke.dispatch.core import PinRefused
+
+    for kw in (dict(use_fp8=True, use_attn_bias=False), dict(use_attn_bias=True)):
+        attention_tuning_spec(_request(**kw), "gfx950_dense_grid")  # each alone is fine
+    with pytest.raises(PinRefused, match=r"not supported with fp8 KV"):
+        attention_tuning_spec(_request(use_fp8=True), "gfx950_dense_grid")
+
+
 def test_the_kv_segment_knob_is_out_of_scope_with_a_bias():
     """The tuning axis and the kernel's admission share one rule (``kv_split_admits``),
     so a bias spec is not offered a split the spec would refuse."""
