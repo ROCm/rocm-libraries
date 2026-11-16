@@ -612,9 +612,11 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     the parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
     rocke_tiling_visualization_pytest in the comprehensive tier only, which
     pull-request and push CI (quick and standard) do not select.
-    rocke_ctest_shard_pytest and rocke_library_gdn_pytest run in the standard,
+    rocke_ctest_shard_pytest, rocke_library_gdn_pytest and
+    rocke_library_conv_fwd_aot_packaging_pytest run in the standard,
     comprehensive and full tiers and not in the quick tier. Another category
-    keeps rocke_library_gdn_pytest in the ffm-quick tier."""
+    keeps rocke_library_gdn_pytest and
+    rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctests(ctest_dir)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
@@ -635,6 +637,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             "rocke_library_gpu_pytest",
             "rocke_ctest_shard_pytest",
             "rocke_library_gdn_pytest",
+            "rocke_library_conv_fwd_aot_packaging_pytest",
         ],
         tmp_path,
     )
@@ -646,7 +649,12 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert library_gpu_labels
     assert labels.get("rocke_tiling_gpu_pytest") == library_gpu_labels
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
-    for name in ["rocke_ctest_shard_pytest", "rocke_library_gdn_pytest"]:
+    standard_entries = [
+        "rocke_ctest_shard_pytest",
+        "rocke_library_gdn_pytest",
+        "rocke_library_conv_fwd_aot_packaging_pytest",
+    ]
+    for name in standard_entries:
         standard_labels = labels.get(name, set())
         assert {"standard", "comprehensive", "full"} <= standard_labels, (
             name,
@@ -654,6 +662,11 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         )
         assert "quick" not in standard_labels, (name, standard_labels)
     assert "ffm-quick" not in labels.get("rocke_ctest_shard_pytest", set())
+    for name in [
+        "rocke_library_gdn_pytest",
+        "rocke_library_conv_fwd_aot_packaging_pytest",
+    ]:
+        assert "ffm-quick" in labels.get(name, set()), name
 
 
 # (exported target, installed header, extern "C" symbol it declares). The
