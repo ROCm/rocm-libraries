@@ -24,7 +24,8 @@
  * builder has no point where both branches are done, so it does not check the
  * branches: the verifier and the lowerings do, the LLVM lowering also in the
  * body of an unrolled loop of zero trips, which it does not lower, directly in
- * that body or in an scf.if there.
+ * that body or in an scf.if there. An scf.if holds exactly one region, its then
+ * region (rocke_i_scf_if_region_error), refused otherwise before it is read.
  * tests/core/test_scf_if_else_results.py and tests/core/test_scf_for_yields.py
  * cover the Python engine and both engines' lowering texts;
  * tests/core/test_packed_only.py covers both builders' result-type order.
@@ -1088,6 +1089,86 @@ void an_if_else_with_missing_branches_is_refused()
     check_refused(k, ROCKE_ERR_VALUE, message, "missing branches");
 }
 
+/* The lowerings read only an scf.if's first region, so serialized IR with no
+ * then region, or with a second one that would be dropped unchecked, is
+ * refused: the parser reads it, and the verifier and both lowerings refuse the
+ * parsed scf.if. An scf.if made raw with no regions array has a NULL then
+ * region, which counts as missing, also in the body of an unrolled loop of
+ * zero trips, which the LLVM lowering does not lower. */
+void an_scf_if_without_exactly_one_then_region_is_refused()
+{
+    const std::string empty_then = "      region @then {\n      }\n";
+    const struct
+    {
+        std::string regions;
+        int count;
+    } cases[] = {{"", 0}, {empty_then + empty_then, 2}};
+    for(const auto& regions_case : cases)
+    {
+        Kernel built("if_regions");
+        rocke_if_t branch = rocke_b_scf_if(
+            &built.b, rocke_b_cmp_lt(&built.b, built.lane, rocke_b_const_i32(&built.b, 8)));
+        rocke_b_region_enter(&built.b, branch.then_region);
+        rocke_b_region_leave(&built.b);
+        rocke_b_ret(&built.b);
+        std::string text = built.serialized();
+        const size_t then_at = text.find(empty_then);
+        if(then_at == std::string::npos)
+        {
+            fprintf(
+                stderr, "FAIL: no empty then region in the serialized scf.if:\n%s\n", text.c_str());
+            std::exit(1);
+        }
+        text.replace(then_at, empty_then.size(), regions_case.regions);
+        Kernel parsed(Kernel::from_text{text});
+        const std::string count_text = std::to_string(regions_case.count);
+        const rocke_region_t* body = rocke_ir_builder_kernel(&parsed.b)->body;
+        int if_regions = -1;
+        for(int i = 0; i < body->num_ops; i++)
+        {
+            if(body->ops[i]->opcode == ROCKE_OP_SCF_IF)
+                if_regions = body->ops[i]->num_regions;
+        }
+        check(if_regions == regions_case.count,
+              "the parsed scf.if holds " + count_text + " regions");
+        check_refused(parsed,
+                      ROCKE_ERR_VALUE,
+                      "scf.if: expected 1 then region, got " + count_text,
+                      "scf.if with " + count_text + " regions");
+    }
+
+    const std::string null_then_message = "scf.if: expected 1 then region, got 0";
+    Kernel raw("if_null_then");
+    rocke_value_t* cond = rocke_b_cmp_lt(&raw.b, raw.lane, rocke_b_const_i32(&raw.b, 8));
+    const rocke_op_t* if_op = rocke_i_op(
+        &raw.b, ROCKE_OP_SCF_IF, &cond, 1, nullptr, 0, nullptr, nullptr, 1, "v", nullptr);
+    rocke_b_ret(&raw.b);
+    check(if_op != nullptr && if_op->num_regions == 1 && if_op->regions[0] == nullptr,
+          "raw scf.if should leave its then region NULL");
+    check_refused(raw, ROCKE_ERR_VALUE, null_then_message, "NULL then region");
+
+    Kernel zero_trip("zero_trip_if_null_then");
+    zero_trip.build_carrying_loop(0, true, [&zero_trip](const rocke_for_t& loop) {
+        rocke_value_t* loop_cond = rocke_b_cmp_lt(&zero_trip.b, loop.iv, zero_trip.lane);
+        rocke_i_op(&zero_trip.b,
+                   ROCKE_OP_SCF_IF,
+                   &loop_cond,
+                   1,
+                   nullptr,
+                   0,
+                   nullptr,
+                   nullptr,
+                   1,
+                   "v",
+                   nullptr);
+    });
+    rocke_b_ret(&zero_trip.b);
+    check_refused(zero_trip,
+                  ROCKE_ERR_VALUE,
+                  null_then_message,
+                  "NULL then region in an unrolled loop of zero trips");
+}
+
 /* An if/else result or yielded value with no type is refused, as Python
  * refuses one, with a TypeError, before the missing type is read: by the C
  * builder given a NULL result type, and, past the builder, by the rule, the
@@ -1209,6 +1290,7 @@ int main()
     an_unrolled_loop_refuses_its_body_before_its_carried_types();
     well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
+    an_scf_if_without_exactly_one_then_region_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();
     an_if_else_value_with_no_type_is_refused();
     if(g_failures)
