@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
@@ -10,6 +11,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
@@ -127,6 +129,18 @@ protected:
         return EngineDetailsWrapper(detailsOut.ptr, detailsOut.size);
     }
 };
+
+TEST_F(TestAsmSdpaEngine, GetDetailsReportsGraphCaptureSupport)
+{
+    // getDetails asks the builders whether they serve the graph, so it needs a real
+    // graph; the behavior note does not depend on which builder serves it.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_THAT(
+        details(graph).behaviorNotes(),
+        ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
+}
 
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 {

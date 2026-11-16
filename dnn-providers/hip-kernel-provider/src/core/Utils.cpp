@@ -193,6 +193,7 @@ bool hasOnly16ByteAlignedTensors(
 void storeEngineDetails(Handle& handle,
                         int64_t engineId,
                         const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs,
+                        const std::vector<int32_t>& behaviorNotes,
                         hipdnnPluginConstData_t& detailsOut)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -203,8 +204,9 @@ void storeEngineDetails(Handle& handle,
         knobOffsets.push_back(hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knob));
     }
     const auto knobVector = builder.CreateVector(knobOffsets);
-    builder.Finish(
-        hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, engineId, knobVector));
+    const auto behaviorNoteVector = builder.CreateVector(behaviorNotes);
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, engineId, knobVector, behaviorNoteVector));
 
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

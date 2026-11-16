@@ -1025,7 +1025,7 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
 
 class TestGfx942SlidingWindow(unittest.TestCase):
     """Sliding-window pass-through and capability tests, mirroring gfx950's suite.
-    The key-less-row refusal is gfx942's own: gfx950's kernel zeroes those rows."""
+    Rows with no key are zeroed by the kernel on gfx942 as on gfx950."""
 
     @staticmethod
     def _windowed_spec(seqlen_kv, **kw) -> Gfx942AttentionDenseSpec:
@@ -1045,32 +1045,29 @@ class TestGfx942SlidingWindow(unittest.TestCase):
             **kw,
         )
 
-    def test_supports_rejects_a_window_that_leaves_rows_no_key(self):
+    def test_supports_accepts_a_window_that_leaves_rows_no_key(self):
         """Row q keeps keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows keep
-        none, and without a sink or the LSE path they would average V. 512/256 at
-        256/64 passes the block-level zero-trip guard (the last block starts at tile 2
-        of 4) yet rows from 383 see no key."""
-        for seqlen_kv, ok_expected in (
-            (256, False),
-            (384, False),
-            (448, True),
-            (512, True),
-        ):
-            with self.subTest(seqlen_kv=seqlen_kv):
-                spec = self._windowed_spec(seqlen_kv)
-                ok, why = supports_attention_dense(spec, arch="gfx942")
-                self.assertEqual(ok, ok_expected, why)
-                if not ok:
-                    self.assertIn("see no key", why)
+        none. The kernel writes 0 for them, so the window is admitted at every
+        seqlen_kv, with or without sinks or the LSE path. 512/256 at 256/64 has its
+        last block start at tile 2 of 4, yet rows from 383 see no key."""
+        for seqlen_kv in (256, 384, 448, 512):
+            for extra in ({}, {"use_sinks": True}, {"emit_lse": True}):
+                with self.subTest(seqlen_kv=seqlen_kv, **extra):
+                    spec = self._windowed_spec(seqlen_kv, **extra)
+                    ok, why = supports_attention_dense(spec, arch="gfx942")
+                    self.assertTrue(ok, why)
 
-    def test_supports_accepts_key_less_window_rows_with_sinks_or_lse(self):
-        """Sinks seed the softmax (a key-less row is 0) and the LSE path zeroes
-        key-less rows, so the row rule leaves both alone."""
-        for exempt in ("use_sinks", "emit_lse"):
-            with self.subTest(exempt=exempt):
-                spec = self._windowed_spec(256, **{exempt: True})
-                ok, why = supports_attention_dense(spec, arch="gfx942")
-                self.assertTrue(ok, why)
+    def test_emit_lse_does_not_change_the_tile_of_a_keyless_window(self):
+        """512 rows over 256 keys under a 128-key window leaves rows 383.. keyless. With
+        LSE on or off dispatch must pick the same tile: the narrow-window tile is chosen
+        by what the kernel supports, and keyless rows no longer depend on LSE."""
+        shape = dict(seqlen_q=512, seqlen_k=256, sliding_window=128)
+        with _Gfx942Arch():
+            plain = _spec(_req(**shape))
+            with_lse = _spec(_req(**shape, emit_lse=True))
+        self.assertEqual(
+            (plain.block_m, plain.block_n), (with_lse.block_m, with_lse.block_n)
+        )
 
     def test_sliding_window_zero_by_default(self):
         with _Gfx942Arch():
@@ -1149,28 +1146,25 @@ class TestGfx942Sinks(unittest.TestCase):
                         ).name,
                     )
 
-    def test_empty_last_window_admitted_only_with_sinks(self):
+    def test_empty_last_window_admitted_and_dispatched(self):
         """Sq > Skv puts the last query block's window past seqlen_kv, a zero-trip
-        KV loop. Without sinks that is NaN and must fall through; with sinks it is a
-        well-defined 0 output and this arm must claim it, on both grids."""
+        KV loop on the default grid. The kernel writes 0 for those rows, so this arm
+        claims the shape on both grids, with or without sinks."""
         shape = dict(seqlen_q=1024, seqlen_k=256, sliding_window=128)
         with _Gfx942Arch():
             for persistent in (False, True):
                 knobs = (("persistent", persistent),)
-                with self.subTest(persistent=persistent):
-                    ok, why = _candidate().admits(_req(**shape, tuning_knobs=knobs))
-                    self.assertFalse(ok)
-                    self.assertIn("zero-trip", why)
-                    req = _req(**shape, use_sinks=True, tuning_knobs=knobs)
-                    ok, why = _candidate().admits(req)
-                    self.assertTrue(ok, why)
-                    self.assertEqual(dispatch_attention(req).candidate.name, _NAME)
+                for sinks in ({}, {"use_sinks": True}):
+                    with self.subTest(persistent=persistent, **sinks):
+                        req = _req(**shape, **sinks, tuning_knobs=knobs)
+                        ok, why = _candidate().admits(req)
+                        self.assertTrue(ok, why)
+                        self.assertEqual(dispatch_attention(req).candidate.name, _NAME)
 
-    def test_window_leaving_rows_keyless_admitted_only_with_sinks_or_lse(self):
-        """512/256 at 256/64 with a 128-key window passes the block-level zero-trip
-        guard (the last block's window starts at key tile 2 of 4), yet rows from 383
-        see no key and would average V. Both dense candidates refuse it unless sinks
-        or the LSE path handle those rows."""
+    def test_window_leaving_rows_keyless_is_admitted(self):
+        """512/256 at 256/64 with a 128-key window: the last block's window starts at
+        key tile 2 of 4, yet rows from 383 see no key. Both dense candidates admit it
+        with or without sinks or the LSE path, because the kernel zeroes those rows."""
         shape = dict(seqlen_q=512, seqlen_k=256, sliding_window=128)
         knobs = (("block_m", 256),)
         by_name = {c.name: c for c in attention_candidates()}
@@ -1180,17 +1174,12 @@ class TestGfx942Sinks(unittest.TestCase):
                 ("attention_gfx942_dense_qbminor", "gfx942_dense_qbminor"),
             ):
                 candidate = by_name[name]
-                with self.subTest(candidate=name):
-                    ok, why = candidate.admits(
-                        _req(**shape, spec_id=spec_id, tuning_knobs=knobs)
-                    )
-                    self.assertFalse(ok)
-                    self.assertIn("see no key", why)
-                    for exempt in (dict(use_sinks=True), dict(emit_lse=True)):
+                for extra in ({}, dict(use_sinks=True), dict(emit_lse=True)):
+                    with self.subTest(candidate=name, **extra):
                         ok, why = candidate.admits(
-                            _req(**shape, spec_id=spec_id, tuning_knobs=knobs, **exempt)
+                            _req(**shape, spec_id=spec_id, tuning_knobs=knobs, **extra)
                         )
-                        self.assertTrue(ok, f"{exempt}: {why}")
+                        self.assertTrue(ok, why)
 
     def test_auto_sinks_request_does_not_select_dense(self):
         """Opt-in still holds for sink requests."""

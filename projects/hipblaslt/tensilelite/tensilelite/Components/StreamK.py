@@ -24,7 +24,7 @@ from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersisten
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label, RegSet
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, DSModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
-from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMaxU32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32, VAndB32, VLShiftLeftB32
+from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SAndSaveExecB32, SAndSaveExecB64, SBarrier, SBitcmp1B32, SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, SMaxI32, SMaxU32, SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, SSubBU32, SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SLongBranch, SLongBranchPositive, SLongBranchNegative, SAtomicInc, DSLoadB32, DSStoreB32, VAndB32, VLShiftLeftB32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
@@ -206,20 +206,20 @@ class StreamKMemoryOrdering(Component):
     StreamK uses a producer/consumer protocol: one workgroup writes a partial
     tile to a workspace and signals completion via a flag, and other
     workgroups poll the flag and read the partials. The required cross-CU
-    memory ordering depends on the target ISA:
+    memory ordering depends on the target's capabilities:
 
     - Most arches: `s_waitcnt vscnt(0)` before the flag store and an SMEM
       flag load with `glc/dlc/scope:SCOPE_DEV` are sufficient because
       ordering between L1/L2 and the device-scope coherence point is
       implicit.
 
-    - gfx1250: the L2 has independent partitions and SMEM is not coherent
-      with the VMEM flag store, so an explicit `global_wb scope:SCOPE_DEV`
-      is required on the release side and a `global_inv scope:SCOPE_DEV`
-      on the acquire side. Additionally, XNACK-replay can reorder a
-      volatile/atomic VMEM op past in-flight VMEM, so `s_wait_xcnt 0` must
-      precede such ops. The flag itself must be read via VMEM (not SMEM)
-      to observe the producer's release-side fence.
+    - gfx1250: flag reads use VMEM because SMEM is not coherent with the
+      VMEM flag store. When MTypeNC is True (e.g. gfx1250-strict), release
+      needs DEV writeback and acquire needs DEV invalidation. Non-strict
+      gfx1250 excludes NC mappings: hardware keeps L2 coherent, so release
+      retains only completion waits and acquire uses SE invalidation.
+      XNACK-replay can still reorder volatile/atomic VMEM past in-flight
+      VMEM, so the separate `s_wait_xcnt 0` drains remain necessary.
 
     - gfx950: L2 is split across XCDs. Workspace partials already
       store with glc+slc, but SMEM flag traffic and workspace loads without
@@ -376,31 +376,33 @@ class StreamKMemoryOrderingGfx9Xcd(StreamKMemoryOrdering):
 
 
 class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
-    """Explicit cross-L2 release/acquire fences via global_wb/global_inv
-    scope:SCOPE_DEV plus a VMEM-coherent flag read.
+    """Target-dependent cache fences plus a VMEM-coherent flag read.
 
-    Selected on arches whose L2 is partitioned across CUs/XCDs and whose
-    SMEM is not coherent with the VMEM flag write (e.g. gfx1250).
+    MTYPE NC mappings need DEV writeback/invalidation. Without NC, completed
+    stores need no software L2 writeback. Release still drains loads/stores;
+    acquire invalidates stale copies below SE scope. VMEM flags remain necessary.
     """
     archCaps = {"HasInvWbDevFences": True}
 
     def releaseFence(self, writer) -> Module:
         module = Module("StreamK release fence (dev-scope)")
         module.add(SWaitCnt(vlcnt=0,
-            comment="release: drain in-flight loads before global_wb"))
+            comment="release: drain in-flight loads"))
         module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
-        module.add(GlobalWb(scope=CacheScope.SCOPE_DEV,
-            comment="release: writeback partials to L2-coherent point"))
-        module.add(SWaitCnt(vlcnt=0, vscnt=0,
-            comment="release: wait for global_wb"))
+        if writer.states.archCaps.get("MTypeNC", True):
+            module.add(GlobalWb(scope=CacheScope.SCOPE_DEV,
+                comment="release: writeback partials to L2-coherent point"))
+            module.add(SWaitCnt(vlcnt=0, vscnt=0,
+                comment="release: wait for global_wb"))
         return module
 
     def acquireFence(self, writer) -> Module:
-        # Drop stale dev-scope cache lines so the next dependent read (the flag
-        # word in getFlagValue, or the partials after the flag is observed) is
-        # re-fetched from the L2-coherent point.
+        # Invalidate before the flag poll and again before consuming partials.
+        # The memory accesses stay DEV-scoped even when L2 coherence permits
+        # the narrower invalidation; missing capability data stays conservative.
         module = Module("StreamK acquire fence (dev-scope)")
-        module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
+        scope = CacheScope.SCOPE_DEV if writer.states.archCaps.get("MTypeNC", True) else CacheScope.SCOPE_SE
+        module.add(GlobalInv(scope=scope,
             comment="acquire: invalidate before dependent dev-scope read"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module
@@ -1158,6 +1160,21 @@ class StreamK(TileProcessingStrategy):
         #     kStr += self.assert_eq(sgpr(sTmp+1),0)
         module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(sTmp+0), comment="accum GsuOffset term to tilestart"))
         module.add(SAddCU32(dst=sgpr(tileStart+1), src0=sgpr(tileStart+1), src1=sgpr(sTmp+1), comment="accum GsuOffset term to tilestart"))
+
+        # The offset just folded into tileStart advances the SRD base, so the
+        # dual-period scale windows must shrink by the same amount, or
+        # base+num_records no longer ends at the scale allocation. computeLoadSrd
+        # sizes them as (numLine+1)*span measured from the *tile* start, so for a
+        # work item that begins mid-tile the window hangs over the end by exactly
+        # this offset. MXSB's allocation is small enough to end on a mapping
+        # boundary, so the first prefetch then reads unmapped memory and faults.
+        # emitScaleGRPtrUpdate already maintains this invariant for the per-epoch
+        # advances; this is the pre-loop advance it cannot see. A and B are left
+        # alone: their Srd+2 is a tile-boundary window with its own slack, and
+        # shrinking it clips legitimate top-group reads.
+        if kernel.get("_DualPeriodMXFP8") and tc in ("MXSA", "MXSB"):
+            module.add(SSubU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=sgpr(sTmp+0),
+                               comment="shrink num_records by the SK K-start base advance"))
 
         return module
 
@@ -2190,6 +2207,8 @@ class StreamK(TileProcessingStrategy):
         """Write the StreamK completion flag.
 
         `src` is an SGPR holding the flag value (1 = ready, 0 = reset).
+        The caller must select one wave per flag. The VMEM path selects one
+        active lane within that wave, restores incoming EXEC, and clobbers SCC.
         gfx950 uses VMEM even when HasScalarStore is available, because
         SMEM stores are not coherent across XCD-split L2.
         """
@@ -2206,6 +2225,10 @@ class StreamK(TileProcessingStrategy):
         return module
 
     def setFlagValue(self, writer, src, soffset, comment=""):
+        """Store a wave-uniform flag value through the first active lane.
+
+        The caller selects one wave per flag. EXEC is restored; SCC is clobbered.
+        """
         module = Module("Buffer Store Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
         tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, tag="StreamKCommon_setFlagValue_tmpSgprBuffer", preventOverflow=False)
@@ -2216,12 +2239,24 @@ class StreamK(TileProcessingStrategy):
         module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
         module.add(self.shiftSrd(writer, tmpSgprBuffer))
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM store"))
-        module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
-                                  mubuf=memOrder.flagBufferMubuf(), comment=comment))
-        # Release the flag store: drain the store and (on dev-scope arches) global_wb
-        # the flag word to the L2-coherent point so a peer's acquire can observe it.
-        # On other targets, releaseFence is just the s_wait vscnt 0 we'd emit anyway.
-        module.add(memOrder.releaseFence(writer))
+        laneCount = writer.states.laneSGPRCount
+        with writer.allocTmpSgpr(laneCount, alignment=laneCount,
+                                tag="StreamK_flagStoreExec") as execRegs:
+            mask = execRegs.idx
+            # Do not rely on duplicate lane writes becoming visible as one publication.
+            # EXEC & -EXEC selects the first active lane and keeps an empty EXEC empty.
+            module.add(SSubU32(dst=sgpr(mask), src0=0, src1="exec_lo"))
+            if laneCount == 2:
+                module.add(SSubBU32(dst=sgpr(mask+1), src0=0, src1="exec_hi"))
+            andSaveExec = SAndSaveExecB64 if laneCount == 2 else SAndSaveExecB32
+            # AND_SAVEEXEC reads the mask before saving EXEC in the same registers.
+            module.add(andSaveExec(dst=sgpr(mask, laneCount), src=sgpr(mask, laneCount)))
+            module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
+                                      mubuf=memOrder.flagBufferMubuf(), comment=comment))
+            # Complete the flag store before restoring EXEC, including replay.
+            module.add(memOrder.releaseFence(writer))
+            movExec = SMovB64 if laneCount == 2 else SMovB32
+            module.add(movExec(dst=EXEC(), src=sgpr(mask, laneCount)))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 

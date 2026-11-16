@@ -6,6 +6,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <vector>
 
 namespace asm_sdpa_engine
@@ -58,7 +59,10 @@ void AsmSdpaEngine::getDetails(Handle& handle,
     {
         knobs = pb->getCustomKnobs(handle, opGraph);
     }
-    hip_kernel_provider::core::utils::storeEngineDetails(handle, id(), knobs, detailsOut);
+    const std::vector<int32_t> behaviorNotes{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    hip_kernel_provider::core::utils::storeEngineDetails(
+        handle, id(), knobs, behaviorNotes, detailsOut);
 }
 
 size_t AsmSdpaEngine::getMaxWorkspaceSize(

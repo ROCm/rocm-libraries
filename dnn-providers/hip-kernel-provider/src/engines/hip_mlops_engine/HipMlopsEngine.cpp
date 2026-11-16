@@ -1,4 +1,4 @@
-﻿// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #include "HipMlopsEngine.hpp"
@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -72,7 +73,9 @@ void HipMlopsEngine::getDetails(Handle& handle,
         }
     }
 
-    core::utils::storeEngineDetails(handle, _id, knobs, detailsOut);
+    const std::vector<int32_t> behaviorNotes{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    core::utils::storeEngineDetails(handle, _id, knobs, behaviorNotes, detailsOut);
 }
 
 size_t HipMlopsEngine::getMaxWorkspaceSize(

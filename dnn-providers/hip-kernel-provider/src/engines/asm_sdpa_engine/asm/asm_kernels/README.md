@@ -36,10 +36,11 @@ scale × log2(e) and round the product to bf16 before QK^T, where the hd128 and
 hd192x128 kernels keep that factor in fp32. Their error grows with the
 attention scale. For inputs in [-1, 1], a model of this rounding keeps their
 error inside the 1e-2 bf16 tolerance of the GPU registry tests at the standard
-scale 1/sqrt(256); at scale 1.0 a group-mode case reaches about 0.016. The
-limit is in AITER's kernels, which AITER launches at any scale too, so the
-engine serves them at any scale and does not decline them. The GPU registry
-tests run every forward row at scale 1/sqrt(hdim_q).
+scale 1/sqrt(256); at scale 1.0, which a graph gets when it sets no scale, a
+group-mode case reaches about 0.016. The limit is in AITER's kernels, which
+AITER launches at any scale too, so the engine adds no precision bound on the
+scale for them. The GPU registry tests run every forward row at scale
+1/sqrt(hdim_q).
 
 ## Backward tables
 

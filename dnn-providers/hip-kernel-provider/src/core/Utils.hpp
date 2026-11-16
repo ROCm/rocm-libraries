@@ -79,12 +79,14 @@ bool hasOnly16ByteAlignedTensors(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-// Builds the EngineDetails flatbuffer of engine `engineId` advertising `knobs`,
-// points `detailsOut` at it, and stores the buffer in `handle`, which keeps it
-// alive until hipDNN releases the details.
+// Builds the EngineDetails flatbuffer of engine `engineId` advertising `knobs`
+// and `behaviorNotes` (hipdnnBehaviorNote_t values), points `detailsOut` at it,
+// and stores the buffer in `handle`, which keeps it alive until hipDNN releases
+// the details.
 void storeEngineDetails(Handle& handle,
                         int64_t engineId,
                         const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs,
+                        const std::vector<int32_t>& behaviorNotes,
                         hipdnnPluginConstData_t& detailsOut);
 
 } // namespace hip_kernel_provider::core::utils
