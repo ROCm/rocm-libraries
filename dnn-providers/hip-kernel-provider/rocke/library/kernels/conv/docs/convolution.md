@@ -12,6 +12,7 @@ This page covers:
   `library/kernels/common/conv_direct_dw_wgrad_mfma.py`,
   `library/kernels/common/conv_direct_grouped_wgrad_mfma.py` (direct wgrad)
 - `library/kernels/common/conv_direct_fwd_pp_mfma.py` (gfx950 ping-pong direct forward)
+- `library/kernels/common/conv_direct_pp_mfma.py` (the ping-pong pipeline the gfx950 direct dgrad and forward share)
 - `library/kernels/common/conv_direct_fwd_flex_mfma.py` (gfx950 flattened-pixel direct forward)
 - `library/kernels/common/img2col.py`
 
@@ -1325,7 +1326,9 @@ covers every knob; the byte-identity gate is
 ## Direct Dgrad on MFMA with LDS DMA (gfx950)
 
 `library/kernels/common/conv_direct_dgrad_pp_mfma.py`, spec `DgradPpMfmaSpec`,
-builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`).
+builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`),
+on the ping-pong pipeline of `conv_direct_pp_mfma.py` (shared with the direct
+forward on MFMA with LDS DMA).
 A dense (`groups == 1`) stride-1 dgrad for gfx950 (wave64,
 `mfma_f32_16x16x32`), computed as the forward pass over the transposed problem
 (`dgrad_pp_mfma_problem`: dY in, dX out, padding `dil_h * (KH - 1) - PAD`
@@ -1365,7 +1368,8 @@ every extent and channel count at least 1, the dgrad's K a multiple of 8 and
 C a multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 only
 at `block_k` 128, 7x7 not at all), and one dY image, one dX image and the
 filter each at most `INT32_MAX` bytes (the buffer descriptors span them and a
-masked lane reads at that offset), with an i32 block count. The AOT
+masked lane reads at that offset), and the whole dY and dX each at most
+`INT32_MAX` bytes (their sizes are i32 kernargs). The AOT
 grid is `DGRAD_PP_MFMA_FILTERS` (3, 5) times `DGRAD_PP_MFMA_BLOCK_K`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_pp_mfma`, a
 single-kernel forward-ABI step of `DIRECT_DGRAD_FPROP_SINGLE`); a binary is
@@ -1589,6 +1593,9 @@ knobs. The AOT grid is `DW_FWD_WMMA_*` over "same" 3x3 / 5x5 / 7x7 and "valid"
 
 `library/kernels/common/conv_direct_fwd_pp_mfma.py`, spec `FwdPpMfmaSpec`,
 builder `build_fwd_pp_mfma` (C++ twin `instance_conv_direct_fwd_pp_mfma.h`).
+It runs on the ping-pong pipeline it shares with the direct dgrad below
+(`conv_direct_pp_mfma.py`, C++ `instance_conv_direct_pp_mfma_internal.hpp`);
+only the weight staging and the A reads are its own.
 A dense (`groups == 1`) stride-1 forward for gfx950 (wave64,
 `mfma_f32_16x16x32`). The arch gate reads `ArchTarget` capabilities (wave64,
 16-byte `buffer_load ... lds`, `mfma_f32_16x16x32`), which of the known
@@ -1620,7 +1627,8 @@ every extent and channel count at least 1, C a multiple of 8 and K a
 multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 up to
 `block_k` 128, 7x7 only at 64), and one input image, one output image and
 the filter each at most `INT32_MAX` bytes (the buffer descriptors span them
-and a masked lane reads at that offset), with an i32 block count. The AOT
+and a masked lane reads at that offset), and the whole input and output each
+at most `INT32_MAX` bytes (their sizes are i32 kernargs). The AOT
 grid is `FWD_PP_MFMA_FILTERS` (3x3) times the kernel module's `BLOCK_K`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_fwd_pp_mfma`); a binary
 is offered where at least half of its padded tile grid is real work. The C++
