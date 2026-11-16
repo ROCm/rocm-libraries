@@ -63,5 +63,8 @@
     "waves_per_eu",
     "xcd_tiles",
     "stage_rows"
-  ]
+  ],
+  "predict_engine": {
+    "gfx950": "566908f6-b3e8-41df-af93-51ac2761ed63"
+  }
 }

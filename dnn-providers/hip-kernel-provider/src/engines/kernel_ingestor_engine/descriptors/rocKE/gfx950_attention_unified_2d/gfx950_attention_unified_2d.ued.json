@@ -20,5 +20,8 @@
     "block_m_per_warp",
     "use_mfma_32x32",
     "use_transposed_qk_32x32"
-  ]
+  ],
+  "predict_engine": {
+    "gfx950": "a308e432-78f9-4529-9c11-078023e57deb"
+  }
 }
