@@ -149,9 +149,12 @@ def test_other_custom_kernel_families_are_untouched(name):
     assert M_TAG not in tags and K_TAG not in tags
 
 
-def test_a_family_name_without_a_checked_in_capture_is_untouched():
-    tags = _by_tag(_state(name="RR_GEMM_TN_FP8_FP8_Float_Float_Float_not_checked_in"))
-    assert M_TAG not in tags and BATCH_TAG not in tags
+def test_an_rr_gemm_name_without_a_checked_in_capture_is_refused():
+    """A RR_GEMM_ name that is not a rocRoller MX capture used to emit nothing.
+    The C++ selectors still key on the prefix, so the mismatch is an error."""
+    name = "RR_GEMM_TN_FP8_FP8_Float_Float_Float_not_checked_in"
+    with pytest.raises(ValueError, match=name):
+        _by_tag(_state(name=name))
 
 
 def _predicates(state):
@@ -230,6 +233,48 @@ def test_a_caller_directory_is_read_again_after_it_changes(tmp_path):
     assert not isRocRollerMXCapture("capture", str(tmp_path))
     _write_capture(tmp_path, "capture", "rocroller", True)
     assert isRocRollerMXCapture("capture", str(tmp_path))
+
+
+def _state_from_directory(name, directory, macrotile=(256, 128, 128)):
+    """Point CompoundPredicates at a planted custom.config.
+
+    isRocRollerMXCapture reads that file only when given a directory. The
+    bundled tree is left alone, so a develop-era RR_GEMM_ kernel that is in
+    the family cannot fail this test.
+    """
+    state = _state(name=name, macrotile=macrotile)
+    state["CustomKernel"]["directory"] = str(directory)
+    return state
+
+
+def test_an_rr_gemm_name_without_origin_or_mx_is_refused(tmp_path):
+    _write_capture(tmp_path, "RR_GEMM_other_origin", "aiter", True)
+    _write_capture(tmp_path, "RR_GEMM_no_mx", "rocroller", False)
+    for name in ("RR_GEMM_other_origin", "RR_GEMM_no_mx"):
+        with pytest.raises(ValueError, match=name):
+            _by_tag(_state_from_directory(name, tmp_path))
+
+
+def test_a_family_member_not_named_rr_gemm_is_refused(tmp_path):
+    _write_capture(tmp_path, "capture_mx", "rocroller", True)
+    with pytest.raises(ValueError, match="capture_mx"):
+        _by_tag(_state_from_directory("capture_mx", tmp_path))
+
+
+def test_an_rr_gemm_family_member_still_emits_the_predicates(tmp_path):
+    name = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_capture"
+    _write_capture(tmp_path, name, "rocroller", True)
+    tags = _by_tag(_state_from_directory(name, tmp_path, macrotile=(256, 128, 128)))
+    assert len(tags.get(M_TAG, [])) == 1
+    assert tags[M_TAG][0].value == 256
+    assert tags[M_TAG][0].index == 0
+    assert len(tags.get(K_TAG, [])) == 1
+    assert tags[K_TAG][0].value == 128
+    assert tags[K_TAG][0].index == -1
+    assert N_TAG not in tags
+    assert len(tags.get(BATCH_TAG, [])) == 1
+    assert tags[BATCH_TAG][0].value == 1
+    assert len(tags.get(BUFFER_TAG, [])) == 1
 
 
 def test_the_family_is_exactly_the_rr_gemm_kernels():
