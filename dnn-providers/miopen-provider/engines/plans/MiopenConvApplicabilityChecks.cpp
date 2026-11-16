@@ -273,7 +273,9 @@ std::string layoutName(unsigned mask)
 
 // Product of the dims of a tensor with each dim raised to at least `smallestFactor`, saturating at
 // INT64_MAX so that absurd dims cannot overflow. Rejects null and negative dims, which have no
-// element count.
+// element count. Every dim is read, so the result does not depend on the dim order: a zero factor
+// (possible only with `smallestFactor` 0) gives 0 whatever the other dims are, otherwise a product
+// that does not fit gives INT64_MAX.
 int64_t saturatingProduct(const char* operation,
                           const char* name,
                           const TensorAttributes& attr,
@@ -289,6 +291,8 @@ int64_t saturatingProduct(const char* operation,
 
     constexpr int64_t MAX_COUNT = std::numeric_limits<int64_t>::max();
     int64_t count = 1;
+    bool zero = false;
+    bool saturated = false;
     for(const int64_t dim : *dims)
     {
         if(dim < 0)
@@ -296,17 +300,31 @@ int64_t saturatingProduct(const char* operation,
             decline(prefix + " has a negative dim");
         }
         const int64_t factor = std::max(dim, smallestFactor);
-        if(factor > 0 && count > MAX_COUNT / factor)
+        if(factor == 0)
         {
-            return MAX_COUNT;
+            zero = true;
         }
-        count *= factor;
+        else if(!saturated)
+        {
+            if(count > MAX_COUNT / factor)
+            {
+                saturated = true;
+            }
+            else
+            {
+                count *= factor;
+            }
+        }
     }
-    return count;
+    if(zero)
+    {
+        return 0;
+    }
+    return saturated ? MAX_COUNT : count;
 }
 
 // Number of elements (product of the dims) of a tensor, saturating at INT64_MAX. A zero dim makes
-// the count zero, whatever the other dims are.
+// the count zero, whatever the other dims are and wherever the zero stands.
 int64_t
     saturatingElementCount(const char* operation, const char* name, const TensorAttributes& attr)
 {
@@ -319,6 +337,64 @@ int64_t
 int64_t saturatingExtent(const char* operation, const char* name, const TensorAttributes& attr)
 {
     return saturatingProduct(operation, name, attr, 1);
+}
+
+// True when a * b is representable in int64_t.
+bool productFits(int64_t a, int64_t b)
+{
+    constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
+    constexpr int64_t MIN_VALUE = std::numeric_limits<int64_t>::min();
+
+    if(a == 0 || b == 0)
+    {
+        return true;
+    }
+    // -1 is excluded below so that MIN_VALUE / -1 is never formed.
+    if(a == -1)
+    {
+        return b != MIN_VALUE;
+    }
+    if(b == -1)
+    {
+        return a != MIN_VALUE;
+    }
+    if(a > 0)
+    {
+        return b > 0 ? a <= MAX_VALUE / b : b >= MIN_VALUE / a;
+    }
+    return b > 0 ? a >= MIN_VALUE / b : a >= MAX_VALUE / b;
+}
+
+// True when a + b is representable in int64_t.
+bool sumFits(int64_t a, int64_t b)
+{
+    return b >= 0 ? a <= std::numeric_limits<int64_t>::max() - b
+                  : a >= std::numeric_limits<int64_t>::min() - b;
+}
+
+// True when hipdnn_data_sdk::utilities::isTensorPacked evaluates without signed overflow for
+// `dims` (non-negative, with a product that fits, see saturatingExtent) and any `strides`: it
+// sums the terms (dim - 1) * stride in dim order, starting from 0, and then adds 1 to the sum. The
+// check replays exactly that arithmetic, so it declines only strides that overflow it and accepts
+// every stride, negative ones included, that the helper evaluates without overflow.
+bool packingArithmeticFits(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    int64_t space = 0;
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        const int64_t extentMinusOne = dims[i] - 1;
+        if(!productFits(extentMinusOne, strides[i]))
+        {
+            return false;
+        }
+        const int64_t term = extentMinusOne * strides[i];
+        if(!sumFits(space, term))
+        {
+            return false;
+        }
+        space += term;
+    }
+    return sumFits(space, 1);
 }
 
 // Reads one tensor and rejects shapes the checks cannot judge. `operation` prefixes every reason
@@ -357,6 +433,15 @@ TensorInfo readTensor(const char* operation, const char* name, const TensorAttri
     info.dataType = attr.data_type();
     info.dims = toVector(dims);
     info.strides = toVector(strides);
+
+    // isTensorPacked then forms (dim - 1) * stride per dim and sums the terms in int64_t, with
+    // strides straight from the graph (the backend does not bound them); decline strides for which
+    // that arithmetic overflows. The dims are non-negative and bounded by the check above.
+    if(!packingArithmeticFits(info.dims, info.strides))
+    {
+        decline(prefix + " has strides whose packing arithmetic overflows a 64-bit integer");
+    }
+
     info.packed = hipdnn_data_sdk::utilities::isTensorPacked(info.dims, info.strides);
     info.layoutMask = classifyLayout(info.dims, info.strides, info.packed);
     return info;

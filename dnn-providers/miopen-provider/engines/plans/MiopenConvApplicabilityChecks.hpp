@@ -23,7 +23,8 @@ bool hasPassByValueTensor(const TensorMap& tensorMap);
 
 // Layout checks for conv -> [bias add] -> activation graphs. Throws BAD_PARAM when:
 //  - the bias is not a per-channel tensor: dims [1, C, 1, ...] with C equal to the convolution
-//    output channels, the same rank as the convolution output, and a unit channel stride;
+//    output channels and the same rank as the convolution output, and, when C > 1, a unit channel
+//    stride (a single-channel bias is accepted with any channel stride);
 //  - the bias data type differs from the convolution input data type, which is the io data type
 //    of the fused graph (the fused MIOpen solver does not validate it and computes garbage);
 //  - the final activation output differs from the descriptor MIOpen derives for the fused
@@ -57,10 +58,14 @@ void checkConvFwdBiasActivLayouts(
 // Throws hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason) when the
 // tensors must be declined; `reason` names the operation, the offending tensor and the rule. Also
 // throws when a tensor has null dims() or strides(), differing dims()/strides() lengths, rank
-// below 3, a negative dim, or dims whose product (a zero dim counted as 1, so a zero extent does
-// not hide dims that overflow) reaches INT64_MAX, so no check computes strides or extents from
-// dims that could overflow (the size check only needs non-null, non-negative dims()). The tensors
-// are the graph's own (unpadded rank 3, 4 or 5), not the padded MIOpen descriptors.
+// below 3, a negative dim, dims whose product (a zero dim counted as 1, so a zero extent does
+// not hide dims that overflow) reaches INT64_MAX, or strides for which the signed 64-bit
+// arithmetic of the SDK packing check, the sum of (dim - 1) * stride over the dims plus 1,
+// overflows. These are declined before the packing check and before the canonical strides are
+// formed, so the io validators never do arithmetic on the dims or strides they are given that
+// could overflow (the size check only needs non-null, non-negative dims()). Strides that do not
+// overflow are never declined for their value, negative ones included. The tensors are the
+// graph's own (unpadded rank 3, 4 or 5), not the padded MIOpen descriptors.
 
 // Forward convolution: data type, layout and packing rules above.
 void validateConvFwdIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x,

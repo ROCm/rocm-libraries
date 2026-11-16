@@ -401,8 +401,8 @@ std::vector<std::vector<int64_t>> overflowingDims()
 }
 
 // Dims whose product, counting a zero dim as 1, reaches INT64_MAX although the element count is
-// zero: overflowing in either dim order, so the io validators decline them while the size check
-// (which counts the zero) accepts them.
+// zero: overflowing in either dim order, so the io validators decline them, while the size check
+// (which counts the zero) accepts both orders.
 std::vector<std::vector<int64_t>> zeroExtentOverflowingDims()
 {
     return {
@@ -430,6 +430,44 @@ std::string overflowReason(const char* name)
 TensorSpec withUnitStrides(const std::vector<int64_t>& dims)
 {
     return withStrides(dims, std::vector<int64_t>(dims.size(), 1));
+}
+
+std::string strideOverflowReason(const char* name)
+{
+    return std::string("tensor ") + name
+           + " has strides whose packing arithmetic overflows a 64-bit integer";
+}
+
+struct OverflowingStrides
+{
+    const char* name;
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+};
+
+// Dims that are fine on their own (the element count is small) with strides for which the SDK
+// packing check, the sum of (dim - 1) * stride plus 1 in int64_t, overflows in one of its steps.
+std::vector<OverflowingStrides> overflowingStrides()
+{
+    constexpr int64_t MAX_VALUE = std::numeric_limits<int64_t>::max();
+    constexpr int64_t MIN_VALUE = std::numeric_limits<int64_t>::min();
+    constexpr int64_t TWO_POW_62 = int64_t{1} << 62;
+
+    return {
+        {"one term overflows", {1, 4, 1}, {4, TWO_POW_62, 1}},
+        {"one negative term overflows", {1, 3, 1}, {1, -MAX_VALUE, 1}},
+        {"term overflows next to a maximal stride", {1, 5, 1}, {MAX_VALUE, TWO_POW_62 + 1, 1}},
+        {"every term fits, their sum overflows", {2, 2, 1}, {MAX_VALUE, MAX_VALUE, 1}},
+        {"every term fits, their negative sum overflows", {2, 2, 1}, {-MAX_VALUE, -MAX_VALUE, 1}},
+        {"the sum fits, adding one overflows", {2, 1, 1}, {MAX_VALUE, 1, 1}},
+        {"a zero dim negates the minimum stride", {0, 2, 1}, {MIN_VALUE, 1, 1}},
+    };
+}
+
+std::string describe(const OverflowingStrides& overflowing)
+{
+    return std::string(overflowing.name) + ": dims " + vecToString(overflowing.dims) + ", strides "
+           + vecToString(overflowing.strides);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1446,6 +1484,23 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeDeclinesDimsWhoseProduct
     }
 }
 
+// The element count of a tensor with a zero dim is zero whatever the order of the other dims, so
+// the size check accepts both orders of the overflowing dims, although the io validators decline
+// them.
+TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeAcceptsZeroExtentDimsInAnyOrder)
+{
+    const TensorSpec small = channelsFirst(Y_DIMS);
+
+    for(const auto& dims : zeroExtentOverflowingDims())
+    {
+        SCOPED_TRACE(vecToString(dims));
+        const TensorSpec spec = withUnitStrides(dims);
+
+        EXPECT_EQ(sizeDeclineReason(spec, small), "");
+        EXPECT_EQ(sizeDeclineReason(small, spec), "");
+    }
+}
+
 TEST(TestMiopenConvApplicabilityChecks, BackwardDataSizeDeclinesNullAndNegativeDims)
 {
     auto nullDy = channelsFirst(Y_DIMS);
@@ -1529,6 +1584,74 @@ TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesDimsWhoseElementCountOve
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Strides that overflow: every io validator declines them before the packing check runs
+// ---------------------------------------------------------------------------------------------
+
+TEST(TestMiopenConvApplicabilityChecks, DeclinesStridesWhoseArithmeticOverflows)
+{
+    for(const auto& overflowing : overflowingStrides())
+    {
+        SCOPED_TRACE(describe(overflowing));
+        const TensorSpec huge = withStrides(overflowing.dims, overflowing.strides);
+
+        EXPECT_THAT(declineReason(huge, channelsFirst(W_DIMS), channelsFirst(Y_DIMS)),
+                    ::testing::HasSubstr(strideOverflowReason("x")));
+        EXPECT_THAT(declineReason(channelsFirst(X_DIMS), huge, channelsFirst(Y_DIMS)),
+                    ::testing::HasSubstr(strideOverflowReason("w")));
+        EXPECT_THAT(declineReason(channelsFirst(X_DIMS), channelsFirst(W_DIMS), huge),
+                    ::testing::HasSubstr(strideOverflowReason("y")));
+    }
+}
+
+// Both backward operations, every tensor in turn, under the tensor's name in the operation.
+TEST(TestMiopenConvApplicabilityChecks, BackwardDeclinesStridesWhoseArithmeticOverflows)
+{
+    const BackwardCase packed = uniformBackwardCase({X_DIMS, W_DIMS, Y_DIMS}, false);
+
+    for(const auto& overflowing : overflowingStrides())
+    {
+        SCOPED_TRACE(describe(overflowing));
+        const TensorSpec huge = withStrides(overflowing.dims, overflowing.strides);
+
+        for(const Role role : ROLES)
+        {
+            for(const BackwardOp op : BACKWARD_OPS)
+            {
+                SCOPED_TRACE(operationName(op));
+                SCOPED_TRACE(roleName(op, role));
+                const std::string actual
+                    = backwardDeclineReason(op, withTensorAt(packed, role, huge));
+                EXPECT_THAT(actual, ::testing::HasSubstr(strideOverflowReason(roleName(op, role))));
+                EXPECT_THAT(actual, ::testing::HasSubstr(operationName(op)));
+            }
+        }
+    }
+}
+
+// Large strides whose arithmetic fits are judged as before, by layout and packing alone: a packed
+// tensor of 2^40 elements is accepted, a non-packed channels-first tensor with large strides is
+// declined by forward for not being packed and accepted by backward, and a tensor with a negative
+// stride is declined by the layout rule, not for overflow.
+TEST(TestMiopenConvApplicabilityChecks, StridesThatDoNotOverflowAreJudgedByLayoutAndPacking)
+{
+    const std::vector<int64_t> largeDims = {1, int64_t{1} << 40, 1};
+    const TensorSpec largePacked = channelsFirst(largeDims);
+    expectAccepted(largePacked, largePacked, largePacked);
+    expectBackwardAccepted({"large packed", largePacked, largePacked, largePacked});
+
+    const TensorSpec largePadded = withStrides({1, 4, 1}, {int64_t{1} << 60, int64_t{1} << 58, 1});
+    ASSERT_FALSE(isTensorPacked(largePadded.dims, largePadded.strides));
+    expectDeclined(largePadded, channelsFirst(W_DIMS), channelsFirst(Y_DIMS), PACKED_REASON);
+    expectBackwardAccepted(
+        {"large padded dy", largePadded, channelsFirst(W_DIMS), channelsFirst(X_DIMS)});
+
+    const TensorSpec reversed = withStrides({1, 3, 1}, {3, -1, 1});
+    expectDeclined(reversed, channelsFirst(W_DIMS), channelsFirst(Y_DIMS), LAYOUT_REASON);
+    expectBackwardDeclined({"reversed dy", reversed, channelsFirst(W_DIMS), channelsFirst(X_DIMS)},
+                           LAYOUT_REASON);
 }
 
 // A negative dim has no element count: declined by name, not left to the stride arithmetic.
