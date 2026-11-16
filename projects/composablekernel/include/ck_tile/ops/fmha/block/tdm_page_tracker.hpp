@@ -79,6 +79,33 @@ struct TdmPageTracker
         return new_block;
     }
 
+    // Physical page id of the window after a move by step (same as PageBlockNavigator), to
+    // pass to the move_tile_window overload below so the table is read once per move.
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE int32_t
+    prefetch_table_id(index_t block_index,
+                      const TileWindow& tile_window,
+                      const typename remove_cvref_t<TileWindow>::BottomTensorIndex& step) const
+    {
+        return load_block_index(get_block_index(moved_origin(block_index, tile_window, step)));
+    }
+
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE index_t
+    move_tile_window(index_t block_index,
+                     TileWindow& tile_window,
+                     const typename remove_cvref_t<TileWindow>::BottomTensorIndex& step,
+                     int32_t physical_id) const
+    {
+        const WindowOrigin origin = moved_origin(block_index, tile_window, step);
+        const index_t new_block   = get_block_index(origin);
+        relocate(tile_window,
+                 origin,
+                 new_block,
+                 physical_blocks_ + physical_id * block_stride_ + fixed_offset_);
+        return new_block;
+    }
+
     CK_TILE_HOST_DEVICE WindowOrigin to_global_window_origin(index_t block_index,
                                                              const WindowOrigin& local) const
     {
@@ -110,6 +137,26 @@ struct TdmPageTracker
     }
 
     private:
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE WindowOrigin
+    moved_origin(index_t block_index,
+                 const TileWindow& tile_window,
+                 const typename remove_cvref_t<TileWindow>::BottomTensorIndex& step) const
+    {
+        return to_global_window_origin(block_index, tile_window.get_window_origin() + step);
+    }
+
+    template <typename TileWindow>
+    CK_TILE_HOST_DEVICE void relocate(TileWindow& tile_window,
+                                      const WindowOrigin& origin,
+                                      index_t block_index,
+                                      DataType* page) const
+    {
+        tile_window.bottom_tensor_view_.desc_ = view_of(block_index).get_tensor_descriptor();
+        tile_window.set_window_origin(to_local_window_origin(block_index, origin));
+        tile_window.set_bottom_tensor_view_data_ptr(page);
+    }
+
     CK_TILE_HOST_DEVICE int32_t load_block_index(index_t block_index) const
     {
 #if defined(__HIP_DEVICE_COMPILE__)
