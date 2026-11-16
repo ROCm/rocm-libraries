@@ -242,6 +242,14 @@ static rocke_status_t _op_tile_smem_store_vN_f32(rocke_h_lowerer_t* lw, const ro
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.smem_store_vN_f32: too few operands");
     }
+    {
+        char contract_error[ROCKE_ERR_MSG_CAP];
+        if(const char* error
+           = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        }
+    }
     smem = op->operands[0];
     value = op->operands[op->num_operands - 1];
     n = mem_attr_int(op, "vec", 0);
@@ -397,6 +405,14 @@ static rocke_status_t _op_tile_smem_load_vN_f32(rocke_h_lowerer_t* lw, const roc
     if(op->num_operands < 1 || op->num_results < 1)
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.smem_load_vN_f32: bad operand/result count");
+    }
+    {
+        char contract_error[ROCKE_ERR_MSG_CAP];
+        if(const char* error
+           = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        }
     }
     smem = op->operands[0];
     n = mem_attr_int(op, "vec", 0);

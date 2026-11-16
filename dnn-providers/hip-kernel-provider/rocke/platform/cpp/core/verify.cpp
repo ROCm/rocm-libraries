@@ -682,6 +682,14 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
             v_errf(v, op, "%s", error);
         }
     }
+    else if(o == ROCKE_OP_TILE_SMEM_LOAD_VN_F32 || o == ROCKE_OP_TILE_SMEM_STORE_VN_F32)
+    {
+        char err[ROCKE_ERR_MSG_CAP];
+        if(const char* error = rocke_i_smem_vN_f32_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
     else if(o == ROCKE_OP_TILE_GLOBAL_PTR_OFFSET)
     {
         char err[256];

@@ -14,7 +14,10 @@ access's byte offset from the pool base, and the pool must be at least
 and on the C++ engine where its binding is built, whose IR must also be
 byte-identical to the Python engine's and whose refusals must be the same.
 A vector store also claims a width: the value it stores must have that many
-lanes, and the builder and the verifier refuse one that does not.
+lanes, and the builder and the verifier refuse one that does not. The f32
+epilogue load and store emit, and size their claim for, an f32 access, so they
+refuse a tile or value that does not hold f32; ``smem_store_f16`` records an
+f16 store, so it refuses a value that does not hold f16.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from collections.abc import Callable
 
 import pytest
 from rocke.core.ir import (
+    BF16,
     F16,
     F32,
     F64,
@@ -679,5 +683,156 @@ kernel @lds_store_lanes {{
         _ARCH,
         error_type=ValueError,
         message=f"tile.smem_store_vN failed - lanes={lanes}, expected vec={vec}",
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )
+
+
+@pytest.mark.parametrize(("lanes", "n"), [(4, 2), (2, 4), (4, 1), (1, 4)])
+def test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused(lanes, n):
+    """``smem_store_vN_f32`` stores its value as an ``n``-element f32 vector
+    (a scalar for ``n=1``), so it refuses a value of another lane count as
+    ``smem_store_vN`` does. The builder adds no op."""
+    b = IRBuilder(f"lds_store_f32_epilogue_x{lanes}_n{n}")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [16], name_hint="f")
+    if lanes == 1:
+        value = b.global_load(out, zero, F32)
+    else:
+        value = b.global_load_vN(out, zero, F32, lanes, align=4)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError) as refusal:
+        b.smem_store_vN_f32(tile, [zero], value, n)
+    assert (
+        str(refusal.value)
+        == f"smem_store_vN_f32 failed - lanes={lanes}, expected n={n}"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize("tile_elem", [F16, BF16])
+@pytest.mark.parametrize("access", ["smem_load_vN_f32", "smem_store_vN_f32"])
+def test_an_f32_epilogue_access_to_a_tile_not_holding_f32_is_refused(access, tile_elem):
+    """The f32 epilogue ops emit an f32 access and size its alignment claim
+    for f32 elements, so they refuse a tile of any other element type. The
+    builder adds no op."""
+    b = IRBuilder(f"lds_{access}_{tile_elem.name}_tile")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(tile_elem, [16], name_hint="t")
+    value = b.global_load_vN(out, zero, F32, 4, align=4)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError) as refusal:
+        if access == "smem_load_vN_f32":
+            b.smem_load_vN_f32(tile, zero, n=4)
+        else:
+            b.smem_store_vN_f32(tile, [zero], value, 4)
+    assert (
+        str(refusal.value)
+        == f"{access} failed - tile_elem={tile_elem.name}, expected f32"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+def test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused():
+    """``smem_store_vN_f32`` emits an f32 store, so it refuses a value of any
+    other element type. The builder adds no op."""
+    b = IRBuilder("lds_store_f32_epilogue_f16_value")
+    out = b.param("out", PtrType(F16, "global"))
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [16], name_hint="f")
+    value = b.global_load_vN(out, zero, F16, 4, align=2)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError) as refusal:
+        b.smem_store_vN_f32(tile, [zero], value, 4)
+    assert (
+        str(refusal.value) == "smem_store_vN_f32 failed - value_elem=f16, expected f32"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize("value_elem", [F32, BF16])
+def test_an_f16_store_of_a_value_not_holding_f16_is_refused(value_elem):
+    """``smem_store_f16`` records an f16 store, so it refuses a value of any
+    other element type. The builder adds no op."""
+    b = IRBuilder(f"lds_store_f16_{value_elem.name}_value")
+    out = b.param("out", PtrType(value_elem, "global"))
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F16, [16], name_hint="h")
+    value = b.global_load(out, zero, value_elem)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError) as refusal:
+        b.smem_store_f16(tile, [zero], value)
+    assert (
+        str(refusal.value)
+        == f"smem_store_f16 failed - value_elem={value_elem.name}, expected f16"
+    )
+    assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize(
+    ("tile_elem", "access_lines", "message"),
+    [
+        (
+            "f16",
+            "%av4 : vec<f32x4> = tile.smem_load_vN_f32 ( %buf2, %c1 ) "
+            '{ elem_type = s:"f32", rank = i:1, vec = i:4 }',
+            "tile.smem_load_vN_f32 failed - tile_elem=f16, expected f32",
+        ),
+        (
+            "f16",
+            "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+            '{ align = i:4, elem_type = s:"f32", vec = i:4 }\n'
+            "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
+            '{ elem_type = s:"f32", rank = i:1, vec = i:4 }',
+            "tile.smem_store_vN_f32 failed - tile_elem=f16, expected f32",
+        ),
+        (
+            "f32",
+            "%v3 : vec<f16x4> = memref.global_load_vN ( %outh, %c1 ) "
+            '{ align = i:2, elem_type = s:"f16", vec = i:4 }\n'
+            "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
+            '{ elem_type = s:"f32", rank = i:1, vec = i:4 }',
+            "tile.smem_store_vN_f32 failed - value_elem=f16, expected f32",
+        ),
+        (
+            "f32",
+            "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+            '{ align = i:4, elem_type = s:"f32", vec = i:4 }\n'
+            "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
+            '{ elem_type = s:"f32", rank = i:1, vec = i:2 }',
+            "tile.smem_store_vN_f32 failed - lanes=4, expected vec=2",
+        ),
+    ],
+    ids=["load-f16-tile", "store-f16-tile", "store-f16-value", "store-lanes"],
+)
+def test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused(
+    tile_elem, access_lines, message
+):
+    """Serialized IR reaches the verifier and the lowerings without passing
+    the builder: each refuses an f32 epilogue access to a tile that does not
+    hold f32, and a store whose value does not hold f32 or does not have
+    ``vec`` lanes, in both engines."""
+    kernel = parse(
+        f"""ckdsl.ir v1
+kernel @lds_f32_epilogue_contract {{
+  params {{
+    %out : ptr<f32,global>
+    %outh : ptr<f16,global>
+  }}
+  region @entry {{
+    %c1 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:0 }}
+    %buf2 : smem<{tile_elem}, [16]> = tile.smem_alloc (  )
+    {access_lines}
+    cf.return (  )
+  }}
+}}
+"""
+    )
+    assert_refused_everywhere(
+        kernel,
+        _ARCH,
+        error_type=ValueError,
+        message=message,
         llvm_flavor=LLVM_FLAVOR_LLVM20,
     )
