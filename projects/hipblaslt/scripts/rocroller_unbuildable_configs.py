@@ -12,6 +12,12 @@ tensilelite/tensilelite/CustomKernels/rocroller/unbuildable_configs.def.
     build  builds every configuration of a list with the hipblaslt-bench of a
            HIPBLASLT_ENABLE_ROCROLLER=ON build (rocRoller JIT, one solution
            index per configuration) and appends one record per configuration.
+           --enumerate ignores --configs and builds every MX type pair
+           (FP4, FP6, BF6, FP8, BF8) x {Half, BFloat16, Float} x four layouts
+           x {data-parallel, data-parallel with workgroup mapping, Stream-K}
+           x the tiles getTileListForKernelType returns (the 35 standard
+           tiles, plus the FP4xFP4 swizzle-only tiles). Loads are temporal.
+           Pass nta or ntb on a JSON object to build that non-temporal bit.
     write  writes the table from records. A configuration is recorded when it
            failed to build; one with records that both built and failed is an
            error. With --records-out it also writes the merged records as CSV,
@@ -67,6 +73,47 @@ HIP_TYPES = {
 }
 LAYOUTS = ("TN", "NN", "NT", "TT")
 TYPE_ORDER = list(HIP_TYPES)
+# solution_selection.cpp possibleTileSizes, the workgroup tile the solution
+# index encodes. getTileListForKernelType emits these for every type pair
+# that is not FP4 x FP4 with swizzleA.
+STANDARD_TILES = (
+    (256, 256, 256), (256, 256, 128), (256, 192, 128), (256, 128, 128), (256, 64, 128),
+    (256, 32, 128), (256, 16, 128), (192, 256, 128), (192, 128, 128), (192, 64, 128),
+    (192, 32, 128), (128, 256, 128), (128, 192, 128), (128, 128, 128), (128, 64, 128),
+    (128, 32, 128), (64, 256, 128), (64, 192, 128), (64, 128, 128), (64, 64, 128),
+    (64, 32, 128), (32, 256, 128), (32, 192, 128), (32, 128, 128), (32, 64, 128),
+    (32, 32, 128), (32, 32, 64), (16, 256, 128), (64, 16, 128), (16, 64, 128),
+    (32, 16, 128), (16, 32, 128), (16, 16, 128), (16, 16, 256), (16, 64, 256),
+)
+# possibleSwizzleTileSizes entries that are not in STANDARD_TILES. FP4 x FP4
+# with swizzleA is ranked from that list.
+SWIZZLE_ONLY_TILES = (
+    (32, 384, 128), (32, 512, 128), (32, 640, 128), (32, 768, 128), (32, 896, 128), (32, 1024, 128),
+    (64, 384, 128), (64, 512, 128), (64, 640, 128), (64, 768, 128), (64, 896, 128), (64, 1024, 128),
+    (96, 128, 128), (96, 256, 128), (96, 384, 128), (96, 512, 128), (96, 640, 128),
+    (128, 384, 128), (160, 128, 128), (160, 256, 128), (160, 384, 128), (192, 256, 128),
+    (224, 128, 128), (224, 256, 128),
+)
+MX_TYPES = ("FP4", "FP6", "BF6", "FP8", "BF8")
+MX_OUTPUTS = ("Half", "BFloat16", "Float")
+# (workgroup mapping, stream-K). Stream-K forces workgroup mapping off, so
+# the two are not combined.
+ENUM_MODES = ((False, False), (True, False), (False, True))
+
+
+def enumerate_configs():
+    """Every configuration getTileListForKernelType can rank for an MX GEMM."""
+    configs = []
+    for layout in LAYOUTS:
+        for a in MX_TYPES:
+            for b in MX_TYPES:
+                tiles = STANDARD_TILES + (SWIZZLE_ONLY_TILES if a == "FP4" and b == "FP4" else ())
+                for d in MX_OUTPUTS:
+                    for m, n, k in tiles:
+                        for wgm, sk in ENUM_MODES:
+                            configs.append(dict(layout=layout, typeA=a, typeB=b, typeC=d, typeD=d,
+                                                tile=[m, n, k], wgm=wgm, streamK=sk))
+    return configs
 KNOWN_PASSES = ("WaitcntObserver", "SwizzleScale", "AddPrefetch", "AddTransposeLoadCT",
                 "InProcessAssembler", "RegisterAllocator", "Scheduler", "Assembler")
 BUILD_ERROR = "Error building the following kernel:"
@@ -150,14 +197,20 @@ def rocroller_tree(build):
                           capture_output=True, text=True).stdout.strip()
 
 
-def solution_index(m, n, k, wgm, sk):
-    """solution_selection.cpp parametersToIndex, with tail loops and temporal loads."""
+def solution_index(m, n, k, wgm, sk, nta=0, ntb=0):
+    """solution_selection.cpp parametersToIndex, with tail loops.
+
+    nta and ntb are the non-temporal A and B bits. The checked-in table is
+    built with both clear.
+    """
     r = k // 32
     r |= (n // 16) << 7
     r |= (m // 16) << 15
     r |= int(wgm) << 23
     r |= int(sk) << 24
     r |= 1 << 25
+    r |= int(nta) << 26
+    r |= int(ntb) << 27
     r |= 1 << 31
     return r - (1 << 32)
 
@@ -174,6 +227,8 @@ def failed_pass(log):
 
 def build_one(c, build, gpu, scratch):
     layout, a, b, cc, d, m, n, k, wgm, sk = key(c)
+    nta = int(bool(c.get("nta")))
+    ntb = int(bool(c.get("ntb")))
     hb = os.path.join(build, "projects", "hipblaslt")
     env = {v: x for v, x in os.environ.items() if not v.startswith(("HIPBLASLT_", "ROCROLLER_", "TENSILE_"))}
     env.update(
@@ -189,7 +244,8 @@ def build_one(c, build, gpu, scratch):
            "--transA", layout[0], "--transB", layout[1], "--a_type", HIP_TYPES[a][0], "--b_type", HIP_TYPES[b][0],
            "--c_type", HIP_TYPES[cc][0], "--d_type", HIP_TYPES[d][0], "--compute_type", "f32_r",
            "--scaleA", "3", "--scaleB", "3", "--algo_method", "index",
-           "--solution_index", str(solution_index(m, n, k, wgm, sk)), "--iters", "1", "--cold_iters", "0"]
+           "--solution_index", str(solution_index(m, n, k, wgm, sk, nta, ntb)),
+           "--iters", "1", "--cold_iters", "0"]
     p = subprocess.run(cmd, env=env, cwd=scratch, capture_output=True, text=True, timeout=1800)
     log = p.stdout + p.stderr
     if os.path.exists(env["HIPBLASLT_LOG_FILE"]):
@@ -205,7 +261,12 @@ def build_one(c, build, gpu, scratch):
 
 
 def cmd_build(a):
-    configs, _ = read_records(a.configs)
+    if a.enumerate == bool(a.configs):
+        raise SystemExit("build needs exactly one of --enumerate and --configs")
+    if a.enumerate:
+        configs = enumerate_configs()
+    else:
+        configs, _ = read_records(a.configs)
     gpus = [int(g) for g in a.gpus.split(",")]
     lock = threading.Lock()
     slots = [g for g in gpus for _ in range(a.per_gpu)]
@@ -339,7 +400,9 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     b.add_argument("--build", required=True, help="HIPBLASLT_ENABLE_ROCROLLER=ON build directory")
-    b.add_argument("--configs", required=True, help="configurations, JSONL or CSV records")
+    b.add_argument("--configs", help="configurations, JSONL or CSV records")
+    b.add_argument("--enumerate", action="store_true",
+                   help="build every getTileListForKernelType MX configuration instead of --configs")
     b.add_argument("--gpus", required=True, help="comma-separated HIP_VISIBLE_DEVICES ids")
     b.add_argument("--per-gpu", type=int, default=4)
     b.add_argument("--out", required=True, help="records, JSONL or (ending in .csv) CSV, appended to")
