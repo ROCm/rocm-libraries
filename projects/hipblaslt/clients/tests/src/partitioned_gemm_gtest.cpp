@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -117,6 +118,17 @@ namespace
     // Makes two different devices unreachable for PartitionedGemm::setProblem, so the paths without
     // peer access can be tested on a machine that has it.
     constexpr const char* kForceNoPeer = "HIPBLASLT_PARTITIONED_FORCE_NO_PEER";
+
+    // PartitionedGemm is validated on gfx1250 only; the tests skip on any other architecture.
+    bool isGfx1250()
+    {
+        hipDeviceProp_t props;
+        int             device = 0;
+        if(hipGetDevice(&device) != hipSuccess
+           || hipGetDeviceProperties(&props, device) != hipSuccess)
+            return false;
+        return std::strncmp(props.gcnArchName, "gfx1250", 7) == 0;
+    }
 
     std::vector<half_t> randomHalf(size_t count, unsigned seed)
     {
@@ -342,12 +354,21 @@ namespace
     }
 } // namespace
 
+// Skips the rest of the test unless the device is a gfx1250.
+#define SKIP_UNLESS_GFX1250()                                            \
+    do                                                                   \
+    {                                                                    \
+        if(!isGfx1250())                                                 \
+            GTEST_SKIP() << "PartitionedGemm is tested on gfx1250 only"; \
+    } while(0)
+
 // ---------------------------------------------------------------------------------------------
 // Any single GPU
 // ---------------------------------------------------------------------------------------------
 
 TEST(pre_checkin_partitioned_gemm_ext, PartitionCountAndSliceRule)
 {
+    SKIP_UNLESS_GFX1250();
     auto parts = onDeviceZero(3);
     auto gemm  = makeGemm(parts);
     EXPECT_EQ(gemm.getPartitionCount(), 3u);
@@ -371,6 +392,7 @@ TEST(pre_checkin_partitioned_gemm_ext, PartitionCountAndSliceRule)
 
 TEST(pre_checkin_partitioned_gemm_ext, MSlicesStartOn256ByteBoundaries)
 {
+    SKIP_UNLESS_GFX1250();
     // fp16: 128 elements are 256 bytes. The first slices round up and the last is smaller.
     struct Case
     {
@@ -401,6 +423,7 @@ TEST(pre_checkin_partitioned_gemm_ext, MSlicesStartOn256ByteBoundaries)
 
 TEST(pre_checkin_partitioned_gemm_ext, GetSliceNeedsAProblem)
 {
+    SKIP_UNLESS_GFX1250();
     auto    parts = onDeviceZero(2);
     auto    gemm  = makeGemm(parts);
     int64_t offset, size;
@@ -409,6 +432,7 @@ TEST(pre_checkin_partitioned_gemm_ext, GetSliceNeedsAProblem)
 
 TEST(pre_checkin_partitioned_gemm_ext, StorePeerDNeedsTwoDifferentDs)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -438,6 +462,7 @@ TEST(pre_checkin_partitioned_gemm_ext, StorePeerDNeedsTwoDifferentDs)
 
 TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongPointerCounts)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -461,6 +486,7 @@ TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongPointerCounts)
 
 TEST(pre_checkin_partitioned_gemm_ext, RejectsBadSizesAndScalars)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -484,6 +510,7 @@ TEST(pre_checkin_partitioned_gemm_ext, RejectsBadSizesAndScalars)
 
 TEST(pre_checkin_partitioned_gemm_ext, UserArgsAreNotSupportedYet)
 {
+    SKIP_UNLESS_GFX1250();
     auto parts = onDeviceZero(2);
     auto gemm  = makeGemm(parts);
 
@@ -499,6 +526,7 @@ TEST(pre_checkin_partitioned_gemm_ext, UserArgsAreNotSupportedYet)
 
 TEST(pre_checkin_partitioned_gemm_ext, TwoPartitionsOnOneDeviceMatchGemm)
 {
+    SKIP_UNLESS_GFX1250();
     // SPX mode: both partitions are on the same device, so their streams share it. Speed does
     // not matter there, the result must still be right.
     for(SplitDim dim : {SplitDim::N, SplitDim::M})
@@ -530,6 +558,7 @@ TEST(pre_checkin_partitioned_gemm_ext, TwoPartitionsOnOneDeviceMatchGemm)
 
 TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongStreamAndWorkspaceCounts)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -551,6 +580,7 @@ TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongStreamAndWorkspaceCounts)
 
 TEST(partitioned_gemm_ext_streams_multi_gpu, RejectsAStreamOnAnotherDeviceThanItsHandle)
 {
+    SKIP_UNLESS_GFX1250();
     const auto pair = hipblaslt_partitions::dpxPair();
     if(!pair)
         GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
@@ -580,6 +610,7 @@ TEST(partitioned_gemm_ext_streams_multi_gpu, RejectsAStreamOnAnotherDeviceThanIt
 // One partition is a plain GEMM: it must match Gemm exactly.
 TEST(pre_checkin_partitioned_gemm_ext, OnePartitionMatchesGemm)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(1);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -607,6 +638,7 @@ TEST(pre_checkin_partitioned_gemm_ext, OnePartitionMatchesGemm)
 // All partitions on one device (SPX) never need peer access, whatever the machine offers.
 TEST(pre_checkin_partitioned_gemm_ext, NoPeerAccessIsNeededOnOneDevice)
 {
+    SKIP_UNLESS_GFX1250();
     ScopedEnv         noPeer(kForceNoPeer, "1");
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
@@ -646,6 +678,7 @@ namespace
 
 TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
 {
+    SKIP_UNLESS_GFX1250();
     // The two partitions of a DPX GPU, or both partitions on one device (SPX).
     const auto  devs = hipblaslt_partitions::partitionDevices(2);
     const Combo cs   = GetParam();
@@ -855,6 +888,7 @@ namespace
 // order the halves are in, each partition must compute the slice on its own device.
 TEST_P(partitioned_gemm_ext_placement_multi_gpu, SlicesFollowThePages)
 {
+    SKIP_UNLESS_GFX1250();
     const auto pair = hipblaslt_partitions::dpxPair();
     if(!pair)
         GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
@@ -951,6 +985,7 @@ INSTANTIATE_TEST_SUITE_P(partitioned_gemm_ext_placement_multi_gpu,
 // swapped back; lists that disagree are an error.
 TEST(partitioned_gemm_ext_copies_multi_gpu, SwappedCopiesAreMatchedByDevice)
 {
+    SKIP_UNLESS_GFX1250();
     const auto pair = hipblaslt_partitions::dpxPair();
     if(!pair)
         GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
@@ -988,6 +1023,7 @@ TEST(partitioned_gemm_ext_copies_multi_gpu, SwappedCopiesAreMatchedByDevice)
 
 TEST(partitioned_gemm_ext_copies_multi_gpu, CopiesInDifferentOrdersAreRejected)
 {
+    SKIP_UNLESS_GFX1250();
     const auto pair = hipblaslt_partitions::dpxPair();
     if(!pair)
         GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
@@ -1015,6 +1051,7 @@ TEST(partitioned_gemm_ext_copies_multi_gpu, CopiesInDifferentOrdersAreRejected)
 // Batch split: whole matrices, the first partitions take batch_count / N batches, the last the rest.
 TEST(pre_checkin_partitioned_gemm_ext, BatchSplitSlices)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -1068,6 +1105,7 @@ TEST(pre_checkin_partitioned_gemm_ext, BatchSplitSlices)
 // Two partitions, 5 batches split 2 + 3: each partition computes its batches into its own D.
 TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
 {
+    SKIP_UNLESS_GFX1250();
     // The two partitions of a DPX GPU, or both partitions on one device (SPX).
     const auto devs = hipblaslt_partitions::partitionDevices(2);
 
@@ -1152,6 +1190,7 @@ TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
 // A batch split gives different batches of D to different partitions, so D needs a batch stride.
 TEST(pre_checkin_partitioned_gemm_ext, BatchSplitNeedsABatchStrideOfD)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -1212,6 +1251,7 @@ TEST(pre_checkin_partitioned_gemm_ext, BatchSplitNeedsABatchStrideOfD)
 // A setProblem that fails must not leave the previous problem usable.
 TEST(pre_checkin_partitioned_gemm_ext, FailedSetProblemClearsTheProblem)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -1233,6 +1273,7 @@ TEST(pre_checkin_partitioned_gemm_ext, FailedSetProblemClearsTheProblem)
 // A moved-from PartitionedGemm and one built with a null handle are unusable, not crashes.
 TEST(pre_checkin_partitioned_gemm_ext, MovedFromAndNullHandlesAreRejected)
 {
+    SKIP_UNLESS_GFX1250();
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
@@ -1268,6 +1309,7 @@ TEST(pre_checkin_partitioned_gemm_ext, MovedFromAndNullHandlesAreRejected)
 // access, stay fine.
 TEST(partitioned_gemm_ext_streams_multi_gpu, MemoryOnAnotherDeviceNeedsPeerAccess)
 {
+    SKIP_UNLESS_GFX1250();
     const auto pair = hipblaslt_partitions::dpxPair();
     if(!pair)
         GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
