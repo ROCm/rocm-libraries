@@ -243,53 +243,110 @@ def test_both_lowerings_refuse_a_narrow_nuw_add():
 
 
 _FLOAT_CMP_ERROR = (
-    "arith.cmp failed - operand_type={}, expected an integer or i1 type "
+    "arith.cmp failed - operand type='{}', expected an integer or i1 type "
     "(compare floats with fcmp)"
 )
+_INTEGER_FCMP_ERROR = (
+    "arith.fcmp failed - operand type='{}', expected f16, bf16, f32 or f64 "
+    "(compare integers with cmp)"
+)
+_FLOAT_VECTOR_CMP_ERROR = (
+    "vector.cmp failed - element type='{}', expected an integer or i1 type"
+)
+# A compare's pred attr that is absent, as serialized IR can leave it.
+_ABSENT = object()
 
-# (op, pred attr, operand type, the refusal): the IR rule's text. An
-# ``arith.cmp`` pred is checked first (``ult`` takes i32 or i64 operands), then
-# its operands must be integers or i1; ``vector.cmp`` takes the signed
-# orderings and equality only; ``arith.fcmp`` takes its ordered predicates and
-# ``ord`` / ``uno``.
+# (op, pred attr, operand type, refusal type, the refusal): the IR rule's type
+# and text. An ``arith.cmp`` pred is required and checked first (``ult``
+# takes i32 or i64 operands), then its operands must be integers or i1 (a
+# TypeError); ``vector.cmp`` takes the signed orderings and equality only, on
+# integer or i1 lanes; ``arith.fcmp`` requires its ordered predicates or
+# ``ord`` / ``uno``, on f16, bf16, f32 or f64 operands.
 _REFUSED_COMPARES = [
     (
         "arith.cmp",
         "ult",
         F32,
+        ValueError,
         "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32",
     ),
-    ("arith.cmp", "ult", I8, "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"),
-    ("arith.cmp", "ugt", I32, "arith.cmp: unknown pred 'ugt'"),
-    ("arith.cmp", 1, I32, "arith.cmp: pred must be a string"),
-    ("arith.cmp", "lt", F32, _FLOAT_CMP_ERROR.format("f32")),
+    (
+        "arith.cmp",
+        "ult",
+        I8,
+        ValueError,
+        "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8",
+    ),
+    ("arith.cmp", "ugt", I32, ValueError, "arith.cmp: unknown pred 'ugt'"),
+    ("arith.cmp", 1, I32, ValueError, "arith.cmp: pred must be a string"),
+    (
+        "arith.cmp",
+        _ABSENT,
+        I32,
+        ValueError,
+        "op 'arith.cmp' missing required attr 'pred'",
+    ),
+    ("arith.cmp", "lt", F32, TypeError, _FLOAT_CMP_ERROR.format("f32")),
     (
         "arith.cmp",
         "eq",
         PtrType(I32, "global"),
+        TypeError,
         _FLOAT_CMP_ERROR.format("ptr<i32,global>"),
     ),
-    ("vector.cmp", "ult", VectorType(I32, 2), "vector.cmp: unknown pred 'ult'"),
-    ("vector.cmp", 1, VectorType(I32, 2), "vector.cmp: pred must be a string"),
-    ("arith.fcmp", "lt", F32, "arith.fcmp: unknown pred 'lt'"),
-    ("arith.fcmp", 1, F32, "arith.fcmp: pred must be a string"),
+    (
+        "vector.cmp",
+        "ult",
+        VectorType(I32, 2),
+        ValueError,
+        "vector.cmp: unknown pred 'ult'",
+    ),
+    (
+        "vector.cmp",
+        1,
+        VectorType(I32, 2),
+        ValueError,
+        "vector.cmp: pred must be a string",
+    ),
+    (
+        "vector.cmp",
+        "lt",
+        VectorType(F32, 2),
+        TypeError,
+        _FLOAT_VECTOR_CMP_ERROR.format("f32"),
+    ),
+    ("arith.fcmp", "lt", F32, ValueError, "arith.fcmp: unknown pred 'lt'"),
+    ("arith.fcmp", 1, F32, ValueError, "arith.fcmp: pred must be a string"),
+    (
+        "arith.fcmp",
+        _ABSENT,
+        F32,
+        ValueError,
+        "op 'arith.fcmp' missing required attr 'pred'",
+    ),
+    ("arith.fcmp", "olt", I32, TypeError, _INTEGER_FCMP_ERROR.format("i32")),
 ]
 _REFUSED_COMPARE_IDS = [
     "cmp_ult_f32",
     "cmp_ult_i8",
     "cmp_unknown",
     "cmp_not_a_string",
+    "cmp_absent",
     "cmp_lt_f32",
     "cmp_eq_ptr",
     "vector_cmp_ult",
     "vector_cmp_not_a_string",
+    "vector_cmp_f32",
     "fcmp_unknown",
     "fcmp_not_a_string",
+    "fcmp_absent",
+    "fcmp_i32",
 ]
 
 
-def _compare_kernel(op_name: str, pred: str | int, operand_type: Type) -> KernelDef:
-    """A kernel holding one raw ``op_name`` compare of a parameter with itself."""
+def _compare_kernel(op_name: str, pred: object, operand_type: Type) -> KernelDef:
+    """A kernel holding one raw ``op_name`` compare of a parameter with itself,
+    whose pred attr is ``pred`` (none when it is ``_ABSENT``)."""
     b = IRBuilder("refused_compare")
     a = b.param("a", operand_type)
     result_type = (
@@ -297,16 +354,23 @@ def _compare_kernel(op_name: str, pred: str | int, operand_type: Type) -> Kernel
         if isinstance(operand_type, VectorType)
         else I1
     )
-    b._op(op_name, [a, a], [result_type], attrs={"pred": pred})
+    attrs = {} if pred is _ABSENT else {"pred": pred}
+    b._op(op_name, [a, a], [result_type], attrs=attrs)
     b.ret()
     return b.kernel
 
 
 @pytest.mark.parametrize(
-    "op_name,pred,operand_type,message", _REFUSED_COMPARES, ids=_REFUSED_COMPARE_IDS
+    "op_name,pred,operand_type,error_type,message",
+    _REFUSED_COMPARES,
+    ids=_REFUSED_COMPARE_IDS,
 )
 def test_verifier_refuses_a_compare_the_ir_rule_refuses(
-    op_name: str, pred: str | int, operand_type: Type, message: str
+    op_name: str,
+    pred: object,
+    operand_type: Type,
+    error_type: type[Exception],
+    message: str,
 ) -> None:
     """The verifier reports the IR rule's text, and nothing else, for each
     case. The C++ verifier reports the same texts (the ctest)."""
@@ -315,45 +379,89 @@ def test_verifier_refuses_a_compare_the_ir_rule_refuses(
 
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
-    "op_name,pred,operand_type,message", _REFUSED_COMPARES, ids=_REFUSED_COMPARE_IDS
+    "op_name,pred,operand_type,error_type,message",
+    _REFUSED_COMPARES,
+    ids=_REFUSED_COMPARE_IDS,
 )
 def test_both_lowerings_refuse_a_compare_the_ir_rule_refuses(
-    op_name: str, pred: str | int, operand_type: Type, message: str, engine: str
+    op_name: str,
+    pred: object,
+    operand_type: Type,
+    error_type: type[Exception],
+    message: str,
+    engine: str,
 ) -> None:
     """Each engine's LLVM and HIP lowerings check a compare against the IR
-    rule before reading its pred, and refuse it with a ``ValueError``
-    (``ROCKE_ERR_VALUE``) in the verifier's words: a float or pointer
-    ``arith.cmp`` is not lowered to an integer compare, and an unknown or
-    non-string pred is neither read as a default nor passed through. The ctest
-    repeats these cases for the C++ engine without the binding."""
+    rule before reading its pred, and refuse it with the rule's type
+    (``ValueError`` / ``ROCKE_ERR_VALUE`` for a pred, ``TypeError`` /
+    ``ROCKE_ERR_TYPE`` for an operand) in the verifier's words: a float or
+    pointer ``arith.cmp`` or float ``vector.cmp`` is not lowered to an integer
+    compare, an integer ``arith.fcmp`` not to a float one, and an absent,
+    unknown or non-string pred is neither read as a default nor passed
+    through. The ctest repeats these cases for the C++ engine without the
+    binding."""
     kernel = _compare_kernel(op_name, pred, operand_type)
     for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
         assert_rejects(
-            kernel, "gfx942", engine=engine, error_type=ValueError, message=message
+            kernel, "gfx942", engine=engine, error_type=error_type, message=message
         )
 
 
 @pytest.mark.parametrize(
-    "build,message",
+    "operand_type,build,error_type,message",
     [
-        (lambda b, f, v: b.cmp_lt(f, f), _FLOAT_CMP_ERROR.format("f32")),
-        (lambda b, f, v: b.cmp_eq(f, f), _FLOAT_CMP_ERROR.format("f32")),
-        (lambda b, f, v: b.fcmp("lt", f, f), "arith.fcmp: unknown pred 'lt'"),
-        (lambda b, f, v: b.vector_cmp("ult", v, v), "vector.cmp: unknown pred 'ult'"),
+        (F32, lambda b, x: b.cmp_lt(x, x), TypeError, _FLOAT_CMP_ERROR.format("f32")),
+        (F32, lambda b, x: b.cmp_eq(x, x), TypeError, _FLOAT_CMP_ERROR.format("f32")),
+        (
+            F32,
+            lambda b, x: b.fcmp("lt", x, x),
+            ValueError,
+            "arith.fcmp: unknown pred 'lt'",
+        ),
+        (
+            I32,
+            lambda b, x: b.fcmp("olt", x, x),
+            TypeError,
+            _INTEGER_FCMP_ERROR.format("i32"),
+        ),
+        (
+            VectorType(I32, 2),
+            lambda b, x: b.vector_cmp("ult", x, x),
+            ValueError,
+            "vector.cmp: unknown pred 'ult'",
+        ),
+        (
+            VectorType(F32, 2),
+            lambda b, x: b.vector_cmp("lt", x, x),
+            TypeError,
+            _FLOAT_VECTOR_CMP_ERROR.format("f32"),
+        ),
     ],
-    ids=["cmp_lt_f32", "cmp_eq_f32", "fcmp_unknown", "vector_cmp_ult"],
+    ids=[
+        "cmp_lt_f32",
+        "cmp_eq_f32",
+        "fcmp_unknown",
+        "fcmp_i32",
+        "vector_cmp_ult",
+        "vector_cmp_f32",
+    ],
 )
 def test_compare_builders_refuse_what_the_ir_rule_refuses(
-    build: Callable[[IRBuilder, Value, Value], Value], message: str
+    operand_type: Type,
+    build: Callable[[IRBuilder, Value], Value],
+    error_type: type[Exception],
+    message: str,
 ) -> None:
-    """The builders refuse with the IR rule's ``ValueError`` and text; the
-    ctest checks the C API builders' texts."""
+    """The builders refuse with the IR rule's type and text and add no op;
+    the ctest checks the C API builders' types and texts."""
     b = IRBuilder("refused_compare_builder")
-    f = b.param("f", F32)
-    v = b.param("v", VectorType(I32, 2))
-    with pytest.raises(ValueError) as error:
-        build(b, f, v)
+    x = b.param("x", operand_type)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(error_type) as error:
+        build(b, x)
+    assert type(error.value) is error_type
     assert str(error.value) == message
+    assert len(b.kernel.body.ops) == ops_before
 
 
 @pytest.mark.parametrize("int_type", [I1, I8, U8, I16, I32, I64], ids=lambda t: t.name)

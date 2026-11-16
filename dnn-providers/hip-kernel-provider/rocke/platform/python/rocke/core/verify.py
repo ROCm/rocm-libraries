@@ -54,11 +54,12 @@ from .ir import (
     _if_else_yields,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
-    _fcmp_pred_error,
+    _fcmp_error,
     _int_add_wrap_error,
     _int_cmp_error,
     _integer_element_error,
     _is_flag_ptr,
+    _missing_attr_message,
     _first_reused_loop_name,
     _orphan_yield,
     _reused_loop_name_message,
@@ -69,7 +70,7 @@ from .ir import (
     _scf_if_region_error,
     _smem_store_vN_op_error,
     _smem_vN_f32_op_error,
-    _vector_cmp_pred_error,
+    _vector_cmp_error,
     KernelDef,
     Op,
     Region,
@@ -149,7 +150,8 @@ _UNARY_SAME_TYPE = {
     "math.tanh",
 }
 
-# Comparison ops: 2 operands, 1 i1 result; require a 'pred' attr.
+# Comparison ops: 2 operands, 1 i1 result; their compare rule requires a 'pred'
+# attr (_int_cmp_error, _fcmp_error).
 _CMP_OPS = {"arith.cmp", "arith.fcmp"}
 
 # The two block-size kernel attrs state one fact two ways; a kernel sets one.
@@ -166,8 +168,6 @@ _ADDR_SPACES = {"global", "constant", "shared", "lds", "private"}
 # them; missing keys are real bugs).
 _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "arith.constant": ["value", "ity"],
-    "arith.cmp": ["pred"],
-    "arith.fcmp": ["pred"],
     ASSUME_RANGE_OP: ["multiple_of", "residue"],
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
@@ -305,7 +305,7 @@ class _Verifier:
         # 2) required attrs present.
         for key in _REQUIRED_ATTRS.get(op.name, ()):
             if key not in op.attrs:
-                self.err(f"op {op.name!r} missing required attr {key!r}", op)
+                self.err(_missing_attr_message(op.name, key), op)
 
         # 3) per-opcode arity / type contracts.
         self._check_contract(op, scope)
@@ -423,13 +423,13 @@ class _Verifier:
                 self.err(
                     f"{name}: result must be i1, got {op.results[0].type.name}", op
                 )
-            cmp_error = (
-                _int_cmp_error(op.attrs, a.type.name)
+            cmp_refusal = (
+                _int_cmp_error(op.attrs, a.type)
                 if name == "arith.cmp"
-                else _fcmp_pred_error(op.attrs)
+                else _fcmp_error(op.attrs, a.type)
             )
-            if cmp_error:
-                self.err(cmp_error, op)
+            if cmp_refusal:
+                self.err(str(cmp_refusal), op)
         elif name == ASSUME_RANGE_OP:
             if len(op.operands) not in (1, 2, 3) or len(op.results) != 1:
                 self.err(
@@ -460,9 +460,13 @@ class _Verifier:
                     op,
                 )
         elif name == "vector.cmp":
-            pred_error = _vector_cmp_pred_error(op.attrs)
-            if pred_error:
-                self.err(pred_error, op)
+            cmp_refusal = (
+                _vector_cmp_error(op.attrs, op.operands[0].type)
+                if op.operands
+                else None
+            )
+            if cmp_refusal:
+                self.err(str(cmp_refusal), op)
         elif name == "vector.extract":
             if len(op.operands) != 1 or len(op.results) != 1:
                 self.err(f"{name}: expected 1 operand / 1 result", op)
@@ -534,9 +538,9 @@ class _Verifier:
             if error:
                 self.err(error, op)
         elif name in ("tile.smem_load_vN_f32", "tile.smem_store_vN_f32"):
-            error = _smem_vN_f32_op_error(op)
-            if error:
-                self.err(error, op)
+            refusal = _smem_vN_f32_op_error(op)
+            if refusal:
+                self.err(str(refusal), op)
         elif name == "tile.global_ptr_offset":
             error = _global_ptr_offset_op_error(op)
             if error:

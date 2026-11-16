@@ -674,24 +674,15 @@ const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size
                                           cap);
 }
 
-/* Python core/ir.py::_element_type_error; the texts are the Python engine's. */
-const char* rocke_i_element_type_error(const char* access,
-                                       const char* param,
-                                       const rocke_type_t* operand_type,
-                                       const char* expected,
-                                       char* buf,
-                                       size_t cap)
+const char* rocke_i_type_name_message(const char* what,
+                                      const char* param,
+                                      const char* type_name,
+                                      const char* expected,
+                                      char* buf,
+                                      size_t cap)
 {
-    const rocke_type_t* elem
-        = operand_type->kind == ROCKE_TYPE_VECTOR || operand_type->kind == ROCKE_TYPE_SMEM
-              ? operand_type->elem
-              : operand_type;
-    if(strcmp(elem->name, expected) != 0)
-    {
-        snprintf(buf, cap, "%s failed - %s=%s, expected %s", access, param, elem->name, expected);
-        return buf;
-    }
-    return NULL;
+    snprintf(buf, cap, "%s failed - %s='%s', expected %s", what, param, type_name, expected);
+    return buf;
 }
 
 /* Python core/ir.py::_smem_f32_access_error; the texts are the Python engine's. */
@@ -701,30 +692,40 @@ const char* rocke_i_smem_f32_access_error(const char* access,
                                           char* buf,
                                           size_t cap)
 {
-    const char* error = rocke_i_element_type_error(access, "tile_elem", tile_type, "f32", buf, cap);
-    if(error || !value_type)
+    const rocke_type_t* tile_element
+        = tile_type->kind == ROCKE_TYPE_SMEM ? tile_type->elem : tile_type;
+    if(strcmp(tile_element->name, "f32") != 0)
     {
-        return error;
+        return rocke_i_type_name_message(
+            access, "tile element type", tile_element->name, "f32", buf, cap);
     }
-    return rocke_i_element_type_error(access, "value_elem", value_type, "f32", buf, cap);
+    if(value_type && strcmp(rocke_i_elem_of(value_type)->name, "f32") != 0)
+    {
+        return rocke_i_type_name_message(
+            access, "value element type", rocke_i_elem_of(value_type)->name, "f32", buf, cap);
+    }
+    return NULL;
 }
 
 /* Python core/ir.py::_smem_vN_f32_op_error; the texts are the Python engine's. */
-const char* rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap)
+rocke_status_t rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     if(op->num_operands == 0)
     {
-        return NULL;
+        return ROCKE_OK;
     }
     const bool is_store = op->opcode == ROCKE_OP_TILE_SMEM_STORE_VN_F32;
     const rocke_type_t* value_type = is_store ? op->operands[op->num_operands - 1]->type : NULL;
-    const char* error = rocke_i_smem_f32_access_error(
-        rocke_opcode_name(op->opcode), op->operands[0]->type, value_type, buf, cap);
-    if(error || !is_store)
+    if(rocke_i_smem_f32_access_error(
+           rocke_opcode_name(op->opcode), op->operands[0]->type, value_type, buf, cap))
     {
-        return error;
+        return ROCKE_ERR_TYPE;
     }
-    return rocke_i_smem_store_vN_op_error(op, buf, cap);
+    if(is_store && rocke_i_smem_store_vN_op_error(op, buf, cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
 }
 
 const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)
@@ -991,22 +992,34 @@ static const char* const k_vector_cmp_predicates[] = {"lt", "le", "gt", "ge", "e
 static const char* const k_fcmp_predicates[]
     = {"olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno", NULL};
 
+const char*
+    rocke_i_missing_attr_message(const char* op_name, const char* key, char* buf, size_t cap)
+{
+    snprintf(buf, cap, "op '%s' missing required attr '%s'", op_name, key);
+    return buf;
+}
+
 /* ir._string_attr_error: the error for the string attr `key` of `op_name`,
- * or NULL when it is absent or one of `allowed`; `not_a_string` is the error
- * for a value of another kind. */
+ * or NULL when it is one of `allowed`, or absent and not `required`;
+ * `not_a_string` is the error for a value of another kind. A returned error
+ * is written to `buf`. */
 static const char* string_attr_error(const rocke_attr_map_t* attrs,
                                      const char* op_name,
                                      const char* key,
                                      const char* const* allowed,
                                      const char* not_a_string,
+                                     bool required,
                                      char* buf,
                                      size_t cap)
 {
     const rocke_attr_value_t* v = rocke_attr_get(attrs, key);
     if(!v)
-        return NULL;
+        return required ? rocke_i_missing_attr_message(op_name, key, buf, cap) : NULL;
     if(v->kind != ROCKE_ATTR_STR)
-        return not_a_string;
+    {
+        snprintf(buf, cap, "%s", not_a_string);
+        return buf;
+    }
     bool known = false;
     for(const char* const* s = allowed; *s; ++s)
     {
@@ -1059,6 +1072,7 @@ const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
                                                "wrap",
                                                k_int_add_wraps,
                                                "arith.add: wrap must be the string 'nsw' or 'nuw'",
+                                               false,
                                                buf,
                                                cap);
     if(wrap_error)
@@ -1068,64 +1082,113 @@ const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
     return unsigned_form_width_error(attrs, "arith.add", "wrap", "nuw", operand_type, buf, cap);
 }
 
-const char* rocke_i_cmp_error(const rocke_attr_map_t* attrs,
-                              const rocke_type_t* operand_type,
-                              char* buf,
-                              size_t cap)
+/* ir._FCMP_OPERAND_TYPES: the float types the IR computes in. */
+static const char* const k_fcmp_operand_types[] = {"f16", "bf16", "f32", "f64", NULL};
+
+bool rocke_i_is_integer_type_name(const char* type_name)
+{
+    /* ir._INTEGER_ELEMENT_TYPES: the canonical names of the integer and
+     * predicate dtypes, matched exactly as the Python membership test does. A
+     * vector or pointer type name is no dtype. */
+    const rocke_dtype_info_t* info = type_name ? rocke_dtype_info(type_name) : NULL;
+    return info && strcmp(info->name, type_name) == 0
+           && (info->category == ROCKE_DTYPE_INTEGER || info->category == ROCKE_DTYPE_PREDICATE);
+}
+
+const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap)
 {
     const char* pred_error = string_attr_error(attrs,
                                                "arith.cmp",
                                                "pred",
                                                k_int_cmp_predicates,
                                                "arith.cmp: pred must be a string",
+                                               true,
                                                buf,
                                                cap);
-    if(!pred_error)
-    {
-        pred_error
-            = unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type, buf, cap);
-    }
     if(pred_error)
     {
         return pred_error;
     }
-    /* ir._INT_CMP_OPERAND_TYPES: the integer and predicate dtypes. A vector or
-     * pointer type name is no dtype. */
-    const char* type_name = operand_type ? operand_type->name : "?";
-    const rocke_dtype_info_t* info = rocke_dtype_info(type_name);
-    if(info && strcmp(info->name, type_name) == 0
-       && (info->category == ROCKE_DTYPE_INTEGER || info->category == ROCKE_DTYPE_PREDICATE))
+    return unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type, buf, cap);
+}
+
+rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
+                                 const rocke_type_t* operand_type,
+                                 char* buf,
+                                 size_t cap)
+{
+    if(rocke_i_cmp_pred_error(attrs, operand_type, buf, cap))
     {
-        return NULL;
+        return ROCKE_ERR_VALUE;
     }
-    snprintf(buf,
-             cap,
-             "arith.cmp failed - operand_type=%s, expected an integer or i1 type (compare "
-             "floats with fcmp)",
-             type_name);
-    return buf;
+    const char* type_name = operand_type ? operand_type->name : "?";
+    if(rocke_i_is_integer_type_name(type_name))
+    {
+        return ROCKE_OK;
+    }
+    rocke_i_type_name_message("arith.cmp",
+                              "operand type",
+                              type_name,
+                              "an integer or i1 type (compare floats with fcmp)",
+                              buf,
+                              cap);
+    return ROCKE_ERR_TYPE;
 }
 
-const char* rocke_i_vector_cmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap)
+rocke_status_t rocke_i_vector_cmp_error(const rocke_attr_map_t* attrs,
+                                        const rocke_type_t* operand_type,
+                                        char* buf,
+                                        size_t cap)
 {
-    return string_attr_error(attrs,
-                             "vector.cmp",
-                             "pred",
-                             k_vector_cmp_predicates,
-                             "vector.cmp: pred must be a string",
-                             buf,
-                             cap);
+    if(string_attr_error(attrs,
+                         "vector.cmp",
+                         "pred",
+                         k_vector_cmp_predicates,
+                         "vector.cmp: pred must be a string",
+                         false,
+                         buf,
+                         cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    return rocke_i_integer_element_error("vector.cmp", operand_type, buf, cap) ? ROCKE_ERR_TYPE
+                                                                               : ROCKE_OK;
 }
 
-const char* rocke_i_fcmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap)
+rocke_status_t rocke_i_fcmp_error(const rocke_attr_map_t* attrs,
+                                  const rocke_type_t* operand_type,
+                                  char* buf,
+                                  size_t cap)
 {
-    return string_attr_error(attrs,
-                             "arith.fcmp",
-                             "pred",
-                             k_fcmp_predicates,
-                             "arith.fcmp: pred must be a string",
-                             buf,
-                             cap);
+    if(string_attr_error(attrs,
+                         "arith.fcmp",
+                         "pred",
+                         k_fcmp_predicates,
+                         "arith.fcmp: pred must be a string",
+                         true,
+                         buf,
+                         cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    const char* type_name = operand_type ? operand_type->name : "?";
+    for(const char* const* name = k_fcmp_operand_types; *name; ++name)
+    {
+        if(strcmp(type_name, *name) == 0)
+        {
+            return ROCKE_OK;
+        }
+    }
+    rocke_i_type_name_message("arith.fcmp",
+                              "operand type",
+                              type_name,
+                              "f16, bf16, f32 or f64 (compare integers with cmp)",
+                              buf,
+                              cap);
+    return ROCKE_ERR_TYPE;
 }
 
 bool rocke_i_is_integer_element_op(rocke_opcode_t opcode)
@@ -1154,15 +1217,10 @@ const char* rocke_i_integer_element_error(const char* op_name,
 {
     const rocke_type_t* element = rocke_i_elem_of(operand_type);
     const char* element_name = element && element->name ? element->name : "?";
-    /* ir._INTEGER_ELEMENT_TYPES: the canonical names of the integer and
-     * predicate dtypes, matched exactly as the Python membership test does. */
-    const rocke_dtype_info_t* info = rocke_dtype_info(element_name);
-    if(info && strcmp(info->name, element_name) == 0
-       && (info->category == ROCKE_DTYPE_INTEGER || info->category == ROCKE_DTYPE_PREDICATE))
+    if(rocke_i_is_integer_type_name(element_name))
         return NULL;
-    snprintf(
-        buf, cap, "%s failed - element type='%s', expected an integer type", op_name, element_name);
-    return buf;
+    return rocke_i_type_name_message(
+        op_name, "element type", element_name, "an integer or i1 type", buf, cap);
 }
 
 void rocke_i_refuse_non_integer(const char* op_name, const rocke_type_t* operand_type)

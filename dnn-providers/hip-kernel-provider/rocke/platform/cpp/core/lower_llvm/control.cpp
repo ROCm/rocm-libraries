@@ -328,8 +328,8 @@ static void _op_vector_lshr(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_vector_binop(L, op, "lshr");
 }
 
-/* Python _op_vector_cmp: packed icmp with a pred map; the pred is checked by
- * the IR rule first (rocke_i_vector_cmp_pred_error, ROCKE_ERR_VALUE). */
+/* Python _op_vector_cmp: packed icmp with a pred map; the op is checked by
+ * the IR rule first (rocke_i_vector_cmp_error). */
 static void _op_vector_cmp(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -337,11 +337,13 @@ static void _op_vector_cmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    char pred_buf[ROCKE_ERR_MSG_CAP];
-    const char* pred_error = rocke_i_vector_cmp_pred_error(&op->attrs, pred_buf, sizeof pred_buf);
-    if(pred_error)
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status
+        = rocke_i_vector_cmp_error(&op->attrs, op->operands[0]->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", pred_error);
+        rocke_ll_fail(L, cmp_status, "%s", cmp_buf);
+        return;
     }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     if(pred == NULL)

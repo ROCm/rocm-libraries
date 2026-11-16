@@ -300,10 +300,11 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
     char cmp_buf[ROCKE_ERR_MSG_CAP];
-    const char* cmp_error = rocke_i_cmp_error(&op->attrs, a->type, cmp_buf, sizeof cmp_buf);
-    if(cmp_error)
+    const rocke_status_t cmp_status
+        = rocke_i_cmp_error(&op->attrs, a->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", cmp_error);
+        return rocke_h_fail(lw, cmp_status, "%s", cmp_buf);
     }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     if(!pred)
@@ -760,15 +761,12 @@ static rocke_status_t rocke_h_op_arith_fcmp(rocke_h_lowerer_t* lw, const rocke_o
     const char* an = rocke_h_name(lw, a);
     const char* bn = rocke_h_name(lw, b);
     const char* cop = NULL;
-    char pred_buf[ROCKE_ERR_MSG_CAP];
-    const char* pred_error = rocke_i_fcmp_pred_error(&op->attrs, pred_buf, sizeof pred_buf);
-    if(pred_error)
+    char fcmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t fcmp_status
+        = rocke_i_fcmp_error(&op->attrs, a->type, fcmp_buf, sizeof fcmp_buf);
+    if(fcmp_status != ROCKE_OK)
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", pred_error);
-    }
-    if(!pred)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.fcmp: missing pred");
+        return rocke_h_fail(lw, fcmp_status, "%s", fcmp_buf);
     }
     if(strcmp(pred, "olt") == 0)
     {

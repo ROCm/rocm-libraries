@@ -324,7 +324,6 @@ static int is_cmp(rocke_opcode_t o)
 static const char* const* required_attrs(rocke_opcode_t o, int* n)
 {
     static const char* constant_keys[] = {"value", "ity"};
-    static const char* pred_keys[] = {"pred"};
     static const char* mma_keys[] = {"op_id"};
     static const char* yield_keys[] = {"num"};
     static const char* asm_keys[] = {"template", "constraints"};
@@ -339,10 +338,6 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     case ROCKE_OP_ARITH_CONSTANT:
         *n = 2;
         return constant_keys;
-    case ROCKE_OP_ARITH_CMP:
-    case ROCKE_OP_ARITH_FCMP:
-        *n = 1;
-        return pred_keys;
     case ROCKE_OP_TILE_MMA:
         *n = 1;
         return mma_keys;
@@ -521,12 +516,12 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
             v_errf(v, op, "%s: result must be i1, got %s", name, tn(op->results[0]->type));
         }
         char cmp_buf[ROCKE_ERR_MSG_CAP];
-        const char* cmp_error = o == ROCKE_OP_ARITH_CMP
-                                    ? rocke_i_cmp_error(&op->attrs, a, cmp_buf, sizeof cmp_buf)
-                                    : rocke_i_fcmp_pred_error(&op->attrs, cmp_buf, sizeof cmp_buf);
-        if(cmp_error)
+        const rocke_status_t cmp_status
+            = o == ROCKE_OP_ARITH_CMP ? rocke_i_cmp_error(&op->attrs, a, cmp_buf, sizeof cmp_buf)
+                                      : rocke_i_fcmp_error(&op->attrs, a, cmp_buf, sizeof cmp_buf);
+        if(cmp_status != ROCKE_OK)
         {
-            v_errf(v, op, "%s", cmp_error);
+            v_errf(v, op, "%s", cmp_buf);
         }
     }
     else if(o == ROCKE_OP_ARITH_ASSUME_RANGE)
@@ -574,12 +569,12 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     }
     else if(o == ROCKE_OP_VECTOR_CMP)
     {
-        char pred_buf[ROCKE_ERR_MSG_CAP];
-        const char* pred_error
-            = rocke_i_vector_cmp_pred_error(&op->attrs, pred_buf, sizeof pred_buf);
-        if(pred_error)
+        char cmp_buf[ROCKE_ERR_MSG_CAP];
+        if(op->num_operands > 0
+           && rocke_i_vector_cmp_error(&op->attrs, op->operands[0]->type, cmp_buf, sizeof cmp_buf)
+                  != ROCKE_OK)
         {
-            v_errf(v, op, "%s", pred_error);
+            v_errf(v, op, "%s", cmp_buf);
         }
     }
     else if(o == ROCKE_OP_VECTOR_EXTRACT)
@@ -709,9 +704,9 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     else if(o == ROCKE_OP_TILE_SMEM_LOAD_VN_F32 || o == ROCKE_OP_TILE_SMEM_STORE_VN_F32)
     {
         char err[ROCKE_ERR_MSG_CAP];
-        if(const char* error = rocke_i_smem_vN_f32_op_error(op, err, sizeof err))
+        if(rocke_i_smem_vN_f32_op_error(op, err, sizeof err) != ROCKE_OK)
         {
-            v_errf(v, op, "%s", error);
+            v_errf(v, op, "%s", err);
         }
     }
     else if(o == ROCKE_OP_TILE_GLOBAL_PTR_OFFSET)
@@ -910,7 +905,11 @@ static void check_op(verifier_t* v, const rocke_op_t* op)
     {
         if(!rocke_attr_get(&op->attrs, req[i]))
         {
-            v_errf(v, op, "op '%s' missing required attr '%s'", op->name, req[i]);
+            char missing[ROCKE_ERR_MSG_CAP];
+            v_errf(v,
+                   op,
+                   "%s",
+                   rocke_i_missing_attr_message(op->name, req[i], missing, sizeof missing));
         }
     }
 

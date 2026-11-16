@@ -516,9 +516,12 @@ int test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts()
 }
 
 /* True when `build`, a call to one C builder on `builder`, is refused with
- * ROCKE_ERR_VALUE and exactly `message`, and adds no op to the kernel. */
+ * `status` and exactly `message`, and adds no op to the kernel. */
 template <typename Build>
-bool builder_refuses(rocke_ir_builder_t* builder, Build build, const char* message)
+bool builder_refuses(rocke_ir_builder_t* builder,
+                     Build build,
+                     rocke_status_t status,
+                     const char* message)
 {
     const int ops_before = builder->kernel->body->num_ops;
     bool refused = false;
@@ -528,15 +531,17 @@ bool builder_refuses(rocke_ir_builder_t* builder, Build build, const char* messa
     }
     catch(const ckc::Error& error)
     {
-        refused = error.code() == ROCKE_ERR_VALUE && std::strcmp(error.what(), message) == 0;
+        refused = error.code() == status && std::strcmp(error.what(), message) == 0;
     }
     return refused && builder->kernel->body->num_ops == ops_before;
 }
 
 /* True when the serialized kernel `text` parses, the verifier reports exactly
- * `message` for it, and the LLVM lowering refuses it with ROCKE_ERR_VALUE and
- * the same text, emitting nothing. */
-bool serialized_kernel_is_refused(const std::string& text, const char* message)
+ * `message` for it, and the LLVM lowering refuses it with `status` and the
+ * same text, emitting nothing. */
+bool serialized_kernel_is_refused(const std::string& text,
+                                  rocke_status_t status,
+                                  const char* message)
 {
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "parsed") != ROCKE_OK)
@@ -553,7 +558,7 @@ bool serialized_kernel_is_refused(const std::string& text, const char* message)
     const bool reported = verified && num_diags == 1 && std::strcmp(diags[0].message, message) == 0;
     rocke_diags_free(diags, num_diags);
     const Lowering lowering = lower_and_free(&b);
-    return reported && lowering.status == ROCKE_ERR_VALUE && lowering.text.empty()
+    return reported && lowering.status == status && lowering.text.empty()
            && lowering.error == message;
 }
 
@@ -595,6 +600,7 @@ int test_a_store_whose_value_lanes_differ_from_n_is_refused()
         const bool refused = builder_refuses(
             &b,
             [&] { rocke_b_smem_store_vN(&b, float_buf, at_zero, 1, value, test_case.n); },
+            ROCKE_ERR_VALUE,
             test_case.message);
         rocke_ir_builder_free(&b);
         CHECK(refused);
@@ -672,7 +678,7 @@ int test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused()
                 "    cf.return (  )\n"
                 "  }\n"
                 "}\n";
-        CHECK(serialized_kernel_is_refused(text, test_case.message));
+        CHECK(serialized_kernel_is_refused(text, ROCKE_ERR_VALUE, test_case.message));
     }
     return 0;
 }
@@ -711,6 +717,7 @@ int test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused()
         const bool refused = builder_refuses(
             &b,
             [&] { rocke_b_smem_store_vN_f32(&b, tile, at_zero, 1, value, test_case.n); },
+            ROCKE_ERR_VALUE,
             test_case.message);
         rocke_ir_builder_free(&b);
         CHECK(refused);
@@ -729,10 +736,10 @@ int test_an_f32_epilogue_access_to_a_tile_not_holding_f32_is_refused()
         bool is_store;
         const char* message;
     } cases[] = {
-        {rocke_f16(), false, "smem_load_vN_f32 failed - tile_elem=f16, expected f32"},
-        {rocke_bf16(), false, "smem_load_vN_f32 failed - tile_elem=bf16, expected f32"},
-        {rocke_f16(), true, "smem_store_vN_f32 failed - tile_elem=f16, expected f32"},
-        {rocke_bf16(), true, "smem_store_vN_f32 failed - tile_elem=bf16, expected f32"},
+        {rocke_f16(), false, "smem_load_vN_f32 failed - tile element type='f16', expected f32"},
+        {rocke_bf16(), false, "smem_load_vN_f32 failed - tile element type='bf16', expected f32"},
+        {rocke_f16(), true, "smem_store_vN_f32 failed - tile element type='f16', expected f32"},
+        {rocke_bf16(), true, "smem_store_vN_f32 failed - tile element type='bf16', expected f32"},
     };
     for(const auto& test_case : cases)
     {
@@ -754,6 +761,7 @@ int test_an_f32_epilogue_access_to_a_tile_not_holding_f32_is_refused()
                 else
                     rocke_b_smem_load_vN_f32(&b, tile, at_zero, 1, 4);
             },
+            ROCKE_ERR_TYPE,
             test_case.message);
         rocke_ir_builder_free(&b);
         CHECK(refused);
@@ -778,7 +786,8 @@ int test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused()
     const bool refused = builder_refuses(
         &b,
         [&] { rocke_b_smem_store_vN_f32(&b, tile, at_zero, 1, value, 4); },
-        "smem_store_vN_f32 failed - value_elem=f16, expected f32");
+        ROCKE_ERR_TYPE,
+        "smem_store_vN_f32 failed - value element type='f16', expected f32");
     rocke_ir_builder_free(&b);
     CHECK(refused);
     return 0;
@@ -793,8 +802,8 @@ int test_an_f16_store_of_a_value_not_holding_f16_is_refused()
         const rocke_type_t* value_elem;
         const char* message;
     } cases[] = {
-        {rocke_f32(), "smem_store_f16 failed - value_elem=f32, expected f16"},
-        {rocke_bf16(), "smem_store_f16 failed - value_elem=bf16, expected f16"},
+        {rocke_f32(), "smem_store_f16 failed - value element type='f32', expected f16"},
+        {rocke_bf16(), "smem_store_f16 failed - value element type='bf16', expected f16"},
     };
     for(const auto& test_case : cases)
     {
@@ -809,7 +818,10 @@ int test_an_f16_store_of_a_value_not_holding_f16_is_refused()
         CHECK(rocke_ir_builder_ok(&b));
         rocke_value_t* const at_zero[] = {zero};
         const bool refused = builder_refuses(
-            &b, [&] { rocke_b_smem_store_f16(&b, tile, at_zero, 1, value); }, test_case.message);
+            &b,
+            [&] { rocke_b_smem_store_f16(&b, tile, at_zero, 1, value); },
+            ROCKE_ERR_TYPE,
+            test_case.message);
         rocke_ir_builder_free(&b);
         CHECK(refused);
     }
@@ -817,9 +829,10 @@ int test_an_f16_store_of_a_value_not_holding_f16_is_refused()
 }
 
 /* Serialized IR reaches the verifier and the lowerings without passing the
- * builder: the verifier reports, and the LLVM lowering refuses with
- * ROCKE_ERR_VALUE, an f32 epilogue access to a tile that does not hold f32,
- * and a store whose value does not hold f32 or does not have `vec` lanes.
+ * builder: the verifier reports, and the LLVM lowering refuses, an f32
+ * epilogue access to a tile that does not hold f32 and a store whose value
+ * does not hold f32 (ROCKE_ERR_TYPE), or does not have `vec` lanes
+ * (ROCKE_ERR_VALUE).
  * Mirrors test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused. */
 int test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused()
 {
@@ -827,29 +840,34 @@ int test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused()
     {
         const char* tile_elem;
         const char* access_lines;
+        rocke_status_t status;
         const char* message;
     } cases[] = {
         {"f16",
          "%av4 : vec<f32x4> = tile.smem_load_vN_f32 ( %buf2, %c1 ) "
          "{ elem_type = s:\"f32\", rank = i:1, vec = i:4 }",
-         "tile.smem_load_vN_f32 failed - tile_elem=f16, expected f32"},
+         ROCKE_ERR_TYPE,
+         "tile.smem_load_vN_f32 failed - tile element type='f16', expected f32"},
         {"f16",
          "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
          "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }\n"
          "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
          "{ elem_type = s:\"f32\", rank = i:1, vec = i:4 }",
-         "tile.smem_store_vN_f32 failed - tile_elem=f16, expected f32"},
+         ROCKE_ERR_TYPE,
+         "tile.smem_store_vN_f32 failed - tile element type='f16', expected f32"},
         {"f32",
          "%v3 : vec<f16x4> = memref.global_load_vN ( %outh, %c1 ) "
          "{ align = i:2, elem_type = s:\"f16\", vec = i:4 }\n"
          "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
          "{ elem_type = s:\"f32\", rank = i:1, vec = i:4 }",
-         "tile.smem_store_vN_f32 failed - value_elem=f16, expected f32"},
+         ROCKE_ERR_TYPE,
+         "tile.smem_store_vN_f32 failed - value element type='f16', expected f32"},
         {"f32",
          "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
          "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }\n"
          "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
          "{ elem_type = s:\"f32\", rank = i:1, vec = i:2 }",
+         ROCKE_ERR_VALUE,
          "tile.smem_store_vN_f32 failed - lanes=4, expected vec=2"},
     };
     for(const auto& test_case : cases)
@@ -870,7 +888,7 @@ int test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused()
                                    "    cf.return (  )\n"
                                    "  }\n"
                                    "}\n";
-        CHECK(serialized_kernel_is_refused(text, test_case.message));
+        CHECK(serialized_kernel_is_refused(text, test_case.status, test_case.message));
     }
     return 0;
 }

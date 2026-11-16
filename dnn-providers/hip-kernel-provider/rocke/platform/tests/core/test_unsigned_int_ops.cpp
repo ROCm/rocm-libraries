@@ -318,7 +318,7 @@ void case_integer_element_builder_rule()
                 op.build(b, a, a);
             },
             std::string(rocke_opcode_name(op.opcode))
-                + " failed - element type='f32', expected an integer type");
+                + " failed - element type='f32', expected an integer or i1 type");
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_i1");
         const rocke_type_t* flag_type
@@ -369,7 +369,7 @@ void case_integer_element_verifier_rule()
     for(const IntegerElementOp& op : k_integer_element_ops)
     {
         const std::string want = std::string(rocke_opcode_name(op.opcode))
-                                 + " failed - element type='f32', expected an integer type\n";
+                                 + " failed - element type='f32', expected an integer or i1 type\n";
         const std::string errors
             = verify_past_the_builder(op.opcode, op.vector, rocke_f32(), rocke_f32());
         EXPECT(errors == want, "want '" + want + "', got '" + errors + "'");
@@ -595,7 +595,8 @@ enum class CompareOperand
     i32,
     f32,
     ptr_i32,
-    vec_i32x2
+    vec_i32x2,
+    vec_f32x2
 };
 
 const rocke_type_t* compare_operand_type(rocke_ir_builder_t* b, CompareOperand operand)
@@ -612,55 +613,109 @@ const rocke_type_t* compare_operand_type(rocke_ir_builder_t* b, CompareOperand o
         return rocke_ptr_type(b, rocke_i32(), "global");
     case CompareOperand::vec_i32x2:
         return rocke_vector_type(b, rocke_i32(), 2);
+    case CompareOperand::vec_f32x2:
+        return rocke_vector_type(b, rocke_f32(), 2);
     }
     return nullptr;
 }
 
+/* A compare's pred attr in the cases below: absent, or of another kind than a
+ * string (the int 1), when the case names no pred string. */
+const char* const kAbsentPred = "(absent)";
+
 /* The verifier and the LLVM and HIP lowerings refuse a compare the IR rule
- * refuses, the lowerings with ROCKE_ERR_VALUE, all in the rule's words: an
- * arith.cmp pred is checked first ("ult" takes i32 or i64 operands), then its
- * operands must be integers or i1 (a float or pointer one is not lowered to an
- * integer compare); vector.cmp takes the signed orderings and equality only;
- * arith.fcmp takes its own predicates; an unknown or non-string pred is
- * neither read as a default nor passed through. The same cases and texts as
- * test_unsigned_int_ops.py. */
+ * refuses, all in the rule's words, the lowerings with the rule's status: an
+ * arith.cmp pred is required and checked first ("ult" takes i32 or i64
+ * operands), then its operands must be integers or i1 (a float or pointer one
+ * is not lowered to an integer compare: ROCKE_ERR_TYPE); vector.cmp takes the
+ * signed orderings and equality only, on integer or i1 lanes; arith.fcmp
+ * requires its own predicates, on f16, bf16, f32 or f64 operands; an unknown
+ * or non-string pred is neither read as a default nor passed through. The
+ * same cases and texts as test_unsigned_int_ops.py. */
 void case_compares_refused_by_the_ir_rule()
 {
     struct CompareCase
     {
         rocke_opcode_t opcode;
-        const char* pred; /* nullptr: the int attr 1 */
+        const char* pred; /* nullptr: the int attr 1; kAbsentPred: no attr */
         CompareOperand operand;
+        rocke_status_t status;
         const char* want;
     };
     const CompareCase cases[] = {
         {ROCKE_OP_ARITH_CMP,
          "ult",
          CompareOperand::f32,
+         ROCKE_ERR_VALUE,
          "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"},
         {ROCKE_OP_ARITH_CMP,
          "ult",
          CompareOperand::i8,
+         ROCKE_ERR_VALUE,
          "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"},
-        {ROCKE_OP_ARITH_CMP, "ugt", CompareOperand::i32, "arith.cmp: unknown pred 'ugt'"},
-        {ROCKE_OP_ARITH_CMP, nullptr, CompareOperand::i32, "arith.cmp: pred must be a string"},
+        {ROCKE_OP_ARITH_CMP,
+         "ugt",
+         CompareOperand::i32,
+         ROCKE_ERR_VALUE,
+         "arith.cmp: unknown pred 'ugt'"},
+        {ROCKE_OP_ARITH_CMP,
+         nullptr,
+         CompareOperand::i32,
+         ROCKE_ERR_VALUE,
+         "arith.cmp: pred must be a string"},
+        {ROCKE_OP_ARITH_CMP,
+         kAbsentPred,
+         CompareOperand::i32,
+         ROCKE_ERR_VALUE,
+         "op 'arith.cmp' missing required attr 'pred'"},
         {ROCKE_OP_ARITH_CMP,
          "lt",
          CompareOperand::f32,
-         "arith.cmp failed - operand_type=f32, expected an integer or i1 type (compare floats "
-         "with fcmp)"},
+         ROCKE_ERR_TYPE,
+         "arith.cmp failed - operand type='f32', expected an integer or i1 type (compare "
+         "floats with fcmp)"},
         {ROCKE_OP_ARITH_CMP,
          "eq",
          CompareOperand::ptr_i32,
-         "arith.cmp failed - operand_type=ptr<i32,global>, expected an integer or i1 type "
+         ROCKE_ERR_TYPE,
+         "arith.cmp failed - operand type='ptr<i32,global>', expected an integer or i1 type "
          "(compare floats with fcmp)"},
-        {ROCKE_OP_VECTOR_CMP, "ult", CompareOperand::vec_i32x2, "vector.cmp: unknown pred 'ult'"},
+        {ROCKE_OP_VECTOR_CMP,
+         "ult",
+         CompareOperand::vec_i32x2,
+         ROCKE_ERR_VALUE,
+         "vector.cmp: unknown pred 'ult'"},
         {ROCKE_OP_VECTOR_CMP,
          nullptr,
          CompareOperand::vec_i32x2,
+         ROCKE_ERR_VALUE,
          "vector.cmp: pred must be a string"},
-        {ROCKE_OP_ARITH_FCMP, "lt", CompareOperand::f32, "arith.fcmp: unknown pred 'lt'"},
-        {ROCKE_OP_ARITH_FCMP, nullptr, CompareOperand::f32, "arith.fcmp: pred must be a string"},
+        {ROCKE_OP_VECTOR_CMP,
+         "lt",
+         CompareOperand::vec_f32x2,
+         ROCKE_ERR_TYPE,
+         "vector.cmp failed - element type='f32', expected an integer or i1 type"},
+        {ROCKE_OP_ARITH_FCMP,
+         "lt",
+         CompareOperand::f32,
+         ROCKE_ERR_VALUE,
+         "arith.fcmp: unknown pred 'lt'"},
+        {ROCKE_OP_ARITH_FCMP,
+         nullptr,
+         CompareOperand::f32,
+         ROCKE_ERR_VALUE,
+         "arith.fcmp: pred must be a string"},
+        {ROCKE_OP_ARITH_FCMP,
+         kAbsentPred,
+         CompareOperand::f32,
+         ROCKE_ERR_VALUE,
+         "op 'arith.fcmp' missing required attr 'pred'"},
+        {ROCKE_OP_ARITH_FCMP,
+         "olt",
+         CompareOperand::i32,
+         ROCKE_ERR_TYPE,
+         "arith.fcmp failed - operand type='i32', expected f16, bf16, f32 or f64 (compare "
+         "integers with cmp)"},
     };
     const auto status_text = [](rocke_status_t status, const std::string& message) {
         return "status " + std::to_string((int)status) + " '" + message + "'";
@@ -673,13 +728,13 @@ void case_compares_refused_by_the_ir_rule()
         rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
         rocke_value_t* operands[2] = {a, a};
         rocke_attr_map_t attrs = rocke_i_attrs(&b);
-        if(c.pred)
-        {
-            rocke_attr_set_str(&b, &attrs, "pred", c.pred);
-        }
-        else
+        if(!c.pred)
         {
             rocke_attr_set_int(&b, &attrs, "pred", 1);
+        }
+        else if(c.pred != kAbsentPred)
+        {
+            rocke_attr_set_str(&b, &attrs, "pred", c.pred);
         }
         const rocke_type_t* result_type = c.opcode == ROCKE_OP_VECTOR_CMP
                                               ? rocke_vector_type(&b, rocke_i1(), type->count)
@@ -692,7 +747,7 @@ void case_compares_refused_by_the_ir_rule()
         EXPECT(verifier_got == verifier_want,
                "verifier: want '" + verifier_want + "', got '" + verifier_got + "'");
 
-        const std::string want = status_text(ROCKE_ERR_VALUE, c.want);
+        const std::string want = status_text(c.status, c.want);
         std::string llvm;
         std::string llvm_error;
         const rocke_status_t llvm_status = lower_llvm_status(&b, &llvm, &llvm_error);
@@ -708,8 +763,8 @@ void case_compares_refused_by_the_ir_rule()
     }
 }
 
-/* The C API compare builders refuse what the IR rule refuses, with
- * ROCKE_ERR_VALUE and the rule's text (the same texts as the Python builders). */
+/* The C API compare builders refuse what the IR rule refuses, with the rule's
+ * status and text (the same texts as the Python builders). */
 void case_compare_builders_refuse_what_the_ir_rule_refuses()
 {
     enum class Builder
@@ -717,28 +772,42 @@ void case_compare_builders_refuse_what_the_ir_rule_refuses()
         cmp_lt,
         cmp_eq,
         fcmp,
-        vector_cmp
+        fcmp_of_integers,
+        vector_cmp,
+        vector_cmp_of_floats
     };
     const struct
     {
         Builder builder;
+        rocke_status_t status;
         const char* want;
     } cases[] = {
         {Builder::cmp_lt,
-         "arith.cmp failed - operand_type=f32, expected an integer or i1 type (compare floats "
-         "with fcmp)"},
+         ROCKE_ERR_TYPE,
+         "arith.cmp failed - operand type='f32', expected an integer or i1 type (compare "
+         "floats with fcmp)"},
         {Builder::cmp_eq,
-         "arith.cmp failed - operand_type=f32, expected an integer or i1 type (compare floats "
-         "with fcmp)"},
-        {Builder::fcmp, "arith.fcmp: unknown pred 'lt'"},
-        {Builder::vector_cmp, "vector.cmp: unknown pred 'ult'"},
+         ROCKE_ERR_TYPE,
+         "arith.cmp failed - operand type='f32', expected an integer or i1 type (compare "
+         "floats with fcmp)"},
+        {Builder::fcmp, ROCKE_ERR_VALUE, "arith.fcmp: unknown pred 'lt'"},
+        {Builder::fcmp_of_integers,
+         ROCKE_ERR_TYPE,
+         "arith.fcmp failed - operand type='i32', expected f16, bf16, f32 or f64 (compare "
+         "integers with cmp)"},
+        {Builder::vector_cmp, ROCKE_ERR_VALUE, "vector.cmp: unknown pred 'ult'"},
+        {Builder::vector_cmp_of_floats,
+         ROCKE_ERR_TYPE,
+         "vector.cmp failed - element type='f32', expected an integer or i1 type"},
     };
     for(const auto& c : cases)
     {
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "refused_compare_builder");
         rocke_value_t* f = rocke_b_param(&b, "f", rocke_f32(), nullptr);
+        rocke_value_t* i = rocke_b_param(&b, "i", rocke_i32(), nullptr);
         rocke_value_t* v = rocke_b_param(&b, "v", rocke_vector_type(&b, rocke_i32(), 2), nullptr);
+        rocke_value_t* fv = rocke_b_param(&b, "fv", rocke_vector_type(&b, rocke_f32(), 2), nullptr);
         bool refused = false;
         std::string got;
         try
@@ -755,19 +824,24 @@ void case_compare_builders_refuse_what_the_ir_rule_refuses()
             case Builder::fcmp:
                 r = rocke_b_fcmp(&b, "lt", f, f);
                 break;
+            case Builder::fcmp_of_integers:
+                r = rocke_b_fcmp(&b, "olt", i, i);
+                break;
             case Builder::vector_cmp:
                 r = rocke_b_vector_cmp(&b, "ult", v, v);
+                break;
+            case Builder::vector_cmp_of_floats:
+                r = rocke_b_vector_cmp(&b, "lt", fv, fv);
                 break;
             }
             const char* error = rocke_ir_builder_error(&b);
             got = error ? error : "";
-            refused
-                = r == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE && got == c.want;
+            refused = r == nullptr && rocke_ir_builder_status(&b) == c.status && got == c.want;
         }
         catch(const ckc::Error& error)
         {
             got = error.what();
-            refused = error.code() == ROCKE_ERR_VALUE && got == c.want;
+            refused = error.code() == c.status && got == c.want;
         }
         EXPECT(refused, std::string("want '") + c.want + "', got '" + got + "'");
         rocke_ir_builder_free(&b);

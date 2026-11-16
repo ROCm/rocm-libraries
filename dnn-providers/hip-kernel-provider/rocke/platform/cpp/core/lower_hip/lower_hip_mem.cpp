@@ -244,10 +244,11 @@ static rocke_status_t _op_tile_smem_store_vN_f32(rocke_h_lowerer_t* lw, const ro
     }
     {
         char contract_error[ROCKE_ERR_MSG_CAP];
-        if(const char* error
-           = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+        const rocke_status_t contract_status
+            = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error);
+        if(contract_status != ROCKE_OK)
         {
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+            return rocke_h_fail(lw, contract_status, "%s", contract_error);
         }
     }
     smem = op->operands[0];
@@ -408,10 +409,11 @@ static rocke_status_t _op_tile_smem_load_vN_f32(rocke_h_lowerer_t* lw, const roc
     }
     {
         char contract_error[ROCKE_ERR_MSG_CAP];
-        if(const char* error
-           = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+        const rocke_status_t contract_status
+            = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error);
+        if(contract_status != ROCKE_OK)
         {
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+            return rocke_h_fail(lw, contract_status, "%s", contract_error);
         }
     }
     smem = op->operands[0];
