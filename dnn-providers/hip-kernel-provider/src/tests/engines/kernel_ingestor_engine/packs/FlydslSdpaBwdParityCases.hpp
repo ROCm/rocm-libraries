@@ -20,10 +20,12 @@
  * @file FlydslSdpaBwdParityCases.hpp
  * @brief The cases the FlyDSL SDPA forward's RDNA dispatch suite runs, for the split backward
  *        engine's feature set: each is one graph the split matcher (FlydslSdpaBwdCommon.hpp; the
- *        gfx11 verdict table flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv) either serves or
- *        declines for a named rule. TestFlydslSdpaBwdParityGraphs.cpp checks them on the host
- *        against the installed gfx11 shard; TestFlydslSdpaBwdParity.cpp launches them on a gfx11
- *        device.
+ *        verdict tables flydsl/tests/data/sdpa_bwd_{gfx11,gfx12,...}_verdicts.csv) either serves
+ *        or declines for a named rule. TestFlydslSdpaBwdParityGraphs.cpp checks them on the host
+ *        against the installed gfx11, gfx12, gfx90a or gfx942 shard; TestFlydslSdpaBwdParity.cpp
+ *        launches them on a device of those architectures. parityCases() is arch-neutral (every
+ *        head dim in it is within the gfx11 ladder); gfx12WideParityCases() holds the head dims
+ *        past 256 that only the gfx12 catalog has rungs for.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_parity
 {
@@ -325,6 +327,76 @@ inline std::string parityName(const ::testing::TestParamInfo<size_t>& info)
 inline auto parityIndices()
 {
     return ::testing::Range(size_t{0}, parityCases().size());
+}
+
+/// The cases only a gfx12 device is held to: the head dims past 256, where the gfx12 catalog
+/// has the wide rungs (16-bit dK/dV 320, 384, 448, 512; 16-bit dQ 384, 512, with no 320 or 448
+/// row; fp32 512 for both) and the shared matcher's bound of 512, which every architecture
+/// declines above. A rung serves max(Dqk, Dv): the first rung at or above it that the slot has.
+inline const std::vector<ParityCase>& gfx12WideParityCases()
+{
+    constexpr auto HALF = DataType::HALF;
+    constexpr auto BF16 = DataType::BFLOAT16;
+    constexpr auto FP32 = DataType::FLOAT;
+    static const std::vector<ParityCase> s_cases = [] {
+        std::vector<ParityCase> list;
+
+        // 16-bit: dK/dV 320 and dQ 384 (dQ has no 320 row).
+        list.push_back(
+            served("ComputesHeadDim300OnTheDkdv320AndDq384Rungs", caseOf(HALF, 300, 70, 190)));
+        list.push_back(served("ComputesHeadDim320OnTheDkdv320AndDq384Rungs",
+                              withMask(caseOf(BF16, 320, 100, 100, 8, 2), BwdMask::TOP_LEFT)));
+        // 384 is a rung of both slots.
+        list.push_back(served("ComputesHeadDim384OnTheDkdv384AndDq384Rungs",
+                              withMask(caseOf(HALF, 384, 90, 150, 4, 2), BwdMask::BOTTOM_RIGHT)));
+        // dK/dV 448 and dQ 512 (dQ has no 448 row).
+        list.push_back(
+            served("ComputesHeadDim400OnTheDkdv448AndDq512Rungs", caseOf(BF16, 400, 64, 130)));
+        list.push_back(served("ComputesHeadDim448OnTheDkdv448AndDq512Rungs",
+                              withMask(caseOf(HALF, 448, 100, 100, 4, 2), BwdMask::TOP_LEFT)));
+        // 512 is a rung of both slots, the widest the matcher accepts.
+        list.push_back(served("ComputesHeadDim512OnTheDkdv512AndDq512Rungs",
+                              withMask(caseOf(BF16, 512, 96, 160, 4, 2), BwdMask::BOTTOM_RIGHT)));
+        list.push_back(served("ComputesHeadDim512NonCausal", caseOf(HALF, 512, 70, 130)));
+        // V narrower or wider than Q/K: the slot's rung follows the wider of the two, prep's
+        // the value width.
+        auto narrowValue = caseOf(HALF, 448, 80, 150);
+        narrowValue.headDimV = 128;
+        list.push_back(served("ServesAValueHeadDimNarrowerThanAWideQueryOne", narrowValue));
+        auto wideValue = caseOf(BF16, 192, 80, 150);
+        wideValue.headDimV = 320;
+        list.push_back(served("ServesAValueHeadDimWiderThanTheQueryOneOnAWideRung", wideValue));
+
+        // fp32 has one wide rung, 512, for every head dim from 257.
+        list.push_back(served("ComputesFp32HeadDim512", caseOf(FP32, 512, 64, 96)));
+        list.push_back(served("ComputesFp32HeadDim300OnTheDkdv512AndDq512Rungs",
+                              withMask(caseOf(FP32, 300, 64, 96, 4, 2), BwdMask::TOP_LEFT)));
+
+        // Past 512 the shared matcher declines (DT-4), whichever of Q/K and V is wider, in every
+        // dtype.
+        list.push_back(declined("DeclinesHeadDim513", specOf(caseOf(HALF, 513, 64, 64)), "DT-4"));
+        list.push_back(declined("DeclinesHeadDim640", specOf(caseOf(BF16, 640, 64, 64)), "DT-4"));
+        auto wideQuery = caseOf(HALF, 600, 64, 64);
+        wideQuery.headDimV = 64;
+        list.push_back(declined("DeclinesAQueryHeadDimPast512", specOf(wideQuery), "DT-4"));
+        auto wideValueDecline = caseOf(BF16, 64, 64, 64);
+        wideValueDecline.headDimV = 600;
+        list.push_back(declined("DeclinesAValueHeadDimPast512", specOf(wideValueDecline), "DT-4"));
+        list.push_back(
+            declined("DeclinesFp32HeadDim768", specOf(caseOf(FP32, 768, 64, 64)), "DT-4"));
+        return list;
+    }();
+    return s_cases;
+}
+
+inline std::string gfx12WideParityName(const ::testing::TestParamInfo<size_t>& info)
+{
+    return gfx12WideParityCases()[info.param].name;
+}
+
+inline auto gfx12WideParityIndices()
+{
+    return ::testing::Range(size_t{0}, gfx12WideParityCases().size());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_parity
