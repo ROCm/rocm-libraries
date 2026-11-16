@@ -154,6 +154,13 @@ void init_code(nb::module_ m)
                  self.name = std::get<0>(state);
              });
 
+    // Carrier leaf for StinkyTofu logical-IR instructions inside a rocisa Module
+    // tree. Instances are built on the C++ side (the conversion glue); Python only
+    // needs the type registered so isinstance/downcast work once leaves appear in
+    // a tree. No constructor is exposed here on purpose.
+    nb::class_<rocisa::LogicalLeaf, rocisa::Item>(m_code, "LogicalLeaf")
+        .def("__str__", &rocisa::LogicalLeaf::toString);
+
     nb::class_<rocisa::Module, rocisa::Item>(m_code, "Module")
         .def(nb::init<const std::string&>(), nb::arg("name") = "")
         .def_rw("isCallable", &rocisa::Module::isCallable)

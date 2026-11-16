@@ -1464,6 +1464,13 @@ void appendLogicalItem(PyLogicalModule& lm, const rocisa::Item* item, const Logi
         if (!sub->name.empty()) lm.endGroup(sub->name);
         return;
     }
+    // Carrier leaf: the logical instruction is already built, so pass it straight
+    // through instead of converting a rocisa instruction. This is what makes a
+    // mixed rocisa/logical tree lower correctly on the logical-IR path.
+    if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item)) {
+        lm.add(leaf->logical());
+        return;
+    }
     const auto* inst = dynamic_cast<const rocisa::Instruction*>(item);
     if (inst == nullptr) {
         throw std::runtime_error("rocisa item has no logical-IR form: " + item->toString());

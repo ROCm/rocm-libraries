@@ -37,6 +37,15 @@
 #include <variant>
 #include <vector>
 
+// Carried by rocisa::LogicalLeaf below. Only a forward declaration: core rocisa
+// headers stay decoupled from stinkytofu, and a shared_ptr to an incomplete type
+// is fine for storage/copy/destroy. The full type is only needed where a leaf is
+// actually built/consumed (the rocisa<->stinkytofu conversion glue).
+namespace stinkytofu
+{
+    class LogicalInstruction;
+}
+
 namespace rocisa
 {
     struct Label : public Item
@@ -156,6 +165,49 @@ namespace rocisa
             if(!rocIsa::getInstance().getOutputOptions().outputNoComment)
                 return text;
             return "";
+        }
+    };
+
+    /*
+    Carrier leaf for an already-built StinkyTofu logical-IR instruction living
+    inside a rocisa Module tree (the "mixed tree" of the rocisa -> logical IR
+    migration).
+
+    It is a real rocisa::Item, so the tree can hold it and the usual structural
+    surgery (reorder / insert / remove / regroup) keeps working via the existing
+    rocisa API. The rocisa -> logical converter recognizes it and passes the
+    payload straight through instead of converting a rocisa instruction.
+
+    A LogicalLeaf has ONLY a logical form: a tree that contains one must be
+    lowered through the logical-IR path (LowerViaLogicalIR), never the direct
+    rocisa -> asm path.
+    */
+    struct LogicalLeaf : public Item
+    {
+        std::shared_ptr<stinkytofu::LogicalInstruction> logicalInst;
+
+        LogicalLeaf(std::shared_ptr<stinkytofu::LogicalInstruction> inst,
+                    const std::string&                              name = "LogicalLeaf")
+            : Item(name)
+            , logicalInst(std::move(inst))
+        {
+        }
+
+        LogicalLeaf(const LogicalLeaf& other) = default;
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<LogicalLeaf>(*this);
+        }
+
+        const std::shared_ptr<stinkytofu::LogicalInstruction>& logical() const
+        {
+            return logicalInst;
+        }
+
+        std::string toString() const override
+        {
+            return name;
         }
     };
 
