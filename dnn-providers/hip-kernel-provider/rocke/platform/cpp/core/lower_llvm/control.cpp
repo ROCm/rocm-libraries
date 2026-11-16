@@ -2433,10 +2433,22 @@ static void _op_tile_exec_or(rocke_lower_t* L, const rocke_op_t* op)
  *     for i, line in enumerate(cur.lines):
  *         cur.lines[i] = line.replace("%IF_END", f"%{end_blk.label}")
  *
- * Note: the Python scf.if lowers ONLY regions[0]; there is no else region. */
+ * The scf.if holds exactly one region, its then region
+ * (rocke_i_scf_if_region_error), checked before it is read; there is no else
+ * region. */
 static void _op_scf_if(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_regions < 1)
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    char region_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_if_region_error(op, region_error, sizeof region_error))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", region_error);
+        return;
+    }
+    if(op->num_operands < 1)
     {
         return;
     }

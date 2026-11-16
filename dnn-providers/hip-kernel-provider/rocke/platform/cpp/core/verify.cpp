@@ -858,16 +858,15 @@ static void check_scf_if(verifier_t* v, const rocke_op_t* op)
     {
         v_errf(v, op, "scf.if condition must be i1, got %s", tn(op->operands[0]->type));
     }
-    if(op->num_regions <= 0)
+    char region_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_if_region_error(op, region_error, sizeof region_error))
     {
-        v_errf(v, op, "scf.if missing its 'then' region");
+        v_errf(v, op, "%s", region_error);
+        return;
     }
-    for(int i = 0; i < op->num_regions; ++i)
-    {
-        int saved = v->scope_count;
-        check_region(v, op->regions[i], 0);
-        v->scope_count = saved;
-    }
+    int saved = v->scope_count;
+    check_region(v, op->regions[0], 0);
+    v->scope_count = saved;
 }
 
 /* ---- op ---- */
@@ -926,8 +925,9 @@ static void check_op(verifier_t* v, const rocke_op_t* op)
     }
 
     /* 5) nested regions, with block-defined values registered first. An scf.for
-     * is checked even with no region, so a loop without its body is refused. */
-    if(op->num_regions > 0 || op->opcode == ROCKE_OP_SCF_FOR)
+     * or scf.if is checked even with no region, so one without its region is
+     * refused. */
+    if(op->num_regions > 0 || op->opcode == ROCKE_OP_SCF_FOR || op->opcode == ROCKE_OP_SCF_IF)
     {
         if(op->opcode == ROCKE_OP_SCF_FOR)
         {

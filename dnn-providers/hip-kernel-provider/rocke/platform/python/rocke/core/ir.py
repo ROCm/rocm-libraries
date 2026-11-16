@@ -1733,17 +1733,40 @@ def _orphan_yield(ops: Sequence[Op]) -> Op | None:
     return None
 
 
-def _scf_for_region_error(op: Op) -> str | None:
-    """The refusal for the ``scf.for`` ``op`` when it does not hold exactly one
-    region, its body, or None when it does.
+def _single_region_error(op: Op, region_role: str) -> str | None:
+    """The refusal for ``op`` when it does not hold exactly one region, its
+    ``region_role`` region (``"body"``, ``"then"``), or None when it does.
 
-    The loop rule and the lowerings read only the first region, so a second one
-    would be dropped unchecked, yields included. The verifier checks this
-    before it reads the body; :func:`_scf_for_error` checks it first.
+    The rule and the lowerings of a one-region op read only that region, so a
+    second one would be dropped unchecked and a missing one cannot be read.
+    Serialized IR can hold any region count, so the verifier and every
+    lowering check this before they read the region, in both engines
+    (``single_region_error``).
     """
     if len(op.regions) != 1:
-        return f"scf.for: expected 1 body region, got {len(op.regions)}"
+        return f"{op.name}: expected 1 {region_role} region, got {len(op.regions)}"
     return None
+
+
+def _scf_for_region_error(op: Op) -> str | None:
+    """The refusal for the ``scf.for`` ``op`` when it does not hold exactly one
+    region, its body, or None when it does (:func:`_single_region_error`).
+
+    The verifier checks this before it reads the body; :func:`_scf_for_error`
+    checks it first.
+    """
+    return _single_region_error(op, "body")
+
+
+def _scf_if_region_error(op: Op) -> str | None:
+    """The refusal for the ``scf.if`` ``op`` when it does not hold exactly one
+    region, its then region, or None when it does
+    (:func:`_single_region_error`; ``rocke_i_scf_if_region_error`` in the C++
+    engine). The verifier and every lowering of ``scf.if`` check it before
+    they read the region; an ``scf.if`` has no else region (``scf.if_else``
+    has one).
+    """
+    return _single_region_error(op, "then")
 
 
 def _scf_for_carried_count_error(op: Op) -> str | None:
@@ -1928,12 +1951,13 @@ def _scf_for_error(op: Op) -> ValueError | TypeError | None:
 
 
 def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
-    """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`) and every
-    ``scf.if_else`` (:func:`_if_else_yields`) among ``ops`` and nested in them.
+    """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`), every
+    ``scf.if`` (:func:`_scf_if_region_error`) and every ``scf.if_else``
+    (:func:`_if_else_yields`) among ``ops`` and nested in them.
 
     A lowering calls it on a loop body it does not lower (an unrolled loop of
-    zero trips), so that body's malformed loop or if/else is refused as it is
-    wherever the body is lowered; the C++ engine's
+    zero trips), so that body's malformed loop, scf.if or if/else is refused as
+    it is wherever the body is lowered; the C++ engine's
     ``rocke_i_check_control_flow`` is its twin.
     """
     for op in ops:
@@ -1941,6 +1965,10 @@ def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
             refusal = _scf_for_error(op)
             if refusal is not None:
                 raise refusal
+        elif op.name == "scf.if":
+            error = _scf_if_region_error(op)
+            if error is not None:
+                raise ValueError(error)
         elif op.name == "scf.if_else":
             _if_else_yields(op)
         for region in op.regions:

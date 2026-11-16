@@ -2943,13 +2943,33 @@ static int present_region_count(const rocke_op_t* op)
     return count;
 }
 
-const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap)
+/* Python core/ir.py::_single_region_error: the refusal for `op` when it does
+ * not hold exactly one region, its `region_role` region ("body", "then"),
+ * written into `buf`, or NULL when it does. A NULL region counts as missing
+ * (present_region_count). */
+static const char*
+    single_region_error(const rocke_op_t* op, const char* region_role, char* buf, size_t cap)
 {
     const int num_regions = present_region_count(op);
     if(op->num_regions == 1 && num_regions == 1)
         return NULL;
-    snprintf(buf, cap, "scf.for: expected 1 body region, got %d", num_regions);
+    snprintf(buf,
+             cap,
+             "%s: expected 1 %s region, got %d",
+             rocke_opcode_name(op->opcode),
+             region_role,
+             num_regions);
     return buf;
+}
+
+const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    return single_region_error(op, "body", buf, cap);
+}
+
+const char* rocke_i_scf_if_region_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    return single_region_error(op, "then", buf, cap);
 }
 
 /* Python core/ir.py::_scf_for_carried_count_error: the refusal for the scf.for
@@ -3188,6 +3208,11 @@ rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* er
             const rocke_status_t status = rocke_i_scf_for_error(op, err, err_cap);
             if(status != ROCKE_OK)
                 return status;
+        }
+        else if(op->opcode == ROCKE_OP_SCF_IF)
+        {
+            if(rocke_i_scf_if_region_error(op, err, err_cap))
+                return ROCKE_ERR_VALUE;
         }
         else if(op->opcode == ROCKE_OP_SCF_IF_ELSE)
         {

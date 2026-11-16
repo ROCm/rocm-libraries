@@ -20,12 +20,13 @@ Checks performed:
   result typing).
 * **Arity / result counts** — per-opcode operand and result counts where the
   builder guarantees them (binary arith, ``cf.return``, ``scf.yield``, etc.).
-* **Region well-formedness** — ``scf.for`` / ``scf.if`` carry their required
-  regions; loop-carried values are typed; the kernel body ends in a terminator;
-  every ``scf.yield`` is directly in an ``scf.for`` body or a branch of an
-  ``scf.if_else`` with results; a loop's carried-value counts agree, its
-  ``iter_args`` metadata describes them and its results share their types, and
-  its body yields them once, at its end, with their types (``_scf_for_error``).
+* **Region well-formedness** — ``scf.for`` / ``scf.if`` each hold exactly one
+  region (``_scf_for_region_error`` / ``_scf_if_region_error``); loop-carried
+  values are typed; the kernel body ends in a terminator; every ``scf.yield``
+  is directly in an ``scf.for`` body or a branch of an ``scf.if_else`` with
+  results; a loop's carried-value counts agree, its ``iter_args`` metadata
+  describes them and its results share their types, and its body yields them
+  once, at its end, with their types (``_scf_for_error``).
 * **Attr maps** — required keys present per opcode; enum-valued attrs legal.
 * **Vector / smem / addrspace sanity** — vector widths > 0, smem shapes
   positive, pointer address spaces from the known set.
@@ -62,6 +63,7 @@ from .ir import (
     _scf_for_error,
     _scf_for_region_error,
     _scf_for_value_names,
+    _scf_if_region_error,
     _smem_store_vN_op_error,
     _smem_vN_f32_op_error,
     KernelDef,
@@ -320,9 +322,9 @@ class _Verifier:
 
         # 5) nested regions, with block-defined values registered first. Use a
         # scope that excludes this op's own (not-yet-computed) results. An
-        # scf.for is checked even with no region, so a loop without its body is
-        # refused.
-        if op.regions or op.name == "scf.for":
+        # scf.for or scf.if is checked even with no region, so one without its
+        # region is refused.
+        if op.regions or op.name in ("scf.for", "scf.if"):
             region_scope = {
                 name: val for name, val in scope.items() if name in names_before_results
             }
@@ -620,10 +622,11 @@ class _Verifier:
             self.err("scf.if expects exactly 1 condition operand", op)
         elif op.operands[0].type.name != "i1":
             self.err(f"scf.if condition must be i1, got {op.operands[0].type.name}", op)
-        if not op.regions:
-            self.err("scf.if missing its 'then' region", op)
-        for region in op.regions:
-            self._check_region(region, dict(scope))
+        region_error = _scf_if_region_error(op)
+        if region_error is not None:
+            self.err(region_error, op)
+            return
+        self._check_region(op.regions[0], dict(scope))
 
 
 def _reparse(type_str: str) -> Type:
