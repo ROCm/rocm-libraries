@@ -423,11 +423,12 @@ def _read_asm_file(filepath):
         # Workgroups resident per CU, from the kernel's static register and
         # LDS usage. Only rocRoller Stream-K grid selection reads it, and it
         # cannot recover it later without loading the code object.
-        from .CustomKernels import rocRollerOccupancy
+        from .CustomKernels import architecture_from_assembly, recordedRocRollerOccupancy
         from .RocRollerStreamK import is_streamk_kernel_metadata
 
         if is_streamk_kernel_metadata(k):
-            occupancy = rocRollerOccupancy(k)
+            occupancy = recordedRocRollerOccupancy(
+                k, architecture_from_assembly("".join(lines)))
             if occupancy:
                 result["detected"]["occupancy"] = occupancy
 

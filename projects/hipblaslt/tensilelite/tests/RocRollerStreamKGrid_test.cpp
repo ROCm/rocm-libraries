@@ -451,18 +451,9 @@ TEST(RocRollerStreamKGrid, LeavesUnsetFieldsAtOrigamiDefaults)
 
 // ContractionSolution::rocRollerStreamKGrid clamps this solve's answer to
 // StreamKFlagElements because the flag region holds exactly that many ints.
-//
-// These inputs overshoot that clamp, but note what they are: every one of them
-// has far more tiles than the device has CUs, and the ranker only picks a
-// Stream-K kernel when numTiles < usableCUs (chooseSolutionIndexParameters in
-// rocroller/solution_selection.cpp). So none of them can reach a Stream-K
-// kernel in practice -- swept over 76464 points that do satisfy that gate, the
-// grid never exceeded 256 and the clamp never fired.
-//
-// They are pinned anyway because they fix what the clamp is for: it guards the
-// unreachable region, and if the ranker's gate is ever loosened these become
-// live, at which point truncating is the wrong answer and the solution should
-// be refused at selection time instead.
+// These inputs have more tiles than CUs, so they sit outside the ranker's
+// Stream-K gate (numTiles < usableCUs). They pin the clamp: a grid above
+// StreamKFlagElements is limited to the flag region.
 TEST(RocRollerStreamKGrid, OvershootsTheStreamKFlagRegion)
 {
     origami::hardware_t const hw = makeGfx950Hardware(); // 256 CUs
@@ -539,8 +530,8 @@ TEST(RocRollerStreamKGrid, DecompositionCoversEveryTile)
                     in.aElementBits          = 4;
                     in.bElementBits          = 4;
 
-                    uint32_t const grid
-                        = std::max(1u, std::min(rocRollerStreamKGrid(in, hw), StreamKFlagElements));
+                    uint32_t const grid = rocRollerStreamKApplyFlagClamp(
+                        rocRollerStreamKGrid(in, hw), StreamKFlagElements);
                     auto const k = evaluateRocRollerStreamKKernargs(
                         size.m, size.n, size.k, mt.m, mt.n, mt.k, grid);
 

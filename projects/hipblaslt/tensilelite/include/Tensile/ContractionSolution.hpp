@@ -665,6 +665,20 @@ namespace TensileLite
     };
 
     /**
+     * Thrown when a rocRoller Stream-K launch would run data-parallel tiles.
+     * The kernel cannot execute that regime. A distinct type so the rocblaslt
+     * host maps it to invalid_value; a generic runtime_error is an internal error.
+     */
+    class RocRollerStreamKDataParallelError : public std::runtime_error
+    {
+    public:
+        explicit RocRollerStreamKDataParallelError(const std::string& what)
+            : std::runtime_error(what)
+        {
+        }
+    };
+
+    /**
      * Selection-time diagnostics for uniform summation order.
      *
      * Under uniform summation order the library filters out every solution it
@@ -1403,14 +1417,13 @@ namespace TensileLite
         //  * customKernel.occupancy == 0 (not recorded by the logic file) means
         //    the grid cannot be reproduced at all, so this falls back to the CU
         //    count honouring smCountTarget and persistentMaxCUs, clamped to
-        //    StreamKFlagElements. So does an empty problem (M, N or batch 0),
-        //    on which origami divides by the zero tile count.
-        //  * the result is clamped to StreamKFlagElements, which the flag region
-        //    requires. Measured over 76464 points that satisfy the ranker's own
-        //    Stream-K gate the clamp never fires and the grid never exceeds 256,
-        //    so it is a safety net rather than an expected path; if it ever does
-        //    fire the launch has diverged from the rocRoller JIT path. See the
-        //    definition.
+        //    StreamKFlagElements. So does missing analytical hardware, and an
+        //    empty problem (M, N or batch 0), on which origami divides by the
+        //    zero tile count.
+        //  * the result is clamped to StreamKFlagElements, one int per workgroup
+        //    in the flag region. A wider grid writes into the next region.
+        //    The input assembly and both clamps live in RocRollerStreamKGrid.hpp
+        //    (assembleRocRollerStreamKGrid). See the definition.
         uint32_t rocRollerStreamKGrid(Problem const& problem, Hardware const& hardware) const;
 
         // Same StreamK grid / reduction solve() packs, including the

@@ -269,6 +269,12 @@ def test_hoisted_tile_counts_classify_by_the_size_they_read():
         ".expression": _hoisted_num_tiles("Tensor_2_size_1", 192),
     }
     assert _metadataArgToCustomArg(meta) == {"type": "int64", "semantic": "RR_NumTilesN"}
+    # A missing .variableType still declares int64. Other semantics keep the
+    # int32 fallback; these two counts do not fit in int32.
+    bare = dict(meta)
+    del bare[".variableType"]
+    bare[".expression"] = _hoisted_num_tiles("Tensor_0_size_0", 192)
+    assert _metadataArgToCustomArg(bare) == {"type": "int64", "semantic": "RR_NumTilesM"}
 
 
 def test_hoisted_tile_count_decode_rejects_other_divisions():

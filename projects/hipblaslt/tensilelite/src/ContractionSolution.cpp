@@ -2725,18 +2725,19 @@ namespace TensileLite
                        customKernel.macrotile.y,
                        customKernel.macrotile.z,
                        grid))
-                    throw std::runtime_error(concatenate("rocRoller Stream-K kernel ",
-                                                         customKernel.name,
-                                                         " cannot run data-parallel tiles: grid ",
-                                                         grid,
-                                                         " is too small for problem ",
-                                                         problem.problemSizes()[0],
-                                                         "x",
-                                                         problem.problemSizes()[1],
-                                                         " with macrotile ",
-                                                         customKernel.macrotile.x,
-                                                         "x",
-                                                         customKernel.macrotile.y));
+                    throw RocRollerStreamKDataParallelError(concatenate(
+                        "rocRoller Stream-K kernel ",
+                        customKernel.name,
+                        " cannot run data-parallel tiles: grid ",
+                        grid,
+                        " is too small for problem ",
+                        problem.problemSizes()[0],
+                        "x",
+                        problem.problemSizes()[1],
+                        " with macrotile ",
+                        customKernel.macrotile.x,
+                        "x",
+                        customKernel.macrotile.y));
                 rrSKGridValue = grid;
             }
             return *rrSKGridValue;
@@ -3744,11 +3745,19 @@ namespace TensileLite
                 // ceil(size / tile) as int64. Every other RR_* kernarg is 32-bit;
                 // appendCustomType would follow a 32-bit declaration and truncate.
                 case CustomArgSemantic::RR_NumTilesM:
-                    rv.args.template append<int64_t>("RR_NumTilesM", wgmKernarg().numTilesM);
-                    break;
                 case CustomArgSemantic::RR_NumTilesN:
-                    rv.args.template append<int64_t>("RR_NumTilesN", wgmKernarg().numTilesN);
+                {
+                    if(arg.type != CustomArgType::int64 && arg.type != CustomArgType::uint64)
+                        throw std::runtime_error(concatenate(
+                            toString(arg.semantic),
+                            " must be a 64-bit integer kernarg, declared ",
+                            toString(arg.type)));
+                    if(arg.semantic == CustomArgSemantic::RR_NumTilesM)
+                        rv.args.template append<int64_t>("RR_NumTilesM", wgmKernarg().numTilesM);
+                    else
+                        rv.args.template append<int64_t>("RR_NumTilesN", wgmKernarg().numTilesN);
                     break;
+                }
 
                 // rocRoller Stream-K. The work decomposition is hoisted into
                 // kernargs; see RocRollerStreamKKernargs.hpp.
@@ -6660,109 +6669,61 @@ namespace TensileLite
         if(pAMDGPU == nullptr)
             throw std::runtime_error("rocRoller Stream-K grid needs AMDGPU hardware");
 
-        // The CU count clamped to the caller's budgets: the answer whenever the
-        // origami solve's inputs are not all available. A valid Stream-K grid,
-        // but not necessarily the one the rocRoller JIT path picks.
-        auto clampedCuCount = [&]() -> uint32_t {
-            int grid = pAMDGPU->computeUnitCount;
-            if(problem.getParams().smCountTarget() > 0)
-                grid = std::min(grid, problem.getParams().smCountTarget());
-            if(pAMDGPU->persistentMaxCUs > 0)
-                grid = std::min(grid, pAMDGPU->persistentMaxCUs);
-            grid = std::min(grid, static_cast<int>(StreamKFlagElements));
-            return static_cast<uint32_t>(std::max(1, grid));
+        auto extents = [](size_t n, auto&& at) {
+            std::vector<size_t> out;
+            out.reserve(n);
+            for(size_t i = 0; i < n; ++i)
+                out.push_back(static_cast<size_t>(at(i)));
+            return out;
         };
 
-        // Behaviour 1 -- occupancy == 0 fallback. customKernel.occupancy is 0
-        // when the logic file did not record it. origami's grid solve is keyed
-        // on occupancy (config_t::is_valid rejects <= 0), so without it this
-        // path cannot reproduce rocRoller's grid at all; substituting 1, or
-        // anything else, would be a guess that silently diverges from the JIT
-        // launch. Fall back to the clamped CU count instead, and never hand 0
-        // to origami.
-        if(customKernel.occupancy == 0)
-            return clampedCuCount();
+        RocRollerStreamKGridRequest req;
+        req.freeA = extents(problem.freeIndicesA().size(),
+                            [&](size_t i) { return problem.freeSizeA(i); });
+        req.freeB = extents(problem.freeIndicesB().size(),
+                            [&](size_t i) { return problem.freeSizeB(i); });
+        req.bound = extents(problem.boundIndices().size(),
+                            [&](size_t i) { return problem.boundSize(i); });
+        req.batch = extents(problem.batchIndices().size(),
+                            [&](size_t i) { return problem.batchSize(i); });
+        req.smCountTarget          = problem.getParams().smCountTarget();
+        req.computeUnitCount       = pAMDGPU->computeUnitCount;
+        req.persistentMaxCUs       = pAMDGPU->persistentMaxCUs;
+        req.tileM                  = static_cast<size_t>(customKernel.macrotile.x);
+        req.tileN                  = static_cast<size_t>(customKernel.macrotile.y);
+        req.tileK                  = static_cast<size_t>(customKernel.macrotile.z);
+        req.occupancy              = static_cast<int>(customKernel.occupancy);
+        req.workspaceSize          = problem.workspaceSize();
+        req.workspaceSizePerElemC  = sizeMapping.workspaceSizePerElemC;
 
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
-            return clampedCuCount();
-
-        size_t m     = 1;
-        size_t n     = 1;
-        size_t k     = 1;
-        size_t batch = 1;
-        for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-            m *= problem.freeSizeA(i);
-        for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-            n *= problem.freeSizeB(i);
-        for(size_t i = 0; i < problem.boundIndices().size(); i++)
-            k *= problem.boundSize(i);
-        for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-            batch *= problem.batchSize(i);
-
-        // origami divides by the tile count, so an empty problem would raise
-        // SIGFPE rather than an exception.
-        if(m == 0 || n == 0 || batch == 0)
-            return clampedCuCount();
-
+        req.hasAnalyticalHardware
+            = hipAMDGPU != nullptr && hipAMDGPU->analyticalHardware != nullptr;
         // rocRoller reads the element widths off its kernel's own A/B types;
         // for the kernel selected to serve this problem those are the problem's
         // types, which is all TensileLite has here.
-        auto elementBits = [](rocisa::DataType type) -> size_t {
-            return static_cast<size_t>(rocisa::GetElementSize(type) * 8.0f + 0.5f);
-        };
+        if(req.hasAnalyticalHardware)
+        {
+            auto elementBits = [](rocisa::DataType type) -> size_t {
+                return static_cast<size_t>(rocisa::GetElementSize(type) * 8.0f + 0.5f);
+            };
+            req.aDtype       = datatypeToAnalyticalDatatype(problem.a().dataType());
+            req.bDtype       = datatypeToAnalyticalDatatype(problem.b().dataType());
+            req.aElementBits = elementBits(problem.a().dataType());
+            req.bElementBits = elementBits(problem.b().dataType());
+        }
 
-        RocRollerStreamKGridInputs in;
-        in.m     = m;
-        in.n     = n;
-        in.k     = k;
-        in.batch = batch;
-        // Only sm_count_target: rocRoller has no persistentMaxCUs notion, and
-        // folding one in here would move the grid off the JIT path's answer.
-        in.numCUs                = static_cast<size_t>(std::max(0, problem.getParams().smCountTarget()));
-        in.tileM                 = static_cast<size_t>(customKernel.macrotile.x);
-        in.tileN                 = static_cast<size_t>(customKernel.macrotile.y);
-        in.tileK                 = static_cast<size_t>(customKernel.macrotile.z);
-        in.occupancy             = static_cast<int>(customKernel.occupancy);
-        in.workspaceSize         = problem.workspaceSize();
-        in.workspaceSizePerElemC = sizeMapping.workspaceSizePerElemC;
-        in.aDtype                = datatypeToAnalyticalDatatype(problem.a().dataType());
-        in.bDtype                = datatypeToAnalyticalDatatype(problem.b().dataType());
-        in.aElementBits          = elementBits(problem.a().dataType());
-        in.bElementBits          = elementBits(problem.b().dataType());
+        // occupancy 0, missing analytical hardware, and an empty M, N or batch
+        // do not call origami. The grid is then the CU count capped by
+        // smCountTarget, persistentMaxCUs and the flag region.
+        RocRollerStreamKGridPlan plan = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+        if(!plan.useOrigami)
+            return plan.fallbackGrid;
 
-        uint32_t grid = TensileLite::rocRollerStreamKGrid(in, *(hipAMDGPU->analyticalHardware));
-
-        // Behaviour 2 -- flag-region clamp. The per-stream Stream-K flag region
-        // holds StreamKFlagElements ints, one per workgroup; a wider grid writes
-        // into the next region, so the clamp is a memory-safety requirement.
-        //
-        // When it fires, this launch has diverged from the grid the rocRoller
-        // JIT path would use. The numWGs kernarg and the partial-tile workspace
-        // are derived from this same function, so they stay consistent with the
-        // launch geometry -- the divergence is from the JIT path, not within
-        // this launch.
-        //
-        // It should not fire for any problem that can reach a Stream-K kernel.
-        // The ranker only picks Stream-K when numTiles < usableCUs and
-        // itersPerTile >= 16 (chooseSolutionIndexParameters in
-        // rocroller/solution_selection.cpp), which bounds the tile count below
-        // the CU count. Swept against this same origami solve on a modelled
-        // 256-CU gfx950 over 76464 points satisfying that gate -- 10 macrotiles
-        // from 16x16x128 to 256x192x128, 9 shapes, batch 1 and 4, CU budgets
-        // 0/224/256, 9 MX type pairs, with and without a workspace, occupancy 1
-        // to 24 -- the grid never exceeded 256, and occupancy did not change the
-        // answer at all. Drop the gate and it is easy to exceed 2048, because
-        // k_split_aware then returns the whole tile count; that is why this
-        // clamp stays rather than becoming an assert.
-        //
-        // If it ever does fire, truncating is the wrong answer: refusing the
-        // solution at selection time, or raising StreamKFlagElements in step
-        // with _rocblaslt_handle::c_syncSkSlotElements, is the real fix.
-        //
-        // The lower bound is the same kind of net -- a zero grid would be an
-        // unlaunchable dim3(0, 1, 1).
-        return std::max(1u, std::min(grid, StreamKFlagElements));
+        // The flag region holds StreamKFlagElements ints, one per workgroup.
+        // The numWGs kernarg and the partial-tile workspace use this same grid.
+        uint32_t grid = TensileLite::rocRollerStreamKGrid(plan.inputs, *(hipAMDGPU->analyticalHardware));
+        return rocRollerStreamKApplyFlagClamp(grid, StreamKFlagElements);
     }
 
     StreamKSettings ContractionSolution::resolveStreamKSettings(Problem const&  problem,

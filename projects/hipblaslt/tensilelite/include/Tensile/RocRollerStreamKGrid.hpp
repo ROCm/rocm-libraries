@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <origami/hardware.hpp>
 #include <origami/streamk.hpp>
@@ -127,5 +129,125 @@ namespace TensileLite
         // select_grid_size derives the CU budget from it internally.
         return static_cast<uint32_t>(origami::streamk::select_grid_size(
             problem, hw, config, RocRollerStreamKGridSelection));
+    }
+
+    /// Product of free/bound/batch extents. An empty list is 1, matching a
+    /// loop that starts at 1 and multiplies each index.
+    inline size_t rocRollerStreamKExtentProduct(std::vector<size_t> const& extents)
+    {
+        size_t product = 1;
+        for(size_t extent : extents)
+            product *= extent;
+        return product;
+    }
+
+    /// CU count capped by a positive smCountTarget, a positive persistentMaxCUs
+    /// budget, and the flag-region length. At least one workgroup.
+    inline uint32_t rocRollerStreamKClampedCuCount(int      computeUnitCount,
+                                                   int      smCountTarget,
+                                                   int      persistentMaxCUs,
+                                                   uint32_t flagElements)
+    {
+        int grid = computeUnitCount;
+        if(smCountTarget > 0)
+            grid = std::min(grid, smCountTarget);
+        if(persistentMaxCUs > 0)
+            grid = std::min(grid, persistentMaxCUs);
+        grid = std::min(grid, static_cast<int>(flagElements));
+        return static_cast<uint32_t>(std::max(1, grid));
+    }
+
+    /// Grid written into a flag region of flagElements ints. At least one
+    /// workgroup; a wider grid would write the next region.
+    inline uint32_t rocRollerStreamKApplyFlagClamp(uint32_t grid, uint32_t flagElements)
+    {
+        return std::max(1u, std::min(grid, flagElements));
+    }
+
+    /**
+     * Scalar inputs to assembleRocRollerStreamKGrid.
+     *
+     * freeA/freeB/bound/batch are the problem extents those index groups
+     * contribute; the assembly multiplies each group. numCUs on the origami
+     * path is smCountTarget alone (0 means all CUs). persistentMaxCUs applies
+     * only to the CU-count fallback.
+     */
+    struct RocRollerStreamKGridRequest
+    {
+        std::vector<size_t> freeA;
+        std::vector<size_t> freeB;
+        std::vector<size_t> bound;
+        std::vector<size_t> batch;
+
+        int smCountTarget     = 0;
+        int computeUnitCount  = 0;
+        int persistentMaxCUs  = 0;
+
+        size_t tileM = 0;
+        size_t tileN = 0;
+        size_t tileK = 0;
+
+        int occupancy = 0;
+
+        size_t workspaceSize         = 0;
+        size_t workspaceSizePerElemC = 0;
+
+        origami::data_type_t aDtype = origami::data_type_t::None;
+        origami::data_type_t bDtype = origami::data_type_t::None;
+        size_t               aElementBits = 0;
+        size_t               bElementBits = 0;
+
+        /// False when the device is not a HipAMDGPU or has no analytical hardware.
+        bool hasAnalyticalHardware = false;
+    };
+
+    /// useOrigami false means the launch grid is fallbackGrid (the clamped CU
+    /// count). inputs is filled either way so a test can read the products.
+    struct RocRollerStreamKGridPlan
+    {
+        bool                       useOrigami   = false;
+        uint32_t                   fallbackGrid = 1;
+        RocRollerStreamKGridInputs inputs{};
+    };
+
+    /**
+     * The Stream-K grid inputs ContractionSolution::rocRollerStreamKGrid builds,
+     * plus the cases that never call origami.
+     *
+     * origami is not called when occupancy is 0 (the logic file did not record
+     * it; config_t::is_valid rejects <= 0), when analytical hardware is missing,
+     * or when M, N or batch is 0 (origami divides by the tile count). Those
+     * launches use the clamped CU count. Otherwise inputs is what
+     * rocRollerStreamKGrid consumes, and the caller clamps that answer with
+     * rocRollerStreamKApplyFlagClamp.
+     */
+    inline RocRollerStreamKGridPlan assembleRocRollerStreamKGrid(RocRollerStreamKGridRequest const& req,
+                                                                uint32_t flagElements)
+    {
+        RocRollerStreamKGridPlan plan;
+        plan.fallbackGrid = rocRollerStreamKClampedCuCount(
+            req.computeUnitCount, req.smCountTarget, req.persistentMaxCUs, flagElements);
+
+        plan.inputs.m     = rocRollerStreamKExtentProduct(req.freeA);
+        plan.inputs.n     = rocRollerStreamKExtentProduct(req.freeB);
+        plan.inputs.k     = rocRollerStreamKExtentProduct(req.bound);
+        plan.inputs.batch = rocRollerStreamKExtentProduct(req.batch);
+        // Only sm_count_target. persistentMaxCUs is a fallback cap, not an
+        // origami input.
+        plan.inputs.numCUs = static_cast<size_t>(std::max(0, req.smCountTarget));
+        plan.inputs.tileM  = req.tileM;
+        plan.inputs.tileN  = req.tileN;
+        plan.inputs.tileK  = req.tileK;
+        plan.inputs.occupancy             = req.occupancy;
+        plan.inputs.workspaceSize         = req.workspaceSize;
+        plan.inputs.workspaceSizePerElemC = req.workspaceSizePerElemC;
+        plan.inputs.aDtype                = req.aDtype;
+        plan.inputs.bDtype                = req.bDtype;
+        plan.inputs.aElementBits          = req.aElementBits;
+        plan.inputs.bElementBits          = req.bElementBits;
+
+        plan.useOrigami = req.occupancy != 0 && req.hasAnalyticalHardware && plan.inputs.m != 0
+                          && plan.inputs.n != 0 && plan.inputs.batch != 0;
+        return plan;
     }
 } // namespace TensileLite

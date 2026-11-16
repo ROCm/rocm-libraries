@@ -539,9 +539,14 @@ def custom_arg_for_metadata(meta_arg):
         return None
     semantic = classify_wgm_expression(expr)
     if semantic is not None:
-        arg_type = _variable_arg_type(meta_arg)
-        if arg_type is None:
-            arg_type = "uint32" if semantic.startswith("RR_MagicShiftAndSign") else "int32"
+        # Tile counts are ceil-divs of int64 sizes. A missing .variableType
+        # must not fall back to int32: that truncates counts above 2^31.
+        if semantic in ("RR_NumTilesM", "RR_NumTilesN"):
+            arg_type = "int64"
+        else:
+            arg_type = _variable_arg_type(meta_arg)
+            if arg_type is None:
+                arg_type = "uint32" if semantic.startswith("RR_MagicShiftAndSign") else "int32"
         return {"type": arg_type, "semantic": semantic}
     if expr.get("type") == "CommandArgument":
         mapped = DIRECT_COMMAND_ARGUMENT.get(expr.get("name"))

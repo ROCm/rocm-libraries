@@ -40,6 +40,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/RocRollerStreamKGrid.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 #include <origami/hardware.hpp>
 #ifndef TENSILE_YAML
@@ -664,7 +665,7 @@ TEST(CustomKernelTest, RocRollerStreamKLaunchRefusesDataParallelTiles)
         EXPECT_EQ(probe.refused(), !c.launches) << "grid " << grid;
         if(!c.launches)
         {
-            EXPECT_THROW(probe.launch(), std::runtime_error) << "grid " << grid;
+            EXPECT_THROW(probe.launch(), RocRollerStreamKDataParallelError) << "grid " << grid;
             continue;
         }
         auto const fits = probe.launch();
@@ -677,7 +678,7 @@ TEST(CustomKernelTest, RocRollerStreamKLaunchRefusesDataParallelTiles)
     }
 
     // 4096 tiles of 16x16 on the full grid: 16 per workgroup.
-    EXPECT_THROW(RocRollerStreamKProbe(16, 0).launch(), std::runtime_error);
+    EXPECT_THROW(RocRollerStreamKProbe(16, 0).launch(), RocRollerStreamKDataParallelError);
 }
 
 // The refusal hangs off the grid, not off the kernargs: a kernel that only
@@ -687,7 +688,7 @@ TEST(CustomKernelTest, RocRollerStreamKGridAloneIsEnoughToRefuse)
     EXPECT_NO_THROW(RocRollerStreamKProbe(128, 33, false).launch());
     RocRollerStreamKProbe const tooSmall(128, 32, false);
     EXPECT_TRUE(tooSmall.refused());
-    EXPECT_THROW(tooSmall.launch(), std::runtime_error);
+    EXPECT_THROW(tooSmall.launch(), RocRollerStreamKDataParallelError);
 }
 
 // An empty problem has no tiles, on which origami divides by zero: the grid
@@ -742,6 +743,108 @@ TEST(CustomKernelTest, OnlyRocRollerStreamKKernelsUseItsGrid)
     // A Tensile-generated kernel is never launched on rocRoller's grid.
     workspaceOnly.customKernel.generated = true;
     EXPECT_FALSE(workspaceOnly.usesRocRollerStreamK());
+}
+
+// RR_NumTilesM and RR_NumTilesN are int64. A 32-bit declaration is refused
+// rather than written truncated.
+TEST(CustomKernelTest, RocRollerNumTilesKernargIsEightBytes)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::int64, CustomArgSemantic::RR_NumTilesM});
+    solution.customKernel.args.push_back(
+        {CustomArgType::int64, CustomArgSemantic::RR_NumTilesN});
+
+    auto              problem = dummyProblem();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    auto const        invocation
+        = solution.generateCustomCall<false>(problem, inputs, probeDevice(), sk);
+    EXPECT_EQ(invocation.args.size(), 2 * sizeof(int64_t));
+
+    ContractionSolution narrow;
+    configureProbeKernel(narrow, {CustomArgType::int32, CustomArgSemantic::RR_NumTilesM});
+    EXPECT_THROW(narrow.generateCustomCall<false>(problem, inputs, probeDevice(), sk),
+                 std::runtime_error);
+}
+
+// assembleRocRollerStreamKGrid is the input assembly rocRollerStreamKGrid uses.
+TEST(CustomKernelTest, RocRollerStreamKGridInputs)
+{
+    RocRollerStreamKGridRequest req;
+    req.freeA                 = {16, 32, 2};
+    req.freeB                 = {64};
+    req.bound                 = {8, 4};
+    req.batch                 = {3};
+    req.smCountTarget         = 48;
+    req.computeUnitCount      = 256;
+    req.persistentMaxCUs      = 0;
+    req.tileM                 = 128;
+    req.tileN                 = 128;
+    req.tileK                 = 64;
+    req.occupancy             = 2;
+    req.workspaceSize         = 4096;
+    req.workspaceSizePerElemC = 8;
+    req.hasAnalyticalHardware = true;
+
+    auto const plan = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+    EXPECT_TRUE(plan.useOrigami);
+    EXPECT_EQ(plan.inputs.m, 16u * 32u * 2u);
+    EXPECT_EQ(plan.inputs.n, 64u);
+    EXPECT_EQ(plan.inputs.k, 32u);
+    EXPECT_EQ(plan.inputs.batch, 3u);
+    EXPECT_EQ(plan.inputs.numCUs, 48u);
+    EXPECT_EQ(plan.inputs.workspaceSizePerElemC, 8u);
+
+    req.smCountTarget = -4;
+    EXPECT_EQ(assembleRocRollerStreamKGrid(req, StreamKFlagElements).inputs.numCUs, 0u);
+
+    // occupancy 0 never reaches origami. The grid is the CU count.
+    req.smCountTarget = 0;
+    req.occupancy     = 0;
+    auto const noOccupancy = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+    EXPECT_FALSE(noOccupancy.useOrigami);
+    EXPECT_EQ(noOccupancy.fallbackGrid, 256u);
+
+    // A positive smCountTarget caps that fallback, and so does the flag region.
+    req.smCountTarget = 32;
+    EXPECT_EQ(assembleRocRollerStreamKGrid(req, StreamKFlagElements).fallbackGrid, 32u);
+    req.smCountTarget    = 0;
+    req.computeUnitCount = static_cast<int>(StreamKFlagElements) + 100;
+    EXPECT_EQ(assembleRocRollerStreamKGrid(req, StreamKFlagElements).fallbackGrid,
+              StreamKFlagElements);
+    EXPECT_EQ(rocRollerStreamKApplyFlagClamp(StreamKFlagElements + 10, StreamKFlagElements),
+              StreamKFlagElements);
+    EXPECT_EQ(rocRollerStreamKApplyFlagClamp(0, StreamKFlagElements), 1u);
+
+    // Missing analytical hardware is the same fallback, even with occupancy.
+    req.computeUnitCount       = 256;
+    req.smCountTarget          = 40;
+    req.occupancy              = 4;
+    req.hasAnalyticalHardware  = false;
+    auto const noHardware = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+    EXPECT_FALSE(noHardware.useOrigami);
+    EXPECT_EQ(noHardware.fallbackGrid, 40u);
+    EXPECT_EQ(noHardware.inputs.workspaceSizePerElemC, 8u);
+}
+
+// The member uses that assembly: no analytical hardware, occupancy recorded,
+// grid is the smCountTarget cap. A CU count above the flag region clamps.
+TEST(CustomKernelTest, RocRollerStreamKGridMemberUsesTheAssembly)
+{
+    RocRollerStreamKProbe probe(128, 40);
+    probe.solution.customKernel.occupancy = 4;
+    EXPECT_EQ(probe.launch().numWorkGroups.x, 40u);
+
+    hip::HipAMDGPU device;
+    device.processor        = AMDGPU::Processor::gfx950;
+    device.computeUnitCount = static_cast<int>(StreamKFlagElements) + 50;
+    RocRollerStreamKProbe wide(128, 0);
+    wide.solution.customKernel.occupancy = 0;
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+    auto const        launch
+        = wide.solution.generateCustomCall<false>(wide.problem, inputs, device, sk);
+    EXPECT_EQ(launch.numWorkGroups.x, static_cast<size_t>(StreamKFlagElements));
 }
 
 namespace

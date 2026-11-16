@@ -217,7 +217,7 @@ def test_closed_form_matches_serialised_trees(name, kernel):
 
 @pytest.mark.parametrize("name,kernel", _kernels(), ids=_kernel_ids())
 def test_every_kernarg_maps_to_a_semantic(name, kernel):
-    """CustomKernels no longer raises on a Stream-K kernel's arguments."""
+    """Every Stream-K kernarg maps to a launch semantic."""
     seen = []
     for arg in kernel["args"]:
         mapped = _metadataArgToCustomArg(arg, name)
@@ -317,11 +317,9 @@ def test_occupancy_unknown_without_metadata():
     assert rocRollerOccupancy(None) == 0
 
 
-# (vgpr, agpr, lds, flatWorkgroupSize, expected). Measured against
-# hipModuleOccupancyMaxActiveBlocksPerMultiprocessor on gfx950 over 4552
-# kernels drawn from a Tensile library, the rocRoller custom-kernel code
-# object, and synthetic kernels built to sweep AGPR and LDS usage; the model
-# agreed on every one. These rows are the witnesses that pin each constant.
+# (vgpr, agpr, lds, flatWorkgroupSize, expected). Rows that pin the gfx950
+# occupancy constants: LDS, the 8-register granule, and .vgpr_count already
+# including the AGPR allocation.
 _OCCUPANCY = [
     # Binding constraint is LDS.
     (44, 0, 12480, 64, 13),
@@ -391,7 +389,10 @@ def _streamk_config(macrotile, compute_type="s"):
 @pytest.mark.parametrize("name,kernel", _kernels(), ids=_kernel_ids())
 def test_streamk_metadata_infers_a_rocroller_streamk_launch(name, kernel):
     ck = _buildCustomKernelFromMetadata(
-        name, _streamk_metadata_yaml(kernel), _streamk_config(kernel["macrotile"])
+        name,
+        _streamk_metadata_yaml(kernel),
+        _streamk_config(kernel["macrotile"]),
+        architecture="gfx950",
     )
 
     assert ck["macrotile"] == kernel["macrotile"]
@@ -446,6 +447,7 @@ def test_add_custom_config_detects_occupancy_only_for_streamk(tmp_path, streamk)
     meta = _streamk_metadata_yaml(kernel) if streamk else _without_streamk_args(kernel)
     asm = tmp_path / f"{name}.s"
     asm.write_text(
+        '.amdgcn_target "amdgcn-amd-amdhsa--gfx950"\n'
         ".amdgpu_metadata\n---\n" + yaml.safe_dump(meta) + "...\n.end_amdgpu_metadata\n"
     )
     detected = _read_asm_file(str(asm))["detected"]
@@ -481,6 +483,61 @@ def test_streamk_workspace_is_sized_by_the_compute_type(compute_type, expected):
 )
 def test_compute_type_bytes(config, expected):
     assert _computeTypeBytes(config) == expected
+
+
+def test_compute_type_bytes_follows_the_logic_problem_type():
+    """The advisory custom.config type is not the workspace width."""
+    advisory = {"ProblemType": {"ComputeDataType": "s"}}
+    logic = {"ComputeDataType": "d"}
+    assert _computeTypeBytes(advisory) == 4
+    assert _computeTypeBytes(advisory, problemType=logic) == 8
+
+    class _Double:
+        def numBytes(self):
+            return 8
+
+    name, kernel = _kernels()[0]
+    ck = _buildCustomKernelFromMetadata(
+        name,
+        _streamk_metadata_yaml(kernel),
+        _streamk_config(kernel["macrotile"], "h"),
+        problemType={"ComputeDataType": _Double()},
+        architecture="gfx950",
+    )
+    assert ck["workspaceSizePerElemC"] == 8
+
+
+@pytest.mark.parametrize("architecture", ["gfx950", "gfx942"])
+def test_occupancy_is_recorded_only_for_gfx950(tmp_path, architecture):
+    from tensilelite.AddCustomConfig import _read_asm_file
+    from tensilelite.Common import state
+    from tensilelite.Contractions import CustomKernel
+
+    name, kernel = _kernels()[0]
+    meta = _streamk_metadata_yaml(kernel)
+    ck = _buildCustomKernelFromMetadata(
+        name,
+        meta,
+        _streamk_config(kernel["macrotile"]),
+        architecture=architecture,
+    )
+    expected = rocRollerOccupancy(meta["amdhsa.kernels"][0])
+    assert expected > 0
+    serialized = state(CustomKernel.FromOriginalState(ck))
+    asm = tmp_path / f"{name}.s"
+    asm.write_text(
+        f'.amdgcn_target "amdgcn-amd-amdhsa--{architecture}"\n'
+        ".amdgpu_metadata\n---\n" + yaml.safe_dump(meta) + "...\n.end_amdgpu_metadata\n"
+    )
+    detected = _read_asm_file(str(asm))["detected"]
+    if architecture == "gfx950":
+        assert ck["occupancy"] == expected
+        assert serialized["occupancy"] == expected
+        assert detected["occupancy"] == expected
+    else:
+        assert ck["occupancy"] == 0
+        assert "occupancy" not in serialized
+        assert "occupancy" not in detected
 
 
 @pytest.mark.parametrize(

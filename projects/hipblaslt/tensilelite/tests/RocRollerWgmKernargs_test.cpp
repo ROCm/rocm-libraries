@@ -214,6 +214,16 @@ TEST(RocRollerWgmKernargs, NumTilesAreInt64CeilDiv)
     auto wide = evaluateRocRollerWgmKernargs(193, 384, 192, 192);
     EXPECT_EQ(wide.numTilesM, 2);
     EXPECT_EQ(wide.numTilesN, 2);
+
+    // Counts above 2^31 stay in the int64 fields. The int32 roles truncate.
+    constexpr int64_t tile = 192;
+    constexpr int64_t size = (int64_t{1} << 32) * tile + 1;
+    auto huge = evaluateRocRollerWgmKernargs(
+        size, size + tile, static_cast<uint32_t>(tile), static_cast<uint32_t>(tile));
+    EXPECT_EQ(huge.numTilesM, (size + tile - 1) / tile);
+    EXPECT_GT(huge.numTilesM, int64_t{1} << 31);
+    EXPECT_EQ(huge.numTilesN, (size + 2 * tile - 1) / tile);
+    EXPECT_GT(huge.numTilesN, int64_t{1} << 31);
 }
 
 TEST(RocRollerWgmKernargs, RejectsZeroMacroTile)

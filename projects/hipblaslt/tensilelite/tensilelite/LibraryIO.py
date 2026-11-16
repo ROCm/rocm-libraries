@@ -877,7 +877,8 @@ def parseLibraryLogicData(
                 rawConfig = readCustomKernelConfig(customKernelName)
                 # getCustomKernelConfig drops Features, so keep the declaration.
                 features = rawConfig.get("Features")
-                customConfig = getCustomKernelConfig(customKernelName, isp, kernelConfig=rawConfig)
+                customConfig = getCustomKernelConfig(
+                    customKernelName, isp, kernelConfig=rawConfig, problemType=problemType)
             except (RuntimeError, KeyError, TypeError) as e:
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")

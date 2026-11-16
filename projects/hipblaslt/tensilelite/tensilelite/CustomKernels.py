@@ -500,32 +500,56 @@ _COMPUTE_TYPE_BYTES = {
 }
 
 
-def _computeTypeBytes(kernelConfig, default=4):
-    """Bytes per accumulator element, from the config's ProblemType."""
-    problemType = kernelConfig.get("ProblemType") or {}
-    key = problemType.get("ComputeDataType", problemType.get("DataType"))
+def _type_width(key, default):
+    num_bytes = getattr(key, "numBytes", None)
+    if callable(num_bytes):
+        return int(num_bytes())
     if isinstance(key, str):
         return _COMPUTE_TYPE_BYTES.get(key, default)
     return default
 
 
-# gfx950 (CDNA) occupancy model. Four SIMDs per CU, a 512-entry unified
-# VGPR+AGPR file per SIMD allocated in blocks of eight, at most eight waves
-# resident per SIMD, and 160 KiB of LDS per CU.
-#
-# Every constant here was pinned by measurement: the model was checked
-# against hipModuleOccupancyMaxActiveBlocksPerMultiprocessor over 4552
-# gfx950 kernels (Tensile assembly, rocRoller custom kernels, and synthetic
-# kernels built to sweep AGPR and LDS usage) and agreed on all of them, and
-# every constant was ablated to confirm no other value fits. The device
-# properties corroborate them: maxSharedMemoryPerMultiProcessor = 163840 and
-# regsPerBlock = 131072 = 512 x 64 lanes x 4 SIMDs.
-#
-# maxBlocksPerMultiProcessor is 32 on this part and never binds on its own:
-# it equals this model's own ceiling of 8 waves/SIMD x 4 SIMDs with a
-# single-wave workgroup, so no extra clamp is needed.
-#
-# gfx942 has 64 KiB of LDS per CU; this table is gfx950-specific.
+def _computeTypeBytes(kernelConfig, default=4, problemType=None):
+    """Bytes per accumulator element.
+
+    problemType is the logic file's ProblemType. custom.config's ProblemType
+    is advisory and is used only when the caller did not pass one.
+    """
+    source = problemType if problemType is not None else (kernelConfig.get("ProblemType") or {})
+    if not hasattr(source, "get"):
+        return default
+    key = source.get("ComputeDataType", source.get("DataType"))
+    return _type_width(key, default)
+
+
+# gfx950 occupancy model. Four SIMDs per CU, a 512-entry unified VGPR+AGPR
+# file per SIMD allocated in blocks of eight, at most eight waves resident
+# per SIMD, and 160 KiB of LDS per CU. maxBlocksPerMultiProcessor is 32,
+# equal to 8 waves/SIMD x 4 SIMDs for a single-wave workgroup, so it does
+# not add a separate clamp. gfx942 has 64 KiB of LDS per CU; this table is
+# gfx950-only.
+_AMDGCN_TARGET = re.compile(r'\.amdgcn_target\s+"amdgcn-amd-amdhsa--([A-Za-z0-9]+)')
+
+
+def architecture_from_assembly(text):
+    """ISA named by an ``.amdgcn_target`` directive, or None when it is absent."""
+    if not text:
+        return None
+    match = _AMDGCN_TARGET.search(text)
+    return match.group(1) if match else None
+
+
+def recordedRocRollerOccupancy(kernelMeta, architecture):
+    """Workgroups per CU, or 0 when the architecture is not gfx950.
+
+    The gfx950 model is the only one recorded. Any other architecture,
+    including a missing tag, records 0, which serialization omits.
+    """
+    if architecture != "gfx950":
+        return 0
+    return rocRollerOccupancy(kernelMeta)
+
+
 _CU_SIMDS = 4
 _VGPRS_PER_SIMD = 512
 _VGPR_ALLOC_GRANULE = 8
@@ -556,12 +580,9 @@ def rocRollerOccupancy(kernelMeta):
     if wavesPerGroup <= 0:
         return 0
 
-    # .agpr_count is deliberately NOT added. On gfx90a and later LLVM reports
-    # .vgpr_count as NumVGPRsForWavesPerEU, which is already the unified
-    # arch-plus-acc allocation; .agpr_count is an informational subset of it.
-    # Adding the two undercounts occupancy for every kernel that uses AGPRs --
-    # measured against HIP, the sum disagrees on 45 of 4552 kernels and
-    # .vgpr_count alone on none.
+    # .agpr_count is not added. On gfx90a and later LLVM reports .vgpr_count
+    # as NumVGPRsForWavesPerEU, the unified arch-plus-acc allocation.
+    # .agpr_count is a subset of that count.
     vgprs = int(kernelMeta.get(".vgpr_count", 0))
     granule = _VGPR_ALLOC_GRANULE
     allocated = max(-(-vgprs // granule) * granule, granule)
@@ -576,7 +597,8 @@ def rocRollerOccupancy(kernelMeta):
     return max(1, min(byWaves, byLds))
 
 
-def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
+def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig, problemType=None,
+                                  architecture=None):
     """Build a CustomKernel dict from the amdgpu_metadata and custom.config sections."""
     if not isinstance(fullYaml, dict):
         raise RuntimeError(f"Custom kernel '{kernelName}' has no parseable .amdgpu_metadata YAML")
@@ -690,16 +712,15 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     # Solution._assignCustomKernelParameters, which sees the logic file's
     # ProblemType rather than the advisory copy in custom.config.
     #
-    # A rocRoller Stream-K kernel is the exception: it stores partial tiles
-    # unconditionally, and the auto-derivation only fires for a PartialsBuffer
-    # GlobalSplitU algorithm, which a handwritten custom kernel does not have.
-    # Leaving it "None" would hand the kernel a zero-byte workspace and fault
-    # on its first partial-tile store, so declare it here.
+    # A rocRoller Stream-K kernel stores partial tiles unconditionally, and
+    # the auto-derivation only fires for a PartialsBuffer GlobalSplitU
+    # algorithm, which a handwritten custom kernel does not have. The element
+    # width is the logic file's ProblemType when the caller passes one.
     workspaceType = "None"
     workspaceSizePerElemC = 0
     if isRocRollerSK:
         workspaceType = "RocRollerStreamK"
-        workspaceSizePerElemC = _computeTypeBytes(kernelConfig)
+        workspaceSizePerElemC = _computeTypeBytes(kernelConfig, problemType=problemType)
 
     return {
         "name": kernelName,
@@ -709,14 +730,19 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         "grid": grid,
         # Only the rocRoller Stream-K grid reads it; other kernels keep 0 so
         # their library entries are unchanged.
-        "occupancy": rocRollerOccupancy(kernelMeta) if isRocRollerSK else 0,
+        "occupancy": recordedRocRollerOccupancy(kernelMeta, architecture) if isRocRollerSK else 0,
         "workspaceType": workspaceType,
         "workspaceSizePerElemC": workspaceSizePerElemC,
         "workspaceSizePerElemBias": 0,
     }
 
 def getCustomKernelConfig(
-    kernelName: str, internalSupportParams: dict, directory: str = None, kernelConfig: dict = None
+    kernelName: str,
+    internalSupportParams: dict,
+    directory: str = None,
+    kernelConfig: dict = None,
+    *,
+    problemType=None,
 ) -> dict:
     """
     Retrieves and validates the configuration for a custom kernel.
@@ -744,9 +770,11 @@ def getCustomKernelConfig(
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
 
     # A handwritten kernel skips the derivation that resolves "Auto", and the
-    # runtime picks which scale modes it serves from this field.
-    problemType = kernelConfig.get("ProblemType", {})
-    if (problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0)) and kernelConfig.get(
+    # runtime picks which scale modes it serves from this field. This is the
+    # config's own ProblemType. The problemType argument is the logic file's,
+    # and is what the metadata builder uses for the launch.
+    configProblemType = kernelConfig.get("ProblemType", {})
+    if (configProblemType.get("MXBlockA", 0) or configProblemType.get("MXBlockB", 0)) and kernelConfig.get(
             "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
                                      "HostPreSwizzle128x4"):
         raise RuntimeError(
@@ -798,8 +826,15 @@ def getCustomKernelConfig(
         # Only a kernel without an explicit CustomKernel block needs
         # amdhsa.kernels; the rocRoller kernels embed about 1 MB of it, so it is
         # parsed here and not for every kernel.
+        contents = getCustomKernelContents(kernelName, directory)
         fullYaml = _readEmbeddedYaml(kernelName, directory)
-        kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
+        kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(
+            kernelName,
+            fullYaml,
+            kernelConfig,
+            problemType=problemType,
+            architecture=architecture_from_assembly(contents),
+        )
 
     kernelConfig["CustomKernel"]["name"] = kernelName
     kernelConfig["CustomKernel"].setdefault("workspaceType", "None")
