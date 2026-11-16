@@ -1,7 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
 #include <string>
+#include <type_traits>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -10,6 +12,16 @@
 
 namespace miopen_plugin
 {
+
+namespace
+{
+
+void destroyPoolingDescriptor(miopenPoolingDescriptor_t descriptor)
+{
+    LOG_ON_MIOPEN_FAILURE(miopenDestroyPoolingDescriptor(descriptor));
+}
+
+} // namespace
 
 MiopenPoolingDescriptor::MiopenPoolingDescriptor(miopenPoolingMode_t mode,
                                                  const std::vector<int>& window,
@@ -33,31 +45,30 @@ MiopenPoolingDescriptor::MiopenPoolingDescriptor(miopenPoolingMode_t mode,
                 + std::to_string(window.size()));
     }
 
-    THROW_ON_MIOPEN_FAILURE(miopenCreatePoolingDescriptor(&_descriptor));
+    miopenPoolingDescriptor_t created = nullptr;
+    THROW_ON_MIOPEN_FAILURE(miopenCreatePoolingDescriptor(&created));
 
-    try
-    {
-        THROW_ON_MIOPEN_FAILURE(miopenSetNdPoolingDescriptor(_descriptor,
-                                                             mode,
-                                                             static_cast<int>(window.size()),
-                                                             window.data(),
-                                                             padding.data(),
-                                                             stride.data()));
+    // Owns the descriptor until every setting is applied, so a throwing setter destroys it.
+    std::unique_ptr<std::remove_pointer_t<miopenPoolingDescriptor_t>,
+                    decltype(&destroyPoolingDescriptor)>
+        owner(created, &destroyPoolingDescriptor);
 
-        // Setting the N-d descriptor resets the index type and the workspace index mode, so both
-        // must be applied afterwards. Image mode records a flattened spatial offset into the
-        // unpadded input, hipDNN's index convention. MIOpen's default for two spatial dimensions
-        // is mask mode, an offset inside the window.
-        THROW_ON_MIOPEN_FAILURE(miopenSetPoolingIndexType(_descriptor, indexType));
-        THROW_ON_MIOPEN_FAILURE(
-            miopenSetPoolingWorkSpaceIndexMode(_descriptor, miopenPoolingWorkspaceIndexImage));
-    }
-    catch(...)
-    {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyPoolingDescriptor(_descriptor));
-        _descriptor = nullptr;
-        throw;
-    }
+    THROW_ON_MIOPEN_FAILURE(miopenSetNdPoolingDescriptor(owner.get(),
+                                                         mode,
+                                                         static_cast<int>(window.size()),
+                                                         window.data(),
+                                                         padding.data(),
+                                                         stride.data()));
+
+    // Setting the N-d descriptor resets the index type and the workspace index mode, so both
+    // must be applied afterwards. Image mode records a flattened spatial offset into the
+    // unpadded input, hipDNN's index convention. MIOpen's default for two spatial dimensions
+    // is mask mode, an offset inside the window.
+    THROW_ON_MIOPEN_FAILURE(miopenSetPoolingIndexType(owner.get(), indexType));
+    THROW_ON_MIOPEN_FAILURE(
+        miopenSetPoolingWorkSpaceIndexMode(owner.get(), miopenPoolingWorkspaceIndexImage));
+
+    _descriptor = owner.release();
 }
 
 MiopenPoolingDescriptor::MiopenPoolingDescriptor(MiopenPoolingDescriptor&& other) noexcept
@@ -76,7 +87,7 @@ MiopenPoolingDescriptor&
 
     if(_descriptor != nullptr)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyPoolingDescriptor(_descriptor));
+        destroyPoolingDescriptor(_descriptor);
     }
 
     _descriptor = other._descriptor;
@@ -89,7 +100,7 @@ MiopenPoolingDescriptor::~MiopenPoolingDescriptor()
 {
     if(_descriptor != nullptr)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyPoolingDescriptor(_descriptor));
+        destroyPoolingDescriptor(_descriptor);
     }
 }
 
