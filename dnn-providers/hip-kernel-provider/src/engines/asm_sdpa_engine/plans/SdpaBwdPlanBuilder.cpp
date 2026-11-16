@@ -400,9 +400,15 @@ struct VerifiedKernel
     int hdimQ;
     int hdimV;
 };
-constexpr std::array<VerifiedKernel, 2> K_VERIFIED_KERNELS{{
+constexpr std::array<VerifiedKernel, 8> K_VERIFIED_KERNELS{{
     {"gfx942", "bf16", 128, 128},
+    {"gfx942", "bf16", 192, 192},
     {"gfx942", "fp16", 128, 128},
+    {"gfx942", "fp16", 192, 192},
+    {"gfx950", "bf16", 128, 128},
+    {"gfx950", "bf16", 192, 128},
+    {"gfx950", "fp16", 128, 128},
+    {"gfx950", "fp16", 192, 128},
 }};
 
 bool isVerifiedDispatch(const std::string& archId,

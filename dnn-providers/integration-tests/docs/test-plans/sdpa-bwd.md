@@ -986,10 +986,12 @@ on gfx942 and gfx950 (AITER's choice there is for speed, not correctness), and g
 bound 0 and right bound 0 or unbounded (AITER's Python gate does not count them as windows; the band
 kernel computes them).
 
-Only the gfx942 hd128 A32 psskddv kernels (the kernels that take any sequence length and a padded
-head dim), run at D = 128, have been checked against the CPU backward reference. Every other
-configuration the engine accepts, including all of gfx950, logs a WARN on its first dispatch until
-it is calibrated on a GPU (`asm_sdpa_engine/asm/asm_kernels/README.md`, Verified Kernel Matrix).
+The psskddv kernels (the kernels that take any sequence length and a padded head dim) of gfx942
+hd128 and hd192 and of gfx950 hd128 and hd192 x hd128, run at their own head dims, have been checked
+against the CPU backward reference: the provider's backward GPU tests passed on MI300X (gfx942) and
+MI355X (gfx950) at commit 130bc66931c. Every other configuration the engine accepts, including every
+padded head dim and every `pssk = 0` or `pddv = 0` kernel, logs a WARN on its first dispatch until it
+is calibrated on a GPU (`asm_sdpa_engine/asm/asm_kernels/README.md`, Verified Kernel Matrix).
 
 *Non-normative, 2026-11-10,* the HF census PR: two MI300X GPUs (gfx942) of one node, two GTest
 shards, otherwise configured as above, with O and Stats derived by the reference executors

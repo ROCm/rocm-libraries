@@ -107,14 +107,28 @@ hold:
 | Arch | dtype | D_qk x D_v | Row | Accumulator | Masks |
 |---|---|---|---|---|---|
 | gfx942 | bf16 | 128 x 128 | psskddv | A32 | 0-3 |
+| gfx942 | bf16 | 192 x 192 | psskddv | A32 | 0-2 |
 | gfx942 | fp16 | 128 x 128 | psskddv | A32 | 0-3 |
+| gfx942 | fp16 | 192 x 192 | psskddv | A32 | 0-2 |
+| gfx950 | bf16 | 128 x 128 | psskddv | A16, A32 | 0-4 |
+| gfx950 | bf16 | 192 x 128 | psskddv | A16, A32 | 0-2 |
+| gfx950 | fp16 | 128 x 128 | psskddv | A16, A32 | 0-4 |
+| gfx950 | fp16 | 192 x 128 | psskddv | A16, A32 | 0-2 |
 
-Every gfx942 hd128 psskddv row is an A32 row, so the entries cover A32 only.
-The mask is not part of the key; the entries cover each mask those rows ship.
+The calibration runs are `IntegrationGpuSdpaBwdBf16` and
+`IntegrationGpuSdpaBwdFp16` (instances `Smoke` and `Comprehensive`), which
+passed on MI300X (gfx942) and MI355X (gfx950) at commit 130bc66931c. For every
+entry, each batch psskddv row the engine serves with those head dims is
+selected by at least one of those cases at the row's own head dims.
 
-Every other configuration the engine accepts is unverified. That includes
-gfx942 at D = 64 or 192, any padded head dim, any `pssk = 0` or `pddv = 0` row
-and the A16 accumulator, and every gfx950 configuration.
+The mask and accumulator are not part of the key; the entries cover each mask
+and accumulator those rows ship. Every gfx942 psskddv row is an A32 row. The
+gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV, although
+their object names end in `_pssk`.
+
+Every other configuration the engine accepts is unverified: any padded head
+dim, and any `pssk = 0` or `pddv = 0` row. That includes every gfx942 D = 64
+row and every gfx942 A16 row.
 
 Dispatch logs once per (arch, dtype, row head dims, mask, accumulator,
 verified):

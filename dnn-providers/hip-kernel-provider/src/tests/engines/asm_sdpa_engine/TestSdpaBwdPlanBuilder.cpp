@@ -167,22 +167,21 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
     const bool isGfx942 = deviceString() == "gfx942";
 
     const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
-        // Valid backward graph: BF16, HD=128, FP32 stats, no masking. It is calibrated
-        // against the CPU reference on gfx942 (logs INFO there, WARN on gfx950).
+        // Valid backward graph: BF16, HD=128, FP32 stats, no masking. Its head dims
+        // are in the verified kernel matrix on gfx942 and gfx950.
         {GraphTest{createSdpaBwdGraph(), "Valid BF16 HD128 backward"}, true},
 
         // HD=64: gfx942 serves it with the (pssk = 1, pddv = 0) rows; AITER sends
         // gfx950 hd64 to CK, so gfx950 declines it.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "Head dimension 64"}, isGfx942},
 
-        // HD=192 BF16: registry-supported and dispatched on gfx942. The CPU
-        // reference is not yet calibrated, so buildPlan logs a one-time WARN;
-        // isApplicable accepts. AITER sends gfx950 hd192x192 to CK, so gfx950
-        // declines it.
+        // HD=192 BF16: registry-supported and dispatched on gfx942, where its head
+        // dims are in the verified kernel matrix; isApplicable accepts. AITER sends
+        // gfx950 hd192x192 to CK, so gfx950 declines it.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, isGfx942},
 
-        // FP16 HD128: registry-supported and dispatched; calibrated on gfx942 (logs
-        // INFO there, WARN on gfx950). isApplicable accepts.
+        // FP16 HD128: registry-supported and dispatched; its head dims are in the
+        // verified kernel matrix on gfx942 and gfx950. isApplicable accepts.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::HALF), "FP16 tensors"}, true},
 
         // Causal mask dispatched: CSV registry carries mask=1 DQDKDV rows.
