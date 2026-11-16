@@ -344,7 +344,6 @@
           "s3_2d_i16x16_n2c16k32_f3x3_bf16_cl_relu_clamp",
           "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu6",
           "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clamp",
-          "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_sigmoid",
           "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_tanh",
           "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu6",
           "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu_clamp",

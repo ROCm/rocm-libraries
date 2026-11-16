@@ -190,7 +190,9 @@ inference. They stay frontend C++ tests:
 ### 2.7 Invalid problems
 
 These are frontend unit tests, not sweep cases. Each must be rejected with
-`INVALID_VALUE`:
+`INVALID_VALUE`. This deviates from RFC 0022 §6, which asks for an
+`expected_rejection` bundle for each rejection an engine can see; see the
+deviations after §4.3 (D1).
 
 - `C % w[1] ≠ 0`
 - `K % G ≠ 0`
@@ -222,7 +224,7 @@ feature small, nightly retests it at medium size, and full adds stress.
 | Level | Per-case ceiling (fp32) | Shape sets of the level's own cases |
 |---|---|---|
 | quick | ≤ 20 MFLOP, ≤ 1 MB | S; 3D at 16×8×4, 16×8×8, 8×8×4 and 8×4×4 |
-| PR | ≤ 200 MFLOP, ≤ 16 MB | S, H, R, plus three M cases (M2, M9, M11), which exceed the ceiling by design |
+| PR | ≤ 200 MFLOP, ≤ 16 MB | S, H, R, plus three M cases (M2, M9, M11); M2 and M9 exceed the ceiling by design |
 | nightly | ≤ 8 GFLOP, ≤ 64 MB | S, L, M, R, H, A |
 | full | none | S, L, R, X |
 
@@ -352,7 +354,7 @@ base size:
 - **Scaling rule:** if a shape exceeds the nightly ceiling, the generator halves N,
   then C and K, until it fits. Examples: L10 2D (filter 5) runs at N 2; L19
   (filter = input) runs at C = K = 64 in 1D and 2D.
-- **Size range:** about 0.01–8 GFLOP and 1–64 MB per case.
+- **Size range:** about 0.3 MFLOP–6.6 GFLOP and 0.3–56 MB per case.
 
 ### 3.3 Model (M) and corpus (R)
 
@@ -383,11 +385,15 @@ signatures (strided grouped and depthwise convs, ConvNeXt 7×7 depthwise,
 patchify convs, (2+1)D video convs, vocoder dilations, atrous dilations), and
 where they matched a signature it was often at a small fraction of real size.
 
-- **Selection.** A behaviour signature is (rank, group class, filter, stride,
-  dilation, padding class): what selects a solver path, not the exact size. For
-  each signature, R takes the median-FLOP graph inside each level ceiling (PR,
-  nightly, and full up to 120 GFLOP and 1 GiB), and every model gets at least
-  one graph in PR or nightly. A graph picked for two levels sits in the lower.
+- **Selection.** A behaviour signature is (effective rank, group class, filter,
+  stride, dilation, padding class): what selects a solver path, not the exact
+  size. Each signature's graphs are split into exclusive ceiling bins (PR: fits
+  the PR ceiling; nightly: fits the nightly ceiling but not PR, or every graph
+  that fits nightly if none does; full: up to 120 GFLOP and 1 GiB but not
+  nightly), and R takes the median-FLOP graph of each bin. Every model gets at
+  least one graph in PR or nightly. A graph picked for two levels sits in the
+  lower. The exact rule, with its tie and rank details, is the `selection`
+  string in `conv_fwd_corpus.json`.
 - **Counts.** PR 30, nightly 60, full 47: 137 cases covering all 60 signatures
   and all 31 models.
 - **Cases keep the model's data type and layout** (mostly fp16 and NCHW). The
@@ -398,9 +404,11 @@ where they matched a signature it was often at a small fraction of real size.
   R id (R001…R137); `metadata.notes` names the corpus shape id, the models and the
   family. The pick, the selection rule and the pin (repository commit and archive
   md5) are data in `conv_fwd_corpus.json`. Each case's `why` records how the rule
-  chose it: its signature, the ceiling bin, how many corpus graphs share the
-  signature in that bin, the pick's position in FLOP order (the median), and the
-  reason (signature median, or the one graph that gives a model its first case).
+  chose it: its signature, the ceiling bin, how many candidate graphs the rule
+  ranked (the signature's graphs in that bin, or for a model-coverage pick the
+  model's graphs that fit nightly), the pick's position in FLOP order (the
+  median), and the reason (signature median, or the one graph that gives a model
+  its first case).
   A corpus update is a deliberate regeneration.
 - **Limits of the corpus.** It was captured at small batch on one GPU, with
   `MIOPEN_FIND_MODE=fast`, and holds no fused graphs and no int8 or fp8. S, H
@@ -449,7 +457,7 @@ The sweep is a set of cases over three core axes plus feature axes.
 
 | Rule | Meaning |
 |---|---|
-| Core cover | Every level, together with the levels below it, holds every core combination at least once, for plain conv and for **each** fused topology (seven topologies × 18). In quick, at least one engine executes each core cell (RFC 0022 §8.1). The core matrix in quick crosses plain conv, `act` and `bias_act` with every 2-D and 3-D rank × layout × data type cell (36 cells) on S3; the fused cells use plain `relu`, which MIOpen executes on gfx942, and gfx90a declines every fused graph. The 1-D cells of `act` and `bias_act` rotate the ReLU family and the shapes. Of the other four topologies, MIOpen declines every graph except fp32 `add_relu`, which it accepts and computes wrongly (ALMIOPEN-3009). ALMIOPEN-3008 tracks the defects that cause the declines that are workarounds. |
+| Core cover | Every level, together with the levels below it, holds every core combination at least once, for plain conv and for **each** fused topology (seven topologies × 18). In quick, at least one engine executes each 2-D and 3-D core cell of plain conv, `act` and `bias_act` (RFC 0022 §8.1): the core matrix crosses them with every 2-D and 3-D rank × layout × data type cell (36 cells) on S3, with plain `relu`, which MIOpen executes on gfx942; gfx90a declines every fused graph. The 1-D cells of `act` and `bias_act` rotate the ReLU family and the shapes, and no engine executes them in quick. Of the other four topologies, MIOpen declines every graph except fp32 `add_relu`, which it accepts and computes wrongly (ALMIOPEN-3009). ALMIOPEN-3008 tracks the defects that cause the declines that are workarounds. |
 | One feature at a time | Each S and L shape changes one feature from the defaults, so a failure points at that feature. |
 | Size grows with level | Each level has a size ceiling (§3). PR proves a feature works; nightly proves it still works at medium size. |
 | Pair cover | The level rules loop over rank, layout and data type, and rotate the other values by position (`PAIRS[(i + offset) % 6]`, `acts[k % 13]`, `MIXES[…]`). The generator does not construct an all-pairs set, check pair coverage or use a selection seed. By the end of nightly, loops give every S shape every layout × data type pair of its rank, and give `conv_mode`, the extra data types and the value classes every rank × data type combination; mixed layouts (two mixes) and non-packed strides (three kinds) are placed once per rank × data type. Full gives every S shape one value of each feature, by rotation. |
@@ -478,7 +486,7 @@ that holds its graph; the levels cascade.
 | Model (M) | — | M2, M9, M11 | M1–M12 × every pair of its rank | — |
 | Corpus (R) | — | 30 graphs (one per signature that fits) | 60 graphs (realistic size, every model) | 47 graphs (production size) |
 | Stress | — | — | — | X1–X4 (X3 fp16 and bf16) |
-| Fusion core (6 topologies × 18) | 1 per cell; ReLU family rotated; core matrix: `act` and `bias_act` with plain `relu` on S3 × every 2-D and 3-D layout × dtype cell; sigmoid on `act` (S3) | `act`, `bias_act`: 2× core; the others 1×; all 13 activations over the cells | `act` and `bias_act`: every S shape × every pair, activation rotated; the other four topologies: from quick and PR (T9) | `act`: the executed activations × core and × every S and L shape (T8); `bias_act`: activation × core; the other four topologies: from quick and PR (T9) |
+| Fusion core (6 topologies × 18) | 1 per cell; ReLU family rotated; core matrix: `act` and `bias_act` with plain `relu` on S3 × every 2-D and 3-D layout × dtype cell; sigmoid on `act` (S3, 2-D, fp16 channels-first, the form MIOpen executes) | `act`, `bias_act`: 2× core; the others 1×; all 13 activations over the cells | `act` and `bias_act`: every S shape × every pair, activation rotated; the other four topologies: from quick and PR (T9) | `act`: the executed activations × core and × every S and L shape (T8); `bias_act`: activation × core; the other four topologies: from quick and PR (T9) |
 | F26 zero lower clip, zero slope | — | `relu_clip0` and `relu_slope0` × `act`, `bias_act` × S2 2-D × (channels-first, fp32 and fp16) | — | — |
 | Fusion features F25–F31 | — | each variant once | each variant × rank (`bias_act`, `scale_bias_act`, `act`) | — |
 | Fusion at size | — | — | every L shape once per `act` and `bias_act`; M2, M3, M6, M9 × every pair | — |
@@ -489,12 +497,12 @@ Cases generated (own level / cumulative):
 | Level | Plain conv | Fused | Own | Cumulative | Claim | Probe | Regression |
 |---|---|---|---|---|---|---|---|
 | quick | 40 | 133 | **173** | 173 | 83 | 90 | 0 |
-| PR | 193 | 171 | **364** | 537 | 178 | 186 | 0 |
-| nightly | 1,334 | 1,020 | **2,354** | 2,891 | 1,260 | 1,092 | 2 |
-| full | 965 | 910 | **1,875** | 4,766 | 1,255 | 620 | 0 |
+| PR | 193 | 172 | **365** | 538 | 179 | 186 | 0 |
+| nightly | 1,334 | 1,020 | **2,354** | 2,892 | 1,260 | 1,092 | 2 |
+| full | 965 | 909 | **1,874** | 4,766 | 1,254 | 620 | 0 |
 
-By size class: quick S 173. PR S 313, H 18, M 3, R 30. Nightly S 1,613, L 385,
-M 122, H 162, A 12, R 60. Full S 977, L 831, R 47, X 20. 541 distinct conv
+By size class: quick S 173. PR S 314, H 18, M 3, R 30. Nightly S 1,613, L 385,
+M 122, H 162, A 12, R 60. Full S 976, L 831, R 47, X 20. 541 distinct conv
 geometries in all. The trims T8, T9, T11 and T12 (§4.3) remove 3,798 of the
 generated synthetic cases, 879 duplicate graphs are merged into the case that
 holds the same graph, and the R set adds 137. Counts are those of the generator;
@@ -575,14 +583,21 @@ cascade. Strict `expected_rejection` bundles are never trimmed.
 
 T10 is retired; trim ids are not reused.
 
+**Deviations from RFC 0022.**
+
+| Id | RFC rule | This plan | Why | Tracked |
+|---|---|---|---|---|
+| D1 | §6: each rejection an engine can see is an `expected_rejection` bundle | The invalid problems of §2.7 are frontend unit tests; no `ConvolutionFwd` sweep holds an `expected_rejection` case. The harness never calls the frontend's `validate()`, so an engine that accepts one of these graphs is not caught by a bundle. | The bundle flag landed after the plan's sweeps; the engine-visible rules need choosing and confirming first. | ALMIOPEN-3232 |
+| D2 | §12.3: precision uplift is the default for low-precision golden data | fp16 and bf16 golden data use matched precision (fp32 accumulation, rounded to the io type) (§5) | It matches the engines' accumulation contract and keeps the calibrated tolerance tighter than the op default of 0.1. This is the conv answer to the RFC's open question on golden precision. | ALMIOPEN-3230 |
+
 ### 4.4 Cost
 
 | Estimate | Value |
 |---|---|
-| FLOP per case | 0.01 M – 116 G; quick ≤ 14 M, PR ≤ 3.6 G (the three M cases), nightly ≤ 7.2 G, full 116 G (X2) |
+| FLOP per case | 0.002 M – 116 G; quick ≤ 14 M, PR ≤ 3.6 G (the M cases), nightly ≤ 7.2 G, full 116 G (X2) |
 | Oracle | GPU reference first. The CPU reference fallback costs seconds per M case and minutes per X case, so X cases must find a GPU reference. |
 | Compile and solver search | Paid once per unique shape on a cold cache; it dominates execution. Measured in §4.5. |
-| Device memory | X1 ≈ 0.4 GB, X3 ≈ 13 GB (fp16), so `minimum_vram_mb` is set on those cases. |
+| Device memory | X1 ≈ 0.4 GB, X3 ≈ 13 GB (fp16). The generator sets `minimum_vram_mb` on every case whose tensors exceed 1 GiB, so on the X3 cases. |
 
 ### 4.5 Measured run
 
@@ -699,7 +714,8 @@ live sweep case, so no level that runs without `dvc pull` will lose coverage.
 - **Precision strategy:** precision uplift (fp64, cast to the io type) for fp32
   cases. Matched precision (fp32 accumulation, rounded to the io type) for fp16
   and bf16 cases, which matches the engines' accumulation contract and keeps
-  the calibrated tolerance tighter than the op default of 0.1. Recorded per case
+  the calibrated tolerance tighter than the op default of 0.1. This deviates
+  from the RFC 0022 §12.3 default (D2 after §4.3). Recorded per case
   in `meta.json`.
 - **Confirmation:** `hipdnn_golden_data_tests --reference both` must pass for every
   golden case except G13. G13 cannot be confirmed by a hipDNN reference until F13's

@@ -637,7 +637,8 @@ def rules(lv):
                         else "relu"
                     )
                     add(fuse(base, topo, act=act))
-        add(fuse(b.S("S3", 2, P1), "act", act="sigmoid"))
+        # fp16 channels-first: the sigmoid form MIOpen executes, so quick runs it.
+        add(fuse(b.S("S3", 2, P.PAIRS[2]), "act", act="sigmoid"))
         # Core matrix: plain conv, conv -> ReLU and conv -> bias -> ReLU over
         # rank 2 and 3, both layouts and the three core data types, with plain
         # ReLU, which every engine executes.

@@ -13,8 +13,9 @@ shape roles: the activation (fwd ``x``, bwd ``dx``, wrw ``x``), the filter
 
 - ``dtype`` (exclusive): the dtype of the op's data input: fp32, fp16, bf16,
   fp64, int8 or one of the four fp8 encodings. FNUZ fp8 keeps its own value,
-  as in the matrix. Any tensor may also be int32, the response an int8
-  convolution accumulates into; int32 is not a data dtype.
+  as in the matrix. Every tensor except the data input may also be int32 (the
+  type an int8 convolution accumulates into); int32 is not a data dtype, and
+  the check does not tie it to the response port.
 - ``precision:mixed``: the op's non-virtual tensors do not all share one
   dtype. A virtual tensor -- the fp32 intermediate between a conv and its
   fused pointwise -- is not counted: the caller never sees it.
