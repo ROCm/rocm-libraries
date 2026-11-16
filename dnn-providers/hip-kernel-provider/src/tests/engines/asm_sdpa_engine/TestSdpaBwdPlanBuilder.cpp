@@ -15,6 +15,7 @@
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaBwdArgsBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlan.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
@@ -31,6 +32,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -107,15 +109,89 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGr
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForRaggedGraph)
+// Copy of a backward graph with seq_len_q and/or seq_len_kv set, each to an
+// INT32 [B, 1, 1, 1] tensor as the frontend builds them. sdpa::withSeqLenQ and
+// sdpa::withSeqLenKv accept forward nodes only.
+flatbuffers::FlatBufferBuilder
+    withSeqLenTensors(const flatbuffers::FlatBufferBuilder& base, bool seqLenQ, bool seqLenKv)
 {
-    // The backward engine does not support group mode; any ragged tensor must be
-    // rejected.
-    auto builder = sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"});
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+    GraphT graph;
+    GetGraph(base.GetBufferPointer())->UnPackTo(&graph);
+    auto& attrs = *graph.nodes.front()->attributes.AsSdpaBackwardAttributes();
+    int64_t batch = 0;
+    int64_t nextUid = 0;
+    for(const auto& tensor : graph.tensors)
+    {
+        nextUid = std::max(nextUid, tensor->uid + 1);
+        if(tensor->uid == attrs.q_tensor_uid)
+        {
+            batch = tensor->dims.at(0);
+        }
+    }
+    const auto appendSeqLen = [&](const char* name) {
+        auto tensor = std::make_unique<TensorAttributesT>();
+        tensor->uid = nextUid++;
+        tensor->name = name;
+        tensor->data_type = DataType::INT32;
+        tensor->dims = {batch, 1, 1, 1};
+        tensor->strides = {1, 1, 1, 1};
+        const int64_t uid = tensor->uid;
+        graph.tensors.push_back(std::move(tensor));
+        return uid;
+    };
+    if(seqLenQ)
+    {
+        attrs.seq_len_q_tensor_uid = appendSeqLen("seq_len_q");
+    }
+    if(seqLenKv)
+    {
+        attrs.seq_len_kv_tensor_uid = appendSeqLen("seq_len_kv");
+    }
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(Graph::Pack(builder, &graph));
+    return builder;
+}
+
+// The engine serves batch mode only. The ASM kernels take sequence positions
+// only as cumulative offsets, so a graph with per-sequence lengths is declined
+// although its Q is not ragged. A group-mode graph (Q ragged) and a batch-mode
+// graph with any other ragged tensor are declined too. Without these
+// attributes each graph is one the engine serves.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableDeclinesGraphsOutsideBatchMode)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // On other devices the device check declines first, masking these checks.
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
+    {
+        GTEST_SKIP();
+    }
+
+    std::vector<GraphTest> declineTests;
+    declineTests.emplace_back(withSeqLenTensors(createSdpaBwdGraph(), true, false),
+                              "seq_len_q set");
+    declineTests.emplace_back(withSeqLenTensors(createSdpaBwdGraph(), false, true),
+                              "seq_len_kv set");
+    declineTests.emplace_back(withSeqLenTensors(createSdpaBwdGraph(), true, true),
+                              "seq_len_q and seq_len_kv set");
+    declineTests.emplace_back(
+        withSeqLenTensors(
+            sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"}), true, true),
+        "seq_len_q and seq_len_kv set, Q, K, V and O ragged");
+    declineTests.emplace_back(sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q", "k", "v", "o"}),
+                              "Q, K, V and O ragged");
+    declineTests.emplace_back(sdpa::withRaggedTensors(createSdpaBwdGraph(), {"q"}),
+                              "only Q ragged");
+    declineTests.emplace_back(sdpa::withRaggedTensors(createSdpaBwdGraph(), {"k", "v", "o"}),
+                              "K, V and O ragged, Q not");
+
+    for(const auto& test : declineTests)
+    {
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper())) << test.message;
+    }
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsTrueForMultipleOf16ByteAlignment)
@@ -984,6 +1060,90 @@ TEST(TestSdpaBwdRegistryLookup, Gfx950ResolvesThePsskddvRows)
     {
         SCOPED_TRACE(std::to_string(request.hdimQ) + "x" + std::to_string(request.hdimV));
         EXPECT_EQ(resolvedPsskPddv("gfx950", request), K_PSSK_PDDV);
+    }
+}
+
+// =============================================================================
+// Verified kernels
+// =============================================================================
+
+namespace
+{
+// A dispatch the verified-kernel tests check: the request, and the (pssk, pddv)
+// of the dqdkdv row it must resolve, so each row names the kernel it covers.
+struct VerifiedCase
+{
+    const char* arch;
+    bwd_dispatch::KernelRequest request;
+    std::pair<int, int> row;
+};
+
+bwd_dispatch::KernelRequest withA16(bwd_dispatch::KernelRequest request)
+{
+    request.atomic32 = ATOMIC_A16;
+    return request;
+}
+
+std::string describe(const VerifiedCase& c)
+{
+    return std::string(c.arch) + " " + c.request.dataType + " " + std::to_string(c.request.hdimQ)
+           + "x" + std::to_string(c.request.hdimV) + " mask=" + std::to_string(c.request.mask)
+           + " atomic32=" + std::to_string(c.request.atomic32)
+           + " S=" + std::to_string(c.request.seqLenQ) + "/" + std::to_string(c.request.seqLenKv);
+}
+} // namespace
+
+// Every (arch, dtype, head dims) key of the Verified Kernel Matrix, through rows
+// that the IntegrationGpuSdpaBwd{Bf16,Fp16} Smoke and Comprehensive cases ran
+// and passed at the row's own head dims, including the gfx942 rows that are not
+// psskddv (hd64 (1, 0), and the (0, 0) A16 and A32 rows).
+TEST(TestSdpaBwdVerifiedDispatch, RowsRunAtTheirOwnHeadDimsAreVerified)
+{
+    const std::vector<VerifiedCase> cases{
+        {"gfx942", makeRequest("bf16", 64, 64), K_PSSK_ONLY},
+        {"gfx942",
+         withA16(withSeqLens(makeRequest("fp16", 64, 64, MASK_TOP_LEFT_CAUSAL), 128, 128)),
+         K_UNPADDED},
+        {"gfx942", withSeqLens(makeRequest("bf16", 128, 128), 384, 384), K_UNPADDED},
+        {"gfx942", withA16(makeRequest("fp16", 128, 128)), K_UNPADDED},
+        {"gfx942", makeRequest("fp16", 128, 128, MASK_BOTTOM_RIGHT_CAUSAL), K_PSSK_PDDV},
+        {"gfx942", makeRequest("bf16", 192, 192, MASK_TOP_LEFT_CAUSAL), K_PSSK_PDDV},
+        {"gfx942", makeRequest("fp16", 192, 192), K_PSSK_PDDV},
+        {"gfx950",
+         withA16(makeRequest("bf16", 128, 128, BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW)),
+         K_PSSK_PDDV},
+        {"gfx950", makeRequest("fp16", 128, 128, MASK_SLIDING_WINDOW), K_PSSK_PDDV},
+        {"gfx950", withA16(makeRequest("bf16", 192, 128, MASK_TOP_LEFT_CAUSAL)), K_PSSK_PDDV},
+        {"gfx950", makeRequest("fp16", 192, 128, MASK_BOTTOM_RIGHT_CAUSAL), K_PSSK_PDDV},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(describe(c));
+        EXPECT_EQ(resolvedPsskPddv(c.arch, c.request), c.row);
+        EXPECT_TRUE(bwd_dispatch::isVerifiedDispatch(c.arch, c.request));
+    }
+}
+
+// A padded head dim is unverified even when the row it runs is verified at its
+// own head dims. The gfx942 hd128 A16 pddv = 1 rows serve only padded head
+// dims, so they are never verified. Rows the engine never dispatches (gfx950
+// hd64 and 192 x 192, which isApplicable declines) are unverified too.
+TEST(TestSdpaBwdVerifiedDispatch, PaddedAndUndispatchedRowsAreUnverified)
+{
+    const std::vector<VerifiedCase> cases{
+        {"gfx942", makeRequest("bf16", 96, 96), K_PSSK_PDDV},
+        {"gfx942", makeRequest("bf16", 136, 136), K_PSSK_PDDV},
+        {"gfx942", withA16(withSeqLens(makeRequest("bf16", 72, 72), 128, 128)), {0, 1}},
+        {"gfx942", withA16(makeRequest("fp16", 96, 96, MASK_TOP_LEFT_CAUSAL)), {0, 1}},
+        {"gfx950", makeRequest("bf16", 96, 96), K_PSSK_PDDV},
+        {"gfx950", makeRequest("bf16", 64, 64), K_PSSK_ONLY},
+        {"gfx950", makeRequest("bf16", 192, 192), K_PSSK_PDDV},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(describe(c));
+        EXPECT_EQ(resolvedPsskPddv(c.arch, c.request), c.row);
+        EXPECT_FALSE(bwd_dispatch::isVerifiedDispatch(c.arch, c.request));
     }
 }
 
@@ -3285,6 +3445,134 @@ TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsReturnsAccumulatorKnob)
     ASSERT_EQ(constraint->valid_values.size(), 2u);
     EXPECT_EQ(constraint->valid_values[0], "a32");
     EXPECT_EQ(constraint->valid_values[1], "a16");
+}
+
+// A backward graph with the accumulator knob values getCustomKnobs offers for
+// it on each arch; no values when the engine does not serve the graph.
+struct AccumulatorKnobCase
+{
+    flatbuffers::FlatBufferBuilder graph;
+    std::string name;
+    std::vector<std::string> gfx942Values;
+    std::vector<std::string> gfx950Values;
+};
+
+// Graphs a32 serves on gfx942. Every gfx942 a16 row is pssk = 0 at
+// D_qk = D_v <= 128 and writes dQ with Q's strides, so a16 serves only the
+// first there. The gfx950 a16 kernels serve every graph a32 serves; gfx950
+// does not serve D = 192 x 192.
+std::vector<AccumulatorKnobCase> accumulatorKnobCases()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    const std::vector<std::string> both = {"a32", "a16"};
+    const std::vector<std::string> a32Only = {"a32"};
+    const auto packed = [](const std::vector<int64_t>& dims) {
+        return hipdnn_data_sdk::utilities::generateStrides(dims);
+    };
+    const std::vector<int64_t> qDims = {1, 2, 256, 128};
+    const std::vector<int64_t> kvDims = {1, 2, 512, 128};
+    const std::vector<int64_t> paddedRows = {int64_t{2} * 256 * 136, int64_t{256} * 136, 136, 1};
+
+    std::vector<AccumulatorKnobCase> cases;
+    cases.push_back({createSdpaBwdGraph(qDims), "S_q == S_kv == 256, D = 128", both, both});
+    cases.push_back({hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(qDims,
+                                                                         packed(qDims),
+                                                                         kvDims,
+                                                                         packed(kvDims),
+                                                                         kvDims,
+                                                                         packed(kvDims),
+                                                                         qDims,
+                                                                         packed(qDims),
+                                                                         DataType::BFLOAT16),
+                     "S_q != S_kv",
+                     a32Only,
+                     both});
+    cases.push_back({createSdpaBwdGraph({1, 2, 200, 128}), "S_kv % 64 != 0", a32Only, both});
+    cases.push_back({createSdpaBwdGraph({1, 2, 256, 192}), "D = 192", a32Only, {}});
+    cases.push_back({withLayouts(createSdpaBwdGraph(qDims), {{"dq", paddedRows, {}}}),
+                     "dQ rows padded, Q packed",
+                     a32Only,
+                     both});
+    return cases;
+}
+
+// The accumulator knob values getCustomKnobs offers; empty when it offers no
+// knob.
+std::vector<std::string>
+    accumulatorKnobValues(const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs)
+{
+    if(knobs.empty())
+    {
+        return {};
+    }
+    const auto* constraint = knobs.front().constraint.AsStringConstraint();
+    return constraint == nullptr ? std::vector<std::string>{} : constraint->valid_values;
+}
+
+// The knob offers a16 only for graphs the a16 kernels serve on the device.
+TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsOffersA16OnlyForGraphsTheA16KernelsServe)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto arch = deviceString();
+    if(!bwd_dispatch::isSupportedArch(arch))
+    {
+        GTEST_SKIP();
+    }
+
+    for(const auto& knobCase : accumulatorKnobCases())
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            knobCase.graph.GetBufferPointer(), knobCase.graph.GetSize());
+        EXPECT_EQ(accumulatorKnobValues(_planBuilder.getCustomKnobs(_handle, graphWrapper)),
+                  arch == "gfx942" ? knobCase.gfx942Values : knobCase.gfx950Values)
+            << knobCase.name;
+    }
+}
+
+// For every graph the engine serves, getCustomKnobs offers a16 exactly when
+// buildPlan does not decline it with BAD_PARAM. Any other outcome of buildPlan,
+// such as a kernel that does not load on the device, is not an a16 decline.
+TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsOffersA16IffBuildPlanAcceptsIt)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!bwd_dispatch::isSupportedArch(deviceString()))
+    {
+        GTEST_SKIP();
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper noConfig(nullptr, 0);
+    Settings a16Settings;
+    a16Settings.accumulatorType = AccumulatorType::A16;
+    const auto buildPlanDeclinesA16
+        = [&](const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graphWrapper) {
+              Context context;
+              context.setExecutionSettings(a16Settings);
+              try
+              {
+                  _planBuilder.buildPlan(_handle, graphWrapper, noConfig, context);
+              }
+              catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+              {
+                  return e.getStatus() == HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+              }
+              return false;
+          };
+
+    for(const auto& knobCase : accumulatorKnobCases())
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            knobCase.graph.GetBufferPointer(), knobCase.graph.GetSize());
+        // The engine builds plans only for graphs it serves.
+        if(!_planBuilder.isApplicable(_handle, graphWrapper))
+        {
+            continue;
+        }
+        const auto values
+            = accumulatorKnobValues(_planBuilder.getCustomKnobs(_handle, graphWrapper));
+        const bool offersA16 = std::find(values.begin(), values.end(), "a16") != values.end();
+        EXPECT_NE(offersA16, buildPlanDeclinesA16(graphWrapper)) << knobCase.name;
+    }
 }
 
 // =============================================================================

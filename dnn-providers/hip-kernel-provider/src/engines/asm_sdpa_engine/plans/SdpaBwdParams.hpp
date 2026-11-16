@@ -114,7 +114,7 @@ struct SdpaBwdParams
     hipdnn_plugin_sdk::ScalarOperand attnScale;
 
     // Per-stage tile sizes; populated by SdpaBwdPlanBuilder from the resolved
-    // CSV configs ('ts' column) and consumed by SdpaBwdPlan grid math.
+    // CSV configs ('ts' column) and consumed by computeBwdLaunchParams().
     struct KernelTiles
     {
         unsigned int ts; // K/V or convert tile size (column 'ts' in the AITER CSV)

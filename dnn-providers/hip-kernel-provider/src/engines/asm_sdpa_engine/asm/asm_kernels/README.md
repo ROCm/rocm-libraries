@@ -90,45 +90,48 @@ follows AITER's choice of kernel (the gate in `aiter/ops/mha.py` and
   left bound 0 and right bound 0 or unbounded
   ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
 
-Only some of those kernels have been checked on a GPU against the CPU backward
-reference. A checked kernel is **verified**.
+A dispatch whose kernel has been checked on a GPU against the CPU backward
+reference, at the head dims it runs, is **verified**.
 
 The verified list is `K_VERIFIED_KERNELS` in `plans/SdpaBwdPlanBuilder.cpp`.
-Each entry names an arch, a dtype and the head dims of a DQDKDV registry row.
-`isVerifiedDispatch()` counts a dispatch as verified only when all of these
+Each entry names an arch, a dtype and the head dims of DQDKDV registry rows.
+`isVerifiedDispatch()` counts a dispatch as verified only when both of these
 hold:
 
 1. The DQDKDV row matches an entry on arch, dtype, row `hdim_q` and row `hdim_v`.
-2. The row is a psskddv row (`pssk = 1` and `pddv = 1`). Calibration ran these
-   rows only.
-3. The graph's head dims equal the row's head dims, so no head-dim padding
+2. The graph's head dims equal the row's head dims, so no head-dim padding
    applies.
 
-| Arch | dtype | D_qk x D_v | Row | Accumulator | Masks |
-|---|---|---|---|---|---|
-| gfx942 | bf16 | 128 x 128 | psskddv | A32 | 0-3 |
-| gfx942 | bf16 | 192 x 192 | psskddv | A32 | 0-2 |
-| gfx942 | fp16 | 128 x 128 | psskddv | A32 | 0-3 |
-| gfx942 | fp16 | 192 x 192 | psskddv | A32 | 0-2 |
-| gfx950 | bf16 | 128 x 128 | psskddv | A16, A32 | 0-4 |
-| gfx950 | bf16 | 192 x 128 | psskddv | A16, A32 | 0-2 |
-| gfx950 | fp16 | 128 x 128 | psskddv | A16, A32 | 0-4 |
-| gfx950 | fp16 | 192 x 128 | psskddv | A16, A32 | 0-2 |
+An entry is added only when every batch row that a graph with the entry's head
+dims can select has passed on a GPU at the row's own head dims. The table lists
+those rows by (`pssk`, `pddv`), accumulator and mask.
 
-The calibration runs are `IntegrationGpuSdpaBwdBf16` and
-`IntegrationGpuSdpaBwdFp16` (instances `Smoke` and `Comprehensive`), which
-passed on MI300X (gfx942) and MI355X (gfx950) at commit 130bc66931c. For every
-entry, each batch psskddv row the engine serves with those head dims is
-selected by at least one of those cases at the row's own head dims.
+| Arch | dtype | D_qk x D_v | Rows: (pssk, pddv) accumulator, masks |
+|---|---|---|---|
+| gfx942 | bf16 | 64 x 64 | (1, 0) A32, 0-2; (0, 0) A16, 0-1 |
+| gfx942 | bf16 | 128 x 128 | (1, 1) A32, 0-3; (0, 0) A32, 0-1; (0, 0) A16, 0-1 |
+| gfx942 | bf16 | 192 x 192 | (1, 1) A32, 0-2 |
+| gfx942 | fp16 | 64 x 64 | (1, 0) A32, 0-2; (0, 0) A16, 0-1 |
+| gfx942 | fp16 | 128 x 128 | (1, 1) A32, 0-3; (0, 0) A32, 0-1; (0, 0) A16, 0-1 |
+| gfx942 | fp16 | 192 x 192 | (1, 1) A32, 0-2 |
+| gfx950 | bf16 | 128 x 128 | (1, 1) A16 and A32, 0-4 |
+| gfx950 | bf16 | 192 x 128 | (1, 1) A16 and A32, 0-2 |
+| gfx950 | fp16 | 128 x 128 | (1, 1) A16 and A32, 0-4 |
+| gfx950 | fp16 | 192 x 128 | (1, 1) A16 and A32, 0-2 |
 
-The mask and accumulator are not part of the key; the entries cover each mask
-and accumulator those rows ship. Every gfx942 psskddv row is an A32 row. The
-gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV, although
-their object names end in `_pssk`.
+The GPU runs are `IntegrationGpuSdpaBwdBf16` and `IntegrationGpuSdpaBwdFp16`
+(instances `Smoke` and `Comprehensive`), which passed on MI300X (gfx942) and
+MI355X (gfx950) in PR #15484. Each row in the table is selected by at least one
+of those cases at the row's own head dims.
 
-Every other configuration the engine accepts is unverified: any padded head
-dim, and any `pssk = 0` or `pddv = 0` row. That includes every gfx942 D = 64
-row and every gfx942 A16 row.
+The gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV,
+although their object names end in `_pssk`. The bf16 rows are the RTNE ones:
+the engine never selects the RTNA or RTZ rows.
+
+Every other configuration the engine accepts is unverified, which means any
+padded head dim. That includes the gfx942 hd128 A16 rows with `pddv = 1`
+(`*_a16*_pddv`): an unpadded request takes the `pddv = 0` row beside them, so
+they run only for padded head dims.
 
 Dispatch logs once per (arch, dtype, row head dims, mask, accumulator,
 verified):
@@ -137,6 +140,8 @@ verified):
 - **Unverified** kernel: a `WARN` line stating the results are not validated
   against a CPU reference.
 
-An unverified configuration keeps its `WARN` until it is calibrated on a GPU.
-When a configuration is calibrated, add its entry to `K_VERIFIED_KERNELS` and
-its row to the table above in the same change.
+An unverified configuration keeps its `WARN` until it passes on a GPU. When
+every row that a new key's graphs can select has passed at the row's own head
+dims, add the key to `K_VERIFIED_KERNELS`, its rows to the table above, and a
+case for one of its rows to the `TestSdpaBwdVerifiedDispatch` unit tests, in
+the same change.

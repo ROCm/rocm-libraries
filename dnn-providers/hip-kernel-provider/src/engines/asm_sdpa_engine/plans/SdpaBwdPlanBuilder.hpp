@@ -185,7 +185,7 @@ struct KernelRequest
     int64_t seqLenKv;
     int mask; // dqdkdv CSV mask ordinal (dqdkdvMaskOrdinal)
     int atomic32; // requested accumulator: 1 = A32, 0 = A16
-    int mode; // 0 = batch, 1 = group
+    int mode; // 0 = batch, 1 = group (Q has a ragged offset)
     // Rounding mode the CSV column encodes: 0/1/2 for the bf16 modes, 3 for fp16.
     // A row matches when its bf16_cvt equals this or is BF16_CVT_FP16_SENTINEL.
     int bf16Cvt;
@@ -266,6 +266,14 @@ ClassifiedRequest
 std::string lookupKernelNameKey(PipelineStage stage,
                                 const std::string& archId,
                                 const KernelRequest& request);
+
+// True when the dqdkdv row the lookup resolves for request on archId is a
+// verified kernel: its (arch, dtype, hdim_q, hdim_v) is in the Verified Kernel
+// Matrix (asm/asm_kernels/README.md), and the request's head dims equal the
+// row's, so no head-dim padding applies. False when no row resolves. buildPlan
+// logs a verified dispatch at INFO and any other at WARN.
+// Exposed for unit testing of the dispatch logic.
+bool isVerifiedDispatch(const std::string& archId, const KernelRequest& request);
 
 } // namespace bwd_dispatch
 

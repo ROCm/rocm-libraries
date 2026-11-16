@@ -18,21 +18,6 @@
 namespace asm_sdpa_engine
 {
 
-/// The window coordinates (mask_y, mask_x) the DQDKDV kernel takes for the
-/// mask in `params`, or (0, 0) for a mask the kernel bakes in. Mirrors AITER
-/// v0.1.29 mha_bwd.cu fmha_v3_bwd(): the gfx950 window kernels (masks 3 and 4)
-/// take the FlashAttention window sizes as they are, negative for unbounded,
-/// and align the window to each batch themselves; the gfx942 window kernel
-/// (mask 3) takes the coordinates computeMaskCoordinates() derives from the
-/// window sizes, the sequence lengths and the alignment.
-std::pair<int32_t, int32_t> dqdkdvMaskCoordinates(const SdpaBwdParams& params);
-
-/// True when the DQDKDV kernel for dqdkdv CSV mask `maskOrdinal` runs on half
-/// the K/V tiles, rounded up. Mirrors AITER v0.1.29 mha_bwd.cu fmha_v3_bwd()
-/// (:713-716): only the causal kernels (masks 1 and 2) halve the grid; the
-/// sliding-window kernels (masks 3 and 4) take the full grid.
-bool halvesDqdkdvGrid(int32_t maskOrdinal);
-
 /**
  * @brief SDPA backward kernel plan.
  *

@@ -33,7 +33,7 @@ Every arch whose objects changed, and every arch whose launch code changed, need
 `IntegrationGpuSdpaBackward.cpp`: `IntegrationGpuSdpaBwdBf16` and `IntegrationGpuSdpaBwdFp16` (instances `Smoke` and `Comprehensive`), checked against a CPU backward reference. Filter on `*IntegrationGpuSdpaBwd*`.
 
 - The cases come from fixed lists (`getSdpaBwdSmokeTestCases` and `getSdpaBwdComprehensiveTestCases`), not from the registry. A changed object is covered only where a case reaches it, and a new row, head dim, mask or accumulator is covered only after a case for it is added. List the kept rows no case reaches.
-- The Verified Kernel Matrix in `asm/asm_kernels/README.md` and `K_VERIFIED_KERNELS` in `plans/SdpaBwdPlanBuilder.cpp` record which DQDKDV rows were calibrated against the CPU reference, keyed by arch, dtype, row hdim_q and row hdim_v. `isVerifiedDispatch` counts only psskddv rows run at their own head dims. Change the table and the array together, and only for rows whose cases passed on that arch.
+- The Verified Kernel Matrix in `asm/asm_kernels/README.md` and `K_VERIFIED_KERNELS` in `plans/SdpaBwdPlanBuilder.cpp` record which DQDKDV rows passed against the CPU reference, keyed by arch, dtype, row hdim_q and row hdim_v. `isVerifiedDispatch` counts any row under a key that runs at its own head dims, whatever its `pssk` and `pddv`. Add a key only when every batch row a graph with those head dims can select passed at its own head dims on that arch, and change the table, the array and the `TestSdpaBwdVerifiedDispatch` unit tests together.
 - Group-mode (varlen) rows are not exercised by these cases. Say so in the report when no other check covers them.
 
 ### Where to run them

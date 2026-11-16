@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 
 // Backward CSV columns consumed by this builder:
@@ -69,11 +70,13 @@ RoundingMode
     return RoundingMode::RTNE;
 }
 
-BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs)
+// Group (varlen) mode is keyed on Q's ragged offset, as in the forward
+// builder. The ASM kernels locate group-mode sequences only through cumulative
+// offsets (AITER v0.1.29 mha_bwd.cu builds ptr_qseq and ptr_kseq from seqstart
+// and cu_seqlen), never through per-sequence lengths.
+BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
 {
-    return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
-               ? BatchMode::GROUP
-               : BatchMode::BATCH;
+    return q.ragged_offset_tensor_uid().has_value() ? BatchMode::GROUP : BatchMode::BATCH;
 }
 
 // Map the seven backward tensor dtypes to a CSV dtype identifier. The backward
@@ -320,6 +323,26 @@ bool wouldBwdDimsFitKernargFields(const hipdnn_flatbuffers_sdk::data_objects::Te
     return ok;
 }
 
+// True for a batch-mode graph, the only mode the engine serves: it passes no
+// sequence offsets to the kernels and sizes the stats, D and dq_acc buffers
+// from B x S_q. Group mode (Q ragged; getBatchMode) would also need the total
+// sequence lengths, which the backward graph does not carry. In batch mode no
+// tensor may be ragged.
+bool isBatchModeGraph(const std::unordered_map<
+                          int64_t,
+                          const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>& tensorMap,
+                      const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaBwdPlanBuilder::isApplicable] ";
+
+    HIP_KERNEL_RETURN_FALSE_IF(getBatchMode(q) != BatchMode::BATCH,
+                               "group mode (ragged offsets) is not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
+                               "Ragged tensors are not supported in batch mode");
+    return true;
+}
+
 // Validates that every byte stride consumed by the backward kernels fits in
 // the uint32_t fields of the kernarg structs.  Catches overflow at
 // applicability time so the engine can be excluded from heuristics for graphs
@@ -388,11 +411,15 @@ bool wouldBwdByteStridesFitUint32(const hipdnn_flatbuffers_sdk::data_objects::Te
     return ok;
 }
 
-// Registry rows whose dqdkdv kernel has been calibrated against the CPU
-// backward reference, by (arch, dtype, row hdim_q, row hdim_v); see "Verified
-// Kernel Matrix" in asm/asm_kernels/README.md. Calibration ran the psskddv
-// rows (pssk = 1, pddv = 1) at the row's own head dims, so isVerifiedDispatch()
-// accepts only that case.
+// Head dims of the registry rows whose dqdkdv kernels were checked on a GPU
+// against the CPU backward reference, by (arch, dtype, row hdim_q, row hdim_v);
+// see "Verified Kernel Matrix" in asm/asm_kernels/README.md. Under each key,
+// every batch row that a graph at the row's own head dims can select passed
+// those checks at its own head dims. A dispatch counts as verified only at the
+// row's own head dims: a padded head dim runs the kernel on inputs the checks
+// did not cover. The gfx942 hd128 A16 rows with pddv = 1 serve only padded
+// head dims (an unpadded request takes the pddv = 0 row beside them), so they
+// are never verified.
 struct VerifiedKernel
 {
     const char* arch;
@@ -400,9 +427,11 @@ struct VerifiedKernel
     int hdimQ;
     int hdimV;
 };
-constexpr std::array<VerifiedKernel, 8> K_VERIFIED_KERNELS{{
+constexpr std::array<VerifiedKernel, 10> K_VERIFIED_KERNELS{{
+    {"gfx942", "bf16", 64, 64},
     {"gfx942", "bf16", 128, 128},
     {"gfx942", "bf16", 192, 192},
+    {"gfx942", "fp16", 64, 64},
     {"gfx942", "fp16", 128, 128},
     {"gfx942", "fp16", 192, 192},
     {"gfx950", "bf16", 128, 128},
@@ -411,12 +440,13 @@ constexpr std::array<VerifiedKernel, 8> K_VERIFIED_KERNELS{{
     {"gfx950", "fp16", 192, 128},
 }};
 
-bool isVerifiedDispatch(const std::string& archId,
-                        const bwd_dispatch::KernelRequest& request,
-                        const fmha_v3_bwdConfig& dqdkdv)
+// bwd_dispatch::isVerifiedDispatch() for the dqdkdv row already resolved for
+// request on archId.
+bool isVerifiedRow(const std::string& archId,
+                   const bwd_dispatch::KernelRequest& request,
+                   const fmha_v3_bwdConfig& dqdkdv)
 {
-    if(dqdkdv.pssk != 1 || dqdkdv.pddv != 1 || request.hdimQ != dqdkdv.hdim_q
-       || request.hdimV != dqdkdv.hdim_v)
+    if(request.hdimQ != dqdkdv.hdim_q || request.hdimV != dqdkdv.hdim_v)
     {
         return false;
     }
@@ -500,6 +530,102 @@ size_t dispatchLogIndex(const std::string& archId,
             + accIdx)
                * K_NUM_VERIFIED
            + verifiedIdx;
+}
+
+// Why the a16 accumulator cannot serve a backward graph that isApplicable
+// accepted on archId, followed by the dispatch inputs, or std::nullopt when it
+// can. isApplicable resolves the A32 rows only, and the A16 kernels serve fewer
+// graphs: every gfx942 A16 row is pssk = 0, which needs S_q == S_kv,
+// S_kv % 64 == 0, the pssk = 0 stride layout and tensors that span at most
+// 4 GiB, and neither arch ships A16 rows for every mask and head dim. AITER's
+// Python layer sends these graphs to CK (aiter/ops/mha.py
+// can_impl_fmha_v3_bwd()). getCustomKnobs offers a16 only when this returns
+// std::nullopt, and buildPlan declines an a16 request with the reason.
+std::optional<std::string>
+    a16DeclineReason(const std::string& archId,
+                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto& attrs = opGraph.getNodeWrapper(0).attributesAs<SdpaBackwardAttributes>();
+    const auto& tensorMap = opGraph.getTensorMap();
+    const auto& q = *tensorMap.at(attrs.q_tensor_uid());
+    const auto& k = *tensorMap.at(attrs.k_tensor_uid());
+    const auto& v = *tensorMap.at(attrs.v_tensor_uid());
+    const auto& dO = *tensorMap.at(attrs.do_tensor_uid());
+    const auto& dq = *tensorMap.at(attrs.dq_tensor_uid());
+    const auto& dk = *tensorMap.at(attrs.dk_tensor_uid());
+    const auto& dv = *tensorMap.at(attrs.dv_tensor_uid());
+
+    const auto dataTypeId = tryGetDataTypeIdentifier(q.data_type(),
+                                                     k.data_type(),
+                                                     v.data_type(),
+                                                     dO.data_type(),
+                                                     dq.data_type(),
+                                                     dk.data_type(),
+                                                     dv.data_type());
+    if(!dataTypeId)
+    {
+        return std::string("unsupported tensor dtype combination");
+    }
+    const auto request = bwd_dispatch::makeKernelRequest(
+                             archId, *dataTypeId, attrs, q, k, v, dO, dk, dv, AccumulatorMode::A16)
+                             .request;
+    const auto withInputs = [&](const std::string& reason) {
+        return reason + " dtype=" + *dataTypeId + " D_qk=" + std::to_string(request.hdimQ)
+               + " D_v=" + std::to_string(request.hdimV) + " mask=" + std::to_string(request.mask)
+               + " S_q=" + std::to_string(request.seqLenQ)
+               + " S_kv=" + std::to_string(request.seqLenKv) + " pssk0_strides="
+               + std::to_string(static_cast<int>(request.psskOffStridesOk)) + " pssk0_offsets="
+               + std::to_string(static_cast<int>(bwd_dispatch::psskOffOffsetsFitU32(request)));
+    };
+    const auto noKernel = [&](bwd_dispatch::PipelineStage stage) {
+        return withInputs(std::string("no ") + stageName(stage) + " kernel:");
+    };
+
+    const auto dqdkdv = resolveStageConfig(bwd_dispatch::PipelineStage::DQDKDV, archId, request);
+    if(!dqdkdv)
+    {
+        return noKernel(bwd_dispatch::PipelineStage::DQDKDV);
+    }
+    if(!resolveStageConfig(bwd_dispatch::PipelineStage::ODO, archId, request))
+    {
+        return noKernel(bwd_dispatch::PipelineStage::ODO);
+    }
+    const auto post = bwd_dispatch::postStage(archId, request.atomic32, request.hdimQ);
+    if(post && !resolveStageConfig(*post, archId, request))
+    {
+        return noKernel(*post);
+    }
+
+    // isApplicable checked the A32 rows' tile and dq_acc against the 32-bit
+    // kernarg fields; these are the A16 ones.
+    if(!plan_utils::byteStrideFitsU32(
+           "Ts (tsKv * stride_k)", k.strides()->Get(2), K_BF16_BYTES * dqdkdv->ts))
+    {
+        return withInputs("Ts overflows its 32-bit kernarg field:");
+    }
+    if(post)
+    {
+        // The DQDKDV kernels address dq_acc within a batch in 32 bits.
+        const auto heads = static_cast<size_t>(request.nheadQ);
+        if(!sdpaBwdDqAccFitsU32(sdpaBwdDqAccLayout(static_cast<size_t>(request.batch),
+                                                   heads,
+                                                   static_cast<size_t>(request.seqLenQ),
+                                                   static_cast<size_t>(request.hdimQ),
+                                                   AccumulatorType::A16),
+                                heads))
+        {
+            return withInputs("the dq_acc offsets overflow 32 bits:");
+        }
+    }
+    else if(!bwd_dispatch::dqSharesQStrides(
+                bhsStrides(q), bhsStrides(dq), request.batch, request.nheadQ, request.seqLenQ))
+    {
+        // DQDKDV writes dQ itself and has no dQ strides.
+        return withInputs("dQ strides differ from Q strides and the kernel writes dQ directly:");
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -745,7 +871,7 @@ ClassifiedRequest
                                request.seqLenKv);
 
     request.atomic32 = static_cast<int>(accMode);
-    request.mode = static_cast<int>(getBatchMode(attrs));
+    request.mode = static_cast<int>(getBatchMode(q));
     request.bf16Cvt = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                              : static_cast<int>(getRoundingMode(attrs));
     request.psskOffStridesOk = psskOffStridesMatch(bhsStrides(q),
@@ -786,6 +912,12 @@ std::string lookupKernelNameKey(PipelineStage stage,
 {
     const auto cfg = resolveStageConfig(stage, archId, request);
     return cfg.has_value() ? cfg->arch + cfg->knl_name : std::string{};
+}
+
+bool isVerifiedDispatch(const std::string& archId, const KernelRequest& request)
+{
+    const auto dqdkdv = resolveStageConfig(PipelineStage::DQDKDV, archId, request);
+    return dqdkdv.has_value() && isVerifiedRow(archId, request, *dqdkdv);
 }
 
 } // namespace bwd_dispatch
@@ -834,6 +966,11 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                    + std::to_string(attrs.dropout_probability().value()) + ")");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask must be false");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask must be false");
+    // The ASM kernels take sequence positions only as cumulative offsets
+    // (getBatchMode), never as per-sequence lengths.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value(),
+        "SEQ_LEN_Q/KV not supported: the ASM kernels take only cumulative sequence offsets");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seed_tensor_uid(), "seed tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.offset_tensor_uid(), "offset tensor not supported");
@@ -861,15 +998,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     // --- Validate required tensors ---
 
-    // Group mode (variable sequence lengths) requires a different kernarg
-    // layout than the POC; deferred to the kernarg-layout abstraction.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        getBatchMode(attrs) != BatchMode::BATCH,
-        "group mode (seq_len_q_tensor_uid or seq_len_kv_tensor_uid set) is not supported");
-
     const auto& tensorMap = opGraph.getTensorMap();
-    HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
-                               "Ragged tensors are not supported");
     HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
         "All tensors must be aligned to a multiple of 16 bytes");
@@ -910,6 +1039,10 @@ bool SdpaBwdPlanBuilder::isApplicable(
     if(qTensor == nullptr || kTensor == nullptr || vTensor == nullptr || oTensor == nullptr
        || doTensor == nullptr || statsTensor == nullptr || dqTensor == nullptr
        || dkTensor == nullptr || dvTensor == nullptr)
+    {
+        return false;
+    }
+    if(!isBatchModeGraph(tensorMap, *qTensor))
     {
         return false;
     }
@@ -1152,8 +1285,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
     // for each mask ordinal; ODO and DQ_CONVERT are mask-agnostic. Applicability
     // is gated by the window rules and the registry lookup below.
     // Applicability does not depend on the execution settings, so it validates
-    // the default A32 accumulator. buildPlan declines an A16 request the A16
-    // kernels cannot serve.
+    // the default A32 accumulator. getCustomKnobs offers a16 only for graphs
+    // the A16 kernels serve (a16DeclineReason), and buildPlan declines an A16
+    // request for any other graph.
     const int64_t seqLenKv = kTensor->dims()->Get(2);
     bwd_dispatch::ClassifiedRequest classified{};
     try
@@ -1199,7 +1333,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
                 << " S_q=" << seqLenQ << " S_kv=" << seqLenKv << " pssk0_strides="
                 << static_cast<int>(request.psskOffStridesOk) << " pssk0_offsets="
                 << static_cast<int>(bwd_dispatch::psskOffOffsetsFitU32(request))
-                << " mode=batch bf16_cvt=" << request.bf16Cvt);
+                << " mode=" << request.mode << " bf16_cvt=" << request.bf16Cvt);
             return false;
         }
         if(stage == bwd_dispatch::PipelineStage::DQDKDV)
@@ -1472,9 +1606,20 @@ void SdpaBwdPlanBuilder::buildPlan(
             "(isApplicable should have rejected)");
     }
     const auto& dataTypeId = *dataTypeIdOpt;
+    // isApplicable does not see the accumulator knob, so an A16 request the
+    // A16 kernels cannot serve is declined here as a bad knob value.
+    if(accType == AccumulatorType::A16)
+    {
+        if(const auto reason = a16DeclineReason(deviceString, opGraph))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "SdpaBwdPlanBuilder::buildPlan: the a16 accumulator does not serve this graph on "
+                    + deviceString + " (" + *reason + "); use the a32 accumulator");
+        }
+    }
     // The accumulator selects the atomic32 dqdkdv rows, the mask the lookup
     // asks for (requestedMaskOrdinal) and the post stage (postStage).
-    const bool useA32 = (accType == AccumulatorType::A32);
     const auto classified = bwd_dispatch::makeKernelRequest(deviceString,
                                                             dataTypeId,
                                                             sdpaAttrs,
@@ -1488,34 +1633,12 @@ void SdpaBwdPlanBuilder::buildPlan(
     const auto& request = classified.request;
     const auto& maskBand = classified.band;
 
-    // isApplicable resolved every A32 stage, so an A32 miss here is an internal
-    // error. isApplicable does not see the accumulator knob, and the A16
-    // kernels serve fewer graphs (every gfx942 A16 row is pssk = 0, which needs
-    // S_q == S_kv, S_kv % 64 == 0, the pssk = 0 stride layout and tensors that
-    // span at most 4 GiB; neither arch ships A16 rows for every mask and head
-    // dim), so an A16 request the A16 kernels cannot serve is declined as a bad
-    // knob value. AITER's Python layer sends these graphs to CK (aiter/ops/mha.py
-    // can_impl_fmha_v3_bwd()).
-    const auto declineA16 = [&](const std::string& reason) {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "SdpaBwdPlanBuilder::buildPlan: the a16 accumulator does not serve this graph on "
-                + deviceString + " (" + reason + " dtype=" + dataTypeId
-                + " D_qk=" + std::to_string(headDimQk) + " D_v=" + std::to_string(headDimV)
-                + " mask=" + std::to_string(request.mask) + " S_q=" + std::to_string(seqLenQ)
-                + " S_kv=" + std::to_string(seqLenKv) + " pssk0_strides="
-                + std::to_string(static_cast<int>(request.psskOffStridesOk)) + " pssk0_offsets="
-                + std::to_string(static_cast<int>(bwd_dispatch::psskOffOffsetsFitU32(request)))
-                + "); use the a32 accumulator");
-    };
+    // isApplicable resolved every A32 stage and a16DeclineReason every A16 one,
+    // so a miss here is an internal error.
     auto resolveStage = [&](bwd_dispatch::PipelineStage stage) {
         auto cfgOpt = resolveStageConfig(stage, deviceString, request);
         if(!cfgOpt)
         {
-            if(!useA32)
-            {
-                declineA16(std::string("no ") + stageName(stage) + " kernel:");
-            }
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 std::string("SdpaBwdPlanBuilder::buildPlan: failed to resolve ") + stageName(stage)
@@ -1546,41 +1669,12 @@ void SdpaBwdPlanBuilder::buildPlan(
         postResolved = toResolvedKernel(resolveStage(*postStage));
     }
 
-    if(!useA32)
-    {
-        // isApplicable checked the A32 rows' tile and dq_acc against the
-        // 32-bit kernarg fields; check the A16 ones.
-        const auto* kStridesAll = kTensor->strides();
-        if(!plan_utils::byteStrideFitsU32(
-               "Ts (tsKv * stride_k)", kStridesAll->Get(2), K_BF16_BYTES * dqdkdvCfg.ts))
-        {
-            declineA16("Ts overflows its 32-bit kernarg field:");
-        }
-        if(postStage)
-        {
-            // The DQDKDV kernels address dq_acc within a batch in 32 bits.
-            if(!sdpaBwdDqAccFitsU32(
-                   sdpaBwdDqAccLayout(
-                       batchSize, numHeadsQ, seqLenQ, headDimQk, AccumulatorType::A16),
-                   numHeadsQ))
-            {
-                declineA16("the dq_acc offsets overflow 32 bits:");
-            }
-        }
-        else if(!bwd_dispatch::dqSharesQStrides(
-                    bhsStrides(*qTensor), bhsStrides(*dqTensor), batchSize, numHeadsQ, seqLenQ))
-        {
-            // DQDKDV writes dQ itself and has no dQ strides.
-            declineA16("dQ strides differ from Q strides and the kernel writes dQ directly:");
-        }
-    }
-
     // Surface, exactly once per (arch, dtype, row head dims, mask, accumulator,
     // verified) over the program lifetime, whether the dqdkdv kernel about to
-    // be dispatched has a calibrated CPU reference. The lambda is noexcept
+    // be dispatched has passed against the CPU reference. The lambda is noexcept
     // because it only logs (a throwing call_once initializer would let the
     // exception escape, which bugprone-exception-escape forbids).
-    const bool verified = isVerifiedDispatch(deviceString, request, dqdkdvCfg);
+    const bool verified = isVerifiedRow(deviceString, request, dqdkdvCfg);
     std::call_once(dispatchLogFlags[dispatchLogIndex(
                        deviceString,
                        dataTypeId,
@@ -1744,6 +1838,13 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
         return {};
     }
 
+    // a16 is offered only when buildPlan accepts it for this graph
+    // (a16DeclineReason). buildPlan cannot build a plan when the device cannot
+    // be queried, so then only the default is offered.
+    const auto deviceString
+        = plan_utils::tryGetDeviceString(handle.getStream(), "Could not query device string: ");
+    const bool offersA16 = deviceString && !a16DeclineReason(*deviceString, opGraph);
+
     std::vector<KnobT> knobs;
 
     KnobT accKnob;
@@ -1752,7 +1853,9 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
         = "Accumulator precision for the backward dQ gradient. a32: dQ accumulates in FP32 and a "
           "dq_convert kernel writes it. a16: dQ accumulates in 16 bits; gfx942 writes dQ "
           "directly, gfx950 accumulates into a 16-bit buffer that a dq_shuffle kernel writes "
-          "to dQ. a16 serves fewer graphs than a32 and fails plan building for the others";
+          "to dQ. a16 is a valid value only for graphs the a16 kernels serve on this device. "
+          "On gfx942 they need S_q == S_kv, S_kv a multiple of 64, D_qk == D_v <= 128 and no "
+          "sliding window, among other limits; on gfx950 they serve the graphs a32 serves";
 
     StringValueT defaultValue;
     defaultValue.value = "a32";
@@ -1760,7 +1863,10 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
 
     StringConstraintT constraint;
     constraint.valid_values.emplace_back("a32");
-    constraint.valid_values.emplace_back("a16");
+    if(offersA16)
+    {
+        constraint.valid_values.emplace_back("a16");
+    }
     accKnob.constraint.Set(constraint);
 
     knobs.push_back(std::move(accKnob));
