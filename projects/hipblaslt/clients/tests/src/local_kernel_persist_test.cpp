@@ -72,7 +72,7 @@ namespace
     std::string deviceScope()
     {
         int         device = 0, chip = 0;
-        std::string scope  = deviceArch() + "_CU" + std::to_string(deviceCuCount());
+        std::string scope = deviceArch() + "_CU" + std::to_string(deviceCuCount());
         if(deviceArch() == "gfx950" && hipGetDevice(&device) == hipSuccess
            && hipDeviceGetAttribute(&chip, hipDeviceAttributePciChipId, device) == hipSuccess)
         {
@@ -428,6 +428,50 @@ TEST(LocalKernelPersist, SavedKernelsLoadInNewProcess)
     EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0)
         << "a new process loads the saved kernel; the payload it was registered from is gone";
     EXPECT_EQ(runWorker(NOTHING_LOADED_WORKER), 0) << "without the variable, nothing is loaded";
+}
+
+// Nothing is loaded from another build's journal, and a Refresh finds nothing.
+TEST(LocalKernelPersist, DISABLED_OtherBuildWorker)
+{
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    size_t added = 123;
+    for(int i = 0; i < 2; ++i)
+    {
+        ASSERT_EQ(hipblasLtLocalKernelRefresh(handle, &added), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(added, 0u);
+    }
+    EXPECT_EQ(registeredCount(handle), 0u);
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+// A process warns once when only another build has saved kernels for its
+// device, and not when this build has too.
+TEST(LocalKernelPersist, WarnsAboutKernelsOfOtherBuilds)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    const fs::path journal = journalPath(library);
+    fs::rename(journal, journal.parent_path() / "journal-0.0.0-other");
+
+    const fs::path errors = tmp.path / "stderr";
+    ASSERT_EQ(runWorker("LocalKernelPersist.DISABLED_OtherBuildWorker",
+                        {libraryEnv(library)},
+                        errors.string()),
+              0);
+    const std::string log     = readFile(errors);
+    const std::string warning = "only by other builds of hipBLASLt (0.0.0-other)";
+    size_t            count   = 0;
+    for(size_t at = log.find(warning); at != std::string::npos; at = log.find(warning, at + 1))
+        ++count;
+    EXPECT_EQ(count, 1u) << log;
+
+    ASSERT_EQ(runWorker(SAVE_WORKER, {libraryEnv(library)}), 0);
+    ASSERT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}, errors.string()), 0);
+    EXPECT_EQ(readFile(errors).find("other builds"), std::string::npos)
+        << "this build's own journal is loaded without a warning";
 }
 
 // Mapping a shape again to the kernel it already selects, as a tuner run again

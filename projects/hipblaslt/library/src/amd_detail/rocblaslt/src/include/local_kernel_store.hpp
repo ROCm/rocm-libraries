@@ -32,7 +32,8 @@
  * are checked against, e.g. 1.5.0-3c1c5d13b19; a build without git history
  * has only the version. A saved code object takes the kernel arguments its build's launch code
  * passes, so each build keeps its own journal. The V line starts every
- * journal, and a journal whose V line is not this build's is not read.
+ * journal, and a journal whose V line is not this build's is not read. A
+ * process warns once per scope when only other builds' journals exist there.
  * <journalId> is random, so a journal that is deleted and created again is
  * told apart from the one a reader had read part of.
  *
@@ -267,6 +268,14 @@ namespace rocblaslt
             std::string journalPath(std::string const& scope, std::string* error) const;
 
             /**
+             * Warns, once per scope, when `journal`, this build's journal for
+             * `scope`, does not exist but other builds' journals do, since
+             * their kernels are then silently not loaded.
+             */
+            void warnIfSavedByOtherBuilds(std::string const& scope,
+                                          std::string const& journal) const;
+
+            /**
              * Locks the journal for `scope` exclusively, creating it with its
              * V line if needed, reads what was appended since `state` was last
              * brought up to date, and appends the line `makeLine` returns for
@@ -291,6 +300,8 @@ namespace rocblaslt
             };
             mutable std::mutex                          m_mutex;
             mutable std::map<std::string, ScopeJournal> m_journals;
+            // Scopes warnIfSavedByOtherBuilds has warned about; guarded by m_mutex.
+            mutable std::set<std::string> m_warnedOtherBuilds;
         };
     } // namespace local_kernel_store
 } // namespace rocblaslt

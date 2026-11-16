@@ -20,6 +20,9 @@
  *    apart from gfx1250), a compute unit count and, on architectures that
  *    report one, a PCI chip ID. Those saved for a device are loaded when this
  *    build of hipBLASLt first initializes it, before any heuristic query.
+ *    Another build's are not loaded, since a saved code object takes the
+ *    kernel arguments of the build that saved it; if only other builds have
+ *    saved kernels for a kind of device, a warning says so, once per process.
  *    A saved kernel is loaded only if its files still match what was saved
  *    and it can run on the device; otherwise it is skipped with a warning.
  *    One skipped for its files is tried again by

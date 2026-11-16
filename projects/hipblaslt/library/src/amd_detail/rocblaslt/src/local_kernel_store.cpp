@@ -1037,6 +1037,44 @@ namespace rocblaslt
                 error);
         }
 
+        void Store::warnIfSavedByOtherBuilds(std::string const& scope,
+                                             std::string const& journal) const
+        {
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if(m_warnedOtherBuilds.count(scope))
+                    return;
+            }
+
+            const fs::path           ours = fs::path(journal).filename();
+            std::vector<std::string> others;
+            std::error_code          ec;
+            for(auto const& entry : fs::directory_iterator(fs::path(journal).parent_path(), ec))
+            {
+                const std::string name = entry.path().filename().string();
+                if(name.rfind(kJournalPrefix, 0) == 0 && entry.path().filename() != ours)
+                    others.push_back(name.substr(std::strlen(kJournalPrefix)));
+            }
+            if(others.empty())
+                return;
+
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if(!m_warnedOtherBuilds.insert(scope).second)
+                    return;
+            }
+            std::sort(others.begin(), others.end());
+            std::ostringstream builds;
+            for(size_t i = 0; i < others.size(); ++i)
+                builds << (i ? ", " : "") << others[i];
+            std::cerr << "\nrocblaslt warning: local kernel library " << m_root
+                      << " has kernels saved for " << scope
+                      << " only by other builds of hipBLASLt (" << builds.str() << "). This build ("
+                      << buildStamp()
+                      << ") does not load them; register them again to use them with it."
+                      << std::endl;
+        }
+
         bool Store::read(std::string const&         scope,
                          JournalCursor*             cursor,
                          std::vector<JournalEntry>* entries,
@@ -1063,6 +1101,7 @@ namespace rocblaslt
                 return false;
             if(fd.get() < 0)
             {
+                warnIfSavedByOtherBuilds(scope, path);
                 *cursor = JournalCursor{};
                 return true;
             }
