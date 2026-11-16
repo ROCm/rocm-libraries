@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <vector>
 
 #include "MiopenApi.hpp"
@@ -35,5 +36,8 @@ public:
 private:
     miopenPoolingDescriptor_t _descriptor{nullptr};
 };
+
+// Bytes per index for each MIOpen pooling index type (miopenSetPoolingIndexType).
+size_t poolingIndexTypeSize(miopenIndexType_t indexType);
 
 } // namespace miopen_plugin

@@ -13,24 +13,6 @@
 namespace
 {
 
-size_t indexTypeSize(miopenIndexType_t indexType)
-{
-    switch(indexType)
-    {
-    case miopenIndexUint8:
-        return sizeof(uint8_t);
-    case miopenIndexUint16:
-        return sizeof(uint16_t);
-    case miopenIndexUint32:
-        return sizeof(uint32_t);
-    case miopenIndexUint64:
-        return sizeof(uint64_t);
-    default:
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "MiopenResampleFwdPlan: unknown index type");
-    }
-}
-
 size_t elementCount(const std::vector<int64_t>& dims)
 {
     return static_cast<size_t>(
@@ -51,19 +33,11 @@ MiopenResampleFwdPlan::MiopenResampleFwdPlan(
 {
     if(_indexUid.has_value())
     {
-        _indexBytes = elementCount(config.yDims) * indexTypeSize(config.indexType);
+        _indexBytes = elementCount(config.yDims) * poolingIndexTypeSize(config.indexType);
     }
 
     THROW_ON_MIOPEN_FAILURE(miopenPoolingGetWorkSpaceSizeV2(
         _pooling.poolingDescriptor(), _y.tensorDescriptor(), &_workspaceSize));
-
-    if(_workspaceSize < _indexBytes)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "MiopenResampleFwdPlan: MIOpen's pooling workspace (" + std::to_string(_workspaceSize)
-                + " bytes) cannot hold the " + std::to_string(_indexBytes) + " bytes of indices");
-    }
 }
 
 size_t
@@ -127,15 +101,8 @@ void MiopenResampleFwdPlan::execute(const HipdnnMiopenHandle& handle,
         hipStream_t stream = nullptr;
         THROW_ON_MIOPEN_FAILURE(miopenGetStream(handle.miopenHandle, &stream));
 
-        const auto status
-            = hipMemcpyAsync(indexPtr, workspace, _indexBytes, hipMemcpyDeviceToDevice, stream);
-        if(status != hipSuccess)
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                std::string("MiopenResampleFwdPlan: copying the pooling indices failed: ")
-                    + hipGetErrorString(status));
-        }
+        THROW_ON_HIP_FAILURE(
+            hipMemcpyAsync(indexPtr, workspace, _indexBytes, hipMemcpyDeviceToDevice, stream));
     }
 }
 

@@ -43,6 +43,18 @@
         }                                                                               \
     } while(0)
 
+#define THROW_ON_HIP_FAILURE(call)                                                   \
+    do                                                                               \
+    {                                                                                \
+        const hipError_t hipStatus = (call);                                         \
+        if(hipStatus != hipSuccess)                                                  \
+        {                                                                            \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(                          \
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                 \
+                "HIP error occurred: " + std::string(hipGetErrorString(hipStatus))); \
+        }                                                                            \
+    } while(0)
+
 namespace miopen_plugin::miopen_utils
 {
 
