@@ -16,10 +16,12 @@
 #include <typeindex>
 #include <string_view>
 #include <unordered_map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#include <hip/hip_runtime_api.h>
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/numeric_limits.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight.hpp>
@@ -242,8 +244,10 @@ inline bool IsLargeTensorCKInstance(const ConvPtr& ptr)
 /// of instances is shared by all queries, invokers and threads. Invokers hold these shared
 /// instances, whose code lives in this plugin, so the plugin must outlive every invoker it made.
 /// Some CK factories select instances by ck::get_device_name() (the calling thread's current
-/// device), so the first call fixes the list; that is deterministic because each plugin serves
-/// one arch.
+/// device), so the first call fixes the list for the process. Today that only adds or drops the
+/// gfx950-only forward instances; on a node whose current device and handle device are different
+/// archs, the list follows the device current at the first call, where each call used its own
+/// current device before.
 template <typename DeviceOpType>
 class CKInstances
 {
@@ -628,9 +632,11 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 /// MIOPEN_DEBUG_CK_PROBLEM_CACHE=0): every solution query asks it, and otherwise each query
 /// re-runs CK's argument check on instance after instance. Only the yes/no answer is kept.
 ///
-/// The key has no device field. That is correct while each plugin serves exactly one arch and
-/// CK's argument check at split_k = 1 reads nothing about the device beyond its arch (no CU count,
-/// no device properties). If CK's check starts to depend on the device, the key needs it.
+/// CK's argument check reads the arch of the calling thread's current HIP device
+/// (ck::get_device_name()), which can differ from the device of the handle that selected this
+/// plugin, so the key holds the current device ordinal: a query made on another device never
+/// reuses an answer computed for this one. Beyond its arch, the check at split_k = 1 reads nothing
+/// about the device (no CU count, no device properties); if that changes, the key needs it too.
 template <typename DeviceOpType,
           typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
@@ -640,9 +646,14 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     if constexpr(HasSupportKey<CKArgsType>::value)
     {
-        using Key = std::pair<bool, decltype(args.Key())>;
+        using Key = std::tuple<int, bool, decltype(args.Key())>;
         static CKProblemCache<std::map<Key, bool>> memo;
-        return *memo.GetOrCompute(Key{require_large_tensor, args.Key()}, [&] {
+        int device = 0;
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+        if(hipGetDevice(&device) != hipSuccess)
+            return AnyCKInstanceSupports<DeviceOpType>(args, require_large_tensor);
+#endif
+        return *memo.GetOrCompute(Key{device, require_large_tensor, args.Key()}, [&] {
             return std::optional<bool>{
                 AnyCKInstanceSupports<DeviceOpType>(args, require_large_tensor)};
         });
