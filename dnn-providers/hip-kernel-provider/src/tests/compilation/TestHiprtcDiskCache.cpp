@@ -209,7 +209,7 @@ TEST(TestHiprtcCacheEntry, RejectsAFlippedPayloadBit)
     entry[entry.size() - 100] = static_cast<char>(entry[entry.size() - 100] ^ 0x10);
     std::string problem;
     EXPECT_TRUE(hiprtc_cache::decodeEntry(entry, problem).empty());
-    EXPECT_NE(problem.find("SHA-256"), std::string::npos) << problem;
+    EXPECT_NE(problem.find("checksum"), std::string::npos) << problem;
 }
 
 TEST(TestHiprtcCacheEntry, RejectsAFileWithoutAHeader)
@@ -269,5 +269,5 @@ TEST(TestHiprtcCacheFile, ReadsATruncatedOrCorruptedFileAsCorrupt)
     writeRaw(path, entry);
     read = hiprtc_cache::readCodeObject(path);
     EXPECT_EQ(read.outcome, hiprtc_cache::ReadOutcome::CORRUPT);
-    EXPECT_NE(read.problem.find("SHA-256"), std::string::npos) << read.problem;
+    EXPECT_NE(read.problem.find("checksum"), std::string::npos) << read.problem;
 }

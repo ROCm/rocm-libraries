@@ -12,7 +12,7 @@
 ///
 /// A code object is stored under a key that digests everything it was built from: the
 /// compiler, the source, every embedded include and every option. Each file carries a header
-/// with the payload's length and SHA-256, so a truncated or damaged file reads as corrupt and
+/// with the payload's length and XXH64 checksum, so a truncated or damaged file reads as corrupt and
 /// is recompiled instead of loaded. Files are written to a temporary name and renamed into
 /// place, so a reader in another process never sees a partial file.
 namespace hip_kernel_provider::compilation::hiprtc_cache
@@ -42,8 +42,8 @@ std::filesystem::path codeObjectPath(const std::string& key);
 enum class ReadOutcome
 {
     ABSENT, ///< No file, or it could not be opened.
-    VALID, ///< The header matched and the payload's length and digest check out.
-    CORRUPT, ///< A file is there, but its header, length or digest is wrong.
+    VALID, ///< The header matched and the payload's length and checksum check out.
+    CORRUPT, ///< A file is there, but its header, length or checksum is wrong.
 };
 
 struct ReadResult
@@ -65,7 +65,7 @@ bool writeCodeObject(const std::filesystem::path& path, const std::vector<char>&
 std::vector<char> encodeEntry(const std::vector<char>& codeObject);
 
 /// The payload of an entry encodeEntry() produced. @p problem is set, and the result empty,
-/// when @p entry is not one: wrong header, length or digest.
+/// when @p entry is not one: wrong header, length or checksum.
 std::vector<char> decodeEntry(const std::vector<char>& entry, std::string& problem);
 
 } // namespace hip_kernel_provider::compilation::hiprtc_cache

@@ -3,6 +3,7 @@
 
 #include "HiprtcDiskCache.hpp"
 
+#include "utilities/Checksum.hpp"
 #include "utilities/Digest.hpp"
 
 #include <array>
@@ -41,14 +42,15 @@ namespace
 
 /// Bumped when the key's inputs or the file format change, so entries of an older format are
 /// never looked up.
-constexpr std::string_view CACHE_FORMAT = "hip-kernel-provider-hiprtc-v2";
+constexpr std::string_view CACHE_FORMAT = "hip-kernel-provider-hiprtc-v3";
 
-/// Every entry starts with this, then the payload length (8 bytes, little-endian), then the
-/// payload's SHA-256 in 64 hex characters.
-constexpr std::string_view ENTRY_MAGIC{"hkpco\0\0\2", 8};
+/// Every entry starts with this, then the payload length and the payload's XXH64 checksum (8
+/// bytes each, little-endian). The checksum catches accidental damage; the key, a SHA-256 of the
+/// inputs, is what identifies the content.
+constexpr std::string_view ENTRY_MAGIC{"hkpco\0\0\3", 8};
 constexpr std::size_t LENGTH_BYTES = 8;
-constexpr std::size_t DIGEST_CHARS = 64;
-constexpr std::size_t HEADER_BYTES = ENTRY_MAGIC.size() + LENGTH_BYTES + DIGEST_CHARS;
+constexpr std::size_t CHECKSUM_BYTES = 8;
+constexpr std::size_t HEADER_BYTES = ENTRY_MAGIC.size() + LENGTH_BYTES + CHECKSUM_BYTES;
 
 /// Appends @p field with its length first, so no two field sequences hash alike.
 void appendField(std::string& key, std::string_view field)
@@ -307,8 +309,7 @@ std::vector<char> encodeEntry(const std::vector<char>& codeObject)
     entry.reserve(HEADER_BYTES + codeObject.size());
     entry.insert(entry.end(), ENTRY_MAGIC.begin(), ENTRY_MAGIC.end());
     appendLittleEndian(entry, codeObject.size());
-    const auto digest = utilities::sha256Hex(codeObject.data(), codeObject.size());
-    entry.insert(entry.end(), digest.begin(), digest.end());
+    appendLittleEndian(entry, utilities::xxh64(codeObject.data(), codeObject.size()));
     entry.insert(entry.end(), codeObject.begin(), codeObject.end());
     return entry;
 }
@@ -329,11 +330,11 @@ std::vector<char> decodeEntry(const std::vector<char>& entry, std::string& probl
                   + std::to_string(length);
         return {};
     }
-    const std::string_view recorded(entry.data() + ENTRY_MAGIC.size() + LENGTH_BYTES, DIGEST_CHARS);
+    const auto recorded = readLittleEndian(entry.data() + ENTRY_MAGIC.size() + LENGTH_BYTES);
     const char* payload = entry.data() + HEADER_BYTES;
-    if(utilities::sha256Hex(payload, actual) != recorded)
+    if(utilities::xxh64(payload, actual) != recorded)
     {
-        problem = "does not match the SHA-256 its header records";
+        problem = "does not match the checksum its header records";
         return {};
     }
     problem.clear();

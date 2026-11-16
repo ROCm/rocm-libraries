@@ -30,6 +30,7 @@ add_executable(
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
     device/TestScopedDevice.cpp
+    utilities/TestChecksum.cpp
     utilities/TestDigest.cpp
 )
 

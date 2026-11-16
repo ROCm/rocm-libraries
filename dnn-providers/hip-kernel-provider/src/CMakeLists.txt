@@ -19,6 +19,7 @@ add_library(
     compilation/Kernel.cpp
     compilation/Program.cpp
     compilation/ProgramFetchRecording.cpp
+    utilities/Checksum.cpp
     utilities/Digest.cpp
     utilities/sha256.cpp
 )
