@@ -8,10 +8,11 @@
  * Run with no argument it checks, through the C API: the LLVM and HIP text of
  * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
  * through the unsigned type of the operand's own width) and its refusal of a
- * non-integer operand, the builders' and the verifier's lshr rule (an integer
- * or i1 element, a shift amount of the value's type; texts identical to the
- * Python engine's), the HIP refusal of a pred the verifier refuses, the
- * builders' operand-type refusals, the verifier's acceptance of the new attrs
+ * non-integer operand, the builders' and the verifier's integer-element rule
+ * for the bitwise ops and shifts (an integer or i1 element) and lshr's shift
+ * amount of the value's type (texts identical to the Python engine's), the HIP
+ * refusal of a pred the verifier refuses, the builders' operand-type
+ * refusals, the verifier's acceptance of the new attrs
  * and its refusals of bad marker attrs (texts identical to the Python
  * verifier), and the constant folder (unsigned compare at the operand width;
  * constants read at their width; a marker on a constant folds to the constant;
@@ -169,18 +170,18 @@ void case_hip_text()
     rocke_ir_builder_free(&b);
 }
 
-/* One `opcode` (arith.lshr or vector.lshr) of a `value_type` parameter by an
- * `amount_type` parameter, built directly: the builders refuse both a
- * non-integer shift and a mismatched shift amount, and hand-assembled or
+/* One `opcode` (a bitwise op or shift) of a `value_type` parameter and an
+ * `amount_type` parameter, built directly: the builders refuse a non-integer
+ * operand (and a mismatched lshr shift amount), and hand-assembled or
  * deserialized IR can still reach the verifier and the lowerings. */
-void build_shift_past_the_builder(rocke_ir_builder_t* b,
-                                  rocke_opcode_t opcode,
-                                  const rocke_type_t* value_type,
-                                  const rocke_type_t* amount_type)
+void build_binary_past_the_builder(rocke_ir_builder_t* b,
+                                   rocke_opcode_t opcode,
+                                   const rocke_type_t* value_type,
+                                   const rocke_type_t* amount_type)
 {
     rocke_value_t* operands[2] = {rocke_b_param(b, "value", value_type, nullptr),
                                   rocke_b_param(b, "amount", amount_type, nullptr)};
-    rocke_i_op1(b, opcode, operands, 2, value_type, nullptr, "lshr");
+    rocke_i_op1(b, opcode, operands, 2, value_type, nullptr, "binary");
     rocke_b_ret(b);
 }
 
@@ -225,7 +226,7 @@ void case_lshr_hip_text()
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_f32");
         const rocke_type_t* type = vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
-        build_shift_past_the_builder(
+        build_binary_past_the_builder(
             &b, vector ? ROCKE_OP_VECTOR_LSHR : ROCKE_OP_ARITH_LSHR, type, type);
         std::string hip;
         const rocke_status_t status = lower_hip_status(&b, &hip);
@@ -243,10 +244,10 @@ void case_lshr_hip_text()
 
 /* The builder must throw a TypeError with exactly `want` from `build`. */
 template <typename Build>
-void expect_lshr_builder_type_error(Build build, const std::string& want)
+void expect_builder_type_error(Build build, const std::string& want)
 {
     rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_refusal");
+    rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_refusal");
     bool refused = false;
     std::string got = "no refusal";
     try
@@ -262,47 +263,103 @@ void expect_lshr_builder_type_error(Build build, const std::string& want)
     rocke_ir_builder_free(&b);
 }
 
-/* LLVM's lshr takes two integers of one width: the builders refuse an f32
- * shift, scalar or lane by lane, and a shift amount of another type, and
- * accept an i1 shift. */
-void case_lshr_builder_rule()
+/* A two-operand builder entry point of the C API. */
+using binary_builder_t = rocke_value_t* (*)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*);
+
+/* Every op whose element type must be an integer or i1, with the builder entry
+ * point that makes it; mirrors test_lshr.py's _INTEGER_ELEMENT_BUILDERS. */
+struct IntegerElementOp
 {
-    expect_lshr_builder_type_error(
-        [](rocke_ir_builder_t* b) {
-            rocke_value_t* a = rocke_b_param(b, "a", rocke_f32(), nullptr);
-            rocke_b_lshr(b, a, a);
-        },
-        "arith.lshr failed - element type='f32', expected an integer type");
-    expect_lshr_builder_type_error(
-        [](rocke_ir_builder_t* b) {
-            rocke_value_t* a = rocke_b_param(b, "a", rocke_vector_type(b, rocke_f32(), 2), nullptr);
-            rocke_b_vector_lshr(b, a, a);
-        },
-        "vector.lshr failed - element type='f32', expected an integer type");
-    expect_lshr_builder_type_error(
+    rocke_opcode_t opcode;
+    binary_builder_t build;
+    bool vector;
+};
+
+const IntegerElementOp k_integer_element_ops[] = {
+    {ROCKE_OP_ARITH_AND, rocke_b_land, false},
+    {ROCKE_OP_ARITH_OR, rocke_b_lor, false},
+    {ROCKE_OP_ARITH_XOR, rocke_b_xor, false},
+    {ROCKE_OP_ARITH_SHL, rocke_b_shl, false},
+    {ROCKE_OP_ARITH_LSHR, rocke_b_lshr, false},
+    {ROCKE_OP_VECTOR_AND, rocke_b_vector_and, true},
+    {ROCKE_OP_VECTOR_OR, rocke_b_vector_or, true},
+    {ROCKE_OP_VECTOR_SHL, rocke_b_vector_shl, true},
+    {ROCKE_OP_VECTOR_LSHR, rocke_b_vector_lshr, true},
+};
+
+/* LLVM's bitwise ops and shifts take integers only: the builders refuse an f32
+ * operand and accept an i1 one, scalar or lane by lane. lshr also takes two
+ * integers of one width, so its builder refuses a shift amount of another
+ * type. */
+void case_integer_element_builder_rule()
+{
+    for(const IntegerElementOp& op : k_integer_element_ops)
+    {
+        expect_builder_type_error(
+            [&](rocke_ir_builder_t* b) {
+                const rocke_type_t* type
+                    = op.vector ? rocke_vector_type(b, rocke_f32(), 2) : rocke_f32();
+                rocke_value_t* a = rocke_b_param(b, "a", type, nullptr);
+                op.build(b, a, a);
+            },
+            std::string(rocke_opcode_name(op.opcode))
+                + " failed - element type='f32', expected an integer type");
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_i1");
+        const rocke_type_t* flag_type
+            = op.vector ? rocke_vector_type(&b, rocke_i1(), 2) : rocke_i1();
+        rocke_value_t* flag = rocke_b_param(&b, "flag", flag_type, nullptr);
+        EXPECT(op.build(&b, flag, flag) != nullptr,
+               std::string("an i1 ") + rocke_opcode_name(op.opcode) + " is built");
+        rocke_b_ret(&b);
+        const std::string errors = verify_errors(&b);
+        EXPECT(errors.empty(),
+               std::string("verifier rejected an i1 ") + rocke_opcode_name(op.opcode) + ": "
+                   + errors);
+        rocke_ir_builder_free(&b);
+    }
+    expect_builder_type_error(
         [](rocke_ir_builder_t* b) {
             rocke_value_t* a = rocke_b_param(b, "a", rocke_i64(), nullptr);
             rocke_value_t* s = rocke_b_param(b, "s", rocke_i32(), nullptr);
             rocke_b_lshr(b, a, s);
         },
         "arith.lshr failed - shift amount type='i32', expected the shifted value's type 'i64'");
+}
 
+/* The verifier errors for one `opcode` of a `value_type` and an `amount_type`
+ * operand written past the builders. */
+std::string verify_past_the_builder(rocke_opcode_t opcode,
+                                    bool vector,
+                                    const rocke_type_t* value_element,
+                                    const rocke_type_t* amount_element)
+{
     rocke_ir_builder_t b;
-    rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_i1");
-    rocke_value_t* flag = rocke_b_param(&b, "flag", rocke_i1(), nullptr);
-    EXPECT(rocke_b_lshr(&b, flag, flag) != nullptr, "an i1 lshr is built");
-    rocke_b_ret(&b);
+    rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_verify");
+    const rocke_type_t* value_type
+        = vector ? rocke_vector_type(&b, value_element, 2) : value_element;
+    const rocke_type_t* amount_type
+        = vector ? rocke_vector_type(&b, amount_element, 2) : amount_element;
+    build_binary_past_the_builder(&b, opcode, value_type, amount_type);
     const std::string errors = verify_errors(&b);
-    EXPECT(errors.empty(), "verifier rejected an i1 lshr: " + errors);
     rocke_ir_builder_free(&b);
+    return errors;
 }
 
 /* IR written past the builders still meets the rule: the verifier reports an
- * f32 shift and a mismatched shift amount, scalar or lane by lane, with the
- * Python verifier's texts. */
-void case_lshr_verifier_rule()
+ * f32 bitwise op or shift, scalar or lane by lane, and operands of different
+ * types, with the Python verifier's texts. */
+void case_integer_element_verifier_rule()
 {
-    struct VerifierCase
+    for(const IntegerElementOp& op : k_integer_element_ops)
+    {
+        const std::string want = std::string(rocke_opcode_name(op.opcode))
+                                 + " failed - element type='f32', expected an integer type\n";
+        const std::string errors
+            = verify_past_the_builder(op.opcode, op.vector, rocke_f32(), rocke_f32());
+        EXPECT(errors == want, "want '" + want + "', got '" + errors + "'");
+    }
+    struct MismatchCase
     {
         rocke_opcode_t opcode;
         bool vector;
@@ -310,17 +367,7 @@ void case_lshr_verifier_rule()
         const rocke_type_t* amount_element;
         const char* want;
     };
-    const VerifierCase cases[] = {
-        {ROCKE_OP_ARITH_LSHR,
-         false,
-         rocke_f32(),
-         rocke_f32(),
-         "arith.lshr failed - element type='f32', expected an integer type"},
-        {ROCKE_OP_VECTOR_LSHR,
-         true,
-         rocke_f32(),
-         rocke_f32(),
-         "vector.lshr failed - element type='f32', expected an integer type"},
+    const MismatchCase cases[] = {
         {ROCKE_OP_ARITH_LSHR,
          false,
          rocke_i64(),
@@ -331,20 +378,28 @@ void case_lshr_verifier_rule()
          rocke_i32(),
          rocke_i16(),
          "vector.lshr: operand types differ (vec<i32x2> vs vec<i16x2>)"},
+        {ROCKE_OP_VECTOR_SHL,
+         true,
+         rocke_i32(),
+         rocke_i16(),
+         "vector.shl: operand types differ (vec<i32x2> vs vec<i16x2>)"},
+        {ROCKE_OP_VECTOR_AND,
+         true,
+         rocke_i32(),
+         rocke_i16(),
+         "vector.and: operand types differ (vec<i32x2> vs vec<i16x2>)"},
+        {ROCKE_OP_VECTOR_OR,
+         true,
+         rocke_i32(),
+         rocke_i16(),
+         "vector.or: operand types differ (vec<i32x2> vs vec<i16x2>)"},
     };
-    for(const VerifierCase& c : cases)
+    for(const MismatchCase& c : cases)
     {
-        rocke_ir_builder_t b;
-        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_verify");
-        const rocke_type_t* value_type
-            = c.vector ? rocke_vector_type(&b, c.value_element, 2) : c.value_element;
-        const rocke_type_t* amount_type
-            = c.vector ? rocke_vector_type(&b, c.amount_element, 2) : c.amount_element;
-        build_shift_past_the_builder(&b, c.opcode, value_type, amount_type);
-        const std::string errors = verify_errors(&b);
+        const std::string errors
+            = verify_past_the_builder(c.opcode, c.vector, c.value_element, c.amount_element);
         EXPECT(errors == std::string(c.want) + "\n",
                std::string("want '") + c.want + "', got '" + errors + "'");
-        rocke_ir_builder_free(&b);
     }
 }
 
@@ -785,8 +840,8 @@ int main(int argc, char** argv)
     case_llvm_text();
     case_hip_text();
     case_lshr_hip_text();
-    case_lshr_builder_rule();
-    case_lshr_verifier_rule();
+    case_integer_element_builder_rule();
+    case_integer_element_verifier_rule();
     case_hip_refuses_a_bad_pred();
     case_builder_refusals();
     case_verifier_accepts();
