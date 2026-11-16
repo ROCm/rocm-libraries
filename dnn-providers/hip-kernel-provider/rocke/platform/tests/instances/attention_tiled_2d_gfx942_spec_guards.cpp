@@ -19,7 +19,8 @@
  *   5. the 2D validator's gfx950-only-knob and fp8 K/V rejects carry Python's
  *      exact text, the knob list untruncated and in Python's order;
  *   6. one message per band shape, HBM-direct + use_i64_kv_addr rejected,
- *      and use_k_hbm_direct refused (ROCKE_ERR_NOTIMPL) while V from HBM builds.
+ *      and use_k_hbm_direct refused (ROCKE_ERR_NOTIMPL) while V from HBM builds;
+ *   7. a block_size of zero or below is rejected before anything divides by it.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -289,6 +290,12 @@ static void test_2d_reject_messages(void)
         "2d/k_hbm_direct_i64",
         &spec,
         "use_k_hbm_direct reads K/V with i32 offsets; it cannot be combined with use_i64_kv_addr");
+
+    spec = spec_2d(64, 0, 32, 32, "bf16");
+    expect_2d_validate_message("2d/block_size_zero", &spec, "block_size must be positive, got 0");
+    spec.block_size = -16;
+    expect_2d_validate_message(
+        "2d/block_size_negative", &spec, "block_size must be positive, got -16");
 }
 
 /* ----------------------------------------------------------------- supports */
