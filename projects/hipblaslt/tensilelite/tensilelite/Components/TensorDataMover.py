@@ -72,21 +72,6 @@ class TensorDataMoverLoad(TensorDataMover):
         return mod
 
     @staticmethod
-    def swizzledCompRows(mt: int, miRows: int, numComp: int) -> tuple:
-        """(rowsPerComp, replicate) for a wave-separated swizzled-TDM operand.
-
-        The swizzled layout is indivisible below one MI row block (nO), so the
-        macro-tile's mt/MI nO rows are split across the wave components. When they
-        do not divide evenly (e.g. MT=16 -> one nO over two components), every
-        component instead loads the whole tile from the same global address into
-        the same LDS address (identical bytes, so the overlapping writes are benign).
-        """
-        nO = mt // miRows
-        if numComp <= 1 or nO % numComp == 0:
-            return nO // max(numComp, 1), False
-        return nO, True
-
-    @staticmethod
     def swizzledTileStride(tp: Mapping, dstSgprIdx: int, mt: int, bpe: float) -> Module:
         """Bytes between consecutive macro-tiles of a swizzled-TDM operand.
 
@@ -95,7 +80,7 @@ class TensorDataMoverLoad(TensorDataMover):
         macro-tile spans MT * paddedK elements rather than MT * Stride{tc}{free}.
         """
         mod = Module("swizzled-TDM tile stride")
-        swzK = tp["swizzleK"]
+        swzK = tp["swzGeom"].swzK
         mod.add(SAddU32(sgpr(dstSgprIdx), sgpr("SizeL"), swzK - 1, f"paddedK = SizeL + swzK({swzK})-1"))
         mod.add(SAndB32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK = alignUp(SizeL, swzK)"))
         mod.add(SMulI32(sgpr(dstSgprIdx), sgpr(dstSgprIdx), round(mt * bpe), f"swizzled tile stride = paddedK * MT({mt}) * bpe({bpe})"))
@@ -185,8 +170,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 if tp.get("isSwizzledTDM"):
                     # Swizzled tensor is contiguous in K at MI_dim*DepthU stride (matches the per-iter
                     # GlobalReadIncs); K-chunk start = gsuIterOffset * MI_dim*DepthU*bpe, no tlu/MXS scaling.
-                    swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), round(swzMi * depthU * bpe), f"swizzle: gsuOffset = gsuIterOffset * MI({swzMi})*DepthU({depthU})*bpe({bpe})"))
+                    geom = tp["swzGeom"]
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), geom.kIterBytes(), f"swizzle: gsuOffset = gsuIterOffset * MI({geom.mi})*DepthU({geom.depthU})*bpe({geom.bpe})"))
                 else:
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                     if "MXS" in tc:
@@ -311,10 +296,10 @@ class TensorDataMoverLoad(TensorDataMover):
                 # Swizzled-B: host buffer is nO-major with row stride0 = MI_N*paddedK (elements),
                 # paddedK = roundup(SizeL, swzK). Component wCompId loads rowsPerComp nO rows ->
                 # woffset = wCompId * rowsPerComp * MI_N * paddedK * bpe.
-                swzMiN      = kernel["MatrixInstM"] if tp["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-                swzInnerK   = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
-                swzK        = (wavelen // swzMiN) * swzInnerK
-                rowsPerComp, swzReplicate = self.swizzledCompRows(mt, swzMiN, numComp)
+                geom        = tp["swzGeom"]                 # SwizzledTdmGeometry.compGlobalOffsetBytes
+                swzMiN      = geom.mi
+                swzK        = geom.swzK
+                rowsPerComp, swzReplicate = geom.compRows(numComp)
                 if swzReplicate:
                     rowsPerComp = 0  # every component loads the whole tile from the WG base
                 with writer.allocTmpSgpr(1, tag="swzWSglobal") as swzTmp:
@@ -335,8 +320,8 @@ class TensorDataMoverLoad(TensorDataMover):
                 if tp.get("isSwizzledTDM"):
                     # Swizzled tensor is contiguous in K at MI_dim*DepthU stride (matches the per-iter
                     # GlobalReadIncs); K-chunk start = gsuIterOffset * MI_dim*DepthU*bpe, no tlu/MXS scaling.
-                    swzMi = kernel["MatrixInstM"] if tIdx == 0 else kernel["MatrixInstN"]
-                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), round(swzMi * depthU * bpe), f"swizzle: gsuOffset = gsuIterOffset * MI({swzMi})*DepthU({depthU})*bpe({bpe})"))
+                    geom = tp["swzGeom"]
+                    mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), geom.kIterBytes(), f"swizzle: gsuOffset = gsuIterOffset * MI({geom.mi})*DepthU({geom.depthU})*bpe({geom.bpe})"))
                 else:
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                     if "MXS" in tc:
