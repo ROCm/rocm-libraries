@@ -24,6 +24,7 @@ Fork sweep (5 values, all within limit=8):
 """
 
 import os
+import re
 
 import pytest
 
@@ -69,3 +70,58 @@ def test_r2_wgm_gfx942_golden(snapshot):
         key=lambda d: d["basename"],
     )
     assert digest == snapshot
+
+
+_SPACE_FILLING_GFX1250 = os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "common", "gemm", "gfx12", "space_filling.yaml"
+)
+_TILE_COUNT_MOVE = re.compile(r"^\s*s_mov_b32\s+s\[?(\d+)\]?,\s*s\[sgprNumWorkGroups([01])\]", re.M)
+_PAIR_READ = re.compile(r"^\s*s_mov_b64\s+s\[\d+:\d+\],\s*s\[(\d+):\d+\]", re.M)
+
+
+def test_r2_wgm_tile_counts_are_an_aligned_sgpr_pair(monkeypatch):
+    """The walk keeps NumTilesM/N in a pair that s_mov_b64 and s_cselect_b64 read as one 64-bit
+    operand, so M must sit on an even SGPR with N right after it, whatever the register pool holds.
+    The walk is entered here with an odd first free SGPR."""
+    import rocisa
+    import tensilelite.KernelWriterAssembly as kernelWriterAssembly
+
+    # The harness emits in this process only for the ISA the backend serves, so the patch below can reach it.
+    if getattr(rocisa, "_BACKEND", "") == "stinkytofu":
+        config, arch = _SPACE_FILLING_GFX1250, "gfx1250"
+    else:
+        config, arch = _CONFIG, _ARCH
+    walk = kernelWriterAssembly.SpaceFillingCurveWalk
+    entered = []
+
+    def walkFromAnOddFreeSgpr(writer, kernel, sgprWGM):
+        entered.append(kernel)
+        held = []
+        while True:
+            sgprIdx = writer.sgprPool.checkOut(1, tag="test_oddFirstFree")
+            if sgprIdx % 2:
+                writer.sgprPool.checkIn(sgprIdx)
+                break
+            held.append(sgprIdx)
+        module = walk(writer, kernel, sgprWGM)
+        for sgprIdx in held:
+            writer.sgprPool.checkIn(sgprIdx)
+        return module
+
+    monkeypatch.setattr(kernelWriterAssembly, "SpaceFillingCurveWalk", walkFromAnOddFreeSgpr)
+    results = emit_kernels_from_config(config, limit=8, arch=arch, canonical=False)
+    assert results
+    assert len(entered) >= len(results), (len(entered), len(results))
+    pairReads = 0
+    for base, src, err in results:
+        assert err == 0, base
+        start = src.find("Start of Generic WGM algo")
+        assert start >= 0, f"no SpaceFillingCurveWalk in {base!r}"
+        tileCounts = {}
+        for m in _TILE_COUNT_MOVE.finditer(src, start):
+            tileCounts.setdefault(int(m.group(2)), int(m.group(1)))
+        assert tileCounts[0] % 2 == 0 and tileCounts[1] == tileCounts[0] + 1, (base, tileCounts)
+        pairReads += any(int(m.group(1)) == tileCounts[0] for m in _PAIR_READ.finditer(src, start))
+    if config == _CONFIG:
+        # The Hilbert and Morton forks read the pair with s_mov_b64 in SpaceFillCurveSimpleImpl.
+        assert pairReads >= 2, pairReads

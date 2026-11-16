@@ -23,6 +23,7 @@
 ################################################################################
 
 from ..Component import NotLocalFullTileElements
+from ..KernelWriterModules import hasPackedAccumulators
 from math import ceil
 
 class NotLocalFullTileElementsVALU(NotLocalFullTileElements):
@@ -72,6 +73,9 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
         # which is what makes the wider edge store safe.
         minStoreVectorWidth = 2 if (kernel["GlobalSplitUAlgorithm"] == "AtomicDest" and \
             (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1)) else 1
+        # Packed f16 accumulators: with AF0EM%2==0 an edge store of whole VGPRs stays inside a column.
+        if hasPackedAccumulators(kernel) and kernel["AssertFree0ElementMultiple"] % 2 == 0:
+            minStoreVectorWidth = min(2, storeVectorWidth)
 
         # handle mfma 4x4 instruction
         matrixInstM  = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
@@ -110,7 +114,7 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
     (ie non-edge cases)
     """
     def __call__(self, writer, kernel):
-        if kernel["GlobalSplitU"] == 0:
+        if kernel["GlobalSplitU"] == 0 or hasPackedAccumulators(kernel):
             (storeVectorWidths, elements) = self.getElements(writer, kernel)
             return (storeVectorWidths, elements, storeVectorWidths, elements)
         else:

@@ -37,7 +37,13 @@ from rocisa.macro import PseudoRandomGeneratorModule
 
 from ..Common.DataType import DataType
 from ..Component import PackData
+from ..SolutionStructs.Problem import epilogueComputeDataType, isF16Accumulation
 from rocisa.instruction import ECvtF32toF16, t16
+
+def f32Epilogue(**fields):
+    # Matches the problem types whose epilogue computes in f32, which includes widened f16 accumulators.
+    return lambda problemType: epilogueComputeDataType(problemType).isSingle() and \
+        all(problemType[k] == v for k, v in fields.items())
 
 def formatting(idx, inputPrefix, prefixOffset):
     if inputPrefix:
@@ -46,7 +52,7 @@ def formatting(idx, inputPrefix, prefixOffset):
         return idx
 
 class PackData_F16(PackData):
-    kernel = {"ProblemType": {"ComputeDataType": DataType(DataTypeEnum.Float), "DestDataType": DataType(DataTypeEnum.Half)}}
+    kernel = {"ProblemType": f32Epilogue(DestDataType=DataType(DataTypeEnum.Half))}
     def __call__(self, gwvw, destIdx, elementSumIdx, tmpVgpr=None, inputPrefix="", prefixOffset=0):
         module = Module("PackData F16")
         ti = rocIsa.getInstance()
@@ -83,7 +89,7 @@ class PackData_F16(PackData):
         return module
 
 class PackData_BF16(PackData):
-    kernel = {"ProblemType": {"ComputeDataType": DataType(DataTypeEnum.Float), "DestDataType": DataType(DataTypeEnum.BFloat16)}}
+    kernel = {"ProblemType": f32Epilogue(DestDataType=DataType(DataTypeEnum.BFloat16))}
     def __call__(self, gwvw, destIdx, elementSumIdx, bf16CVTVgprStruct, tmpS01, laneSGPRC, tmpVgpr=None, inputPrefix="", prefixOffset=0):
         ti = rocIsa.getInstance()
 
@@ -144,6 +150,7 @@ class PackData_BF16(PackData):
 
 class PackData_FLOAT8(PackData):
     kernel = {"ProblemType": {"ComputeDataType": DataType(DataTypeEnum.Float), "DestDataType": DataType(DataTypeEnum.Float8), "StochasticRounding": False}}
+    saturateInf = False
     def __call__(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, tmpS01, laneSGPRC, inputPrefix="", prefixOffset=0):
         vgprFp8NanInf = fp8CVTVgprStruct.vgprFp8NanInf
         vgprFp8Temp   = fp8CVTVgprStruct.vgprFp8Temp
@@ -164,7 +171,8 @@ class PackData_FLOAT8(PackData):
                         # Equivalent to the cmp_class/med3/cndmask sequence below: x*0+x maps +/-inf to
                         # NaN and leaves finite values unchanged; the NaN-propagating clamp then keeps
                         # NaN and saturates finite values to [Min, Max]. Only the NaN sign for +inf differs.
-                        for pi in range(4):
+                        # Without x*0+x the clamp saturates +/-inf as well (saturateInf).
+                        for pi in range(0 if self.saturateInf else 4):
                             pv = formatting(elementSumIdx + groupIdx * 8 + pi * 2, inputPrefix, prefixOffset)
                             module.add(VFmaPKF32(dst=vgpr(pv, 2), src0=vgpr(pv, 2), src1=0, src2=vgpr(pv, 2),
                                                   comment="x*0+x: +/-inf -> NaN, finite unchanged"))
@@ -206,6 +214,16 @@ class PackData_FLOAT8(PackData):
                 module.add(VCvtPkF32toFP8(dst=vgpr(d), src0=vgpr(formatting(sumIdxV-1, inputPrefix, prefixOffset)), src1=vgpr(formatVgpr), vop3=VOP3PModifiers(op_sel=[0,0,pos])))
                 pos = int(not pos)
         return module
+
+class PackData_FLOAT8_F16Accumulation(PackData_FLOAT8):
+    """
+    f16 accumulation, whose epilogue widens the accumulators to f32: an accumulator that overflowed the f16 range
+    holds +/-inf, which saturates to +/-448 like a finite overflow instead of becoming NaN. The one-at-a-time path
+    gets the same from the class mask its caller loads, NaN only.
+    """
+    kernel = {"ProblemType": lambda problemType: isF16Accumulation(problemType) and \
+        problemType["DestDataType"] == DataType(DataTypeEnum.Float8) and not problemType["StochasticRounding"]}
+    saturateInf = True
 
 class PackData_FLOAT8_fnuz(PackData):
     kernel = {"ProblemType": {"ComputeDataType": DataType(DataTypeEnum.Float), "DestDataType": DataType(DataTypeEnum.Float8_fnuz), "StochasticRounding": False}}
