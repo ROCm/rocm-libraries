@@ -732,6 +732,12 @@ namespace TensileLite
         {
             return static_cast<size_t>(skTiles) * skSplit;
         }
+
+        // The reduction that sums the parts of the split tiles.
+        origami::reduction_t reduction() const
+        {
+            return parallel ? origami::reduction_t::parallel : origami::reduction_t::tree;
+        }
     };
 
     struct StreamKDynamicSplitInputs
