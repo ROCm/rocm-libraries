@@ -6,7 +6,9 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <random>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -34,7 +36,7 @@ namespace hip_kernel_provider::layernorm_bwd_precision::test
 namespace
 {
 
-// ALMIOPEN-3339 regression suite: the HIP MLops layernorm backward kernel must stay accurate
+// The HIP MLops layernorm backward kernel must stay accurate
 // in fp32 when the activations sit far from zero relative to their spread (|mean| >> std).
 // An uncentered dx = rstd*dy*scale - a*x - b subtracts terms of size |mean|*rstd that cancel
 // down to the spread, so the kernel centers x before forming them. The fp32 dx is compared
@@ -52,8 +54,7 @@ protected:
     static constexpr float SPREAD = 0.01f;
     static constexpr unsigned int SEED = 3339;
 
-    // The ticket's acceptance bound on dx. The unfixed kernel misses it by 4x at mean 100
-    // (0.017) and by 50x at mean 1000 (0.23); the centered kernel lands near 3e-5.
+    // Acceptance bound on dx; a centered fp32 kernel lands near 3e-5.
     static constexpr double DX_TOLERANCE = 0.004;
     // dscale and dbias accumulate over only N = 4 rows from already-centered terms: values
     // reach a few units, fp32 rounding is ~1e-6 relative, so an absolute-plus-relative bound
@@ -285,9 +286,14 @@ protected:
         {
             const double error
                 = std::abs(static_cast<double>(dxGpu[i]) - static_cast<double>(dxCpu[i]));
-            if(!(error <= maxDxError))
+            // A NaN is sticky: it stays the recorded worst element, so the check below fails
+            // on it even when later elements have finite errors.
+            if(std::isnan(maxDxError))
             {
-                // Also records a NaN, which compares false against everything.
+                continue;
+            }
+            if(std::isnan(error) || error > maxDxError)
+            {
                 maxDxError = error;
                 worstDx = i;
             }
@@ -315,9 +321,14 @@ protected:
             maxDscaleError = std::max(maxDscaleError, dscaleError);
             maxDbiasError = std::max(maxDbiasError, dbiasError);
         }
-        RecordProperty("max_dx_error", std::to_string(maxDxError));
-        RecordProperty("max_dscale_error", std::to_string(maxDscaleError));
-        RecordProperty("max_dbias_error", std::to_string(maxDbiasError));
+        const auto scientific = [](double value) {
+            std::ostringstream stream;
+            stream << std::scientific << std::setprecision(3) << value;
+            return stream.str();
+        };
+        RecordProperty("max_dx_error", scientific(maxDxError));
+        RecordProperty("max_dscale_error", scientific(maxDscaleError));
+        RecordProperty("max_dbias_error", scientific(maxDbiasError));
     }
 
     hipdnnHandle_t _handle = nullptr;
