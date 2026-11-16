@@ -308,7 +308,7 @@ public:
         _epilogue.convOutputUid = convOutputUid;
         _epilogue.outputUid = convOutputUid;
         const auto& graph = _graph;
-        const auto nodes = static_cast<uint32_t>(graph.nodeCount());
+        const uint32_t nodes = graph.nodeCount();
         if(nodes <= 1)
         {
             return _epilogue;

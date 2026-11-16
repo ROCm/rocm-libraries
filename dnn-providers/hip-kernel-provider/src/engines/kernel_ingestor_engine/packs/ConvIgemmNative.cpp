@@ -619,6 +619,86 @@ IgemmProblem withoutOutputStaging(const IgemmProblem& problem)
     return direct;
 }
 
+std::optional<IgemmProblem> withPatchView(const IgemmProblem& problem)
+{
+    const auto& b = problem.base.args;
+    const bool forward = problem.direction == ConvDirection::FORWARD;
+    // An axis folds when the filter tiles it exactly: extent equal to the stride, no padding,
+    // unit dilation, and the input a whole number of tiles.
+    const auto folds = [&](int axis) {
+        return b.filter[axis] == b.stride[axis] && b.prePadding[axis] == 0
+               && (b.filter[axis] == 1 || b.dilation[axis] == 1)
+               && b.outSpatial[axis] * b.filter[axis] == b.inSpatial[axis];
+    };
+    if(b.groups != 1 || problem.largeImage)
+    {
+        return std::nullopt;
+    }
+    IgemmProblem view = problem;
+    auto& v = view.args;
+    if(forward)
+    {
+        if(!folds(2) || b.filter[2] < 2 || b.c * b.filter[2] > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        // W / S pixels of S C channels; the filter row's S taps become its channels.
+        v.c = static_cast<int>(b.c * b.filter[2]);
+        v.wi = static_cast<int>(b.inSpatial[2] / b.filter[2]);
+        v.fs = 1;
+        v.sw = 1;
+        v.pw = 0;
+        v.dw = 1;
+        return view;
+    }
+    const long long taps = b.filter[0] * b.filter[1] * b.filter[2];
+    if(!folds(0) || !folds(1) || !folds(2) || taps < 2 || b.c * taps > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    // A 1x1, unit-stride problem over dy's positions whose T R S C columns scatter to dx.
+    v.c = static_cast<int>(b.c * taps);
+    v.di = v.dout;
+    v.hi = v.ho;
+    v.wi = v.wo;
+    v.ft = v.fr = v.fs = 1;
+    v.sd = v.sh = v.sw = 1;
+    v.pd = v.ph = v.pw = 0;
+    v.dd = v.dh = v.dw = 1;
+    v.patchT = static_cast<int>(b.filter[0]);
+    v.patchR = static_cast<int>(b.filter[1]);
+    v.wRowStride = 0;
+    v.wTapStride = 0;
+    view.phases = 1;
+    // The transposed filter is [(t, r, s, c)][k]: the parse's own transpose for a packed
+    // K T R S C filter; any other filter (K C T R S, reflected, strided) by the strided copy.
+    if(!problem.filterKtrsc)
+    {
+        const bool flip = b.flipFilter != 0;
+        const long long t = b.filter[0];
+        const long long r = b.filter[1];
+        const long long s = b.filter[2];
+        const std::array<long long, 5> dims{t, r, s, b.c, b.k};
+        Staging w;
+        w.needed = true;
+        w.copy = copyOf<5>(dims,
+                           {flip ? -b.wStrides[2] : b.wStrides[2],
+                            flip ? -b.wStrides[3] : b.wStrides[3],
+                            flip ? -b.wStrides[4] : b.wStrides[4],
+                            b.wStrides[1],
+                            b.wStrides[0]},
+                           packedStrides(dims),
+                           problem.elementBytes);
+        w.graphOffset
+            = flip ? (t - 1) * b.wStrides[2] + (r - 1) * b.wStrides[3] + (s - 1) * b.wStrides[4]
+                   : 0;
+        w.bytes = static_cast<size_t>(w.copy.total) * static_cast<size_t>(problem.elementBytes);
+        view.w = w;
+    }
+    layOutWorkspace(view);
+    return view;
+}
+
 bool packFits(const IgemmProblem& problem, int64_t bk)
 {
     const auto& a = problem.args;
@@ -732,7 +812,8 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bn,
                        int64_t bk,
                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
-                       int64_t pack)
+                       int64_t pack,
+                       bool noSplit)
 {
     // Blocks per dispatch unit below which the grid splits, and k-iterations each split keeps.
     // gfx9: 2 per CU, 2 iterations. gfx10+ (units are WGPs): 1 per WGP, 64 iterations -- there a
@@ -749,7 +830,7 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     plan.workspaceBytes = problem.workspaceBytes;
     plan.outElems = forward ? a.m * a.k : static_cast<long long>(a.n) * a.di * a.hi * a.wi * a.c;
     const auto grid = gridFor(problem, bm, bn);
-    if(!grid.has_value())
+    if(!grid.has_value() || noSplit)
     {
         return plan;
     }
@@ -883,6 +964,7 @@ struct Tile
     int64_t dma = 0; ///< gfx950: buffer loads straight into this many swizzled LDS stages
     int64_t fuse = 0; ///< groups run as one block-diagonal group (group fusion), 0 none
     int64_t large = 0; ///< 64-bit positions within an image (K1_LARGE): images past 2^31 - 1 px
+    int64_t patch = 0; ///< patch convolutions as one GEMM (withPatchView, K1_PATCH)
 
     int64_t blockThreads() const
     {
@@ -898,6 +980,26 @@ bool bufferLoads(const IgemmProblem& problem)
     const long long filterBytes = static_cast<long long>(a.k) * a.ft * a.fr * a.fs
                                   * (a.c / a.groups) * problem.elementBytes;
     return problem.blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
+}
+
+/// The atoms the patch tile runs: 16x16 matrix-core atoms of 16-bit operands.
+bool patchTileAtom(std::string_view atom)
+{
+    const bool family = atom.rfind("mfma16", 0) == 0 || atom.rfind("wmma1", 0) == 0;
+    return family && atom.find("f32") == std::string_view::npos;
+}
+
+/// LDS bytes of the patch tile (k1PatchMma): two stages of the A tile and the B tile (K-major
+/// for gfx950 backward data), or the epilogue strips if larger.
+long long patchTileLds(const Tile& tile, bool backward, std::string_view arch)
+{
+    const long long ld = tile.vec == 8 ? tile.bk : tile.bk + 8;
+    const bool kMajor
+        = backward && tile.wdirect != 0 && arch == "gfx950" && tile.atom.rfind("mfma16x32", 0) == 0;
+    const long long b = kMajor ? tile.bk * (tile.bn + 8) : tile.bn * ld;
+    const long long stages = 2 * (tile.bm * ld + b) * 2;
+    const long long out = tile.wm * tile.wn * 16 * (tile.bn / tile.wn + 8) * 2;
+    return std::max(stages, out);
 }
 
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
@@ -929,6 +1031,7 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.dma = kernel.getIntMetadata("dma");
     tile.fuse = kernel.getIntMetadata("fuse");
     tile.large = kernel.getIntMetadata("large");
+    tile.patch = kernel.getIntMetadata("patch");
     if((tile.large != 0
         && (tile.large != 1 || tile.xcd != 0 || tile.halo != 0 || tile.wdirect != 0
             || tile.pack != 0 || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0
@@ -942,12 +1045,21 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
        || (tile.swz != 0 && tile.swz != 1)
        || (tile.swz != 0
            && (tile.info.wave == 0 || tile.split || tile.halo != 0 || tile.wdirect != 0
-               || tile.pack != 0 || tile.vec != 8
+               || tile.pack == 1 || tile.vec != 8
                || (tile.bk != 16 && tile.bk != 32 && tile.bk != 64) || tile.info.swizzleK == 0
                || tile.bk % tile.info.swizzleK != 0))
-       || (tile.dma != 0 && (tile.dma < 2 || tile.dma > 4 || tile.swz == 0))
+       || (tile.dma != 0 && (tile.dma < 2 || tile.dma > 4 || tile.swz == 0 || tile.pack == 1))
        || (tile.fuse != 0 && tile.fuse != 2 && tile.fuse != 4 && tile.fuse != 8 && tile.fuse != 16)
-       || (tile.fuse != 0 && (tile.halo != 0 || tile.pack != 0)))
+       || (tile.fuse != 0 && (tile.halo != 0 || tile.pack != 0))
+       || (tile.patch != 0
+           && (tile.patch < 0 || tile.patch > 2 || tile.large != 0 || tile.fuse != 0))
+       // The patch tile (k1PatchMma): 16-bit 16x16 matrix-core atoms, every variant knob off.
+       || (tile.patch == 2
+           && (!patchTileAtom(tile.atom) || tile.split || tile.stages != 1 || tile.xcd != 0
+               || tile.halo != 0 || tile.pack != 0 || tile.cf != 0 || tile.swz != 0 || tile.dma != 0
+               || (tile.vec != 4 && tile.vec != 8) || tile.bm % (tile.wm * 16) != 0
+               || tile.bn % (tile.wn * 16) != 0 || (tile.bk != 16 && tile.bk != 32 && tile.bk != 64)
+               || tile.info.swizzleK == 0 || tile.bk % tile.info.swizzleK != 0)))
     {
         return std::nullopt;
     }
@@ -969,7 +1081,9 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// config (16-bit atoms with 8-, 16- or 32-byte fragments and a k-step the chunked reads divide,
 /// vector 8, no halo, direct filter or tap packing; checked in tileOf) serves whatever its plain
 /// twin serves. A DMA config (swizzled tiles loaded straight into LDS) serves gfx950 only, and only
-/// problems the 32-bit buffer offsets address.
+/// problems the 32-bit buffer offsets address. A patch config serves only patch convolutions
+/// (withPatchView), and every check above applies to the problem as it runs it; in backward data
+/// it writes channels-last dx (no channels-first output) with a channel vector dividing S C.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -994,6 +1108,41 @@ bool kernelMatches(const MatchContext& context,
             return false;
         }
         problem = conv_igemm::withFusedGroups(*problem, tile->fuse);
+    }
+    if(problem.has_value() && tile->patch != 0)
+    {
+        // Patch configs serve exactly the patch convolutions; backward data writes dx
+        // channels-last, in runs of S C columns its channel vector divides.
+        problem = conv_igemm::withPatchView(*problem);
+        if(problem.has_value() && *direction == ConvDirection::BACKWARD_DATA)
+        {
+            const auto& v = problem->args;
+            const long long run = v.c / (static_cast<long long>(v.patchT) * v.patchR);
+            if(tile->cf != 0 || run % tile->vec != 0)
+            {
+                return false;
+            }
+        }
+        if(problem.has_value() && tile->patch == 2)
+        {
+            // The patch tile: 32-bit buffer offsets over the whole read operands, its LDS within
+            // the device's, and the filter's columns whole vectors (backward data).
+            const auto& v = problem->args;
+            const bool forward = *direction == ConvDirection::FORWARD;
+            const long long readElems
+                = forward ? static_cast<long long>(v.n) * v.di * v.hi * v.wi * v.c : v.m * v.k;
+            const long long filterElems = static_cast<long long>(v.k) * v.c * v.ft * v.fr * v.fs;
+            const auto arch
+                = hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName);
+            const long long ldsLimit = arch == "gfx950" ? 160 * 1024 : 64 * 1024;
+            if(readElems * problem->elementBytes >= BUFFER_LIMIT
+               || filterElems * problem->elementBytes >= BUFFER_LIMIT
+               || patchTileLds(*tile, !forward, arch) > ldsLimit
+               || (!forward && v.c % tile->vec != 0))
+            {
+                return false;
+            }
+        }
     }
     // The split-K plan is sized from the device's units: none reported, nothing to size.
     if(!problem.has_value() || device_units::dispatchUnits(context.deviceProperties) < 1
@@ -1090,7 +1239,7 @@ bool kernelMatches(const MatchContext& context,
 
 /// The problem a config runs: a direct-filter config reads the graph's filter, and a
 /// channels-first-output config writes the graph's output, so nothing stages them; a group-fusion
-/// config stages the expanded filter.
+/// config stages the expanded filter; a patch config runs the patch view.
 std::optional<IgemmProblem>
     problemFor(const MatchContext& context, ConvDirection direction, const Tile& tile)
 {
@@ -1100,7 +1249,11 @@ std::optional<IgemmProblem>
         // The expanded filter is the staged operand, direct filter or not.
         problem = conv_igemm::withFusedGroups(*problem, tile.fuse);
     }
-    else if(problem.has_value() && tile.wdirect != 0)
+    if(problem.has_value() && tile.patch != 0)
+    {
+        problem = conv_igemm::withPatchView(*problem);
+    }
+    if(problem.has_value() && tile.fuse == 0 && tile.wdirect != 0)
     {
         problem = conv_igemm::withoutFilterStaging(*problem);
     }
@@ -1287,8 +1440,13 @@ public:
         {
             return 0;
         }
-        return conv_igemm::splitPlanFor(
-                   *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack)
+        return conv_igemm::splitPlanFor(*problem,
+                                        tile->bm,
+                                        tile->bn,
+                                        tile->bk,
+                                        context.deviceProperties,
+                                        tile->pack,
+                                        tile->patch != 0)
             .workspaceBytes;
     }
 
@@ -1348,6 +1506,7 @@ public:
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         options.add("K1_BUFFER", std::string(bufferLoads(*problem) ? "1" : "0"));
         options.add("K1_LARGE", std::to_string(tile->large));
+        options.add("K1_PATCH", std::to_string(tile->patch));
         const int waves = conv_igemm::occupancyTarget(tile->atom,
                                                       tile->bm,
                                                       tile->bn,
@@ -1362,8 +1521,13 @@ public:
             options.add("CONV_IGEMM_WAVES_MAX", std::to_string(waves));
         }
 
-        const auto plan = conv_igemm::splitPlanFor(
-            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);
+        const auto plan = conv_igemm::splitPlanFor(*problem,
+                                                   tile->bm,
+                                                   tile->bn,
+                                                   tile->bk,
+                                                   context.deviceProperties,
+                                                   tile->pack,
+                                                   tile->patch != 0);
         // The fused epilogue: in the convolution, and in the split-K reduce that writes the
         // output when the reduction is split. Fusion off adds no option, so the code is that of
         // an unfused build.

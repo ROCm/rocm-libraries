@@ -48,4 +48,15 @@ std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem);
 std::optional<ConvGemmPlanCalls>
     fuseEpilogue(const ConvProblem& problem, ConvGemmPlanCalls plan, bool native);
 
+/**
+ * @brief @p plan with every GEMM that writes an fp32 result from 16-bit operands (a fused plan's
+ *        y copy or staging) cut into @p chunks consecutive reductions, each after the first
+ *        adding to the fp32 result (beta 1), in order.
+ *
+ * The same fp32 sum, rounded once by the epilogue pass. For a backend without a workspace-free
+ * algorithm for the long fp32-output GEMM (hipBLASLt's deterministic engines on small-n, long-k
+ * layers): the shorter reductions have one. Deterministic: the chunks run one after another.
+ */
+ConvGemmPlanCalls splitFp32OutputReductions(ConvGemmPlanCalls plan, int64_t chunks);
+
 } // namespace hipblaslt_plugin

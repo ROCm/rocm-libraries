@@ -391,6 +391,35 @@ std::optional<ConvGemmPlanCalls>
 
 } // namespace
 
+ConvGemmPlanCalls splitFp32OutputReductions(ConvGemmPlanCalls plan, int64_t chunks)
+{
+    for(auto& stage : plan.stages)
+    {
+        std::vector<GemmCall> calls;
+        for(const auto& call : stage.calls)
+        {
+            if(call.d.dataType != DataType::FLOAT || call.a.dataType == DataType::FLOAT
+               || call.epilogue.has_value() || chunks < 2 || call.k < chunks)
+            {
+                calls.push_back(call);
+                continue;
+            }
+            const int64_t length = (call.k + chunks - 1) / chunks;
+            for(int64_t first = 0; first < call.k; first += length)
+            {
+                GemmCall part = call;
+                part.k = std::min(length, call.k - first);
+                part.a.offset += call.transposeA ? first : first * call.a.leadingDimension;
+                part.b.offset += call.transposeB ? first * call.b.leadingDimension : first;
+                part.accumulate = call.accumulate || first > 0;
+                calls.push_back(part);
+            }
+        }
+        stage.calls = std::move(calls);
+    }
+    return plan;
+}
+
 std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem)
 {
     const auto& epilogue = problem.epilogue;

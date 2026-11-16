@@ -149,8 +149,8 @@ inline std::string metadataKey(const hipdnn_plugin_sdk::ingestor::KernelDefiniti
 /// fields (every code path of the fields named, at a bounded compile cost).
 inline EngineRunner
     catalogRunner(PackSymbols pack,
-                  std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels,
-                  std::vector<std::string> distinctBy = {},
+                  const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& kernels,
+                  const std::vector<std::string>& distinctBy = {},
                   bool requireMatch = true)
 {
     return [pack, kernels, distinctBy, requireMatch](
@@ -317,7 +317,7 @@ int checkFusedCase(
                     return -std::numeric_limits<double>::infinity();
                 }
             }
-            const double u = static_cast<double>(unit(random));
+            const auto u = static_cast<double>(unit(random));
             return isScale ? 1.0 + 0.5 * u : u;
         };
         if(step.operand == OperandKind::CONSTANT || step.operand == OperandKind::RUNTIME)
@@ -425,7 +425,7 @@ int checkFusedCase(
                 offset += index[a] * strides[a];
             }
             const int64_t channel = index[1];
-            double v = static_cast<double>(reference[offset]);
+            auto v = static_cast<double>(reference[offset]);
             double magnitude = std::fabs(v);
             for(size_t i = 0; i < steps.size(); ++i)
             {
@@ -438,9 +438,9 @@ int checkFusedCase(
                 v = applyStep(steps[i], v, input);
                 magnitude = std::max(magnitude, std::fabs(v));
             }
-            const double want
+            const auto want
                 = static_cast<double>(static_cast<float>(static_cast<T>(static_cast<float>(v))));
-            const double got = static_cast<double>(static_cast<float>(actual[offset]));
+            const auto got = static_cast<double>(static_cast<float>(actual[offset]));
             const double tolerance = convBound * gain + 4e-6 * magnitude
                                      + 2.0 * unitRoundoff<T>() * (std::fabs(want) + 1e-3);
             bool ok = false;
