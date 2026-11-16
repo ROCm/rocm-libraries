@@ -8,16 +8,16 @@ SPDX-License-Identifier:  MIT
 > Engine ids: `hipkernel:CONV_GROUP_FWD`, `hipkernel:CONV_GROUP_BWD`, `hipkernel:CONV_GROUP_WRW` · Generator: `conv/generators/gen_group.py` · Kernels: `src/engines/kernel_ingestor_engine/descriptors/conv/group/kernels/` (`ConvGroup.cpp`, `ConvGroupCore.h`, `ConvGroupArgs.h`) · Pack: `packs/ConvGroupNative.cpp`, `packs/ConvGroupProblem.hpp`
 
 ## At a glance
-- **What:** a direct convolution in which each 16-channel block multiplies on a 16x16 matrix-core atom against the block-diagonal expansion of its groups' filters, so one multiply serves 16 / (C/g) whole groups. The input halo is staged once in LDS. Backward weights keeps the diagonal blocks of the same products and reduces through a deterministic split and reduce.
+- **What:** a direct convolution in which each 16-channel block multiplies on a 16x16 matrix-core atom against the block-diagonal expansion of its groups' filters, so one multiply serves 16 / (C/g) whole groups. The input halo is staged once in LDS, or (row-streaming `rs` configs, channels-last) the band's input rows stream through LDS once each while the filter stays in registers. Backward weights keeps the diagonal blocks of the same products and reduces through a deterministic split and reduce.
 - **Covers:** fwd, bwd-data, wrw. fp32, fp16 and bf16, plus three-bf16 fp32 sibling engines for wide groups (`CONV_GROUP_FWD/BWD_TF32`, fwd/bwd only, offered by default, reporting `TENSOR_CORE`). Activations NHWC/NDHWC are staged, or NCHW/NCDHW are read in place (`cf`). Filters 3x3 and 3x3x3 (1x3x3 runs as 2-D); 2-D and 3-D; unit dilation; any padding; both convolution modes.
 - **Groups:** small groups have C/g in {2, 4, 8, 16} with C a multiple of 16. Wide groups have 17 to 64 channels a group (a multiple of 8) in fwd/bwd, and 24 or 32 channels a group in wrw (MFMA only).
 - **Strides:** row stride equals column stride, 1 or 2 per config. Forward takes any depth stride. Backward data takes strides 1 or 2 on every axis, run by stride phases. Wrw takes row/column stride 1 or 2 and any depth stride.
 - **Large tensors:** element offsets are 64-bit from the image base, and the grid is a flattened 64-bit block id. No >2 GiB device test exists (unverified).
 - **Arches:** MFMA 16x16x16 f16/bf16 and 16x16x4 f32 on gfx908 to gfx950 (gfx908 has its own bf16 atom). WMMA on gfx11 and gfx12. An fp32 FMA kernel compiled per channels-a-group runs on every arch, gfx906 included, and is RDNA's only fp32 path. gfx906 has no 16-bit configs.
 - **Wins when:** groups of 2 to 16 channels (ResNeXt g32, RegNet, ResNeXt3D), where a per-group implicit GEMM fills 1/16 to 1/4 of its tile. It is the best non-MIOpen engine on roughly 40-110 graphs per direction per GPU in the full corpus.
-- **Loses when:** gfx950/gfx942 NHWC 16-channel groups (ResNeXt c512 g32) against MIOpen's hipconv grouped kernel, by about 2.4-2.5x. Also mid-width compute-bound groups (Winograd does fewer MACs). Most grouped wrw goes to `CONV_GROUP_VALU_WRW` (see GROUP_VALU.md).
+- **Loses when:** gfx950 NHWC 16-channel groups (ResNeXt c512 g32) at 28x28-32x32 against MIOpen's hipconv grouped kernel, by about 1.2x with the row-streaming configs (at parity from 56x56). Also mid-width compute-bound groups (Winograd does fewer MACs). Most grouped wrw goes to `CONV_GROUP_VALU_WRW` (see GROUP_VALU.md).
 - **Precision:** fp32 accumulation and one rounding at the store. Wrw keeps fp32 partials and reduces them in a fixed order. No numerical notes on the exact engines (the TF32 siblings report `TENSOR_CORE`). Results are bitwise deterministic, and the device test relaunches every config to check it.
-- **Instances:** fwd 852 + 144 three-bf16; bwd 1372 + 120 three-bf16; wrw 3132 in 7 packs (each tile at 3 `bpu` targets that share one compiled kernel). Counted from the generator's output.
+- **Instances:** fwd 1524 (672 row-streaming) + 144 three-bf16; bwd 2200 (828 row-streaming) + 120 three-bf16; wrw 3132 in 7 packs (each tile at 3 `bpu` targets that share one compiled kernel). Counted from the generator's output.
 - **vs MIOpen:** competes with `ConvHipImplicitGemmGroup{Fwd,Bwd,Wrw}Xdlops` and their 3-D forms, `ConvHipConv`, and the grouped Winograd solvers. On the full corpus the grouped class (all engines) runs at 1.41x on gfx950, 2.06x on MI325X, 1.44x on gfx1201 and 1.77x on gfx1100 against MIOpen search.
 
 ## Why it exists
@@ -45,6 +45,7 @@ store acc (fp32 -> T)
 
 ## Implementation design
 - **Matrix-core kernel (`k4ConvMma`).** 4 waves own TH output rows x 16·WP columns x CB channel blocks of one output plane. The halo is a static LDS array; each pixel is padded by 16 bytes so that a fragment's 16 lanes hit different banks. At stride 2, each halo row stores its even columns and then its odd ones, so a fragment's lanes (columns 2 apart) read consecutive pixels. The halo is staged once per depth tap, behind a barrier, and is single-buffered. B fragments come from the expanded filter in global memory, read through cache.
+- **Row-streaming kernel (`k4ConvMmaRows`, `rs` 1-4).** Small groups, and wide groups of exactly 2 or 4 blocks (32 or 64 channels a group, `nbi` 2 or 4: a workgroup holds whole groups, a wave one output block of its group against every input block); channels-last; forward at stride 1 or 2, backward data by its unit-stride phases. A workgroup of `cb` waves owns 16 `wp` output columns x a band of `th` output rows x `cb` 16-channel blocks (one a wave). Each wave loads its block's expanded filter (every tap) into registers once. The band's input rows (and depth taps) stream top to bottom: a row segment of (16 `wp` - 1) stride + S pixels is staged in a double-buffered LDS row (at stride 2 its even columns first, then its odd ones, so a fragment's lanes read consecutive pixels), with `rs` later rows' loads in flight in registers. Each wave keeps a ring of R output-row accumulators: input row t adds filter row r into output row (t - r) / stride where the stride divides t - r, so after row t the output row (t - (R - 1)) / stride is complete and is stored straight from registers (filter as the A operand, input as B: a lane holds consecutive output channels of one pixel). Input rows are read once a band (plus the halo columns) and every output written once. Loads and stores go through per-row buffer records (rows outside the tensor have an empty record; columns past the row read zero or are dropped), so the loop has no branch around memory operations and its waits count only the rows in flight. Each input and output row must be under 2 GiB (gated); bases are 64-bit.
 - **Wide kernel (`k4ConvMmaWide`).** A workgroup owns `nbo` of a group's output blocks and stages the group's `nbi` input blocks. Channels need not be a multiple of 16, only of the 16-byte vector.
 - **Channels-first in place (`cf`).** The halo is gathered one channel per thread-load along rows, which makes the loads coalesced. The output tile is parked in the halo's LDS as [row][channel][column] and written one row of columns at a time. Configs without `cf` read NHWC staged by the implicit-GEMM engine's staging kernels; on NCHW graphs that costs a transpose each way. In-place `cf` measures 1.5-2.5x faster than staged (indicative).
 - **Host gates (`parseGroupProblem`):**
@@ -82,6 +83,7 @@ store acc (fp32 -> T)
   | `cg`, `oc`, `px` | FMA: channels a group, output channels and columns per thread |
   | `tw`, `bpu` | wrw: tile columns; split target |
   | `math` | 1 for three-bf16 |
+  | `rs` | row streaming: 1-4 input rows in flight (`th` the band's rows, `wp` 1/2/4 fragments, `cb` waves); 0 otherwise |
 
   The tile lists come from bench winners per target (one-block tiles, for example, are RDNA's best at 16 channels a group). Every tile that fits LDS ships for every atom. Shapes are runtime. There is no generic/specialized tier split: every config is specialized on filter and stride, and other filters go to K1, `CONV_GROUP_VALU`, or Winograd.
 - **Codegen.** `readfirstlane` on the FMA kernel's chunk index makes the filter loads scalar. Per-tap B offsets are compile-time. Out-of-plane depth taps are skipped uniformly across the workgroup.
@@ -131,7 +133,8 @@ fused graphs. With no epilogue the kernels compile to the same code as without f
 - **Determinism.** No atomics; the sums run in a fixed order. The wrw association depends only on the split count, which depends on the shape and the device's dispatch units. The UED therefore carries no `nondeterministic` note, and the device test asserts bitwise equality on relaunch for every admitted config.
 - **Tolerance.** Results are compared with a CPU reference at 2e-6 x reduction length + 2 x storage epsilon x (|ref| + 1e-3). The reduction length is (C/g) x taps for fwd/bwd and N x output positions for wrw. This is not yet the #15481 fp64 form.
 - **Three-bf16 (`math` 1).** Only `CONV_GROUP_FWD/BWD_TF32` list it (144 fwd, 120 bwd configs; the exact engines 852 and 1372), for wide-group fp32 fwd/bwd. x (or dy) and the expanded filter are split into hi/lo bf16 parts, and three part products accumulate in fp32. The error is about 2^-16 per product, and infinities propagate as in fp32 (tested). It measured 1.4-2.4x over exact on gfx950 and 1.1-1.8x on gfx90a. For small groups and wrw the form measures 0.28-0.77x of exact, so they have none.
-- **inf/NaN parity (open).** On exact matrix-core small-group configs, an inf input times a structural zero of the block-diagonal expansion gives NaN where cuDNN and PyTorch give inf. Wide-group padding channels and the FMA kernel do not multiply structural zeros of real data the same way (unverified for wide-group padding).
+- **inf/NaN parity, row-streaming configs.** When a fragment of the input holds an infinity or NaN (a wave-wide check per fragment), and groups are narrower than the block, that fragment multiplies one group at a time: the input keeps only the group's channels and only the group's output rows take the product, so a structural zero never meets another group's infinity. Wide groups of whole blocks have no structural zeros. Tested with +inf and -inf inputs on groups of 2, 4, 8, 16 and 32 channels, fwd and bwd-data, stride 1 and 2, in all three types.
+- **inf/NaN parity (open) for the other matrix-core configs.** On exact matrix-core small-group configs, an inf input times a structural zero of the block-diagonal expansion gives NaN where cuDNN and PyTorch give inf. Wide-group padding channels and the FMA kernel do not multiply structural zeros of real data the same way (unverified for wide-group padding).
 
 ## Comparison with MIOpen
 - **`ConvHipImplicitGemmGroup{Fwd,Bwd,Wrw}Xdlops` and the `3DGroup` forms.** These are CK grouped implicit GEMMs, one GEMM per group, so their tiles are mostly empty at small cg. K4 replaces the per-group GEMM with block-diagonal 16x16 tiles, or with the FMA kernel for fp32 where there is no matrix core.
@@ -148,21 +151,23 @@ fused graphs. With no epilogue the kernels compile to the same code as without f
 K4 reuses K1's atoms and staging. No CK or hipconv code was copied.
 
 ## Next steps and deferred ideas
-1. **inf/NaN parity for small groups.** Add a select on structural zeros, a data test with inf inputs, and an A/B against the compiled-out build to log its cost. This is required for behaviour parity with cuDNN and PyTorch.
-2. **gfx950/gfx942 NHWC cg16 gap to `ConvHipConv`.** The gap is about 2.4x on ResNeXt g32 c512. Candidates: double-buffered halo staging across depth taps and tiles (the halo is single-buffered today), LDS DMA on gfx950, and larger CB tiles.
-3. **Coverage.** Add C/g not dividing 16 and not a multiple of 8 (3, 6, 12), non-unit dilation, and filters other than 3x3 / 3x3x3. Demand for these is not measured; they are served by K1 and `CONV_GROUP_VALU` today.
-4. **Mid-width groups.** Leave these to grouped Winograd (K5) rather than K4.
-5. **Large-tensor test.** Add a sampled >2 GiB boundary case to confirm the 64-bit offsets.
+1. **inf/NaN parity for the halo-staged small-group configs.** Port the row-streaming kernel's per-fragment group-at-a-time path, with an A/B against the compiled-out build. This is required for behaviour parity with cuDNN and PyTorch.
+2. **gfx950 NHWC cg16 at 28x28-32x32 (about 1.2x behind `ConvHipConv`).** Candidates: LDS DMA for the row segments, fusing the filter expansion into the kernel's prologue with vector loads (an element-wise gather there measured 13 us slower than the separate launch), and the gfx950 16x16x32 atom with two taps a step.
+3. **Row streaming in place for channels-first activations** (NCHW graphs are served through staging today), and wide groups whose channels are not whole blocks (24, 48, 56).
+4. **Coverage.** Add C/g not dividing 16 and not a multiple of 8 (3, 6, 12), non-unit dilation, and filters other than 3x3 / 3x3x3. Demand for these is not measured; they are served by K1 and `CONV_GROUP_VALU` today.
+5. **Mid-width groups.** Leave these to grouped Winograd (K5) rather than K4.
+6. **Large-tensor test.** Add a sampled >2 GiB boundary case to confirm the 64-bit offsets.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestGpuConvGroup.cpp`:
   - Device test (`TestGpuConvGroup` Float/Half/BFloat16): runs every shipped config admitted for 2-D and 3-D, NCHW and NHWC, small and wide, stride 1/2 and depth-stride cases, in all three directions, against the CPU reference, with a bitwise relaunch check.
   - `TestGpuConvGroupThreeBf16`: the bound and inf propagation.
+  - `TestGpuConvGroupRowsInfinities`: row-streaming configs with +inf and -inf inputs, groups of 2-32 channels, fwd and bwd-data (stride 1 and 2), three types.
   - `TestGpuConvGroupWrwOneSplit`: wrw planned for one dispatch unit, so configs run at one split and write dw themselves, against the reference and the relaunch check.
   - Opt-in timing test: exact against three-bf16.
 - Host tests in the same file:
   - one decline per gated graph field (`DeclinesEveryUnservedGraph`, fwd/bwd and wrw);
-  - kernel gates per knob, including FMA, wide and wrw;
+  - kernel gates per knob, including FMA, wide, row-streaming (`RowsKernelGatesEveryField`: every field, stride 2 admitted in both directions, wide configs only for groups of exactly `nbi` blocks with whole groups a workgroup, rows of 2 GiB declined) and wrw;
   - every config fits its LDS, and the knobs tell configs apart;
   - three-bf16 is admitted only for fp32 wide-group fwd/bwd graphs;
   - launches past one dispatch are declined;

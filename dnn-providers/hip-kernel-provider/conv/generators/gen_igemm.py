@@ -36,6 +36,7 @@ FIELDS = [
     "dma",
     "fuse",
     "large",
+    "patch",
 ]
 # Every field that tells two configs of one graph apart is a knob (the candidate enumeration
 # identifies a config by its knob tuple).
@@ -70,6 +71,7 @@ def C(
     dma=0,
     fuse=0,
     large=0,
+    patch=0,
 ):
     return dict(
         atom=atom,
@@ -91,6 +93,7 @@ def C(
         dma=dma,
         fuse=fuse,
         large=large,
+        patch=patch,
     )
 
 
@@ -192,6 +195,132 @@ def withSwz(cfgs):
         and c["bk"] in (16, 32, 64)
         and c["bk"] % SWZ_ATOMS[c["atom"]] == 0
     ]
+
+
+# patch 1: patch convolutions (filter equal to the stride, no padding) run as one GEMM. Forward
+# reads each filter row's taps as one contiguous run of the reduction (W / S pixels of S C
+# channels), backward data runs one GEMM over dy's positions whose T R S C columns scatter to dx
+# (K1_PATCH), with no stride phases. Twins of the plain configs without halo, tap packing, group
+# fusion or large images (backward data: channels-last output only), plus flat-reduction twins
+# with swizzled tiles for runs that the k-step does not divide (ViT's 16 x 3 = 48).
+def withPatch(cfgs, tag):
+    base = [
+        c
+        for c in cfgs
+        if c["math"] == "native"
+        and not (c["halo"] or c["pack"] == 1 or c["fuse"] or c["large"] or c["patch"])
+        and not (tag == "bwd" and c["cf"])
+    ]
+    twins = [dict(c, patch=1) for c in base]
+    twins += [
+        dict(c, patch=1, pack=2)
+        for c in base
+        if c["swz"] and not (c["pack"] or c["cf"]) and tag == "fwd"
+    ]
+    # Patch-only tiles of the 16-bit matrix-core atoms: 4-wide vectors for RGB runs of 4 x 3
+    # channels (ConvNeXt's 4x4 stem), which no 8-wide vector divides, and 64-deep k-steps on the
+    # 64 x 64 tile (short GEMMs of a few hundred rows a block, ViT-B/16 at batch 16).
+    atoms = {c["atom"] for c in cfgs}
+    extra = []
+    for atom, tiles in PATCH_TILES.items():
+        if atom in atoms:
+            extra += [
+                C(atom, bm, bn, bk, wm, wn, vec=v) for bm, bn, bk, wm, wn, v in tiles
+            ]
+    extra = withSwz(withFlat(extra))
+    # gfx950: the same short GEMMs on its 16x16x32 / 32x32x16 atoms with DMA rings (DMA serves
+    # the flat reduction too, so ViT's 48-channel runs keep a 2- to 3-deep load ring).
+    for atom in PATCH_DMA_ATOMS & atoms:
+        extra += [
+            C(atom, bm, bn, 64, wm, wn, vec=8, xcd=1, swz=1, dma=d)
+            for bm, bn, wm, wn in ((64, 64, 2, 2), (64, 128, 2, 2), (128, 128, 2, 2))
+            for d in (2, 3)
+        ]
+    if tag == "fwd":
+        extra = withCf(extra)
+        extra += [
+            dict(c, pack=2) for c in extra if c["swz"] and not (c["pack"] or c["cf"])
+        ]
+    out = cfgs + twins + patchTile(cfgs, tag)
+    seen = {tuple(sorted(c.items())) for c in out}
+    for c in extra:
+        c = dict(c, patch=1)
+        if tuple(sorted(c.items())) not in seen:
+            seen.add(tuple(sorted(c.items())))
+            out.append(c)
+    return out
+
+
+PATCH_TILES = {
+    atom: [
+        (64, 64, 16, 2, 2, 4),
+        (64, 64, 32, 2, 2, 4),
+        (128, 64, 32, 2, 2, 4),
+        (64, 64, 64, 2, 2, 8),
+    ]
+    for atom in ("mfma16_f16", "mfma16_bf16")
+}
+PATCH_TILES.update(
+    {
+        atom: [(64, 64, 32, 2, 2, 4), (128, 64, 32, 2, 2, 4), (64, 64, 64, 2, 2, 8)]
+        for atom in ("mfma16x32_f16", "mfma16x32_bf16")
+    }
+)
+# patch 2: the patch tile (k1PatchMma, ConvIgemmPatch.h), a dedicated GEMM for patch
+# convolutions: two LDS stages with one barrier a k-step, swizzled 16-byte chunks, the forward
+# filter-row cursor, backward data's filter staged [(t, r, s, c)][k] or (wdirect) read K-major in
+# place and transposed (ds_read_b64_tr_b16 on gfx950), no split. Tiles per 16-bit 16x16 atom (bm, bn, bk, wm, wn, vec); 4-wide vectors for
+# RGB runs of 4 x 3 channels.
+PATCH_TILE = {
+    "mfma16x32": [
+        (64, 64, 64, 2, 2, 8),
+        (64, 128, 64, 2, 2, 8),
+        (128, 64, 64, 2, 2, 8),
+        (128, 128, 64, 2, 2, 8),
+        (128, 128, 64, 1, 4, 8),
+        (32, 128, 64, 1, 4, 8),
+        (256, 128, 64, 2, 4, 8),
+        (256, 256, 64, 2, 4, 8),
+        (64, 64, 32, 2, 2, 4),
+        (128, 64, 32, 2, 2, 4),
+    ],
+    "mfma16": [
+        (64, 64, 32, 2, 2, 8),
+        (128, 64, 32, 2, 2, 8),
+        (128, 128, 32, 2, 2, 8),
+        (64, 64, 32, 2, 2, 4),
+    ],
+    "wmma11": [
+        (64, 64, 32, 2, 2, 8),
+        (128, 64, 32, 2, 4, 8),
+        (128, 128, 32, 2, 4, 8),
+        (64, 64, 32, 2, 2, 4),
+    ],
+}
+PATCH_TILE["wmma12"] = PATCH_TILE["wmma11"]
+
+
+def patchTile(cfgs, tag):
+    # The catalog's own 16-bit atoms (its fp32 catalog runs its three-bf16 configs on 16-bit
+    # atoms, which the patch tile does not serve).
+    atoms = {
+        c["atom"] for c in cfgs if c["math"] == "native" and "f32" not in c["atom"]
+    }
+    out = []
+    for family, tiles in PATCH_TILE.items():
+        for atom in sorted(atoms):
+            if atom.rsplit("_", 1)[0] != family or atom.endswith("_908"):
+                continue
+            out += [
+                C(atom, bm, bn, bk, wm, wn, vec=v, patch=2, wdirect=wd)
+                for bm, bn, bk, wm, wn, v in tiles
+                for wd in ((0, 1) if tag == "bwd" else (0,))
+            ]
+    return out
+
+
+PATCH_DMA_ATOMS = {"mfma16x32_f16", "mfma16x32_bf16", "mfma32x16_f16", "mfma32x16_bf16"}
+PATCH_TILES["mfma16_bf16_908"] = [(64, 64, 16, 2, 2, 4), (128, 64, 32, 2, 2, 4)]
 
 
 def mfma(dt, atoms32, atoms16, wide32=None, wide16=None):
@@ -444,16 +573,20 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     for dtype, cfgs in CATALOG.items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         # The direct filter is a backward-data loader: forward has no use for it.
-        cfgs = withLarge(
-            withCf(
-                withSwz(
-                    withFlat(
-                        withFuse(
-                            [c for c in cfgs if tag == "bwd" or not c["wdirect"]], tag
+        cfgs = withPatch(
+            withLarge(
+                withCf(
+                    withSwz(
+                        withFlat(
+                            withFuse(
+                                [c for c in cfgs if tag == "bwd" or not c["wdirect"]],
+                                tag,
+                            )
                         )
                     )
                 )
-            )
+            ),
+            tag,
         )
         for i, c in enumerate(cfgs):
             name = f"conv_igemm.{tag}.{dt}.{c['atom']}.{c['math']}.{c['bm']}x{c['bn']}x{c['bk']}" f".w{c['wm']}x{c['wn']}.t{c['threads']}.v{c['vec']}.s{c['stages']}" + (
@@ -476,6 +609,10 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                 f".fuse{c['fuse']}" if c["fuse"] else ""
             ) + (
                 ".large" if c["large"] else ""
+            ) + (
+                ".patch" if c["patch"] == 1 else ""
+            ) + (
+                ".patchtile" if c["patch"] == 2 else ""
             )
             kernels.append(
                 {
