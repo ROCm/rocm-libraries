@@ -473,6 +473,12 @@ rocke_value_t* rocke_xcd_remap_contiguous(rocke_ir_builder_t* b,
                                           rocke_value_t* npid,
                                           int num_xcds)
 {
+    if(num_xcds <= 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "xcd_remap(mode='contiguous'): invalid num_xcds=%d", num_xcds);
+    }
+
     rocke_value_t* n = rocke_b_const_i32(b, (int64_t)num_xcds);
     rocke_value_t* xcd = rocke_b_mod(b, pid, n);
     rocke_value_t* one_a = rocke_b_const_i32(b, 1);

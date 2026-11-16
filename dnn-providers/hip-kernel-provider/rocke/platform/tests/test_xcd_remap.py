@@ -410,5 +410,37 @@ def test_invalid_use_is_refused():
         xcd_remap(b, w, num_wgs=n, num_xcds=n, mode="gated")
     with pytest.raises(TypeError):  # contiguous takes no chunk
         xcd_remap(b, w, num_wgs=n, num_xcds=8, chunk=4, mode="contiguous")
+    for bad in (0, -1):  # a zero/negative count is a divide by a constant 0
+        with pytest.raises(ValueError):
+            xcd_remap(b, w, num_wgs=n, num_xcds=bad, mode="contiguous")
+        with pytest.raises(ValueError):
+            python_xcd_remap(0, num_wgs=8, num_xcds=bad, mode="contiguous")
     with pytest.raises(ValueError):
         python_xcd_remap(0, num_wgs=8, num_xcds=8, mode="nope")
+    with pytest.raises(TypeError):  # same mode contract as the IR entry point
+        python_xcd_remap(0, num_wgs=8, num_xcds=8, mode="gated")
+    with pytest.raises(TypeError):
+        python_xcd_remap(0, num_wgs=8, num_xcds=8, chunk=4, mode="contiguous")
+
+
+def test_int_grid_and_gated_args_are_emitted_as_constants():
+    # a static num_wgs / int gated args used to reach IRBuilder arithmetic raw
+    # (AttributeError); each emits and equals the host model
+    for kwargs, ref in [
+        (dict(num_wgs=64, num_xcds=8), dict(num_wgs=64, num_xcds=8)),
+        (dict(num_wgs=64, num_xcds=8, mode="contiguous"), None),
+        (dict(num_wgs=64, num_xcds=8, chunk=3, mode="gated"), None),
+    ]:
+        b = IRBuilder("static")
+        w = b.block_id_x()
+        out = xcd_remap(b, w, **kwargs)
+        for wi in range(64):
+            got = _eval(b.kernel, {w.name: wi})[out.name]
+            assert got == python_xcd_remap(wi, **kwargs), (kwargs, wi)
+    b = IRBuilder("static_ssa_chunk")  # static grid, SSA chunk
+    c = b.param("c", I32)
+    w = b.block_id_x()
+    out = xcd_remap(b, w, num_wgs=64, num_xcds=8, chunk=c)
+    for wi in range(64):
+        got = _eval(b.kernel, {w.name: wi, c.name: 3})[out.name]
+        assert got == python_xcd_remap(wi, num_wgs=64, num_xcds=8, chunk=3)
