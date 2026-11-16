@@ -8,7 +8,9 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
+#include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -139,4 +141,133 @@ TEST(TestHiprtcCachePath, LivesUnderTheCacheRootAndIsOffWhenTheCacheIsDisabled)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
         "HIPDNN_DISABLE_CACHE", "1");
     EXPECT_TRUE(hiprtc_cache::codeObjectPath(key).empty());
+}
+
+namespace
+{
+
+std::vector<char> sampleCodeObject(std::size_t size, unsigned seed)
+{
+    std::vector<char> bytes(size);
+    for(std::size_t i = 0; i < size; ++i)
+    {
+        bytes[i] = static_cast<char>((i * 131 + seed * 7919) & 0xFF);
+    }
+    return bytes;
+}
+
+void writeRaw(const std::filesystem::path& path, const std::vector<char>& bytes)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+std::vector<std::filesystem::path> temporaryFiles(const std::filesystem::path& directory)
+{
+    std::vector<std::filesystem::path> found;
+    std::error_code error;
+    for(const auto& entry : std::filesystem::directory_iterator(directory, error))
+    {
+        if(entry.path().extension() == ".tmp")
+        {
+            found.push_back(entry.path());
+        }
+    }
+    return found;
+}
+
+} // namespace
+
+TEST(TestHiprtcCacheEntry, RoundTripsThroughItsHeader)
+{
+    const auto codeObject = sampleCodeObject(4099, 1);
+    const auto entry = hiprtc_cache::encodeEntry(codeObject);
+    EXPECT_GT(entry.size(), codeObject.size());
+    std::string problem;
+    EXPECT_EQ(hiprtc_cache::decodeEntry(entry, problem), codeObject);
+    EXPECT_TRUE(problem.empty()) << problem;
+}
+
+TEST(TestHiprtcCacheEntry, RejectsATruncatedEntry)
+{
+    auto entry = hiprtc_cache::encodeEntry(sampleCodeObject(4099, 2));
+    entry.pop_back();
+    std::string problem;
+    EXPECT_TRUE(hiprtc_cache::decodeEntry(entry, problem).empty());
+    EXPECT_NE(problem.find("payload bytes"), std::string::npos) << problem;
+
+    // Cut inside the header too.
+    entry.resize(20);
+    EXPECT_TRUE(hiprtc_cache::decodeEntry(entry, problem).empty());
+    EXPECT_FALSE(problem.empty());
+}
+
+TEST(TestHiprtcCacheEntry, RejectsAFlippedPayloadBit)
+{
+    auto entry = hiprtc_cache::encodeEntry(sampleCodeObject(4099, 3));
+    entry[entry.size() - 100] = static_cast<char>(entry[entry.size() - 100] ^ 0x10);
+    std::string problem;
+    EXPECT_TRUE(hiprtc_cache::decodeEntry(entry, problem).empty());
+    EXPECT_NE(problem.find("SHA-256"), std::string::npos) << problem;
+}
+
+TEST(TestHiprtcCacheEntry, RejectsAFileWithoutAHeader)
+{
+    // A bare code object, as an older format stored it.
+    const auto bare = sampleCodeObject(4099, 4);
+    std::string problem;
+    EXPECT_TRUE(hiprtc_cache::decodeEntry(bare, problem).empty());
+    EXPECT_NE(problem.find("header"), std::string::npos) << problem;
+    EXPECT_TRUE(hiprtc_cache::decodeEntry({}, problem).empty());
+    EXPECT_FALSE(problem.empty());
+}
+
+TEST(TestHiprtcCacheFile, ReadsWhatItWroteAndLeavesNoTemporaryFile)
+{
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "hiprtc-file", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+    const auto path = hiprtc_cache::codeObjectPath(std::string(64, 'b'));
+    ASSERT_FALSE(path.empty());
+
+    EXPECT_EQ(hiprtc_cache::readCodeObject(path).outcome, hiprtc_cache::ReadOutcome::ABSENT);
+
+    const auto codeObject = sampleCodeObject(70000, 5);
+    ASSERT_TRUE(hiprtc_cache::writeCodeObject(path, codeObject));
+    const auto read = hiprtc_cache::readCodeObject(path);
+    EXPECT_EQ(read.outcome, hiprtc_cache::ReadOutcome::VALID) << read.problem;
+    EXPECT_EQ(read.codeObject, codeObject);
+    EXPECT_TRUE(temporaryFiles(path.parent_path()).empty());
+
+    // A rewrite replaces the entry.
+    const auto other = sampleCodeObject(1000, 6);
+    ASSERT_TRUE(hiprtc_cache::writeCodeObject(path, other));
+    EXPECT_EQ(hiprtc_cache::readCodeObject(path).codeObject, other);
+}
+
+TEST(TestHiprtcCacheFile, ReadsATruncatedOrCorruptedFileAsCorrupt)
+{
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "hiprtc-corrupt", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+    const auto path = hiprtc_cache::codeObjectPath(std::string(64, 'c'));
+    ASSERT_FALSE(path.empty());
+    auto entry = hiprtc_cache::encodeEntry(sampleCodeObject(9000, 7));
+
+    // Truncated, as a crash or a full disk leaves it.
+    writeRaw(path, std::vector<char>(entry.begin(), entry.begin() + 5000));
+    auto read = hiprtc_cache::readCodeObject(path);
+    EXPECT_EQ(read.outcome, hiprtc_cache::ReadOutcome::CORRUPT);
+    EXPECT_FALSE(read.problem.empty());
+    EXPECT_TRUE(read.codeObject.empty());
+
+    // Empty.
+    writeRaw(path, {});
+    EXPECT_EQ(hiprtc_cache::readCodeObject(path).outcome, hiprtc_cache::ReadOutcome::CORRUPT);
+
+    // Full length, one byte changed.
+    entry[entry.size() / 2] = static_cast<char>(entry[entry.size() / 2] + 1);
+    writeRaw(path, entry);
+    read = hiprtc_cache::readCodeObject(path);
+    EXPECT_EQ(read.outcome, hiprtc_cache::ReadOutcome::CORRUPT);
+    EXPECT_NE(read.problem.find("SHA-256"), std::string::npos) << read.problem;
 }

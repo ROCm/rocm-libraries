@@ -59,15 +59,22 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
     if(!cachePath.empty())
     {
         auto cached = hiprtc_cache::readCodeObject(cachePath);
-        if(!cached.empty() && hipModuleLoadData(&_module, cached.data()) == hipSuccess)
+        if(cached.outcome == hiprtc_cache::ReadOutcome::VALID
+           && hipModuleLoadData(&_module, cached.codeObject.data()) == hipSuccess)
         {
-            _binary = std::move(cached);
+            _binary = std::move(cached.codeObject);
             return;
         }
-        // Absent, unreadable or not loadable on this device: compile and replace it below. A
+        // Absent, damaged or not loadable on this device: compile and replace it below. A
         // failed load leaves HIP's last error set; clear it, since the fallback recovers and a
         // caller checking hipGetLastError later must not see a failure that did not happen.
-        if(!cached.empty())
+        if(cached.outcome == hiprtc_cache::ReadOutcome::CORRUPT)
+        {
+            HIPDNN_PLUGIN_LOG_WARN("hipRTC cache: " << cachePath.string() << " " << cached.problem
+                                                    << "; recompiling " << _programName
+                                                    << " and replacing it");
+        }
+        else if(cached.outcome == hiprtc_cache::ReadOutcome::VALID)
         {
             static_cast<void>(hipGetLastError());
         }

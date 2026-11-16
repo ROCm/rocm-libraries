@@ -11,9 +11,10 @@
 /// The on-disk cache of HIPRTC code objects (`<cacheRoot>/hip-kernel-provider/hiprtc/<key>.co`).
 ///
 /// A code object is stored under a key that digests everything it was built from: the
-/// compiler, the source, every embedded include and every option. Files are written to a
-/// temporary name and renamed into place, so a reader in another process never sees a partial
-/// file.
+/// compiler, the source, every embedded include and every option. Each file carries a header
+/// with the payload's length and SHA-256, so a truncated or damaged file reads as corrupt and
+/// is recompiled instead of loaded. Files are written to a temporary name and renamed into
+/// place, so a reader in another process never sees a partial file.
 namespace hip_kernel_provider::compilation::hiprtc_cache
 {
 
@@ -38,12 +39,33 @@ std::string codeObjectKey(std::string_view compilerIdentity,
 /// (HIPDNN_DISABLE_CACHE) or its root cannot be made.
 std::filesystem::path codeObjectPath(const std::string& key);
 
-/// The code object at @p path, or an empty vector when there is none or it cannot be read.
-std::vector<char> readCodeObject(const std::filesystem::path& path);
+enum class ReadOutcome
+{
+    ABSENT, ///< No file, or it could not be opened.
+    VALID, ///< The header matched and the payload's length and digest check out.
+    CORRUPT, ///< A file is there, but its header, length or digest is wrong.
+};
 
-/// Writes @p codeObject to @p path through a temporary file renamed into place. Best effort: a
-/// failure is logged at INFO and dropped, and the next process compiles again.
+struct ReadResult
+{
+    ReadOutcome outcome = ReadOutcome::ABSENT;
+    std::vector<char> codeObject; ///< The payload, when VALID.
+    std::string problem; ///< What is wrong with the file, when CORRUPT.
+};
+
+/// Reads and verifies the entry at @p path.
+ReadResult readCodeObject(const std::filesystem::path& path);
+
+/// Writes @p codeObject to @p path with its header, through a temporary file renamed into place.
+/// Best effort: a failure is logged at INFO and dropped, and the next process compiles again.
 /// @return Whether the entry was placed.
 bool writeCodeObject(const std::filesystem::path& path, const std::vector<char>& codeObject);
+
+/// The bytes writeCodeObject() stores for @p codeObject: header, then payload.
+std::vector<char> encodeEntry(const std::vector<char>& codeObject);
+
+/// The payload of an entry encodeEntry() produced. @p problem is set, and the result empty,
+/// when @p entry is not one: wrong header, length or digest.
+std::vector<char> decodeEntry(const std::vector<char>& entry, std::string& problem);
 
 } // namespace hip_kernel_provider::compilation::hiprtc_cache

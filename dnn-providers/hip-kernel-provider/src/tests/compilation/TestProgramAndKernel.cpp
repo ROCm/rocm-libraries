@@ -14,6 +14,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -111,6 +112,48 @@ TEST(TestGpuProgramCache, RecompilesOverACorruptEntry)
     const Program rebuilt("vector_add.cpp", {"-O3", "-DFLOAT=float"});
     EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);
     EXPECT_EQ(std::filesystem::file_size(files[0]), size);
+}
+
+// A truncated entry and one with a changed byte inside the code object both read as corrupt:
+// the program is recompiled and the entry restored, rather than the damaged bytes loaded.
+TEST(TestGpuProgramCache, RecompilesOverATruncatedOrFlippedEntry)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "program-cache-damaged", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+
+    {
+        const Program first("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    }
+    const auto files = cachedCodeObjects();
+    ASSERT_EQ(files.size(), 1u);
+    const auto readAll = [](const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        return std::vector<char>((std::istreambuf_iterator<char>(file)),
+                                 std::istreambuf_iterator<char>());
+    };
+    const auto writeAll = [](const std::filesystem::path& path, const std::vector<char>& bytes) {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    const auto original = readAll(files[0]);
+    ASSERT_GT(original.size(), 256u);
+
+    writeAll(files[0], std::vector<char>(original.begin(), original.begin() + original.size() / 2));
+    {
+        const Program rebuilt("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+        EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);
+    }
+    EXPECT_EQ(readAll(files[0]), original);
+
+    auto flipped = original;
+    flipped[flipped.size() - 64] = static_cast<char>(flipped[flipped.size() - 64] ^ 0x01);
+    writeAll(files[0], flipped);
+    {
+        const Program rebuilt("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+        EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);
+    }
+    EXPECT_EQ(readAll(files[0]), original);
 }
 
 TEST(TestKernel, LaunchesVectorAdd)

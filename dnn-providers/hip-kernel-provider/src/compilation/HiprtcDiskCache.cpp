@@ -43,6 +43,13 @@ namespace
 /// never looked up.
 constexpr std::string_view CACHE_FORMAT = "hip-kernel-provider-hiprtc-v2";
 
+/// Every entry starts with this, then the payload length (8 bytes, little-endian), then the
+/// payload's SHA-256 in 64 hex characters.
+constexpr std::string_view ENTRY_MAGIC{"hkpco\0\0\2", 8};
+constexpr std::size_t LENGTH_BYTES = 8;
+constexpr std::size_t DIGEST_CHARS = 64;
+constexpr std::size_t HEADER_BYTES = ENTRY_MAGIC.size() + LENGTH_BYTES + DIGEST_CHARS;
+
 /// Appends @p field with its length first, so no two field sequences hash alike.
 void appendField(std::string& key, std::string_view field)
 {
@@ -233,6 +240,24 @@ std::string computeCompilerIdentity()
     return identity;
 }
 
+void appendLittleEndian(std::vector<char>& out, std::uint64_t value)
+{
+    for(std::size_t i = 0; i < LENGTH_BYTES; ++i)
+    {
+        out.push_back(static_cast<char>((value >> (8 * i)) & 0xFF));
+    }
+}
+
+std::uint64_t readLittleEndian(const char* bytes)
+{
+    std::uint64_t value = 0;
+    for(std::size_t i = 0; i < LENGTH_BYTES; ++i)
+    {
+        value |= static_cast<std::uint64_t>(static_cast<unsigned char>(bytes[i])) << (8 * i);
+    }
+    return value;
+}
+
 } // namespace
 
 const std::string& compilerIdentity()
@@ -275,14 +300,58 @@ std::filesystem::path codeObjectPath(const std::string& key)
     return root / "hip-kernel-provider" / "hiprtc" / (key + ".co");
 }
 
-std::vector<char> readCodeObject(const std::filesystem::path& path)
+std::vector<char> encodeEntry(const std::vector<char>& codeObject)
 {
+    std::vector<char> entry;
+    entry.reserve(HEADER_BYTES + codeObject.size());
+    entry.insert(entry.end(), ENTRY_MAGIC.begin(), ENTRY_MAGIC.end());
+    appendLittleEndian(entry, codeObject.size());
+    const auto digest = utilities::sha256Hex(codeObject.data(), codeObject.size());
+    entry.insert(entry.end(), digest.begin(), digest.end());
+    entry.insert(entry.end(), codeObject.begin(), codeObject.end());
+    return entry;
+}
+
+std::vector<char> decodeEntry(const std::vector<char>& entry, std::string& problem)
+{
+    if(entry.size() < HEADER_BYTES
+       || std::string_view(entry.data(), ENTRY_MAGIC.size()) != ENTRY_MAGIC)
+    {
+        problem = "has no cache entry header";
+        return {};
+    }
+    const auto length = readLittleEndian(entry.data() + ENTRY_MAGIC.size());
+    const auto actual = entry.size() - HEADER_BYTES;
+    if(length != actual)
+    {
+        problem = "holds " + std::to_string(actual) + " payload bytes where its header records "
+                  + std::to_string(length);
+        return {};
+    }
+    const std::string_view recorded(entry.data() + ENTRY_MAGIC.size() + LENGTH_BYTES, DIGEST_CHARS);
+    const char* payload = entry.data() + HEADER_BYTES;
+    if(utilities::sha256Hex(payload, actual) != recorded)
+    {
+        problem = "does not match the SHA-256 its header records";
+        return {};
+    }
+    problem.clear();
+    return {payload, payload + actual};
+}
+
+ReadResult readCodeObject(const std::filesystem::path& path)
+{
+    ReadResult result;
     std::ifstream file(path, std::ios::binary);
     if(!file)
     {
-        return {};
+        return result;
     }
-    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    const std::vector<char> entry((std::istreambuf_iterator<char>(file)),
+                                  std::istreambuf_iterator<char>());
+    result.codeObject = decodeEntry(entry, result.problem);
+    result.outcome = result.problem.empty() ? ReadOutcome::VALID : ReadOutcome::CORRUPT;
+    return result;
 }
 
 bool writeCodeObject(const std::filesystem::path& path, const std::vector<char>& codeObject)
@@ -296,12 +365,13 @@ bool writeCodeObject(const std::filesystem::path& path, const std::vector<char>&
         return false;
     }
 
+    const auto entry = encodeEntry(codeObject);
     std::random_device random;
     auto temporary = path;
     temporary += "." + std::to_string(random()) + std::to_string(random()) + ".tmp";
     {
         std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-        file.write(codeObject.data(), static_cast<std::streamsize>(codeObject.size()));
+        file.write(entry.data(), static_cast<std::streamsize>(entry.size()));
         file.flush();
         if(!file)
         {
