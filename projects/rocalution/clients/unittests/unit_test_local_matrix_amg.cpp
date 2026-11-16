@@ -1127,27 +1127,27 @@ TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a
     }
 }
 
-// The F point 1 has only the strong F neighbour 2, whose strong C point 3 joins C^_1 = {3}
-// with a_13 = 0. D_2 = 0 (a_21 = 0, a_23 = 1), so a_12 is lumped and cancels the diagonal:
-// a_11 + a_12 = 0, which leaves the row without interpolation: w_13 = 0, so P does not
-// reproduce constants in row 1. hypre's BuildExtPIInterp skips the scaling instead and keeps
-// the numerator, which is 0 here too.
+// The matrix of rs_ext_interpolation_without_distribution_through_a_strong_f_point with
+// a_11 = 1. D_2 = 0 again, so a_12 is lumped and cancels the diagonal: a_11 + a_12 = 0,
+// which leaves the row without interpolation, w_1 = (0, 0), so P does not reproduce
+// constants in row 1. hypre's BuildExtPIInterp skips the scaling instead and keeps the
+// numerator, w_1 = (a_10, 0) = (-1, 0), a weight of the wrong sign that scales with A.
 //   row 2: C^_2 = {3}, weak a_24 lumped, w_23 = -a_23 / (a_22 + a_24) = 1
 TYPED_TEST(local_matrix_amg, rs_ext_interpolation_with_a_lumped_diagonal_of_zero)
 {
     using T          = typename TypeParam::value_type;
     const Csr<T> ref = from_rows<T>(5,
                                     {{{0, 1.0}, {1, -1.0}},
-                                     {{1, 1.0}, {2, -1.0}},
+                                     {{0, -1.0}, {1, 1.0}, {2, -1.0}},
                                      {{2, 1.0}, {3, 1.0}, {4, -2.0}},
                                      {{2, -1.0}, {3, 1.0}},
                                      {{2, -1.0}, {4, 1.0}}});
     SetupInputs  in;
     in.cf = {1, 2, 2, 1, 1};
-    in.S  = flags_at(ref, {{1, 2}, {2, 3}});
+    in.S  = flags_at(ref, {{1, 0}, {1, 2}, {2, 3}});
 
     const Csr<T> expected
-        = from_rows<T>(3, {{{0, 1.0}}, {{1, 0.0}}, {{1, 1.0}}, {{1, 1.0}}, {{2, 1.0}}});
+        = from_rows<T>(3, {{{0, 1.0}}, {{0, 0.0}, {1, 0.0}}, {{1, 1.0}}, {{1, 1.0}}, {{2, 1.0}}});
     for(const auto& interpolation : ext_interpolations<T>())
     {
         if(interpolation.first != "ext+i" && interpolation.first != "ext+i FF1")
