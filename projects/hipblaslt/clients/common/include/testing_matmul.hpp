@@ -3185,9 +3185,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             // With c_equal_d, hC restores the shared C/D buffer before each solution.
             hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
-            // With a host reference and no c_equal_d, hD_1 is allocated once hC is released.
-            if(!hD_1_follows_hC(i))
-                hD_1.emplace_back(To, size_D_copy[i]);
+            // hD_1 is allocated below, once hC has seeded hD_gold and can be released.
             if(size_bias[i] * block_count != 0)
             {
                 hBias.emplace_back(Tbias, size_bias[i]);
@@ -3979,14 +3977,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                        num_batches[i]);
                 if(epilogue_on[i])
                     transform_buf(hD_gold[i], hD_gold_epl[i], To, Talpha);
-                if(hD_1_follows_hC(i))
-                {
-                    // Nothing reads hC again, so hD_1 takes its place instead of adding to it.
-                    hC[i].release();
-                    hD_1.emplace_back(To, size_D_copy[i]);
-                    CHECK_HOST_ALLOCATION(host_allocation_failure(hD_1.back()));
-                }
             }
+            // Nothing reads hC again, so hD_1 takes its place instead of adding to it.
+            if(hD_1_follows_hC(i))
+                hC[i].release();
+            hD_1.emplace_back(To, size_D_copy[i]);
+            CHECK_HOST_ALLOCATION(host_allocation_failure(hD_1.back()));
             if(epilogue_on[i])
             {
                 EXPECT_HIPBLAS_STATUS(
