@@ -501,6 +501,18 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   add_dependencies(miopen-tests fake_hipdnn_backend)
   add_dependencies(miopen-check fake_hipdnn_backend)
 
+  # A backend hipDNN accepts whose hipdnnDestroy calls miopenDestroy. MODULE for the same
+  # reason as the fake above.
+  add_library(reentrant_hipdnn_backend MODULE forwarding_failure/reentrant_hipdnn_backend.cpp)
+  target_link_libraries(reentrant_hipdnn_backend PRIVATE MIOpen hipdnn_frontend_dynamic)
+  set_target_properties(reentrant_hipdnn_backend PROPERTIES
+    OUTPUT_NAME hipdnn_backend
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend"
+    THEROCK_INSTALL_RPATH_ORIGIN
+      "${CMAKE_INSTALL_BINDIR}/${MIOPEN_WRAPPER_TESTS_SUBDIR}/reentrant_hipdnn_backend")
+  add_dependencies(miopen-tests reentrant_hipdnn_backend)
+  add_dependencies(miopen-check reentrant_hipdnn_backend)
+
   add_executable(forwarding_failure_probe forwarding_failure/forwarding_failure_probe.cpp)
   target_link_libraries(forwarding_failure_probe PRIVATE MIOpen)
   # TheRock sets an executable's install RPATH as if it were in bin/. This one is a folder
@@ -517,7 +529,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
     TIMEOUT 300
     ENVIRONMENT
-      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
+      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend;MIOPEN_REENTRANT_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend"
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 endif()
@@ -610,7 +622,7 @@ endif()
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
   file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(forwarding_failure_modes python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/test_forwarding_failure_modes.py\" \"-v\")
-set_tests_properties(forwarding_failure_modes PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\" ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend\")
+set_tests_properties(forwarding_failure_modes PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\" ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend;MIOPEN_REENTRANT_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/reentrant_hipdnn_backend\")
 
 ")
 endif()
@@ -654,6 +666,10 @@ if( NOT ENABLE_ASAN_PACKAGING )
     )
     install(TARGETS fake_hipdnn_backend
         LIBRARY DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}/fake_hipdnn_backend
+        COMPONENT tests
+    )
+    install(TARGETS reentrant_hipdnn_backend
+        LIBRARY DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}/reentrant_hipdnn_backend
         COMPONENT tests
     )
   endif()

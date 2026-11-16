@@ -171,7 +171,7 @@ python3 -m pytest script/test_check_public_abi.py
   test_check_wrapper_abi test_miopen_wrapper_libs test_run_forwarding_parity \
   test_compare_forwarding_runs test_forwarding_parity_gpu_labels)
 # Wrapper-ON builds, after building miopen-tests (the libraries, forwarding_failure_probe,
-# and the fake hipDNN backend); no GPU needed:
+# and the two test hipDNN backends); no GPU needed (the reentrant-backend case skips without one):
 ctest --test-dir build --output-on-failure --no-tests=error \
   -R '^(wrapper_abi_check|forwarding_failure_modes|test_forwarding_parity_scripts)$'
 # GPU/backend required (not registered when configure detects no GPU):

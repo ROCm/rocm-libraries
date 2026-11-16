@@ -12,6 +12,12 @@
 //  last_forwarded      status miopenGetLastForwardedError reports
 //  last_forwarded_null miopenGetLastForwardedError(NULL); prints returned status
 //  get_version         miopenGetVersion, which MIOpen always serves; prints status
+//  destroy_after_forward
+//                      miopenCreate, then conv_forward on that handle, then
+//                      miopenDestroy; prints all three statuses. The forwarded call
+//                      gives the handle a hipDNN handle for miopenDestroy to
+//                      destroy. Needs a GPU, so stops after printing a failed
+//                      miopenCreate.
 //  repeat N            runs the previous step N more times
 
 #include <miopen/hipdnn_forwarding.h>
@@ -63,15 +69,15 @@ void FreeProblem(ConvProblem& p)
             miopenDestroyTensorDescriptor(desc);
 }
 
-// The descriptors are real so the MIOpen route gets far enough to reject the
+// The descriptors are real so the MIOpen route gets far enough to reject a
 // null handle with a status: it reads the convolution descriptor before its
 // error handling starts, so a null one would crash. The hipDNN route, with
 // hipDNN unavailable, fails before reading any argument. Neither needs a GPU.
-miopenStatus_t ConvForward(const ConvProblem& p)
+miopenStatus_t ConvForward(const ConvProblem& p, miopenHandle_t handle = nullptr)
 {
     const float alpha = 1.0f;
     const float beta  = 0.0f;
-    return miopenConvolutionForward(nullptr,
+    return miopenConvolutionForward(handle,
                                     &alpha,
                                     p.x,
                                     nullptr,
@@ -96,17 +102,34 @@ int main(int argc, char** argv)
     std::string previous;
     int exitCode = 0;
 
+    const auto ensureProblem = [&] {
+        if(!haveProblem)
+            haveProblem = MakeProblem(problem);
+        return haveProblem;
+    };
+
     const auto run = [&](const std::string& step) {
         if(step == "conv_forward")
         {
-            if(!haveProblem)
-            {
-                if(!MakeProblem(problem))
-                    return false;
-                haveProblem = true;
-            }
+            if(!ensureProblem())
+                return false;
             lastConvStatus = ConvForward(problem);
             std::printf("conv_forward=%d\n", static_cast<int>(lastConvStatus));
+        }
+        else if(step == "destroy_after_forward")
+        {
+            if(!ensureProblem())
+                return false;
+            miopenHandle_t handle        = nullptr;
+            const miopenStatus_t created = miopenCreate(&handle);
+            std::printf("create=%d\n", static_cast<int>(created));
+            if(created != miopenStatusSuccess)
+                return true;
+            // Data pointers are never read: the forwarded call fails building its
+            // graph, after it has given the handle its hipDNN state.
+            std::printf("forward_with_handle=%d\n", static_cast<int>(ConvForward(problem, handle)));
+            std::fflush(stdout);
+            std::printf("destroy=%d\n", static_cast<int>(miopenDestroy(handle)));
         }
         else if(step == "error_string")
         {

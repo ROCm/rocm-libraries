@@ -177,10 +177,15 @@ read once per process, so each case runs a fresh process:
   but no version, so hipDNN loads it and then refuses it. Every case points
   `HIPDNN_BACKEND_LIBRARY_PATH` at it, so no case can reach a real backend. It prints a marker
   line to stderr when it is loaded, which shows whether a case loaded it at all.
+- A second backend, `reentrant_hipdnn_backend`, is one hipDNN accepts. Like a plugin built on
+  MIOpen, it creates an MIOpen handle with each hipDNN handle and destroys it in `hipdnnDestroy`.
+  One case uses it to check that `miopenDestroy` returns when destroying its hipDNN handle calls
+  `miopenDestroy` again.
 - `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
   each environment and checks its output.
 
-Run it from the build directory with `ctest -R forwarding_failure_modes`. It needs no GPU.
+Run it from the build directory with `ctest -R forwarding_failure_modes`. It needs no GPU, except
+for the `reentrant_hipdnn_backend` case, which is skipped without one.
 
 A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
 without the backend, hipDNN moves on to its next search location and may find the real backend
