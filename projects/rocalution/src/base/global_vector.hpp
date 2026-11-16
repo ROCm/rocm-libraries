@@ -115,7 +115,8 @@ namespace rocalution
         /** \brief Set the values of the interior vector to given argument */
         ROCALUTION_EXPORT
         virtual void SetValues(ValueType val);
-        /** \brief Set the values of the interior vector to random uniformly distributed values (between -1 and 1) */
+        /** \brief Set the values of the interior vector to random uniformly distributed values
+      * from the interval [a,b] */
         ROCALUTION_EXPORT
         virtual void SetRandomUniform(unsigned long long seed,
                                       ValueType          a = static_cast<ValueType>(-1),
