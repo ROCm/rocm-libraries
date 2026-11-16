@@ -747,7 +747,6 @@ rocke_mx_gemm_spec_t mx_build_spec(const py::dict& d, std::deque<std::string>& s
     s.group_k = dict_int(d, "group_k", s.group_k);
     s.block_tile_m = dict_int(d, "block_tile_m", s.block_tile_m);
     s.block_tile_n = dict_int(d, "block_tile_n", s.block_tile_n);
-    s.per_input_row = dict_bool(d, "per_input_row", s.per_input_row);
     {
         std::string v;
         if(dict_str(d, "mantissa_dtype", v))
@@ -2689,6 +2688,8 @@ rocke_wmma_fmha_fwd_v2_spec_t w1151fmha_v2_build_spec(const py::dict& d,
     s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
     s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
+    s.dense_q = dict_bool(d, "dense_q", s.dense_q);
+    s.seqused_q = dict_bool(d, "seqused_q", s.seqused_q);
     if(d.contains("wave_pair") && !d["wave_pair"].is_none())
         s.wave_pair = d["wave_pair"].cast<bool>() ? 1 : 0;
     {
