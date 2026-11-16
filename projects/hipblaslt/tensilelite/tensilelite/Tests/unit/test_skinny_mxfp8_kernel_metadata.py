@@ -22,7 +22,8 @@ from tensilelite.CustomKernels import readCustomKernelConfig
 pytestmark = pytest.mark.unit
 
 KERNEL_DIR = os.path.join(os.path.dirname(tensilelite.__file__), "CustomKernels", "skinny_mxfp8")
-TESTS_CUSTOM_DIR = Path(tensilelite.__file__).parent / "Tests" / "custom"
+# Resolved from this file, since the installed tensilelite package excludes Tests.
+TESTS_CUSTOM_DIR = Path(__file__).resolve().parents[1] / "custom"
 
 ARG_BYTES = {"address": 8, "uint64": 8, "int32": 4, "float32": 4}
 DEPTH = 4096
