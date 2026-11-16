@@ -598,12 +598,23 @@ const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap);
 
-/* Mirrors ir._int_cmp_pred_error: the same for arith.cmp's "pred" attr
- * (absent means lt; "ult" takes i32 or i64 operands). */
-const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
-                                   const rocke_type_t* operand_type,
-                                   char* buf,
-                                   size_t cap);
+/* Mirrors ir._int_cmp_error: the error for an arith.cmp op with `attrs` on
+ * operands of type `operand_type`, or NULL when it is valid. The "pred" attr is
+ * checked first (absent means lt; "ult" takes i32 or i64 operands), then the
+ * operands must be integers or i1. Writes into `buf` as above. */
+const char* rocke_i_cmp_error(const rocke_attr_map_t* attrs,
+                              const rocke_type_t* operand_type,
+                              char* buf,
+                              size_t cap);
+
+/* Mirrors ir._vector_cmp_pred_error: the error for vector.cmp's "pred" attr,
+ * or NULL when it is absent (lt) or one of lt, le, gt, ge, eq, ne. Writes into
+ * `buf` as above. */
+const char* rocke_i_vector_cmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap);
+
+/* Mirrors ir._fcmp_pred_error: the error for arith.fcmp's "pred" attr, or NULL
+ * when it is absent or one of ir._FCMP_PREDICATES. Writes into `buf` as above. */
+const char* rocke_i_fcmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap);
 
 /* Mirrors ir._INTEGER_ELEMENT_OPS: whether `opcode` is a bitwise op or shift
  * (arith.and / or / xor / shl / lshr, vector.and / or / shl / lshr), which LLVM

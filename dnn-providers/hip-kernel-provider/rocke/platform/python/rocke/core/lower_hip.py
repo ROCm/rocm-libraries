@@ -31,10 +31,12 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
     F64,
+    _fcmp_pred_error,
     _int_add_wrap_error,
-    _int_cmp_pred_error,
+    _int_cmp_error,
     _scf_for_error,
     _scf_if_error,
+    _vector_cmp_pred_error,
     KernelDef,
     Op,
     PtrType,
@@ -205,7 +207,7 @@ def _hip_unsigned_int_type(op_name: str, type_name: str) -> str:
     message wherever it is met (the C++ engine's twin is
     ``rocke_h_require_unsigned_int_type``). The ``nuw`` add and the ``ult``
     compare check their IR rule first (``_int_add_wrap_error``,
-    ``_int_cmp_pred_error``: i32 or i64 operands), so for them this lookup
+    ``_int_cmp_error``: i32 or i64 operands), so for them this lookup
     cannot fail. ``arith.zext`` reads the table itself: its vector source is
     valid IR that the HIP lowering has not implemented, and it refuses it as
     such.
@@ -607,7 +609,7 @@ class _Lowerer:
         )
 
     def _op_arith_add(self, op: Op) -> None:
-        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        wrap_error = _int_add_wrap_error(op.attrs, op.operands[0].type.name)
         if wrap_error:
             raise ValueError(wrap_error)
         wrap = op.attrs.get("wrap", "nsw")
@@ -644,9 +646,9 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
-        if pred_error:
-            raise ValueError(pred_error)
+        cmp_error = _int_cmp_error(op.attrs, a.type.name)
+        if cmp_error:
+            raise ValueError(cmp_error)
         pred = op.attrs.get("pred", "lt")
         if pred == "ult":
             unsigned = _hip_unsigned_int_type(op.name, a.type.name)
@@ -1872,6 +1874,9 @@ class _Lowerer:
         )
 
     def _op_arith_fcmp(self, op: Op) -> None:
+        pred_error = _fcmp_pred_error(op.attrs)
+        if pred_error:
+            raise ValueError(pred_error)
         pred = op.attrs["pred"]
         a, b = op.operands
         # IEEE ordered predicates: ``a OP b`` evaluates to true only when
@@ -2950,6 +2955,9 @@ class _Lowerer:
             )
 
     def _op_vector_cmp(self, op: Op) -> None:
+        pred_error = _vector_cmp_pred_error(op.attrs)
+        if pred_error:
+            raise ValueError(pred_error)
         a, bb = op.operands
         pred = op.attrs.get("pred", "lt")
         cmap = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!="}

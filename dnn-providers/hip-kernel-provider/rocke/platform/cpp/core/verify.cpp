@@ -520,14 +520,13 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v, op, "%s: result must be i1, got %s", name, tn(op->results[0]->type));
         }
-        char pred_buf[128];
-        const char* pred_error
-            = o == ROCKE_OP_ARITH_CMP
-                  ? rocke_i_cmp_pred_error(&op->attrs, a, pred_buf, sizeof pred_buf)
-                  : NULL;
-        if(pred_error)
+        char cmp_buf[ROCKE_ERR_MSG_CAP];
+        const char* cmp_error = o == ROCKE_OP_ARITH_CMP
+                                    ? rocke_i_cmp_error(&op->attrs, a, cmp_buf, sizeof cmp_buf)
+                                    : rocke_i_fcmp_pred_error(&op->attrs, cmp_buf, sizeof cmp_buf);
+        if(cmp_error)
         {
-            v_errf(v, op, "%s", pred_error);
+            v_errf(v, op, "%s", cmp_error);
         }
     }
     else if(o == ROCKE_OP_ARITH_ASSUME_RANGE)
@@ -571,6 +570,16 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         if(!rocke_type_eq(lhs, rhs))
         {
             v_errf(v, op, "%s: branch types differ (%s vs %s)", name, tn(lhs), tn(rhs));
+        }
+    }
+    else if(o == ROCKE_OP_VECTOR_CMP)
+    {
+        char pred_buf[ROCKE_ERR_MSG_CAP];
+        const char* pred_error
+            = rocke_i_vector_cmp_pred_error(&op->attrs, pred_buf, sizeof pred_buf);
+        if(pred_error)
+        {
+            v_errf(v, op, "%s", pred_error);
         }
     }
     else if(o == ROCKE_OP_VECTOR_EXTRACT)

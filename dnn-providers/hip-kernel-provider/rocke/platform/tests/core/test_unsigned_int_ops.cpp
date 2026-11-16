@@ -11,13 +11,14 @@
  * non-integer operand, the builders' and the verifier's integer-element rule
  * for the bitwise ops and shifts (an integer or i1 element) and lshr's shift
  * amount of the value's type (texts identical to the Python engine's), the
- * LLVM and HIP refusals of a pred the verifier refuses, the builders'
- * operand-type refusals, the verifier's acceptance of the new attrs and its
- * refusals of bad marker attrs (texts identical to the Python verifier), and
- * the constant folder (unsigned compare at the operand width; constants read
- * at their width; a marker on a constant folds to the constant; signed div /
- * mod rounded toward zero, undefined ones left unfolded), and the verifier's
- * i32 / i64 rule for the nuw and ult forms.
+ * verifier's, LLVM's and HIP's refusals of a compare the IR rule refuses (an
+ * arith.cmp pred or operand type, a vector.cmp or arith.fcmp pred), the
+ * builders' operand-type and compare refusals, the verifier's acceptance of
+ * the new attrs and its refusals of bad marker attrs (texts identical to the
+ * Python verifier), and the constant folder (unsigned compare at the operand
+ * width; constants read at their width; a marker on a constant folds to the
+ * constant; signed div / mod rounded toward zero, undefined ones left
+ * unfolded), and the verifier's i32 / i64 rule for the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -586,30 +587,90 @@ void case_unsigned_forms_need_i32_or_i64()
     }
 }
 
-/* The LLVM and HIP lowerings check an arith.cmp pred against the verifier's
- * rule before reading it and refuse it with ROCKE_ERR_VALUE in the verifier's
- * words: ult takes i32 or i64 operands (an f32 ult is not lowered to an integer
- * compare), and an unknown or non-string pred is not read as lt. The same
- * cases and texts as test_unsigned_int_ops.py. */
-void case_lowerings_refuse_a_bad_pred()
+/* A compare's operand type in the cases below; the vector and pointer types
+ * are made per builder. */
+enum class CompareOperand
 {
-    struct PredCase
+    i8,
+    i32,
+    f32,
+    ptr_i32,
+    vec_i32x2
+};
+
+const rocke_type_t* compare_operand_type(rocke_ir_builder_t* b, CompareOperand operand)
+{
+    switch(operand)
     {
+    case CompareOperand::i8:
+        return rocke_i8();
+    case CompareOperand::i32:
+        return rocke_i32();
+    case CompareOperand::f32:
+        return rocke_f32();
+    case CompareOperand::ptr_i32:
+        return rocke_ptr_type(b, rocke_i32(), "global");
+    case CompareOperand::vec_i32x2:
+        return rocke_vector_type(b, rocke_i32(), 2);
+    }
+    return nullptr;
+}
+
+/* The verifier and the LLVM and HIP lowerings refuse a compare the IR rule
+ * refuses, the lowerings with ROCKE_ERR_VALUE, all in the rule's words: an
+ * arith.cmp pred is checked first ("ult" takes i32 or i64 operands), then its
+ * operands must be integers or i1 (a float or pointer one is not lowered to an
+ * integer compare); vector.cmp takes the signed orderings and equality only;
+ * arith.fcmp takes its own predicates; an unknown or non-string pred is
+ * neither read as a default nor passed through. The same cases and texts as
+ * test_unsigned_int_ops.py. */
+void case_compares_refused_by_the_ir_rule()
+{
+    struct CompareCase
+    {
+        rocke_opcode_t opcode;
         const char* pred; /* nullptr: the int attr 1 */
-        const rocke_type_t* type;
+        CompareOperand operand;
         const char* want;
     };
-    const PredCase cases[] = {
-        {"ult", rocke_f32(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"},
-        {"ult", rocke_i8(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"},
-        {"ugt", rocke_i32(), "arith.cmp: unknown pred 'ugt'"},
-        {nullptr, rocke_i32(), "arith.cmp: pred must be a string"},
+    const CompareCase cases[] = {
+        {ROCKE_OP_ARITH_CMP,
+         "ult",
+         CompareOperand::f32,
+         "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"},
+        {ROCKE_OP_ARITH_CMP,
+         "ult",
+         CompareOperand::i8,
+         "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"},
+        {ROCKE_OP_ARITH_CMP, "ugt", CompareOperand::i32, "arith.cmp: unknown pred 'ugt'"},
+        {ROCKE_OP_ARITH_CMP, nullptr, CompareOperand::i32, "arith.cmp: pred must be a string"},
+        {ROCKE_OP_ARITH_CMP,
+         "lt",
+         CompareOperand::f32,
+         "arith.cmp failed - operand_type=f32, expected an integer or i1 type (compare floats "
+         "with fcmp)"},
+        {ROCKE_OP_ARITH_CMP,
+         "eq",
+         CompareOperand::ptr_i32,
+         "arith.cmp failed - operand_type=ptr<i32,global>, expected an integer or i1 type "
+         "(compare floats with fcmp)"},
+        {ROCKE_OP_VECTOR_CMP, "ult", CompareOperand::vec_i32x2, "vector.cmp: unknown pred 'ult'"},
+        {ROCKE_OP_VECTOR_CMP,
+         nullptr,
+         CompareOperand::vec_i32x2,
+         "vector.cmp: pred must be a string"},
+        {ROCKE_OP_ARITH_FCMP, "lt", CompareOperand::f32, "arith.fcmp: unknown pred 'lt'"},
+        {ROCKE_OP_ARITH_FCMP, nullptr, CompareOperand::f32, "arith.fcmp: pred must be a string"},
     };
-    for(const PredCase& c : cases)
+    const auto status_text = [](rocke_status_t status, const std::string& message) {
+        return "status " + std::to_string((int)status) + " '" + message + "'";
+    };
+    for(const CompareCase& c : cases)
     {
         rocke_ir_builder_t b;
-        rocke_ir_builder_init(&b, "refused_pred");
-        rocke_value_t* a = rocke_b_param(&b, "a", c.type, nullptr);
+        rocke_ir_builder_init(&b, "refused_compare");
+        const rocke_type_t* type = compare_operand_type(&b, c.operand);
+        rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
         rocke_value_t* operands[2] = {a, a};
         rocke_attr_map_t attrs = rocke_i_attrs(&b);
         if(c.pred)
@@ -620,13 +681,18 @@ void case_lowerings_refuse_a_bad_pred()
         {
             rocke_attr_set_int(&b, &attrs, "pred", 1);
         }
-        rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &attrs, "cmp");
+        const rocke_type_t* result_type = c.opcode == ROCKE_OP_VECTOR_CMP
+                                              ? rocke_vector_type(&b, rocke_i1(), type->count)
+                                              : rocke_i1();
+        rocke_i_op1(&b, c.opcode, operands, 2, result_type, &attrs, "cmp");
         rocke_b_ret(&b);
-        const auto status_text = [](rocke_status_t status, const std::string& message) {
-            return "status " + std::to_string((int)status) + " '" + message + "'";
-        };
-        const std::string want = status_text(ROCKE_ERR_VALUE, c.want);
 
+        const std::string verifier_want = std::string(c.want) + "\n";
+        const std::string verifier_got = verify_errors(&b);
+        EXPECT(verifier_got == verifier_want,
+               "verifier: want '" + verifier_want + "', got '" + verifier_got + "'");
+
+        const std::string want = status_text(ROCKE_ERR_VALUE, c.want);
         std::string llvm;
         std::string llvm_error;
         const rocke_status_t llvm_status = lower_llvm_status(&b, &llvm, &llvm_error);
@@ -642,9 +708,75 @@ void case_lowerings_refuse_a_bad_pred()
     }
 }
 
+/* The C API compare builders refuse what the IR rule refuses, with
+ * ROCKE_ERR_VALUE and the rule's text (the same texts as the Python builders). */
+void case_compare_builders_refuse_what_the_ir_rule_refuses()
+{
+    enum class Builder
+    {
+        cmp_lt,
+        cmp_eq,
+        fcmp,
+        vector_cmp
+    };
+    const struct
+    {
+        Builder builder;
+        const char* want;
+    } cases[] = {
+        {Builder::cmp_lt,
+         "arith.cmp failed - operand_type=f32, expected an integer or i1 type (compare floats "
+         "with fcmp)"},
+        {Builder::cmp_eq,
+         "arith.cmp failed - operand_type=f32, expected an integer or i1 type (compare floats "
+         "with fcmp)"},
+        {Builder::fcmp, "arith.fcmp: unknown pred 'lt'"},
+        {Builder::vector_cmp, "vector.cmp: unknown pred 'ult'"},
+    };
+    for(const auto& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "refused_compare_builder");
+        rocke_value_t* f = rocke_b_param(&b, "f", rocke_f32(), nullptr);
+        rocke_value_t* v = rocke_b_param(&b, "v", rocke_vector_type(&b, rocke_i32(), 2), nullptr);
+        bool refused = false;
+        std::string got;
+        try
+        {
+            rocke_value_t* r = nullptr;
+            switch(c.builder)
+            {
+            case Builder::cmp_lt:
+                r = rocke_b_cmp_lt(&b, f, f);
+                break;
+            case Builder::cmp_eq:
+                r = rocke_b_cmp_eq(&b, f, f);
+                break;
+            case Builder::fcmp:
+                r = rocke_b_fcmp(&b, "lt", f, f);
+                break;
+            case Builder::vector_cmp:
+                r = rocke_b_vector_cmp(&b, "ult", v, v);
+                break;
+            }
+            const char* error = rocke_ir_builder_error(&b);
+            got = error ? error : "";
+            refused
+                = r == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE && got == c.want;
+        }
+        catch(const ckc::Error& error)
+        {
+            got = error.what();
+            refused = error.code() == ROCKE_ERR_VALUE && got == c.want;
+        }
+        EXPECT(refused, std::string("want '") + c.want + "', got '" + got + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
 /* A wrap or pred of another attr kind is refused, not read as the default
  * (nsw, lt): by the verifier, and for the wrap by both lowerers (the
- * lowerers' refusal of such a pred is case_lowerings_refuse_a_bad_pred). */
+ * lowerers' refusal of such a pred is case_compares_refused_by_the_ir_rule). */
 void case_non_string_wrap_and_pred()
 {
     const char* wrap_error = "arith.add: wrap must be the string 'nsw' or 'nuw'";
@@ -866,7 +998,8 @@ int main(int argc, char** argv)
     case_lshr_hip_text();
     case_integer_element_builder_rule();
     case_integer_element_verifier_rule();
-    case_lowerings_refuse_a_bad_pred();
+    case_compares_refused_by_the_ir_rule();
+    case_compare_builders_refuse_what_the_ir_rule_refuses();
     case_builder_refusals();
     case_verifier_accepts();
     case_verifier_rejects_marker_attrs();

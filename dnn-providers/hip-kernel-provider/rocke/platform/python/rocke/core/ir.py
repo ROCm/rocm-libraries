@@ -28,6 +28,7 @@ import enum
 import operator
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import gcd as _gcd
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -415,45 +416,95 @@ def _is_flag_ptr(t: "Type") -> bool:
 # ``arith.cmp`` predicates: the signed orderings, equality, and one unsigned
 # ordering (``ult``, which reads both operands as unsigned at their width).
 _INT_CMP_PREDICATES = ("lt", "le", "gt", "ge", "eq", "ne", "ult")
+# The operand types ``arith.cmp`` compares: integers and i1. Floats compare
+# with ``arith.fcmp``.
+_INT_CMP_OPERAND_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
+    DTypeCategory.PREDICATE
+)
+# ``vector.cmp`` predicates: the signed orderings and equality, lane by lane
+# (unsigned elements compare as unsigned). It has no unsigned form.
+_VECTOR_CMP_PREDICATES = ("lt", "le", "gt", "ge", "eq", "ne")
+# ``arith.fcmp`` predicates: the ordered compares, ``ord`` (neither operand is
+# NaN) and ``uno`` (either is).
+_FCMP_PREDICATES = ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno")
 # ``arith.add`` overflow flag: ``nsw`` (no signed wrap, the default when the
 # attr is absent) or ``nuw`` (no unsigned wrap).
 _INT_ADD_WRAPS = ("nsw", "nuw")
 
 
-def _int_add_wrap_error(wrap: Any, operand_type: str) -> Optional[str]:
-    """The error for an ``arith.add`` ``wrap`` attr on operands of type
-    ``operand_type`` (a type name), or None when it is valid.
+def _string_attr_error(
+    attrs: Mapping[str, Any],
+    op_name: str,
+    key: str,
+    allowed: Sequence[str],
+    not_a_string: str,
+) -> str | None:
+    """The error for the string attr ``key`` of an ``op_name`` op with
+    ``attrs``, or None when it is absent or one of ``allowed``.
 
-    Absent (None) means ``nsw``. ``nuw`` is ``add_nuw``'s form, so it takes the
-    builder's operands: i32 or i64. The verifier and both lowerings use it, and
-    the C++ engine reports the same texts.
+    ``not_a_string`` is the error for a value of another kind. The C++ engine's
+    ``string_attr_error`` is its twin; the width rule of the unsigned forms
+    (``nuw``, ``ult``) is its callers'.
     """
-    if wrap is None:
+    if key not in attrs:
         return None
-    if not isinstance(wrap, str):
-        return "arith.add: wrap must be the string 'nsw' or 'nuw'"
-    if wrap not in _INT_ADD_WRAPS:
-        return f"arith.add: unknown wrap '{wrap}'"
-    if wrap == "nuw" and operand_type not in ("i32", "i64"):
-        return f"arith.add: wrap 'nuw' needs i32 or i64 operands, got {operand_type}"
+    value = attrs[key]
+    if not isinstance(value, str):
+        return not_a_string
+    if value not in allowed:
+        return f"{op_name}: unknown {key} '{value}'"
     return None
 
 
-def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
-    """The error for an ``arith.cmp`` ``pred`` attr on operands of type
+def _int_add_wrap_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
+    """The error for the ``wrap`` attr in an ``arith.add`` op's ``attrs`` on
+    operands of type ``operand_type`` (a type name), or None when it is valid.
+
+    Absent means ``nsw``. ``nuw`` is ``add_nuw``'s form, so it takes the
+    builder's operands: i32 or i64. The verifier and both lowerings use it, and
+    the C++ engine reports the same texts.
+    """
+    error = _string_attr_error(
+        attrs,
+        "arith.add",
+        "wrap",
+        _INT_ADD_WRAPS,
+        "arith.add: wrap must be the string 'nsw' or 'nuw'",
+    )
+    if (
+        error is None
+        and attrs.get("wrap") == "nuw"
+        and operand_type not in ("i32", "i64")
+    ):
+        return f"arith.add: wrap 'nuw' needs i32 or i64 operands, got {operand_type}"
+    return error
+
+
+def _int_cmp_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
+    """The error for an ``arith.cmp`` op with ``attrs`` on operands of type
     ``operand_type`` (a type name), or None when it is valid.
 
-    Absent (None) means ``lt``. ``ult`` is ``cmp_ult``'s form, so it takes the
-    builder's operands: i32 or i64. The C++ verifier reports the same texts.
+    The ``pred`` attr is checked first: absent means ``lt``, and ``ult`` is
+    ``cmp_ult``'s form, so it takes the builder's operands, i32 or i64. Then
+    the operands must be integers or i1. The builders, the verifier and both
+    lowerings use it, and the C++ engine reports the same texts.
     """
-    if pred is None:
-        return None
-    if not isinstance(pred, str):
-        return "arith.cmp: pred must be a string"
-    if pred not in _INT_CMP_PREDICATES:
-        return f"arith.cmp: unknown pred '{pred}'"
-    if pred == "ult" and operand_type not in ("i32", "i64"):
+    error = _string_attr_error(
+        attrs,
+        "arith.cmp",
+        "pred",
+        _INT_CMP_PREDICATES,
+        "arith.cmp: pred must be a string",
+    )
+    if error is not None:
+        return error
+    if attrs.get("pred") == "ult" and operand_type not in ("i32", "i64"):
         return f"arith.cmp: pred 'ult' needs i32 or i64 operands, got {operand_type}"
+    if operand_type not in _INT_CMP_OPERAND_TYPES:
+        return (
+            f"arith.cmp failed - operand_type={operand_type}, expected an integer "
+            "or i1 type (compare floats with fcmp)"
+        )
     return None
 
 
@@ -503,6 +554,33 @@ def _refuse_non_integer(op_name: str, operand_type: Type) -> None:
     error = _integer_element_error(op_name, operand_type)
     if error:
         raise TypeError(error)
+
+
+def _vector_cmp_pred_error(attrs: Mapping[str, Any]) -> str | None:
+    """The error for the ``pred`` attr in a ``vector.cmp`` op's ``attrs``, or
+    None when it is absent (``lt``) or valid. The builder, the verifier and both
+    lowerings use it, and the C++ engine reports the same texts."""
+    return _string_attr_error(
+        attrs,
+        "vector.cmp",
+        "pred",
+        _VECTOR_CMP_PREDICATES,
+        "vector.cmp: pred must be a string",
+    )
+
+
+def _fcmp_pred_error(attrs: Mapping[str, Any]) -> str | None:
+    """The error for the ``pred`` attr in an ``arith.fcmp`` op's ``attrs``, or
+    None when it is absent or valid (the verifier requires it to be present).
+    The builder, the verifier and both lowerings use it, and the C++ engine
+    reports the same texts."""
+    return _string_attr_error(
+        attrs,
+        "arith.fcmp",
+        "pred",
+        _FCMP_PREDICATES,
+        "arith.fcmp: pred must be a string",
+    )
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
@@ -3035,34 +3113,22 @@ class IRBuilder:
         ).result
 
     def cmp_lt(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "lt"}, result_name_hint="lt"
-        ).result
+        return self._int_cmp("lt", a, b)
 
     def cmp_le(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "le"}, result_name_hint="le"
-        ).result
+        return self._int_cmp("le", a, b)
 
     def cmp_gt(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "gt"}, result_name_hint="gt"
-        ).result
+        return self._int_cmp("gt", a, b)
 
     def cmp_ge(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "ge"}, result_name_hint="ge"
-        ).result
+        return self._int_cmp("ge", a, b)
 
     def cmp_eq(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "eq"}, result_name_hint="eq"
-        ).result
+        return self._int_cmp("eq", a, b)
 
     def cmp_ne(self, a: Value, b: Value) -> Value:
-        return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "ne"}, result_name_hint="ne"
-        ).result
+        return self._int_cmp("ne", a, b)
 
     def cmp_ult(self, a: Value, b: Value) -> Value:
         """Unsigned ``a < b`` (``icmp ult``): both operands read as unsigned.
@@ -3072,8 +3138,17 @@ class IRBuilder:
         i32 or two i64 values.
         """
         _check_unsigned_int_operands("cmp_ult", a, b)
+        return self._int_cmp("ult", a, b)
+
+    def _int_cmp(self, pred: str, a: Value, b: Value) -> Value:
+        """An ``arith.cmp`` of ``a`` and ``b`` by ``pred``; refuses what
+        ``_int_cmp_error`` refuses (a float operand, say) with a ValueError."""
+        attrs = {"pred": pred}
+        error = _int_cmp_error(attrs, a.type.name)
+        if error:
+            raise ValueError(error)
         return self._op(
-            "arith.cmp", [a, b], [I1], attrs={"pred": "ult"}, result_name_hint="ult"
+            "arith.cmp", [a, b], [I1], attrs=attrs, result_name_hint=pred
         ).result
 
     def _assume_range(
@@ -3279,10 +3354,12 @@ class IRBuilder:
         )
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
-        if pred not in ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno"):
-            raise ValueError(f"unsupported fcmp predicate {pred!r}")
+        attrs = {"pred": pred}
+        error = _fcmp_pred_error(attrs)
+        if error:
+            raise ValueError(error)
         return self._op(
-            "arith.fcmp", [a, b], [I1], attrs={"pred": pred}, result_name_hint="fcmp"
+            "arith.fcmp", [a, b], [I1], attrs=attrs, result_name_hint="fcmp"
         ).result
 
     def fmax(self, a: Value, b: Value) -> Value:
@@ -4548,11 +4625,15 @@ class IRBuilder:
     def vector_cmp(self, pred: str, a: Value, b: Value) -> Value:
         if not isinstance(a.type, VectorType) or a.type != b.type:
             raise ValueError("vector_cmp expects matching vector operands")
+        attrs = {"pred": pred}
+        error = _vector_cmp_pred_error(attrs)
+        if error:
+            raise ValueError(error)
         return self._op(
             "vector.cmp",
             [a, b],
             [VectorType(I1, a.type.count)],
-            attrs={"pred": pred},
+            attrs=attrs,
             result_name_hint=f"vcmp_{pred}",
         ).result
 

@@ -46,10 +46,12 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
+    _fcmp_pred_error,
     _int_add_wrap_error,
-    _int_cmp_pred_error,
+    _int_cmp_error,
     _scf_for_error,
     _scf_if_error,
+    _vector_cmp_pred_error,
     BF16,
     F32,
     F16,
@@ -2608,7 +2610,7 @@ class _Lowerer:
         self._binop(op, llvm_op + flag)
 
     def _op_arith_add(self, op: Op) -> None:
-        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        wrap_error = _int_add_wrap_error(op.attrs, op.operands[0].type.name)
         if wrap_error:
             raise ValueError(wrap_error)
         # An explicit no-unsigned-wrap add; otherwise the type's default
@@ -2765,9 +2767,9 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
-        if pred_error:
-            raise ValueError(pred_error)
+        cmp_error = _int_cmp_error(op.attrs, a.type.name)
+        if cmp_error:
+            raise ValueError(cmp_error)
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
@@ -2775,6 +2777,9 @@ class _Lowerer:
         )
 
     def _op_arith_fcmp(self, op: Op) -> None:
+        pred_error = _fcmp_pred_error(op.attrs)
+        if pred_error:
+            raise ValueError(pred_error)
         pred = op.attrs.get("pred", "olt")
         a, b = op.operands
         self._current().emit(
@@ -6911,6 +6916,9 @@ class _Lowerer:
         self._vector_binop(op, "lshr")
 
     def _op_vector_cmp(self, op: Op) -> None:
+        pred_error = _vector_cmp_pred_error(op.attrs)
+        if pred_error:
+            raise ValueError(pred_error)
         a, b = op.operands
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
