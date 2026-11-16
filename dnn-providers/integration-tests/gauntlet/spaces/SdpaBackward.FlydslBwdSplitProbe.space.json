@@ -51,7 +51,9 @@
         "padding_noseq",
         "v_heads_bias",
         "v_heads_f32",
-        "hd_asym_over"
+        "hd_asym_over",
+        "bias_pitch_pad",
+        "bias_overlap"
       ]
     },
     "shape": {
@@ -276,11 +278,12 @@
     "right": "0 if family == 'alibi' or mk in ['causal_top_left', 'causal_bottom_right'] else (wr if family in ['window_hd192', 'bias_window', 'window_left0'] else None)",
     "align": "'BOTTOM_RIGHT' if mk == 'causal_bottom_right' else 'TOP_LEFT'",
     "scale_on": "family == 'scale_const'",
-    "bias_on": "family in ['attn_mask', 'attn_mask_dbias', 'bias_causal', 'bias_window', 'dbias_rowbcast', 'bias_f32_dbias', 'bias_unaligned_pitch', 'dbias_unaligned', 'v_heads_bias']",
+    "bias_on": "family in ['attn_mask', 'attn_mask_dbias', 'bias_causal', 'bias_window', 'dbias_rowbcast', 'bias_f32_dbias', 'bias_unaligned_pitch', 'dbias_unaligned', 'v_heads_bias', 'bias_pitch_pad', 'bias_overlap']",
     "dbias_on": "family in ['attn_mask_dbias', 'dbias_rowbcast', 'bias_f32_dbias', 'dbias_unaligned']",
     "bias_dtype": "'float' if family == 'bias_f32_dbias' else dtype",
     "bias_q": "1 if family == 'dbias_rowbcast' else sq_e",
     "bias_skv": "skv_e",
+    "bias_pitch": "bias_skv + [1, 2, 3, 4, 5, 6, 7, 8][var] if family == 'bias_pitch_pad' else (max(1, bias_skv // 2) if family == 'bias_overlap' else bias_skv)",
     "ovf_served": "family == 'overflow_stride' and var in [0, 3, 6, 7]",
     "scale_v": "2**21 if family == 'scale_huge' else 0.08838834764831843",
     "nseq": "family in ['padding', 'seq_len_group']",
@@ -296,7 +299,7 @@
       "reason": "k_head and do_head strides of 2**31 elements are served and correct (checked with HIPDNN_TEST_HOST_INPUT_FILL=1) but the device input fill fails on them (hipModuleLaunchKernel invalid argument), so they would end UNEXERCISED"
     }
   ],
-  "expect": "${'declined_or_pass' if family in ['none', 'odd_dims', 'odd_head_size', 'dropout_p0', 'dropout_philox', 'scale_const', 'stats_rank3', 'stats_rank1', 'dt_all_float', 'gqa', 'asym_hd', 'hd64', 'window_hd192', 'padding', 'attn_mask', 'attn_mask_dbias', 'bias_f32_dbias', 'bias_unaligned_pitch', 'v_heads'] or ovf_served else 'declined'}",
+  "expect": "${'declined_or_pass' if family in ['none', 'odd_dims', 'odd_head_size', 'dropout_p0', 'dropout_philox', 'scale_const', 'stats_rank3', 'stats_rank1', 'dt_all_float', 'gqa', 'asym_hd', 'hd64', 'window_hd192', 'padding', 'attn_mask', 'attn_mask_dbias', 'bias_f32_dbias', 'bias_unaligned_pitch', 'v_heads', 'bias_pitch_pad', 'bias_overlap'] or ovf_served else 'declined'}",
   "case": {
     "values": {
       "io_data_type": "${dtype}",
@@ -604,7 +607,7 @@
         "name": "attn_mask",
         "data_type": "${bias_dtype}",
         "dims": "${[1, 1, bias_q, bias_skv]}",
-        "strides": "${[bias_q*bias_skv, bias_q*bias_skv, bias_skv, 1]}",
+        "strides": "${[bias_q*bias_pitch, bias_q*bias_pitch, bias_pitch, 1]}",
         "alignment": 16,
         "is_runtime_pass_by_value": false,
         "ragged_offset_multiplier": 1,

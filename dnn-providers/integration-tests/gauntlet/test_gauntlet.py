@@ -565,8 +565,10 @@ NONCANONICAL_UID_SPACES = {"SdpaBackward/FlydslBwdSplitRagged"}
 FEATURE_KEYS = {
     "SdpaBackward/Default": {"node_patches"},
     "SdpaBackward/FlydslBwdSplit": {"node_patches"},
+    "SdpaBackward/FlydslBwdSplitLong": {"node_patches"},
     "SdpaBackward/FlydslBwdSplitBias": {"add_tensors", "node_patches"},
     "SdpaBackward/FlydslBwdSplitPadded": {"add_tensors", "node_patches"},
+    "SdpaBackward/FlydslBwdSplitPaddedDropout": {"add_tensors", "node_patches"},
     "SdpaBackward/FlydslBwdSplitDropout": {"add_tensors", "node_patches"},
     "SdpaBackward/FlydslBwdSplitRagged": {"node_patches"},
     "SdpaFwd/Default": {"add_tensors", "node_patches"},
@@ -653,9 +655,11 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "ResampleFwd/Default",
         "SdpaBackward/Default",
         "SdpaBackward/FlydslBwdSplit",
+        "SdpaBackward/FlydslBwdSplitLong",
         "SdpaBackward/FlydslBwdSplitBias",
         "SdpaBackward/FlydslBwdSplitDropout",
         "SdpaBackward/FlydslBwdSplitPadded",
+        "SdpaBackward/FlydslBwdSplitPaddedDropout",
         "SdpaBackward/FlydslBwdSplitRagged",
         "SdpaBackward/FlydslBwdSplitStride",
         "SdpaFwd/AsmStride",
@@ -1485,8 +1489,10 @@ LARGE_SCALE = {
     "SdpaFwd/Default": 8,
     "SdpaBackward/Default": 8,
     "SdpaBackward/FlydslBwdSplit": 8,
+    "SdpaBackward/FlydslBwdSplitLong": 8,
     "SdpaBackward/FlydslBwdSplitBias": 8,
     "SdpaBackward/FlydslBwdSplitPadded": 8,
+    "SdpaBackward/FlydslBwdSplitPaddedDropout": 8,
     "SdpaBackward/FlydslBwdSplitDropout": 8,
     "SdpaBackward/FlydslBwdSplitRagged": 8,
     "SdpaFwd/Gfx950Dense": 8,
@@ -1540,8 +1546,10 @@ OPERAND_DOMAIN = {
         for space in (
             "SdpaBackward/Default",
             "SdpaBackward/FlydslBwdSplit",
+            "SdpaBackward/FlydslBwdSplitLong",
             "SdpaBackward/FlydslBwdSplitBias",
             "SdpaBackward/FlydslBwdSplitPadded",
+            "SdpaBackward/FlydslBwdSplitPaddedDropout",
             "SdpaBackward/FlydslBwdSplitDropout",
             "SdpaBackward/FlydslBwdSplitRagged",
         )
@@ -1580,8 +1588,10 @@ PRIMARY_OPERANDS = {
     "SdpaFwd/Gfx1151Decode": ["Q", "K", "V"],
     "SdpaBackward/Default": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplit": ["Q", "K", "V", "dO"],
+    "SdpaBackward/FlydslBwdSplitLong": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitBias": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitPadded": ["Q", "K", "V", "dO"],
+    "SdpaBackward/FlydslBwdSplitPaddedDropout": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitDropout": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitRagged": ["Q", "K", "V", "dO"],
 }
@@ -1600,8 +1610,10 @@ POISONED_OPERANDS = {
     "SdpaFwd/Default": ["V"],
     "SdpaBackward/Default": [],  # nan and inf are not drawn: see that space's description
     "SdpaBackward/FlydslBwdSplit": [],  # as SdpaBackward/Default
+    "SdpaBackward/FlydslBwdSplitLong": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitBias": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitPadded": [],  # as SdpaBackward/Default
+    "SdpaBackward/FlydslBwdSplitPaddedDropout": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitDropout": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitRagged": [],  # as SdpaBackward/Default
     "SdpaFwd/Gfx950Dense": ["V"],
@@ -1651,8 +1663,10 @@ PLACEMENT_OPERAND = {
     "ResampleFwd/Default": "X",
     "SdpaBackward/Default": "Q",
     "SdpaBackward/FlydslBwdSplit": "Q",
+    "SdpaBackward/FlydslBwdSplitLong": "Q",
     "SdpaBackward/FlydslBwdSplitBias": "Q",
     "SdpaBackward/FlydslBwdSplitPadded": "Q",
+    "SdpaBackward/FlydslBwdSplitPaddedDropout": "Q",
     "SdpaBackward/FlydslBwdSplitDropout": "Q",
     "SdpaBackward/FlydslBwdSplitRagged": "Q",
     "SdpaBackward/FlydslBwdSplitStride": "Q",
@@ -1679,8 +1693,10 @@ PATCHED_OPERANDS = (
 NONFINITE_EXCLUDED = {
     "SdpaBackward/Default",
     "SdpaBackward/FlydslBwdSplit",
+    "SdpaBackward/FlydslBwdSplitLong",
     "SdpaBackward/FlydslBwdSplitBias",
     "SdpaBackward/FlydslBwdSplitPadded",
+    "SdpaBackward/FlydslBwdSplitPaddedDropout",
     "SdpaBackward/FlydslBwdSplitDropout",
     "SdpaBackward/FlydslBwdSplitRagged",
 }
