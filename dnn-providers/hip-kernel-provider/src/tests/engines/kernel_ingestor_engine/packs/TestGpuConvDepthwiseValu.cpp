@@ -24,6 +24,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuWrwNative.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -2374,6 +2375,23 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const auto& info) { return info.param.name; });
 
 } // namespace fused_valu
+
+// Opt-in: each forward config's time with and without a fused epilogue, every dtype (shapes in
+// $DW_VALU_EPI_TIMING).
+TEST(TestGpuConvDepthwiseValuFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    for(const auto& config : catalog())
+    {
+        for(const auto dataType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+        {
+            kernels.push_back(kernelFor(config, dataType, ConvDirection::FORWARD));
+        }
+    }
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), kernels, "DW_VALU_EPI_TIMING");
+}
 
 } // namespace
 
