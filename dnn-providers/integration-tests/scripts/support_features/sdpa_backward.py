@@ -6,14 +6,14 @@ backward).
 The features come from ``sdpa_backward_attributes.fbs``. The exclusive groups
 -- ``dtype``, ``head_dim``, ``heads``, ``layout``, ``mask``, ``seq``, ``scale``
 -- are read as the forward catalog reads them (``sdpa.core_features``), with
-two differences:
+these differences:
 
 - The schema has no fp8 scale tensors, so ``dtype`` is bf16 and fp16 only.
 - There is no ``seq:decode``: a backward pass trains, and a single query
   position is an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
 
-A ragged q (the tensor's ``ragged_offset_tensor_uid``) is ``layout:ragged``
-whatever its strides, as in forward.
+``layout:ragged`` is read as the forward reads it: q packed by per-batch
+offsets, whatever its strides.
 """
 
 from __future__ import annotations
