@@ -2425,14 +2425,64 @@ def _wgrad_stem_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# DwWgradFoldSpec block shapes, indices 359..369: the narrow, deep fold the
+# Auto-launch tiled wgrad (rows_per_seg 0: whole strips, one-round grid),
+# indices 359..363: H not a multiple of the unroll, a grid budget below the
+# channel tiles (clamped to one block per tile) with packed images, the
+# ping-pong wave groups, and two rows_per_seg both engines must reject: a
+# negative one and one (31) that is not a multiple of the unroll (3).
+# ---------------------------------------------------------------------------
+_WGRAD_AUTO_CFG_BASE = 359
+
+
+def _wgrad_auto_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_AUTO_CFG_BASE + idx``, or None."""
+    ts = DirectWgradTiledSpec
+    table = {
+        0: ts(
+            problem=_wp(cpg=128, kpg=128, H=30),
+            waves_k=2,
+            wave_c16=1,
+            prefetch=3,
+            row_unroll=4,
+            rows_per_seg=0,
+            target_blocks=512,
+        ),
+        1: ts(
+            problem=_wp(N=4, H=15, W=40, dtype="fp16"),
+            waves_k=2,
+            unfold_n=4,
+            rows_per_seg=0,
+            target_blocks=3,
+        ),
+        2: ts(
+            problem=_wp(),
+            q_groups=2,
+            pingpong=True,
+            waves_k=2,
+            wave_k16=1,
+            prefetch=3,
+            rows_per_seg=0,
+            target_blocks=64,
+        ),
+        3: ts(problem=_wp(), rows_per_seg=-3),
+        4: ts(problem=_wp(), rows_per_seg=31),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad_tiled", sel, "gfx950")
+
+
+# ---------------------------------------------------------------------------
+# DwWgradFoldSpec block shapes, indices 364..374: the narrow, deep fold the
 # gfx1250 grouped WMMA wgrad runs with (cols 32, slices 32, unroll 8) on
 # gfx1250 and gfx950, wide / shallow and narrow shapes, the defaults spelled
 # out (the original kernel name), a one-load unroll; then no unroll, no
 # slices, no cols, negative cols and a 2048-thread block (slices * cols past
-# 1024), which both engines must reject. Follows the 3 wgrad stems.
+# 1024), which both engines must reject. Follows the 5 auto-launch tiled
+# wgrad configs.
 # ---------------------------------------------------------------------------
-_FOLD_KNOB_CFG_BASE = 359
+_FOLD_KNOB_CFG_BASE = 364
 
 
 def _fold_knob_spec(idx: int):
@@ -2464,6 +2514,11 @@ def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
     if idx >= _FOLD_KNOB_CFG_BASE:
         sel = _fold_knob_spec(idx - _FOLD_KNOB_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _WGRAD_AUTO_CFG_BASE:
+        sel = _wgrad_auto_spec(idx - _WGRAD_AUTO_CFG_BASE)
         if sel is not None:
             return sel
         raise SystemExit(f"unknown config index {idx}")
