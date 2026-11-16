@@ -24,9 +24,9 @@
 
 //
 // Device unit tests of rocsparse_{csr,csc,coo,bsr,ell}_set_pointers followed by
-// SpMV. A matrix is analysed and multiplied, then its pointers are replaced
+// SpMV. A matrix is analyzed and multiplied, then its pointers are replaced
 // (different sparsity pattern, same pattern with new values, and the same
-// arrays rewritten in place), analysed again and multiplied again. The
+// arrays rewritten in place), analyzed again and multiplied again. The
 // products are compared with a host product and with a freshly created
 // descriptor over the same arrays, through rocsparse_spmv and through
 // rocsparse_v2_spmv. The compute stage that follows set_pointers without a new
@@ -303,22 +303,28 @@ namespace
     }
 
     template <typename T, typename I>
-    rocsparse_status set_pointers(spmat_guard& g, const problem<T, I>& p, device_problem<T, I>& d)
+    rocsparse_status set_arrays(spmat_guard& g, fmt f, I* first, I* second, T* val)
     {
-        switch(p.format)
+        switch(f)
         {
         case fmt::csr:
-            return rocsparse_csr_set_pointers(g.d, d.first.ptr, d.second.ptr, d.val.ptr);
+            return rocsparse_csr_set_pointers(g.d, first, second, val);
         case fmt::csc:
-            return rocsparse_csc_set_pointers(g.d, d.first.ptr, d.second.ptr, d.val.ptr);
+            return rocsparse_csc_set_pointers(g.d, first, second, val);
         case fmt::coo:
-            return rocsparse_coo_set_pointers(g.d, d.first.ptr, d.second.ptr, d.val.ptr);
+            return rocsparse_coo_set_pointers(g.d, first, second, val);
         case fmt::bsr:
-            return rocsparse_bsr_set_pointers(g.d, d.first.ptr, d.second.ptr, d.val.ptr);
+            return rocsparse_bsr_set_pointers(g.d, first, second, val);
         case fmt::ell:
-            return rocsparse_ell_set_pointers(g.d, d.second.ptr, d.val.ptr);
+            return rocsparse_ell_set_pointers(g.d, second, val);
         }
         return rocsparse_status_internal_error;
+    }
+
+    template <typename T, typename I>
+    rocsparse_status set_pointers(spmat_guard& g, const problem<T, I>& p, device_problem<T, I>& d)
+    {
+        return set_arrays(g, p.format, d.first.ptr, d.second.ptr, d.val.ptr);
     }
 
     struct config
@@ -360,7 +366,7 @@ namespace
         device_vector<T>                     m_dx, m_dy, m_dalpha, m_dbeta;
         dnvec_guard                          m_vx, m_vy;
         std::unique_ptr<spmv_descr_guard>    m_descr;
-        bool                                 m_analysed = false;
+        bool                                 m_analyzed = false;
         size_t                               m_bytes    = 0;
         std::unique_ptr<device_vector<char>> m_buffer;
 
@@ -376,7 +382,7 @@ namespace
         }
 
         // A v2 descriptor takes the analysis stage once, so a matrix whose pointers were
-        // replaced is analysed with a new one.
+        // replaced is analyzed with a new one.
         void new_v2_descr()
         {
             m_descr.reset(new spmv_descr_guard());
@@ -388,7 +394,7 @@ namespace
                                        rocsparse_ut::dt_of<T>(),
                                        rocsparse_ut::dt_of<T>()),
                       rocsparse_status_success);
-            m_analysed = false;
+            m_analyzed = false;
         }
 
         rocsparse_status v1(rocsparse_spmv_stage stage, void* buffer)
@@ -463,6 +469,26 @@ namespace
             return m_y0;
         }
 
+        // Runs the stages on another matrix descriptor with the same sizes.
+        void set_matrix(rocsparse_spmat_descr mat)
+        {
+            m_mat = mat;
+        }
+
+        // The v1 preprocess stage alone, with the buffer of the last preprocess().
+        rocsparse_status preprocess_stage()
+        {
+            return v1(rocsparse_spmv_stage_preprocess, m_buffer ? m_buffer->ptr : nullptr);
+        }
+
+        // Destroys the rocsparse_spmv_descr (v2).
+        rocsparse_status destroy_v2_descr()
+        {
+            const rocsparse_status st = rocsparse_destroy_spmv_descr(m_descr->d);
+            m_descr->d                = nullptr;
+            return st;
+        }
+
         // Replaces the scalars and the vectors; the sizes are those of the constructor.
         void set_data(T alpha, T beta, const std::vector<T>& x, const std::vector<T>& y0)
         {
@@ -504,11 +530,11 @@ namespace
         {
             if(m_cfg.v2)
             {
-                if(m_analysed)
+                if(m_analyzed)
                 {
                     new_v2_descr();
                 }
-                m_analysed   = true;
+                m_analyzed   = true;
                 size_t bytes = 0;
                 ASSERT_EQ(v2_buffer_size(rocsparse_v2_spmv_stage_analysis, &bytes),
                           rocsparse_status_success);
@@ -904,7 +930,7 @@ namespace
 #undef SET_POINTERS_TEST
 
     // The reproducer of the report: a 3 x 2 CSR matrix whose offsets and columns are
-    // replaced after it was analysed.
+    // replaced after it was analyzed.
     TEST_F(L2SetPointers, replaced_csr_arrays_small_matrix)
     {
         const std::vector<int32_t> old_row = {0, 2, 3, 3};
@@ -1003,17 +1029,23 @@ namespace
         EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "product after the new preprocessing"));
     }
 
-    TEST_F(L2SetPointers, same_pointers_new_contents)
+    // Formats and algorithms for which both v1 and v2 keep an analysis of the arrays.
+    const std::vector<std::pair<fmt, alg_trans>>& cases_with_analysis()
     {
-        const std::vector<std::pair<fmt, alg_trans>> cases
+        static const std::vector<std::pair<fmt, alg_trans>> cases
             = {{fmt::csr, {rocsparse_spmv_alg_default, rocsparse_operation_none}},
                {fmt::csr, {rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_none}},
                {fmt::csr, {rocsparse_spmv_alg_csr_lrb, rocsparse_operation_none}},
                {fmt::csc, {rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_transpose}},
                {fmt::csc, {rocsparse_spmv_alg_csr_lrb, rocsparse_operation_transpose}},
                {fmt::bsr, {rocsparse_spmv_alg_default, rocsparse_operation_none}}};
+        return cases;
+    }
+
+    TEST_F(L2SetPointers, same_pointers_new_contents)
+    {
         for(const bool v2 : {false, true})
-            for(const auto& fc : cases)
+            for(const auto& fc : cases_with_analysis())
             {
                 config c;
                 c.alg   = fc.second.alg;
@@ -1113,5 +1145,215 @@ namespace
         ASSERT_FALSE(HasFatalFailure());
         ASSERT_EQ(s.compute(), rocsparse_status_success);
         EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product after set_pointers"));
+    }
+
+    // set_pointers keeps the row and column arrays and replaces only the values.
+    // The v2 analysis is refused all the same; v1 computes the new product.
+    template <typename T>
+    void values_only(rocsparse_handle handle, fmt f, const config& c)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans << " v2=" << c.v2);
+
+        const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
+        device_problem<T, int32_t> d1(sc.p1), d3(sc.p3);
+        ASSERT_EQ(sc.p1.first, sc.p3.first);
+        ASSERT_EQ(sc.p1.second, sc.p3.second);
+
+        spmat_guard mat;
+        create(mat, sc.p1, d1);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "initial product"));
+
+        ASSERT_EQ(set_arrays(mat, f, d1.first.ptr, d1.second.ptr, d3.val.ptr),
+                  rocsparse_status_success);
+
+        const rocsparse_status st = s.compute();
+        if(c.v2)
+        {
+            EXPECT_EQ(st, rocsparse_status_invalid_value) << "compute without analysis";
+            EXPECT_TRUE(expect_near(s.y0(), s.y(), "y after the refused compute"));
+        }
+        else
+        {
+            EXPECT_EQ(st, rocsparse_status_success) << "compute without preprocessing";
+            EXPECT_TRUE(expect_near(s.want(sc.p3), s.y(), "compute without preprocessing"));
+        }
+
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p3), s.y(), "product after the new preprocessing"));
+    }
+
+    TEST_F(L2SetPointers, values_only)
+    {
+        for(const bool v2 : {false, true})
+            for(const auto& fc : cases_with_analysis())
+            {
+                config c;
+                c.alg   = fc.second.alg;
+                c.trans = fc.second.trans;
+                c.v2    = v2;
+                values_only<double>(handle, fc.first, c);
+            }
+    }
+
+    // An analyzed rocsparse_spmv_descr refuses to compute with another matrix
+    // descriptor, even one over the same arrays, and still computes with its own.
+    template <typename T>
+    void v2_another_descriptor(rocsparse_handle handle, fmt f, const config& c)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans);
+
+        const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
+        device_problem<T, int32_t> d1(sc.p1);
+
+        spmat_guard mat_a, mat_b;
+        create(mat_a, sc.p1, d1);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        create(mat_b, sc.p1, d1);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+
+        session<T> s(handle, c, mat_a.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "product of the analyzed descriptor"));
+
+        s.set_matrix(mat_b.d);
+        EXPECT_EQ(s.compute(), rocsparse_status_invalid_value) << "another matrix descriptor";
+        EXPECT_TRUE(expect_near(s.y0(), s.y(), "y after the refused compute"));
+
+        s.set_matrix(mat_a.d);
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "product of the analyzed descriptor again"));
+    }
+
+    TEST_F(L2SetPointers, v2_another_descriptor_over_the_same_arrays)
+    {
+        for(const auto& fc : cases_with_analysis())
+        {
+            config c;
+            c.alg   = fc.second.alg;
+            c.trans = fc.second.trans;
+            c.v2    = true;
+            v2_another_descriptor<double>(handle, fc.first, c);
+        }
+    }
+
+    // The first preprocess after set_pointers frees the analysis of the previous
+    // arrays, which synchronizes the device. While the handle stream is being
+    // captured, it returns invalid_value without freeing anything, and the
+    // preprocess that follows outside the capture analyzes the new arrays.
+    template <typename T>
+    void preprocess_during_capture(rocsparse_handle handle, fmt f, const config& c)
+    {
+        SCOPED_TRACE(::testing::Message()
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans);
+
+        const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
+        device_problem<T, int32_t> d1(sc.p1), d2(sc.p2);
+
+        spmat_guard mat;
+        create(mat, sc.p1, d1);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "initial product"));
+        ASSERT_EQ(set_pointers(mat, sc.p2, d2), rocsparse_status_success);
+
+        hipStream_t saved = nullptr;
+        ASSERT_EQ(rocsparse_get_stream(handle, &saved), rocsparse_status_success);
+        hipStream_t capture = nullptr;
+        ASSERT_EQ(hipStreamCreate(&capture), hipSuccess);
+        ASSERT_EQ(rocsparse_set_stream(handle, capture), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
+        rocsparse_status st = rocsparse_status_success;
+        EXPECT_NO_THROW(st = s.preprocess_stage());
+        EXPECT_EQ(st, rocsparse_status_invalid_value) << "preprocess during the capture";
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        EXPECT_EQ(hipStreamIsCapturing(capture, &status), hipSuccess);
+        EXPECT_EQ(status, hipStreamCaptureStatusActive);
+        hipGraph_t graph = nullptr;
+        EXPECT_EQ(hipStreamEndCapture(capture, &graph), hipSuccess);
+        if(graph != nullptr)
+        {
+            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
+        }
+
+        EXPECT_EQ(rocsparse_set_stream(handle, saved), rocsparse_status_success);
+        EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
+        ASSERT_FALSE(::testing::Test::HasFailure());
+
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product after the capture"));
+    }
+
+    TEST_F(L2SetPointers, preprocess_after_set_pointers_during_stream_capture)
+    {
+        for(const auto& fc : cases_with_analysis())
+        {
+            config c;
+            c.alg   = fc.second.alg;
+            c.trans = fc.second.trans;
+            preprocess_during_capture<double>(handle, fc.first, c);
+            if(HasFailure())
+                return;
+        }
+    }
+
+    // Destroying an analysis synchronizes the device, which fails while another
+    // stream is being captured in global mode. The destructor must not throw.
+    TEST_F(L2SetPointers, destroy_spmv_descr_during_stream_capture)
+    {
+        using T                 = double;
+        using I                 = int32_t;
+        const scenario<T, I> sc = make_scenario<T, I>(fmt::csr, 0);
+        device_problem<T, I> d1(sc.p1);
+
+        spmat_guard mat;
+        create(mat, sc.p1, d1);
+        ASSERT_FALSE(HasFatalFailure());
+        config c;
+        c.alg = rocsparse_spmv_alg_csr_lrb;
+        c.v2  = true;
+        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        hipStream_t capture = nullptr;
+        ASSERT_EQ(hipStreamCreate(&capture), hipSuccess);
+        device_vector<char> scratch(size_t(256));
+        ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
+        EXPECT_EQ(hipMemsetAsync(scratch.ptr, 0, scratch.n, capture), hipSuccess);
+
+        rocsparse_status st = rocsparse_status_internal_error;
+        EXPECT_NO_THROW(st = s.destroy_v2_descr());
+        EXPECT_EQ(st, rocsparse_status_success);
+
+        // The synchronization attempt may have invalidated the capture.
+        hipGraph_t graph = nullptr;
+        (void)hipStreamEndCapture(capture, &graph);
+        if(graph != nullptr)
+        {
+            (void)hipGraphDestroy(graph);
+        }
+        (void)hipGetLastError();
+        EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
+        EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 }

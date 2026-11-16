@@ -810,8 +810,9 @@ TEST_F(CsrmvDefaultDispatch, preprocess_none_then_compute_transpose)
         handle, alternating(), o));
 }
 
-// rocsparse_csr_set_pointers discards the analysis, so the compute that follows
-// it falls back to a kernel that needs none and the result is still correct.
+// rocsparse_csr_set_pointers marks the analysis stale, so the compute that
+// follows it without a new preprocessing falls back to a kernel that needs
+// none and the result is still correct.
 TEST_F(CsrmvDefaultDispatch, switched_default_after_set_pointers_without_preprocess)
 {
     Options o;
