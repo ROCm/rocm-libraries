@@ -1,21 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// CPU (no-Handle) coverage for the conv candidate-selection input path and the precompute
-// selector, across every shipped arch -- including archs with no local hardware (e.g. gfx1250).
-//
-// The companion GPU_CandidateSelection_FP32 suite constructs a miopen::Handle in its fixture, so it
-// only runs on a machine whose GPU matches the parameter arch; and its parameter list historically
-// covered gfx942 only. Two gfx1250 model-artifact defects therefore stayed invisible to CI: a
-// config-embedding table stamped with the wrong md5 (rejected at load), and a 2D input encoder
-// whose width disagreed with its metadata (fdeep "Invalid inputs shape"). Both are pure CPU checks.
-//
-// These tests build no Handle and load each arch's models by name via GetSystemDbPath(), so a
-// gfx942/gfx950 CI runner validates gfx1250's models without gfx1250 hardware. (The shared gtest
-// main still requires some GPU to be present, so the suite runs on any GPU CI runner, not a
-// GPU-less host.) They fail closed when the shipped assets are inconsistent, and drive the
-// engineered input through GetFeaturesND on a real ProblemDescription so the live feature path
-// (including the unconditional dilation_d) is exercised, not a hand-built map.
+// CPU (no-Handle) coverage for the conv candidate-selection path across every shipped arch,
+// including archs with no local hardware (gfx1250): the GPU_CandidateSelection_FP32 suite needs a
+// matching GPU, so a gfx942/gfx950 runner here validates gfx1250's models by loading them by name
+// via GetSystemDbPath(). Catches model-artifact defects on CPU (wrong-md5 table, encoder/metadata
+// width mismatch). The shared gtest main still needs some GPU present, so this runs on any GPU
+// runner, not a GPU-less host.
 
 #include <gtest/gtest.h>
 #include <miopen/config.h>
@@ -95,8 +86,9 @@ std::map<std::string, float> FeaturesFor(const ArchSolver& as)
     return miopen::solver::conv::GetFeaturesND(MakeProblem(as.is3d), /*max_cu=*/304, as.arch);
 }
 
-// Split a vocab kernel id the way parse_kernel_id (ai_candidate_selection.cpp) does, and also
-// report how many "+<value>" suffixes follow the final '>'. A well-formed id has at most one.
+// Mirror parse_kernel_id (ai_candidate_selection.cpp); that lambda is file-local, so keep this copy
+// in sync with it. Also report how many "+<value>" suffixes follow the final '>' (well-formed:
+// <=1).
 struct ParsedId
 {
     std::string base;
@@ -179,12 +171,10 @@ TEST_P(CPU_CandidateSelectionCpu_NONE, PrecomputeSelectorReturnsPick)
     EXPECT_FALSE(pick->first.empty());
 }
 
-// Structural lint over the whole shipped vocabulary. accept_all above never parses split_k, so it
-// cannot see a malformed kernel id: an id carrying two "+<split_k>" suffixes (as the gfx1250
-// Wrw/Bwd tables did) makes parse_kernel_id read the first, fixed value and drop the ranked one.
-// Assert each id has at most one suffix, and that the parsed split_k matches the solver -- none for
-// a non-split-k solver; valid (or the -1 autodeduce sentinel, which stays present but masked) for a
-// split-k solver.
+// Structural lint over the shipped vocabulary: accept_all above never parses split_k, so it misses
+// a malformed id. Assert each id has at most one "+<split_k>" suffix (the gfx1250 Wrw/Bwd tables
+// had two), and that split_k matches the solver -- none for non-split-k, valid or the -1 autodeduce
+// sentinel for split-k.
 TEST_P(CPU_CandidateSelectionCpu_NONE, VocabIdsWellFormed)
 {
     const auto as = GetParam();
