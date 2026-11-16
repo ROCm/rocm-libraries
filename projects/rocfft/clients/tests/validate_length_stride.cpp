@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,18 @@ inline auto generate_length_stride()
         // valid
         {{4, 4, 4, 4, 4, 4, 4, 4},
          {32, 8 * 32, 64 * 32, 512 * 32, 129, 8 * 129, 64 * 129, 512 * 129}},
+        // valid although not nested (flattened indices 0, 2, 3, 5)
+        {{2, 2}, {2, 3}},
+        // valid: the largest stride exceeds the span of the other (non-nested) dimensions,
+        // which restricts its coefficient to 0
+        {{2, 2, 8}, {2, 3, 6}},
+        // invalid due to collision for (1, 0, 1) and (0, 1, 0), although neither of the
+        // offsets 0 and 9 of the planes spanned by the first two dimensions lies in the other
+        {{2, 2, 2}, {1, 10, 9}},
+        // invalid: 16 elements but only 13 flattened indices within the span
+        {{4, 4}, {3, 1}},
+        // valid, not nested, and requiring an exhaustive search
+        {{150, 27, 101, 3}, {182038, 88960, 193077, 88967}},
     };
 
     return vals;
