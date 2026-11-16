@@ -3821,8 +3821,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+scale_bias_act",
         "plan_items": [
-          "S3",
-          "F27const"
+          "F27const",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -4025,8 +4025,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+scale_bias_act",
         "plan_items": [
-          "S3",
-          "F27runtime"
+          "F27runtime",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -4234,8 +4234,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+scale_bias_act",
         "plan_items": [
-          "S3",
-          "F27channel"
+          "F27channel",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",

@@ -284,7 +284,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 884762166,
         "inputs": {
@@ -306,7 +306,8 @@
             "hi": 1.0,
             "seed": 1334314382
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -592,7 +593,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1130638937,
         "inputs": {
@@ -614,7 +615,8 @@
             "hi": 1.0,
             "seed": 909613197
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -1985,7 +1987,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1785809780,
         "inputs": {
@@ -2007,7 +2009,8 @@
             "hi": 1.0,
             "seed": 1724419640
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -2447,7 +2450,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 373672647,
         "inputs": {
@@ -2469,7 +2472,8 @@
             "hi": 1.0,
             "seed": 1939189842
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -3840,7 +3844,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 225612938,
         "inputs": {
@@ -3862,7 +3866,8 @@
             "hi": 1.0,
             "seed": 1555018660
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -4302,7 +4307,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 611811128,
         "inputs": {
@@ -4324,7 +4329,8 @@
             "hi": 1.0,
             "seed": 161266814
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -5695,7 +5701,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 795155794,
         "inputs": {
@@ -5717,7 +5723,8 @@
             "hi": 1.0,
             "seed": 1558897337
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -6157,7 +6164,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1450791658,
         "inputs": {
@@ -6179,7 +6186,8 @@
             "hi": 1.0,
             "seed": 1302815785
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -7550,7 +7558,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 517889394,
         "inputs": {
@@ -7572,7 +7580,8 @@
             "hi": 1.0,
             "seed": 1930005951
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -8012,7 +8021,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 341315010,
         "inputs": {
@@ -8034,7 +8043,8 @@
             "hi": 1.0,
             "seed": 1643981308
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -9405,7 +9415,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1453411590,
         "inputs": {
@@ -9427,7 +9437,8 @@
             "hi": 1.0,
             "seed": 218796380
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -9867,7 +9878,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1076926273,
         "inputs": {
@@ -9889,7 +9900,8 @@
             "hi": 1.0,
             "seed": 857019809
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -10978,176 +10990,6 @@
       }
     },
     {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "bias_compute": "float",
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null,
-          "bias_in_0": 0,
-          "bias_in_1": 3
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              32,
-              1,
-              1
-            ],
-            "strides": [
-              32,
-              1,
-              1,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+bias_act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 728230167,
-        "inputs": {
-          "3": {
-            "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5,
-            "seed": 1935029052
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 524753245
-          },
-          "5": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1100314488
-          }
-        }
-      }
-    },
-    {
       "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
@@ -11292,7 +11134,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 69979777,
         "inputs": {
@@ -11314,7 +11156,8 @@
             "hi": 1.0,
             "seed": 1634380265
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -11632,7 +11475,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 713574104,
         "inputs": {
@@ -11654,7 +11497,8 @@
             "hi": 1.0,
             "seed": 194288804
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -13026,176 +12870,6 @@
       }
     },
     {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "bias_compute": "float",
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null,
-          "bias_in_0": 0,
-          "bias_in_1": 3
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              32,
-              1,
-              1
-            ],
-            "strides": [
-              32,
-              1,
-              32,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+bias_act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1470893272,
-        "inputs": {
-          "3": {
-            "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5,
-            "seed": 1151680805
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1865285310
-          },
-          "5": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 864997396
-          }
-        }
-      }
-    },
-    {
       "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu_lo",
       "values": {
         "io_data_type": "float",
@@ -13340,7 +13014,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 725408991,
         "inputs": {
@@ -13362,7 +13036,8 @@
             "hi": 1.0,
             "seed": 159107878
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -13680,7 +13355,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1718444827,
         "inputs": {
@@ -13702,7 +13377,8 @@
             "hi": 1.0,
             "seed": 1845464799
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -15074,176 +14750,6 @@
       }
     },
     {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "bias_compute": "half",
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null,
-          "bias_in_0": 0,
-          "bias_in_1": 3
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              32,
-              1,
-              1
-            ],
-            "strides": [
-              32,
-              1,
-              1,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+bias_act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1303252916,
-        "inputs": {
-          "3": {
-            "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5,
-            "seed": 111088130
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1626311255
-          },
-          "5": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1243008018
-          }
-        }
-      }
-    },
-    {
       "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_lo",
       "values": {
         "io_data_type": "half",
@@ -15388,7 +14894,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 986106761,
         "inputs": {
@@ -15410,7 +14916,8 @@
             "hi": 1.0,
             "seed": 132005653
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -17122,176 +16629,6 @@
       }
     },
     {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "bias_compute": "half",
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null,
-          "bias_in_0": 0,
-          "bias_in_1": 3
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              32,
-              1,
-              1
-            ],
-            "strides": [
-              32,
-              1,
-              32,
-              32
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+bias_act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1316434691,
-        "inputs": {
-          "3": {
-            "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5,
-            "seed": 24341672
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 409753359
-          },
-          "5": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1667072178
-          }
-        }
-      }
-    },
-    {
       "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
@@ -17436,7 +16773,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 716305184,
         "inputs": {
@@ -17458,7 +16795,8 @@
             "hi": 1.0,
             "seed": 1299643585
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -17946,7 +17284,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1343612319,
         "inputs": {
@@ -17968,7 +17306,8 @@
             "hi": 1.0,
             "seed": 981018869
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -19169,176 +18508,6 @@
       }
     },
     {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cf_relu",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "bias_compute": "bfloat16",
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null,
-          "bias_in_0": 0,
-          "bias_in_1": 3
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              32,
-              1,
-              1
-            ],
-            "strides": [
-              32,
-              1,
-              1,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+bias_act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1513866068,
-        "inputs": {
-          "3": {
-            "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5,
-            "seed": 1259688893
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1407765326
-          },
-          "5": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 64108816
-          }
-        }
-      }
-    },
-    {
       "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
@@ -19483,7 +18652,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 924517498,
         "inputs": {
@@ -19505,7 +18674,8 @@
             "hi": 1.0,
             "seed": 465037559
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -19993,7 +19163,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 722237196,
         "inputs": {
@@ -20015,7 +19185,8 @@
             "hi": 1.0,
             "seed": 1219079023
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -21216,176 +20387,6 @@
       }
     },
     {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cl_relu",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "bias_compute": "bfloat16",
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null,
-          "bias_in_0": 0,
-          "bias_in_1": 3
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              1,
-              32,
-              1,
-              1
-            ],
-            "strides": [
-              32,
-              1,
-              32,
-              32
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 4,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 5,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+bias_act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 146446637,
-        "inputs": {
-          "3": {
-            "kind": "free",
-            "lo": -0.5,
-            "hi": 0.5,
-            "seed": 34682494
-          },
-          "4": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1392971793
-          },
-          "5": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 451380377
-          }
-        }
-      }
-    },
-    {
       "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
@@ -21530,7 +20531,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2115095015,
         "inputs": {
@@ -21552,7 +20553,8 @@
             "hi": 1.0,
             "seed": 716035622
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -22040,7 +21042,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1002850912,
         "inputs": {
@@ -22062,7 +21064,8 @@
             "hi": 1.0,
             "seed": 234965309
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -23981,7 +22984,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 386232854,
         "inputs": {
@@ -24003,7 +23006,8 @@
             "hi": 1.0,
             "seed": 1985079736
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -25849,7 +24853,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 162228917,
         "inputs": {
@@ -25871,7 +24875,8 @@
             "hi": 1.0,
             "seed": 122940232
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -26221,7 +25226,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2034882352,
         "inputs": {
@@ -26243,7 +25248,8 @@
             "hi": 1.0,
             "seed": 1264202927
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -28089,7 +27095,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 438226798,
         "inputs": {
@@ -28111,7 +27117,8 @@
             "hi": 1.0,
             "seed": 1016746115
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -28461,7 +27468,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2066246300,
         "inputs": {
@@ -28483,7 +27490,8 @@
             "hi": 1.0,
             "seed": 1360974136
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -30329,7 +29337,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1650407921,
         "inputs": {
@@ -30351,7 +29359,8 @@
             "hi": 1.0,
             "seed": 61677110
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -32569,7 +31578,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1380884940,
         "inputs": {
@@ -32591,7 +31600,8 @@
             "hi": 1.0,
             "seed": 1584568051
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -33127,7 +32137,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2109012518,
         "inputs": {
@@ -33149,7 +32159,8 @@
             "hi": 1.0,
             "seed": 538615726
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -34808,7 +33819,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1909352836,
         "inputs": {
@@ -34830,7 +33841,8 @@
             "hi": 1.0,
             "seed": 1396808719
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -35366,7 +34378,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 766087162,
         "inputs": {
@@ -35388,7 +34400,8 @@
             "hi": 1.0,
             "seed": 922024473
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {

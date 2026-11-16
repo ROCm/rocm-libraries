@@ -1214,7 +1214,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 58591550,
         "inputs": {
@@ -1236,7 +1236,8 @@
             "hi": 1.0,
             "seed": 1199434731
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -1676,7 +1677,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 111000181,
         "inputs": {
@@ -1698,7 +1699,8 @@
             "hi": 1.0,
             "seed": 595438293
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -3224,7 +3226,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 184974535,
         "inputs": {
@@ -3246,7 +3248,8 @@
             "hi": 1.0,
             "seed": 440333160
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -3686,7 +3689,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1245236226,
         "inputs": {
@@ -3708,7 +3711,8 @@
             "hi": 1.0,
             "seed": 1796405915
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -5234,7 +5238,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 232600924,
         "inputs": {
@@ -5256,7 +5260,8 @@
             "hi": 1.0,
             "seed": 1245111828
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -5696,7 +5701,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 745774551,
         "inputs": {
@@ -5718,7 +5723,8 @@
             "hi": 1.0,
             "seed": 429131397
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -7244,7 +7250,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 244463458,
         "inputs": {
@@ -7266,7 +7272,8 @@
             "hi": 1.0,
             "seed": 1422355086
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -7552,7 +7559,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 339247797,
         "inputs": {
@@ -7574,7 +7581,8 @@
             "hi": 1.0,
             "seed": 960995168
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -9100,7 +9108,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1254530593,
         "inputs": {
@@ -9122,7 +9130,8 @@
             "hi": 1.0,
             "seed": 2045845590
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -9562,7 +9571,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1226374423,
         "inputs": {
@@ -9584,7 +9593,8 @@
             "hi": 1.0,
             "seed": 1447620788
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -11110,7 +11120,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1132447808,
         "inputs": {
@@ -11132,7 +11142,8 @@
             "hi": 1.0,
             "seed": 589186602
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -11572,7 +11583,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1916291559,
         "inputs": {
@@ -11594,7 +11605,8 @@
             "hi": 1.0,
             "seed": 835832529
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -13120,7 +13132,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1287674907,
         "inputs": {
@@ -13142,7 +13154,8 @@
             "hi": 1.0,
             "seed": 404833375
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -13582,7 +13595,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1384167332,
         "inputs": {
@@ -13604,7 +13617,8 @@
             "hi": 1.0,
             "seed": 541051699
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -15130,7 +15144,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 446213313,
         "inputs": {
@@ -15152,7 +15166,8 @@
             "hi": 1.0,
             "seed": 309436653
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -15592,7 +15607,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1989199226,
         "inputs": {
@@ -15614,7 +15629,8 @@
             "hi": 1.0,
             "seed": 1572464353
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -17140,7 +17156,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2054026344,
         "inputs": {
@@ -17162,7 +17178,8 @@
             "hi": 1.0,
             "seed": 1642278135
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -17602,7 +17619,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1501293693,
         "inputs": {
@@ -17624,7 +17641,8 @@
             "hi": 1.0,
             "seed": 1742657421
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -18717,7 +18735,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1677403169,
         "inputs": {
@@ -18739,7 +18757,8 @@
             "hi": 1.0,
             "seed": 1020441877
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -20425,7 +20444,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 35566941,
         "inputs": {
@@ -20447,7 +20466,8 @@
             "hi": 1.0,
             "seed": 1836991396
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -20935,7 +20955,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 994126023,
         "inputs": {
@@ -20957,7 +20977,8 @@
             "hi": 1.0,
             "seed": 1888338505
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -22643,7 +22664,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 258544820,
         "inputs": {
@@ -22665,7 +22686,8 @@
             "hi": 1.0,
             "seed": 1291139035
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -23153,7 +23175,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1784642405,
         "inputs": {
@@ -23175,7 +23197,8 @@
             "hi": 1.0,
             "seed": 1795780177
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -24861,7 +24884,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1643212795,
         "inputs": {
@@ -24883,7 +24906,8 @@
             "hi": 1.0,
             "seed": 657739928
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -25371,7 +25395,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1800237979,
         "inputs": {
@@ -25393,7 +25417,8 @@
             "hi": 1.0,
             "seed": 2116124120
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -27079,7 +27104,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 918613114,
         "inputs": {
@@ -27101,7 +27126,8 @@
             "hi": 1.0,
             "seed": 1062039201
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -27589,7 +27615,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1929536634,
         "inputs": {
@@ -27611,7 +27637,8 @@
             "hi": 1.0,
             "seed": 543337599
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -29297,7 +29324,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1180594313,
         "inputs": {
@@ -29319,7 +29346,8 @@
             "hi": 1.0,
             "seed": 1190746019
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -29807,7 +29835,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 148028287,
         "inputs": {
@@ -29829,7 +29857,8 @@
             "hi": 1.0,
             "seed": 265841290
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -31515,7 +31544,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1036561325,
         "inputs": {
@@ -31537,7 +31566,8 @@
             "hi": 1.0,
             "seed": 83218873
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -32025,7 +32055,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1396036394,
         "inputs": {
@@ -32047,7 +32077,8 @@
             "hi": 1.0,
             "seed": 1535595448
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -33733,7 +33764,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 210907049,
         "inputs": {
@@ -33755,7 +33786,8 @@
             "hi": 1.0,
             "seed": 1188129174
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -34243,7 +34275,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2064502851,
         "inputs": {
@@ -34265,7 +34297,8 @@
             "hi": 1.0,
             "seed": 2056159054
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -35951,7 +35984,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1141891904,
         "inputs": {
@@ -35973,7 +36006,8 @@
             "hi": 1.0,
             "seed": 730256838
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -36461,7 +36495,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 574800783,
         "inputs": {
@@ -36483,7 +36517,8 @@
             "hi": 1.0,
             "seed": 1128785411
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -38193,7 +38228,7 @@
             "seed": 199172086
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -38706,7 +38741,7 @@
             "seed": 2008618558
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -40392,7 +40427,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1920178347,
         "inputs": {
@@ -40414,7 +40449,8 @@
             "hi": 1.0,
             "seed": 313159446
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -40902,7 +40938,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2019004860,
         "inputs": {
@@ -40924,7 +40960,8 @@
             "hi": 1.0,
             "seed": 1269572985
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -42610,7 +42647,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1179377383,
         "inputs": {
@@ -42632,7 +42669,8 @@
             "hi": 1.0,
             "seed": 1928766402
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -43508,7 +43546,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 953493596,
         "inputs": {
@@ -43530,7 +43568,8 @@
             "hi": 1.0,
             "seed": 561299287
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -45376,7 +45415,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 658038010,
         "inputs": {
@@ -45398,7 +45437,8 @@
             "hi": 1.0,
             "seed": 325669487
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -45934,7 +45974,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1751299338,
         "inputs": {
@@ -45956,7 +45996,8 @@
             "hi": 1.0,
             "seed": 515496982
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -47802,7 +47843,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1242721389,
         "inputs": {
@@ -47824,7 +47865,8 @@
             "hi": 1.0,
             "seed": 207898537
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -48360,7 +48402,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2122463441,
         "inputs": {
@@ -48382,7 +48424,8 @@
             "hi": 1.0,
             "seed": 1374021227
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -50228,7 +50271,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1329280616,
         "inputs": {
@@ -50250,7 +50293,8 @@
             "hi": 1.0,
             "seed": 2140640857
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -50786,7 +50830,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 172408818,
         "inputs": {
@@ -50808,7 +50852,8 @@
             "hi": 1.0,
             "seed": 306692372
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -52654,7 +52699,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1858774296,
         "inputs": {
@@ -52676,7 +52721,8 @@
             "hi": 1.0,
             "seed": 846946470
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -53212,7 +53258,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 978946306,
         "inputs": {
@@ -53234,7 +53280,8 @@
             "hi": 1.0,
             "seed": 760090488
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -55080,7 +55127,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 518377947,
         "inputs": {
@@ -55102,7 +55149,8 @@
             "hi": 1.0,
             "seed": 293381326
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -55638,7 +55686,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 112147056,
         "inputs": {
@@ -55660,7 +55708,8 @@
             "hi": 1.0,
             "seed": 802938740
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -57319,7 +57368,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1886701556,
         "inputs": {
@@ -57341,7 +57390,8 @@
             "hi": 1.0,
             "seed": 1421678521
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -57877,7 +57927,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2079654828,
         "inputs": {
@@ -57899,7 +57949,8 @@
             "hi": 1.0,
             "seed": 1463639576
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -59745,7 +59796,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1787479420,
         "inputs": {
@@ -59767,7 +59818,8 @@
             "hi": 1.0,
             "seed": 1676484739
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -60303,7 +60355,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1099494907,
         "inputs": {
@@ -60325,7 +60377,8 @@
             "hi": 1.0,
             "seed": 1207982463
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -62171,7 +62224,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 443948059,
         "inputs": {
@@ -62193,7 +62246,8 @@
             "hi": 1.0,
             "seed": 279441048
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -62729,7 +62783,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 783190338,
         "inputs": {
@@ -62751,7 +62805,8 @@
             "hi": 1.0,
             "seed": 1367515991
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -64597,7 +64652,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 391878607,
         "inputs": {
@@ -64619,7 +64674,8 @@
             "hi": 1.0,
             "seed": 1230004260
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -65155,7 +65211,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 896234053,
         "inputs": {
@@ -65177,7 +65233,8 @@
             "hi": 1.0,
             "seed": 1217653358
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -67023,7 +67080,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1765645828,
         "inputs": {
@@ -67045,7 +67102,8 @@
             "hi": 1.0,
             "seed": 1336372154
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -67581,7 +67639,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 104020621,
         "inputs": {
@@ -67603,7 +67661,8 @@
             "hi": 1.0,
             "seed": 2145491503
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -68741,7 +68800,7 @@
             "seed": 1404740538
           }
         },
-        "notes": "probe: F1 4D spatial"
+        "notes": "probe: F1 4D spatial; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -70507,7 +70566,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1770686256,
         "inputs": {
@@ -70529,7 +70588,8 @@
             "hi": 1.0,
             "seed": 1669845889
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -70969,7 +71029,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1111946680,
         "inputs": {
@@ -70991,7 +71051,8 @@
             "hi": 1.0,
             "seed": 2051638525
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -72517,7 +72578,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1680587828,
         "inputs": {
@@ -72539,7 +72600,8 @@
             "hi": 1.0,
             "seed": 451085503
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -74533,7 +74595,7 @@
         "plan_items": [
           "L10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1289774324,
         "inputs": {
@@ -74555,7 +74617,8 @@
             "hi": 1.0,
             "seed": 211960666
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -75043,7 +75106,7 @@
         "plan_items": [
           "L12b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 596608105,
         "inputs": {
@@ -75065,7 +75128,8 @@
             "hi": 1.0,
             "seed": 1126247079
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -76751,7 +76815,7 @@
         "plan_items": [
           "L21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 790639139,
         "inputs": {
@@ -76773,7 +76837,8 @@
             "hi": 1.0,
             "seed": 1161981996
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -78415,7 +78480,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 148492557,
         "inputs": {
@@ -78437,7 +78502,8 @@
             "hi": 1.0,
             "seed": 661520063
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -78973,7 +79039,7 @@
         "plan_items": [
           "L11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1600183772,
         "inputs": {
@@ -78995,7 +79061,8 @@
             "hi": 1.0,
             "seed": 749739512
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -80841,7 +80908,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 997621191,
         "inputs": {
@@ -80863,7 +80930,8 @@
             "hi": 1.0,
             "seed": 740452388
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -81553,7 +81621,7 @@
         "plan_items": [
           "M2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 321620592,
         "inputs": {
@@ -81575,7 +81643,8 @@
             "hi": 1.0,
             "seed": 1548793553
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -83261,7 +83330,7 @@
         "plan_items": [
           "M3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 869465864,
         "inputs": {
@@ -83283,7 +83352,8 @@
             "hi": 1.0,
             "seed": 1859951392
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -83771,7 +83841,7 @@
         "plan_items": [
           "M6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 406329825,
         "inputs": {
@@ -83793,7 +83863,8 @@
             "hi": 1.0,
             "seed": 569375103
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -85557,8 +85628,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25full"
+          "F25full",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85713,8 +85784,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25scalar"
+          "F25scalar",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85869,8 +85940,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25type"
+          "F25type",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86025,8 +86096,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25first"
+          "F25first",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86197,8 +86268,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25full"
+          "F25full",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86369,8 +86440,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25scalar"
+          "F25scalar",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86541,8 +86612,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25type"
+          "F25type",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86713,8 +86784,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25first"
+          "F25first",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86901,8 +86972,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25full"
+          "F25full",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87089,8 +87160,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25scalar"
+          "F25scalar",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87277,8 +87348,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25type"
+          "F25type",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87465,8 +87536,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+bias_act",
         "plan_items": [
-          "S3",
-          "F25first"
+          "F25first",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",

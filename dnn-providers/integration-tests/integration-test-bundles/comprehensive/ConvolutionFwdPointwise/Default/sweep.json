@@ -216,7 +216,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 925043691,
         "inputs": {
@@ -232,7 +232,8 @@
             "hi": 1.0,
             "seed": 277221472
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -567,7 +568,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1815613233,
         "inputs": {
@@ -583,7 +584,8 @@
             "hi": 1.0,
             "seed": 706857297
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -684,7 +686,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1244410917,
         "inputs": {
@@ -700,8 +702,7 @@
             "hi": 1.0,
             "seed": 2049647403
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -802,7 +803,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1415909000,
         "inputs": {
@@ -818,8 +819,7 @@
             "hi": 1.0,
             "seed": 817613784
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -1745,7 +1745,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 225612938,
         "inputs": {
@@ -1761,7 +1761,8 @@
             "hi": 1.0,
             "seed": 392062980
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -2096,7 +2097,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1076926273,
         "inputs": {
@@ -2112,7 +2113,8 @@
             "hi": 1.0,
             "seed": 905034339
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -2213,7 +2215,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 57237820,
         "inputs": {
@@ -2229,8 +2231,7 @@
             "hi": 1.0,
             "seed": 804995767
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -2331,7 +2332,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1790399757,
         "inputs": {
@@ -2347,8 +2348,7 @@
             "hi": 1.0,
             "seed": 1525866146
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -3274,7 +3274,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1424226728,
         "inputs": {
@@ -3290,7 +3290,8 @@
             "hi": 1.0,
             "seed": 1652296149
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -3625,7 +3626,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 202885343,
         "inputs": {
@@ -3641,7 +3642,8 @@
             "hi": 1.0,
             "seed": 1109898894
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -3742,7 +3744,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1970731722,
         "inputs": {
@@ -3758,8 +3760,7 @@
             "hi": 1.0,
             "seed": 609224483
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -3860,7 +3861,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 433550335,
         "inputs": {
@@ -3876,8 +3877,7 @@
             "hi": 1.0,
             "seed": 1122040194
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -4803,7 +4803,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1307574818,
         "inputs": {
@@ -4819,7 +4819,8 @@
             "hi": 1.0,
             "seed": 1514010103
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -5154,7 +5155,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 585528651,
         "inputs": {
@@ -5170,7 +5171,8 @@
             "hi": 1.0,
             "seed": 936133563
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -5271,7 +5273,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2033534795,
         "inputs": {
@@ -5287,8 +5289,7 @@
             "hi": 1.0,
             "seed": 440363108
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -5389,7 +5390,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 568726517,
         "inputs": {
@@ -5405,8 +5406,7 @@
             "hi": 1.0,
             "seed": 1391844740
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -6332,7 +6332,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1756156392,
         "inputs": {
@@ -6348,7 +6348,8 @@
             "hi": 1.0,
             "seed": 586403162
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -6683,7 +6684,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1270865734,
         "inputs": {
@@ -6699,7 +6700,8 @@
             "hi": 1.0,
             "seed": 2130221426
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -6800,7 +6802,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1582414476,
         "inputs": {
@@ -6816,8 +6818,7 @@
             "hi": 1.0,
             "seed": 982723874
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -6918,7 +6919,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 579424334,
         "inputs": {
@@ -6934,8 +6935,7 @@
             "hi": 1.0,
             "seed": 834303042
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -7743,7 +7743,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1335617569,
         "inputs": {
@@ -7759,7 +7759,8 @@
             "hi": 1.0,
             "seed": 316999
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -8094,7 +8095,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1222245422,
         "inputs": {
@@ -8110,7 +8111,8 @@
             "hi": 1.0,
             "seed": 1276230218
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -8211,7 +8213,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1216927341,
         "inputs": {
@@ -8227,8 +8229,7 @@
             "hi": 1.0,
             "seed": 695387281
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -8329,7 +8330,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 66808469,
         "inputs": {
@@ -8345,8 +8346,7 @@
             "hi": 1.0,
             "seed": 550731464
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -9272,7 +9272,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1682288874,
         "inputs": {
@@ -9288,7 +9288,8 @@
             "hi": 1.0,
             "seed": 1862798480
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -9623,7 +9624,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 789028393,
         "inputs": {
@@ -9639,7 +9640,8 @@
             "hi": 1.0,
             "seed": 471757837
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -9740,7 +9742,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1033784782,
         "inputs": {
@@ -9756,8 +9758,7 @@
             "hi": 1.0,
             "seed": 1448592161
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -9858,7 +9859,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 364730683,
         "inputs": {
@@ -9874,8 +9875,7 @@
             "hi": 1.0,
             "seed": 2066370366
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -10819,7 +10819,7 @@
             "seed": 2095094535
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -11173,7 +11173,7 @@
             "seed": 707910037
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -11274,7 +11274,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2062533157,
         "inputs": {
@@ -11290,8 +11290,7 @@
             "hi": 1.0,
             "seed": 1723661578
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -11392,7 +11391,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 877007574,
         "inputs": {
@@ -11408,8 +11407,7 @@
             "hi": 1.0,
             "seed": 420877317
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -12335,7 +12333,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 835361128,
         "inputs": {
@@ -12351,7 +12349,8 @@
             "hi": 1.0,
             "seed": 1957372482
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -12686,7 +12685,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1530238542,
         "inputs": {
@@ -12702,7 +12701,8 @@
             "hi": 1.0,
             "seed": 1888518289
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -12803,7 +12803,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 748469408,
         "inputs": {
@@ -12819,8 +12819,7 @@
             "hi": 1.0,
             "seed": 49244161
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -12921,7 +12920,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1883253105,
         "inputs": {
@@ -12937,8 +12936,7 @@
             "hi": 1.0,
             "seed": 837873022
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -13864,7 +13862,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 952075255,
         "inputs": {
@@ -13880,7 +13878,8 @@
             "hi": 1.0,
             "seed": 275992411
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -14759,7 +14758,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2145926584,
         "inputs": {
@@ -14775,7 +14774,8 @@
             "hi": 1.0,
             "seed": 691675429
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -15146,7 +15146,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 450967119,
         "inputs": {
@@ -15162,7 +15162,8 @@
             "hi": 1.0,
             "seed": 1025031557
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -15275,7 +15276,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 782244071,
         "inputs": {
@@ -15291,8 +15292,7 @@
             "hi": 1.0,
             "seed": 486772121
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -15405,7 +15405,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 254141817,
         "inputs": {
@@ -15421,8 +15421,7 @@
             "hi": 1.0,
             "seed": 728292520
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -16076,135 +16075,6 @@
       }
     },
     {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cl_relu",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 146446637,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 989141390
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 34682494
-          }
-        }
-      }
-    },
-    {
       "id": "s4_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
@@ -16314,7 +16184,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 17325032,
         "inputs": {
@@ -16330,7 +16200,8 @@
             "hi": 1.0,
             "seed": 2115217497
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -16701,7 +16572,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1922958867,
         "inputs": {
@@ -16717,7 +16588,8 @@
             "hi": 1.0,
             "seed": 859378404
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -16830,7 +16702,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2055231014,
         "inputs": {
@@ -16846,8 +16718,7 @@
             "hi": 1.0,
             "seed": 786702416
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -16960,7 +16831,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1411302578,
         "inputs": {
@@ -16976,8 +16847,7 @@
             "hi": 1.0,
             "seed": 947957016
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -17999,7 +17869,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2059021908,
         "inputs": {
@@ -18015,7 +17885,8 @@
             "hi": 1.0,
             "seed": 1410340764
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -18386,7 +18257,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1964015961,
         "inputs": {
@@ -18402,7 +18273,8 @@
             "hi": 1.0,
             "seed": 1557042316
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -18515,7 +18387,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 862099758,
         "inputs": {
@@ -18531,8 +18403,7 @@
             "hi": 1.0,
             "seed": 2020624376
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -19554,7 +19425,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1942461878,
         "inputs": {
@@ -19570,7 +19441,8 @@
             "hi": 1.0,
             "seed": 887239477
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -19941,7 +19813,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1847660515,
         "inputs": {
@@ -19957,7 +19829,8 @@
             "hi": 1.0,
             "seed": 1181063746
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -20070,7 +19943,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1839147840,
         "inputs": {
@@ -20086,8 +19959,7 @@
             "hi": 1.0,
             "seed": 845472876
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -20200,7 +20072,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 758039771,
         "inputs": {
@@ -20216,8 +20088,7 @@
             "hi": 1.0,
             "seed": 1089287691
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -21239,7 +21110,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1466338159,
         "inputs": {
@@ -21255,7 +21126,8 @@
             "hi": 1.0,
             "seed": 1264903118
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -21626,7 +21498,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 878221420,
         "inputs": {
@@ -21642,7 +21514,8 @@
             "hi": 1.0,
             "seed": 392501204
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -21755,7 +21628,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1255909034,
         "inputs": {
@@ -21771,8 +21644,7 @@
             "hi": 1.0,
             "seed": 894811821
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -21885,7 +21757,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1282401964,
         "inputs": {
@@ -21901,8 +21773,7 @@
             "hi": 1.0,
             "seed": 1897240849
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -22924,7 +22795,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1593972917,
         "inputs": {
@@ -22940,7 +22811,8 @@
             "hi": 1.0,
             "seed": 837234959
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -23311,7 +23183,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 946113635,
         "inputs": {
@@ -23327,7 +23199,8 @@
             "hi": 1.0,
             "seed": 1085686395
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -23440,7 +23313,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 633904190,
         "inputs": {
@@ -23456,8 +23329,7 @@
             "hi": 1.0,
             "seed": 526040345
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -23570,7 +23442,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1311004572,
         "inputs": {
@@ -23586,8 +23458,7 @@
             "hi": 1.0,
             "seed": 2024732386
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -24480,7 +24351,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 934059257,
         "inputs": {
@@ -24496,7 +24367,8 @@
             "hi": 1.0,
             "seed": 1978484351
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -24867,7 +24739,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2116994781,
         "inputs": {
@@ -24883,7 +24755,8 @@
             "hi": 1.0,
             "seed": 1090575196
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -24996,7 +24869,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1247782976,
         "inputs": {
@@ -25012,8 +24885,7 @@
             "hi": 1.0,
             "seed": 1768180734
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -25126,7 +24998,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 188441082,
         "inputs": {
@@ -25142,8 +25014,7 @@
             "hi": 1.0,
             "seed": 1022783414
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -26165,7 +26036,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1613295197,
         "inputs": {
@@ -26181,7 +26052,8 @@
             "hi": 1.0,
             "seed": 2064381963
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -26552,7 +26424,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 865487653,
         "inputs": {
@@ -26568,7 +26440,8 @@
             "hi": 1.0,
             "seed": 1059164231
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -26681,7 +26554,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2027287024,
         "inputs": {
@@ -26697,8 +26570,7 @@
             "hi": 1.0,
             "seed": 1433498699
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -26811,7 +26683,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1142005511,
         "inputs": {
@@ -26827,8 +26699,7 @@
             "hi": 1.0,
             "seed": 434878163
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -27850,7 +27721,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1905959882,
         "inputs": {
@@ -27866,7 +27737,8 @@
             "hi": 1.0,
             "seed": 2045654871
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -28237,7 +28109,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 895628384,
         "inputs": {
@@ -28253,7 +28125,8 @@
             "hi": 1.0,
             "seed": 342091192
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -28366,7 +28239,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2025319102,
         "inputs": {
@@ -28382,8 +28255,7 @@
             "hi": 1.0,
             "seed": 980620417
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -28513,7 +28385,7 @@
             "seed": 1201980022
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -29535,7 +29407,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1521810454,
         "inputs": {
@@ -29551,7 +29423,8 @@
             "hi": 1.0,
             "seed": 1308970995
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -29922,7 +29795,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 62172246,
         "inputs": {
@@ -29938,7 +29811,8 @@
             "hi": 1.0,
             "seed": 759151023
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -30051,7 +29925,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 926470969,
         "inputs": {
@@ -30067,8 +29941,7 @@
             "hi": 1.0,
             "seed": 33032353
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -30181,7 +30054,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 554937001,
         "inputs": {
@@ -30197,8 +30070,7 @@
             "hi": 1.0,
             "seed": 857708142
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -31220,7 +31092,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 980050751,
         "inputs": {
@@ -31236,7 +31108,8 @@
             "hi": 1.0,
             "seed": 1530141139
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -31607,7 +31480,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2011529328,
         "inputs": {
@@ -31623,7 +31496,8 @@
             "hi": 1.0,
             "seed": 1920373104
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -31736,7 +31610,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 552459720,
         "inputs": {
@@ -31752,8 +31626,7 @@
             "hi": 1.0,
             "seed": 1736517443
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -31866,7 +31739,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1127662575,
         "inputs": {
@@ -31882,8 +31755,7 @@
             "hi": 1.0,
             "seed": 659538890
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -33249,7 +33121,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1533008429,
         "inputs": {
@@ -33265,7 +33137,8 @@
             "hi": 1.0,
             "seed": 1653695040
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -33672,7 +33545,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 377190525,
         "inputs": {
@@ -33688,7 +33561,8 @@
             "hi": 1.0,
             "seed": 695418417
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -33813,7 +33687,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1600493560,
         "inputs": {
@@ -33829,8 +33703,7 @@
             "hi": 1.0,
             "seed": 1038158933
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -33955,7 +33828,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 457414933,
         "inputs": {
@@ -33971,8 +33844,7 @@
             "hi": 1.0,
             "seed": 838849372
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -35090,7 +34962,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1093748738,
         "inputs": {
@@ -35106,7 +34978,8 @@
             "hi": 1.0,
             "seed": 2109596293
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -35513,7 +35386,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1413916758,
         "inputs": {
@@ -35529,7 +35402,8 @@
             "hi": 1.0,
             "seed": 1958098175
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -35654,7 +35528,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1795182744,
         "inputs": {
@@ -35670,8 +35544,7 @@
             "hi": 1.0,
             "seed": 268810671
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -35796,7 +35669,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1607731056,
         "inputs": {
@@ -35812,8 +35685,7 @@
             "hi": 1.0,
             "seed": 837920498
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -36931,7 +36803,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 218837422,
         "inputs": {
@@ -36947,7 +36819,8 @@
             "hi": 1.0,
             "seed": 1579098472
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -37354,7 +37227,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1951197292,
         "inputs": {
@@ -37370,7 +37243,8 @@
             "hi": 1.0,
             "seed": 1982365195
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -37495,7 +37369,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1963976239,
         "inputs": {
@@ -37511,8 +37385,7 @@
             "hi": 1.0,
             "seed": 1832586850
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -37637,7 +37510,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 691720210,
         "inputs": {
@@ -37653,8 +37526,7 @@
             "hi": 1.0,
             "seed": 1268760015
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -38772,7 +38644,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1124173849,
         "inputs": {
@@ -38788,7 +38660,8 @@
             "hi": 1.0,
             "seed": 1727273133
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -39195,7 +39068,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 959405442,
         "inputs": {
@@ -39211,7 +39084,8 @@
             "hi": 1.0,
             "seed": 601249935
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -39336,7 +39210,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1986584039,
         "inputs": {
@@ -39352,8 +39226,7 @@
             "hi": 1.0,
             "seed": 1009570205
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -39478,7 +39351,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1582854953,
         "inputs": {
@@ -39494,8 +39367,7 @@
             "hi": 1.0,
             "seed": 894099684
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -40613,7 +40485,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1657358917,
         "inputs": {
@@ -40629,7 +40501,8 @@
             "hi": 1.0,
             "seed": 2064777832
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -41036,7 +40909,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 141486997,
         "inputs": {
@@ -41052,7 +40925,8 @@
             "hi": 1.0,
             "seed": 1620746492
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -41177,7 +41051,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1969178036,
         "inputs": {
@@ -41193,8 +41067,7 @@
             "hi": 1.0,
             "seed": 397899873
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -41319,7 +41192,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1326785462,
         "inputs": {
@@ -41335,8 +41208,7 @@
             "hi": 1.0,
             "seed": 379904242
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -42454,7 +42326,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 171877590,
         "inputs": {
@@ -42470,7 +42342,8 @@
             "hi": 1.0,
             "seed": 1950847690
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -42877,7 +42750,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 769508073,
         "inputs": {
@@ -42893,7 +42766,8 @@
             "hi": 1.0,
             "seed": 1321217744
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -43018,7 +42892,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1344647303,
         "inputs": {
@@ -43034,8 +42908,7 @@
             "hi": 1.0,
             "seed": 2052219392
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -43160,7 +43033,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1830186593,
         "inputs": {
@@ -43176,8 +43049,7 @@
             "hi": 1.0,
             "seed": 876001183
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -44295,7 +44167,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 444473670,
         "inputs": {
@@ -44311,7 +44183,8 @@
             "hi": 1.0,
             "seed": 1374690188
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -44718,7 +44591,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 804769463,
         "inputs": {
@@ -44734,7 +44607,8 @@
             "hi": 1.0,
             "seed": 193137518
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -44859,7 +44733,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1757044815,
         "inputs": {
@@ -44875,8 +44749,7 @@
             "hi": 1.0,
             "seed": 1419835708
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -45001,7 +44874,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1040213617,
         "inputs": {
@@ -45017,8 +44890,7 @@
             "hi": 1.0,
             "seed": 757613392
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -46136,7 +46008,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 177942690,
         "inputs": {
@@ -46152,7 +46024,8 @@
             "hi": 1.0,
             "seed": 1149118786
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -46559,7 +46432,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1936680733,
         "inputs": {
@@ -46575,7 +46448,8 @@
             "hi": 1.0,
             "seed": 147649202
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -46700,7 +46574,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1849334569,
         "inputs": {
@@ -46716,8 +46590,7 @@
             "hi": 1.0,
             "seed": 1504019063
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -46842,7 +46715,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1312086803,
         "inputs": {
@@ -46858,8 +46731,7 @@
             "hi": 1.0,
             "seed": 1954880907
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -47995,7 +47867,7 @@
             "seed": 749325442
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -48421,7 +48293,7 @@
             "seed": 1340542224
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -48546,7 +48418,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1671009192,
         "inputs": {
@@ -48562,8 +48434,7 @@
             "hi": 1.0,
             "seed": 41305793
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -48688,7 +48559,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1476737181,
         "inputs": {
@@ -48704,8 +48575,7 @@
             "hi": 1.0,
             "seed": 2052542897
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -49823,7 +49693,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 615487659,
         "inputs": {
@@ -49839,7 +49709,8 @@
             "hi": 1.0,
             "seed": 1644091190
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -50246,7 +50117,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1691077450,
         "inputs": {
@@ -50262,7 +50133,8 @@
             "hi": 1.0,
             "seed": 1334033277
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -50387,7 +50259,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 689924815,
         "inputs": {
@@ -50403,8 +50275,7 @@
             "hi": 1.0,
             "seed": 211974101
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -50529,7 +50400,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 247767103,
         "inputs": {
@@ -50545,8 +50416,7 @@
             "hi": 1.0,
             "seed": 1081118654
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -51664,7 +51534,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 736189796,
         "inputs": {
@@ -51680,7 +51550,8 @@
             "hi": 1.0,
             "seed": 1716701446
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -52591,7 +52462,7 @@
             "seed": 1620835712
           }
         },
-        "notes": "probe: F1 4D spatial"
+        "notes": "probe: F1 4D spatial; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -52963,7 +52834,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 434589401,
         "inputs": {
@@ -52979,7 +52850,8 @@
             "hi": 1.0,
             "seed": 1568283784
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -53080,7 +52952,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1689103844,
         "inputs": {
@@ -53096,8 +52968,7 @@
             "hi": 1.0,
             "seed": 994556661
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -53198,7 +53069,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 648203542,
         "inputs": {
@@ -53214,8 +53085,7 @@
             "hi": 1.0,
             "seed": 1941986469
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -54141,7 +54011,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 174176438,
         "inputs": {
@@ -54157,7 +54027,8 @@
             "hi": 1.0,
             "seed": 846377309
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -54492,7 +54363,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 608595661,
         "inputs": {
@@ -54508,7 +54379,8 @@
             "hi": 1.0,
             "seed": 301144085
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -54626,7 +54498,7 @@
             "seed": 190641926
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -54727,7 +54599,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 682764663,
         "inputs": {
@@ -54743,8 +54615,7 @@
             "hi": 1.0,
             "seed": 1562101110
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -55600,7 +55471,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 859004024,
         "inputs": {
@@ -55616,7 +55487,8 @@
             "hi": 1.0,
             "seed": 1514571552
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -55987,7 +55859,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1644330080,
         "inputs": {
@@ -56003,7 +55875,8 @@
             "hi": 1.0,
             "seed": 1041639676
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -56116,7 +55989,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1571638250,
         "inputs": {
@@ -56132,8 +56005,7 @@
             "hi": 1.0,
             "seed": 2089422168
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -56246,7 +56118,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1335198803,
         "inputs": {
@@ -56262,8 +56134,7 @@
             "hi": 1.0,
             "seed": 288582351
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -57285,7 +57156,7 @@
         "plan_items": [
           "L15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 501936540,
         "inputs": {
@@ -57301,7 +57172,8 @@
             "hi": 1.0,
             "seed": 45112116
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -57689,7 +57561,7 @@
             "seed": 1857421121
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -57802,7 +57674,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 516887657,
         "inputs": {
@@ -57818,8 +57690,7 @@
             "hi": 1.0,
             "seed": 1062891111
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -57932,7 +57803,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1129698942,
         "inputs": {
@@ -57948,8 +57819,7 @@
             "hi": 1.0,
             "seed": 1934359266
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -58475,7 +58345,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 937734340,
         "inputs": {
@@ -58491,7 +58361,8 @@
             "hi": 1.0,
             "seed": 340952845
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -58898,7 +58769,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 179661464,
         "inputs": {
@@ -58914,7 +58785,8 @@
             "hi": 1.0,
             "seed": 1770346224
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -59039,7 +58911,7 @@
         "plan_items": [
           "L6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1154785159,
         "inputs": {
@@ -59055,8 +58927,7 @@
             "hi": 1.0,
             "seed": 1397626862
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59181,7 +59052,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 113520696,
         "inputs": {
@@ -59197,8 +59068,7 @@
             "hi": 1.0,
             "seed": 202493749
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60316,7 +60186,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1444401140,
         "inputs": {
@@ -60332,7 +60202,8 @@
             "hi": 1.0,
             "seed": 1077011545
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -60739,7 +60610,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1158371267,
         "inputs": {
@@ -60755,7 +60626,8 @@
             "hi": 1.0,
             "seed": 1976923799
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -60897,7 +60769,7 @@
             "seed": 158284895
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -61022,7 +60894,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 747801743,
         "inputs": {
@@ -61038,8 +60910,7 @@
             "hi": 1.0,
             "seed": 756266518
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62227,7 +62098,7 @@
         "plan_items": [
           "M2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 2060399603,
         "inputs": {
@@ -62243,7 +62114,8 @@
             "hi": 1.0,
             "seed": 546267567
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -62614,7 +62486,7 @@
         "plan_items": [
           "M3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 258860634,
         "inputs": {
@@ -62630,7 +62502,8 @@
             "hi": 1.0,
             "seed": 891808869
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -62743,7 +62616,7 @@
         "plan_items": [
           "M3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 107497792,
         "inputs": {
@@ -62759,8 +62632,7 @@
             "hi": 1.0,
             "seed": 1872241218
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62873,7 +62745,7 @@
         "plan_items": [
           "M3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 463106627,
         "inputs": {
@@ -62889,8 +62761,7 @@
             "hi": 1.0,
             "seed": 606899598
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63924,7 +63795,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 1761793091,
         "inputs": {
@@ -63940,7 +63811,8 @@
             "hi": 1.0,
             "seed": 853744096
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -64347,7 +64219,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 223096846,
         "inputs": {
@@ -64363,7 +64235,8 @@
             "hi": 1.0,
             "seed": 772567592
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
@@ -64488,7 +64361,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 1983555477,
         "inputs": {
@@ -64504,8 +64377,7 @@
             "hi": 1.0,
             "seed": 1137463198
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64630,7 +64502,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 1599609520,
         "inputs": {
@@ -64646,8 +64518,7 @@
             "hi": 1.0,
             "seed": 1747842988
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64746,8 +64617,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F30"
+          "F30",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64865,8 +64736,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F31"
+          "F31",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64996,8 +64867,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F30"
+          "F30",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65127,8 +64998,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F31"
+          "F31",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65270,8 +65141,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F30"
+          "F30",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65413,8 +65284,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F31"
+          "F31",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",

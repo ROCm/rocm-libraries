@@ -54763,8 +54763,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F11"
+          "F11",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -54860,8 +54860,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F20"
+          "F20",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -54957,8 +54957,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F15"
+          "F15",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55054,8 +55054,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F16fast"
+          "F16fast",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55151,8 +55151,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F21zero"
+          "F21zero",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55247,8 +55247,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F11"
+          "F11",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55344,8 +55344,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F20"
+          "F20",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55441,8 +55441,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F15"
+          "F15",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55538,8 +55538,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F16chan"
+          "F16chan",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55635,8 +55635,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55730,8 +55730,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S3",
-          "F11"
+          "F11",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55827,8 +55827,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S3",
-          "F16plane"
+          "F16plane",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -55924,8 +55924,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F11"
+          "F11",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56021,8 +56021,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F20"
+          "F20",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56118,8 +56118,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F15"
+          "F15",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56215,8 +56215,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F16fast"
+          "F16fast",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56312,8 +56312,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F21tiny"
+          "F21tiny",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56409,8 +56409,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F11"
+          "F11",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56506,8 +56506,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F20"
+          "F20",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56603,8 +56603,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F15"
+          "F15",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56700,8 +56700,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F16chan"
+          "F16chan",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56797,8 +56797,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F21zero"
+          "F21zero",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56893,8 +56893,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F11"
+          "F11",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -56990,8 +56990,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F20"
+          "F20",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57087,8 +57087,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F15"
+          "F15",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57184,8 +57184,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F16plane"
+          "F16plane",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57281,8 +57281,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F21const"
+          "F21const",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57376,8 +57376,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F11"
+          "F11",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57473,8 +57473,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F20"
+          "F20",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57570,8 +57570,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F15"
+          "F15",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57667,8 +57667,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F16fast"
+          "F16fast",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57764,8 +57764,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F21large"
+          "F21large",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57861,8 +57861,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F11"
+          "F11",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -57958,8 +57958,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F20"
+          "F20",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58055,8 +58055,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F15"
+          "F15",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58152,8 +58152,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F16chan"
+          "F16chan",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58249,8 +58249,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F21tiny"
+          "F21tiny",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58346,8 +58346,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F11"
+          "F11",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58443,8 +58443,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F20"
+          "F20",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58540,8 +58540,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F15"
+          "F15",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58637,8 +58637,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F16plane"
+          "F16plane",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58734,8 +58734,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F21zero"
+          "F21zero",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58830,8 +58830,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F11"
+          "F11",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -58927,8 +58927,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F20"
+          "F20",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59024,8 +59024,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F15"
+          "F15",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59121,8 +59121,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F16fast"
+          "F16fast",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59218,8 +59218,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F21const"
+          "F21const",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59313,8 +59313,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F11"
+          "F11",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59410,8 +59410,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F20"
+          "F20",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59507,8 +59507,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F15"
+          "F15",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59604,8 +59604,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F16chan"
+          "F16chan",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59701,8 +59701,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F21large"
+          "F21large",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59798,8 +59798,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F11"
+          "F11",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59895,8 +59895,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F20"
+          "F20",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -59992,8 +59992,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F15"
+          "F15",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60089,8 +60089,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F16plane"
+          "F16plane",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60186,8 +60186,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F21tiny"
+          "F21tiny",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60283,8 +60283,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F11"
+          "F11",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60380,8 +60380,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F20"
+          "F20",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60477,8 +60477,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F15"
+          "F15",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60574,8 +60574,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F16fast"
+          "F16fast",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60671,8 +60671,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F21zero"
+          "F21zero",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60767,8 +60767,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F11"
+          "F11",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60864,8 +60864,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F20"
+          "F20",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -60961,8 +60961,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F15"
+          "F15",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61058,8 +61058,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F16chan"
+          "F16chan",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61155,8 +61155,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F21const"
+          "F21const",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61250,8 +61250,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F11"
+          "F11",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61347,8 +61347,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F20"
+          "F20",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61444,8 +61444,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F15"
+          "F15",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61541,8 +61541,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F16plane"
+          "F16plane",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61638,8 +61638,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F21large"
+          "F21large",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61735,8 +61735,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F20"
+          "F20",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61832,8 +61832,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F15"
+          "F15",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -61929,8 +61929,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F16fast"
+          "F16fast",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62026,8 +62026,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F21tiny"
+          "F21tiny",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62123,8 +62123,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F11"
+          "F11",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62220,8 +62220,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F20"
+          "F20",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62317,8 +62317,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F15"
+          "F15",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62414,8 +62414,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F16chan"
+          "F16chan",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62511,8 +62511,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F21zero"
+          "F21zero",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62607,8 +62607,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F11"
+          "F11",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62704,8 +62704,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F20"
+          "F20",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62801,8 +62801,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F15"
+          "F15",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62898,8 +62898,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F16plane"
+          "F16plane",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -62995,8 +62995,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F21const"
+          "F21const",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63090,8 +63090,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F11"
+          "F11",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63187,8 +63187,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F20"
+          "F20",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63284,8 +63284,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F15"
+          "F15",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63381,8 +63381,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F16fast"
+          "F16fast",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63478,8 +63478,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F21large"
+          "F21large",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63575,8 +63575,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F11"
+          "F11",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63672,8 +63672,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F20"
+          "F20",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63769,8 +63769,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F15"
+          "F15",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63866,8 +63866,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F16chan"
+          "F16chan",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -63963,8 +63963,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F21tiny"
+          "F21tiny",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64070,8 +64070,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F11"
+          "F11",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64177,8 +64177,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F20"
+          "F20",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64284,8 +64284,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F15"
+          "F15",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64391,8 +64391,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F16fast"
+          "F16fast",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64498,8 +64498,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F21zero"
+          "F21zero",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64604,8 +64604,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F11"
+          "F11",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64711,8 +64711,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F20"
+          "F20",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64818,8 +64818,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F15"
+          "F15",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64925,8 +64925,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F16chan"
+          "F16chan",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65032,8 +65032,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65137,8 +65137,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S3",
-          "F11"
+          "F11",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65244,8 +65244,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S3",
-          "F16plane"
+          "F16plane",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65351,8 +65351,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F11"
+          "F11",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65458,8 +65458,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F20"
+          "F20",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65565,8 +65565,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F15"
+          "F15",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65672,8 +65672,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F16fast"
+          "F16fast",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65779,8 +65779,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F21tiny"
+          "F21tiny",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65886,8 +65886,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F11"
+          "F11",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65993,8 +65993,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F20"
+          "F20",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66100,8 +66100,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F15"
+          "F15",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66207,8 +66207,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F16chan"
+          "F16chan",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66314,8 +66314,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F21zero"
+          "F21zero",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66420,8 +66420,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F11"
+          "F11",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66527,8 +66527,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F20"
+          "F20",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66634,8 +66634,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F15"
+          "F15",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66741,8 +66741,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F16plane"
+          "F16plane",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66848,8 +66848,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F21const"
+          "F21const",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -66953,8 +66953,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F11"
+          "F11",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67060,8 +67060,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F20"
+          "F20",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67167,8 +67167,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F15"
+          "F15",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67274,8 +67274,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F16fast"
+          "F16fast",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67381,8 +67381,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F21large"
+          "F21large",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67488,8 +67488,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F11"
+          "F11",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67595,8 +67595,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F20"
+          "F20",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67702,8 +67702,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F15"
+          "F15",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67809,8 +67809,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F16chan"
+          "F16chan",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -67916,8 +67916,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F21tiny"
+          "F21tiny",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68023,8 +68023,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F11"
+          "F11",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68130,8 +68130,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F20"
+          "F20",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68237,8 +68237,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F15"
+          "F15",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68344,8 +68344,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F16plane"
+          "F16plane",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68451,8 +68451,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F21zero"
+          "F21zero",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68557,8 +68557,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F11"
+          "F11",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68664,8 +68664,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F20"
+          "F20",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68771,8 +68771,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F15"
+          "F15",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68878,8 +68878,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F16fast"
+          "F16fast",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -68985,8 +68985,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F21const"
+          "F21const",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69090,8 +69090,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F11"
+          "F11",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69197,8 +69197,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F20"
+          "F20",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69304,8 +69304,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F15"
+          "F15",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69411,8 +69411,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F16chan"
+          "F16chan",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69518,8 +69518,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F21large"
+          "F21large",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69625,8 +69625,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F11"
+          "F11",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69732,8 +69732,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F20"
+          "F20",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69839,8 +69839,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F15"
+          "F15",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -69946,8 +69946,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F16plane"
+          "F16plane",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70053,8 +70053,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F21tiny"
+          "F21tiny",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70160,8 +70160,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12b",
-          "F11"
+          "F11",
+          "S12b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70267,8 +70267,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12b",
-          "F20"
+          "F20",
+          "S12b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70374,8 +70374,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12b",
-          "F15"
+          "F15",
+          "S12b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70481,8 +70481,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12b",
-          "F16fast"
+          "F16fast",
+          "S12b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70588,8 +70588,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12b",
-          "F21zero"
+          "F21zero",
+          "S12b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70694,8 +70694,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F11"
+          "F11",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70801,8 +70801,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F20"
+          "F20",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -70908,8 +70908,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F15"
+          "F15",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71015,8 +71015,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F16chan"
+          "F16chan",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71122,8 +71122,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F21const"
+          "F21const",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71227,8 +71227,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F11"
+          "F11",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71334,8 +71334,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F20"
+          "F20",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71441,8 +71441,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F15"
+          "F15",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71548,8 +71548,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F16plane"
+          "F16plane",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71655,8 +71655,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F21large"
+          "F21large",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71762,8 +71762,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F11"
+          "F11",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71869,8 +71869,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F20"
+          "F20",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -71976,8 +71976,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F15"
+          "F15",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72083,8 +72083,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F16fast"
+          "F16fast",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72190,8 +72190,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F21tiny"
+          "F21tiny",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72297,8 +72297,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F11"
+          "F11",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72404,8 +72404,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F20"
+          "F20",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72511,8 +72511,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F15"
+          "F15",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72618,8 +72618,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F16chan"
+          "F16chan",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72725,8 +72725,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F21zero"
+          "F21zero",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72831,8 +72831,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F11"
+          "F11",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -72938,8 +72938,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F20"
+          "F20",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73045,8 +73045,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F15"
+          "F15",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73152,8 +73152,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F16plane"
+          "F16plane",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73259,8 +73259,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F21const"
+          "F21const",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73364,8 +73364,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F11"
+          "F11",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73471,8 +73471,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F20"
+          "F20",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73578,8 +73578,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F15"
+          "F15",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73685,8 +73685,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F16fast"
+          "F16fast",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73792,8 +73792,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F21large"
+          "F21large",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -73899,8 +73899,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F20"
+          "F20",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74006,8 +74006,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F15"
+          "F15",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74113,8 +74113,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F16chan"
+          "F16chan",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74220,8 +74220,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F21tiny"
+          "F21tiny",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74327,8 +74327,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F11"
+          "F11",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74434,8 +74434,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F20"
+          "F20",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74541,8 +74541,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F15"
+          "F15",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74648,8 +74648,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F16plane"
+          "F16plane",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74755,8 +74755,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F21zero"
+          "F21zero",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74861,8 +74861,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F11"
+          "F11",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -74968,8 +74968,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F20"
+          "F20",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75075,8 +75075,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F15"
+          "F15",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75182,8 +75182,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F16fast"
+          "F16fast",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75289,8 +75289,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F21const"
+          "F21const",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75394,8 +75394,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F11"
+          "F11",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75501,8 +75501,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F20"
+          "F20",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75608,8 +75608,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F15"
+          "F15",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75715,8 +75715,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F16chan"
+          "F16chan",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75822,8 +75822,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F21large"
+          "F21large",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -75929,8 +75929,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F11"
+          "F11",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76036,8 +76036,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F20"
+          "F20",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76143,8 +76143,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F15"
+          "F15",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76250,8 +76250,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F16plane"
+          "F16plane",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76357,8 +76357,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F21tiny"
+          "F21tiny",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76474,8 +76474,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F11"
+          "F11",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76591,8 +76591,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F20"
+          "F20",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76708,8 +76708,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F15"
+          "F15",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76825,8 +76825,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F16fast"
+          "F16fast",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -76942,8 +76942,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S1",
-          "F21zero"
+          "F21zero",
+          "S1"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77058,8 +77058,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F11"
+          "F11",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77175,8 +77175,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F20"
+          "F20",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77292,8 +77292,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F15"
+          "F15",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77409,8 +77409,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F16chan"
+          "F16chan",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77526,8 +77526,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77641,8 +77641,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S3",
-          "F11"
+          "F11",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77758,8 +77758,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S3",
-          "F15"
+          "F15",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77875,8 +77875,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S3",
-          "F16plane"
+          "F16plane",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -77992,8 +77992,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F11"
+          "F11",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78109,8 +78109,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F20"
+          "F20",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78226,8 +78226,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F15"
+          "F15",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78343,8 +78343,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F16fast"
+          "F16fast",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78460,8 +78460,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S4",
-          "F21tiny"
+          "F21tiny",
+          "S4"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78577,8 +78577,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F11"
+          "F11",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78694,8 +78694,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F20"
+          "F20",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78811,8 +78811,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F15"
+          "F15",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -78928,8 +78928,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F16chan"
+          "F16chan",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79045,8 +79045,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S5",
-          "F21zero"
+          "F21zero",
+          "S5"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79161,8 +79161,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F11"
+          "F11",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79278,8 +79278,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F20"
+          "F20",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79395,8 +79395,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F15"
+          "F15",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79512,8 +79512,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F16plane"
+          "F16plane",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79629,8 +79629,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S6",
-          "F21const"
+          "F21const",
+          "S6"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79744,8 +79744,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F11"
+          "F11",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79861,8 +79861,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F20"
+          "F20",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -79978,8 +79978,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F15"
+          "F15",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80095,8 +80095,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F16fast"
+          "F16fast",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80212,8 +80212,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S7",
-          "F21large"
+          "F21large",
+          "S7"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80329,8 +80329,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F11"
+          "F11",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80446,8 +80446,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F20"
+          "F20",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80563,8 +80563,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F15"
+          "F15",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80680,8 +80680,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F16chan"
+          "F16chan",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80797,8 +80797,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S8",
-          "F21tiny"
+          "F21tiny",
+          "S8"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -80914,8 +80914,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F11"
+          "F11",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81031,8 +81031,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F20"
+          "F20",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81148,8 +81148,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F15"
+          "F15",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81265,8 +81265,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F16plane"
+          "F16plane",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81382,8 +81382,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S9",
-          "F21zero"
+          "F21zero",
+          "S9"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81498,8 +81498,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F11"
+          "F11",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81615,8 +81615,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F20"
+          "F20",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81732,8 +81732,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F15"
+          "F15",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81849,8 +81849,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F16fast"
+          "F16fast",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -81966,8 +81966,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S10",
-          "F21const"
+          "F21const",
+          "S10"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82081,8 +82081,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F11"
+          "F11",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82198,8 +82198,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F20"
+          "F20",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82315,8 +82315,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F15"
+          "F15",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82432,8 +82432,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F16chan"
+          "F16chan",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82549,8 +82549,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S11",
-          "F21large"
+          "F21large",
+          "S11"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82666,8 +82666,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F11"
+          "F11",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82783,8 +82783,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F20"
+          "F20",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -82900,8 +82900,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F15"
+          "F15",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83017,8 +83017,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F16plane"
+          "F16plane",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83134,8 +83134,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S12a",
-          "F21tiny"
+          "F21tiny",
+          "S12a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83251,8 +83251,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F11"
+          "F11",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83368,8 +83368,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F20"
+          "F20",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83485,8 +83485,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F15"
+          "F15",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83602,8 +83602,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F16fast"
+          "F16fast",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83719,8 +83719,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13a",
-          "F21zero"
+          "F21zero",
+          "S13a"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83835,8 +83835,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F11"
+          "F11",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -83952,8 +83952,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F20"
+          "F20",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84069,8 +84069,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F15"
+          "F15",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84186,8 +84186,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F16chan"
+          "F16chan",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84303,8 +84303,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S13b",
-          "F21const"
+          "F21const",
+          "S13b"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84418,8 +84418,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F11"
+          "F11",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84535,8 +84535,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F20"
+          "F20",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84652,8 +84652,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F15"
+          "F15",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84769,8 +84769,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F16plane"
+          "F16plane",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -84886,8 +84886,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S14",
-          "F21large"
+          "F21large",
+          "S14"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85003,8 +85003,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F11"
+          "F11",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85120,8 +85120,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F20"
+          "F20",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85237,8 +85237,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F15"
+          "F15",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85354,8 +85354,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F16fast"
+          "F16fast",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85471,8 +85471,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S15",
-          "F21tiny"
+          "F21tiny",
+          "S15"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85588,8 +85588,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F11"
+          "F11",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85705,8 +85705,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F20"
+          "F20",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85822,8 +85822,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F15"
+          "F15",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -85939,8 +85939,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F16chan"
+          "F16chan",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86056,8 +86056,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S16",
-          "F21zero"
+          "F21zero",
+          "S16"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86172,8 +86172,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F11"
+          "F11",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86289,8 +86289,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F20"
+          "F20",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86406,8 +86406,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F15"
+          "F15",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86523,8 +86523,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F16plane"
+          "F16plane",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86640,8 +86640,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S17",
-          "F21const"
+          "F21const",
+          "S17"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86755,8 +86755,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F20"
+          "F20",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86872,8 +86872,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F15"
+          "F15",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -86989,8 +86989,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F16fast"
+          "F16fast",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87106,8 +87106,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S18",
-          "F21large"
+          "F21large",
+          "S18"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87223,8 +87223,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F11"
+          "F11",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87340,8 +87340,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F20"
+          "F20",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87457,8 +87457,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F15"
+          "F15",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87574,8 +87574,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F16chan"
+          "F16chan",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87691,8 +87691,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S19",
-          "F21tiny"
+          "F21tiny",
+          "S19"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87808,8 +87808,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F11"
+          "F11",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -87925,8 +87925,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F20"
+          "F20",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88042,8 +88042,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F15"
+          "F15",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88159,8 +88159,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F16plane"
+          "F16plane",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88276,8 +88276,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S20",
-          "F21zero"
+          "F21zero",
+          "S20"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88392,8 +88392,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F11"
+          "F11",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88509,8 +88509,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F20"
+          "F20",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88626,8 +88626,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F15"
+          "F15",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88743,8 +88743,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F16fast"
+          "F16fast",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88860,8 +88860,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S21",
-          "F21const"
+          "F21const",
+          "S21"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -88975,8 +88975,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F11"
+          "F11",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89092,8 +89092,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F20"
+          "F20",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89209,8 +89209,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F15"
+          "F15",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89326,8 +89326,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F16chan"
+          "F16chan",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89443,8 +89443,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S22",
-          "F21large"
+          "F21large",
+          "S22"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89570,8 +89570,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S23",
-          "F11"
+          "F11",
+          "S23"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89697,8 +89697,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S23",
-          "F20"
+          "F20",
+          "S23"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89824,8 +89824,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S23",
-          "F15"
+          "F15",
+          "S23"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -89951,8 +89951,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S23",
-          "F16fast"
+          "F16fast",
+          "S23"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90078,8 +90078,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S23",
-          "F21zero"
+          "F21zero",
+          "S23"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90174,8 +90174,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90270,8 +90270,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90365,8 +90365,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90462,8 +90462,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90559,8 +90559,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90655,8 +90655,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90752,8 +90752,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90849,8 +90849,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -90945,8 +90945,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91040,8 +91040,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91137,8 +91137,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91234,8 +91234,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91330,8 +91330,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91425,8 +91425,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91522,8 +91522,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91619,8 +91619,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91715,8 +91715,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91810,8 +91810,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -91907,8 +91907,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92004,8 +92004,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92100,8 +92100,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92195,8 +92195,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92292,8 +92292,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92399,8 +92399,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92505,8 +92505,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92610,8 +92610,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92717,8 +92717,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92824,8 +92824,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -92930,8 +92930,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93037,8 +93037,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93144,8 +93144,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93250,8 +93250,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93355,8 +93355,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93462,8 +93462,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93569,8 +93569,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93675,8 +93675,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93780,8 +93780,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93887,8 +93887,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -93994,8 +93994,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94100,8 +94100,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94205,8 +94205,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94312,8 +94312,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94419,8 +94419,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94525,8 +94525,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94630,8 +94630,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94737,8 +94737,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94854,8 +94854,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -94970,8 +94970,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95085,8 +95085,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95202,8 +95202,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95319,8 +95319,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95435,8 +95435,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95552,8 +95552,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95669,8 +95669,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95785,8 +95785,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -95900,8 +95900,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96017,8 +96017,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96134,8 +96134,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96250,8 +96250,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96365,8 +96365,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96482,8 +96482,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96599,8 +96599,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96715,8 +96715,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96830,8 +96830,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -96947,8 +96947,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -97064,8 +97064,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21zero"
+          "F21zero",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -97180,8 +97180,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21const"
+          "F21const",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -97295,8 +97295,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21large"
+          "F21large",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -97412,8 +97412,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd",
         "plan_items": [
-          "S2",
-          "F21tiny"
+          "F21tiny",
+          "S2"
         ],
         "purpose": "probe",
         "size_class": "S",

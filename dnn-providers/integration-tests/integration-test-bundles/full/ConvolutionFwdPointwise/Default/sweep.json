@@ -450,7 +450,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1921448071,
         "inputs": {
@@ -466,8 +466,7 @@
             "hi": 1.0,
             "seed": 503799469
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -568,7 +567,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1176776607,
         "inputs": {
@@ -584,8 +583,7 @@
             "hi": 1.0,
             "seed": 1142147858
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -803,7 +801,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 872774779,
         "inputs": {
@@ -819,8 +817,7 @@
             "hi": 1.0,
             "seed": 744909199
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -921,7 +918,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 466270778,
         "inputs": {
@@ -937,8 +934,7 @@
             "hi": 1.0,
             "seed": 1811261463
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -1390,7 +1386,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2043134797,
         "inputs": {
@@ -1406,8 +1402,7 @@
             "hi": 1.0,
             "seed": 52780048
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -1508,7 +1503,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 814414715,
         "inputs": {
@@ -1524,8 +1519,7 @@
             "hi": 1.0,
             "seed": 990246626
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -1860,7 +1854,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1708070218,
         "inputs": {
@@ -1876,8 +1870,7 @@
             "hi": 1.0,
             "seed": 50793327
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -1978,7 +1971,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1825725106,
         "inputs": {
@@ -1994,8 +1987,7 @@
             "hi": 1.0,
             "seed": 1155087938
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -2330,7 +2322,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1660127445,
         "inputs": {
@@ -2346,8 +2338,7 @@
             "hi": 1.0,
             "seed": 940825989
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -2448,7 +2439,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 826323640,
         "inputs": {
@@ -2464,8 +2455,7 @@
             "hi": 1.0,
             "seed": 1546647176
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -2917,7 +2907,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2108794603,
         "inputs": {
@@ -2933,8 +2923,7 @@
             "hi": 1.0,
             "seed": 1083521791
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -3035,7 +3024,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 11956171,
         "inputs": {
@@ -3050,136 +3039,6 @@
             "lo": -1.0,
             "hi": 1.0,
             "seed": 2124864063
-          }
-        },
-        "notes": "probe: F26 non-ReLU activation"
-      }
-    },
-    {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1470893272,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 646818500
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1151680805
           }
         }
       }
@@ -3552,7 +3411,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 573715016,
         "inputs": {
@@ -3568,8 +3427,7 @@
             "hi": 1.0,
             "seed": 1302691228
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -3682,7 +3540,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1683040320,
         "inputs": {
@@ -3697,136 +3555,6 @@
             "lo": -1.0,
             "hi": 1.0,
             "seed": 1115067060
-          }
-        },
-        "notes": "probe: F26 non-ReLU activation"
-      }
-    },
-    {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1303252916,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1008683383
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 111088130
           }
         }
       }
@@ -4199,7 +3927,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1367764845,
         "inputs": {
@@ -4215,8 +3943,7 @@
             "hi": 1.0,
             "seed": 1804998814
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -4329,7 +4056,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2050515804,
         "inputs": {
@@ -4344,136 +4071,6 @@
             "lo": -1.0,
             "hi": 1.0,
             "seed": 162978744
-          }
-        },
-        "notes": "probe: F26 non-ReLU activation"
-      }
-    },
-    {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
-      "values": {
-        "io_data_type": "half",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "half"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "half"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1316434691,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1053405626
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 24341672
           }
         }
       }
@@ -4846,7 +4443,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1077236622,
         "inputs": {
@@ -4862,8 +4459,7 @@
             "hi": 1.0,
             "seed": 842099632
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -4976,7 +4572,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 361706858,
         "inputs": {
@@ -4991,136 +4587,6 @@
             "lo": -1.0,
             "hi": 1.0,
             "seed": 628771457
-          }
-        },
-        "notes": "probe: F26 non-ReLU activation"
-      }
-    },
-    {
-      "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cf_relu",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 1513866068,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 2050731952
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1259688893
           }
         }
       }
@@ -5493,7 +4959,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 577646212,
         "inputs": {
@@ -5509,8 +4975,7 @@
             "hi": 1.0,
             "seed": 855104764
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -5623,7 +5088,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 580431750,
         "inputs": {
@@ -5639,8 +5104,7 @@
             "hi": 1.0,
             "seed": 1463490794
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -6011,7 +5475,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1488580124,
         "inputs": {
@@ -6027,8 +5491,7 @@
             "hi": 1.0,
             "seed": 2137837197
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -6141,7 +5604,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1263847676,
         "inputs": {
@@ -6157,8 +5620,7 @@
             "hi": 1.0,
             "seed": 1519874504
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -6706,7 +6168,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1151281020,
         "inputs": {
@@ -6722,8 +6184,7 @@
             "hi": 1.0,
             "seed": 1099532212
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -6848,7 +6309,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1919911608,
         "inputs": {
@@ -6864,8 +6325,7 @@
             "hi": 1.0,
             "seed": 696053952
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -7413,7 +6873,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1868732644,
         "inputs": {
@@ -7429,8 +6889,7 @@
             "hi": 1.0,
             "seed": 1883209026
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -7555,7 +7014,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 648647952,
         "inputs": {
@@ -7571,8 +7030,7 @@
             "hi": 1.0,
             "seed": 1859970068
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -8120,7 +7578,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1628345201,
         "inputs": {
@@ -8136,8 +7594,7 @@
             "hi": 1.0,
             "seed": 1910238341
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -8262,7 +7719,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 795167100,
         "inputs": {
@@ -8278,8 +7735,7 @@
             "hi": 1.0,
             "seed": 973581288
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -8827,7 +8283,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1740842815,
         "inputs": {
@@ -8843,8 +8299,7 @@
             "hi": 1.0,
             "seed": 751199786
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -8969,7 +8424,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 261844538,
         "inputs": {
@@ -8985,8 +8440,7 @@
             "hi": 1.0,
             "seed": 1849198104
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -9534,7 +8988,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1052876705,
         "inputs": {
@@ -9550,8 +9004,7 @@
             "hi": 1.0,
             "seed": 1423412836
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -9676,7 +9129,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1852092686,
         "inputs": {
@@ -9692,8 +9145,7 @@
             "hi": 1.0,
             "seed": 1554464819
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -10241,7 +9693,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 100803545,
         "inputs": {
@@ -10257,8 +9709,7 @@
             "hi": 1.0,
             "seed": 537146413
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -10383,7 +9834,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 944880709,
         "inputs": {
@@ -10399,8 +9850,7 @@
             "hi": 1.0,
             "seed": 562083282
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -58687,7 +58137,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2083866989,
         "inputs": {
@@ -58703,8 +58153,7 @@
             "hi": 1.0,
             "seed": 1899713649
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -58805,7 +58254,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1694899688,
         "inputs": {
@@ -58821,8 +58270,7 @@
             "hi": 1.0,
             "seed": 442506244
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -58923,7 +58371,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 235366072,
         "inputs": {
@@ -58939,8 +58387,7 @@
             "hi": 1.0,
             "seed": 580416928
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59041,7 +58488,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1590501704,
         "inputs": {
@@ -59057,8 +58504,7 @@
             "hi": 1.0,
             "seed": 98431188
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59159,7 +58605,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1499709216,
         "inputs": {
@@ -59175,8 +58621,7 @@
             "hi": 1.0,
             "seed": 1336499582
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59277,7 +58722,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1389275513,
         "inputs": {
@@ -59293,8 +58738,7 @@
             "hi": 1.0,
             "seed": 236769140
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59395,7 +58839,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1715121504,
         "inputs": {
@@ -59411,8 +58855,7 @@
             "hi": 1.0,
             "seed": 2045412576
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59513,7 +58956,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1505574488,
         "inputs": {
@@ -59529,8 +58972,7 @@
             "hi": 1.0,
             "seed": 1425652589
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59631,7 +59073,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1782900199,
         "inputs": {
@@ -59647,8 +59089,7 @@
             "hi": 1.0,
             "seed": 972797040
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59749,7 +59190,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1318754699,
         "inputs": {
@@ -59765,8 +59206,7 @@
             "hi": 1.0,
             "seed": 1323867501
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59867,7 +59307,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 405676,
         "inputs": {
@@ -59883,8 +59323,7 @@
             "hi": 1.0,
             "seed": 1442636265
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -59985,7 +59424,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 606034025,
         "inputs": {
@@ -60001,8 +59440,7 @@
             "hi": 1.0,
             "seed": 628290178
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60120,7 +59558,7 @@
             "seed": 840064057
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -60221,7 +59659,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 146492994,
         "inputs": {
@@ -60237,8 +59675,7 @@
             "hi": 1.0,
             "seed": 1320776663
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60339,7 +59776,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 196849878,
         "inputs": {
@@ -60355,8 +59792,7 @@
             "hi": 1.0,
             "seed": 1252463649
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60457,7 +59893,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 525195417,
         "inputs": {
@@ -60473,8 +59909,7 @@
             "hi": 1.0,
             "seed": 260261488
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60575,7 +60010,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 383561764,
         "inputs": {
@@ -60591,8 +60026,7 @@
             "hi": 1.0,
             "seed": 1786815454
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60693,7 +60127,7 @@
         "plan_items": [
           "L1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 971400139,
         "inputs": {
@@ -60709,8 +60143,7 @@
             "hi": 1.0,
             "seed": 2059120433
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60811,7 +60244,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1050883527,
         "inputs": {
@@ -60827,8 +60260,7 @@
             "hi": 1.0,
             "seed": 799105611
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -60929,7 +60361,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 387883255,
         "inputs": {
@@ -60945,8 +60377,7 @@
             "hi": 1.0,
             "seed": 93830491
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61047,7 +60478,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 225164216,
         "inputs": {
@@ -61063,8 +60494,7 @@
             "hi": 1.0,
             "seed": 7037481
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61165,7 +60595,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1841926339,
         "inputs": {
@@ -61181,8 +60611,7 @@
             "hi": 1.0,
             "seed": 1607852696
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61283,7 +60712,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1594819097,
         "inputs": {
@@ -61299,8 +60728,7 @@
             "hi": 1.0,
             "seed": 2020950412
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61401,7 +60829,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 955024207,
         "inputs": {
@@ -61417,8 +60845,7 @@
             "hi": 1.0,
             "seed": 1191639465
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61519,7 +60946,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1827525176,
         "inputs": {
@@ -61535,8 +60962,7 @@
             "hi": 1.0,
             "seed": 1053939419
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61637,7 +61063,7 @@
         "plan_items": [
           "L10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 841371474,
         "inputs": {
@@ -61653,8 +61079,7 @@
             "hi": 1.0,
             "seed": 1092316121
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61755,7 +61180,7 @@
         "plan_items": [
           "L11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 265918327,
         "inputs": {
@@ -61771,8 +61196,7 @@
             "hi": 1.0,
             "seed": 963650453
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61873,7 +61297,7 @@
         "plan_items": [
           "L13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1273780190,
         "inputs": {
@@ -61889,8 +61313,7 @@
             "hi": 1.0,
             "seed": 64419155
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -61991,7 +61414,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 473217166,
         "inputs": {
@@ -62007,8 +61430,7 @@
             "hi": 1.0,
             "seed": 86259589
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62109,7 +61531,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1978312916,
         "inputs": {
@@ -62125,8 +61547,7 @@
             "hi": 1.0,
             "seed": 326154608
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62227,7 +61648,7 @@
         "plan_items": [
           "L16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1329254704,
         "inputs": {
@@ -62243,8 +61664,7 @@
             "hi": 1.0,
             "seed": 285026430
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62345,7 +61765,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1368820418,
         "inputs": {
@@ -62361,8 +61781,7 @@
             "hi": 1.0,
             "seed": 578665902
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62480,7 +61899,7 @@
             "seed": 487584667
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -62581,7 +62000,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1397503732,
         "inputs": {
@@ -62597,8 +62016,7 @@
             "hi": 1.0,
             "seed": 2089276433
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62699,7 +62117,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1433353777,
         "inputs": {
@@ -62715,8 +62133,7 @@
             "hi": 1.0,
             "seed": 1780906910
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62817,7 +62234,7 @@
         "plan_items": [
           "L21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 329899567,
         "inputs": {
@@ -62833,8 +62250,7 @@
             "hi": 1.0,
             "seed": 552009023
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -62935,7 +62351,7 @@
         "plan_items": [
           "L22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 807208985,
         "inputs": {
@@ -62951,8 +62367,7 @@
             "hi": 1.0,
             "seed": 1493033278
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63065,7 +62480,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2054460767,
         "inputs": {
@@ -63081,8 +62496,7 @@
             "hi": 1.0,
             "seed": 941011759
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63195,7 +62609,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1141040142,
         "inputs": {
@@ -63211,8 +62625,7 @@
             "hi": 1.0,
             "seed": 1901772507
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63325,7 +62738,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 101470185,
         "inputs": {
@@ -63341,8 +62754,7 @@
             "hi": 1.0,
             "seed": 731855002
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63455,7 +62867,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1758863764,
         "inputs": {
@@ -63471,8 +62883,7 @@
             "hi": 1.0,
             "seed": 34865545
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63585,7 +62996,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 312617443,
         "inputs": {
@@ -63601,8 +63012,7 @@
             "hi": 1.0,
             "seed": 907118289
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63715,7 +63125,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 896167436,
         "inputs": {
@@ -63731,8 +63141,7 @@
             "hi": 1.0,
             "seed": 889746087
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63845,7 +63254,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1939090594,
         "inputs": {
@@ -63861,8 +63270,7 @@
             "hi": 1.0,
             "seed": 1910072641
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -63975,7 +63383,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 517498369,
         "inputs": {
@@ -63991,8 +63399,7 @@
             "hi": 1.0,
             "seed": 1308503195
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64105,7 +63512,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 505534099,
         "inputs": {
@@ -64121,8 +63528,7 @@
             "hi": 1.0,
             "seed": 941163584
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64235,7 +63641,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1941350092,
         "inputs": {
@@ -64251,8 +63657,7 @@
             "hi": 1.0,
             "seed": 273259246
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64365,7 +63770,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 107631625,
         "inputs": {
@@ -64381,8 +63786,7 @@
             "hi": 1.0,
             "seed": 1618058898
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64495,7 +63899,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1804672488,
         "inputs": {
@@ -64511,8 +63915,7 @@
             "hi": 1.0,
             "seed": 995376780
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64625,7 +64028,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1575118120,
         "inputs": {
@@ -64641,8 +64044,7 @@
             "hi": 1.0,
             "seed": 477950476
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64755,7 +64157,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 271521710,
         "inputs": {
@@ -64771,8 +64173,7 @@
             "hi": 1.0,
             "seed": 21181650
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -64885,7 +64286,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1595473224,
         "inputs": {
@@ -64901,8 +64302,7 @@
             "hi": 1.0,
             "seed": 1847123076
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -65015,7 +64415,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1306755336,
         "inputs": {
@@ -65031,8 +64431,7 @@
             "hi": 1.0,
             "seed": 1315717507
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -65145,7 +64544,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2112811866,
         "inputs": {
@@ -65161,8 +64560,7 @@
             "hi": 1.0,
             "seed": 777788470
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -65292,7 +64690,7 @@
             "seed": 51304983
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -65405,7 +64803,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 987785200,
         "inputs": {
@@ -65421,8 +64819,7 @@
             "hi": 1.0,
             "seed": 637820103
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -65535,7 +64932,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1184587786,
         "inputs": {
@@ -65551,8 +64948,7 @@
             "hi": 1.0,
             "seed": 1649593357
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -65665,7 +65061,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 220217387,
         "inputs": {
@@ -65681,8 +65077,7 @@
             "hi": 1.0,
             "seed": 2074215147
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -65795,7 +65190,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 204854937,
         "inputs": {
@@ -65811,8 +65206,7 @@
             "hi": 1.0,
             "seed": 675377725
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -65925,7 +65319,7 @@
         "plan_items": [
           "L1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1600863743,
         "inputs": {
@@ -65941,8 +65335,7 @@
             "hi": 1.0,
             "seed": 771136259
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66055,7 +65448,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1334830214,
         "inputs": {
@@ -66071,8 +65464,7 @@
             "hi": 1.0,
             "seed": 1150574271
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66185,7 +65577,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 2076185246,
         "inputs": {
@@ -66201,8 +65593,7 @@
             "hi": 1.0,
             "seed": 1094125772
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66315,7 +65706,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 966283547,
         "inputs": {
@@ -66331,8 +65722,7 @@
             "hi": 1.0,
             "seed": 692557550
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66445,7 +65835,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1426954234,
         "inputs": {
@@ -66461,8 +65851,7 @@
             "hi": 1.0,
             "seed": 293349685
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66575,7 +65964,7 @@
         "plan_items": [
           "L6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1711302447,
         "inputs": {
@@ -66591,8 +65980,7 @@
             "hi": 1.0,
             "seed": 1322325530
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66705,7 +66093,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1812010734,
         "inputs": {
@@ -66721,8 +66109,7 @@
             "hi": 1.0,
             "seed": 1675371681
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66835,7 +66222,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 162214956,
         "inputs": {
@@ -66851,8 +66238,7 @@
             "hi": 1.0,
             "seed": 460333694
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -66965,7 +66351,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 245732191,
         "inputs": {
@@ -66981,8 +66367,7 @@
             "hi": 1.0,
             "seed": 442062742
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -67095,7 +66480,7 @@
         "plan_items": [
           "L10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 910021959,
         "inputs": {
@@ -67111,8 +66496,7 @@
             "hi": 1.0,
             "seed": 161076003
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -67225,7 +66609,7 @@
         "plan_items": [
           "L11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 732765536,
         "inputs": {
@@ -67241,8 +66625,7 @@
             "hi": 1.0,
             "seed": 1496231423
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -67355,7 +66738,7 @@
         "plan_items": [
           "L12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 379516056,
         "inputs": {
@@ -67371,8 +66754,7 @@
             "hi": 1.0,
             "seed": 861608023
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -67485,7 +66867,7 @@
         "plan_items": [
           "L12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 425359534,
         "inputs": {
@@ -67501,8 +66883,7 @@
             "hi": 1.0,
             "seed": 1657957044
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -67615,7 +66996,7 @@
         "plan_items": [
           "L13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1409313255,
         "inputs": {
@@ -67631,8 +67012,7 @@
             "hi": 1.0,
             "seed": 1931335972
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -67745,7 +67125,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1069243872,
         "inputs": {
@@ -67761,8 +67141,7 @@
             "hi": 1.0,
             "seed": 1359357205
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -67875,7 +67254,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 247208009,
         "inputs": {
@@ -67891,8 +67270,7 @@
             "hi": 1.0,
             "seed": 1433823923
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -68005,7 +67383,7 @@
         "plan_items": [
           "L15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1391687079,
         "inputs": {
@@ -68021,8 +67399,7 @@
             "hi": 1.0,
             "seed": 1532720167
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -68135,7 +67512,7 @@
         "plan_items": [
           "L16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 654053942,
         "inputs": {
@@ -68151,8 +67528,7 @@
             "hi": 1.0,
             "seed": 1077451685
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -68265,7 +67641,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1890725650,
         "inputs": {
@@ -68281,8 +67657,7 @@
             "hi": 1.0,
             "seed": 296033549
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -68412,7 +67787,7 @@
             "seed": 1967586144
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -68525,7 +67900,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 665979719,
         "inputs": {
@@ -68541,8 +67916,7 @@
             "hi": 1.0,
             "seed": 1610093112
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -68655,7 +68029,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1128400335,
         "inputs": {
@@ -68671,8 +68045,7 @@
             "hi": 1.0,
             "seed": 1924527138
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -68785,7 +68158,7 @@
         "plan_items": [
           "L21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 2030056426,
         "inputs": {
@@ -68801,8 +68174,7 @@
             "hi": 1.0,
             "seed": 1413738267
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -68915,7 +68287,7 @@
         "plan_items": [
           "L22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 201427163,
         "inputs": {
@@ -68931,8 +68303,7 @@
             "hi": 1.0,
             "seed": 1276178040
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -69057,7 +68428,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 104005528,
         "inputs": {
@@ -69073,8 +68444,7 @@
             "hi": 1.0,
             "seed": 119195654
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -69199,7 +68569,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1178281864,
         "inputs": {
@@ -69215,8 +68585,7 @@
             "hi": 1.0,
             "seed": 471972382
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -69341,7 +68710,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1279110677,
         "inputs": {
@@ -69357,8 +68726,7 @@
             "hi": 1.0,
             "seed": 92280542
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -69483,7 +68851,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1743704586,
         "inputs": {
@@ -69499,8 +68867,7 @@
             "hi": 1.0,
             "seed": 1906908084
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -69625,7 +68992,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 19251336,
         "inputs": {
@@ -69641,8 +69008,7 @@
             "hi": 1.0,
             "seed": 2003055810
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -69767,7 +69133,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1164527370,
         "inputs": {
@@ -69783,8 +69149,7 @@
             "hi": 1.0,
             "seed": 808431506
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -69909,7 +69274,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 16195677,
         "inputs": {
@@ -69925,8 +69290,7 @@
             "hi": 1.0,
             "seed": 465499069
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -70051,7 +69415,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1896813235,
         "inputs": {
@@ -70067,8 +69431,7 @@
             "hi": 1.0,
             "seed": 1759424270
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -70193,7 +69556,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 431943010,
         "inputs": {
@@ -70209,8 +69572,7 @@
             "hi": 1.0,
             "seed": 1005424323
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -70335,7 +69697,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1485502290,
         "inputs": {
@@ -70351,8 +69713,7 @@
             "hi": 1.0,
             "seed": 433330019
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -70477,7 +69838,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 135349863,
         "inputs": {
@@ -70493,8 +69854,7 @@
             "hi": 1.0,
             "seed": 1066716062
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -70619,7 +69979,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 725701175,
         "inputs": {
@@ -70635,8 +69995,7 @@
             "hi": 1.0,
             "seed": 605001420
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -70761,7 +70120,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1022136812,
         "inputs": {
@@ -70777,8 +70136,7 @@
             "hi": 1.0,
             "seed": 1554394781
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -70903,7 +70261,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 281066473,
         "inputs": {
@@ -70919,8 +70277,7 @@
             "hi": 1.0,
             "seed": 1552356304
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -71045,7 +70402,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 9842606,
         "inputs": {
@@ -71061,8 +70418,7 @@
             "hi": 1.0,
             "seed": 2146659634
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -71187,7 +70543,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2002470858,
         "inputs": {
@@ -71203,8 +70559,7 @@
             "hi": 1.0,
             "seed": 1673662085
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -71346,7 +70701,7 @@
             "seed": 423759836
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -71471,7 +70826,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 621170060,
         "inputs": {
@@ -71487,8 +70842,7 @@
             "hi": 1.0,
             "seed": 1479564915
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -71613,7 +70967,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1433711659,
         "inputs": {
@@ -71629,8 +70983,7 @@
             "hi": 1.0,
             "seed": 794751520
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -71755,7 +71108,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1096285520,
         "inputs": {
@@ -71771,8 +71124,7 @@
             "hi": 1.0,
             "seed": 100102889
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -71897,7 +71249,7 @@
         "plan_items": [
           "L1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1068055473,
         "inputs": {
@@ -71913,8 +71265,7 @@
             "hi": 1.0,
             "seed": 132785585
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -72039,7 +71390,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 806834309,
         "inputs": {
@@ -72055,8 +71406,7 @@
             "hi": 1.0,
             "seed": 46997190
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -72181,7 +71531,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1097387779,
         "inputs": {
@@ -72197,8 +71547,7 @@
             "hi": 1.0,
             "seed": 1894655761
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -72323,7 +71672,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 462188126,
         "inputs": {
@@ -72339,8 +71688,7 @@
             "hi": 1.0,
             "seed": 1482398895
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -72465,7 +71813,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1554125417,
         "inputs": {
@@ -72481,8 +71829,7 @@
             "hi": 1.0,
             "seed": 509908228
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -72607,7 +71954,7 @@
         "plan_items": [
           "L6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1949176691,
         "inputs": {
@@ -72623,8 +71970,7 @@
             "hi": 1.0,
             "seed": 638768393
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -72749,7 +72095,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1323707997,
         "inputs": {
@@ -72765,8 +72111,7 @@
             "hi": 1.0,
             "seed": 1609715863
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -72891,7 +72236,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1617932131,
         "inputs": {
@@ -72907,8 +72252,7 @@
             "hi": 1.0,
             "seed": 19153478
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -73033,7 +72377,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1660254310,
         "inputs": {
@@ -73049,8 +72393,7 @@
             "hi": 1.0,
             "seed": 1223619295
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -73175,7 +72518,7 @@
         "plan_items": [
           "L10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 874192684,
         "inputs": {
@@ -73191,8 +72534,7 @@
             "hi": 1.0,
             "seed": 59580718
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -73317,7 +72659,7 @@
         "plan_items": [
           "L11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1623166319,
         "inputs": {
@@ -73333,8 +72675,7 @@
             "hi": 1.0,
             "seed": 1167907005
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -73459,7 +72800,7 @@
         "plan_items": [
           "L12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 553787650,
         "inputs": {
@@ -73475,8 +72816,7 @@
             "hi": 1.0,
             "seed": 814481592
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -73601,7 +72941,7 @@
         "plan_items": [
           "L13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1074212821,
         "inputs": {
@@ -73617,8 +72957,7 @@
             "hi": 1.0,
             "seed": 1387493278
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -73743,7 +73082,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1900541143,
         "inputs": {
@@ -73759,8 +73098,7 @@
             "hi": 1.0,
             "seed": 1188817491
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -73885,7 +73223,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 714186168,
         "inputs": {
@@ -73901,8 +73239,7 @@
             "hi": 1.0,
             "seed": 246258933
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -74027,7 +73364,7 @@
         "plan_items": [
           "L15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1999576606,
         "inputs": {
@@ -74043,8 +73380,7 @@
             "hi": 1.0,
             "seed": 1620859027
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -74169,7 +73505,7 @@
         "plan_items": [
           "L16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1641547541,
         "inputs": {
@@ -74185,8 +73521,7 @@
             "hi": 1.0,
             "seed": 1049382224
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -74311,7 +73646,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 211210518,
         "inputs": {
@@ -74327,8 +73662,7 @@
             "hi": 1.0,
             "seed": 1639841066
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -74470,7 +73804,7 @@
             "seed": 631114599
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -74595,7 +73929,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1248683739,
         "inputs": {
@@ -74611,8 +73945,7 @@
             "hi": 1.0,
             "seed": 1396516165
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -74737,7 +74070,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1276836884,
         "inputs": {
@@ -74753,8 +74086,7 @@
             "hi": 1.0,
             "seed": 1795881641
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -74879,7 +74211,7 @@
         "plan_items": [
           "L21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 856843825,
         "inputs": {
@@ -74895,8 +74227,7 @@
             "hi": 1.0,
             "seed": 823780988
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75021,7 +74352,7 @@
         "plan_items": [
           "L22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 621040902,
         "inputs": {
@@ -75037,8 +74368,7 @@
             "hi": 1.0,
             "seed": 1664252692
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75139,7 +74469,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1857365396,
         "inputs": {
@@ -75155,8 +74485,7 @@
             "hi": 1.0,
             "seed": 1734076473
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75257,7 +74586,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 870289752,
         "inputs": {
@@ -75273,8 +74602,7 @@
             "hi": 1.0,
             "seed": 178009624
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75375,7 +74703,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1864518930,
         "inputs": {
@@ -75391,8 +74719,7 @@
             "hi": 1.0,
             "seed": 616957808
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75493,7 +74820,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1193846034,
         "inputs": {
@@ -75509,8 +74836,7 @@
             "hi": 1.0,
             "seed": 1456743097
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75611,7 +74937,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 326623453,
         "inputs": {
@@ -75627,8 +74953,7 @@
             "hi": 1.0,
             "seed": 1279699835
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75729,7 +75054,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1389000143,
         "inputs": {
@@ -75745,8 +75070,7 @@
             "hi": 1.0,
             "seed": 599274346
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75847,7 +75171,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1091035515,
         "inputs": {
@@ -75863,8 +75187,7 @@
             "hi": 1.0,
             "seed": 2003512433
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -75965,7 +75288,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 998588587,
         "inputs": {
@@ -75981,8 +75304,7 @@
             "hi": 1.0,
             "seed": 1032727797
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -76083,7 +75405,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1787414491,
         "inputs": {
@@ -76099,8 +75421,7 @@
             "hi": 1.0,
             "seed": 245036385
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -76201,7 +75522,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 158520947,
         "inputs": {
@@ -76217,8 +75538,7 @@
             "hi": 1.0,
             "seed": 1681242652
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -76319,7 +75639,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2038456996,
         "inputs": {
@@ -76335,8 +75655,7 @@
             "hi": 1.0,
             "seed": 1818542090
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -76437,7 +75756,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1777959955,
         "inputs": {
@@ -76453,8 +75772,7 @@
             "hi": 1.0,
             "seed": 1887705595
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -76555,7 +75873,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 254857419,
         "inputs": {
@@ -76571,8 +75889,7 @@
             "hi": 1.0,
             "seed": 511150649
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -76690,7 +76007,7 @@
             "seed": 2086376204
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -76791,7 +76108,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 298041925,
         "inputs": {
@@ -76807,8 +76124,7 @@
             "hi": 1.0,
             "seed": 1145312591
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -76909,7 +76225,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 356298688,
         "inputs": {
@@ -76925,8 +76241,7 @@
             "hi": 1.0,
             "seed": 1561545219
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77027,7 +76342,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1497842657,
         "inputs": {
@@ -77043,8 +76358,7 @@
             "hi": 1.0,
             "seed": 1146041169
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77145,7 +76459,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 552909536,
         "inputs": {
@@ -77161,8 +76475,7 @@
             "hi": 1.0,
             "seed": 1600350287
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77263,7 +76576,7 @@
         "plan_items": [
           "L1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1640601768,
         "inputs": {
@@ -77279,8 +76592,7 @@
             "hi": 1.0,
             "seed": 990677629
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77381,7 +76693,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1281810604,
         "inputs": {
@@ -77397,8 +76709,7 @@
             "hi": 1.0,
             "seed": 1180376458
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77499,7 +76810,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1843104001,
         "inputs": {
@@ -77515,8 +76826,7 @@
             "hi": 1.0,
             "seed": 1985969654
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77617,7 +76927,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1139849181,
         "inputs": {
@@ -77633,8 +76943,7 @@
             "hi": 1.0,
             "seed": 1139073760
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77735,7 +77044,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 811531164,
         "inputs": {
@@ -77751,8 +77060,7 @@
             "hi": 1.0,
             "seed": 60546487
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77853,7 +77161,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 94138240,
         "inputs": {
@@ -77869,8 +77177,7 @@
             "hi": 1.0,
             "seed": 341701341
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -77971,7 +77278,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 2141361236,
         "inputs": {
@@ -77987,8 +77294,7 @@
             "hi": 1.0,
             "seed": 212628159
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78089,7 +77395,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1110656346,
         "inputs": {
@@ -78105,8 +77411,7 @@
             "hi": 1.0,
             "seed": 34290585
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78207,7 +77512,7 @@
         "plan_items": [
           "L10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1027057402,
         "inputs": {
@@ -78223,8 +77528,7 @@
             "hi": 1.0,
             "seed": 81515192
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78325,7 +77629,7 @@
         "plan_items": [
           "L11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1407153875,
         "inputs": {
@@ -78341,8 +77645,7 @@
             "hi": 1.0,
             "seed": 1333677092
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78443,7 +77746,7 @@
         "plan_items": [
           "L13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1594516413,
         "inputs": {
@@ -78459,8 +77762,7 @@
             "hi": 1.0,
             "seed": 1573782288
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78561,7 +77863,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 116051591,
         "inputs": {
@@ -78577,8 +77879,7 @@
             "hi": 1.0,
             "seed": 936573329
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78679,7 +77980,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 329397932,
         "inputs": {
@@ -78695,8 +77996,7 @@
             "hi": 1.0,
             "seed": 1090694836
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78797,7 +78097,7 @@
         "plan_items": [
           "L16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 225531188,
         "inputs": {
@@ -78813,8 +78113,7 @@
             "hi": 1.0,
             "seed": 1037885959
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -78915,7 +78214,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 918662044,
         "inputs": {
@@ -78931,8 +78230,7 @@
             "hi": 1.0,
             "seed": 1742566128
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -79050,7 +78348,7 @@
             "seed": 906727952
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -79151,7 +78449,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1334894099,
         "inputs": {
@@ -79167,8 +78465,7 @@
             "hi": 1.0,
             "seed": 605045704
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -79269,7 +78566,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 991188334,
         "inputs": {
@@ -79285,8 +78582,7 @@
             "hi": 1.0,
             "seed": 609045970
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -79387,7 +78683,7 @@
         "plan_items": [
           "L21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1031571659,
         "inputs": {
@@ -79403,8 +78699,7 @@
             "hi": 1.0,
             "seed": 1958362985
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -79505,7 +78800,7 @@
         "plan_items": [
           "L22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1715187615,
         "inputs": {
@@ -79521,8 +78816,7 @@
             "hi": 1.0,
             "seed": 210885543
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -79635,7 +78929,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1380055682,
         "inputs": {
@@ -79651,8 +78945,7 @@
             "hi": 1.0,
             "seed": 250267640
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -79765,7 +79058,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 206916032,
         "inputs": {
@@ -79781,8 +79074,7 @@
             "hi": 1.0,
             "seed": 1517950325
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -79895,7 +79187,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 468224619,
         "inputs": {
@@ -79911,8 +79203,7 @@
             "hi": 1.0,
             "seed": 2086191203
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80025,7 +79316,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 59607744,
         "inputs": {
@@ -80041,8 +79332,7 @@
             "hi": 1.0,
             "seed": 1302175926
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80155,7 +79445,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1605075266,
         "inputs": {
@@ -80171,8 +79461,7 @@
             "hi": 1.0,
             "seed": 1832591995
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80285,7 +79574,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 276113322,
         "inputs": {
@@ -80301,8 +79590,7 @@
             "hi": 1.0,
             "seed": 1461607370
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80415,7 +79703,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 977468011,
         "inputs": {
@@ -80431,8 +79719,7 @@
             "hi": 1.0,
             "seed": 702891453
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80545,7 +79832,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 782974498,
         "inputs": {
@@ -80561,8 +79848,7 @@
             "hi": 1.0,
             "seed": 1823915278
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80675,7 +79961,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 499775018,
         "inputs": {
@@ -80691,8 +79977,7 @@
             "hi": 1.0,
             "seed": 1169506000
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80805,7 +80090,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 517989450,
         "inputs": {
@@ -80821,8 +80106,7 @@
             "hi": 1.0,
             "seed": 2113631014
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -80935,7 +80219,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 926162899,
         "inputs": {
@@ -80951,8 +80235,7 @@
             "hi": 1.0,
             "seed": 993694654
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -81065,7 +80348,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 878013513,
         "inputs": {
@@ -81081,8 +80364,7 @@
             "hi": 1.0,
             "seed": 1213008896
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -81195,7 +80477,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 697365790,
         "inputs": {
@@ -81211,8 +80493,7 @@
             "hi": 1.0,
             "seed": 909139296
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -81325,7 +80606,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1783788580,
         "inputs": {
@@ -81341,8 +80622,7 @@
             "hi": 1.0,
             "seed": 345608586
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -81455,7 +80735,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 404920067,
         "inputs": {
@@ -81471,8 +80751,7 @@
             "hi": 1.0,
             "seed": 566160161
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -81585,7 +80864,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2026279755,
         "inputs": {
@@ -81601,8 +80880,7 @@
             "hi": 1.0,
             "seed": 1040121160
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -81715,7 +80993,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 948799755,
         "inputs": {
@@ -81731,8 +81009,7 @@
             "hi": 1.0,
             "seed": 926325325
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -81862,7 +81139,7 @@
             "seed": 1915873903
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -81975,7 +81252,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1548616611,
         "inputs": {
@@ -81991,8 +81268,7 @@
             "hi": 1.0,
             "seed": 1533767496
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -82105,7 +81381,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 359656330,
         "inputs": {
@@ -82121,8 +81397,7 @@
             "hi": 1.0,
             "seed": 2080666414
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -82235,7 +81510,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1270253464,
         "inputs": {
@@ -82251,8 +81526,7 @@
             "hi": 1.0,
             "seed": 649710593
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -82365,7 +81639,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2056839461,
         "inputs": {
@@ -82381,8 +81655,7 @@
             "hi": 1.0,
             "seed": 552315047
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -82495,7 +81768,7 @@
         "plan_items": [
           "L1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1682650231,
         "inputs": {
@@ -82511,8 +81784,7 @@
             "hi": 1.0,
             "seed": 1774592113
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -82625,7 +81897,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1042713906,
         "inputs": {
@@ -82641,8 +81913,7 @@
             "hi": 1.0,
             "seed": 2025067171
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -82755,7 +82026,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 335980348,
         "inputs": {
@@ -82771,8 +82042,7 @@
             "hi": 1.0,
             "seed": 1589065866
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -82885,7 +82155,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 667736706,
         "inputs": {
@@ -82901,8 +82171,7 @@
             "hi": 1.0,
             "seed": 925449349
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83015,7 +82284,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 798027912,
         "inputs": {
@@ -83031,8 +82300,7 @@
             "hi": 1.0,
             "seed": 935099038
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83145,7 +82413,7 @@
         "plan_items": [
           "L6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1516665970,
         "inputs": {
@@ -83161,8 +82429,7 @@
             "hi": 1.0,
             "seed": 287374346
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83275,7 +82542,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1815350060,
         "inputs": {
@@ -83291,8 +82558,7 @@
             "hi": 1.0,
             "seed": 1751626764
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83405,7 +82671,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1069188204,
         "inputs": {
@@ -83421,8 +82687,7 @@
             "hi": 1.0,
             "seed": 1539475592
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83535,7 +82800,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 627515804,
         "inputs": {
@@ -83551,8 +82816,7 @@
             "hi": 1.0,
             "seed": 897418559
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83665,7 +82929,7 @@
         "plan_items": [
           "L10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 547810393,
         "inputs": {
@@ -83681,8 +82945,7 @@
             "hi": 1.0,
             "seed": 504086482
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83795,7 +83058,7 @@
         "plan_items": [
           "L11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1034013926,
         "inputs": {
@@ -83811,8 +83074,7 @@
             "hi": 1.0,
             "seed": 1771907079
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -83925,7 +83187,7 @@
         "plan_items": [
           "L12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1384344510,
         "inputs": {
@@ -83941,8 +83203,7 @@
             "hi": 1.0,
             "seed": 2092821367
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84055,7 +83316,7 @@
         "plan_items": [
           "L12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 630270131,
         "inputs": {
@@ -84071,8 +83332,7 @@
             "hi": 1.0,
             "seed": 1167600562
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84185,7 +83445,7 @@
         "plan_items": [
           "L13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 862160601,
         "inputs": {
@@ -84201,8 +83461,7 @@
             "hi": 1.0,
             "seed": 693992251
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84315,7 +83574,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1897619916,
         "inputs": {
@@ -84331,8 +83590,7 @@
             "hi": 1.0,
             "seed": 707287952
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84445,7 +83703,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 791548668,
         "inputs": {
@@ -84461,8 +83719,7 @@
             "hi": 1.0,
             "seed": 720506357
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84575,7 +83832,7 @@
         "plan_items": [
           "L15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 863570907,
         "inputs": {
@@ -84591,8 +83848,7 @@
             "hi": 1.0,
             "seed": 1240652563
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84705,7 +83961,7 @@
         "plan_items": [
           "L16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 459929951,
         "inputs": {
@@ -84721,8 +83977,7 @@
             "hi": 1.0,
             "seed": 954582179
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84835,7 +84090,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1864767845,
         "inputs": {
@@ -84851,8 +84106,7 @@
             "hi": 1.0,
             "seed": 55319967
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -84982,7 +84236,7 @@
             "seed": 1239823261
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -85095,7 +84349,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 123820719,
         "inputs": {
@@ -85111,8 +84365,7 @@
             "hi": 1.0,
             "seed": 1794421298
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -85225,7 +84478,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1700985632,
         "inputs": {
@@ -85241,8 +84494,7 @@
             "hi": 1.0,
             "seed": 158311532
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -85355,7 +84607,7 @@
         "plan_items": [
           "L21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1159249732,
         "inputs": {
@@ -85371,8 +84623,7 @@
             "hi": 1.0,
             "seed": 1706489232
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -85485,7 +84736,7 @@
         "plan_items": [
           "L22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1884206987,
         "inputs": {
@@ -85501,8 +84752,7 @@
             "hi": 1.0,
             "seed": 640801000
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -85627,7 +84877,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1381714504,
         "inputs": {
@@ -85643,8 +84893,7 @@
             "hi": 1.0,
             "seed": 2110442654
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -85769,7 +85018,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 98862394,
         "inputs": {
@@ -85785,8 +85034,7 @@
             "hi": 1.0,
             "seed": 653751291
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -85911,7 +85159,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1538671721,
         "inputs": {
@@ -85927,8 +85175,7 @@
             "hi": 1.0,
             "seed": 742010494
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -86053,7 +85300,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 65546452,
         "inputs": {
@@ -86069,8 +85316,7 @@
             "hi": 1.0,
             "seed": 1966324340
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -86195,7 +85441,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 627340687,
         "inputs": {
@@ -86211,8 +85457,7 @@
             "hi": 1.0,
             "seed": 279653552
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -86337,7 +85582,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 591126998,
         "inputs": {
@@ -86353,8 +85598,7 @@
             "hi": 1.0,
             "seed": 2122808460
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -86479,7 +85723,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 901589176,
         "inputs": {
@@ -86495,8 +85739,7 @@
             "hi": 1.0,
             "seed": 2052358671
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -86621,7 +85864,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 821620517,
         "inputs": {
@@ -86637,8 +85880,7 @@
             "hi": 1.0,
             "seed": 168883049
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -86763,7 +86005,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 346578947,
         "inputs": {
@@ -86779,8 +86021,7 @@
             "hi": 1.0,
             "seed": 1135241548
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -86905,7 +86146,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 334016781,
         "inputs": {
@@ -86921,8 +86162,7 @@
             "hi": 1.0,
             "seed": 231186113
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -87047,7 +86287,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 590397318,
         "inputs": {
@@ -87063,8 +86303,7 @@
             "hi": 1.0,
             "seed": 1892427765
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -87189,7 +86428,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1825960547,
         "inputs": {
@@ -87205,8 +86444,7 @@
             "hi": 1.0,
             "seed": 1533379185
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -87331,7 +86569,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 108993370,
         "inputs": {
@@ -87347,8 +86585,7 @@
             "hi": 1.0,
             "seed": 178552151
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -87473,7 +86710,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2117332561,
         "inputs": {
@@ -87489,8 +86726,7 @@
             "hi": 1.0,
             "seed": 497986356
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -87615,7 +86851,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1444197199,
         "inputs": {
@@ -87631,8 +86867,7 @@
             "hi": 1.0,
             "seed": 373996377
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -87757,7 +86992,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1003235538,
         "inputs": {
@@ -87773,8 +87008,7 @@
             "hi": 1.0,
             "seed": 1417081211
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -87916,7 +87150,7 @@
             "seed": 2210280
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -88041,7 +87275,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 822432913,
         "inputs": {
@@ -88057,8 +87291,7 @@
             "hi": 1.0,
             "seed": 522850559
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -88183,7 +87416,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2096649909,
         "inputs": {
@@ -88199,8 +87432,7 @@
             "hi": 1.0,
             "seed": 207625219
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -88325,7 +87557,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 255579391,
         "inputs": {
@@ -88341,8 +87573,7 @@
             "hi": 1.0,
             "seed": 314281781
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -88467,7 +87698,7 @@
         "plan_items": [
           "L1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 919879727,
         "inputs": {
@@ -88483,8 +87714,7 @@
             "hi": 1.0,
             "seed": 696896776
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -88609,7 +87839,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1980032833,
         "inputs": {
@@ -88625,8 +87855,7 @@
             "hi": 1.0,
             "seed": 1006425287
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -88751,7 +87980,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1311236077,
         "inputs": {
@@ -88767,8 +87996,7 @@
             "hi": 1.0,
             "seed": 1777705375
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -88893,7 +88121,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 264787577,
         "inputs": {
@@ -88909,8 +88137,7 @@
             "hi": 1.0,
             "seed": 684620009
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -89035,7 +88262,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1336207374,
         "inputs": {
@@ -89051,8 +88278,7 @@
             "hi": 1.0,
             "seed": 1342591834
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -89177,7 +88403,7 @@
         "plan_items": [
           "L6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1356666663,
         "inputs": {
@@ -89193,8 +88419,7 @@
             "hi": 1.0,
             "seed": 1292793255
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -89319,7 +88544,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 312736420,
         "inputs": {
@@ -89335,8 +88560,7 @@
             "hi": 1.0,
             "seed": 1904989245
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -89461,7 +88685,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1875301820,
         "inputs": {
@@ -89477,8 +88701,7 @@
             "hi": 1.0,
             "seed": 1453570873
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -89603,7 +88826,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 64575466,
         "inputs": {
@@ -89619,8 +88842,7 @@
             "hi": 1.0,
             "seed": 1128950451
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -89745,7 +88967,7 @@
         "plan_items": [
           "L10"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1034007846,
         "inputs": {
@@ -89761,8 +88983,7 @@
             "hi": 1.0,
             "seed": 258690385
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -89887,7 +89108,7 @@
         "plan_items": [
           "L11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1774312432,
         "inputs": {
@@ -89903,8 +89124,7 @@
             "hi": 1.0,
             "seed": 857959553
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -90029,7 +89249,7 @@
         "plan_items": [
           "L12a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 849892502,
         "inputs": {
@@ -90045,8 +89265,7 @@
             "hi": 1.0,
             "seed": 990740845
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -90171,7 +89390,7 @@
         "plan_items": [
           "L13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 839995442,
         "inputs": {
@@ -90187,8 +89406,7 @@
             "hi": 1.0,
             "seed": 1673959332
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -90313,7 +89531,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1046330863,
         "inputs": {
@@ -90329,8 +89547,7 @@
             "hi": 1.0,
             "seed": 2142850125
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -90455,7 +89672,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 2039714523,
         "inputs": {
@@ -90471,8 +89688,7 @@
             "hi": 1.0,
             "seed": 521990681
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -90597,7 +89813,7 @@
         "plan_items": [
           "L15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1604940816,
         "inputs": {
@@ -90613,8 +89829,7 @@
             "hi": 1.0,
             "seed": 546325786
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -90739,7 +89954,7 @@
         "plan_items": [
           "L16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 2319111,
         "inputs": {
@@ -90755,8 +89970,7 @@
             "hi": 1.0,
             "seed": 1789782247
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -90881,7 +90095,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 227101981,
         "inputs": {
@@ -90897,8 +90111,7 @@
             "hi": 1.0,
             "seed": 839020048
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -91040,7 +90253,7 @@
             "seed": 1257371424
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
@@ -91165,7 +90378,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1663536878,
         "inputs": {
@@ -91181,8 +90394,7 @@
             "hi": 1.0,
             "seed": 1983064750
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -91307,7 +90519,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 61558401,
         "inputs": {
@@ -91323,8 +90535,7 @@
             "hi": 1.0,
             "seed": 1613696547
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -91449,7 +90660,7 @@
         "plan_items": [
           "L21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 928447352,
         "inputs": {
@@ -91465,8 +90676,7 @@
             "hi": 1.0,
             "seed": 1028237581
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
@@ -91591,7 +90801,7 @@
         "plan_items": [
           "L22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1210452849,
         "inputs": {
@@ -91607,8 +90817,7 @@
             "hi": 1.0,
             "seed": 282369173
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     }
   ]
