@@ -3,8 +3,7 @@
 
 #pragma once
 
-// Relative to this header: integration-test TUs include it without src/ on their include path.
-#include "../../../core/Utils.hpp"
+#include "core/Utils.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -29,12 +28,49 @@
 #include <string>
 #include <unordered_map>
 
+/**
+ * @brief Applicability-check convention of the ASM SDPA plan builders (local to
+ * asm_sdpa_engine; other hip-kernel-provider engines use HIP_KERNEL_RETURN_FALSE_IF).
+ *
+ * A check returns asm_sdpa_engine::plan_utils::Rejection: std::nullopt when the
+ * graph passes, otherwise the reason the engine declines it. Checks compose with
+ * HIP_KERNEL_RETURN_IF_REJECTED and the top-level isApplicable() logs the reason once,
+ * so no check expands a logging macro of its own.
+ *
+ * HIP_KERNEL_REJECT_IF returns `message` from a Rejection-returning function when
+ * `condition` holds. `message` follows HIP_KERNEL_RETURN_FALSE_IF's rule: it is
+ * substituted unparenthesised after `std::string{} +` so `+`-chained pieces fold into
+ * a std::string left to right.
+ */
+#define HIP_KERNEL_REJECT_IF(condition, message)                                      \
+    do                                                                                \
+    {                                                                                 \
+        if(condition)                                                                 \
+        {                                                                             \
+            /* NOLINTNEXTLINE(bugprone-macro-parentheses) */                          \
+            return ::asm_sdpa_engine::plan_utils::Rejection{std::string{} + message}; \
+        }                                                                             \
+    } while(0)
+
+/**
+ * @brief Forwards a sub-check's Rejection to the caller (which must return Rejection).
+ */
+#define HIP_KERNEL_RETURN_IF_REJECTED(check)  \
+    do                                        \
+    {                                         \
+        if(auto hipKernelRejection = (check)) \
+        {                                     \
+            return hipKernelRejection;        \
+        }                                     \
+    } while(0)
+
 namespace asm_sdpa_engine
 {
 namespace plan_utils
 {
 
-using hip_kernel_provider::core::utils::Rejection;
+// Why a builder declines a graph: std::nullopt when applicable, otherwise the reason.
+using Rejection = std::optional<std::string>;
 
 // =============================================================================
 // Tensor dtype classification
@@ -327,6 +363,21 @@ float attnScaleOrDefault(const SdpaAttrsT& attrs)
 using TensorMap
     = std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>;
 
+// Looks up a tensor the node references; a UID missing from the graph declines it.
+inline Rejection
+    findRequiredTensor(const TensorMap& tensorMap,
+                       const char* name,
+                       int64_t uid,
+                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*& tensor)
+{
+    const auto it = tensorMap.find(uid);
+    HIP_KERNEL_REJECT_IF(it == tensorMap.end(),
+                         std::string(name) + " tensor UID " + std::to_string(uid)
+                             + " not present in graph");
+    tensor = it->second;
+    return std::nullopt;
+}
+
 // Graph-level requirements both SDPA builders share: no execute-time override shapes
 // (the family serves fixed prebuilt shapes, RFC 0008 §4.6), 16-byte aligned tensors,
 // exactly one node of `expectedType`, accumulating in FLOAT.
@@ -383,15 +434,25 @@ Rejection checkCommonUnsupportedFeatures(const SdpaAttrsT& attrs, const TensorMa
     return std::nullopt;
 }
 
-// Q/K/V(/O) requirement: a device buffer (not virtual) and rank 4, which every later
-// dims()->Get(0..3) relies on.
+// A tensor the kernels read or write through a device pointer. A virtual tensor has no
+// buffer, and a pass-by-value one is delivered as a host pointer (or not at all).
+inline Rejection
+    checkDeviceBufferTensor(const char* label,
+                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
+{
+    HIP_KERNEL_REJECT_IF(
+        tensor.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor),
+        std::string(label) + " tensor must be a non-virtual, non-pass-by-value device tensor");
+    return std::nullopt;
+}
+
+// Q/K/V(/O) requirement: a device buffer (neither virtual nor pass-by-value) and rank 4,
+// which every later dims()->Get(0..3) relies on.
 inline Rejection
     checkRank4DeviceTensor(const char* label,
                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& tensor)
 {
-    // Virtual tensors have no device buffer, and execute needs a device pointer for every
-    // operand.
-    HIP_KERNEL_REJECT_IF(tensor.virtual_(), std::string(label) + " tensor must not be virtual");
+    HIP_KERNEL_RETURN_IF_REJECTED(checkDeviceBufferTensor(label, tensor));
     HIP_KERNEL_REJECT_IF(tensor.dims()->size() != 4,
                          std::string(label) + " tensor must be rank 4 (Actual rank: "
                              + std::to_string(tensor.dims()->size()) + ")");

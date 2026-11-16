@@ -30,7 +30,7 @@ namespace asm_sdpa_engine
 {
 
 using namespace hip_kernel_provider_common;
-using hip_kernel_provider::core::utils::Rejection;
+using plan_utils::Rejection;
 
 constexpr auto SDPA_SEQ_AXIS
     = static_cast<flatbuffers::uoffset_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
@@ -402,9 +402,7 @@ static Rejection
                       hipdnn_flatbuffers_sdk::data_objects::DataType expectedType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    HIP_KERNEL_REJECT_IF(
-        tensor.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor),
-        std::string(label) + " tensor must be a non-virtual, non-pass-by-value device tensor");
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkDeviceBufferTensor(label, tensor));
     HIP_KERNEL_REJECT_IF(tensor.data_type() != expectedType,
                          std::string(label) + " tensor must be " + EnumNameDataType(expectedType)
                              + " (Actual value: " + EnumNameDataType(tensor.data_type()) + ")");
@@ -531,9 +529,15 @@ static Rejection checkFp8Descales(const hipdnn_flatbuffers_sdk::data_objects::Sd
     // per-[B, H_kv]) would be silently mis-read as descale[0] for every batch and
     // head. Decline it here rather than miscompute. Per-[B, H_kv] descales are a
     // future extension (tracked with the gfx950 fp8 path).
-    const auto* qDescale = tensorMap.at(attrs.descale_q_tensor_uid().value());
-    const auto* kDescale = tensorMap.at(attrs.descale_k_tensor_uid().value());
-    const auto* vDescale = tensorMap.at(attrs.descale_v_tensor_uid().value());
+    const TensorAttributes* qDescale = nullptr;
+    const TensorAttributes* kDescale = nullptr;
+    const TensorAttributes* vDescale = nullptr;
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::findRequiredTensor(
+        tensorMap, "descale_q", attrs.descale_q_tensor_uid().value(), qDescale));
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::findRequiredTensor(
+        tensorMap, "descale_k", attrs.descale_k_tensor_uid().value(), kDescale));
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::findRequiredTensor(
+        tensorMap, "descale_v", attrs.descale_v_tensor_uid().value(), vDescale));
     HIP_KERNEL_REJECT_IF(
         !isScalarTensor(*qDescale) || !isScalarTensor(*kDescale) || !isScalarTensor(*vDescale),
         "fp8 q/k/v descales must be per-tensor scalars; per-[B, H_kv] descales are not yet "
@@ -572,10 +576,18 @@ static Rejection
     HIP_KERNEL_RETURN_IF_REJECTED(checkFwdUnsupportedFeatures(attrs));
     HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkAttnScale(attrs, tensorMap));
 
-    const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
-    const auto* kTensor = tensorMap.at(attrs.k_tensor_uid());
-    const auto* vTensor = tensorMap.at(attrs.v_tensor_uid());
-    const auto* oTensor = tensorMap.at(attrs.o_tensor_uid());
+    const TensorAttributes* qTensor = nullptr;
+    const TensorAttributes* kTensor = nullptr;
+    const TensorAttributes* vTensor = nullptr;
+    const TensorAttributes* oTensor = nullptr;
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "q", attrs.q_tensor_uid(), qTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "k", attrs.k_tensor_uid(), kTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "v", attrs.v_tensor_uid(), vTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "o", attrs.o_tensor_uid(), oTensor));
 
     // Validate Q/K/V/O before accessing their dims by index.
     for(const auto& [label, tensor] : {std::pair{"q", qTensor},

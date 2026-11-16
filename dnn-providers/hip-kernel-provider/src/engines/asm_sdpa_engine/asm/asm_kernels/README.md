@@ -45,9 +45,9 @@ reason) any graph outside this contract:
 - **Intermediate data type.** Neither builder reads the graph's `intermediate_data_type`.
   The frontend uses it only to type unset virtual tensors, and it is `(cache_ignore)` in
   `graph.fbs`. These single-node kernels expose no intermediate tensor, so both builders
-  decline a virtual operand tensor instead (forward: Q, K, V, O, Stats and the FP8 descales;
-  backward: every operand). A virtual tensor has no device buffer, and execute needs a pointer
-  for every operand.
+  decline a virtual or pass-by-value operand tensor instead (forward: Q, K, V, O, Stats and the
+  FP8 descales; backward: every operand). Neither has a device buffer, and execute needs a
+  pointer for every operand.
 - **Enforcement.** Any other combination is declined in `isApplicable` with a logged reason,
   except the backward O dtype noted in the table.
 

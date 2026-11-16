@@ -44,10 +44,10 @@ namespace
 // RoundingMode and BatchMode via hip_kernel_provider_common (the same header the
 // forward builder consumes). AccumulatorMode stays backward-local because the
 // forward dispatch has no 16/32-bit accumulator axis.
-using hip_kernel_provider::core::utils::Rejection;
 using hip_kernel_provider_common::BatchMode;
 using hip_kernel_provider_common::RoundingMode;
 using plan_utils::MaskType;
+using plan_utils::Rejection;
 
 using bwd_dispatch::BF16_CVT_FP16_SENTINEL;
 
@@ -391,20 +391,6 @@ size_t dispatchLogIndex(const std::string& dtype, int hdim, MaskType mask)
     return (dtypeIdx * K_NUM_HDIMS + hdimIdx) * K_NUM_MASKS + maskIdx;
 }
 
-// Looks up a required backward operand; a missing UID declines the graph.
-Rejection findBwdTensor(const plan_utils::TensorMap& tensorMap,
-                        const char* name,
-                        int64_t uid,
-                        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*& tensor)
-{
-    const auto it = tensorMap.find(uid);
-    HIP_KERNEL_REJECT_IF(it == tensorMap.end(),
-                         std::string(name) + " tensor UID " + std::to_string(uid)
-                             + " not present in graph");
-    tensor = it->second;
-    return std::nullopt;
-}
-
 } // namespace
 
 namespace bwd_dispatch
@@ -528,19 +514,27 @@ static Rejection
     const TensorAttributes* dqTensor = nullptr;
     const TensorAttributes* dkTensor = nullptr;
     const TensorAttributes* dvTensor = nullptr;
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "q", attrs.q_tensor_uid(), qTensor));
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "k", attrs.k_tensor_uid(), kTensor));
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "v", attrs.v_tensor_uid(), vTensor));
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "o", attrs.o_tensor_uid(), oTensor));
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "do", attrs.do_tensor_uid(), doTensor));
     HIP_KERNEL_RETURN_IF_REJECTED(
-        findBwdTensor(tensorMap, "stats", attrs.stats_tensor_uid(), statsTensor));
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "dq", attrs.dq_tensor_uid(), dqTensor));
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "dk", attrs.dk_tensor_uid(), dkTensor));
-    HIP_KERNEL_RETURN_IF_REJECTED(findBwdTensor(tensorMap, "dv", attrs.dv_tensor_uid(), dvTensor));
+        plan_utils::findRequiredTensor(tensorMap, "q", attrs.q_tensor_uid(), qTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "k", attrs.k_tensor_uid(), kTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "v", attrs.v_tensor_uid(), vTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "o", attrs.o_tensor_uid(), oTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "do", attrs.do_tensor_uid(), doTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "stats", attrs.stats_tensor_uid(), statsTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "dq", attrs.dq_tensor_uid(), dqTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "dk", attrs.dk_tensor_uid(), dkTensor));
+    HIP_KERNEL_RETURN_IF_REJECTED(
+        plan_utils::findRequiredTensor(tensorMap, "dv", attrs.dv_tensor_uid(), dvTensor));
 
-    // Virtual tensors have no device buffer, and execute needs a device pointer for every
-    // operand. Q/K/V get the same check from checkRank4DeviceTensor below.
+    // Virtual and pass-by-value tensors have no device buffer, and execute needs a device
+    // pointer for every operand. Q/K/V get the same check from checkRank4DeviceTensor below.
     for(const auto& [label, tensor] : {std::pair{"o", oTensor},
                                        std::pair{"do", doTensor},
                                        std::pair{"stats", statsTensor},
@@ -548,8 +542,7 @@ static Rejection
                                        std::pair{"dk", dkTensor},
                                        std::pair{"dv", dvTensor}})
     {
-        HIP_KERNEL_REJECT_IF(tensor->virtual_(),
-                             std::string(label) + " tensor must not be virtual");
+        HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkDeviceBufferTensor(label, *tensor));
     }
     for(const auto& [label, tensor] :
         {std::pair{"q", qTensor}, std::pair{"k", kTensor}, std::pair{"v", vTensor}})

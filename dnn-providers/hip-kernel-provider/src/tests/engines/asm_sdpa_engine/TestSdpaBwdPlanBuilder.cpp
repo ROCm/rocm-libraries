@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -227,10 +228,13 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
     }
 }
 
-// A virtual operand has no device buffer, and execute needs a pointer for every operand. The
-// builder checks them in one data-driven loop, so cover every entry: dropping one must fail here.
-TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsVirtualOperand)
+// A virtual or pass-by-value operand has no device buffer, and execute needs a pointer for every
+// operand. The builder checks them in one data-driven loop, so cover every entry: dropping one
+// must fail here.
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsOperandThatIsNotADeviceTensor)
 {
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
     SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
@@ -241,14 +245,23 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsVirtualOperand)
     const GraphTest control{createSdpaBwdGraph(), "unmodified graph"};
     ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
 
-    for(const std::string name : {"q", "k", "v", "o", "do", "stats", "dq", "dk", "dv"})
+    const std::vector<std::pair<std::string, std::function<void(TensorAttributesT&)>>> mutations
+        = {{"virtual", [](TensorAttributesT& tensor) { tensor.virtual_ = true; }},
+           {"pass-by-value",
+            [](TensorAttributesT& tensor) { tensor.is_runtime_pass_by_value = true; }}};
+    for(const char* name : {"q", "k", "v", "o", "do", "stats", "dq", "dk", "dv"})
     {
-        SCOPED_TRACE("virtual " + name);
-        const GraphTest test{
-            mutateGraph(createSdpaBwdGraph(),
-                        [&](GraphT& graph) { findTensor(graph, name).virtual_ = true; }),
-            "virtual " + name};
-        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        for(const auto& entry : mutations)
+        {
+            const std::string& mutationName = entry.first;
+            const auto& mutation = entry.second;
+            SCOPED_TRACE(mutationName + " " + name);
+            const GraphTest test{
+                mutateGraph(createSdpaBwdGraph(),
+                            [&](GraphT& graph) { mutation(findTensor(graph, name)); }),
+                mutationName + " " + name};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        }
     }
 }
 

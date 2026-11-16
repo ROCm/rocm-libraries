@@ -298,14 +298,6 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
         {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
                                       {4, 8, 256, 128},
                                       DataType::BFLOAT16,
-                                      DataType::HALF,
-                                      false,
-                                      true),
-                   "compute_data_type = HALF"},
-         false},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
                                       DataType::FLOAT,
                                       false,
                                       false,
@@ -353,9 +345,10 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
     }
 }
 
-// A virtual operand has no device buffer, and execute needs a pointer for every operand. The
-// builder checks them in one data-driven loop, so cover every entry: dropping one must fail here.
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsVirtualOperand)
+// A virtual or pass-by-value operand has no device buffer, and execute needs a pointer for every
+// operand. The builder checks them in one data-driven loop, so cover every entry: dropping one
+// must fail here.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOperandThatIsNotADeviceTensor)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -371,13 +364,59 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsVirtualOperand)
     const GraphTest control{createSdpaFwdGraph(), "unmodified graph"};
     ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
 
-    for(const std::string name : {"q", "k", "v", "o"})
+    const std::vector<std::pair<std::string, std::function<void(TensorAttributesT&)>>> mutations
+        = {{"virtual", [](TensorAttributesT& tensor) { tensor.virtual_ = true; }},
+           {"pass-by-value",
+            [](TensorAttributesT& tensor) { tensor.is_runtime_pass_by_value = true; }}};
+    for(const char* name : {"q", "k", "v", "o"})
     {
-        SCOPED_TRACE("virtual " + name);
+        for(const auto& entry : mutations)
+        {
+            const std::string& mutationName = entry.first;
+            const auto& mutation = entry.second;
+            SCOPED_TRACE(mutationName + " " + name);
+            const GraphTest test{
+                mutateGraph(createSdpaFwdGraph(),
+                            [&](GraphT& graph) { mutation(findTensor(graph, name)); }),
+                mutationName + " " + name};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        }
+    }
+}
+
+// A node that references a tensor UID the graph does not define must decline, not throw
+// std::out_of_range out of isApplicable.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesOperandUidMissingFromGraph)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest control{createSdpaFwdGraph(), "unmodified graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const auto& entry : {std::pair{"q", &SdpaAttributesT::q_tensor_uid},
+                             std::pair{"k", &SdpaAttributesT::k_tensor_uid},
+                             std::pair{"v", &SdpaAttributesT::v_tensor_uid},
+                             std::pair{"o", &SdpaAttributesT::o_tensor_uid}})
+    {
+        const std::string name = std::string("missing ") + entry.first;
+        const auto uidField = entry.second;
+        SCOPED_TRACE(name);
         const GraphTest test{
             mutateGraph(createSdpaFwdGraph(),
-                        [&](GraphT& graph) { findTensor(graph, name).virtual_ = true; }),
-            "virtual " + name};
+                        [uidField](GraphT& graph) {
+                            graph.nodes.front()->attributes.AsSdpaAttributes()->*uidField
+                                = maxTensorUid(graph) + 1;
+                        }),
+            name};
         EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
     }
 }
@@ -1464,6 +1503,39 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotADeviceTens
                 mutationName + " " + name};
             EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
         }
+    }
+}
+
+// A node that references a descale UID the graph does not define must decline, not throw
+// std::out_of_range out of isApplicable.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesFp8DescaleUidMissingFromGraph)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const GraphTest control{createSdpaFwdFp8Graph(/*withDescale=*/true), "unmodified fp8 graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const auto& entry : {std::pair{"descale_q", &SdpaAttributesT::descale_q_tensor_uid},
+                             std::pair{"descale_k", &SdpaAttributesT::descale_k_tensor_uid},
+                             std::pair{"descale_v", &SdpaAttributesT::descale_v_tensor_uid}})
+    {
+        const std::string name = std::string("missing ") + entry.first;
+        const auto uidField = entry.second;
+        SCOPED_TRACE(name);
+        const GraphTest test{
+            mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
+                        [uidField](GraphT& graph) {
+                            graph.nodes.front()->attributes.AsSdpaAttributes()->*uidField
+                                = maxTensorUid(graph) + 1;
+                        }),
+            name};
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
     }
 }
 
