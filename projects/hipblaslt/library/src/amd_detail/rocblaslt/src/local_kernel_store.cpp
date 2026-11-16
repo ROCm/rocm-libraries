@@ -165,11 +165,15 @@ namespace rocblaslt
                 int m_fd;
             };
 
-            void syncDirectory(fs::path const& dir)
+            bool syncDirectory(fs::path const& dir, std::string* error)
             {
                 Fd fd(::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
-                if(fd.get() >= 0)
-                    static_cast<void>(::fsync(fd.get()));
+                if(fd.get() < 0 || ::fsync(fd.get()) != 0)
+                {
+                    setError(error, errnoText("cannot sync directory", dir.string()));
+                    return false;
+                }
+                return true;
             }
 
             bool writeAll(int fd, char const* data, size_t size)
@@ -336,14 +340,15 @@ namespace rocblaslt
                     if(::stat(dir.c_str(), &st) == 0)
                         static_cast<void>(
                             ::chmod(dir.c_str(), st.st_mode & 07777 & ~(S_IWGRP | S_IWOTH)));
-                    syncDirectory(dir.parent_path());
                 }
                 else if(errno != EEXIST)
                 {
                     setError(error, errnoText("cannot create", dir.string()));
                     return false;
                 }
-                return checkPrivate(dir, error);
+                // An existing directory may have been left by an interrupted
+                // creation or another writer whose sync has not completed.
+                return checkPrivate(dir, error) && syncDirectory(dir.parent_path(), error);
             }
 
             /**
@@ -736,6 +741,11 @@ namespace rocblaslt
             const fs::path  rootPath = fs::path(root).lexically_normal();
             std::error_code ec;
             fs::create_directories(rootPath.parent_path(), ec);
+            // Persist parent directories too, including any left by a failed
+            // earlier attempt to create the library path.
+            for(auto dir = rootPath.parent_path(); dir != dir.root_path(); dir = dir.parent_path())
+                if(!syncDirectory(dir.parent_path(), error))
+                    return nullptr;
             if(!makePrivateDirectory(rootPath, error)
                || !makePrivateDirectory(rootPath / kObjectsDir, error))
                 return nullptr;
@@ -852,8 +862,7 @@ namespace rocblaslt
                 static_cast<void>(::unlink(object->temp.c_str()));
                 object->temp.clear();
             }
-            syncDirectory(fs::path(m_root) / kObjectsDir);
-            return true;
+            return syncDirectory(fs::path(m_root) / kObjectsDir, error);
         }
 
         std::string Store::objectState(PayloadRecord const& record) const
@@ -930,6 +939,10 @@ namespace rocblaslt
 
             Fd fd;
             if(!openJournal(path, true, &fd, error))
+                return false;
+            // Sync the name before appending records. A previous attempt may
+            // have created this journal but failed to sync its directory.
+            if(!syncDirectory(fs::path(path).parent_path(), error))
                 return false;
 
             struct stat st

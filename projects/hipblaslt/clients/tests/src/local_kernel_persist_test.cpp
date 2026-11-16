@@ -1097,6 +1097,92 @@ TEST(LocalKernelPersist, FailedSaveIsNotPublished)
     EXPECT_EQ(countRecords(lines, 'E'), 0u);
 }
 
+// Write and search permission allow saving files, but opening a directory to
+// sync its entries also needs read permission. A failed sync must fail the save.
+TEST(LocalKernelPersist, DISABLED_DirectorySyncWorker)
+{
+    if(::geteuid() == 0)
+        GTEST_SKIP() << "root ignores file permissions";
+
+    char const* library = std::getenv(LIBRARY_ENV);
+    ASSERT_NE(library, nullptr);
+    const auto candidates = candidatePayloads();
+    ASSERT_FALSE(candidates.empty());
+    hipblasLtHandle_t handle;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    Problem p;
+    ASSERT_EQ(buildProblem(p), HIPBLAS_STATUS_SUCCESS);
+    const auto r = registerUsable(handle, p, candidates);
+    ASSERT_GE(r.index, 0);
+    const size_t before = registeredCount(handle);
+
+    const fs::path variant = fs::path(library).parent_path() / "variant.co";
+    fs::copy_file(r.stem + ".co", variant);
+    {
+        std::ofstream out(variant, std::ios::binary | std::ios::app);
+        out << std::string(64, '\0');
+    }
+
+    const fs::path objects = fs::path(library) / "objects";
+    ASSERT_EQ(::chmod(objects.c_str(), 0300), 0);
+    int        count  = -1;
+    const auto status = hipblasLtLocalKernelRegister(
+        handle, (r.stem + ".dat").c_str(), variant.c_str(), nullptr, 0, &count);
+    ASSERT_EQ(::chmod(objects.c_str(), 0755), 0);
+    EXPECT_EQ(status, HIPBLAS_STATUS_INTERNAL_ERROR);
+    EXPECT_EQ(count, 0);
+    EXPECT_EQ(registeredCount(handle), before);
+
+    // Retry with the objects already present: their directory still needs to
+    // be synced before a journal record can name them.
+    EXPECT_EQ(hipblasLtLocalKernelRegister(
+                  handle, (r.stem + ".dat").c_str(), variant.c_str(), nullptr, 0, &count),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_GT(count, 0);
+
+    // A new journal also needs a durable directory entry. Refuse the mapping
+    // before writing its record if that directory cannot be synced.
+    ASSERT_TRUE(fs::remove(journalPath(library)));
+    const fs::path scope = scopePath(library);
+    ASSERT_EQ(::chmod(scope.c_str(), 0300), 0);
+    const auto mapped = hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K);
+    ASSERT_EQ(::chmod(scope.c_str(), 0755), 0);
+    EXPECT_EQ(mapped, HIPBLAS_STATUS_INTERNAL_ERROR);
+    size_t selectable = 123;
+    counts(handle, nullptr, &selectable);
+    EXPECT_EQ(selectable, 0u);
+    EXPECT_EQ(countRecords(journalLines(library), 'E'), 0u);
+
+    // The scope directory itself can also be left by a failed save. Retrying
+    // must sync its entry in the library directory even though it now exists.
+    ASSERT_TRUE(fs::remove(journalPath(library)));
+    ASSERT_TRUE(fs::remove(scope));
+    ASSERT_EQ(::chmod(library, 0300), 0);
+    const auto first = hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K);
+    const auto retry = hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K);
+    ASSERT_EQ(::chmod(library, 0755), 0);
+    EXPECT_EQ(first, HIPBLAS_STATUS_INTERNAL_ERROR);
+    EXPECT_EQ(retry, HIPBLAS_STATUS_INTERNAL_ERROR);
+    counts(handle, nullptr, &selectable);
+    EXPECT_EQ(selectable, 0u);
+    EXPECT_EQ(countRecords(journalLines(library), 'E'), 0u);
+
+    EXPECT_EQ(hipblasLtLocalKernelSetExactMatch(handle, r.index, M, N, 1, K),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(topIndex(handle, p), r.index);
+    EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(LocalKernelPersist, DirectorySyncFailureIsNotPublished)
+{
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path library = tmp.path / "lib";
+    ASSERT_EQ(runWorker("LocalKernelPersist.DISABLED_DirectorySyncWorker", {libraryEnv(library)}),
+              0);
+    EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0);
+}
+
 // A mapping whose write fails partway is truncated away, so nothing of a
 // mapping reported as not saved stays for the next append to complete.
 TEST(LocalKernelPersist, DISABLED_FailedWriteWorker)
