@@ -60,7 +60,7 @@ from pathlib import Path
 from unittest import mock
 
 from rocke.core.isa.backend import wired_arches
-from rocke.core.lower_llvm import _resolve_llvm_flavor
+from rocke.core.lower_llvm import _datalayout_for_flavor, _resolve_llvm_flavor
 from rocke.tests.arch_marks import COVERED_ARCHES
 
 _HERE = Path(__file__).resolve().parent
@@ -1084,6 +1084,36 @@ class ProbeWitnessTest(unittest.TestCase):
         spec = G._probe_spec("ordinary", "declare i32 @llvm.probe.plain(i32)")
         self.assertIsNone(spec.literal_ints)
         self.assertIsNone(spec.imm_int)
+
+    def test_ldexp_probe_keeps_both_operands_variable(self):
+        """A constant exponent would ask a weaker question than the baseline."""
+        key = "ldexp.f32.i32"
+        expected_contract = {
+            "version": 1,
+            "return_type": "float",
+            "operands": [
+                {"type": "float", "source": "argument"},
+                {"type": "i32", "source": "argument"},
+            ],
+        }
+        call = "call float @llvm.ldexp.f32.i32(float %a0, i32 %a1)"
+        for flavor, path in _columns():
+            with self.subTest(flavor=flavor):
+                spec = G._probe_spec(key, G._decl_table(flavor)[key])
+                self.assertIsNone(spec.literal_ints)
+                self.assertIsNone(spec.imm_int)
+                self.assertEqual(G._probe_contract(spec), expected_contract)
+                doc = json.loads(path.read_text())
+                self.assertEqual(doc["probe_contracts"][key], expected_contract)
+                layout = _datalayout_for_flavor(flavor)
+                for text, why in (
+                    G._probe_module(spec.decl, layout),
+                    G._batch_probe_module([spec], layout),
+                ):
+                    self.assertEqual(why, "")
+                    self.assertEqual(text.count(call), 1)
+                    self.assertIn("float %a0, i32 %a1)", text)
+                    self.assertIn("store volatile float %r", text)
 
     def test_recorded_witnesses_match_every_positive_special_cell(self):
         for flavor, path in _columns():
