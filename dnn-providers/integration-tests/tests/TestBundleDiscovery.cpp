@@ -1864,24 +1864,31 @@ struct SelectionOutcome
     size_t graphsWithClaims = 0;
 };
 
+std::vector<std::string> describeSelected(const std::vector<DiscoveredBundle>& bundles)
+{
+    std::vector<std::string> described;
+    described.reserve(bundles.size());
+    for(const auto& bundle : bundles)
+    {
+        described.push_back(bundle.fullName() + "|" + bundle.jsonPath.string() + "|"
+                            + (bundle.isTemplateSweepCase() ? bundle.sweep->caseId : ""));
+    }
+    return described;
+}
+
 SelectionOutcome selectionOutcome(std::vector<DiscoveredBundle> bundles,
-                                  const std::vector<UnparsedSweep>& unparsedSweeps,
                                   const std::string& filter,
                                   bool observing)
 {
     SelectionOutcome outcome;
     SupportClaimCoverage coverage;
-    for(const auto& bundle : detail::selectBundlesToLoad(std::move(bundles),
-                                                         unparsedSweeps,
-                                                         filter,
-                                                         /*writing=*/false,
-                                                         observing,
-                                                         outcome.stats,
-                                                         coverage))
-    {
-        outcome.selected.push_back(bundle.fullName() + "|" + bundle.jsonPath.string() + "|"
-                                   + (bundle.isTemplateSweepCase() ? bundle.sweep->caseId : ""));
-    }
+    outcome.selected = describeSelected(detail::selectBundlesToLoad(std::move(bundles),
+                                                                    {},
+                                                                    filter,
+                                                                    /*writing=*/false,
+                                                                    observing,
+                                                                    outcome.stats,
+                                                                    coverage));
     outcome.graphsFound = coverage.graphsFound;
     outcome.graphsWithClaims = coverage.graphsWithClaims;
     return outcome;
@@ -1895,18 +1902,33 @@ BundleDiscoveryResult discoverForFilter(const std::filesystem::path& root,
     });
 }
 
-// Compares selection after a filtered discovery with selection after the full one, with and
-// without observing. Returns how many sweep roots the filtered discovery did not parse.
+// Compares what discoverAndSelectBundles() selects, counts and covers with selection after
+// the full discovery, with and without observing. Returns how many sweep roots the
+// filtered discovery did not parse.
 size_t expectFilteredSelectionMatchesFull(const std::filesystem::path& root,
                                           const std::vector<DiscoveredBundle>& full,
                                           const std::string& filter)
 {
-    const auto filtered = discoverForFilter(root, filter);
+    size_t unparsedSweeps = 0;
     for(const bool observing : {false, true})
     {
-        const auto expected = selectionOutcome(full, {}, filter, observing);
-        const auto actual
-            = selectionOutcome(filtered.bundles, filtered.unparsedSweeps, filter, observing);
+        const auto expected = selectionOutcome(full, filter, observing);
+
+        SelectionOutcome actual;
+        SupportClaimCoverage coverage;
+        const auto discovered = detail::discoverAndSelectBundles(
+            root, filter, /*writing=*/false, observing, actual.stats, coverage);
+        if(!discovered.has_value())
+        {
+            ADD_FAILURE() << "filter '" << filter << "': nothing discovered";
+            return 0;
+        }
+        EXPECT_EQ(discovered->dataDir, root) << "filter '" << filter << "'";
+        actual.selected = describeSelected(discovered->bundles);
+        actual.graphsFound = coverage.graphsFound;
+        actual.graphsWithClaims = coverage.graphsWithClaims;
+        unparsedSweeps = discovered->unparsedSweeps.size();
+
         EXPECT_EQ(actual.selected.size(), expected.selected.size()) << "filter '" << filter << "'";
         EXPECT_TRUE(actual.selected == expected.selected) << "filter '" << filter << "'";
         EXPECT_EQ(actual.stats.discovered, expected.stats.discovered)
@@ -1917,7 +1939,7 @@ size_t expectFilteredSelectionMatchesFull(const std::filesystem::path& root,
         EXPECT_EQ(actual.graphsWithClaims, expected.graphsWithClaims)
             << "filter '" << filter << "'";
     }
-    return filtered.unparsedSweeps.size();
+    return unparsedSweeps;
 }
 
 } // namespace
@@ -2047,39 +2069,10 @@ TEST_F(TestBundleDiscoveryFixture, ZeroCaseSweepsTheFilterSkipsCountAsNoBundles)
 TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesMatchesFullDiscoveryUnderAFilter)
 {
     createMixedTierTree(_tempDir);
-    const std::string filter = "quick_Matmul_*.*";
+    const auto full = discoverBundles(_tempDir);
+    ASSERT_EQ(full.size(), 16u);
 
-    for(const bool observing : {false, true})
-    {
-        BundleRegistrationStats expectedStats;
-        SupportClaimCoverage expectedCoverage;
-        const auto expected = detail::selectBundlesToLoad(discoverBundles(_tempDir),
-                                                          {},
-                                                          filter,
-                                                          /*writing=*/false,
-                                                          observing,
-                                                          expectedStats,
-                                                          expectedCoverage);
-
-        BundleRegistrationStats stats;
-        SupportClaimCoverage coverage;
-        const auto discovered = detail::discoverAndSelectBundles(
-            _tempDir, filter, /*writing=*/false, observing, stats, coverage);
-
-        ASSERT_TRUE(discovered.has_value());
-        EXPECT_EQ(discovered->dataDir, _tempDir);
-        EXPECT_FALSE(discovered->unparsedSweeps.empty());
-        ASSERT_EQ(discovered->bundles.size(), expected.size());
-        for(size_t i = 0; i < expected.size(); ++i)
-        {
-            EXPECT_EQ(discovered->bundles[i].fullName(), expected[i].fullName());
-        }
-        EXPECT_EQ(stats.discovered, 16u);
-        EXPECT_EQ(stats.discovered, expectedStats.discovered);
-        EXPECT_EQ(stats.excludedByFilter, expectedStats.excludedByFilter);
-        EXPECT_EQ(coverage.graphsFound, expectedCoverage.graphsFound);
-        EXPECT_EQ(coverage.graphsWithClaims, expectedCoverage.graphsWithClaims);
-    }
+    EXPECT_GT(expectFilteredSelectionMatchesFull(_tempDir, full, "quick_Matmul_*.*"), 0u);
 }
 
 // --write-support-claims needs every sweep manifest parsed, whatever the filter.
