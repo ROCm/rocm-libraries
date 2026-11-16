@@ -1360,6 +1360,16 @@ namespace TensileLite
                                                Hardware const& hardware,
                                                bool const* effectiveDynamicHint = nullptr) const;
 
+        // streamKDynamicDecomposition() on the dynamic-queue path, else all tiles
+        // whole. A split (tiles > 0) reserves partialTileSize(partialSlots())
+        // of workspace in place of the grid-sized partials, in
+        // requiredWorkspaceSize(), resolveStreamKSettings() and
+        // computeStreamKDecisions() alike.
+        StreamK::Dynamic::KernelArguments resolveStreamKDynamicSplit(Problem const&  problem,
+                                                                     Hardware const& hardware,
+                                                                     size_t          tiles,
+                                                                     bool effectiveDynamic) const;
+
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the
         // one clause that exists only at solve() (the pointer is not allocated

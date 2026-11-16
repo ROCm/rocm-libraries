@@ -21,6 +21,7 @@
 
 namespace TensileLite
 {
+    struct AMDGPU;
     struct PersistentLaunchSettings;
 
     struct StreamK
@@ -155,29 +156,31 @@ namespace TensileLite
 
             struct SplitInputs
             {
-                // Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
-                size_t tiles = 0;
-                // getItersPerTile(sizeMapping), clamped to at least 1.
+                // Problem shape. totalTiles is batch-inclusive, getNumTiles(sizeMapping, 1);
+                // itersPerTile is at least 1; kGranularity is skKGranularity().
+                size_t totalTiles   = 0;
                 size_t itersPerTile = 1;
-                // Iterations per indivisible K unit, skKGranularity().
                 size_t kGranularity = 1;
-                // Workgroups the dynamic grid policy may launch (CUs x occupancy).
-                size_t maxGrid = 0;
-                // CUs the split is sized for: origami's cu_count for the static grid.
-                size_t splitCUs = 0;
-                // False keeps every tile whole unless the debug overrides ask otherwise.
-                bool allowSplit = true;
-                // Flag-region entries left after the per-XCD queue counters.
-                size_t flagSlots = 0;
-                // Workspace the launch is given, and the bytes of one partial tile.
+
+                // Launch limits. maxGrid: workgroups the dynamic grid policy may launch
+                // (CUs x occupancy). splitCUs: CUs the split is sized for, origami's
+                // cu_count for the static grid. flagSlots: flag-region entries left
+                // after the per-XCD queue counters.
+                size_t maxGrid          = 0;
+                size_t splitCUs         = 0;
+                size_t flagSlots        = 0;
                 size_t workspaceBytes   = 0;
                 size_t partialTileBytes = 0;
-                // TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
+
+                // Policy. allowSplit false keeps every tile whole unless the debug
+                // overrides ask otherwise; uniform summation order ignores overrides
+                // that split only some tiles (see isRowUniform).
+                bool allowSplit            = true;
+                bool uniformSummationOrder = false;
+
+                // Debug overrides: TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
                 int overrideTiles = -1;
                 int overrideSplit = -1;
-                // Uniform summation order: overrides that split only some tiles are
-                // ignored (see isRowUniform).
-                bool uniformSummationOrder = false;
             };
 
             // Fewest iterations per split part (origami MinItersPerCU, grid_k_split_aware).
@@ -202,7 +205,25 @@ namespace TensileLite
              * same ordered list of chunk lengths: all whole, or all split alike (one
              * SKSplit and SKItersPerWI for every tile, summed in part order).
              */
-            TENSILELITEHOST_EXPORT static bool isRowUniform(KernelArguments const& d, size_t tiles);
+            TENSILELITEHOST_EXPORT static bool isRowUniform(KernelArguments const& d,
+                                                            size_t                 totalTiles);
+
+            // Workgroups per CU the dynamic grid launches at most.
+            // TODO Verify this limit is best
+            static constexpr size_t MaxOccupancy = 3;
+
+            // Workgroups the dynamic grid launches at most: up to MaxOccupancy per
+            // CU, within TENSILE_STREAMK_MAX_CUS and a fixed grid
+            // (TENSILE_STREAMK_FIXED_GRID), so every split part keeps a workgroup of
+            // its own.
+            TENSILELITEHOST_EXPORT static size_t maxGrid(AMDGPU const& gpu, int cuOccupancy);
+
+            // Whether tiles that all split alike keep uniform summation order. The
+            // fixup adds the parts in part order from the raw accumulator bits;
+            // atomic partials add in arrival order, and 16-bit compute types under
+            // HPA widen the partial.
+            TENSILELITEHOST_EXPORT static bool
+                keepsSummationOrder(ContractionSolution const& solution);
 
             /**
              * Work item i sits in queue i % numQueues, and a workgroup pops only its
