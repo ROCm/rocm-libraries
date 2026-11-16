@@ -237,6 +237,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
             COMPONENT tests
             RENAME "CTestTestfile.cmake"
         )
+        install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckCpuGemmFailure.cmake"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
+            COMPONENT tests
+        )
     else()
         message(STATUS "tensilelite-tests: shared/ctest not found (e.g. standalone checkout), falling back to gtest_discover_tests()")
         include(GoogleTest)
@@ -802,15 +807,16 @@ endforeach()
 
 # Option checks: these must be rejected.
 foreach(CASE
-        "I8_MixedA;--typeA i8 --typeB f32"
-        "I8_UnsupportedCD;--type i8 --typeCD f32"
-        "I8_NonIntegerAlpha;--type i8 --typeCD i32 --typeAlpha i32 --alpha 0.5"
-        "F32_TypeCD;--type f32 --typeCD f16")
+        "I8_MixedA;--typeA i8 --typeB f32;Error: mixed i8 / non-i8 input is not supported"
+        "I8_UnsupportedCD;--type i8 --typeCD f32;Error: unsupported i8 type combination --typeCD f32 --typeAlpha f32"
+        "I8_NonIntegerAlpha;--type i8 --typeCD i32 --typeAlpha i32 --alpha 0.5;Error: --typeAlpha i32 needs integer --alpha and --beta"
+        "F32_TypeCD;--type f32 --typeCD f16;Error: --typeCD f16 / --typeAlpha f32 is only supported for i8 inputs")
     list(GET CASE 0 NAME)
     list(GET CASE 1 FLAGS)
+    list(GET CASE 2 EXPECTED_ERROR)
     separate_arguments(FLAGS)
     add_cpu_gemm_test(${NAME}_Rejected
-        WILL_FAIL
+        EXPECTED_ERROR "${EXPECTED_ERROR}"
         ARGS -M 16 -N 16 -K 16 ${FLAGS} --validate
     )
 endforeach()
