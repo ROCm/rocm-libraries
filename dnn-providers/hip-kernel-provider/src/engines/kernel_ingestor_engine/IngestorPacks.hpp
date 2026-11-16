@@ -251,6 +251,10 @@ void registerGfx942AttentionUnified2DSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx942AttentionUnified2DModuleCache();
 
+/// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot)
+void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvFwdAotModuleCache();
+
 /// A preference between two engines that accept the same graph: when both are in a call's
 /// applicable list, @p preferred is listed ahead of @p other.
 struct EngineOrderRule

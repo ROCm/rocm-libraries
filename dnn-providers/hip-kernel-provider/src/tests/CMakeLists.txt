@@ -689,6 +689,59 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "<snake slug>, so its companion census would never register.")
     endif()
 
+    # Census for the shape-generic AOT-instance pack, hipkernel:Gfx950ConvFwdAot.
+    hkp_gfx950_conv_fwd_aot_available(_hkp_gfx950_conv_fwd_aot)
+    if(_hkp_gfx950_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwdAot for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for hipkernel:Gfx950ConvFwdAotSeed, the test-only seed catalog the
+    # integration root carries. It reads that root's own shard, which this binary
+    # otherwise never loads, so it also needs that pack built.
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_gfx950_conv_fwd_aot_seed)
+    if(_hkp_gfx950_conv_fwd_aot_seed)
+        add_dependencies(hip_kernel_provider_census_tests hkp_packaging_integration)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME integration
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotSeedPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: the integration root does not ship hipkernel:Gfx950ConvFwdAotSeed "
+            "for gfx950, so its census is not registered.")
+    endif()
+
     # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
     # every 2D cell that rule hands off must have a 3D kernel.
     if(_hkp_gfx950_attention_unified_2d AND _hkp_gfx950_attention_unified_3d)
@@ -742,6 +795,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 SUITES ${_hkp_suite}
                 EXPECTED_CASES ${_hkp_cases}
             )
+            # The prefill engine's page sizes and architectures, stated once in
+            # Gfx1151WmmaAttentionCatalog.hpp for the matcher and the GPU suites, are
+            # checked against the loaded objects. The suite is registered at every wired
+            # arch the header lists, read from the header itself, not only where the
+            # engine ships: a listed arch the catalog drops then loads no set and fails, as
+            # an object shipped outside the list does.
+            if(_hkp_engine STREQUAL "hipkernel:Gfx1151WmmaAttention")
+                set(_hkp_catalog_hpp
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/packs/Gfx1151WmmaAttentionCatalog.hpp")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hkp_catalog_hpp}")
+                file(READ "${_hkp_catalog_hpp}" _hkp_stated_arches)
+                string(REGEX MATCH "GFX1151_WMMA_ATTENTION_ARCHS\\{[^}]*\\}" _hkp_stated_arches
+                       "${_hkp_stated_arches}")
+                string(REGEX MATCHALL "gfx[0-9a-f]+" _hkp_stated_arches "${_hkp_stated_arches}")
+                if(NOT _hkp_stated_arches)
+                    message(FATAL_ERROR
+                        "hkp: no GFX1151_WMMA_ATTENTION_ARCHS list found in ${_hkp_catalog_hpp}")
+                endif()
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES ${_hkp_stated_arches}
+                    SUITES TestGfx1151WmmaAttentionCatalog
+                    EXPECTED_CASES
+                        ShipsPagedObjectsForExactlyTheMatchersPageSizes
+                        ShipsForNoArchitectureOutsideTheStatedList
+                )
+            endif()
         else()
             message(STATUS
                 "hkp: this configuration does not ship ${_hkp_engine} for any RDNA arch, "
