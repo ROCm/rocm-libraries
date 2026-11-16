@@ -5,9 +5,7 @@
 
 // Production-side workarounds for known MIOpen-provider issues. Each macro is
 // keyed by its upstream issue so it is easy to grep and remove once the
-// underlying problem is fixed: ISSUE_<n> is the GitHub issue
-// ROCm/rocm-libraries#<n>, ALMIOPEN_<n> is the internal Jira ticket
-// ALMIOPEN-<n>. Test-side counterparts live in
+// underlying problem is fixed. Test-side counterparts live in
 // `tests/common/TestWorkarounds.hpp` (kept separate so production TUs never
 // pull in gtest).
 //
@@ -44,6 +42,7 @@
 #include <cstdint>
 #include <exception>
 #include <limits>
+#include <vector>
 
 #define REJECT_IF_WORKAROUND_ISSUE_5409(handle)                                            \
     do                                                                                     \
@@ -68,12 +67,12 @@
     } while(0)
 
 // ----------------------------------------------------------------------------
-// ALMIOPEN-3295 (internal Jira, not a GitHub issue) — MIOpen's tiled pooling
-// forward kernels (MIOpenPooling.cpp, MIOpenPoolingND.cpp) pad BFLOAT16 max
-// pooling with 0xFF7F, which is above the -FLT_MAX their accumulator starts at.
-// A window whose in-bounds inputs are all -inf, NaN or the lowest BFLOAT16 value
-// therefore selects a padded position, and the index names it: a negative offset
-// or one that aliases another element. Pooling backward would read that index.
+// ALMIOPEN-3295 — MIOpen's tiled pooling forward kernels (MIOpenPooling.cpp,
+// MIOpenPoolingND.cpp) pad BFLOAT16 max pooling with 0xFF7F, which is above the
+// -FLT_MAX their accumulator starts at. A window whose in-bounds inputs are all
+// -inf, NaN or the lowest BFLOAT16 value therefore selects a padded position,
+// and the index names it: a negative offset or one that aliases another element.
+// Pooling backward would read that index.
 //
 // WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding) is true for the
 // graphs the resample forward checks decline until the fix lands: BFLOAT16 max
@@ -94,12 +93,12 @@
     ((dataType) == ::hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16 && (hasPadding))
 
 // ----------------------------------------------------------------------------
-// ALMIOPEN-3373 (internal Jira, not a GitHub issue) — MIOpen's pooling forward
-// kernels (MIOpenPoolingForwardNaive.cpp, and the tiled MIOpenPooling.cpp and
-// MIOpenPoolingND.cpp) compute each window's end, start + window, in signed
-// 32-bit arithmetic. The last window of a spatial dimension ends at input extent
-// + padding; above INT_MAX the end wraps negative, the clamp to the input is
-// lost and the kernel reads past X: a memory fault, or a wrong average.
+// ALMIOPEN-3373 — MIOpen's pooling forward kernels (MIOpenPoolingForwardNaive.cpp,
+// and the tiled MIOpenPooling.cpp and MIOpenPoolingND.cpp) compute each window's
+// end, start + window, in signed 32-bit arithmetic. The last window of a spatial
+// dimension ends at input extent + padding; above INT_MAX the end wraps negative,
+// the clamp to the input is lost and the kernel reads past X: a memory fault, or
+// a wrong average.
 //
 // WORKAROUND_ALMIOPEN_3373_DECLINES_EXTENT(inputExtent, padding) is true for the
 // spatial dimensions the resample forward checks decline until the fix lands:
@@ -118,3 +117,50 @@
 #define WORKAROUND_ALMIOPEN_3373_DECLINES_EXTENT(inputExtent, padding) \
     (static_cast<int64_t>(inputExtent) + static_cast<int64_t>(padding) \
      > static_cast<int64_t>(::std::numeric_limits<int>::max()))
+
+// ----------------------------------------------------------------------------
+// ALMIOPEN-3375 — for average pooling that includes padding, MIOpen's naive
+// pooling forward kernel (MIOpenPoolingForwardNaive.cpp) divides by the window
+// volume computed as an unsigned 32-bit product. A volume of 2^32 or more wraps,
+// so the divisor is 0 (Y is inf) or a small residue (Y is too large). Windows
+// that large fit only the naive kernel, so MIOpen selects it.
+//
+// WORKAROUND_ALMIOPEN_3375_DECLINES_WINDOW(mode, window) is true for the graphs
+// the resample forward checks decline until the fix lands: AVGPOOL_INCLUDE_PADDING
+// with a window volume above UINT32_MAX. Max pooling and average pooling that
+// excludes padding do not use that product.
+//
+// To remove after the fix: delete this section, its helper and its macro, its
+// call site in engines/plans/MiopenResampleFwdChecks.cpp (and that file's
+// `#include "Workarounds.hpp"` once no workaround there remains), and the tests
+// tagged ALMIOPEN-3375 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
+// drop the window-volume rule from the Resample Forward notes in
+// docs/OperationSupport.md and
+// projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
+// ALMIOPEN.3375` finds the code sites.
+// ----------------------------------------------------------------------------
+
+namespace miopen_plugin::workaround_almiopen_3375
+{
+
+// True when the product of the window values exceeds UINT32_MAX. Every value is in [1, INT_MAX],
+// so the running product stays below 2^63 until it passes the limit.
+inline bool windowVolumeExceedsUint32(const std::vector<int>& window)
+{
+    uint64_t volume = 1;
+    for(const int value : window)
+    {
+        volume *= static_cast<uint64_t>(value);
+        if(volume > ::std::numeric_limits<uint32_t>::max())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace miopen_plugin::workaround_almiopen_3375
+
+#define WORKAROUND_ALMIOPEN_3375_DECLINES_WINDOW(mode, window)                               \
+    ((mode) == ::hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING \
+     && ::miopen_plugin::workaround_almiopen_3375::windowVolumeExceedsUint32(window))

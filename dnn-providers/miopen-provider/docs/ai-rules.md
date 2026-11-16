@@ -121,7 +121,7 @@ When requested to build/test:
 - Use Flatbuffers for serialization (via Flatbuffers SDK wrapper classes: IGraph, GraphWrapper, etc.)
 
 ### MIOpen Workarounds
-Known MIOpen problems the provider works around live in two headers, each keyed by its tracking issue so the workaround is easy to find and remove once MIOpen is fixed. In a key, `ISSUE_<n>` is the GitHub issue ROCm/rocm-libraries#<n> and `ALMIOPEN_<n>` is the internal Jira ticket ALMIOPEN-<n>.
+Known MIOpen problems the provider works around live in two headers, each keyed by its tracking issue so the workaround is easy to find and remove once MIOpen is fixed. In a key, `ISSUE_<n>` is the GitHub issue ROCm/rocm-libraries#<n> and `ALMIOPEN_<n>` is the Jira ticket ALMIOPEN-<n>.
 - `Workarounds.hpp` (production side): makes a plan builder's applicability decline the affected graphs, so engine selection skips them. `REJECT_IF_WORKAROUND_ISSUE_5409(handle)` returns `false` from a `bool` function; `WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding)` is a predicate the resample checks turn into a decline.
 - `tests/common/TestWorkarounds.hpp` (test side, kept separate so production code never pulls in gtest): predicates and skips for tests that hit a known gap, such as `IS_WORKAROUND_ISSUE_6979(result)` and `SKIP_IF_WORKAROUND_ISSUE_6979(result)`. Use them only in tests of the affected path, so other failures still surface.
 - Each workaround is a commented section: the problem and where it is in MIOpen, the graphs or tests it affects, the macro's contract, and the steps to remove it. Tests that exist because of a workaround mention its key, so `git grep` on the key (for example `WORKAROUND_ISSUE_5409` or `ALMIOPEN.3295`) finds every site.

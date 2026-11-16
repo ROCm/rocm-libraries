@@ -305,6 +305,14 @@ ResampleFwdConfig resolve(const IGraph& opGraph)
         }
     }
 
+    // Workaround for ALMIOPEN-3375 (see Workarounds.hpp): MIOpen divides average pooling that
+    // includes padding by the window volume computed in 32 bits.
+    if(WORKAROUND_ALMIOPEN_3375_DECLINES_WINDOW(attrs.resample_mode(), config.window))
+    {
+        decline("AVGPOOL_INCLUDE_PADDING with a window volume above UINT32_MAX is not supported; "
+                "MIOpen's average overflows");
+    }
+
     // For FP32 and FP16, MIOpen's max pooling never selects a padded position over an in-bounds
     // one, which matches NEG_INF_PAD, and its average pooling counts padded positions as zero,
     // which matches ZERO_PAD. Any other padding_mode, PADDING_NOT_SET included, only agrees with

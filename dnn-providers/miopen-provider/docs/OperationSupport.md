@@ -98,16 +98,17 @@ The following table lists all operations currently supported in hipDNN:
 > [!NOTE]
 > **Standalone Resample Forward:** A single-node graph supports MAXPOOL, AVGPOOL_EXCLUDE_PADDING
 > and AVGPOOL_INCLUDE_PADDING across ranks 4-5, with packed X and Y sharing one datatype and
-> layout, and an FP32 compute type. Padding must be symmetric and smaller than the window, and each
-> spatial input size plus its padding may not exceed INT_MAX (a known MIOpen limitation); unless
-> the padding is all zero, MAXPOOL needs NEG_INF_PAD and the average modes need ZERO_PAD. Y must have the
-> floor-mode output size. The index output (`generate_index`) is supported for MAXPOOL in
-> NCHW/NCDHW only, as INT8 or INT32; with INT8 the input spatial size may not exceed 128, and on
-> BFLOAT16 tensors the padding must be zero (a known MIOpen limitation). The index tensor needs
-> `generate_index`, Y's dimensions and packed NCHW/NCDHW strides, and must not alias X or Y. On
-> channels-last tensors, graphs whose window, stride, datatype and rank need a per-thread tile
-> above the scratch limit of MIOpen's tiled kernels (about 128 KiB) are not supported. In-place
-> execution and override-shape graphs are not supported.
+> layout, and an FP32 compute type. Padding must be symmetric and smaller than the window, and
+> each spatial input size plus its padding may not exceed INT_MAX (a known MIOpen limitation);
+> unless the padding is all zero, MAXPOOL needs NEG_INF_PAD and the average modes need ZERO_PAD.
+> An AVGPOOL_INCLUDE_PADDING window may hold at most UINT32_MAX positions (a known MIOpen
+> limitation). Y must have the floor-mode output size. The index output (`generate_index`) is
+> supported for MAXPOOL in NCHW/NCDHW only, as INT8 or INT32; with INT8 the input spatial size may
+> not exceed 128, and on BFLOAT16 tensors the padding must be zero (a known MIOpen limitation). The
+> index tensor needs `generate_index`, Y's dimensions and packed NCHW/NCDHW strides, and must not
+> alias X or Y. On channels-last tensors, graphs whose window, stride, datatype and rank need a
+> per-thread tile above the scratch limit of MIOpen's tiled kernels (about 128 KiB) are not
+> supported. In-place execution and override-shape graphs are not supported.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.

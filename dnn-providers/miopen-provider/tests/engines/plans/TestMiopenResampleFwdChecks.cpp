@@ -311,6 +311,39 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForInputPlusPaddingAboveIntMax
                    "plus the padding at spatial dimension 0 exceeds INT_MAX");
 }
 
+// Workaround for ALMIOPEN-3375 (see Workarounds.hpp): MIOpen divides AVGPOOL_INCLUDE_PADDING by
+// the window volume in 32 bits. 65537 * 65535 is UINT32_MAX, the largest volume that fits.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForIncludePaddingWindowVolumeAtUint32Max)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::AVGPOOL_INCLUDE_PADDING,
+                                                {1, 1, 1, 1},
+                                                {65537, 65535},
+                                                {65537, 65535},
+                                                {65536, 65534}));
+}
+
+// Workaround for ALMIOPEN-3375 (see Workarounds.hpp): a 65536 x 65536 window has volume 2^32.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForIncludePaddingWindowVolumeAboveUint32Max)
+{
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::AVGPOOL_INCLUDE_PADDING,
+                                                {1, 1, 1, 1},
+                                                {65536, 65536},
+                                                {65536, 65536},
+                                                {65535, 65535}),
+                   "window volume above UINT32_MAX");
+}
+
+// Workaround for ALMIOPEN-3375 (see Workarounds.hpp): the volume is read only by average pooling
+// that includes padding, so the same window is accepted when padding is excluded.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForExcludePaddingWindowVolumeAboveUint32Max)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+                                                {1, 1, 1, 1},
+                                                {65536, 65536},
+                                                {65536, 65536},
+                                                {65535, 65535}));
+}
+
 // For FP32 and FP16, MIOpen's max pooling does not select padded positions, as NEG_INF_PAD would
 // not, and its average pooling counts them as zero (BFLOAT16: ALMIOPEN-3295). Any other
 // padding_mode is only equivalent when no position is padded.
