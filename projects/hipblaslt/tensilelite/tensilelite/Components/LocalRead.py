@@ -806,97 +806,54 @@ class LocalReadMFMA(LocalRead):
 
 
     def _localReadSwizzledTDM(self, writer, kernel, bufferIdx, iui, epsi, tP):
-        # gfx1250 F8 swizzled-B via TDM. B is pre-swizzled in global memory as
-        #   view(N/16,16,K/32,2,16).permute(0,2,3,1,4)
-        # and DMA'd to LDS by TDM (faithful contiguous copy), then read here with plain ds_load_b128
-        # from UNPADDED LDS (LdsPad=0). Bank-conflict-free (64 banks, 2-pass). LDS = off-order host
-        # buffer: off(n,k) = kO*kOStride + kM*blockOff + nI*innerK + kI. The WMMA 16x16x128 f8f6f4
-        # K->thread map is lane L -> n=L%MI_N, k = kO*(kMcount*innerK) + (L//MI_N)*innerK + kI, so the
-        # read-block index r == kO and the lane-half (L//MI_N) == kM (both set in
-        # lraTileAssignmentSwizzledTDM). All strides below are ELEMENT counts; the ds_load immediate is
-        # bytes, so the element offset is scaled by bpeDS (like the normal reader). fp8: elems == bytes.
+        # gfx1250 swizzled-TDM: the operand is pre-swizzled in global memory into WMMA order and copied to
+        # LDS by TDM, then read here with plain ds_load_b128. The layout, offsets and register selection
+        # come from SwizzledTdmGeometry (Components/SwizzledTdmLayout.py), checked end to end by
+        # Tests/unit/test_swizzled_tdm_layout.py. Lane-dependent terms (kM lane half, nI/VW lane column,
+        # wave nO band, pad) are in the LocalReadAddr base (lraTileAssignmentSwizzledTDM/lraFinalOffset);
+        # this emits the per-read immediates: nt = vIdx*vw + eIdx MI tiles x r = kO blocks.
         imod        = Module("LocalReadDo%s_I%s_swizzledTDM" % (tP["tensorChar"], iui))
         tc          = tP["tensorChar"]
-        tile01      = tP["tile01Idx"]
+        geom        = tP["swzGeom"]
         instruction = tP["localReadInstruction"]
         blockWidth  = instruction.blockWidth
         LocalReadX  = instruction.getInst(0)
         maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
-        depthU      = kernel["_DepthU%s" % tc]
-        miN         = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-        innerK      = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())  # elems per ds_load_b128
-        kMcount     = kernel["WavefrontSize"] // miN     # K-halves interleaved across lane-groups
-        blockOff    = miN * innerK                       # inner [nI,kI] block
-        kOStride    = kMcount * blockOff                 # read-block (kO) stride
-        nOStride    = miN * depthU                       # N-tile (nO) stride
-        numNtile    = kernel["MIWaveTile"][tile01]
-        # N-waves interleave at MI_N: a wave's sub-tiles stride by MIWaveGroup[N] nO rows
-        # (the per-wave base offset is added in lraTileAssignmentSwizzledTDM). ==1 -> single wave.
-        nWaveN      = kernel["MIWaveGroup"][tile01]
-        numKChunk   = kernel["MIInputPerThread%s" % tc] // innerK
         regsPerLoad = int(blockWidth)                    # VGPRs per ds_load_b128
-        regsPerNtile = numKChunk * regsPerLoad
+        regsPerNtile = geom.numKChunk * regsPerLoad
         swapByteOff = tP["localReadSwapByteOffset"]
+        numLra      = writer.states.a.numVgprLocalReadAddr if tP["isA"] else writer.states.b.numVgprLocalReadAddr
         # HalfPLR splits the per-iteration Valu block into rotating half-block groups (G0/G1/G2);
         # the WMMA consumer reads through the same getHalfPLRValuStr mapping, so the swizzled reader
         # must target the group register too (else it fills Valu_X while WMMA reads Valu_G -> garbage).
         halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c" % tc]
-        # VectorWidth>1: the WMMA/store interleave the free dim into VW column-phases. A logical MI-tile
-        # group vIdx (0..numVecPerTile) owns VW nO-tiles (strided by the wave interleave nWaveN); the eIdx
-        # phase (0..vw) shifts one column (+innerK) within that group. The per-lane N stride becomes VW
-        # (handled in lraTileAssignmentSwizzledTDM). Register block order stays nt=vIdx*vw+eIdx to match
-        # the acc->arch layout. vw==1 -> vIdx=nt, eIdx=0 -> byte-identical to the flat nt-major loop.
-        vw            = kernel["VectorWidth%s" % tc]
-        numVecPerTile = numNtile // vw
-        # VW>1 breaks the LDS bank conflict with a per-nO-tile pad, deposited by TDM iterate-mode
-        # (see initTDMDescriptor). The nO-crossing term must step by the PADDED nO stride to match;
-        # eIdx/kOStride/kI stay within one nO-tile (no pad). The per-lane base pad is applied by
-        # lraFinalOffset. padElems==0 (VW==1) -> byte-identical to the unpadded reader.
-        padElems       = kernel["LdsPad%s" % tc]
-        nOStridePadded = nOStride + padElems
-        # LDSSegmentInterleave with B not spanning its LDS component (WaveTile/VW a multiple of the
-        # component count): like the normal reader, the vIdx group selects the component. Split the
-        # vIdx nO offset into a within-component nO and a component jump (readStride, post-pad), so
-        # vIdx group h lands at component h and therefore reads through LocalReadAddr+h (B-rotate
-        # relies on that). A wave's nO band stays within its component (lraTileAssignmentSwizzledTDM).
-        segOff     = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
-        segVIdx    = bool(segOff) and segOff.get("footprintPacked", False) \
-            and not segOff.get("bBaseline", False) and numVecPerTile > 1
-        if segVIdx:
-            numComp    = kernel["NumWaves"] // 2
-            compNO     = (kernel["MacroTile%u" % tile01] // miN) // numComp   # nO rows per component
+        # LDSSegmentInterleave with the operand not spanning its LDS component (WaveTile/VW a multiple of
+        # the component count): like the normal reader, the vIdx group selects the component (jump of
+        # readStride, post-pad), so vIdx group h reads through LocalReadAddr+h (B-rotate relies on that).
+        segOff  = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
+        windows = segOff.get("readAddressWindows" + tc)
+        compNO, readStride = None, 0
+        if bool(segOff) and segOff.get("footprintPacked", False) and not segOff.get("bBaseline", False) \
+                and geom.waveTile // geom.vw > 1:
+            compNO     = geom.nORows // (kernel["NumWaves"] // 2)   # nO rows per LDS component
             readStride = segOff.get("readStrideBytes" + tc, segOff["writeStrideBytes"])
-            assert compNO % (vw * nWaveN) == 0, "swizzled LSI: a vIdx group must not straddle a component"
-        for nt in range(numNtile):
-            vIdx = nt // vw
-            eIdx = nt %  vw
-            vNO  = vIdx * vw * nWaveN                     # nO offset of this vIdx group (wave base excluded)
-            compByteOff = 0
-            if segVIdx:
-                comp, vNO   = vNO // compNO, vNO % compNO
-                compByteOff = comp * readStride
-            for r in range(numKChunk):
+        for nt in range(geom.waveTile):
+            for r in range(geom.numKChunk):
                 # localReadOffset carries the K-sub-iteration progression in the immediate (like the
                 # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
                 # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
-                offElems = vNO * nOStridePadded + eIdx * innerK + r * kOStride + tP["localReadOffset"]
-                off = int(round(offElems * tP["bpeDS"])) + compByteOff + swapByteOff
-                if segVIdx and tc == "B" and kernel.get("LDSSegmentBRotate"):
+                comp, off = geom.readOffsetBytes(nt, r, tP["localReadOffset"], compNO, readStride)
+                off += swapByteOff
+                if compNO is not None and tc == "B" and kernel.get("LDSSegmentBRotate"):
                     # B-rotate swaps LocalReadAddrB+0/+1 per SIMD pair: register h must serve component h.
-                    assert off // maxLDSConstOffset == compByteOff // readStride, \
-                        "LDSSegmentBRotate: swizzled B vIdx=%u does not read through LocalReadAddrB+%u" \
-                        % (vIdx, compByteOff // readStride)
+                    assert off // maxLDSConstOffset == comp, \
+                        "LDSSegmentBRotate: swizzled B nt=%u (component %u) does not read through LocalReadAddrB+%u" \
+                        % (nt, comp, comp)
                 reg = nt * regsPerNtile + r * regsPerLoad
-                # 64K-window register select, mapped through the LSI read windows like the normal reader:
-                # with a component stride >= 128K, LocalReadAddr+1 holds window 2, not 1.
-                addrIdx  = off // maxLDSConstOffset
-                windows  = segOff.get("readAddressWindows" + tc)
-                regIdx   = windows.index(addrIdx) if windows is not None else addrIdx
-                numLra   = writer.states.a.numVgprLocalReadAddr if tP["isA"] else writer.states.b.numVgprLocalReadAddr
+                regIdx, offSplit = geom.selectReadRegister(off, windows, maxLDSConstOffset)
                 assert 0 <= regIdx < numLra, \
                     "swizzledTDM %s read at LDS offset %d needs LocalReadAddr%s+%d, but only %d address registers exist" \
                     % (tc, off, tc, regIdx, numLra)
-                offSplit = off - addrIdx * maxLDSConstOffset
                 srcAddr  = vgpr("LocalReadAddr%s+%u" % (tc, regIdx))
                 ds = DSModifiers(na=1, offset=offSplit)
                 if halfPLR:

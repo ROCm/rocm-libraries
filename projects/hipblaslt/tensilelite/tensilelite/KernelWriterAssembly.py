@@ -7216,9 +7216,10 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("lraTileAssignmentSwizzledTDM")
     module.addComment0("lr%s swizzled-TDM base" % tP["tileChar"])
     waveWidth = kernel["WavefrontSize"]
-    miN       = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-    innerK    = int(16 / kernel["ProblemType"]["DataType%s" % tP["tensorChar"]].numBytes())  # elems per ds_load_b128
-    blockOff  = miN * innerK                              # inner [nI,kI] block = kM stride
+    geom      = tP["swzGeom"]                             # SwizzledTdmGeometry.laneBase / waveBase
+    miN       = geom.mi                                   # tile free-dim MI (M for A, N for B)
+    innerK    = geom.innerK                               # elems per ds_load_b128
+    blockOff  = geom.blockOff                             # inner [nI,kI] block = kM stride
     tile01    = tP["tile01Idx"]
     miWaveGroup = kernel["MIWaveGroup"]
     num1DWaves  = miWaveGroup[tile01]                     # N-axis wave count for B
@@ -7237,8 +7238,7 @@ class KernelWriterAssembly(KernelWriter):
         # VectorWidth>1: a lane's per-tile N stride is VW, so its 16 columns span VW nO-tiles. Decompose
         # nVWB = VW*nIdx into nO_lane (//MI_N) and nI_lane (%MI_N):
         #   lro += nO_lane*nOStride + nI_lane*innerK   (eIdx phase + vIdx group are in the ds_load imm).
-        depthU   = kernel["_DepthU%s" % tP["tensorChar"]]
-        nOStride = miN * depthU
+        nOStride = geom.nOTile
         nOReg    = self.vgprPool.checkOut(1, "nOLaneSwizTDM")
         module.add(vectorStaticMultiply(vgpr(lReg), vgpr(lReg), vw, tmpSgprInfo, "nVWB = VW * nIdx"))
         module.add(vectorStaticDivide(nOReg, lReg, miN, tmpVgprRes, "nO_lane = nVWB // MI_N"))
@@ -7253,11 +7253,9 @@ class KernelWriterAssembly(KernelWriter):
       # MI_N granularity (strideWave == one nO), and a wave's MIWaveTile sub-tiles stride by
       # MIWaveGroup[N] nO (applied in _localReadSwizzledTDM) -> lro += wtid0 * nOStride.
       if num1DWaves > 1:
-        depthU   = kernel["_DepthU%s" % tP["tensorChar"]]
-        nOStride = miN * depthU
         # VectorWidth>1 widens each wave's tile span to VW nO-tiles, so the N-waves interleave at
         # VW*MI_N (VW nO-tiles) granularity -> the per-wave nO-band offset scales by VW. vw==1 -> nOStride.
-        strideWaveN = vw * nOStride
+        strideWaveN = geom.waveBase(1)
         dividedForWaveId = waveWidth if tile01 == 0 else waveWidth * miWaveGroup[0]
         wReg = self.vgprPool.checkOut(1, "waveSwizTDM")
         module.add(vectorStaticDivide(wReg, "Serial", dividedForWaveId, tmpVgprRes, "wtid = Serial // (waveWidth*MIWaveGroup[0])"))
@@ -16827,10 +16825,7 @@ class KernelWriterAssembly(KernelWriter):
       # _localReadSwizzledTDM), NOT in the LocalReadAddr VGPR, so localReadInitPointers resets it to 0 at
       # every DepthU boundary — required for correct multi-main-loop-iteration (K>DepthU) reads.
       module   = Module("localReadInc swizzledTDM")
-      innerK   = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
-      miN      = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-      kOStride = (kernel["WavefrontSize"] // miN) * miN * innerK
-      inc      = (kernel["MIInputPerThread%s" % tc] // innerK) * kOStride
+      inc      = tP["swzGeom"].kStepPerMI                 # elements per WMMA K step
       if self.states.inTailLoop:
         # The tail loop is a runtime loop: one emitted body runs once per remaining MI-K step, so a
         # compile-time immediate would re-read the same K block every trip. Advance the address VGPR
@@ -24821,13 +24816,13 @@ class KernelWriterAssembly(KernelWriter):
     value the 2-D dim1 walk used). Caller sets dim1/tile1 = 1 and setPadding(0,0)."""
     comp = TensorDataMoverLoad.find(self)
     dss = TensorDataMoverLoad.dataSizeShift(dtype)
-    pad_bytes = int(round(kernel["LdsPad%s" % tc] * bpe))
-    nOTileBytes = int(round(swzTile0 * bpe))
-    assert nOTileBytes == kernel["LdsBlockSizePerPad%s" % tc], \
+    geom = self.tPA["swzGeom"] if tc == "A" else self.tPB["swzGeom"]
+    nOTileBytes = geom.nOTileBytes
+    assert nOTileBytes == int(round(swzTile0 * bpe)) and nOTileBytes == kernel["LdsBlockSizePerPad%s" % tc], \
         "swizzle nO-tile (%d B) must equal LdsBlockSizePerPad%s (%d); read/LDS-size match" \
         % (nOTileBytes, tc, kernel["LdsBlockSizePerPad%s" % tc])
     assert 0 < swzRows <= 256, "swizzle TDM iter_count(%d) outside HW range 1..256" % swzRows
-    lds_inc = (nOTileBytes + pad_bytes) >> dss
+    lds_inc = geom.iterLdsIncBytes() >> dss
     mod.add(comp.setIterationEnabled(descSgprName(1), True))
     with self.allocTmpSgpr(1, tag="swzTdmIterCount") as itTmp:
       if remainRowsSgpr is None:
@@ -25235,13 +25230,13 @@ class KernelWriterAssembly(KernelWriter):
       #   stride0 = MI_N*paddedK (nO row stride in the host buffer; paddedK = roundup(SizeL, swzK))
       # For #nO==1 or DepthU==K this reduces to a contiguous copy. GlobalReadIncsB (= MI_N*DepthU)
       # advances the base to the next DepthU slice. Element counts; data_size handles fp8 width.
-      swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-      swzInnerK = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
-      swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
-      swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      geom      = tP["swzGeom"]                           # SwizzledTdmGeometry: tile/stride/unit constants
+      swzMiN    = geom.mi                                 # tile free-dim MI (M for A, N for B)
+      swzK      = geom.swzK                               # host swizzle K granule (32 for fp8)
+      swzTile0  = geom.nOTile                             # per-nO DepthU slice (elements)
       # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
       # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
-      swzUnitShift = 1 if dtype.isFloat4() else 0
+      swzUnitShift = geom.unitShift
       swzRows   = (mt // swzMiN) // numWaves              # nO rows per wave
       assert swzRows * numWaves == mt // swzMiN, \
         "swizzled-TDM %s: %d nO rows do not split over %d waves" % (tc, mt // swzMiN, numWaves)
@@ -25511,9 +25506,8 @@ class KernelWriterAssembly(KernelWriter):
           # and both components write the same LDS byte. 0 is still correct
           # when scaleRows*mxDU < numComp: extra comps share LDS+0 (dim0 idle).
           dataBytes = mxTdmTileM(mt, mxTileLds) * du // numComp * int(bpe * 4) // (4 * dim1Divisor)
-      if tP.get("isSwizzledTDM") and TensorDataMoverLoad.swizzledCompRows(
-          mt, kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"], numComp)[1]:
-        dataBytes = 0  # replicated swizzled tile: every component writes LDS+0 (see swizzledCompRows)
+      if tP.get("isSwizzledTDM") and tP["swzGeom"].compRows(numComp)[1]:
+        dataBytes = 0  # replicated swizzled tile: every component writes LDS+0 (see SwizzledTdmGeometry.compRows)
       mod.add(self.tdmWaveLdsAddr(kernel, tc, numComp, dataBytes,
                                   ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
                                   waveOffsetSgprIdx, tmpPadSgprIdx))
@@ -25534,16 +25528,16 @@ class KernelWriterAssembly(KernelWriter):
     # numComp=1 (M-only split) -> full nO band. Per-component global base comes from
     # calculateStartAddrWaveSeparated; per-component LDS base is the wId*dataBytes above.
     if bool(tP.get("isSwizzledTDM")):
-      swzMiN    = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-      swzInnerK = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())
-      swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
-      swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      geom      = tP["swzGeom"]                           # SwizzledTdmGeometry: tile/stride/unit constants
+      swzMiN    = geom.mi                                 # tile free-dim MI (M for A, N for B)
+      swzK      = geom.swzK                               # host swizzle K granule (32 for fp8)
+      swzTile0  = geom.nOTile                             # per-nO DepthU slice (elements)
       # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
       # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
-      swzUnitShift = 1 if dtype.isFloat4() else 0
+      swzUnitShift = geom.unitShift
       # nO rows per component; an uneven split (e.g. MT=16 over 2 components) replicates the whole
-      # tile in every component instead (see TensorDataMoverLoad.swizzledCompRows).
-      swzRows, swzReplicate = TensorDataMoverLoad.swizzledCompRows(mt, swzMiN, numComp)
+      # tile in every component instead (see SwizzledTdmGeometry.compRows).
+      swzRows, swzReplicate = geom.compRows(numComp)
       # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
       # stride, and the pad_interval field (which cannot encode the 4096B nO block) is
       # disabled. dim1 stays the full nO extent (walk clamp); tile1 drops to 1 (one nO per
@@ -27099,9 +27093,10 @@ class KernelWriterAssembly(KernelWriter):
       # prefix, so the tail clamps dim0 to the row's valid extent MI*alignUp(SizeL%DepthU, swzK):
       # the host zero-pads K up to swzK, and TDM zero-fills the rest instead of reading the next
       # nO row. Waves split nO rows, not K, so no per-wave K offset applies.
-      swzMi = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]
-      swzK = tP["swizzleK"]
-      swzUnitShift = 1 if dtype.isFloat4() else 0   # F4: descriptor counts bytes (see initTDMDescriptor)
+      geom = tP["swzGeom"]                          # SwizzledTdmGeometry.descTailDim0
+      swzMi = geom.mi
+      swzK = geom.swzK
+      swzUnitShift = geom.unitShift                 # F4: descriptor counts bytes (see initTDMDescriptor)
       with self.allocTmpSgpr(1, tag="resetTDMDescriptorForTail_swzTmpSgpr") as tmpSgpr:
         mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1), "swizzled tail: K rem = SizeL % DepthU"))
         mod.add(SAddU32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzK - 1, "swizzled tail: rem + swzK-1"))

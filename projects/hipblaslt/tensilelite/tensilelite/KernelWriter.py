@@ -52,6 +52,7 @@ from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 from .KernelWriterModules import *
 
 from .Component import Component, LraTileProperties
+from .Components.SwizzledTdmLayout import SwizzledTdmGeometry
 from .Components.Signature import UserArgumentsInfo
 from .Components.PersistentLoop import PersistentKernelState
 from .Components.StreamK import StreamKKernelState
@@ -11559,16 +11560,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]
     elif tP["isSwizzledTDM"]:
-      # Compact swizzle block along K, matching the host pre-swizzle (gfx1250 F8: BK=32 elements).
-      # inner = one ds_load_b128 = 16 bytes of elements; kMid = wave32 / 16-lane N-group = 2.
+      # Compact swizzle block along K, matching the host pre-swizzle (see SwizzledTdmGeometry, the single
+      # source of the swizzled-TDM constants and offsets; its innerK asserts a whole 16-byte ds_load_b128).
       tP["swizzlePackK"] = 1
-      innerKElems = int(16 / kernel["ProblemType"]["DataType%s"%cM].numBytes())
-      miMorN = kernel["MatrixInstM"] if cM == "A" else kernel["MatrixInstN"]  # tile free-dim MI extent
-      kMid = kernel["WavefrontSize"] // miMorN
-      bpeSwz = kernel["ProblemType"]["DataType%s"%cM].numBytes()
-      assert innerKElems > 0 and innerKElems * bpeSwz == 16, \
-        "swizzled-TDM %s: innerK (%s elements) x bpe (%s) must be one 16-byte ds_load_b128" % (cM, innerKElems, bpeSwz)
-      tP["swizzleK"] = innerKElems * kMid
+      tP["swzGeom"] = SwizzledTdmGeometry.fromKernel(kernel, cM)
+      tP["swizzleK"] = tP["swzGeom"].swzK
 
   ##############################################################################
   # Global Read Addresses: Tile Assignment A/B
