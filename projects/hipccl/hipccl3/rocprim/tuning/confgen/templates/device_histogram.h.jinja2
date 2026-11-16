@@ -12,8 +12,7 @@ class value_type, unsigned int channels, unsigned int active_channels
 {%- endblock %}
 
 {% block config_guard scoped %}
-    ({% if not type.value_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<value_type>::value)
-    && (sizeof(value_type) <= {{ type.value_type.size }})
+    ({{ mk_type_trait_guard(type.value_type) }}(sizeof(value_type) <= {{ type.value_type.size }})
     {% if type.value_type.size_min > 0 %}&& (sizeof(value_type) > {{ type.value_type.size_min }}){% endif %} && (channels == {{ type.channels.type }}) && (active_channels == {{ type.active_channels.type }}))
 {%- endblock %}
 

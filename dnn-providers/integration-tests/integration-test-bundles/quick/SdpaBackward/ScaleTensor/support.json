@@ -11,6 +11,33 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "clms1_b1h1k1v1_64x96_d128_bfp16_none_srt0p5_tolp"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "clms1_b1h1k1v1_64x96_d128_bfp16_none_srt0p5_tolp"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

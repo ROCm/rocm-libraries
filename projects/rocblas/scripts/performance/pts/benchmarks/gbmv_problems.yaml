@@ -26,7 +26,8 @@ Tests:
     KL: 100
     KU: 100
     lda: 201
-    iters: 20
+    iters: 100
+    cold_iters: 20
 
   - name: gbmv_bench_const_m
     category: bench
@@ -42,7 +43,8 @@ Tests:
     KL: 100
     KU: 100
     lda: 201
-    iters: 20
+    iters: 100
+    cold_iters: 20
 
   - name: gbmv_bench_m_equals_n
     category: bench
@@ -57,7 +59,8 @@ Tests:
     KL: 100
     KU: 100
     lda: 201
-    iters: 20
+    iters: 100
+    cold_iters: 20
 
 
 ...

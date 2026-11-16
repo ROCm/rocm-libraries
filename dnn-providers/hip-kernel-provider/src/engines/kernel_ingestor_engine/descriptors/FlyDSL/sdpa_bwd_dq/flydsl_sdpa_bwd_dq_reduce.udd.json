@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "2440789b-d2c7-5f37-843f-eb134ca8ba5c",
+  "name": "flydsl sdpa_bwd_dq reduce dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch"
+}

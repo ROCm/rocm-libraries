@@ -23,7 +23,6 @@ set(HIPDNN_IT_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(HIPDNN_IT_ALWAYS_BUILT_SOURCES
     IntegrationIsSupportedExtPerformance.cpp
     conv/IntegrationConvForwardSerializeRoundTrip.cpp
-    resample/IntegrationGpuResampleBackward.cpp
 )
 
 foreach(_rel IN LISTS HIPDNN_IT_ALWAYS_BUILT_SOURCES)
@@ -82,7 +81,6 @@ add_always_built_test_sources(
 add_subdirectory(conv)
 add_subdirectory(moe)
 add_subdirectory(sdpa)
-add_subdirectory(resample)
 
 # Every .cpp under this directory must go through one of the two helpers above.
 # Calling target_sources() directly would bypass the BUILD_CPP_GRAPH_TESTS gate

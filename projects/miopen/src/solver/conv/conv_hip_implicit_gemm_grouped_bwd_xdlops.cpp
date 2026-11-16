@@ -420,7 +420,7 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
@@ -429,9 +429,10 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsValid(
     if(!loader.IsLoaded())
         return false;
 
-    auto data_type = problem.GetInDataType();
-    return loader.IsArgsSupported(
-        CKSolverType::GrpConvBwd, problem, kernel_id, data_type, use_tf32);
+    // use_tf32 is dropped by Deserialize; recompute it from the problem so a restored config is
+    // validated against the right (TF32 or FP32) instance set. 2D bwd-data has TF32-only kernels,
+    // so a stale use_tf32=false would drop those perf-db records here, before GetSolution runs.
+    return loader.IsArgsSupportedTf32Aware(CKSolverType::GrpConvBwd, problem, kernel_id);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::operator==(
@@ -521,8 +522,7 @@ ConvSolution ConvHipImplicitGemmGroupBwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConvBwd, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConvBwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

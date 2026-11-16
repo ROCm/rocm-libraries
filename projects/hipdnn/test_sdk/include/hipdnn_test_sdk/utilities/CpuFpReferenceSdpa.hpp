@@ -589,11 +589,16 @@ public:
                 }
             }
 
+            const auto readKey = keysTheRowReads(options, b, h, sq, liveQ, liveKv);
             for(int64_t dv = 0; dv < headDimV; ++dv)
             {
                 auto acc = static_cast<ComputeDataType>(0.0);
                 for(int64_t skv = 0; skv < liveKv; ++skv)
                 {
+                    if(readKey[static_cast<size_t>(skv)] == 0)
+                    {
+                        continue;
+                    }
                     acc += probs[static_cast<size_t>(skv)]
                            * dropoutKeep<ComputeDataType>(
                                options.dropoutMask, dropoutFactor, b, h, sq, skv)
@@ -1385,6 +1390,37 @@ private:
             lens[static_cast<size_t>(b)] = len;
         }
         return lens;
+    }
+
+    /// Which of a forward row's keys below liveKv it reads: those the band and the block mask
+    /// leave (1), not those they remove (0). A removed key's V is never read, so whatever it
+    /// holds (vLLM's nulled or stale cache blocks, NaN included) cannot reach O as 0 * NaN
+    /// (SdpaSemanticsRegister.md SEM-027).
+    template <typename MaskDataType>
+    static std::vector<char> keysTheRowReads(const SdpaFwdOptions<MaskDataType>& options,
+                                             int64_t b,
+                                             int64_t h,
+                                             int64_t sq,
+                                             int64_t liveQ,
+                                             int64_t liveKv)
+    {
+        std::vector<char> reads(static_cast<size_t>(liveKv), 1);
+        const auto* blockMask = blockMaskOf(options);
+        for(int64_t skv = 0; skv < liveKv; ++skv)
+        {
+            if(isMasked(sq,
+                        skv,
+                        liveQ,
+                        liveKv,
+                        options.leftBound,
+                        options.rightBound,
+                        options.topLeftAlignment)
+               || isBlockMasked(blockMask, b, h, sq, skv))
+            {
+                reads[static_cast<size_t>(skv)] = 0;
+            }
+        }
+        return reads;
     }
 
     /// Returns true if position (sq, skv) should be masked given the window bounds.

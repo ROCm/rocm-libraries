@@ -24,6 +24,7 @@
 #include "rocke/helper_rocke.helpers.fuse.h" /* FusedEpilogue apply/decl */
 #include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type           */
 #include "rocke/instance_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 
 /* Dispatch helpers for the attached fused epilogue (Python's runtime method
  * resolution on the _fused_epilogue object). The pointer is the FusedEpilogue
@@ -77,60 +78,38 @@ static rocke_value_t* rocke_gemm_fe_apply_vec(rocke_ir_builder_t* b,
  * epilogue functions stay self-contained, matching the Python module).
  * ===================================================================== */
 
-/* _dtype_ir(name) -> F64 for fp64, else io_ir_type(name). */
-static const rocke_type_t* gemm_dtype_ir(rocke_ir_builder_t* b, const char* name)
-{
-    if(name != NULL && strcmp(name, "fp64") == 0)
-        return rocke_f64();
-    return rocke_b_io_ir_type(b, name);
-}
-
-/* _storage_dtype(spec): validates homogeneous A/B/C dtypes, fp32 acc (fp64 acc
- * for fp64 storage), RCR layout, then resolves the A dtype to its IR type.
- * Returns NULL with the builder sticky error set on failure.
+/* _c_storage_dtype(spec): validates the spec's dtypes (A/B homogeneous with C
+ * except on the fp8/bf8 path, fp32 acc -- fp64 acc for fp64 storage -- RCR
+ * layout), then resolves the *C* dtype to its IR type. Returns NULL with the
+ * builder sticky error set on failure.
  *
- * Note: in Python the three validation branches raise ValueError directly. The
- * C port has no public sticky-error setter, so on a homogeneity / acc / layout
- * mismatch we route through rocke_b_io_ir_type with the offending A-dtype: for the
- * (already-validated upstream) GEMM call sites the dtypes are homogeneous fp16 /
- * bf16 with fp32 acc + RCR, so this reduces to io_ir_type(dtype_a) exactly as
- * Python and the emitted IR is byte-identical. NAMED GAP (blocked on shared
- * infra): the heterogeneous-dtype ValueError text is NOT reproduced here because
- * no public _storage_dtype validator exists in a shared header; the ck_gemm_
- * storage_dtype validator in gemm_spec.cpp is the host-side reject surface and is
- * reached before emission, so these emit-path call sites only need the resolved
- * IR type. When a shared _storage_dtype validator lands, call it here so the
- * ValueError messages match byte-for-byte. */
-static const rocke_type_t* gemm_storage_dtype(rocke_ir_builder_t* b,
-                                              const rocke_gemm_universal_spec_t* spec)
+ * Every consumer in this file is an epilogue, i.e. a C-side value -- the two
+ * call sites mirror Python's _emit_default_epilogue / _emit_cshuffle_epilogue,
+ * both of which read `c_dtype = _c_storage_dtype(spec)`. C stays a 16-bit float
+ * even when A/B are 8-bit, so io_ir_type still covers every reachable case.
+ *
+ * The rule itself is rocke_gemm_check_storage (instance_gemm_internal.h), shared
+ * with the validator and the emitter. In Python a failure raises ValueError; here
+ * it sets the builder's sticky error to the same text. The call sites are
+ * reached only after is_valid_spec, so the emitted IR is unaffected. */
+static const rocke_type_t* gemm_c_storage_dtype(rocke_ir_builder_t* b,
+                                                const rocke_gemm_universal_spec_t* spec)
 {
-    const rocke_gemm_data_spec_t* d = &spec->data;
-    const char* a = d->dtype_a;
-    const char* bb = d->dtype_b;
-    const char* c = d->dtype_c;
-    const char* acc = d->dtype_acc;
-    bool ab_ne;
-    bool ac_ne;
-    bool acc_ok;
-    bool layout_ok;
-
     if(!rocke_ir_builder_ok(b))
         return NULL;
-
-    ab_ne = (a == NULL || bb == NULL) ? (a != bb) : (strcmp(a, bb) != 0);
-    ac_ne = (a == NULL || c == NULL) ? (a != c) : (strcmp(a, c) != 0);
-    if(a != NULL && strcmp(a, "fp64") == 0)
-        acc_ok = acc != NULL && (strcmp(acc, "fp64") == 0 || strcmp(acc, "f64") == 0);
-    else
-        acc_ok = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
-    layout_ok = d->layout != NULL && strcmp(d->layout, "RCR") == 0;
-
-    if(ab_ne || ac_ne || !acc_ok || !layout_ok)
     {
-        /* Force the ValueError-equivalent sticky error through the io helper. */
-        return rocke_b_io_ir_type(b, NULL);
+        char reason[256] = {0};
+        if(!rocke_gemm_check_storage(spec, reason, sizeof(reason)))
+        {
+            rocke_i_set_err_msg(b, ROCKE_ERR_VALUE, reason);
+            return NULL;
+        }
     }
-    return gemm_dtype_ir(b, d->dtype_a);
+    {
+        const rocke_type_t* c_ty = rocke_gemm_dtype_ir(spec->data.dtype_c);
+        /* io_ir_type's ValueError, through the helper that sets it. */
+        return c_ty != NULL ? c_ty : rocke_b_io_ir_type(b, spec->data.dtype_c);
+    }
 }
 
 /* =====================================================================
@@ -298,6 +277,68 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
 }
 
 /* =====================================================================
+ * _emit_wmma_acc_scatter
+ * ===================================================================== */
+
+void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
+                                      const rocke_gemm_universal_spec_t* spec,
+                                      const rocke_mmaop_t* op,
+                                      rocke_value_t* lane,
+                                      rocke_value_t* const* accs,
+                                      int num_accs,
+                                      rocke_value_t* m_base_off,
+                                      rocke_value_t* n_base_off,
+                                      int c_per_lane,
+                                      const rocke_type_t* storage_dtype,
+                                      rocke_gemm_per_cell_fn per_cell,
+                                      void* user)
+{
+    const rocke_gemm_tile_spec_t* t = &spec->tile;
+    int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
+    const rocke_layout_map_t* c_map;
+    int flat = 0;
+    int mi, ni, i;
+
+    (void)num_accs;
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    c_map = rocke_mma_op_dst_layout(op, b);
+
+    for(mi = 0; mi < mfmas_m; ++mi)
+    {
+        rocke_value_t* atom_m
+            = rocke_b_add(b, m_base_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
+        for(ni = 0; ni < mfmas_n; ++ni)
+        {
+            rocke_value_t* acc = accs[flat];
+            rocke_value_t* atom_n;
+            rocke_value_t* acc_h;
+            flat += 1;
+            atom_n = rocke_b_add(b, n_base_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
+            acc_h = rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
+            for(i = 0; i < c_per_lane; ++i)
+            {
+                rocke_value_t* row_in_atom = NULL;
+                rocke_value_t* col_in_atom = NULL;
+                rocke_value_t* c_m;
+                rocke_value_t* c_n;
+                rocke_layout_map_coord(c_map, b, lane, i, &row_in_atom, &col_in_atom);
+                /* Sequenced through locals: C leaves argument evaluation order
+                 * unspecified, and Python builds the row add before the column
+                 * add. Passing the two rocke_b_add calls directly as arguments
+                 * lets the compiler emit them in the other order, which swaps
+                 * their SSA numbering and breaks byte-identity. */
+                c_m = rocke_b_add(b, atom_m, row_in_atom);
+                c_n = rocke_b_add(b, atom_n, col_in_atom);
+                per_cell(b, c_m, c_n, acc_h, i, user);
+            }
+        }
+    }
+}
+
+/* =====================================================================
  * _emit_epilogue_default
  * ===================================================================== */
 
@@ -389,7 +430,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       bool fused_is_mde)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
-    const rocke_type_t* storage_dtype = gemm_storage_dtype(b, spec);
+    const rocke_type_t* storage_dtype = gemm_c_storage_dtype(b, spec);
     int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
     int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
     bool pad_m = spec->trait.pad_m;
@@ -413,7 +454,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
     /* ---- WMMA (RDNA) accumulator scatter (op.family == "wmma"). ---- */
     if(op->family != NULL && strcmp(op->family, "wmma") == 0)
     {
-        const rocke_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+        const rocke_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
         rocke_value_t* block_warp_m_off = rocke_b_add(b, block_m_off, warp_m_off);
         rocke_value_t* block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
         gemm_default_store_user_t u;
@@ -430,7 +471,8 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         u.fused_is_mde = fused_is_mde;
         u.pad_m = pad_m;
         u.pad_n = pad_n;
-        u.elem_bytes = rocke_gemm_elem_bytes(spec);
+        /* C element size: C is 16-bit even when A/B are 8-bit. */
+        u.elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_c);
 
         for(mi = 0; mi < mfmas_m; ++mi)
         {
@@ -488,7 +530,8 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         u.fused_is_mde = fused_is_mde;
         u.pad_m = pad_m;
         u.pad_n = pad_n;
-        u.elem_bytes = rocke_gemm_elem_bytes(spec);
+        /* C element size: C is 16-bit even when A/B are 8-bit. */
+        u.elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_c);
 
         rocke_gemm_emit_mfma_acc_scatter(b,
                                          spec,
@@ -683,7 +726,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
 
 void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        const rocke_gemm_universal_spec_t* spec,
-                                       rocke_value_t* smem_unused,
+                                       const rocke_mmaop_t* op,
                                        rocke_value_t* const* accs,
                                        int num_accs,
                                        rocke_value_t* warp_m_idx,
@@ -702,7 +745,7 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        bool fused_is_mde)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
-    const rocke_type_t* storage_dtype = gemm_storage_dtype(b, spec);
+    const rocke_type_t* storage_dtype = gemm_c_storage_dtype(b, spec);
     int mfmas_m = rocke_gemm_tile_mfmas_per_warp_m(t);
     int mfmas_n = rocke_gemm_tile_mfmas_per_warp_n(t);
     rocke_value_t* Cs;
@@ -720,13 +763,13 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
     bool pad_m;
     bool pad_n;
 
-    (void)smem_unused;
     (void)a_per_lane;
     (void)b_per_lane;
     (void)num_accs;
     if(!rocke_ir_builder_ok(b))
         return;
-    elem_bytes = rocke_gemm_elem_bytes(spec);
+    /* C element size: C is 16-bit even when A/B are 8-bit. */
+    elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_c);
 
     if(fused_epilogue != NULL)
     {
@@ -770,18 +813,36 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
 
     /* ---- step 1+2: warp accs -> LDS at the MFMA layout. ---- */
     smem_user.Cs = Cs;
-    rocke_gemm_emit_mfma_acc_scatter(b,
-                                     spec,
-                                     lane,
-                                     accs,
-                                     num_accs,
-                                     warp_m_off,
-                                     warp_n_off,
-                                     c_per_lane,
-                                     storage_dtype,
-                                     gemm_cshuffle_smem_cell,
-                                     &smem_user,
-                                     true);
+    if(op->family != NULL && strcmp(op->family, "wmma") == 0)
+    {
+        rocke_gemm_emit_wmma_acc_scatter(b,
+                                         spec,
+                                         op,
+                                         lane,
+                                         accs,
+                                         num_accs,
+                                         warp_m_off,
+                                         warp_n_off,
+                                         c_per_lane,
+                                         storage_dtype,
+                                         gemm_cshuffle_smem_cell,
+                                         &smem_user);
+    }
+    else
+    {
+        rocke_gemm_emit_mfma_acc_scatter(b,
+                                         spec,
+                                         lane,
+                                         accs,
+                                         num_accs,
+                                         warp_m_off,
+                                         warp_n_off,
+                                         c_per_lane,
+                                         storage_dtype,
+                                         gemm_cshuffle_smem_cell,
+                                         &smem_user,
+                                         true);
+    }
 
     /* ---- step 3: barrier. ---- */
     rocke_b_sync(b);
@@ -970,7 +1031,7 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
     {
         rocke_gemm_emit_epilogue_cshuffle(b,
                                           spec,
-                                          ctx->A_smem,
+                                          ctx->op,
                                           ctx->for_results,
                                           ctx->num_for_results,
                                           ctx->warp_m_idx,

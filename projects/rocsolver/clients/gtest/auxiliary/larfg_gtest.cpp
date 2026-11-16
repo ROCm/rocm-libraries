@@ -66,6 +66,12 @@ const vector<int64_t> incx_range_64 = {
     10,
 };
 
+// for weekly_lapack tests
+template <typename I>
+const static vector<I> very_large_incx_range = {
+    1,
+};
+
 // for checkin_lapack tests
 const vector<int> n_size_range = {
     // quick return
@@ -104,6 +110,12 @@ const vector<int64_t> large_n_size_range_64 = {
     640,
     1024,
     2547,
+};
+
+// for weekly_lapack tests
+template <typename I>
+const static vector<I> very_large_n_size_range = {
+    98305, // test BLAS implementation (n > kernel launch bounds for all arch.)
 };
 
 template <typename I>
@@ -216,4 +228,16 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LARFG_64,
                          Combine(ValuesIn(n_size_range_64),
                                  ValuesIn(incx_range_64),
+                                 ValuesIn(singular_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LARFG,
+                         Combine(ValuesIn((very_large_n_size_range<int>)),
+                                 ValuesIn((very_large_incx_range<int>)),
+                                 ValuesIn(singular_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LARFG_64,
+                         Combine(ValuesIn((very_large_n_size_range<int64_t>)),
+                                 ValuesIn((very_large_incx_range<int64_t>)),
                                  ValuesIn(singular_range)));

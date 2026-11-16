@@ -42,6 +42,25 @@ partials into the workspace and `reduce` combines them. Both launches share one 
 The file stem is the generator's engine slug (`gfx942_attention_unified3d`); the folder is
 the selection's `authored_subpath`.
 
+## Models
+
+One trained model (UHD), the L2 `sort_kernel_catalog` kernel ranker `ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8`
+(ranks this catalog's kernels), is bound in the UED for gfx942. It is tracked at
+`heuristics/4208dcf6-3128-4146-ab2a-affa5b6ab4eb/sort_kernel_catalog/gfx942/tflops/` (the UED id,
+role, arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git, `model.bin`
+from DVC.
+
+The L1 `predict_engine` (predicts the engine's TFLOPS) is held: its selector revision was recorded on
+an older build, so the runtime refuses it on a build of the current source. It follows in a separate
+change, once re-measured on a build of current source. It is measured under the L2 and its selector
+revision digests the code objects packed at build time, so retrain it whenever the L2 or the catalog
+(the KDP) changes.
+
+A build without `dvc pull -r ingestor` on a `model.bin.dvc` packs the bundle without that
+model: the pack warns, the model's UHD does not ship, and the loader logs the dangling id
+and runs the engine with that role off (declared kernel order for the L2). Release builds set
+`HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which makes it an error.
+
 ## Provenance
 
 - Selection: `projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_unified_3d.yaml`,
@@ -67,8 +86,9 @@ the selection's `authored_subpath`.
 
 ## Notes
 
-- Fetch `artifacts/` with `dvc pull -r ingestor artifacts.dvc`. See
-  `../../README.md`.
+- Fetch `artifacts/` with `dvc pull -r ingestor artifacts.dvc` and each model with
+  `dvc pull -r ingestor <model.bin.dvc>` (see Models), or everything at once with
+  `dvc pull -r ingestor --recursive <this folder>`. See `../../README.md`.
 - The native symbols (`hipkernel.gfx942_attention_unified3d.*`) are registered in
   `packs/Gfx942AttentionUnified3dNative.cpp`, which launches `segment` then `reduce` on the
   handle's stream. Its census is `TestGfx942AttentionUnified3dPacks`.

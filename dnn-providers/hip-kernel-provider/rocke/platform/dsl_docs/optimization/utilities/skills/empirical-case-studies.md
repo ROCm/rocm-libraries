@@ -338,6 +338,39 @@ can hurt.
 
 ---
 
+## Case Study 8: A Legacy Atomic Intrinsic Fenced Every Packed fp16 Add (gfx950)
+
+**Context**: fp16 conv wgrad, split-K through the packed 16-bit atomic epilogue
+(`global_atomic_add_pk_f16`). The fitted split-K cost model rated the fp16 atomic far
+slower than the bf16 one, so fp16 shapes got only shallow splits -- while a standalone
+probe of `global_atomic_pk_add_f16` and `global_atomic_pk_add_bf16` showed the two
+instructions running at the same rate.
+
+### Bug signature
+
+In the kernel ISA every `global_atomic_pk_add_f16` sat between a `buffer_wbl2 sc1`
+(write back L2), an `s_waitcnt vmcnt(0)` and a `buffer_inv sc1`; the bf16 kernels had the
+bare atomic. The fp16 op was lowered to the legacy `llvm.amdgcn.global.atomic.fadd.v2f16`
+intrinsic, which current LLVM auto-upgrades to an **agent-scope `seq_cst`**
+`atomicrmw` -- a release/acquire pair around each add. The bf16 op was already lowered to a
+`monotonic` `atomicrmw fadd <2 x bfloat>` with `!amdgpu.no.fine.grained.memory` /
+`!amdgpu.no.remote.memory`.
+
+### Lever
+
+Lower `global_atomic_add_pk_f16` exactly like its bf16 sibling (both engines), then give the
+fp16 atomic the bf16 constant in the split-K cost model -- the old constant had absorbed the
+fences.
+
+### Lesson
+
+When two dtypes of the "same" instruction cost differently, diff their ISA before fitting a
+model to the difference. Grep for `buffer_wbl2` / `buffer_inv` around atomics: a legacy
+`llvm.amdgcn.*atomic*` intrinsic may be auto-upgraded to `seq_cst` at agent scope; emit
+`atomicrmw` with an explicit ordering and the AMDGPU memory-model metadata instead.
+
+---
+
 ## Usage Guidelines
 
 ### Do:

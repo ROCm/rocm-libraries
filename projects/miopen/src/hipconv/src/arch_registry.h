@@ -8,6 +8,7 @@
 
 #include "algorithm.h"         // ConvAlgorithm
 #include "hipconv/hipconv.hpp" // hipconv::Algorithm
+#include "internal_api.h"
 
 #include <cstddef>
 #include <span>
@@ -34,5 +35,5 @@ struct ArchEntry
 
 // Global-scope symbols (unmangled by namespace) so the generated TU's extern
 // references keep pulling the arch objects out of the static library.
-extern const hipconv::ArchEntry hipconv_arch_registry[];
-extern const std::size_t hipconv_arch_registry_size;
+extern HIPCONV_INTERNAL_API const hipconv::ArchEntry hipconv_arch_registry[];
+extern HIPCONV_INTERNAL_API const std::size_t hipconv_arch_registry_size;

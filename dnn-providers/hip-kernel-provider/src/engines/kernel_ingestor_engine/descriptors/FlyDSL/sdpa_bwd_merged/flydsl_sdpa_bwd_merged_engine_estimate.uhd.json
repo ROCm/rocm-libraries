@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "f69fd6f2-28c3-57c8-bc1b-74d24ef0fb23",
+  "name": "flydsl sdpa_bwd_merged engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_sdpa_bwd_merged.engine_estimate"
+  }
+}

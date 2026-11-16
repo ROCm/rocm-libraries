@@ -32,6 +32,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
 #include "hipsparse_local_dnmat.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -78,16 +79,11 @@ void testing_spmm_bell_bad_arg(const Arguments& argus)
     float*   dC   = (float*)dC_managed.get();
     void*    dbuf = (void*)dbuf_managed.get();
 
-    // SpMM structures
-    hipsparseSpMatDescr_t matA;
-
     size_t bsize;
 
     // Create SpMM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateBlockedEll(
-            &matA, m, k, ellBlockSize, ell_cols, dind, dval, idxType, idxBase, dataType),
-        "success");
+    hipsparseLocalBlockedEll matA(
+        m, k, ellBlockSize, ell_cols, dind, dval, idxType, idxBase, dataType);
     hipsparseLocalDnMat matB(k, n, k, dB, dataType, order);
     hipsparseLocalDnMat matC(m, n, m, dC, dataType, order);
 
@@ -174,9 +170,6 @@ void testing_spmm_bell_bad_arg(const Arguments& argus)
         hipsparseSpMM(
             handle, transA, transB, &alpha, matA, matB, &beta, nullptr, dataType, alg, nullptr),
         "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
 #endif
 }
 
@@ -298,9 +291,8 @@ void testing_spmm_bell(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices.
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateBlockedEll(
-        &matA, m, k, ellBlockSize, ellCols, dbell_col_ind, dbell_val, typeI, idxBase, typeT));
+    hipsparseLocalBlockedEll matA(
+        m, k, ellBlockSize, ellCols, dbell_col_ind, dbell_val, typeI, idxBase, typeT);
 
     // Create dense matrices.
     hipsparseLocalDnMat matB(B_m, B_n, ldb, dB, typeT, orderB);
@@ -440,8 +432,6 @@ void testing_spmm_bell(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 #endif // TESTING_SPMM_BELL_HPP

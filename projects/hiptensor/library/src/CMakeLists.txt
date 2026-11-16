@@ -92,6 +92,18 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
 endfunction()
 
+# Compile sources that define no GPU kernels for the host only. Their per-GPU-target device
+# pass emits no kernels but still parses the CK/HIP headers once per target, which only costs
+# build time. Source properties are directory-scoped, so call this from the directory that
+# creates the target compiling the sources. Target-wide offload flags (e.g. --offload-compress)
+# are unused without a device pass, hence the warning suppression.
+# A listed source that does define a kernel fails the build: its host object references an
+# undefined __hip_fatbin_<hash>, which the -Wl,--no-undefined link of libhiptensor rejects.
+function(hiptensor_set_host_only_sources)
+    set_source_files_properties(${ARGN} PROPERTIES
+        COMPILE_OPTIONS "--offload-host-only;-Wno-unused-command-line-argument")
+endfunction()
+
 # Create shared library target
 function(create_hiptensor_shared_library)
     add_library(hiptensor SHARED
@@ -128,6 +140,15 @@ function(create_hiptensor_shared_library)
         # Relink when the script changes (not tracked as a link input otherwise).
         set_target_properties(hiptensor PROPERTIES
             LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
+        # Reject undefined symbols. Besides catching missing dependencies, this guards the
+        # host-only sources (hiptensor_set_host_only_sources): a source that defines a kernel but
+        # is compiled --offload-host-only references an undefined __hip_fatbin_<hash>, which
+        # would otherwise link silently and fail at run time. (Executables and the Windows DLL
+        # already reject undefined symbols.) Skipped with ASan, whose runtime symbols are left
+        # undefined in shared libraries.
+        if(NOT ADDRESS_SANITIZER_ENABLED)
+            target_link_options(hiptensor PRIVATE "-Wl,--no-undefined")
+        endif()
     endif()
 
     # Add export definitions
@@ -152,8 +173,10 @@ function(create_hiptensor_shared_library)
         rocm_set_soversion(hiptensor ${hiptensor_SOVERSION})
     endif()
 
-    # HIP libs symbols are required by hipTensor and users of hipTensor
-    target_link_libraries(hiptensor PUBLIC hip::device hip::host)
+    # HIP runtime symbols are required by hipTensor and users of hipTensor. Users only need the
+    # host side: the public headers define no kernels, so hip::device (-x hip and one device
+    # pass per GPU target) stays private and is not forced onto consumers.
+    target_link_libraries(hiptensor PUBLIC hip::host PRIVATE hip::device)
     target_link_libraries(hiptensor PRIVATE Threads::Threads)
     set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endfunction()
@@ -188,6 +211,7 @@ set(HIPTENSOR_CORE_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache.cpp
 )
 
+hiptensor_set_host_only_sources(${HIPTENSOR_CORE_SOURCES})
 add_hiptensor_component(hiptensor_core ${HIPTENSOR_CORE_SOURCES})
 
 # Create shared library for production use
@@ -200,8 +224,12 @@ create_hiptensor_shared_library()
 # The shared singletons (HiptensorOptions, Logger) are NOT here: they are exported from the
 # .so so the harness and the library share one instance.
 #
-# These sources are deliberately compiled twice: into libhiptensor.so (hidden) and here (for
-# the tests). Keeping them in the .so would re-export the symbols and defeat the baseline.
+# The CPU references are compiled only here: nothing in libhiptensor.so calls them. The other
+# sources are deliberately compiled twice: into libhiptensor.so (hidden) and here (for the
+# tests). Keeping them in the .so would re-export the symbols and defeat the baseline.
+#
+# None of these sources define GPU kernels, so the whole library is compiled host-only (see
+# hiptensor_set_host_only_sources() for the warning suppression).
 if(HIPTENSOR_BUILD_TESTS)
     set(HIPTENSOR_HOST_REFERENCE_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
@@ -229,7 +257,8 @@ if(HIPTENSOR_BUILD_TESTS)
     add_library(hiptensor_host_reference STATIC ${HIPTENSOR_HOST_REFERENCE_SOURCES})
     add_library(hiptensor::host_reference ALIAS hiptensor_host_reference)
 
-    target_compile_options(hiptensor_host_reference PRIVATE ${CLANG_DRIVER_MODE})
+    target_compile_options(hiptensor_host_reference PRIVATE
+        ${CLANG_DRIVER_MODE} --offload-host-only -Wno-unused-command-line-argument)
     target_link_options(hiptensor_host_reference PRIVATE ${CLANG_DRIVER_MODE})
     set_target_properties(hiptensor_host_reference PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_link_libraries(hiptensor_host_reference PRIVATE hip::device)
@@ -243,10 +272,6 @@ if(HIPTENSOR_BUILD_TESTS)
 
     if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(hiptensor_host_reference PRIVATE -Wno-ignored-attributes -Wno-unknown-warning-option)
-    endif()
-
-    if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-        target_compile_options(hiptensor_host_reference PRIVATE "--offload-compress")
     endif()
 
     if(HIPTENSOR_BUILD_COMPRESSED_DBG)

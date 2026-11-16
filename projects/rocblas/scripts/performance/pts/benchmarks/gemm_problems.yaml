@@ -43,6 +43,8 @@ Tests:
     ldb: 384 # k or n, depends on transB
     ldc: 24576
     ldd: 24576
+    iters: 100
+    cold_iters: 20
 
   - name: gemm_ex_bench_const_mk
     category: bench
@@ -63,6 +65,8 @@ Tests:
     ldb: 24576
     ldc: 384
     ldd: 384
+    iters: 100
+    cold_iters: 20
 
   - name: gemm_ex_bench_const_mn
     category: bench
@@ -83,6 +87,8 @@ Tests:
     ldb: 24576
     ldc: 384
     ldd: 384
+    iters: 100
+    cold_iters: 20
 
   - name: gemm_ex_bench_m_equals_n_equals_k
     category: bench
@@ -97,6 +103,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *square_sizes
+    iters: 100
+    cold_iters: 20
 
   - name: gemm_ex_gemv_n1_non
     category: bench
@@ -106,8 +114,8 @@ Tests:
     transB: [N]
     matrix_size: *gemm_n1_transBN_sizes
     alpha_beta: *alpha_beta_range_small
-    cold_iters: 10
-    iters: 20
+    cold_iters: 20
+    iters: 100
 
   - name: gemm_ex_gemv_n1_trans
     category: bench
@@ -117,8 +125,8 @@ Tests:
     transB: [T]
     matrix_size: *gemm_n1_transBT_sizes
     alpha_beta: *alpha_beta_range_small
-    cold_iters: 10
-    iters: 20
+    cold_iters: 20
+    iters: 100
 
   - name: gemm_ex_gemv_m1_non
     category: bench
@@ -128,8 +136,8 @@ Tests:
     transB: [N, T]
     matrix_size: *gemm_m1_transAN_sizes
     alpha_beta: *alpha_beta_range_small
-    cold_iters: 10
-    iters: 20
+    cold_iters: 20
+    iters: 100
 
   - name: gemm_ex_gemv_m1_trans
     category: bench
@@ -139,6 +147,6 @@ Tests:
     transB: [N, T]
     matrix_size: *gemm_m1_transAT_sizes
     alpha_beta: *alpha_beta_range_small
-    cold_iters: 10
-    iters: 20
+    cold_iters: 20
+    iters: 100
 ...
