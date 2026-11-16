@@ -390,6 +390,132 @@ struct K2HaloLoad
     }
 };
 
+// Channels-first halo loader (CF 1, 16-bit, packed N C D H W input): a task is RW consecutive
+// columns of 8 channel rows of one halo row, loaded as one RW-element vector per channel row, from
+// the RW-aligned column at or left of the halo's first column (image widths are a multiple of RW,
+// so a run lies wholly inside or wholly outside its row). The store transposes the 8 x RW block in
+// registers and writes RW pixel granules of 8 channels into the same pixel-major stage as
+// K2HaloLoad (columns outside the halo are dropped). Halo tiles at least 8 columns wide keep the
+// task count within TASKS (k2CfTasks).
+template <class T, int BC, int THREADS, int TASKS, int RW>
+struct K2HaloLoadCf
+{
+    static_assert(sizeof(T) == 2 && BC % 8 == 0 && (RW == 2 || RW == 4), "channels-first halo");
+    static constexpr int CG = BC / 8;
+    static constexpr int PASSES = (TASKS + THREADS - 1) / THREADS;
+    static constexpr int DW = RW / 2; // dwords per channel-row run
+    typedef typename K1Raw<RW * 2>::type Raw;
+
+    __amdgpu_buffer_rsrc_t rsrc;
+    int hw, cIn, chanElems, planeElems;
+    int sOff[PASSES]; // run's first element within its channel plane, -1 outside the input
+    int lpix[PASSES]; // halo pixel of the run's first column (may be left of the halo)
+    int x0[PASSES]; // halo column of the run's first column
+    int cg8[PASSES]; // first channel of the task within the chunk; -1 for no task
+    Raw r[PASSES][8];
+
+    __device__ void init(const K2Args& a, const K2Block& b, int tid)
+    {
+        hw = b.hw;
+        cIn = a.c;
+        planeElems = a.hi * a.wi;
+        chanElems = a.di * planeElems;
+        const T* img = static_cast<const T*>(a.x) + static_cast<long long>(b.img) * a.c * chanElems;
+        rsrc = k1Rsrc(img,
+                      static_cast<long long>(a.c) * chanElems * static_cast<long long>(sizeof(T)));
+        const int iw0 = b.ow0 - a.pw;
+        const int xoff = (iw0 % RW + RW) % RW;
+        const int runs = (xoff + b.hw + RW - 1) / RW;
+        const int hh = b.hp / b.hw;
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            const int t = tid + p * THREADS;
+            const int xr = t % runs;
+            const int rest = t / runs;
+            const int cg = rest % CG;
+            const int h = rest / CG;
+            const int ih = b.oh0 - a.ph + h;
+            const int iw = iw0 - xoff + RW * xr;
+            const bool live = h < hh;
+            cg8[p] = live ? cg * 8 : -1;
+            x0[p] = RW * xr - xoff;
+            lpix[p] = h * b.hw + x0[p];
+            sOff[p] = live && static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)
+                              && static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)
+                          ? ih * a.wi + iw
+                          : -1;
+        }
+    }
+    __device__ void load(int id, int c0)
+    {
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            const int c = c0 + cg8[p];
+            const int base
+                = (c * chanElems + id * planeElems + sOff[p]) * static_cast<int>(sizeof(T));
+#pragma unroll
+            for(int i = 0; i < 8; ++i)
+            {
+                const bool ok = cg8[p] >= 0 && sOff[p] >= 0 && c + i < cIn;
+                r[p][i] = k1BufferLoad<Raw>(
+                    rsrc,
+                    ok ? static_cast<unsigned>(base + i * chanElems * static_cast<int>(sizeof(T)))
+                       : K1_OUT_OF_RANGE);
+            }
+        }
+    }
+    // Pixel-major: buf[pix * LDC + c], as K2HaloLoad::storePixels.
+    template <int LDC>
+    __device__ void storePixels(T* buf) const
+    {
+        typedef unsigned u4 __attribute__((ext_vector_type(4)));
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            if(cg8[p] < 0)
+                continue;
+            unsigned d[8][DW];
+#pragma unroll
+            for(int i = 0; i < 8; ++i)
+                __builtin_memcpy(d[i], &r[p][i], sizeof(Raw));
+#pragma unroll
+            for(int j = 0; j < RW; ++j)
+            {
+                const int x = x0[p] + j;
+                if(static_cast<unsigned>(x) >= static_cast<unsigned>(hw))
+                    continue;
+                u4 g;
+#pragma unroll
+                for(int e = 0; e < 4; ++e)
+                {
+                    const unsigned lo = d[2 * e][j / 2], hi = d[2 * e + 1][j / 2];
+                    g[e] = j % 2 == 0 ? (lo & 0xFFFFu) | (hi << 16)
+                                      : (lo >> 16) | (hi & 0xFFFF0000u);
+                }
+                *reinterpret_cast<u4*>(buf + (lpix[p] + j) * LDC + cg8[p]) = g;
+            }
+        }
+    }
+};
+
+// Channels-first halo tasks bound for a BM-pixel tile with halo tiles at least 8 columns wide.
+constexpr int k2CfTasks(int bm, int r, int s, int bc, int rw)
+{
+    int best = 0;
+    for(int tw = 8; tw <= bm; ++tw)
+    {
+        const int th = bm / tw < 1 ? 1 : bm / tw;
+        const int t = (th + r - 1) * ((rw - 1 + tw + s - 1 + rw - 1) / rw) * (bc / 8);
+        if(t > best)
+        {
+            best = t;
+        }
+    }
+    return best;
+}
+
 // Walks the block's (input plane, channel chunk) steps in order, skipping planes outside the
 // input. planes = dsEff + KD - 1, plane j is input plane od0 - pd + j.
 struct K2Cursor
@@ -640,7 +766,9 @@ template <class T,
           int BL = 0,
           class TO = T,
           int SPLIT = 0,
-          int HALO = k2HaloMax(BM, R, S)>
+          int HALO = k2HaloMax(BM, R, S),
+          int CF = 0,
+          int CFRW = 2>
 __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -658,7 +786,11 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
     constexpr int STRIP = DIM * OLD; // in TS
     constexpr int SETS = RING ? KD : 1;
     static_assert(WTM % DIM == 0 && WTN % DIM == 0 && BC % KA == 0 && WTN % VO == 0, "tile");
-    typedef K2HaloLoad<T, BC, VEC, THREADS, HALO> Loader;
+    // CF 1: packed channels-first activations in place (K2HaloLoadCf in, channel-major stores out).
+    static_assert(CF == 0 || (SPLIT == 0 && sizeof(T) == 2), "channels-first tile");
+    typedef typename K1If<CF != 0,
+                          K2HaloLoadCf<T, BC, THREADS, k2CfTasks(BM, R, S, BC, CFRW), CFRW>,
+                          K2HaloLoad<T, BC, VEC, THREADS, HALO>>::type Loader;
     typedef typename Atom::frag Frag;
 
     // Two halo stages; the epilogue strips reuse the stage just consumed (after a barrier).
@@ -1017,28 +1149,53 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
             __builtin_amdgcn_wave_barrier();
             __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
-            for(int v = lane; v < DIM * RV; v += WAVE)
+            if constexpr(CF != 0)
             {
-                const int rr = v / RV;
-                const int col = (v - rr * RV) * VO;
-                const int m = wm * WTM + i * DIM + rr;
-                const int nn = n0 + wn * WTN + col;
-                if(m >= tilePix || nn >= a.k)
-                    continue;
-                const int ohl = m / a.tw, owl = m - ohl * a.tw;
-                const int oh = b.oh0 + ohl, ow = b.ow0 + owl;
-                if(oh >= a.ho || ow >= a.wo)
-                    continue;
-                const long long o
-                    = (((static_cast<long long>(b.img) * a.dout + od) * a.ho + oh) * a.wo + ow)
-                          * a.k
-                      + nn;
-                if(nn + VO <= a.k && a.k % VO == 0)
-                    *reinterpret_cast<Raw*>(out + o)
-                        = *reinterpret_cast<const Raw*>(strip + rr * OLD + col);
-                else
-                    for(int e = 0; e < VO && nn + e < a.k; ++e)
-                        out[o + e] = strip[rr * OLD + col + e];
+                // Channel-major: DIM consecutive lanes store the slab's DIM pixels of one channel
+                // (runs of the tile's columns along an output row).
+                for(int v = lane; v < DIM * WTN; v += WAVE)
+                {
+                    const int rr = v % DIM;
+                    const int col = v / DIM;
+                    const int m = wm * WTM + i * DIM + rr;
+                    const int nn = n0 + wn * WTN + col;
+                    if(m >= tilePix || nn >= a.k)
+                        continue;
+                    const int ohl = m / a.tw, owl = m - ohl * a.tw;
+                    const int oh = b.oh0 + ohl, ow = b.ow0 + owl;
+                    if(oh >= a.ho || ow >= a.wo)
+                        continue;
+                    out[(((static_cast<long long>(b.img) * a.k + nn) * a.dout + od) * a.ho + oh)
+                            * a.wo
+                        + ow]
+                        = strip[rr * OLD + col];
+                }
+            }
+            else
+            {
+                for(int v = lane; v < DIM * RV; v += WAVE)
+                {
+                    const int rr = v / RV;
+                    const int col = (v - rr * RV) * VO;
+                    const int m = wm * WTM + i * DIM + rr;
+                    const int nn = n0 + wn * WTN + col;
+                    if(m >= tilePix || nn >= a.k)
+                        continue;
+                    const int ohl = m / a.tw, owl = m - ohl * a.tw;
+                    const int oh = b.oh0 + ohl, ow = b.ow0 + owl;
+                    if(oh >= a.ho || ow >= a.wo)
+                        continue;
+                    const long long o
+                        = (((static_cast<long long>(b.img) * a.dout + od) * a.ho + oh) * a.wo + ow)
+                              * a.k
+                          + nn;
+                    if(nn + VO <= a.k && a.k % VO == 0)
+                        *reinterpret_cast<Raw*>(out + o)
+                            = *reinterpret_cast<const Raw*>(strip + rr * OLD + col);
+                    else
+                        for(int e = 0; e < VO && nn + e < a.k; ++e)
+                            out[o + e] = strip[rr * OLD + col + e];
+                }
             }
             __builtin_amdgcn_wave_barrier();
             __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");

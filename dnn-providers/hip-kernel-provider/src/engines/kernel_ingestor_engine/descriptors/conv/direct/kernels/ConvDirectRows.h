@@ -1640,7 +1640,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a CONV
     }
 }
 
-// Channels-first rows (CF 1, gfx950): packed N C H W input and output, read and written in place.
+// Channels-first rows (CF 1): packed N C H W input and output, read and written in place.
 // Raw stage [h][c][x']: 16-byte LDS DMA of runs of 8 columns of one channel row, from the 8-aligned
 // column x_al = ow0 - pw - x_off (x_off = (-pw) mod 8, tiles start at multiples of 16) over
 // XW = RUNS * 8 columns. Image widths are a multiple of 8, so a run lies wholly inside or wholly
@@ -1651,6 +1651,10 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a CONV
 // One raw stage (DMA of the next chunk overlaps the step loop) and one channels-last stage, two
 // barriers a chunk. The epilogue stores channels-first: each lane's 4 channels of one pixel, 16
 // lanes 16 consecutive columns of a channel row.
+// Without 16-byte DMA and transpose reads (gfx90a, gfx942): each 16-byte slot is filled by four
+// dword DMA sub-instructions (lane l: slot 16 j + l / 4, dword l % 4, as k2ConvRows), and the
+// transpose is a gather: a lane takes 8 channels of one halo column by eight 2-byte reads
+// (consecutive lanes read consecutive columns of a channel row) and writes them as one granule.
 template <class T,
           class Atom,
           int R,
@@ -1773,14 +1777,79 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
                                              + static_cast<unsigned>(iw))
                                                 * static_cast<unsigned>(sizeof(T))
                                     : K1_OUT_OF_RANGE;
+#if K2R_DMA16
             __builtin_amdgcn_raw_ptr_buffer_load_lds(
                 xr, (__attribute__((address_space(3))) void*)(raw + i * WAVE), 16, off, 0, 0, 0);
+#else
+            (void)off;
+            // Sub-instruction j fills slots 16 j .. 16 j + 15 of the 64: lane l slot
+            // i WAVE + 16 j + l / 4, dword l % 4.
+#pragma unroll
+            for(int j = 0; j < K2R_DMA_SUB; ++j)
+            {
+                const int uj = i * WAVE + j * (WAVE / K2R_DMA_SUB) + ln / K2R_DMA_SUB;
+                const int xrj = uj % RUNS;
+                const int cj = (uj / RUNS) % BC;
+                const int hj = uj / (RUNS * BC);
+                const int ihj = tc.oh0 - a.ph + hj;
+                const int iwj = xal + GE * xrj;
+                const bool okj = uj < NSLOT
+                                 && static_cast<unsigned>(ihj) < static_cast<unsigned>(a.hi)
+                                 && static_cast<unsigned>(iwj) < static_cast<unsigned>(a.wi)
+                                 && cc * BC + cj < a.c;
+                const unsigned offj
+                    = okj ? static_cast<unsigned>(cc * BC + cj) * planeBytes
+                                + (static_cast<unsigned>(ihj) * static_cast<unsigned>(a.wi)
+                                   + static_cast<unsigned>(iwj))
+                                      * static_cast<unsigned>(sizeof(T))
+                                + static_cast<unsigned>(ln % K2R_DMA_SUB) * 4u
+                          : K1_OUT_OF_RANGE;
+                __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                    xr,
+                    (__attribute__((address_space(3))) void*)(raw + i * WAVE
+                                                              + j * (WAVE / K2R_DMA_SUB)),
+                    4,
+                    offj,
+                    0,
+                    0,
+                    0);
+            }
+#endif
         }
     };
 
     // Raw [h][c][x'] to the channels-last stage: task (h, granule g, 16-column block xb); lane j of
     // the group gets channels 8 g .. 8 g + 7 of column x' = 16 xb + j, written to stage column
     // x = x' - x_off when that is in the halo.
+#if !defined(__gfx950__)
+    // Gather form: task (h, granule g, halo column x), lanes over x first; the lane reads the 8
+    // channels 8 g .. 8 g + 7 of raw column x + x_off and writes them as granule g of column x.
+    auto transpose = [&]() __attribute__((always_inline))
+    {
+        constexpr int NT2 = HH * G * HW;
+        constexpr int NTW2 = (NT2 + NW * WAVE - 1) / (NW * WAVE);
+        typedef unsigned u4 __attribute__((ext_vector_type(4)));
+        const int ln = olane();
+        const unsigned short* rb = reinterpret_cast<const unsigned short*>(raw);
+#pragma unroll
+        for(int it = 0; it < NTW2; ++it)
+        {
+            const int task = (it * NW + wave) * WAVE + ln;
+            if(NT2 % (NW * WAVE) != 0 && task >= NT2)
+                continue;
+            const int x = task % HW;
+            const int g = (task / HW) % G;
+            const int h = task / (HW * G);
+            const unsigned short* p = rb + (h * BC + g * GE) * XW + x + xoff;
+            u4 v;
+#pragma unroll
+            for(int e = 0; e < 4; ++e)
+                v[e] = static_cast<unsigned>(p[(2 * e) * XW])
+                       | (static_cast<unsigned>(p[(2 * e + 1) * XW]) << 16);
+            nh[h * ROWG + x * G + (g + x) % G] = __builtin_bit_cast(Raw16, v);
+        }
+    };
+#else
     auto transpose = [&]() __attribute__((always_inline))
     {
         const int ln = olane();
@@ -1811,6 +1880,7 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
                     Raw16, __builtin_shufflevector(lo, hi, 0, 1, 2, 3, 4, 5, 6, 7));
         }
     };
+#endif
 
     const __amdgpu_buffer_rsrc_t wr = k1Rsrc(
         a.w, static_cast<long long>(a.ca) * a.kpad * KA * R * S * static_cast<int>(sizeof(T)));
