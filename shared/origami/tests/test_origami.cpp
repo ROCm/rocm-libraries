@@ -977,6 +977,168 @@ TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
   }
 }
 
+// argsort_configs must produce exactly the ranking rank_configs does, expressed as positions
+// into the input vector (not config_t::index, which is an opaque user tag).
+TEST_CASE("Origami: argsort_configs matches rank_configs", "[origami][argsort]") {
+  // config_t::index is deliberately set to a value that differs from the position, so a
+  // passing check cannot come from confusing the tag with the position.
+  auto tag_configs = [](std::vector<origami::config_t>& configs) {
+    for (size_t i = 0; i < configs.size(); ++i) configs[i].index = 1000 + 7 * i;
+  };
+
+  auto require_equivalent = [](const origami::problem_t& problem,
+                               const origami::hardware_t& hardware,
+                               const std::vector<origami::config_t>& configs) {
+    const auto sorted  = origami::argsort_configs(problem, hardware, configs);
+    const auto ranked  = origami::rank_configs(problem, hardware, configs);
+    REQUIRE(sorted.size() == configs.size());
+    REQUIRE(ranked.size() == sorted.size());
+
+    std::vector<bool> seen(configs.size(), false);
+    for (size_t i = 0; i < sorted.size(); ++i) {
+      REQUIRE(sorted[i].index < configs.size());
+      REQUIRE_FALSE(seen[sorted[i].index]);  // a permutation of the input positions
+      seen[sorted[i].index] = true;
+      REQUIRE(sorted[i].latency == ranked[i].latency);
+      REQUIRE(ranked[i].config == configs[sorted[i].index]);
+      REQUIRE(ranked[i].config.index == configs[sorted[i].index].index);
+    }
+    return sorted;
+  };
+
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - plain latency ranking") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 4096);
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(64, 64, 64, 32, 32, 8, false, 1, 6, 0, 0));
+      configs.push_back(make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0));
+      configs.push_back(make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0));
+      tag_configs(configs);
+
+      const auto sorted = require_equivalent(problem, hardware, configs);
+      for (size_t i = 0; i + 1 < sorted.size(); ++i) {
+        REQUIRE(sorted[i].latency < sorted[i + 1].latency);
+      }
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - empty input throws") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 1024);
+      std::vector<origami::config_t> empty_configs;
+      REQUIRE_THROWS_WITH(origami::argsort_configs(problem, hardware, empty_configs),
+                          "No configurations provided.");
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - all-rejected fallback keeps every position") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 1024);
+
+      std::vector<origami::config_t> invalid_configs;
+      if (gpu_arch == 942) {
+        invalid_configs.push_back(make_config(256, 256, 128, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(128, 128, 256, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(64, 64, 512, 32, 32, 8, false, 1, 6, 0, 0));
+      } else {
+        invalid_configs.push_back(make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(128, 128, 512, 32, 32, 8, false, 1, 6, 0, 0));
+        invalid_configs.push_back(make_config(256, 256, 512, 32, 32, 8, false, 1, 6, 0, 0));
+      }
+      tag_configs(invalid_configs);
+
+      const auto sorted = require_equivalent(problem, hardware, invalid_configs);
+      for (const auto& r : sorted) { REQUIRE(r.latency == std::numeric_limits<double>::max()); }
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - tie-breaks (buffer flags, AI) match") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 1024);
+
+      auto with_buffer_flags = [](bool buffer_load, bool buffer_store) {
+        auto config                   = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
+        config.tensile().buffer_load  = buffer_load;
+        config.tensile().buffer_store = buffer_store;
+        return config;
+      };
+
+      // Reverse of the preferred buffer order, plus higher-AI tiles at the end.
+      std::vector<origami::config_t> configs;
+      configs.push_back(with_buffer_flags(false, false));
+      configs.push_back(with_buffer_flags(false, true));
+      configs.push_back(with_buffer_flags(true, false));
+      configs.push_back(with_buffer_flags(true, true));
+      auto higher_ai = with_buffer_flags(true, false);
+      higher_ai.mt   = {128, 256, 64};
+      configs.push_back(higher_ai);
+      tag_configs(configs);
+
+      const double saved_variance = origami::runtime_options::get().heuristics_variance;
+      origami::runtime_options::get().heuristics_variance = 10.0;
+      const auto sorted = require_equivalent(problem, hardware, configs);
+      origami::runtime_options::get().heuristics_variance = saved_variance;
+
+      // Higher-AI tile (position 4) leads; then buffer rank orders the rest: (true,true)=3,
+      // (true,false)=2, (false,true)=1, (false,false)=0.
+      REQUIRE(sorted[0].index == 4);
+      REQUIRE(sorted[1].index == 3);
+      REQUIRE(sorted[2].index == 2);
+      REQUIRE(sorted[3].index == 1);
+      REQUIRE(sorted[4].index == 0);
+    }
+
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - tied M/N tie-break is input-order independent") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(2048, 1024, 1024);
+
+      std::vector<origami::config_t> configs_a;
+      configs_a.push_back(make_config(128, 64, 128, 32, 32, 8, false, 1, 6, 0, 0));
+      configs_a.push_back(make_config(64, 128, 128, 32, 32, 8, false, 1, 6, 0, 0));
+      tag_configs(configs_a);
+      std::vector<origami::config_t> configs_b(configs_a.rbegin(), configs_a.rend());
+
+      const auto sorted_a = require_equivalent(problem, hardware, configs_a);
+      const auto sorted_b = require_equivalent(problem, hardware, configs_b);
+      // The same tile wins regardless of input order.
+      REQUIRE(configs_a[sorted_a[0].index] == configs_b[sorted_b[0].index]);
+    }
+  }
+}
+
+// The wrappers built on argsort_configs return the same results as before.
+TEST_CASE("Origami: select_config/select_topk_configs agree with argsort_configs",
+          "[origami][argsort]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(2024, 4096, 768);
+
+      std::vector<origami::config_t> configs;
+      configs.push_back(make_config(256, 160, 32, 32, 32, 8, false, 1, 6, 0, 0));
+      configs.push_back(make_config(192, 160, 64, 32, 32, 8, false, 1, 6, 0, 0));
+      configs.push_back(make_config(64, 256, 32, 32, 32, 8, false, 1, 6, 0, 0));
+      for (size_t i = 0; i < configs.size(); ++i) configs[i].index = 500 + i;
+
+      const auto sorted = origami::argsort_configs(problem, hardware, configs);
+
+      const auto best = origami::select_config(problem, hardware, configs);
+      REQUIRE(best.latency == sorted[0].latency);
+      REQUIRE(best.config == configs[sorted[0].index]);
+      REQUIRE(best.config.index == configs[sorted[0].index].index);
+
+      for (size_t topk : {size_t{1}, size_t{2}, size_t{3}, size_t{10}}) {
+        const auto top = origami::select_topk_configs(problem, hardware, configs, topk);
+        REQUIRE(top.size() == std::min(topk, configs.size()));
+        for (size_t i = 0; i < top.size(); ++i) {
+          REQUIRE(top[i].latency == sorted[i].latency);
+          REQUIRE(top[i].config == configs[sorted[i].index]);
+          REQUIRE(top[i].config.index == configs[sorted[i].index].index);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("Origami: select_topk_configs unit test", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_topk_configs unit test") {

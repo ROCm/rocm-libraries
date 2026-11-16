@@ -102,6 +102,42 @@ ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& pr
                                               model_t model = model_t::gemm);
 
 /**
+ * @brief One entry of an argsort over a candidate config list.
+ */
+struct argsort_result_t {
+  /// Predicted latency. std::numeric_limits<double>::max() when every candidate was rejected
+  /// by the model (fallback ranking).
+  double latency;
+
+  /// Position of the config in the `configs` vector passed to argsort_configs().
+  /// This is NOT config_t::index, which is an opaque user tag.
+  std::size_t index;
+};
+
+/**
+ * @brief Rank configurations by predicted performance without copying them.
+ *
+ * Same ranking, tie-breaking and fallback behavior as rank_configs(), but returns
+ * the position of each config in @p configs (best first) together with its predicted
+ * latency instead of copies of the configs. Use this to avoid copying config_t objects.
+ *
+ * The returned indices are only meaningful for the exact @p configs vector that was
+ * passed in; do not modify or reorder it between this call and using the result.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param configs List of candidate configurations to rank
+ * @param model Model type to use for ranking (gemm or attention)
+ * @return std::vector<argsort_result_t> One entry per config, best first. If every candidate is
+ * rejected, returns a ranking of the rejected configs (max latency) instead of throwing.
+ * @throws std::runtime_error if @p configs is empty.
+ */
+ORIGAMI_EXPORT std::vector<argsort_result_t> argsort_configs(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const std::vector<config_t>& configs,
+                                              model_t model = model_t::gemm);
+
+/**
  * @brief Record per-macro-tile non-temporal availability on each config.
  *
  * A non-temporal read (cache hint 4) counts only for configs with the same

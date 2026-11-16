@@ -225,16 +225,16 @@ namespace TensileLite
                     .b_mx_block_size = 0, // MX Data types come from rocroller
                 };
 
-                auto prediction_result = origami::rank_configs(
+                auto ranked = origami::argsort_configs(
                     origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
 
-                for(const auto& r : prediction_result)
+                for(const auto& r : ranked)
                 {
-                    if(r.config.index >= solution_list.size())
+                    if(r.index >= solution_list.size())
                     {
                         continue;
                     }
-                    considerSolution(solution_list[r.config.index].second);
+                    considerSolution(solution_list[r.index].second);
                     if(rv.size() == numSolutions)
                     {
                         break;
@@ -254,4 +254,3 @@ namespace TensileLite
         }
     };
 } // namespace TensileLite
-
