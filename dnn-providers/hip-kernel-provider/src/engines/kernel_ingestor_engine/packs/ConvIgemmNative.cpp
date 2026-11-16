@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -722,6 +723,23 @@ bool inputChannelsFirst(const IgemmProblem& problem)
     return input.needed && input.transpose;
 }
 
+bool outputPackedChannelsFirst(const IgemmProblem& problem)
+{
+    if(outputChannelsFirst(problem))
+    {
+        return true;
+    }
+    // Not staged: packed channels-last, which is packed channels-first too when every spatial
+    // extent is 1 (the layouts coincide).
+    const auto& b = problem.base.args;
+    const bool forward = problem.direction == ConvDirection::FORWARD;
+    const auto& output = forward ? problem.y : problem.x;
+    const auto& spatial = forward ? b.outSpatial : b.inSpatial;
+    return !output.needed
+           && channelsFirst(forward ? b.yStrides : b.xStrides,
+                            {b.n, forward ? b.k : b.c, spatial[0], spatial[1], spatial[2]});
+}
+
 IgemmProblem withoutInputStaging(const IgemmProblem& problem)
 {
     IgemmProblem direct = problem;
@@ -734,10 +752,10 @@ namespace
 {
 
 /// One gather of the channels-first loaders along the width (k1Setup): the gathered row's
-/// pixels, the GEMM rows per image, the row stride, and the taps' reach.
+/// pixels, the GEMM rows per image, the row stride, the taps' reach and the padding's magnitude.
 struct CfxGather
 {
-    long long in = 0, rows = 0, stride = 1, reach = 0;
+    long long in = 0, rows = 0, stride = 1, reach = 0, pad = 0;
 };
 
 /// The width gathers a 1-D problem's blocks run: forward one, backward data one per stride phase
@@ -747,7 +765,7 @@ std::vector<CfxGather> cfxGathers(const IgemmProblem& problem)
     const auto& a = problem.args;
     if(problem.direction == ConvDirection::FORWARD)
     {
-        return {{a.wi, a.wo, a.sw, static_cast<long long>(a.fs - 1) * a.dw}};
+        return {{a.wi, a.wo, a.sw, static_cast<long long>(a.fs - 1) * a.dw, a.pw}};
     }
     std::vector<CfxGather> gathers;
     for(long long phi = 0; phi < a.sw; ++phi)
@@ -769,7 +787,8 @@ std::vector<CfxGather> cfxGathers(const IgemmProblem& problem)
             continue; // the phase's blocks read nothing
         }
         const long long taps = (a.fs - 1 - tapFirst) / tapStep + 1;
-        gathers.push_back({a.wo, count, 1, (taps - 1) * (tapStep * a.dw / a.sw)});
+        const long long o0 = (first + a.pw - tapFirst * a.dw) / a.sw;
+        gathers.push_back({a.wo, count, 1, (taps - 1) * (tapStep * a.dw / a.sw), std::abs(o0)});
     }
     return gathers;
 }
@@ -798,22 +817,20 @@ bool cfxFits(const IgemmProblem& problem, const CfxTile& tile)
     const auto gathers = cfxGathers(problem);
     for(const auto& g : gathers)
     {
-        // A block's pixel run is monotonic in its rows while every row's first tap lies before
-        // the next image's (the kernels bound it by its first and last row).
-        if((g.rows - 1) * g.stride >= g.in)
-        {
-            return false;
-        }
         long long span = g.reach + 1;
         if(tile.halo != 0)
         {
-            // The pixels one block's rows reach: bm - 1 row steps, plus the gap at each image
-            // boundary they cross (fewest crossings when the gap is negative), plus the taps and
-            // the aligned base's vector.
+            // The pixels one block's rows reach (K1HaloCf's run, clamped to the images of its
+            // first and last row): bm - 1 row steps, plus the gap at each image boundary they
+            // cross; where an image's rows reach past the next image's first pixel (a negative
+            // gap) the run is bounded by the steps, the taps and the padding instead. Plus the
+            // aligned base's vector.
             const long long steps = tile.bm - 1;
             const long long gap = g.in - g.rows * g.stride;
-            const long long crossings = gap > 0 ? (steps + g.rows - 1) / g.rows : steps / g.rows;
-            span = steps * g.stride + crossings * gap + g.reach + 1 + (mv - 1);
+            const long long crossings = (steps + g.rows - 1) / g.rows;
+            span = (gap >= 0 ? steps * g.stride + crossings * gap + g.reach + 1
+                             : steps * g.stride + g.reach + 1 + g.pad)
+                   + (mv - 1);
             const long long hrows = (tile.halo * tile.bm + HALO_CAP + 2 * mv - 1) / mv * mv;
             if(span > hrows)
             {
@@ -1336,7 +1353,8 @@ bool kernelMatches(const MatchContext& context,
         fit.halo = tile->halo;
         fit.dim = tile->atom.rfind("mfma32", 0) == 0 ? 32 : 16;
         fit.ldsBytes = arch == "gfx950" ? 160 * 1024 : 64 * 1024;
-        if(!conv_igemm::inputChannelsFirst(*problem) || !conv_igemm::outputChannelsFirst(*problem)
+        if(!conv_igemm::inputChannelsFirst(*problem)
+           || !conv_igemm::outputPackedChannelsFirst(*problem)
            || !conv_igemm::cfxFits(*problem, fit) || !bufferLoads(*problem))
         {
             return false;
@@ -1357,7 +1375,7 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(tile->cf != 0 && !conv_igemm::outputChannelsFirst(*problem))
+    if(tile->cf != 0 && tile->cfx == 0 && !conv_igemm::outputChannelsFirst(*problem))
     {
         return false;
     }

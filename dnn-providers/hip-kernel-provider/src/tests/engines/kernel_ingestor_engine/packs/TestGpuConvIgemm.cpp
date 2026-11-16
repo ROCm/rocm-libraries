@@ -909,9 +909,9 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 20> KNOBS{
-        "atom", "math", "bm",      "bn",   "bk", "wm",  "wn",  "threads", "vec",   "stages",
-        "xcd",  "halo", "wdirect", "pack", "cf", "swz", "dma", "fuse",    "large", "patch"};
+    static constexpr std::array<const char*, 21> KNOBS{
+        "atom", "math",    "bm",   "bn", "bk",  "wm",  "wn",   "threads", "vec",   "stages", "xcd",
+        "halo", "wdirect", "pack", "cf", "swz", "dma", "fuse", "large",   "patch", "cfx"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -1023,6 +1023,11 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
         for(const auto& kernel : kernels)
         {
             SCOPED_TRACE(kernel.name);
+            // Channels-first-input configs are twins of channels-first-output ones (their own test).
+            if(kernel.getIntMetadata("cfx") != 0)
+            {
+                continue;
+            }
             const bool cf = kernel.getIntMetadata("cf") != 0;
             // Patch backward data writes channels-last dx only; the patch tile has no twins.
             const bool eligible = kernel.getStringMetadata("atom") != "fma"
@@ -1037,7 +1042,8 @@ TEST(TestConvIgemmCatalog, EveryMatrixCoreConfigButTapPackingHasAChannelsFirstOu
             }
             const auto tuple = tupleOf(kernel);
             const auto twin = std::count_if(kernels.begin(), kernels.end(), [&](const auto& other) {
-                return other.getIntMetadata("cf") != 0 && tupleOf(other) == tuple;
+                return other.getIntMetadata("cf") != 0 && other.getIntMetadata("cfx") == 0
+                       && tupleOf(other) == tuple;
             });
             EXPECT_EQ(twin, eligible ? 1 : 0);
             twins += static_cast<int>(twin);
@@ -1538,9 +1544,12 @@ TEST(TestConvIgemmCatalog, ChannelsFirstInputFitsOneDimensionalGathersItsHaloHol
     // Taps reaching 70 pixels: 127 + 70 + 1 + 7 = 205 rows, past halo 1's 200 (reach 60: 195).
     EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(400, 11, 35, 1, 7), fwd), cfxTile(128, 1)));
     EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(400, 11, 30, 1, 6), fwd), cfxTile(128, 1)));
-    // Outputs past the input's end (a 1-wide filter padded by 2): the rows' pixel run is not
-    // monotonic across images.
-    EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(100, 1, 2, 1, 1), fwd), cfxTile(128, 1)));
+    // Outputs past the input's end (a 1-wide filter padded by 2): an image's rows reach past the
+    // next image's first pixel, and the run is bounded by the steps, taps and padding.
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(100, 1, 2, 1, 1), fwd), cfxTile(128, 1)));
+    // One row per image at stride 2 (gap 2 per crossing): 254 + 127 x 2 + 2 + 8 = 518 rows, past
+    // halo 2's 328.
+    EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(4, 3, 0, 2, 1), fwd), cfxTile(128, 2)));
     // LDS: 256 rows at halo 2 and 64-deep k-steps need 100 KiB (gfx950's 160 KiB only).
     auto deep = cfxTile(256, 2);
     deep.bk = 64;

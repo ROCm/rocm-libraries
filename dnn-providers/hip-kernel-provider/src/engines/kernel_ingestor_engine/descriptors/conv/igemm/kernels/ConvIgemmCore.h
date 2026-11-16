@@ -2159,6 +2159,7 @@ struct K1HaloCf
     int delta;
     int chans, cgroup, chanOffset, lin, need;
     long long base; // linear pixel of LDS row 0
+    bool split; // width stride 2: even and odd pixels in separate halves (rowOf)
     int uOff[PASSES], uPos[PASSES], uMask[PASSES], uRg[PASSES], uKg[PASSES];
     bool uVec[PASSES], uLive[PASSES];
     long long pixels;
@@ -2176,6 +2177,7 @@ struct K1HaloCf
         base = firstPixel >= 0 ? firstPixel / MV * MV : -((-firstPixel + MV - 1) / MV) * MV;
         delta = static_cast<int>(firstPixel - base);
         need = static_cast<int>(lastPixel - base + 1);
+        split = g.stride[2] == 2;
         // The buffer starts at the image of the first real pixel.
         const long long img0 = base > 0 ? base / lin : 0;
         const long long imageElems = static_cast<long long>(chans) * lin;
@@ -2258,11 +2260,30 @@ struct K1HaloCf
         {
             if(!uLive[p])
                 continue;
+            if(split)
+            {
 #pragma unroll
-            for(int e = 0; e < MV; ++e)
-                *reinterpret_cast<RawK*>(As + (uRg[p] * MV + e) * ld + uKg[p] * KV)
-                    = k1TransposeRow<T, KV, RawK>(r[p], e);
+                for(int e = 0; e < MV; ++e)
+                    *reinterpret_cast<RawK*>(
+                        As + ((e & 1) * (HR / 2) + uRg[p] * (MV / 2) + e / 2) * ld + uKg[p] * KV)
+                        = k1TransposeRow<T, KV, RawK>(r[p], e);
+            }
+            else
+            {
+#pragma unroll
+                for(int e = 0; e < MV; ++e)
+                    *reinterpret_cast<RawK*>(As + (uRg[p] * MV + e) * ld + uKg[p] * KV)
+                        = k1TransposeRow<T, KV, RawK>(r[p], e);
+            }
         }
+    }
+
+    /// The LDS row of the run's pixel @p r (from base). Width stride 2 (split): even pixels in
+    /// the first HR / 2 rows, odd ones in the rest, so a tap's rows (every other pixel) are
+    /// consecutive rows, as at stride 1, and the fragment reads stay free of bank conflicts.
+    __device__ int rowOf(int r) const
+    {
+        return split ? (r & 1) * (HR / 2) + (r >> 1) : r;
     }
 };
 
@@ -2671,9 +2692,17 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                 lo += static_cast<long long>((e < 0 ? e : 0) - gather.pad[i]) * axis[i];
                 hi += static_cast<long long>((e > 0 ? e : 0) - gather.pad[i]) * axis[i];
             }
+            // A row reads only pixels of its own image (the rest are padding), so the run is
+            // clamped to the first row's image from below and the last row's from above; within
+            // an image a later row's pixels never start before an earlier row's.
             const long long mLast = (m0 + BM < gather.rows ? m0 + BM : gather.rows) - 1;
-            halo.init(
-                DIR == K1_FORWARD ? a.x : a.y, gather, cfPixel(m0) + lo, cfPixel(mLast) + hi, tid);
+            const long long img0 = m0 / cfSpatial, imgL = mLast / cfSpatial;
+            long long first = cfPixel(m0) + lo, last = cfPixel(mLast) + hi;
+            first = first < img0 * cfPlane ? img0 * cfPlane : first;
+            first = first > (img0 + 1) * cfPlane ? (img0 + 1) * cfPlane : first;
+            last = last < imgL * cfPlane - 1 ? imgL * cfPlane - 1 : last;
+            last = last > (imgL + 1) * cfPlane - 1 ? (imgL + 1) * cfPlane - 1 : last;
+            halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, first, last, tid);
         }
         else
         {
@@ -2773,12 +2802,13 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                           && static_cast<unsigned>(ow[i] + d2)
                                  < static_cast<unsigned>(gather.in[2]);
                     if constexpr(CFX != 0)
-                        arow[i] = ok ? cfRow[i]
-                                           + static_cast<int>(
-                                               (static_cast<long long>(d0) * gather.in[1] + d1)
-                                                   * gather.in[2]
-                                               + d2)
-                                     : HROWS;
+                        arow[i]
+                            = ok ? halo.rowOf(cfRow[i]
+                                              + static_cast<int>(
+                                                  (static_cast<long long>(d0) * gather.in[1] + d1)
+                                                      * gather.in[2]
+                                                  + d2))
+                                 : HROWS;
                     else
                         arow[i] = ok ? wm * WTM + i * DIM + fragRow + shift : HROWS;
                 }
