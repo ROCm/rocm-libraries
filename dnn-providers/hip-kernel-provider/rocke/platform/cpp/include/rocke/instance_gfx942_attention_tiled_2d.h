@@ -138,7 +138,9 @@ bool rocke_gfx942_attention_tiled_2d_supports(
  * Emit the gfx942 narrow-atom tiled MFMA 2D unified-attention kernel into the
  * supplied (already rocke_ir_builder_init'd, named spec.kernel_name()) builder
  * ``b`` and return the kernel (b->kernel) on success, or NULL with b's sticky
- * error set. ``arch`` NULL == the Python default "gfx942".
+ * error set. ``arch`` NULL == the Python default "gfx942". It first checks the
+ * spec with rocke_attention_tiled_2d_spec_validate for every target, as the
+ * Python spec checks itself at construction.
  *
  * This is the REAL emitter (the porting task pins this name): the ~4000-line
  * body is split across the instance_gfx942_attention_tiled_2d_*.c translation

@@ -229,6 +229,36 @@ int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tile
     return it < 1 ? 1 : it;
 }
 
+/* ------------------------------------------- direct K / V read refusal */
+bool rocke_attention_tiled_2d_spec_check_no_kv_hbm_direct(rocke_ir_builder_t* b,
+                                                          const rocke_attention_tiled_2d_spec_t* s,
+                                                          const char* message_prefix,
+                                                          const char* reason)
+{
+    if(b == NULL)
+    {
+        return false;
+    }
+    if(s == NULL)
+    {
+        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_2d spec is NULL");
+        return false;
+    }
+    if(s->use_k_hbm_direct || s->use_v_hbm_direct)
+    {
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "%s use_k_hbm_direct=%s, use_v_hbm_direct=%s, expected both "
+                             "False: %s",
+                             message_prefix,
+                             s->use_k_hbm_direct ? "True" : "False",
+                             s->use_v_hbm_direct ? "True" : "False",
+                             reason);
+        return false;
+    }
+    return true;
+}
+
 /* --------------------------------------------------------- __post_init__ */
 /* Faithful reproduction of the gfx942 __post_init__ validation order/messages.
  * Returns false + latches ROCKE_ERR_VALUE on the first failing check. */
@@ -578,19 +608,14 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
             return false;
         }
     }
-    /* The direct K and V reads address the cache through the paged-KV
-     * descriptor, which the fast descriptor path does not build. */
-    if(s->use_fast_paged_kv_desc && (s->use_k_hbm_direct || s->use_v_hbm_direct))
+    if(s->use_fast_paged_kv_desc
+       && !rocke_attention_tiled_2d_spec_check_no_kv_hbm_direct(
+           b,
+           s,
+           "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with",
+           "the direct K and V reads address the cache through the paged-KV "
+           "descriptor, which the fast descriptor path does not build"))
     {
-        rocke_attn2d_set_err(b,
-                             ROCKE_ERR_VALUE,
-                             "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
-                             "use_k_hbm_direct=%s, use_v_hbm_direct=%s, expected both "
-                             "False: the direct K and V reads address the cache through the "
-                             "paged-KV descriptor, which the fast descriptor path does not "
-                             "build",
-                             s->use_k_hbm_direct ? "True" : "False",
-                             s->use_v_hbm_direct ? "True" : "False");
         return false;
     }
 
