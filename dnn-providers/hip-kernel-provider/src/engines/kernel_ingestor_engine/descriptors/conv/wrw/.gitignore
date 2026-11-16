@@ -5,7 +5,6 @@
 /conv_wrw_bf16_fma906b.kdp.json
 /conv_wrw_bf16_generic.kdp.json
 /conv_wrw_bf16_gfx950.kdp.json
-/conv_wrw_bf16_rdna.kdp.json
 /conv_wrw_f16_cdna.kdp.json
 /conv_wrw_f16_cdnapk.kdp.json
 /conv_wrw_f16_direct.kdp.json
@@ -13,7 +12,6 @@
 /conv_wrw_f16_fma906b.kdp.json
 /conv_wrw_f16_generic.kdp.json
 /conv_wrw_f16_gfx950.kdp.json
-/conv_wrw_f16_rdna.kdp.json
 /conv_wrw_f32_cdna.kdp.json
 /conv_wrw_f32_fma.kdp.json
 /conv_wrw_f32_fma906.kdp.json
@@ -24,4 +22,9 @@
 /conv_wrw_f32_x3cdna.kdp.json
 /conv_wrw_f32_x3direct.kdp.json
 /conv_wrw_f32_x3gfx950.kdp.json
-/conv_wrw_f32_x3rdna.kdp.json
+/conv_wrw_bf16_rdna11.kdp.json
+/conv_wrw_bf16_rdna12.kdp.json
+/conv_wrw_f16_rdna11.kdp.json
+/conv_wrw_f16_rdna12.kdp.json
+/conv_wrw_f32_x3rdna11.kdp.json
+/conv_wrw_f32_x3rdna12.kdp.json

@@ -625,23 +625,26 @@ FILTERS = [
     ("1x11", 11, 1, 1, 1, 1, [-1], [0], None),
     ("1x11d3", 11, 1, 3, 1, 1, [-1], [0], [CF]),
     ("1x11d5", 11, 1, 5, 1, 1, [-1], [0], [CF]),
-    ("3x3d4", 3, 1, 4, 3, 1, [0, -1], [0], [CF]),
+    # Dilated 3x3 rows in both layouts: without channels-last configs a channels-last deeplab
+    # ASPP layer (d4 / d24 / d36) has no specialized config, the generic tier declines it (d6+)
+    # or has no gfx11 config, and it falls to the BLAS path (30x on gfx1100).
+    ("3x3d4", 3, 1, 4, 3, 1, [0, -1], [0], None),
     # SSD300's dilation-6 3x3 (the d4 row's tiles).
-    ("3x3d6", 3, 1, 6, 3, 1, [0, -1], [0], [CF]),
+    ("3x3d6", 3, 1, 6, 3, 1, [0, -1], [0], None),
     ("3x3d12", 3, 1, 12, 3, 1, [0, -1], [0], None),
-    ("3x3d24", 3, 1, 24, 3, 1, [0, -1], [0], [CF]),
-    ("3x3d36", 3, 1, 36, 3, 1, [0, -1], [0], [CF]),
+    ("3x3d24", 3, 1, 24, 3, 1, [0, -1], [0], None),
+    ("3x3d36", 3, 1, 36, 3, 1, [0, -1], [0], None),
     ("3x3s2", 3, 2, 1, 3, 0, [0, 1], [0], None),
     ("3x3s2r1", 3, 2, 1, 1, 0, [0, 1], [0], None),
     ("2x2s2", 2, 2, 1, 2, 0, [0, 1], [0], None),
     # Stride-1 3x3 on the output rows too, plain and dilated (RDNA: deeplab 65^2 and unet2d run
     # fastest there; gfx1100).
     ("3x3r1", 3, 1, 1, 1, 0, [0, 1], [0], None),
-    ("3x3d4r1", 3, 1, 4, 1, 0, [0, 1], [0], [CF]),
-    ("3x3d6r1", 3, 1, 6, 1, 0, [0, 1], [0], [CF]),
+    ("3x3d4r1", 3, 1, 4, 1, 0, [0, 1], [0], None),
+    ("3x3d6r1", 3, 1, 6, 1, 0, [0, 1], [0], None),
     ("3x3d12r1", 3, 1, 12, 1, 0, [0, 1], [0], None),
-    ("3x3d24r1", 3, 1, 24, 1, 0, [0, 1], [0], [CF]),
-    ("3x3d36r1", 3, 1, 36, 1, 0, [0, 1], [0], [CF]),
+    ("3x3d24r1", 3, 1, 24, 1, 0, [0, 1], [0], None),
+    ("3x3d36r1", 3, 1, 36, 1, 0, [0, 1], [0], None),
     # 7x7 stride-2 stems (channels-first; few input channels): one filter row per block.
     ("7x7s2r1", 7, 2, 1, 1, 0, [0, 1], [0], [CF]),
     # Strided 1-D downsampling (MelGAN / HiFi-GAN discriminators): 1 x 4 at stride 2, 1 x 16 at 8.
@@ -1456,8 +1459,9 @@ def dws_of(c):
 
 def family_of(c):
     """The pack a config ships in: the direct loop, gfx950's 16 x 32 / 32 x 16 atoms, the other
-    MFMA atoms, RDNA's WMMA, or the FMA loops. The 32 x 32 atom's packed rows ship in a pack
-    without gfx950, which has its own measured packed-rows tiles."""
+    MFMA atoms, RDNA's WMMA per generation (gfx11, gfx12), or the FMA loops. The 32 x 32 atom's
+    packed rows ship in a pack without gfx950, which has its own measured packed-rows tiles.
+    """
     if c["loop"] == 5:
         return "direct"
     if c["loop"] == 8:
@@ -1466,8 +1470,10 @@ def family_of(c):
         return "cdnapk"
     if c["atom"] == "fma":
         return "fma"
-    if c["atom"].startswith("wmma"):
-        return "rdna"
+    if c["atom"].startswith("wmma11"):
+        return "rdna11"
+    if c["atom"].startswith("wmma12"):
+        return "rdna12"
     if c["atom"].startswith(("mfma16x32", "mfma32x16")):
         return "gfx950"
     return "cdna"
