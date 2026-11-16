@@ -31,6 +31,8 @@ SPDX-License-Identifier:  MIT
   - RDNA fp16 small-C backward data against `ConvWinoRage/Fury` (1.4-1.7x);
   - fp32 Mask R-CNN 200² fwd/bwd against `ConvBinWinogradRxSf2x3g1` (1.13-1.24x), F(2,3) only;
   - gfx906 fwd/bwd against MIOpen's asm Winograd (about 1.55x behind, weighted).
+  - NHWC 3x3 fp16 backward weights and backward data against MIOpen's transpose-wrapped asm (`Transposed*`); other engines serve those graphs.
+  - Kernel against kernel, K5 trails MIOpen's Winograd on every arch (0.55-0.87x); see "Next steps".
 - **Precision:** every engine reports the `WINOGRAD` numerical note, with `WINOGRAD_TILE_4x4` on the fwd/bwd and BF16 engines and `WINOGRAD_TILE_6x6` on the F43 engines (wrw mixes F(3,2), F(3,4) and F(3,6) and names no tile). Transforms are fp32; 16-bit operands are rounded once after their transform, except the input transform of `f16math` configs. Accumulation is fp32. An output whose window lies wholly in padding is exactly 0. Deterministic.
 - **Instances:** 420: `CONV_WINOGRAD_FWD/BWD` 106 each, `CONV_WINOGRAD_FWD/BWD_BF16` 54 each (every bf16 fwd/bwd config), `CONV_WINOGRAD_FWD/BWD_F43` 8 each (fp32 F(4,3) multipass), `CONV_WINOGRAD_WRW` 84. All are offered by default.
 - **vs MIOpen** (usage-weighted speedup on the graphs where it is our best engine, search mode), fwd / bwd / wrw:
@@ -163,12 +165,42 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 No code was copied.
 
 ## Next steps and deferred ideas
-1. **RDNA fp16 small-C backward data against Rage / Fury** (largest RDNA Winograd excess; 1.4-1.7x). Autotune does not pick the 16-bin config where it would win, so the planner needs register counts at plan time. Per-item overhead (loads, about 5 barriers per item) is the cost to cut.
-2. **F(4,3) accuracy:** try points 0, ±1, ±1/2 for less error.
-3. **CDNA small-C:** extra VALU and bank conflicts in V stores and B reads; LDS-resident U to fuse the 3-4 µs filter-transform launch.
-4. **gfx906 fused:** reader/writer wave specialization, or a persistent design with U in LDS.
-5. **TF32:** split inside the cooperative kernel, not in multipass.
-6. **Other filter sizes by 3x3 decomposition**, as MIOpen's RxS does. Not yet measured; `CONV_DIRECT`, `CONV_IGEMM` and `CONV_FFT` serve those today.
+
+**Remaining gap to MIOpen's asm Winograd, kernel against kernel.** The graphs are those 3x3 graphs of the 1,998-shape corpus subset where MIOpen's exhaustive-search winner is a Winograd solver. The comparison is K5's best config against that MIOpen solver, usage-weighted, as MIOpen time ÷ K5 time, so below 1 means K5 is slower. The BF16 and F43 engines are not included.
+
+| GPU | K5 vs MIOpen Winograd | Graphs (K5 faster / slower by >5%) | K5 excess (all / without `Transposed*`) |
+|---|---|---|---|
+| gfx950 | 0.87x | 165 (54 / 86) | 26 / 11 ms |
+| gfx942 (MI325X) | 0.75x | 215 (65 / 131) | 80 / 54 ms |
+| gfx90a | 0.81x | 90 (9 / 76) | 95 / 15 ms |
+| gfx908 | 0.85x | 151 (39 / 93) | 208 / 84 ms |
+| gfx906 | 0.56x | 287 (30 / 249) | 3409 / 746 ms |
+| gfx1100 | 0.55x | 319 (88 / 193) | 1811 / 329 ms |
+| gfx1201 | 0.67x | 295 (78 / 196) | 441 / 290 ms |
+
+- By solver:
+  - K5 already beats `ConvBinWinogradRxSf3x2` on gfx950, gfx942, gfx1100 and gfx1201 (1.09-1.37x). It trails it on gfx90a, gfx908 and gfx906 (0.73-0.89x).
+  - It trails `ConvWinoRageRxS` at 0.72-0.92x, `ConvWinoFuryRxS` at 0.39-0.70x, `…RxSf2x3` / `…RxSf2x3g1` at 0.46-1.41x, `ConvBinWinograd3x3U` (gfx908) at 0.77x, and every gfx906 solver at 0.56-0.77x.
+- Users see little of this: on these graphs autotune picks other engines where K5 is slow. Against the best of all engines, the same graphs run 1.14-1.69x faster than MIOpen on gfx950, gfx942, gfx1100 and gfx1201, 1.05x on gfx908, 1.41x on gfx906, and 0.93x on gfx90a.
+- None of the levers below needs assembly.
+
+1. **Channels-last 3x3 Winograd, mostly fp16 backward weights and backward data.** MIOpen serves these graphs with its NCHW asm wrapped in layout transposes (`Transposed*`), and most of K5's excess sits here (gfx906 2663 ms, gfx1100 1483 ms, gfx908 124 ms, gfx90a 79 ms). Give the wrw and bwd variants a fast NHWC path, or at least a transpose-wrapped one, so they don't run the slow configs.
+2. **RDNA fp16 small-C against Fury / Rage** (0.39-0.72x).
+   - Autotune does not pick the 16-bin config where it would win, so the planner needs register counts at plan time.
+   - Per-item overhead (loads, about 5 barriers per item) is the cost to cut.
+3. **gfx942 / gfx950 against Rage** (0.86-0.92x) **and `RxSf2x3(g1)`** (0.47-1.08x).
+   - Remove the extra VALU and the bank conflicts in V stores and B reads.
+   - Fold the 3-4 µs filter-transform launch into the kernel with an LDS-resident U.
+   - Use 32-bit/scalar index math, and per-arch tile shapes as on gfx950.
+   - Use scheduling hints (`__builtin_amdgcn_sched_group_barrier`, wave priority) and `launch_bounds` register budgets.
+4. **gfx908 against `ConvBinWinograd3x3U`** (0.77x).
+5. **gfx906 fused** (0.56-0.77x): reader/writer wave specialization, or a persistent design with U in LDS, aimed at near-peak fp32 VALU.
+6. **gfx90a / gfx908 multipass backward weights** against `ConvWinograd3x3MultipassWrW` (0.25-0.90x on its graphs).
+7. **F(4,3) accuracy:** try points 0, ±1, ±1/2 for less error.
+8. **TF32:** split inside the cooperative kernel, not in multipass.
+9. **Other filter sizes by 3x3 decomposition**, as MIOpen's RxS does: low value. On the non-3x3 graphs where MIOpen picks Winograd (1x1, 5x5, 7x7, 1xN), `CONV_DIRECT`, `CONV_IGEMM` and `CONV_FFT` already run 1.37-2.56x faster than it on every arch except gfx90a (0.63x, 4 ms over 14 graphs).
+
+Gate for each item: parity with the MIOpen solver on the graphs it wins, and no regression elsewhere.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvWinogradProblem.cpp` (host):
