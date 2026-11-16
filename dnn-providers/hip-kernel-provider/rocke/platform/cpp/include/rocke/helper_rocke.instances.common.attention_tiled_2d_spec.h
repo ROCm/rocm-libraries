@@ -4,15 +4,21 @@
  * rocke/helper_rocke.instances.common.attention_tiled_2d_spec.h -- the C spec
  * struct the gfx942 and gfx950 tiled-2D attention builders share, the C mirror
  * of their UnifiedAttention2DTiledSpec dataclasses. Every header that exposes a
- * tiled-2D entry includes it; it needs nothing but <stdbool.h>. Its default
- * constructor and derived accessors (rocke_attention_tiled_2d_spec_default,
- * ..._tile_size_eff, ...) are declared in
- * rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h.
+ * tiled-2D entry includes it. It also declares the struct's default
+ * constructor and derived @property accessors (defined in
+ * instances/common/attention_tiled_2d_spec.cpp).
+ *
+ *   Python (UnifiedAttention2DTiledSpec) -> C99 (this header)
+ *   the dataclass                        -> rocke_attention_tiled_2d_spec_t
+ *   its field defaults                   -> rocke_attention_tiled_2d_spec_default
+ *   each @property <name>                -> rocke_attention_tiled_2d_spec_<name>
  */
 #ifndef ROCKE_HELPER_ROCKE_INSTANCES_COMMON_ATTENTION_TILED_2D_SPEC_H
 #define ROCKE_HELPER_ROCKE_INSTANCES_COMMON_ATTENTION_TILED_2D_SPEC_H
 
 #include <stdbool.h>
+
+#include "rocke/ir.h" /* rocke_type_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -144,6 +150,33 @@ typedef struct rocke_attention_tiled_2d_spec
      * "lse" token becomes "lsehm". Needs emit_lse. */
     bool lse_head_major; /* False */
 } rocke_attention_tiled_2d_spec_t;
+
+/* Materialise every defaulted field (the dataclass defaults). The required
+ * fields are zero/NULL-initialised; the caller must set them before use. */
+rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void);
+
+/* ------------------------------------------------ derived @property accessors *
+ *
+ * Pure, IR-free; faithful ports of the dataclass @property bodies. */
+
+/* num_queries_per_kv = num_query_heads // num_kv_heads */
+int rocke_attention_tiled_2d_spec_num_queries_per_kv(const rocke_attention_tiled_2d_spec_t* s);
+/* block_m = block_m_per_warp * num_warps */
+int rocke_attention_tiled_2d_spec_block_m(const rocke_attention_tiled_2d_spec_t* s);
+/* regs_per_lane: 16 for the 32x32 paths, else block_m_per_warp // 4 */
+int rocke_attention_tiled_2d_spec_regs_per_lane(const rocke_attention_tiled_2d_spec_t* s);
+/* block_q = block_m // num_queries_per_kv */
+int rocke_attention_tiled_2d_spec_block_q(const rocke_attention_tiled_2d_spec_t* s);
+/* tile_size_eff = tile_size if has_tile_size else block_size */
+int rocke_attention_tiled_2d_spec_tile_size_eff(const rocke_attention_tiled_2d_spec_t* s);
+/* n_blocks_per_tile = tile_size_eff // block_size */
+int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_2d_spec_t* s);
+/* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
+const rocke_type_t*
+    rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s);
+/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))).
+ * Exported for existing callers; the kernels derive the search at runtime. */
+int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tiled_2d_spec_t* s);
 
 #ifdef __cplusplus
 }

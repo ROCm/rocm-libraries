@@ -400,8 +400,9 @@ bool rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(
 
 /* The gfx950 spec __post_init__ rules this C twin mirrors, in their Python
  * relative order: the 32x32x16 atom geometry, use_transposed_qk_32x32 requiring
- * that atom, then the shared transposed-softmax VALU and grouped-KV2 / early-V
- * rules (helper_rocke.instances.common.attention_tiled_2d_rules.h). Not every
+ * that atom, then the shared transposed sub-knob, skip-legacy-qreg,
+ * transposed-softmax VALU and grouped-KV2 / early-V rules
+ * (helper_rocke.instances.common.attention_tiled_2d_rules.h). Not every
  * __post_init__ rule is mirrored. The gfx950 tiled 2D build and the fastKV
  * register-P build both run it before their own build checks, as Python runs
  * __post_init__ before building. Returns true when the spec passes; otherwise

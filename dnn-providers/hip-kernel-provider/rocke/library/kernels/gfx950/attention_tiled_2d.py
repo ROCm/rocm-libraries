@@ -57,7 +57,9 @@ from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_tiled_2d_rules import (
     validate_grouped_kv2_and_early_v,
+    validate_skip_legacy_qreg,
     validate_transposed_softmax_valu_opts,
+    validate_transposed_sub_knobs,
 )
 
 from rocke.core.ir import (
@@ -616,24 +618,12 @@ class UnifiedAttention2DTiledSpec:
                 "use_transposed_qk_32x32 requires the 32x32 MFMA atom - "
                 "use_mfma_32x32=False, expected True"
             )
-        if self.use_transposed_scalar_state and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_scalar_state requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_invariant_hoist and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_invariant_hoist requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_mask_once and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_mask_once requires use_transposed_qk_32x32"
-            )
-        if self.use_transposed_half_local_pv and not self.use_transposed_qk_32x32:
-            raise ValueError(
-                "use_transposed_half_local_pv requires use_transposed_qk_32x32"
-            )
-        if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
-            raise ValueError("use_mfma32_skip_legacy_qreg requires use_mfma_32x32")
+        ok, reason = validate_transposed_sub_knobs(self)
+        if not ok:
+            raise ValueError(reason)
+        ok, reason = validate_skip_legacy_qreg(self)
+        if not ok:
+            raise ValueError(reason)
         ok, reason = validate_transposed_softmax_valu_opts(self)
         if not ok:
             raise ValueError(reason)

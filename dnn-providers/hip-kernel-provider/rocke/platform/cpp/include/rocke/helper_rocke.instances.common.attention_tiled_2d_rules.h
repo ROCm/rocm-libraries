@@ -6,6 +6,10 @@
  * tiled-2D attention specs share.
  *
  *   Python (attention_tiled_2d_rules.py) -> C99 (this header)
+ *   validate_transposed_sub_knobs
+ *       -> rocke_attention_tiled_2d_validate_transposed_sub_knobs
+ *   validate_skip_legacy_qreg
+ *       -> rocke_attention_tiled_2d_validate_skip_legacy_qreg
  *   validate_transposed_softmax_valu_opts
  *       -> rocke_attention_tiled_2d_validate_transposed_softmax_valu_opts
  *   validate_grouped_kv2_and_early_v
@@ -27,6 +31,16 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* The transposed-softmax sub-knobs (scalar state, invariant hoist, mask-once,
+ * half-local PV) each require use_transposed_qk_32x32. */
+bool rocke_attention_tiled_2d_validate_transposed_sub_knobs(
+    const rocke_attention_tiled_2d_spec_t* spec, char* reason, size_t reason_cap);
+
+/* use_mfma32_skip_legacy_qreg requires use_mfma_32x32. */
+bool rocke_attention_tiled_2d_validate_skip_legacy_qreg(const rocke_attention_tiled_2d_spec_t* spec,
+                                                        char* reason,
+                                                        size_t reason_cap);
 
 /* The transposed-softmax VALU opts (use_transposed_mask_limit) run only on the
  * R4_s1mask path (the transposed QK with the scalar state and mask-once knobs),

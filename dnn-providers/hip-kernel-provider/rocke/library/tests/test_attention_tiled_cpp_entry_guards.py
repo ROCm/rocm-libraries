@@ -255,16 +255,17 @@ _GKV2_RULES = [
 ]
 
 
-_VALU_RULES = [
-    _Refusal(
-        rule="VALU opts R4_s1mask path",
-        change={"use_transposed_mask_once": False},
-        py_reason=(
-            "transposed softmax VALU opts require the R4_s1mask path - "
-            "use_transposed_qk_32x32=True, use_transposed_scalar_state=True, "
-            "use_transposed_mask_once=False, expected all True"
-        ),
+_VALU_R4_S1MASK = _Refusal(
+    rule="VALU opts R4_s1mask path",
+    change={"use_transposed_mask_once": False},
+    py_reason=(
+        "transposed softmax VALU opts require the R4_s1mask path - "
+        "use_transposed_qk_32x32=True, use_transposed_scalar_state=True, "
+        "use_transposed_mask_once=False, expected all True"
     ),
+)
+_VALU_RULES = [
+    _VALU_R4_S1MASK,
     _Refusal(
         rule="VALU opts sliding window",
         change={"sliding_window": 64},
@@ -310,6 +311,58 @@ _VALU_GKV2 = _Refusal(
 )
 
 
+def _sub_knob_rule(field: str, fastkv_binding_carries: bool = True) -> _Refusal:
+    """A transposed sub-knob turned on without the transposed QK."""
+    return _Refusal(
+        rule=f"{field} without the transposed QK",
+        change={"use_transposed_qk_32x32": False, field: True},
+        py_reason=(
+            f"{field} requires use_transposed_qk_32x32 - "
+            "use_transposed_qk_32x32=False, expected True"
+        ),
+        fastkv_binding_carries=fastkv_binding_carries,
+    )
+
+
+# gfx950 rules after the 32x32 ones, in the Python order. The fastKV binding
+# does not pass use_transposed_invariant_hoist.
+_GFX950_SUB_KNOB_RULES = [
+    _sub_knob_rule("use_transposed_scalar_state"),
+    _sub_knob_rule("use_transposed_invariant_hoist", fastkv_binding_carries=False),
+    _sub_knob_rule("use_transposed_mask_once"),
+    _sub_knob_rule("use_transposed_half_local_pv"),
+    _Refusal(
+        rule="skip-legacy-qreg without the 32x32 atom",
+        change={
+            "use_mfma_32x32": False,
+            "use_transposed_qk_32x32": False,
+            "use_mfma32_skip_legacy_qreg": True,
+        },
+        py_reason=(
+            "use_mfma32_skip_legacy_qreg requires use_mfma_32x32 - "
+            "use_mfma_32x32=False, expected True"
+        ),
+    ),
+]
+# The gfx942 spec refuses use_transposed_half_local_pv and the skip-legacy knob
+# outright, so only these sub-knob rules reach the shared rule there.
+_GFX942_SUB_KNOB_RULES = [
+    _sub_knob_rule("use_transposed_scalar_state"),
+    _sub_knob_rule("use_transposed_invariant_hoist"),
+    _sub_knob_rule("use_transposed_mask_once"),
+]
+# Python runs the VALU opts rule before the fast descriptor's K/V read rule.
+_GFX942_VALU_BEFORE_FAST_DESCRIPTOR = _Refusal(
+    rule="VALU opts before the fast descriptor's K read",
+    change={
+        "use_fast_paged_kv_desc": True,
+        "use_k_hbm_direct": True,
+        "use_transposed_mask_once": False,
+    },
+    py_reason=_VALU_R4_S1MASK.py_reason,
+)
+
+
 class _Entry(NamedTuple):
     name: str
     spec_cls: type
@@ -328,7 +381,7 @@ _ENTRIES = [
         _GFX950_GKV2,
         "gfx950_attention_tiled_2d",
         ("gfx950",),
-        _GFX950_32X32_RULES + _GKV2_RULES,
+        _GFX950_32X32_RULES + _GFX950_SUB_KNOB_RULES + _GKV2_RULES,
     ),
     _Entry(
         "gfx950 tiled 2D, VALU opts",
@@ -346,7 +399,7 @@ _ENTRIES = [
         ("gfx950",),
         [
             refusal
-            for refusal in _GFX950_32X32_RULES + _GKV2_RULES
+            for refusal in _GFX950_32X32_RULES + _GFX950_SUB_KNOB_RULES + _GKV2_RULES
             if refusal.fastkv_binding_carries
         ],
     ),
@@ -358,7 +411,15 @@ _ENTRIES = [
         _GFX942_VALU,
         "gfx942_attention_tiled_2d",
         ("gfx942", "gfx950"),
-        _VALU_RULES,
+        [*_VALU_RULES, _GFX942_VALU_BEFORE_FAST_DESCRIPTOR],
+    ),
+    _Entry(
+        "gfx942 tiled 2D",
+        Gfx942Spec2D,
+        _PROBLEM_64_8,
+        "gfx942_attention_tiled_2d",
+        ("gfx942", "gfx950"),
+        _GFX942_SUB_KNOB_RULES,
     ),
 ]
 # Each binding entry point builds through the same C++ entry.
