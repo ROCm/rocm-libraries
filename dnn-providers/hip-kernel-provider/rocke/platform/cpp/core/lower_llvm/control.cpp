@@ -2283,9 +2283,10 @@ static void _op_scf_for(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
     char loop_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
+    const rocke_status_t loop_status = rocke_i_scf_for_error(op, loop_error, sizeof loop_error);
+    if(loop_status != ROCKE_OK)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", loop_error);
+        rocke_ll_fail(L, loop_status, "%s", loop_error);
     }
     if(op->num_operands < 3)
     {
