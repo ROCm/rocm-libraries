@@ -281,11 +281,30 @@ def validate_tuning_attention_tensors(
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv", "sinks", "lse"}),
+    "gfx942": frozenset(
+        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
+    ),
     "gfx950": frozenset(
         {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
     ),
 }
+
+
+_DENSE_SCALAR_OPTIONS = frozenset({"scale", "stream"})
+_DENSE_LAUNCH_OPTIONS = _DENSE_SCALAR_OPTIONS.union(*_DENSE_OPTIONAL_INPUTS.values())
+_DENSE_BIND_OPTIONS = _DENSE_SCALAR_OPTIONS | {"unsafe_skip_paged_value_validation"}
+# Taken only by an fp8 KV spec: on any other spec a scale would be dropped silently.
+_DENSE_FP8_SCALE_OPTIONS = frozenset({"k_scale", "v_scale"})
+
+
+def _refuse_unknown_keywords(where: str, got: Mapping[str, Any], allowed) -> None:
+    # Refused, not ignored: an option of another call or binding, or a misspelled
+    # keyword, would otherwise be dropped silently.
+    if unknown := got.keys() - allowed:
+        raise TypeError(
+            f"dense attention {where} got unexpected keyword(s) "
+            f"{', '.join(sorted(unknown))}; it takes {', '.join(sorted(allowed))}"
+        )
 
 
 def _dense_runner(arch: str):
@@ -298,6 +317,24 @@ def _dense_runner(arch: str):
     return run_attention_dense_torch
 
 
+def _resolve_fp8_scale(name: str, kwargs: Mapping[str, Any], label: str) -> float:
+    """One per-tensor fp8 dequant scale, resolved to a float at bind time.
+
+    Every fp8 binding reads its scales through here, so one rule holds at every
+    entry point: a scale is a bind kwarg. It is a scalar, not an input tensor,
+    so it is not sourced from the ``tensors`` mapping even where that mapping
+    happens to carry the name.
+
+    Resolving at bind time host-syncs a device-tensor scale once, not on every
+    launch, which keeps graph capture intact. The missing-scale rule itself lives
+    in ``require_fp8_kv_scale`` beside ``require_ocp_fp8_kv``, so this binding
+    and the runner refuse with one wording.
+    """
+    from kernels.common.attention_dense_spec import require_fp8_kv_scale
+
+    return require_fp8_kv_scale(name, kwargs.get(name), label)
+
+
 def bind_dense_attention_torch(
     request, tuning_spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -305,16 +342,43 @@ def bind_dense_attention_torch(
 
     Grid and block come from the spec, the same values the candidate reports.
     An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
-    buffer the kernel fills in place (the runner validates it).
+    buffer the kernel fills in place (the runner validates it). For a paged spec,
+    ``unsafe_skip_paged_value_validation=True`` skips the runner's synchronized
+    block-table/kv_lens value checks (graph capture, hot paths), as for the
+    unified binding; the structural checks stay. Only for callers that guarantee
+    ``kv_lens[i] == seqlen_kv`` and in-range block ids: the kernel trusts both.
     """
+    fp8_scales = (
+        _DENSE_FP8_SCALE_OPTIONS
+        if getattr(tuning_spec.kernel_spec, "kv_storage_dtype", None) is not None
+        else frozenset()
+    )
+    _refuse_unknown_keywords("bind_torch()", kwargs, _DENSE_BIND_OPTIONS | fp8_scales)
     run = _dense_runner(str(getattr(request, "arch", "")))
+    if tuning_spec.kernel_spec.paged:
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
     spec = tuning_spec.kernel_spec
+    if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
+        from kernels.common.attention_dense_spec import require_ocp_fp8_kv
+
+        require_ocp_fp8_kv((name, tensors[name]) for name in ("k", "v"))
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
+    unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
+    bind_k_scale = bind_v_scale = None
+    if getattr(spec, "kv_storage_dtype", None) is not None:
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 dense")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 dense")
 
     def launch(**_kw):
+        _refuse_unknown_keywords("launch()", _kw, _DENSE_LAUNCH_OPTIONS | fp8_scales)
         call = {
             "spec": spec,
             "q": tensors["q"],
@@ -325,6 +389,11 @@ def bind_dense_attention_torch(
             "stream": int(_kw.get("stream", stream)),
             "arch": str(request.arch),
         }
+        # fp8 KV dequant reads per-tensor k_scale/v_scale. Resolved at bind time
+        # above; a launch kwarg may still override (e.g. a sweep varying scale).
+        if bind_k_scale is not None:
+            call["k_scale"] = float(_kw.get("k_scale", bind_k_scale))
+            call["v_scale"] = float(_kw.get("v_scale", bind_v_scale))
         optional = {
             "cu_seqlens_q": _kw.get("cu_seqlens_q", tensors.get("cu_seqlens_q")),
             "cu_seqlens_kv": _kw.get("cu_seqlens_kv", tensors.get("cu_seqlens_kv")),
@@ -342,6 +411,8 @@ def bind_dense_attention_torch(
                     f"{request.arch} dense runner does not accept {name!r}"
                 )
             call[name] = value
+        if spec.paged:
+            call["validate_paged"] = not unsafe_skip
         return run(**call)
 
     return TorchBinding(
@@ -411,7 +482,12 @@ def bind_tuning_attention_torch(
     if problem.use_additive_bias:
         raise ValueError("explicit tuning bindings do not support additive bias")
     _reject_additive_bias_inputs(tensors, "tensors")
-    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
+    unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,
@@ -426,10 +502,17 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
-    # FP8 K/V dequant scales (per tensor); the runner defaults them to 1.0, so
-    # they must be forwarded or an FP8 cache is read unscaled.
-    k_scale = float(kwargs.get("k_scale", 1.0))
-    v_scale = float(kwargs.get("v_scale", 1.0))
+    if bool(getattr(problem, "use_fp8", False)):
+        # Resolve once: a device-tensor scale costs a host readback, so the
+        # non-fp8 capture below must not also run and then be overwritten.
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 attention")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 attention")
+    else:
+        # Non-fp8 keeps the unconditional bind-time capture unchanged: the kernel
+        # only folds the scale in under fp8, but the strided decode path refuses a
+        # non-unit scale, and dropping the kwarg here would swallow that error.
+        bind_k_scale = float(kwargs.get("k_scale", 1.0))
+        bind_v_scale = float(kwargs.get("v_scale", 1.0))
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
@@ -442,6 +525,8 @@ def bind_tuning_attention_torch(
             cu_seqlens_q=tensors["cu_seqlens_q"],
             seqused_k=tensors["seqused_k"],
             softmax_scale=float(_kw.get("softmax_scale", scale)),
+            k_scale=float(_kw.get("k_scale", bind_k_scale)),
+            v_scale=float(_kw.get("v_scale", bind_v_scale)),
             block_table=tensors["block_table"],
             softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
             sinks=_kw.get("sinks", tensors.get("sinks")),
@@ -449,8 +534,6 @@ def bind_tuning_attention_torch(
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
             backend=backend,
             stream=int(_kw.get("stream", stream)),
-            k_scale=float(_kw.get("k_scale", k_scale)),
-            v_scale=float(_kw.get("v_scale", v_scale)),
             tuning_spec=spec,
             lse=_kw.get("lse", tensors.get("lse")),
         )
@@ -1304,12 +1387,12 @@ def _rdna_scalars(view: _RdnaView, head_q: int, kwargs: Mapping[str, Any]):
         softcap = float(softcap)
         if not math.isfinite(softcap) or softcap <= 0:
             raise ValueError("softcap must be finite and positive")
-    if view.kv_fp8 and ("k_scale" not in kwargs or "v_scale" not in kwargs):
-        raise ValueError(
-            "FP8 K/V objects require explicit kwargs['k_scale'] and kwargs['v_scale']"
-        )
-    k_scale = float(kwargs.get("k_scale", 1.0))
-    v_scale = float(kwargs.get("v_scale", 1.0))
+    if view.kv_fp8:
+        k_scale = _resolve_fp8_scale("k_scale", kwargs, "RDNA WMMA fp8 attention")
+        v_scale = _resolve_fp8_scale("v_scale", kwargs, "RDNA WMMA fp8 attention")
+    else:
+        k_scale = float(kwargs.get("k_scale", 1.0))
+        v_scale = float(kwargs.get("v_scale", 1.0))
     stream_default = kwargs.get("stream", 0)
     fence_default = bool(kwargs.get("fence", True))
 
