@@ -265,20 +265,19 @@ def test_aot_grid():
     built_pairs = {(bk, sc) for _, _, bk, sc, _ in built}
     assert built_pairs == knob_pairs, (built_pairs, knob_pairs)
 
-    # split_c > 1 implies a split_reduce job in the AOT cell
-    from kernels.conv.direct_aot_jobs import DIRECT_CAPABILITIES as _caps
+    # Each split_c > 1 kernel brings its split-C fold job into the AOT cell.
+    import json
+
+    from kernels.conv.direct_aot_jobs import _caps_jobs
     from kernels.conv.direct_variants import DIRECT_SPLIT_REDUCE
 
-    caps_first = caps_list[0]
-    for dtype in ("bf16",):
-        probe = probe_problem(caps_first, dtype, _VARIANT)
-        for bk, sc in FWD_FLEX_KNOBS:
-            if sc <= 1:
-                continue
-            knobs = dict(bk=bk, split_c=sc)
-            spec = make_direct_spec(_VARIANT, probe, knobs)
-            # Confirm split_c > 1 would add the split_reduce helper job
-            assert spec.split_c > 1 and spec.workspace_bytes > 0
+    _, jobs = _caps_jobs("gfx950", 64, _VARIANT, "fwd", caps_list[0], "bf16")
+    folds = {
+        json.loads(job.identity.knobs)["split_c"]
+        for _, job in jobs
+        if job.identity.algorithm == DIRECT_SPLIT_REDUCE
+    }
+    assert folds == {sc for _, sc in FWD_FLEX_KNOBS if sc > 1}
 
 
 def test_variant_wiring():
