@@ -1008,6 +1008,11 @@ entry when the blocking ticket is fixed, then follow section 10.4.
   a given GPU ([Support Matrix](../support-matrix.md)). Each sweep's
   `support.json` is empty. Claims come in a later change, tracked in
   ALMIOPEN-3225.
+- The support features name a broadcast q's layout by a convention, because
+  a stride-0 dim has no position in memory (`scripts/support_features/sdpa.py`).
+  Four broadcast-q cases have the strides `(h*d, d, 0, 1)` on b, h, s, d and
+  read `layout:sbhd`. An expand along s of a bhsd q gives the same strides, so
+  the label cannot tell the two apart.
 - 117 rows of the case list are not bundles (section 9.1).
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment
   below 16 bytes. So its lane gets no engine result for an `element_aligned` or

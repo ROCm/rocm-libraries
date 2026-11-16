@@ -1240,6 +1240,27 @@ class TestSdpaExtract:
         assert f"layout:{sdpa.LAYOUTS[order]}" in features
         assert "broadcast:q" in features
 
+    @pytest.mark.parametrize(
+        "strides, expected",
+        [
+            ([64 * 128, 0, 128, 1], "layout:bhsd"),
+            ([8 * 128, 128, 0, 1], "layout:sbhd"),
+        ],
+    )
+    def test_expanded_size_one_dim_gets_a_catalogued_layout(
+        self, strides: list[int], expected: str
+    ) -> None:
+        node, tensors = _sdpa(q_dims=(2, 8, 64, 128))
+        tensors[1]["strides"] = strides
+        features = sdpa.extract(node, tensors)
+        assert expected in features
+        assert "broadcast:q" in features
+
+    def test_expanded_dim_takes_its_bhsd_place_in_a_smaller_catalogue(self) -> None:
+        bhsd_only = {(0, 1, 2, 3): "bhsd"}
+        order = sdpa.stride_order([2, 8, 64, 128], [8 * 128, 128, 0, 1], bhsd_only)
+        assert order == (0, 1, 2, 3)
+
     @pytest.mark.parametrize("uid, port", [(1, "q"), (2, "k"), (8, "v")])
     def test_broadcast_names_the_tensor(self, uid: int, port: str) -> None:
         node, tensors = _sdpa()

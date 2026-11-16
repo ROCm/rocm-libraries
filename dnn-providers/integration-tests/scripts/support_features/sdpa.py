@@ -15,6 +15,14 @@ in the gap the other strides leave for it (``stride_order``): a q in bshd
 broadcast along s is ``bshd``. ``broadcast:q``, ``broadcast:k`` and
 ``broadcast:v`` say that tensor has stride 0 on a dim of extent > 1.
 
+A stride-0 dim that no gap fits has no position in memory, so its place in the
+label is a convention. Such a dim is the result of ``expand()`` on a size-1 dim.
+It goes outermost if that gives a catalogued layout, else in its bhsd place.
+The strides cannot tell an sbhd q with a zeroed s stride from an expanded
+size-1 s: both are ``(h*d, d, 0, 1)`` on b, h, s, d. Both are ``sbhd``, so
+an expand along s of a bhsd q is ``sbhd`` too. An expand along h,
+``(s*d, 0, d, 1)``, would be the uncatalogued ``hbsd``, so it is ``bhsd``.
+
 Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
 ``heads``, ``layout``, ``mask``, ``seq``, ``scale``. ``dtype`` is q's. The rest
 are optional inputs and outputs, each present or not, and two precision
@@ -29,6 +37,8 @@ FNUZ fp8 is not folded into OCP fp8: gfx942 runs ``fp8e4m3_fnuz``, gfx950
 """
 
 from __future__ import annotations
+
+from collections.abc import Container
 
 from support_features import Feature, FeatureError
 
@@ -217,37 +227,56 @@ def ports(node: dict):
     return has
 
 
-def stride_order(dims: list[int], strides: list[int]) -> tuple[int, ...]:
+def stride_order(
+    dims: list[int],
+    strides: list[int],
+    layouts: Container[tuple[int, ...]] = LAYOUTS,
+) -> tuple[int, ...]:
     """The dims by decreasing stride, a stride-0 dim placed where it fits.
 
     The dims of nonzero stride sort by stride; equal strides (a size-1 dim)
     keep their bhsd order. A stride-0 dim goes into the innermost gap wide
     enough for its extent -- below a dim whose stride is at least the extent
-    times the span of the dims inside that gap -- or outermost if none is.
-    One of extent 1 spans nothing, so it goes before the first of them that
-    follows it in bhsd order.
+    times the span of the dims inside that gap. One of extent 1 spans nothing,
+    so it goes before the first of them that follows it in bhsd order. One that
+    no gap fits goes outermost if that order is in ``layouts``, else in its
+    bhsd place.
     """
     known = sorted((dim for dim in range(4) if strides[dim]), key=lambda d: -strides[d])
     # slots[i] holds the stride-0 dims placed just inside known[i - 1].
     slots: list[list[int]] = [[] for _ in range(len(known) + 1)]
+    gapless: list[tuple[int, int]] = []
     for dim in range(4):
         if strides[dim]:
             continue
+        bhsd_slot = next((i for i, d in enumerate(known) if d > dim), len(known))
         if dims[dim] == 1:
-            slot = next((i for i, d in enumerate(known) if d > dim), len(known))
+            slots[bhsd_slot].append(dim)
+            continue
+        span = 1
+        for index in range(len(known), 0, -1):
+            outer = known[index - 1]
+            if strides[outer] >= span * dims[dim]:
+                slots[index].append(dim)
+                break
+            span = max(span, strides[outer] * dims[outer])
         else:
-            slot, span = 0, 1
-            for index in range(len(known), 0, -1):
-                outer = known[index - 1]
-                if strides[outer] >= span * dims[dim]:
-                    slot = index
-                    break
-                span = max(span, strides[outer] * dims[outer])
-        slots[slot].append(dim)
-    order = list(slots[0])
-    for index, dim in enumerate(known, 1):
-        order += [dim, *slots[index]]
-    return tuple(order)
+            gapless.append((dim, bhsd_slot))
+
+    def order_with(gapless_slots: list[int]) -> tuple[int, ...]:
+        placed = [list(slot) for slot in slots]
+        for (dim, _), slot in zip(gapless, gapless_slots):
+            placed[slot].append(dim)
+        placed = [sorted(slot) for slot in placed]
+        order = list(placed[0])
+        for index, dim in enumerate(known, 1):
+            order += [dim, *placed[index]]
+        return tuple(order)
+
+    outermost = order_with([0] * len(gapless))
+    if outermost in layouts:
+        return outermost
+    return order_with([slot for _, slot in gapless])
 
 
 def broadcast(tensor: dict) -> bool:
@@ -312,7 +341,7 @@ def core_features(
             raise FeatureError("ragged q is not catalogued")
         layout = "ragged"
     else:
-        order = stride_order(q["dims"], q["strides"])
+        order = stride_order(q["dims"], q["strides"], layouts)
         if order not in layouts:
             raise FeatureError(f"q stride order {order} is not a catalogued layout")
         layout = layouts[order]
