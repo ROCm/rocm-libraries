@@ -361,6 +361,53 @@ namespace TensileLite
                                   "without a home workgroup");
         }
 
+        // Workgroups per CU the dynamic grid launches at most.
+        // TODO Verify this limit is best
+        constexpr size_t StreamKDynamicMaxOccupancy = 3;
+
+        // Workgroups the dynamic grid launches at most: up to
+        // StreamKDynamicMaxOccupancy per CU, within TENSILE_STREAMK_MAX_CUS and
+        // a fixed grid (TENSILE_STREAMK_FIXED_GRID), so every split part keeps a
+        // workgroup of its own.
+        size_t streamKDynamicMaxGrid(AMDGPU const& gpu, int cuOccupancy)
+        {
+            const size_t occupancy = std::max(cuOccupancy, 1);
+            size_t maxGrid = gpu.computeUnitCount * std::min(occupancy, StreamKDynamicMaxOccupancy);
+            if(gpu.persistentMaxCUs > 0)
+                maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentMaxCUs));
+            if(gpu.persistentFixedGrid > 0)
+                maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentFixedGrid));
+            return maxGrid;
+        }
+
+        // Whether tiles that all split alike keep uniform summation order. The
+        // fixup adds the parts in part order from the raw accumulator bits;
+        // atomic partials add in arrival order, and 16-bit compute types under
+        // HPA widen the partial.
+        bool streamKDynamicSplitKeepsSummationOrder(SizeMapping const& sizeMapping,
+                                                    ContractionSolution::ProblemType const& type)
+        {
+            const bool widenedPartial = type.highPrecisionAccumulate
+                                        && (type.computeType == rocisa::DataType::Half
+                                            || type.computeType == rocisa::DataType::BFloat16);
+            return sizeMapping.streamKAtomic == 0 && !widenedPartial;
+        }
+
+        // "SKTiles=<n> of <tiles> tiles" when the dynamic decomposition splits
+        // only some tiles, which breaks uniform summation order; else empty.
+        std::string streamKDynamicSplitUniformityObstacle(ContractionSolution const&    self,
+                                                          ContractionProblemGemm const& problem,
+                                                          Hardware const&               hardware,
+                                                          size_t                        tiles)
+        {
+            const StreamKDynamicSplit dyn
+                = self.streamKDynamicDecomposition(problem, hardware, tiles);
+            if(streamKDynamicSplitRowUniform(dyn, tiles))
+                return {};
+            return "SKTiles=" + std::to_string(dyn.skTiles) + " of " + std::to_string(tiles)
+                   + " tiles";
+        }
+
         // The dynamic-queue fetch / work stealing is only correct when the
         // device's runtime NUM_XCD is a power of two AND equals the baked
         // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
@@ -467,7 +514,7 @@ namespace TensileLite
 
         // The split is rounded through SKItersPerWI the way the kernel decodes
         // it, so the packed SKSplit is the number of parts that exist.
-        auto decompose = [&](size_t skTiles, size_t split) {
+        auto splitTiles = [&](size_t skTiles, size_t split) {
             StreamKDynamicSplit d;
             split = std::max(size_t{1}, split);
             d.skItersPerWI
@@ -480,34 +527,35 @@ namespace TensileLite
                                     : size_t{d.totalItems};
             return d;
         };
-        // Every tile whole, packed with split 2.
-        const StreamKDynamicSplit whole = decompose(0, 2);
+        // Whole tiles are packed with this split.
+        constexpr size_t          defaultSplit = 2;
+        const StreamKDynamicSplit allWhole     = splitTiles(0, defaultSplit);
 
         // The partials a split needs must fit the workspace and the flag region.
-        auto fits = [&](size_t skTiles, size_t split) {
+        auto partialsFit = [&](size_t skTiles, size_t split) {
             const size_t slots = skTiles * split;
             return slots <= in.flagSlots
                    && slots * in.partialTileBytes <= in.workspaceBytes;
         };
 
+        // Debug overrides replace the policy below. Uniform summation order
+        // ignores those that split only some tiles, or split where the policy
+        // would not.
         if(in.overrideTiles > -1 || in.overrideSplit > -1)
         {
             const size_t skTiles
                 = std::min(in.tiles, size_t(in.overrideTiles > -1 ? in.overrideTiles : 0));
-            StreamKDynamicSplit d = decompose(skTiles, in.overrideSplit > -1 ? in.overrideSplit : 2);
-            // Uniform summation order ignores overrides that split only some
-            // tiles, or split where the gate below would not.
-            if(!in.uniformSummationOrder || d.skTiles == 0
-               || (streamKDynamicSplitRowUniform(d, in.tiles) && in.allowSplit))
-            {
-                if(d.skTiles > 0 && !fits(d.skTiles, d.skSplit))
-                    return whole;
-                return d;
-            }
+            const StreamKDynamicSplit d
+                = splitTiles(skTiles, in.overrideSplit > -1 ? in.overrideSplit : defaultSplit);
+            const bool overrideApplies
+                = !in.uniformSummationOrder || d.skTiles == 0
+                  || (streamKDynamicSplitRowUniform(d, in.tiles) && in.allowSplit);
+            if(overrideApplies)
+                return (d.skTiles == 0 || partialsFit(d.skTiles, d.skSplit)) ? d : allWhole;
         }
 
         if(!in.allowSplit || in.tiles == 0 || in.splitCUs == 0 || in.tiles >= in.splitCUs)
-            return whole;
+            return allWhole;
 
         // Largest factor that fits (origami grid_k_split_aware).
         for(const size_t split : StreamKDynamicSplitFactors)
@@ -515,11 +563,11 @@ namespace TensileLite
             if(in.tiles * split > in.splitCUs
                || itersPerTile / split < StreamKDynamicMinItersPerWI)
                 continue;
-            const StreamKDynamicSplit d = decompose(in.tiles, split);
-            if(d.skSplit >= 2 && fits(d.skTiles, d.skSplit))
+            const StreamKDynamicSplit d = splitTiles(in.tiles, split);
+            if(d.skSplit >= 2 && partialsFit(d.skTiles, d.skSplit))
                 return d;
         }
-        return whole;
+        return allWhole;
     }
 
     bool streamKDynamicSplitRowUniform(StreamKDynamicSplit const& d, size_t tiles)
@@ -6338,11 +6386,10 @@ namespace TensileLite
                                                   ? streamK5EffectiveDynamic(problem, hardware)
                                                   : false;
                 // A dynamic split reserves one partial tile per part (see
-                // computeStreamKDecisions).
+                // resolveStreamKDynamicSplit()).
                 const StreamKDynamicSplit dyn
-                    = (useLegacyWorkspaceLogic
-                       && streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
-                          ? streamKDynamicDecomposition(problem, hardware, tiles)
+                    = useLegacyWorkspaceLogic
+                          ? resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic)
                           : StreamKDynamicSplit{};
                 if(dyn.skTiles > 0)
                     return size + partialTileSize(dyn.partialSlots());
@@ -7074,11 +7121,11 @@ namespace TensileLite
         // below so that fallback sees the reduction the launch will use.
         sk.reduction = streamKReconcileReduction(sk.reduction, sk.grid, tiles);
 
-        // A dynamic split reserves one partial tile per part (see computeStreamKDecisions).
-        if(!handwrittenCustomKernel()
-           && streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
+        // A dynamic split reserves one partial tile per part (see resolveStreamKDynamicSplit()).
+        if(!handwrittenCustomKernel())
         {
-            const StreamKDynamicSplit dyn = streamKDynamicDecomposition(problem, hardware, tiles);
+            const StreamKDynamicSplit dyn
+                = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
             if(dyn.skTiles > 0)
             {
                 sk.workspaceBytes = partialTileSize(dyn.partialSlots());
@@ -7566,13 +7613,11 @@ namespace TensileLite
                 // tile stays whole (SKTiles 0) or every tile splits alike.
                 if(sizeMapping.hasDynamicAssignment() || effectiveDynamic)
                 {
-                    const StreamKDynamicSplit dyn
-                        = streamKDynamicDecomposition(problem, hardware, tiles);
-                    if(!streamKDynamicSplitRowUniform(dyn, tiles))
+                    const std::string obstacle
+                        = streamKDynamicSplitUniformityObstacle(*this, problem, hardware, tiles);
+                    if(!obstacle.empty())
                         return refuse("DynamicQueueSKTiles",
-                                      "the dynamic-queue StreamK path is packing SKTiles="
-                                          + std::to_string(dyn.skTiles) + " of "
-                                          + std::to_string(tiles) + " tiles");
+                                      "the dynamic-queue StreamK path is packing " + obstacle);
                 }
             }
             else
@@ -7651,14 +7696,14 @@ namespace TensileLite
         // The dynamic work queue keeps every tile whole or splits every tile alike.
         if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
         {
-            const size_t              tiles = problem.getNumTiles(sizeMapping, 1);
-            const StreamKDynamicSplit dyn   = streamKDynamicDecomposition(problem, hardware, tiles);
-            if(!streamKDynamicSplitRowUniform(dyn, tiles))
+            const std::string obstacle = streamKDynamicSplitUniformityObstacle(
+                *this, problem, hardware, problem.getNumTiles(sizeMapping, 1));
+            if(!obstacle.empty())
                 throw UniformSummationOrderError(
                     "hipBLASLt Error: solution '" + this->kernelName
                     + "' cannot guarantee uniform summation order for this launch: the "
-                      "dynamic-queue StreamK path splits SKTiles="
-                    + std::to_string(dyn.skTiles) + " of " + std::to_string(tiles) + " tiles");
+                      "dynamic-queue StreamK path splits "
+                    + obstacle);
             return;
         }
 
@@ -7742,7 +7787,8 @@ namespace TensileLite
             {
                 if(self.sizeMapping.hasDynamicAssignment() || sk5DynamicSubMode())
                 {
-                    // Use all CUs (up to 3 workgroups each), capped by the work items.
+                    // Use all CUs (up to StreamKDynamicMaxOccupancy workgroups
+                    // each), capped by the work items.
                     grid = self.streamKDynamicDecomposition(problem, hardware, tiles).grid;
                 }
                 else
@@ -8144,8 +8190,8 @@ namespace TensileLite
             // per-XCD work-queue counters, so they index fewer entries than the
             // region holds. The rest index from 0 and keep all of them;
             // tightening every path would cost them grid they are entitled to.
-            // Those paths index it by partial index; streamKDynamicSplit() keeps
-            // skTiles * skSplit within it, so the grid bound is a backstop there.
+            // On these paths streamKDynamicSplit() keeps skTiles * skSplit within
+            // it; the grid bound is a backstop.
             size_t flagEntries = StreamKFlagElements;
             // The && short-circuits, so a launch that never reaches the flags
             // does not pay for resolving the SK5 sub-mode.
@@ -8209,58 +8255,45 @@ namespace TensileLite
                                                                          Hardware const& hardware,
                                                                          size_t          tiles) const
     {
-        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-
         StreamKDynamicSplitInputs in;
         in.tiles        = tiles;
         in.itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
         in.kGranularity = skKGranularity();
-        if(pAMDGPU != nullptr)
+        if(AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware))
         {
-            // Workgroups the dynamic grid launches at most: up to 3 per CU.
-            // TODO Verify this limit is best
-            const size_t occupancy = std::max(sizeMapping.CUOccupancy, 1);
-            in.maxGrid             = pAMDGPU->computeUnitCount * std::min(occupancy, size_t{3});
-            if(pAMDGPU->persistentMaxCUs > 0)
-                in.maxGrid = std::min(in.maxGrid, static_cast<size_t>(pAMDGPU->persistentMaxCUs));
-            // A fixed grid (TENSILE_STREAMK_FIXED_GRID) caps the split, so every
-            // part keeps a workgroup of its own.
-            if(pAMDGPU->persistentFixedGrid > 0)
-                in.maxGrid
-                    = std::min(in.maxGrid, static_cast<size_t>(pAMDGPU->persistentFixedGrid));
-            // One part per CU, within the grid above.
+            in.maxGrid = streamKDynamicMaxGrid(*pAMDGPU, sizeMapping.CUOccupancy);
+            // One part per CU, within that grid.
             in.splitCUs = std::min(static_cast<size_t>(pAMDGPU->computeUnitCount), in.maxGrid);
             in.overrideTiles = pAMDGPU->skTiles;
             in.overrideSplit = pAMDGPU->skSplit;
         }
         // Split only arrival-fixup kernels (see InternalArgsSupport::arrivalFixup)
-        // with a dynamic path (DynamicWorkQueue, or Hybrid's dynamic sub-mode;
-        // this decomposition runs only on that path). Grouped GEMM keeps every
-        // tile whole.
-        //
-        // Uniform summation order holds as every tile splits alike (skTiles ==
-        // tiles, one SKSplit/SKItersPerWI) and sums its parts in part order:
-        // the fixup adds p0, p1, ... in turn, and partials are stored as the
-        // raw accumulator bits, so a last part 0/1 adding its registers
-        // matches a re-read. Not for atomic partials (arrival order), or
-        // 16-bit compute types under HPA, whose fixup widens the partial.
-        const bool uso = problem.getParams().uniformSummationOrder() != 0;
-        const bool usoSafe
-            = !uso
-              || (sizeMapping.streamKAtomic == 0
-                  && !(problemType.highPrecisionAccumulate
-                       && (problemType.computeType == rocisa::DataType::Half
-                           || problemType.computeType == rocisa::DataType::BFloat16)));
-        in.uniformSummationOrder = uso;
-        in.allowSplit = internalArgsSupport.arrivalFixup
-                        && streamKUsesDynamicQueue(sizeMapping, /*effectiveDynamic=*/true)
-                        && usoSafe && !problem.groupedGemm();
+        // with a dynamic path; this decomposition runs only on that path.
+        // Grouped GEMM keeps every tile whole.
+        in.uniformSummationOrder = problem.getParams().uniformSummationOrder() != 0;
+        const bool dynamicPath
+            = sizeMapping.hasDynamicAssignment() || sizeMapping.hasHybridAssignment();
+        const bool summationOrderKept
+            = !in.uniformSummationOrder
+              || streamKDynamicSplitKeepsSummationOrder(sizeMapping, problemType);
+        in.allowSplit = internalArgsSupport.arrivalFixup && dynamicPath && summationOrderKept
+                        && !problem.groupedGemm();
         // Arrival counters (and per-part flags) start after the queue counters.
         const size_t prefixEntries = streamKQueueRegionBytes(hardware) / sizeof(int);
         in.flagSlots = prefixEntries < StreamKFlagElements ? StreamKFlagElements - prefixEntries : 0;
         in.workspaceBytes   = problem.workspaceSize();
         in.partialTileBytes = partialTileSize(1);
         return streamKDynamicSplit(in);
+    }
+
+    StreamKDynamicSplit ContractionSolution::resolveStreamKDynamicSplit(Problem const&  problem,
+                                                                        Hardware const& hardware,
+                                                                        size_t          tiles,
+                                                                        bool effectiveDynamic) const
+    {
+        if(!streamKUsesDynamicQueue(sizeMapping, effectiveDynamic))
+            return {};
+        return streamKDynamicDecomposition(problem, hardware, tiles);
     }
 
     // Single source of truth for the StreamK launch decisions. The reduction, grid,
@@ -8387,15 +8420,14 @@ namespace TensileLite
         const size_t itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
 
         // Workspace / DP fallback. A dynamic split reserves one partial tile per
-        // part, indexed by partial index and already fitted to the workspace;
+        // part, already fitted to the workspace (see resolveStreamKDynamicSplit());
         // otherwise reserve iff (reduction==parallel || the grid can straddle a
         // tile), sized by grid. requiredWorkspaceSize() and resolveStreamKSettings()
-        // implement the same rule, so change all three together.
+        // apply the grid rule separately, so change all three together.
         size_t idealWorkspace = 0;
         bool   needPartials   = false;
-        const StreamKDynamicSplit dyn = isDynamic
-                                            ? streamKDynamicDecomposition(problem, hardware, tiles)
-                                            : StreamKDynamicSplit{};
+        const StreamKDynamicSplit dyn
+            = resolveStreamKDynamicSplit(problem, hardware, tiles, effectiveDynamic);
         if(dyn.skTiles > 0)
         {
             needPartials   = true;

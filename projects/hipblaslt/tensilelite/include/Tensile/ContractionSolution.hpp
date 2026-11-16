@@ -734,29 +734,31 @@ namespace TensileLite
 
     struct StreamKDynamicSplitInputs
     {
-        // Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
-        size_t tiles = 0;
-        // getItersPerTile(sizeMapping), clamped to at least 1.
+        // Problem shape. tiles is batch-inclusive, getNumTiles(sizeMapping, 1);
+        // itersPerTile is at least 1; kGranularity is skKGranularity().
+        size_t tiles        = 0;
         size_t itersPerTile = 1;
-        // Iterations per indivisible K unit, skKGranularity().
         size_t kGranularity = 1;
-        // Workgroups the dynamic grid policy may launch (CUs x occupancy).
-        size_t maxGrid = 0;
-        // CUs the split is sized for: origami's cu_count for the static grid.
-        size_t splitCUs = 0;
-        // False keeps every tile whole unless the debug overrides ask otherwise.
-        bool allowSplit = true;
-        // Flag-region entries left after the per-XCD queue counters.
-        size_t flagSlots = 0;
-        // Workspace the launch is given, and the bytes of one partial tile.
+
+        // Launch limits. maxGrid: workgroups the dynamic grid policy may launch
+        // (CUs x occupancy). splitCUs: CUs the split is sized for, origami's
+        // cu_count for the static grid. flagSlots: flag-region entries left
+        // after the per-XCD queue counters.
+        size_t maxGrid          = 0;
+        size_t splitCUs         = 0;
+        size_t flagSlots        = 0;
         size_t workspaceBytes   = 0;
         size_t partialTileBytes = 0;
-        // TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
+
+        // Policy. allowSplit false keeps every tile whole unless the debug
+        // overrides ask otherwise; uniform summation order ignores overrides
+        // that split only some tiles (see streamKDynamicSplitRowUniform).
+        bool allowSplit            = true;
+        bool uniformSummationOrder = false;
+
+        // Debug overrides: TENSILE_STREAMK_TILES / TENSILE_STREAMK_SPLIT, -1 when unset.
         int overrideTiles = -1;
         int overrideSplit = -1;
-        // Uniform summation order: overrides that split only some tiles are
-        // ignored (see streamKDynamicSplitRowUniform).
-        bool uniformSummationOrder = false;
     };
 
     // Fewest iterations per split part (origami MinItersPerCU, grid_k_split_aware).
@@ -1752,6 +1754,16 @@ namespace TensileLite
         StreamKSettings resolveStreamKSettings(Problem const&  problem,
                                                Hardware const& hardware,
                                                bool const* effectiveDynamicHint = nullptr) const;
+
+        // streamKDynamicDecomposition() on the dynamic-queue path, else all tiles
+        // whole. A split (skTiles > 0) reserves partialTileSize(partialSlots())
+        // of workspace in place of the grid-sized partials, in
+        // requiredWorkspaceSize(), resolveStreamKSettings() and
+        // computeStreamKDecisions() alike.
+        StreamKDynamicSplit resolveStreamKDynamicSplit(Problem const&  problem,
+                                                       Hardware const& hardware,
+                                                       size_t          tiles,
+                                                       bool            effectiveDynamic) const;
 
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the
