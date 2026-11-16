@@ -83,15 +83,16 @@ python3 "$T/test_tools/determine_rocm_test_dependencies.py" --changed-projects "
 
 **Families.** Covered families = the caller's families ∩ families whose `tests_on_trigger` contains the current trigger − the job's
 `exclude_family`. Triggers: `pull_request` → `presubmit`, `push` → `postsubmit`, `schedule` → `nightly`. `workflow_dispatch` tests
-every requested family, at the `quick` tier. A family outside that set does not test unless a dispatch requests it or the PR carries
+every requested family, at a tier that is not always `quick` (see **Tier**). A family outside that set does not test unless a dispatch requests it or the PR carries
 the labels `ci:<family>` and `ci:test:<family>` (`$T/docs/development/ci_behavior_manipulation.md`). Quote the setup job's `tests
 disabled (...)` lines.
 
 **Tier.** Scoped PR or push: `standard`. Run-all (unclassified non-skipped path, shared CI change): `quick`. `schedule`:
 `comprehensive`. A family's `test_type_for_family` overrides these.
 
-Confirm it from the `test_type` output of the `configure` job in `therock-multi-arch-ci.yml` and the `Test Artifacts (<family>,
-<release_type>, <test_type>, ...)` run name of each test job. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
+Confirm the effective tier per family from its `Configure test matrix (<family>)` job (`Requesting job <component> with test_type
+<tier>` and any `Overriding test_type from ... to ...` line), not from the setup job's JobDecisions line, which can say `standard` while
+the tests ran `quick`, and from the `Test Artifacts (<family>, <release_type>, <test_type>, ...)` run name of each test job. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
 `<tier>_exclude` and `<tier>_therock_ci_exclude`. Tier labels come from each project's test category YAMLs (`*test_categories*.yaml`; registering a test in them is owned by `BUILD`: hand it off, do not file it)
 and cascade upward: a `quick` test also carries `standard`, `comprehensive` and `full`. hipDNN core puts every test in `quick`.
 Provider and integration YAMLs do not, so a test they categorize only as `comprehensive` never runs in PR CI.
