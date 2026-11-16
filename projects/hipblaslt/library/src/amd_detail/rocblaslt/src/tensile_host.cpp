@@ -53,6 +53,7 @@
 #include "rocroller_host.hpp"
 #endif
 #include "include/mx_scale_setup.hpp"
+#include "include/rocroller_kernel_fields.hpp"
 #include "include/rocroller_selected.hpp"
 
 #ifdef HIPBLASLT_ENABLE_LOCAL_KERNELS

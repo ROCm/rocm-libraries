@@ -9,8 +9,6 @@
 
 #include "rocroller_kernel_match.hpp"
 
-#include <Tensile/ContractionSolution.hpp>
-
 #include <algorithm>
 #include <cstddef>
 #include <vector>
@@ -155,21 +153,4 @@ inline bool rocRollerLayoutRejectionCoversTile(const std::vector<RocRollerKernel
         if(rocRollerKernelMatchesTile(kernel, tile))
             return true;
     return false;
-}
-
-// The fields a checked-in rocRoller kernel declares in its custom.config.
-inline RocRollerKernelFields rocRollerKernelFields(const TensileLite::ContractionSolution& solution)
-{
-    const auto&           kernel = solution.customKernel;
-    RocRollerKernelFields fields;
-    fields.tileM   = static_cast<int>(kernel.macrotile.x);
-    fields.tileN   = static_cast<int>(kernel.macrotile.y);
-    fields.tileK   = static_cast<int>(kernel.macrotile.z);
-    fields.unroll  = kernel.unroll;
-    fields.streamK = kernel.workspaceType == TensileLite::CustomWorkspaceType::RocRollerStreamK;
-    fields.workgroupMapping
-        = std::any_of(kernel.args.begin(), kernel.args.end(), [](auto const& arg) {
-              return arg.semantic == TensileLite::CustomArgSemantic::RR_WorkgroupMapping;
-          });
-    return fields;
 }

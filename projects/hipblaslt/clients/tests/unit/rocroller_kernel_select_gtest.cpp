@@ -6,6 +6,7 @@
 // The relative include avoids shadowing the clients' utility.hpp with the
 // library's internal header of the same name.
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_kernel_fields.hpp"
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_kernel_select.hpp"
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_selected.hpp"
 #include "../../../library/src/amd_detail/rocblaslt/src/rocroller/include/solution_selection.hpp"
