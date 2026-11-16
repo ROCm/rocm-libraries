@@ -10,6 +10,11 @@
 namespace hip_kernel_provider::compilation
 {
 
+/// A test hook: a program whose name contains this variable's value fails to compile, with a
+/// real HIPRTC error, and is never read from or written to the disk cache. Read at every
+/// compile. Unset in production.
+inline constexpr const char* TEST_FAIL_COMPILE_ENV = "HIP_KERNEL_PROVIDER_TEST_FAIL_COMPILE";
+
 class Program
 {
 public:

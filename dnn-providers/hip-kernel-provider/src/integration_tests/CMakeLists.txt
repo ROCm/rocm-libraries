@@ -171,6 +171,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         if("naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
             target_sources(hip_kernel_provider_integration_tests PRIVATE
                 kernel_ingestor_engine/IntegrationGpuConvNaive.cpp)
+            # The failure-path suite falls back from, and caches, the naive engine; its
+            # workspace cases skip a family this build does not ship.
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/IntegrationGpuConvRobustness.cpp)
         endif()
         # The census classifies graphs the explicit-GEMM conv engines serve as tier b. It loads
         # them when the hipBLASLt provider beside this one was built with

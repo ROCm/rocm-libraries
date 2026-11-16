@@ -9,6 +9,7 @@
 
 #include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -154,6 +155,41 @@ TEST(TestGpuProgramCache, RecompilesOverATruncatedOrFlippedEntry)
         EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);
     }
     EXPECT_EQ(readAll(files[0]), original);
+}
+
+// The test hook fails a matching program with a real HIPRTC error, ahead of any cache entry,
+// and leaves the cache untouched.
+TEST(TestGpuProgramCache, InjectedCompileFailureBypassesTheCache)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "program-cache-injected", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+    {
+        const Program first("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    }
+    ASSERT_EQ(cachedCodeObjects().size(), 1u);
+
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter inject(
+            TEST_FAIL_COMPILE_ENV, "vector_add");
+        try
+        {
+            const Program failed("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+            ADD_FAILURE() << "the injected failure did not fail the compile";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            EXPECT_NE(std::string(error.what()).find("compile failure injected by"),
+                      std::string::npos)
+                << error.what();
+        }
+        // A name the pattern does not match compiles.
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter other(
+            TEST_FAIL_COMPILE_ENV, "some_other_program");
+        const Program compiled("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+        EXPECT_NE(compiled.getKernel("vector_add"), nullptr);
+    }
+    EXPECT_EQ(cachedCodeObjects().size(), 1u);
 }
 
 TEST(TestKernel, LaunchesVectorAdd)

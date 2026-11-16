@@ -13,6 +13,7 @@
 #include "kernel_includes.hpp"
 #include "kernel_sources.hpp"
 #include <hip/hiprtc.h>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -33,6 +34,13 @@ std::string cacheKey(const std::string& programName,
 {
     return hiprtc_cache::codeObjectKey(
         hiprtc_cache::compilerIdentity(), programName, source, includeTexts, includeNames, options);
+}
+
+/// A test hook (TEST_FAIL_COMPILE_ENV): whether @p program is to fail to compile.
+bool compileFailureInjected(const std::string& program)
+{
+    const auto pattern = hipdnn_data_sdk::utilities::getEnv(TEST_FAIL_COMPILE_ENV);
+    return !pattern.empty() && program.find(pattern) != std::string::npos;
 }
 
 double millisecondsSince(std::chrono::steady_clock::time_point start)
@@ -64,10 +72,16 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
     std::vector<const char*> includeNames;
     hip_plugin::getKernelIncList(includeTexts, includeNames);
 
+    // A failure injected for tests skips the cache, so a cached object cannot hide it, and
+    // compiles a source HIPRTC rejects, so it fails the way a real compile error does.
+    const bool failureInjected = compileFailureInjected(_programName);
+    const std::string injectedSource
+        = std::string("#error \"compile failure injected by ") + TEST_FAIL_COMPILE_ENV + "\"\n";
+
     // A code object compiled earlier, by this process or another, from exactly these inputs.
     const auto cachePath = hiprtc_cache::codeObjectPath(
         cacheKey(_programName, kernelSrc, includeTexts, includeNames, options));
-    if(!cachePath.empty())
+    if(!cachePath.empty() && !failureInjected)
     {
         auto cached = hiprtc_cache::readCodeObject(cachePath);
         if(cached.outcome == hiprtc_cache::ReadOutcome::VALID
@@ -109,7 +123,7 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
     // kernels/templates/kernel_sources.cpp.in.
     // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
     HIPRTC_CHECK(hiprtcCreateProgram(&prog,
-                                     kernelSrc.data(),
+                                     failureInjected ? injectedSource.c_str() : kernelSrc.data(),
                                      _programName.c_str(),
                                      static_cast<int>(headersData.size()),
                                      headersData.data(),

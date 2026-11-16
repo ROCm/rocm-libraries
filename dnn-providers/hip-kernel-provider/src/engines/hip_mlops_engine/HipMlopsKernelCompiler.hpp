@@ -21,10 +21,10 @@ public:
         compile(const std::string& kernelFileName,
                 const std::vector<std::string>& options) const override
     {
-        // Try to use a cached compilation::Program object based on a key of filename and
-        // compilation options. A nullptr will be returned if this fails, in which case
-        // create the compilation objects directly, which will generate a more helpful
-        // exception if the program cannot be created.
+        // A compilation::Program cached on a key of file name and compile options. A program
+        // that fails to build is not cached; its own exception is rethrown, rather than the
+        // program built a second time to produce it.
+        HipMlopsModuleCache::lastLoadFailure().reset();
         const auto started = std::chrono::steady_clock::now();
         const auto recorded = compilation::ProgramFetchRecording::recordedOnThisThread();
         auto program = moduleCache().getOrLoad(kernelFileName, options);
@@ -42,6 +42,13 @@ public:
                          .count()});
             }
             return std::make_unique<compilation::CompiledProgram>(program);
+        }
+        if(auto& failure = HipMlopsModuleCache::lastLoadFailure(); failure.has_value())
+        {
+            const auto status = failure->getStatus();
+            auto message = failure->getMessage();
+            failure.reset();
+            throw hipdnn_plugin_sdk::HipdnnPluginException(status, std::move(message));
         }
         return std::make_unique<compilation::CompiledProgram>(
             std::make_shared<compilation::Program>(kernelFileName, options));
