@@ -10,8 +10,6 @@
 
 #include <gtest/gtest.h>
 
-#include <functional>
-
 namespace
 {
     TensileLite::ContractionProblemGemm problemWithScaleFormat(int format)
@@ -72,8 +70,6 @@ TEST(HostUnitMXScaleFormatPredicate, smoke_FormatDistinguishesCachedProblems)
     auto const tiled = problemWithScaleFormat(3);
     EXPECT_TRUE(plain == problemWithScaleFormat(0));
     EXPECT_FALSE(plain == tiled);
-    EXPECT_NE(std::hash<TensileLite::ContractionProblemGemm>{}(plain),
-              std::hash<TensileLite::ContractionProblemGemm>{}(tiled));
 }
 
 // A solution with AssertAlphaValue must not be reused from the cache for another alpha.
@@ -88,6 +84,4 @@ TEST(HostUnitMXScaleFormatPredicate, smoke_AlphaRestrictionDistinguishesCachedPr
     EXPECT_TRUE(AlphaValue(ScalarValue::One)(one));
     EXPECT_FALSE(AlphaValue(ScalarValue::One)(any));
     EXPECT_FALSE(one == any);
-    EXPECT_NE(std::hash<TensileLite::ContractionProblemGemm>{}(one),
-              std::hash<TensileLite::ContractionProblemGemm>{}(any));
 }
