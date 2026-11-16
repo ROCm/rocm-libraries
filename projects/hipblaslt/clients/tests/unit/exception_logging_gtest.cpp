@@ -37,6 +37,6 @@ namespace
 
         EXPECT_EXIT(createDescWithBadOverrideAndExit(),
                     ::testing::ExitedWithCode(0),
-                    "exception_to_hipblas_status.*stoi");
+                    "\\[hipblasLtMatmulDescCreate\\] exception=.*stoi");
     }
 } // namespace

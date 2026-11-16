@@ -33,11 +33,11 @@
 // Report the message of a caught exception through the error logger
 // (HIPBLASLT_LOG_LEVEL >= 1). Logging must never throw out of the caller's
 // catch block, so any failure to log is dropped.
-inline void log_exception_message(const std::exception& e) noexcept
+inline void log_exception_message(const std::exception& e, const char* func) noexcept
 {
     try
     {
-        log_error("exception_to_hipblas_status", "exception", e.what());
+        log_error(func, "exception", e.what());
     }
     catch(...)
     {
@@ -47,8 +47,9 @@ inline void log_exception_message(const std::exception& e) noexcept
 // Convert the current C++ exception to hiblasStatus_t
 // This allows extern "C" functions to return this function in a catch(...)
 // block while converting all C++ exceptions to an equivalent hipblasStatus_t
-// here
-inline hipblasStatus_t exception_to_hipblas_status(std::exception_ptr e = std::current_exception())
+// here. The default function name is evaluated at the call site.
+inline hipblasStatus_t exception_to_hipblas_status(std::exception_ptr e = std::current_exception(),
+                                                   const char*        func = __builtin_FUNCTION())
 try
 {
     if(e)
@@ -61,12 +62,12 @@ catch(const hipblasStatus_t& status)
 }
 catch(const std::bad_alloc& ex)
 {
-    log_exception_message(ex);
+    log_exception_message(ex, func);
     return HIPBLAS_STATUS_ALLOC_FAILED;
 }
 catch(const std::exception& ex)
 {
-    log_exception_message(ex);
+    log_exception_message(ex, func);
     return HIPBLAS_STATUS_INTERNAL_ERROR;
 }
 catch(...)
