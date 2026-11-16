@@ -107,6 +107,14 @@ tagged in the kernel name and `KernelIdentity`.
   fewer than `num_cus / 4` tiles to one CTA per CU (`small_grid_tiles` /
   `small_grid_target_ctas`) and keeps the grouped CK formula for grouped
   launches (`grouped_ck_formula`), under the common 16-bit atomic caps.
+- AOT grid (`kernels/conv/aot_jobs.py`, `CACHE_RDNA4_ARCHS` only): the
+  register-transpose kernels on every default-epilogue M-outer geometry at
+  widths 2 / 4 / 8 with their `ras`, `rtp3`, `apr` and `xrun` twins
+  (`CACHE_REGT_*`, `CACHE_WGRAD_ATOMIC_PAIR_ARCHS`, `CACHE_WGRAD_XRUN_*`),
+  built only where the configuration is listed in `CACHE_WGRAD_REGT_KERNELS`
+  (`kernels/conv/rdna4_wgrad_regt_kernels.py`);
+  packed-atomic split-K there is register-transpose only. Other targets'
+  grids are unchanged.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 

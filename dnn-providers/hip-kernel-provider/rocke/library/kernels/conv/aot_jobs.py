@@ -74,6 +74,15 @@ Per direction, on top of that:
   plain K loop of each non-two-stage configuration, once per geometry with
   the A / B chunk widths the copy picks recorded in the identity
   (``async_chunk_a`` / ``_b``).
+  On the RDNA4 targets (``CACHE_RDNA4_ARCHS``) the M-outer loader keeps
+  its split-K kernels two-stage only, and every default-epilogue M-outer
+  geometry also gets the register-transpose kernels (``reg_transpose``) at a, b in
+  ``CACHE_REGT_VECS`` with their twins: the stepped address decode
+  (``regt_addr_step``), the register-prefetch K loop (``regt_prefetch``
+  mode 3 on ``CACHE_REGT_PREFETCH_KV_TILES``), the paired-lane atomic
+  epilogue of the 16-bit atomic split-K kernels (``wmma_atomic_pair``) and
+  the ungrouped filter-row X run (``x_run``), limited to the configurations
+  listed in ``CACHE_WGRAD_REGT_KERNELS``.
   Opt-in (``streamk_modes``; ``--compile-all --streamk``): stream-K
   kernels, default epilogue only, ``split_k`` = 1, c = 1. At the widest
   vector width W of the dtype (a = W; b in {W, 1}): one per launch mode
@@ -474,6 +483,150 @@ CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
 # split CTAs of one tile contend on far fewer L2 atomic transactions.
 # Unlisted arches keep dW tied to the X width.
 CACHE_WGRAD_ATOMIC_VEC_C: Dict[str, int] = {"gfx950": 2}
+
+# ---- RDNA4 wgrad: register-transpose kernels (WgradConvSpec.reg_transpose) --
+# The WMMA targets have no LDS transpose read, so the K-outer tile that
+# removes wgrad's per-element transpose-on-store on gfx950 / gfx1250 is not
+# available there. The register-transpose load is their alternative:
+# 8(K) x v(free) micro-tiles, transposed in VGPRs, one 16-byte LDS store per
+# row. Built next to (never instead of) the M-outer kernels, on every
+# geometry of the wgrad grid of these targets, at the free-axis widths below:
+# the width is exact in this mode (a tile that cannot be split 8 x v per
+# thread is rejected), so each width is its own binary. Width 1 (scalar
+# loads, wide stores) is left to the M-outer kernels, which load scalar the
+# same way.
+CACHE_REGT_ARCHS: Tuple[str, ...] = CACHE_RDNA4_ARCHS
+CACHE_REGT_VECS: Tuple[int, ...] = (2, 4, 8)
+# The register-transpose kernels without the prefetch loop (and with mode 3)
+# are built with the stepped micro-tile address decode (regt_addr_step): it
+# measured faster on the stride-1 rows and takes the per-column decode itself
+# where the step does not apply. The plain decode is kept next to it on block
+# tiles up to 128 x 128, where it measured faster on the stride-2 and 2x2 rows.
+CACHE_REGT_ADDR_STEP = True
+CACHE_WGRAD_REGT_PLAIN_DECODE_MAX_TILE = 128
+# Mode 3 of the register-prefetch K loop (LDS-only in-loop barriers, the
+# prefetch pinned ahead of the MMAs and branch-guarded reads; see
+# WgradConvSpec.regt_prefetch), built as a twin of the plain register-
+# transpose kernel (with the same regt_addr_step choice) on these (tile_m,
+# tile_n, tile_k, warp_m, warp_n, warp tile) wgrad geometries only: the
+# small-accumulator tiles of 1-16 waves that each won a measured gfx1201 row.
+# Not built: the big-accumulator tiles (the prefetch registers cost occupancy
+# or spill) and the tiles that were slower on their rows.
+CACHE_REGT_PREFETCH_KV_TILES: Tuple[Tuple[int, ...], ...] = (
+    (64, 64, 128, 2, 2, 16),
+    (64, 64, 128, 4, 1, 16),
+    (64, 64, 128, 1, 4, 16),
+    (64, 64, 64, 1, 2, 16),
+    (128, 64, 128, 4, 1, 16),
+    (128, 64, 128, 2, 2, 16),
+    (128, 64, 128, 1, 4, 16),
+    (128, 64, 64, 4, 1, 16),
+    (64, 128, 128, 1, 4, 16),
+    (64, 128, 128, 2, 2, 16),
+    (64, 128, 128, 2, 4, 16),
+    (64, 128, 128, 4, 2, 16),
+    (64, 128, 128, 4, 4, 16),
+    (64, 128, 128, 2, 8, 16),
+    (32, 64, 128, 2, 2, 16),
+    (32, 64, 128, 2, 4, 16),
+    (64, 32, 128, 1, 2, 16),
+    (64, 32, 128, 2, 1, 16),
+    (64, 32, 128, 2, 2, 16),
+    (64, 32, 128, 4, 1, 16),
+    (64, 32, 128, 4, 2, 16),
+    (128, 128, 64, 2, 2, 16),
+    (128, 128, 64, 4, 1, 16),
+    (32, 128, 128, 2, 4, 16),
+    (128, 32, 64, 4, 1, 16),
+)
+# Packed-atomic split-K kernels (split_k > 1, not two-stage) are cached on the
+# register-transpose loader only: on gfx1201 the atomic won only on regt
+# geometries, so the M-outer loader keeps its two-stage split-K kernels alone.
+CACHE_WGRAD_ATOMIC_REGT_ONLY_ARCHS: Tuple[str, ...] = CACHE_RDNA4_ARCHS
+# The paired-lane WMMA split-K atomic epilogue (WgradConvSpec.wmma_atomic_pair,
+# tag "apr"): a twin of every register-transpose atomic split-K (16-bit dW)
+# kernel. One full packed atomic per two accumulator rows instead of one
+# zero-partner atomic per element.
+CACHE_WGRAD_ATOMIC_PAIR_ARCHS: Tuple[str, ...] = CACHE_RDNA4_ARCHS
+# The (x, c) filter-row X run (WgradConvSpec.x_run, tag "xrun"): an ungrouped
+# twin of the register-prefetch regt jobs, for the small-C patch stems (C = 3,
+# stride == filter, no padding) whose per-channel run otherwise forces scalar
+# X loads. Unsplit / paired-atomic split-K, 16-byte dY loads, tiles of at
+# least 64 x 64 (the stem GEMMs are large in M and N).
+CACHE_WGRAD_XRUN_ARCHS: Tuple[str, ...] = CACHE_RDNA4_ARCHS
+CACHE_WGRAD_XRUN_VECS: Tuple[int, ...] = (4, 8)
+# The register-transpose configurations above span every geometry and twin;
+# these targets build only the ones in CACHE_WGRAD_REGT_KERNELS
+# (kernels/conv/rdna4_wgrad_regt_kernels.py): the kernels that won, or were
+# finalists for, a row of the RDNA4 wgrad benchmark corpus.
+CACHE_WGRAD_REGT_KERNEL_ARCHS: Tuple[str, ...] = CACHE_RDNA4_ARCHS
+
+
+def _wgrad_regt_addr_steps(arch: str, tile_m: int, tile_n: int) -> Tuple[bool, ...]:
+    """``regt_addr_step`` values built for a wgrad register-transpose kernel:
+    the stepped decode, plus the plain one on block tiles up to
+    CACHE_WGRAD_REGT_PLAIN_DECODE_MAX_TILE."""
+    if not CACHE_REGT_ADDR_STEP:
+        return (False,)
+    if max(tile_m, tile_n) <= CACHE_WGRAD_REGT_PLAIN_DECODE_MAX_TILE:
+        return (True, False)
+    return (True,)
+
+
+def _regt_prefetch_modes(geometry: Tuple[int, ...]) -> Tuple[int, ...]:
+    """``regt_prefetch`` values built for a wgrad register-transpose geometry
+    ((tile_m, tile_n, tile_k, warp_m, warp_n, warp tile)): 0 always, and mode 3
+    where it is in CACHE_REGT_PREFETCH_KV_TILES."""
+    if tuple(geometry[:6]) in CACHE_REGT_PREFETCH_KV_TILES:
+        return (0, 3)
+    return (0,)
+
+
+def _wgrad_atomic_pairs(
+    arch: str, split_k: int, two_stage: bool, dtype_d: str
+) -> Tuple[bool, ...]:
+    """``wmma_atomic_pair`` values built for a register-transpose wgrad job."""
+    if (
+        arch in CACHE_WGRAD_ATOMIC_PAIR_ARCHS
+        and split_k > 1
+        and not two_stage
+        and dtype_d in ("fp16", "bf16")
+    ):
+        return (False, True)
+    return (False,)
+
+
+def _wgrad_x_run_split(split_k: int, two_stage: bool, apr: bool) -> bool:
+    """The split-K reductions an x_run twin is built for: unsplit, and the
+    paired-lane atomic split-K (the stem rows with the smallest grids)."""
+    return split_k == 1 or (not two_stage and apr)
+
+
+def _wgrad_x_run(cfg: dict, arch: str) -> bool:
+    """Whether a register-transpose wgrad job ``cfg`` gets an ungrouped
+    ``x_run`` twin."""
+    return (
+        arch in CACHE_WGRAD_XRUN_ARCHS
+        and _wgrad_x_run_split(
+            cfg.get("split_k", 1),
+            bool(cfg.get("two_stage")),
+            bool(cfg.get("wmma_atomic_pair")),
+        )
+        and cfg.get("regt_prefetch", 0) > 0
+        and cfg.get("vector_size_a") == 8
+        and cfg.get("vector_size_b") in CACHE_WGRAD_XRUN_VECS
+        and cfg["tile_m"] >= 64
+        and cfg["tile_n"] >= 64
+    )
+
+
+def _wgrad_split_reductions(arch: str, split_k: int, regt: bool) -> Tuple[bool, ...]:
+    """The ``two_stage`` values built for one wgrad loader at ``split_k``."""
+    stages = _wgrad_two_stages(split_k)
+    if split_k > 1 and not regt and arch in CACHE_WGRAD_ATOMIC_REGT_ONLY_ARCHS:
+        return tuple(t for t in stages if t)
+    return stages
+
 
 # Split-K forward (ImplicitGemmConvSpec.split_k): built for the small-M /
 # deep-K layers it exists for, so only small output tiles, the two WMMA
@@ -1443,7 +1596,7 @@ def _wgrad_jobs(
         # its own width -- tied to D it could only ever load scalar.
         for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
             for two_stage, caps in itertools.product(
-                _wgrad_two_stages(split_k), _layout_caps()
+                _wgrad_split_reductions(arch, split_k, False), _layout_caps()
             ):
                 if two_stage and not in_cover:
                     continue
@@ -1518,6 +1671,25 @@ def _wgrad_jobs(
                             spec_kwargs=kc,
                             caps=caps,
                         )
+        # Register-transpose kernels (RDNA4 WMMA): the same configurations on
+        # the M-outer tile with the transpose moved into registers, at the
+        # CACHE_REGT_VECS widths, plus their register-prefetch, address-step,
+        # paired-atomic and filter-row-run twins. Default
+        # epilogue only: no register-transpose cshuffle kernel was measured.
+        if epilogue == "default" and _wgrad_regt_geometry(
+            target, (tile_m, tile_n, tile_k, warp_m, warp_n, wt), da, db
+        ):
+            yield from _wgrad_regt_jobs(
+                arch,
+                (da, db, dd),
+                flavor,
+                (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue),
+                atom,
+                wave_size,
+                split_ks,
+                in_cover,
+                _pad_cfg,
+            )
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
@@ -1616,6 +1788,138 @@ def _wgrad_jobs(
                 spec_kwargs=cfg,
                 caps=dict(grouped=True, group_merge=gm),
             )
+
+
+def _wgrad_regt_geometry(target, geometry: tuple, da: str, db: str) -> bool:
+    """Whether :func:`_wgrad_jobs` builds register-transpose kernels for
+    ``geometry`` ((tile_m, tile_n, tile_k, warp_m, warp_n, warp tile, ...)):
+    the CACHE_REGT_ARCHS targets, on the geometries that keep the M-outer
+    tile. Shared with :func:`count_jobs`."""
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    if target.gfx not in CACHE_REGT_ARCHS:
+        return False
+    wt = geometry[5]
+    return not WgradConvSpec.default_lds_k_outer(
+        arch=target.gfx,
+        dtype_a=storage_dtype(da),
+        dtype_b=storage_dtype(db),
+        warp_tile_m=wt,
+        warp_tile_n=wt,
+        wave_size=target.wave_size,
+    )
+
+
+def _wgrad_regt_variants(
+    arch: str, dtype_d: str, geometry: tuple, split_ks: Sequence[int]
+) -> Iterator[Tuple[int, int, int, int, bool, bool, bool]]:
+    """``(vec_a, vec_b, split_k, regt_prefetch, two_stage, regt_addr_step,
+    wmma_atomic_pair)`` of every register-transpose job of a geometry
+    ((tile_m, tile_n, tile_k, warp_m, warp_n, warp tile)), before the layout
+    capability and the two-stage cover, restricted to CACHE_WGRAD_REGT_KERNELS
+    on the CACHE_WGRAD_REGT_KERNEL_ARCHS targets. Shared with
+    :func:`count_jobs`."""
+    from kernels.conv.rdna4_wgrad_regt_kernels import CACHE_WGRAD_REGT_KERNELS
+
+    listed = arch in CACHE_WGRAD_REGT_KERNEL_ARCHS
+    tile_m, tile_n = geometry[:2]
+    for vec_a, vec_b, split_k, rpf in itertools.product(
+        CACHE_REGT_VECS, CACHE_REGT_VECS, split_ks, _regt_prefetch_modes(geometry)
+    ):
+        for two_stage, addr_step in itertools.product(
+            _wgrad_split_reductions(arch, split_k, True),
+            _wgrad_regt_addr_steps(arch, tile_m, tile_n),
+        ):
+            for apr in _wgrad_atomic_pairs(arch, split_k, two_stage, dtype_d):
+                v = (vec_a, vec_b, split_k, rpf, two_stage, addr_step, apr)
+                if listed and tuple(geometry[:6]) + v not in CACHE_WGRAD_REGT_KERNELS:
+                    continue
+                yield v
+
+
+def _wgrad_regt_jobs(
+    arch: str,
+    dtypes: Tuple[str, str, str],
+    flavor: str,
+    geometry: tuple,
+    atom,
+    wave_size: int,
+    split_ks: Sequence[int],
+    in_cover: bool,
+    pad_cfg: dict,
+) -> Iterator[BuildJob]:
+    """The register-transpose wgrad jobs of one geometry ((tile_m, tile_n,
+    tile_k, warp_m, warp_n, warp tile, pipeline, epilogue)). lds_k_outer,
+    prefetch_addr and the K-loop variants stay at their defaults (none of them
+    applies to the register-transpose tile); two-stage is built on the
+    two-stage cover only, as for the M-outer loader."""
+    from kernels.common.conv_implicit_gemm_wgrad import _DEFAULT_WS_REPLICAS
+
+    da, db, dd = dtypes
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue = geometry
+    for (
+        vec_a,
+        vec_b,
+        split_k,
+        rpf,
+        two_stage,
+        addr_step,
+        apr,
+    ) in _wgrad_regt_variants(arch, dd, geometry[:6], split_ks):
+        if two_stage and not in_cover:
+            continue
+        for caps in _layout_caps():
+            cfg = dict(
+                tile_m=tile_m,
+                tile_n=tile_n,
+                tile_k=tile_k,
+                warp_m=warp_m,
+                warp_n=warp_n,
+                warp_tile_m=wt,
+                warp_tile_n=wt,
+                warp_tile_k=atom.k,
+                pipeline=pipeline,
+                epilogue=epilogue,
+                wave_size=wave_size,
+                vector_size_a=vec_a,
+                vector_size_b=vec_b,
+                vector_size_c=_wgrad_vec_c(
+                    arch, dd, epilogue, vec_b, split_k, two_stage
+                ),
+                split_k=split_k,
+                two_stage=two_stage,
+                reg_transpose=True,
+                **pad_cfg,
+            )
+            if rpf:
+                cfg["regt_prefetch"] = rpf
+            if addr_step:
+                cfg["regt_addr_step"] = True
+            if apr:
+                cfg["wmma_atomic_pair"] = True
+            if two_stage:
+                cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
+            jobs = [(cfg, caps)]
+            if caps["grouped"] and _wgrad_x_run(cfg, arch):
+                # The ungrouped filter-row-run twin.
+                jobs.append((dict(cfg, x_run=True), dict(grouped=False, xrun=True)))
+            for kc, kcaps in jobs:
+                yield BuildJob(
+                    identity=KernelIdentity(
+                        arch=arch,
+                        direction="wgrad",
+                        algorithm="implicit_gemm",
+                        llvm_flavor=flavor,
+                        dtype_a=da,
+                        dtype_b=db,
+                        dtype_d=dd,
+                        grouped=kcaps["grouped"],
+                        **kc,
+                    ),
+                    direction="wgrad",
+                    spec_kwargs=kc,
+                    caps=kcaps,
+                )
 
 
 def _wgrad_prefetch_global_regs_geometry(arch: str, geometry: tuple) -> bool:
@@ -2145,15 +2449,44 @@ def count_jobs(
                 in_cover = _wgrad_wmma_cover(mma_family, geo)
                 if geo[7] != "default" and not in_cover:
                     continue
+                reductions = [
+                    ts
+                    for sk in split_ks
+                    for ts in _wgrad_split_reductions(target.gfx, sk, False)
+                ]
+                n_plain = sum(1 for ts in reductions if not ts)
                 if in_cover:
-                    stages = sum(len(_wgrad_two_stages(sk)) for sk in split_ks)
+                    stages = len(reductions)
                     # The async loop: once per non-two-stage configuration.
-                    asyncs = len(split_ks) * (
+                    asyncs = n_plain * (
                         len(_wgrad_k_loops(wave_size, pipeline, False, target)) - 1
                     )
                 else:
-                    stages, asyncs = len(split_ks), 0
+                    stages, asyncs = n_plain, 0
                 total += vecs * stages * layouts + asyncs * layouts
+                if geo[7] == "default" and _wgrad_regt_geometry(target, geo, da, db):
+                    for v in _wgrad_regt_variants(
+                        target.gfx, dtype_triple(dtype)[2], geo[:6], split_ks
+                    ):
+                        two_stage = v[4]
+                        if two_stage and not in_cover:
+                            continue
+                        total += layouts
+                        if _wgrad_x_run(
+                            dict(
+                                tile_m=geo[0],
+                                tile_n=geo[1],
+                                vector_size_a=v[0],
+                                vector_size_b=v[1],
+                                split_k=v[2],
+                                regt_prefetch=v[3],
+                                two_stage=two_stage,
+                                wmma_atomic_pair=v[6],
+                            ),
+                            target.gfx,
+                        ):
+                            # The ungrouped x_run twin of the grouped job.
+                            total += sum(1 for c in _layout_caps() if c["grouped"])
                 if 8 in _VECS and _wgrad_prefetch_global_regs_geometry(
                     target.gfx, geo[:6]
                 ):
@@ -2247,6 +2580,9 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     if caps.get("patch"):
         # The patch dgrad's record is the patch embedding's own.
         return ConvProblem(N=1, Hi=16, Wi=16, C=64, K=64, Y=2, X=2, sH=2, sW=2)
+    if caps.get("xrun"):
+        # wgrad x_run: ungrouped, no W padding / dilation (the filter-row run).
+        return ConvProblem(N=1, Hi=16, Wi=16, C=8, K=64, Y=4, X=4, sH=4, sW=4)
     groups = 2 if caps.get("grouped") else 1
     # The tilde dgrad kernel is the strided one: any stride > 1 selects its
     # code path, and the binary then serves every stride at run time.

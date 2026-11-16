@@ -365,5 +365,131 @@ class TestXRun(unittest.TestCase):
         self.assertFalse(identity_supports_problem(ident, odd, **kw)[0])  # X*C = 9
 
 
+class TestWgradRdna4Grid(unittest.TestCase):
+    def _jobs(self, arch, n=40, geos=None):
+        from kernels.conv.aot_jobs import _geometry_list, _wgrad_jobs
+        from rocke.core.arch import ArchTarget
+
+        target = ArchTarget.from_gfx(arch)
+        geo = geos or _geometry_list(target, "fp16", "wgrad")[:n]
+        family = "wmma" if target.wave_size == 32 else "mma"
+        return list(
+            _wgrad_jobs(
+                arch, "fp16", target.wave_size, family, target, (1, 2), geometries=geo
+            )
+        )
+
+    @staticmethod
+    def _geos(arch, geometry):
+        from kernels.conv.aot_jobs import _geometry_list
+        from rocke.core.arch import ArchTarget
+
+        geos = _geometry_list(ArchTarget.from_gfx(arch), "fp16", "wgrad")
+        return [g for g in geos if tuple(g[:6]) == geometry]
+
+    def test_regt_jobs_on_gfx12_rdna_only(self):
+        for arch, want in (
+            ("gfx1201", True),
+            ("gfx1200", True),
+            ("gfx12-generic", True),
+            ("gfx1250", False),
+            ("gfx11-generic", False),
+            ("gfx950", False),
+        ):
+            with self.subTest(arch=arch):
+                geos = self._geos(arch, (64, 64, 128, 2, 2, 16)) or None
+                jobs = self._jobs(arch, geos=geos)
+                got = any(j.identity.reg_transpose for j in jobs)
+                self.assertEqual(got, want)
+
+    def test_regt_jobs_are_listed(self):
+        from kernels.conv.rdna4_wgrad_regt_kernels import CACHE_WGRAD_REGT_KERNELS
+
+        geometry = (64, 64, 128, 2, 2, 16)
+        ids = [
+            j.identity
+            for j in self._jobs("gfx1201", geos=self._geos("gfx1201", geometry))
+            if j.identity.reg_transpose
+        ]
+        self.assertTrue(ids)
+        for i in ids:
+            v = (
+                i.vector_size_a,
+                i.vector_size_b,
+                i.split_k,
+                i.regt_prefetch,
+                i.two_stage,
+                i.regt_addr_step,
+                i.wmma_atomic_pair,
+            )
+            self.assertIn(geometry + v, CACHE_WGRAD_REGT_KERNELS, i.label())
+        # Width 2 is in the grid but not in the list.
+        self.assertFalse(any(i.vector_size_a == 2 for i in ids))
+
+    def test_atomic_split_k_is_regt_only(self):
+        for j in self._jobs("gfx1201"):
+            i = j.identity
+            if i.split_k > 1 and not i.two_stage:
+                self.assertTrue(i.reg_transpose, i.label())
+
+    def test_twin_helpers(self):
+        from kernels.conv.aot_jobs import (
+            _regt_prefetch_modes,
+            _wgrad_atomic_pairs,
+            _wgrad_regt_addr_steps,
+        )
+
+        self.assertEqual(
+            _wgrad_atomic_pairs("gfx1201", 2, False, "fp16"), (False, True)
+        )
+        self.assertEqual(
+            _wgrad_atomic_pairs("gfx1200", 2, False, "bf16"), (False, True)
+        )
+        self.assertEqual(_wgrad_atomic_pairs("gfx1201", 2, True, "fp16"), (False,))
+        self.assertEqual(_wgrad_atomic_pairs("gfx1201", 1, False, "bf16"), (False,))
+        self.assertEqual(_wgrad_atomic_pairs("gfx1201", 2, False, "fp32"), (False,))
+        self.assertEqual(_wgrad_atomic_pairs("gfx1250", 2, False, "fp16"), (False,))
+        # Mode 3 on the listed tiles only.
+        self.assertEqual(_regt_prefetch_modes((64, 64, 64, 2, 4, 16)), (0,))
+        self.assertEqual(_regt_prefetch_modes((64, 64, 128, 2, 2, 16)), (0, 3))
+        self.assertEqual(_regt_prefetch_modes((64, 64, 16, 2, 2, 16)), (0,))
+        self.assertEqual(_wgrad_regt_addr_steps("gfx1201", 64, 64), (True, False))
+        self.assertEqual(_wgrad_regt_addr_steps("gfx1201", 256, 64), (True,))
+
+    def test_x_run_twins_are_ungrouped(self):
+        geos = self._geos("gfx1201", (64, 64, 128, 2, 2, 16))
+        xr = [j for j in self._jobs("gfx1201", geos=geos) if j.identity.x_run]
+        self.assertTrue(xr)
+        for j in xr:
+            self.assertFalse(j.identity.grouped)
+            self.assertEqual(j.caps, dict(grouped=False, xrun=True))
+            self.assertTrue(j.identity.regt_prefetch)
+
+    def test_count_jobs_matches_the_walk(self):
+        from kernels.conv.aot_jobs import (
+            CACHE_DGRAD_MAX_SUB_GEMMS,
+            CACHE_WGRAD_SPLIT_KS,
+            _direction_jobs,
+            count_jobs,
+        )
+        from rocke.core.arch import ArchTarget
+
+        for arch in ("gfx1201", "gfx1250"):
+            target = ArchTarget.from_gfx(arch)
+            n = sum(
+                1
+                for _ in _direction_jobs(
+                    "wgrad",
+                    arch,
+                    "bf16",
+                    target,
+                    CACHE_WGRAD_SPLIT_KS,
+                    CACHE_DGRAD_MAX_SUB_GEMMS,
+                )
+            )
+            c = count_jobs(dtype="bf16", target=target, directions=("wgrad",))
+            self.assertEqual(n, c, arch)
+
+
 if __name__ == "__main__":
     unittest.main()
