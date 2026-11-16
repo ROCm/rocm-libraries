@@ -186,7 +186,7 @@ namespace TensileLite
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
         X_MACRO(ESMRuntimeSupported) \
-        X_MACRO(AddressPeerD)
+        X_MACRO(DeltaPeerD)
 
     enum class CustomArgSemantic
     {

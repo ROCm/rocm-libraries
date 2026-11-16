@@ -141,6 +141,72 @@ TEST(ClientProblemFactorySplit, OffsetOfASliceInTheFullD)
     }
 }
 
+TEST(ClientProblemFactorySplit, BatchOffsetsFollowEachSlicesStrides)
+{
+    // 3 batches, float. A pointer-array run points batch b of a tensor at base + offset[b].
+    ClientProblemFactory factory(makeArgs({130, 96, 3, 64}, 3, "M"));
+    auto*                full = factory.problems()[0].get();
+    const size_t         bpe  = sizeof(float);
+
+    for(size_t d = 0; d < 3; d++)
+    {
+        // D keeps the full strides: its batches are a full 130 x 96 matrix apart on every device.
+        const std::vector<size_t> expectedD = {0, 130 * 96 * bpe, 2 * 130 * 96 * bpe};
+        EXPECT_EQ(factory.sliceBatchOffsets(full, d, ContractionProblemGemm::TENSOR::D), expectedD)
+            << "device " << d;
+
+        // C shrinks with the slice, so its batches are one slice apart.
+        auto const&               slice     = gemm(factory.sliceProblem(full, d));
+        const size_t              rows      = slice.c().sizes()[0];
+        const std::vector<size_t> expectedC = {0, rows * 96 * bpe, 2 * rows * 96 * bpe};
+        EXPECT_EQ(factory.sliceBatchOffsets(full, d, ContractionProblemGemm::TENSOR::C), expectedC)
+            << "device " << d;
+    }
+
+    // B is replicated whole under a split of M.
+    const std::vector<size_t> expectedB = {0, 64 * 96 * bpe, 2 * 64 * 96 * bpe};
+    EXPECT_EQ(factory.sliceBatchOffsets(full, 2, ContractionProblemGemm::TENSOR::B), expectedB);
+
+    EXPECT_THROW(factory.sliceBatchOffsets(full, 0, ContractionProblemGemm::TENSOR::BIAS),
+                 std::runtime_error);
+}
+
+TEST(ClientProblemFactorySplit, BatchOffsetsOfASingleBatch)
+{
+    ClientProblemFactory factory(makeArgs({130, 96, 1, 64}, 2, "N"));
+    auto*                full = factory.problems()[0].get();
+    EXPECT_EQ(factory.sliceBatchOffsets(full, 1, ContractionProblemGemm::TENSOR::D),
+              std::vector<size_t>{0});
+}
+
+TEST(ClientProblemFactorySplit, TheLastSliceHoldsEveryOtherSlicesInputs)
+{
+    // --split-placement S for A, B or C: every device reads the last device's buffer with its own
+    // slice's size, so no slice may need more elements than the last one, per batch and in all.
+    for(std::string dim : {"M", "N"})
+    {
+        ClientProblemFactory factory(makeArgs({130, 131, 3, 64}, 3, dim));
+        auto*                full = factory.problems()[0].get();
+        auto const&          last = gemm(factory.sliceProblem(full, 2));
+        for(size_t d = 0; d < 2; d++)
+        {
+            auto const& slice = gemm(factory.sliceProblem(full, d));
+            for(auto tensor : {ContractionProblemGemm::TENSOR::A,
+                               ContractionProblemGemm::TENSOR::B,
+                               ContractionProblemGemm::TENSOR::C})
+            {
+                EXPECT_LE(slice.tensors()[tensor].totalAllocatedElements(),
+                          last.tensors()[tensor].totalAllocatedElements())
+                    << "split " << dim << ", device " << d << ", tensor " << tensor;
+                // The batch pointer array is the last device's too.
+                EXPECT_LE(factory.sliceBatchOffsets(full, d, tensor).at(1),
+                          factory.sliceBatchOffsets(full, 2, tensor).at(1))
+                    << "split " << dim << ", device " << d << ", tensor " << tensor;
+            }
+        }
+    }
+}
+
 TEST(ClientProblemFactorySplit, RejectsMoreDevicesThanRowsToSplit)
 {
     EXPECT_THROW(ClientProblemFactory(makeArgs({3, 96, 1, 64}, 4, "M")), std::runtime_error);

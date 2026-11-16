@@ -11336,10 +11336,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
 
-    # The peer D address follows the activation arguments, as in the kernel signature.
+    # The distance to the peer D (64-bit) follows the activation arguments, as in the kernel
+    # signature.
     if kernel["ProblemType"]["OutputPeerD"]:
       storeSgprLoad += self.states.rpga
-      self.states.numStoreSgprNames.append("AddressPeerD")
+      self.states.numStoreSgprNames.append("DeltaPeerD")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)
 
     self.states.numStoreSgprToLoad = storeSgprLoad
@@ -12724,7 +12725,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # -- Peer D output ---------------------------------------------------------
     if kernel["ProblemType"]["OutputPeerD"]:
-      _reg("address", "AddressPeerD")
+      _reg("int64", "DeltaPeerD")
 
     # -- Amax output -----------------------------------------------------------
     if kernel["ProblemType"]["OutputAmaxD"]:

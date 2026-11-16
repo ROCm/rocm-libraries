@@ -34,7 +34,7 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      SupportUserArgs: False # OutputPeerD does not support user args yet
+      SupportUserArgs: False
       OutputPeerD: True
 
     - # BenchmarkProblemSizeGroup

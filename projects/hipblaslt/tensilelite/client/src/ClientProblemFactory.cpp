@@ -32,6 +32,8 @@
 
 #include "TimingInstrumentation.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
 
@@ -458,6 +460,44 @@ namespace TensileLite
             auto const& free  = m_slices[0]->m_splitFree;
             size_t      share = gemm->d().sizes().at(free.d) / m_slices.size();
             return device * share * gemm->d().strides().at(free.d);
+        }
+
+        std::vector<size_t> ClientProblemFactory::sliceBatchOffsets(ContractionProblem const* full,
+                                                                    size_t                    device,
+                                                                    size_t tensor) const
+        {
+            auto const* gemm
+                = dynamic_cast<ContractionProblemGemm const*>(sliceProblem(full, device));
+            if(gemm == nullptr)
+                throw std::runtime_error("[ClientProblemFactory] batch offsets need a GEMM problem");
+            if(tensor > ContractionProblemGemm::TENSOR::D)
+                throw std::runtime_error(
+                    "[ClientProblemFactory] batch offsets are for A, B, C and D only");
+
+            // The same layout as the batch pointer arrays DataInitialization builds.
+            auto const&         desc = gemm->tensors()[tensor];
+            std::vector<size_t> sizes, strides;
+            for(auto const& batch : gemm->batchIndices())
+            {
+                const size_t dim = tensor == ContractionProblemGemm::TENSOR::A   ? batch.a
+                                   : tensor == ContractionProblemGemm::TENSOR::B ? batch.b
+                                   : tensor == ContractionProblemGemm::TENSOR::C ? batch.c
+                                                                                 : batch.d;
+                sizes.push_back(desc.sizes().at(dim));
+                strides.push_back(desc.strides().at(dim));
+            }
+            const size_t elementBytes
+                = static_cast<size_t>(std::ceil(std::max(1.0f, desc.elementBytes())));
+
+            std::vector<size_t> coord(sizes.size(), 0);
+            std::vector<size_t> offsets(CoordCount(sizes.begin(), sizes.end()), 0);
+            for(size_t idx = 0; idx < offsets.size(); idx++)
+            {
+                CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+                for(size_t i = 0; i < sizes.size(); i++)
+                    offsets[idx] += coord[i] * strides[i] * elementBytes;
+            }
+            return offsets;
         }
 
         ClientProblemFactory const& ClientProblemFactory::sliceFactory(size_t device) const

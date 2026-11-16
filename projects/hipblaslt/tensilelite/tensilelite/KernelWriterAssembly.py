@@ -11282,6 +11282,11 @@ class KernelWriterAssembly(KernelWriter):
         self.argLoader.setOffset(argOffset) # Restore offset
         module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
         module.add(extReadEpilogueLabel)
+        if kernel["ProblemType"]["OutputPeerD"]:
+          # The device user-args struct has no peer D. A zero distance keeps the peer store
+          # inside D (it repeats the D store) instead of using an unloaded register.
+          module.add(SMovB32(dst=sgpr("DeltaPeerD+0"), src=0, comment="no peer D with user args"))
+          module.add(SMovB32(dst=sgpr("DeltaPeerD+1"), src=0))
         extArgOffset = self.externalArgLoader.getOffset()
         backupExtArgOffset = extArgOffset
         loadList = [[-1, 0, extArgOffset]]
@@ -11451,11 +11456,11 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["ProblemType"]["OutputPeerD"]:
       # SrdPeerD is rebuilt from SrdD before each peer store: SrdPeerD = SrdD + DeltaPeerD,
-      # where DeltaPeerD = AddressPeerD - AddressD, so it follows every SrdD update.
+      # so it follows every SrdD update. DeltaPeerD (peer D - D, in bytes) is a store kernel
+      # argument, so the peer store does not depend on what AddressD holds: D's base for a
+      # strided batch, the pointer array for a pointer-array batch.
       self.defineSgpr("SrdPeerD", 4, 4)
       module.add(RegSet("s", "sgprSrdPeerD", self.sgprs["SrdPeerD"]))
-      self.defineSgpr("DeltaPeerD", 2, 2)
-      module.add(RegSet("s", "sgprDeltaPeerD", self.sgprs["DeltaPeerD"]))
 
     if kernel["ProblemType"]["UseE"]:
       self.defineSgpr("SrdE", 4, 4)
@@ -20084,9 +20089,6 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VMovB32(dst=vgpr("AmaxOut"), src="0"))
     if self.states.numStoreSgprToLoad or self.states.numStoreSgprToLoad2: # Wait for kernel args
       module.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args."%((self.states.numStoreSgprToLoad+self.states.numStoreSgprToLoad2) * 4)))
-    if kernel["ProblemType"]["OutputPeerD"]:
-      module.add(SSubU32(dst=sgpr("DeltaPeerD+0"), src0=sgpr("AddressPeerD+0"), src1=sgpr("AddressD+0"), comment="peer D - D, low"))
-      module.add(SSubBU32(dst=sgpr("DeltaPeerD+1"), src0=sgpr("AddressPeerD+1"), src1=sgpr("AddressD+1"), comment="peer D - D, high"))
 
     if not noGSUBranch:
       labelMB = Label(self.labels.getNameInc("GW_MB"), comment="Global Write MB")

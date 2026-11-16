@@ -46,6 +46,12 @@ def test_plain_gfx1250_solution_is_allowed():
     assert Solution.outputPeerDUnmet(_state()) == []
 
 
+def test_user_args_kernels_are_allowed():
+    # Only a SupportUserArgs kernel has the pointer-array batch path (ArgType 3), which a split
+    # run with --batch-mode 1 needs.
+    assert Solution.outputPeerDUnmet(_state(ProblemType={"SupportUserArgs": True})) == []
+
+
 @pytest.mark.parametrize("isa", [(9, 0, 10), (9, 4, 2), (9, 5, 0), (11, 0, 0), (12, 0, 0)])
 def test_only_gfx1250_is_allowed(isa):
     assert Solution.outputPeerDUnmet(_state(ISA=isa)) == ["gfx1250"]
@@ -67,7 +73,6 @@ def test_missing_isa_is_not_allowed():
         ({"StoreRemapVectorWidth": 2}, "StoreRemapVectorWidth=0"),
         ({"UseSubtileImpl": True}, "UseSubtileImpl=False"),
         ({"WorkGroup": [16, 8, 2]}, "no LocalSplitU"),
-        ({"ProblemType": {"SupportUserArgs": True}}, "SupportUserArgs=False"),
         ({"ProblemType": {"GroupedGemm": True}}, "no GroupedGemm"),
         ({"ProblemType": {"OutputAmaxD": True}}, "no OutputAmaxD"),
         ({"ProblemType": {"UseE": True}}, "no UseE"),

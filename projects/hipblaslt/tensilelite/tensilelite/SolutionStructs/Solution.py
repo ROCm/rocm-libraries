@@ -2459,7 +2459,6 @@ class Solution(collections.abc.Mapping):
       (not state.get("StoreRemapVectorWidth", 0), "StoreRemapVectorWidth=0"),
       (not state.get("UseSubtileImpl", False), "UseSubtileImpl=False"),
       (state.get("WorkGroup", [0, 0, 1])[2] == 1, "no LocalSplitU"),
-      (not problemType.get("SupportUserArgs", False), "SupportUserArgs=False"),
       (not problemType.get("GroupedGemm", False), "no GroupedGemm"),
       (not problemType.get("OutputAmaxD", False), "no OutputAmaxD"),
       (not problemType.get("UseE", False), "no UseE"),

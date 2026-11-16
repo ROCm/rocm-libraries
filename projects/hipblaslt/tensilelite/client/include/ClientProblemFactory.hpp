@@ -68,6 +68,13 @@ namespace TensileLite
             // offset of device `device`'s slice inside that D for the problem `full` (0 when off).
             size_t sliceOffsetInD(ContractionProblem const* full, size_t device) const;
 
+            // Pointer-array batches: the byte offset of every batch of `tensor` (A, B, C or D of
+            // ContractionProblemGemm::TENSOR) from its batch 0, in the problem device `device`
+            // runs for `full`. Entry b of a batch pointer array is the tensor's base plus entry b.
+            std::vector<size_t> sliceBatchOffsets(ContractionProblem const* full,
+                                                  size_t                    device,
+                                                  size_t                    tensor) const;
+
             size_t workspaceSize() const
             {
                 return m_maxWorkspaceSize;

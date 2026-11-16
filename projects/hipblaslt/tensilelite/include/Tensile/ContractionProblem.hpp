@@ -1895,7 +1895,9 @@ namespace TensileLite
         void*       d     = nullptr;
         void*       e     = nullptr;
         void*       amaxD = nullptr;
-        void*       peerD = nullptr; // second D buffer (OutputPeerD)
+        // Second D buffer (OutputPeerD). `d` and `peerD` are the two buffers' batch 0, with or
+        // without batch pointer arrays: the kernel gets the distance between them.
+        void*       peerD = nullptr;
 
         void const* const* batchA    = nullptr;
         void const* const* batchB    = nullptr;
