@@ -16,7 +16,7 @@ Documentation for hipBLAS is available at
 * Fix `hipblas-test` crashing during process teardown after the tests had passed, on a host whose installed googletest is newer than the 1.11 headers bundled with the clients. The clients compiled against the bundled headers and linked the system library, and googletest 1.12 added a virtual function that shifted the listener vtable. The client build now finds the bundled googletest ahead of the system one.
 * Fix the hipBLAS library build with libc++. `library/src/include/exceptions.hpp` catches `std::bad_alloc` and relied on a transitive `<new>` include that libstdc++ provides and libc++ does not.
 
-## hipBLAS 3.8.0 for ROCm 10.2
+## hipBLAS 3.8.0 for ROCm 10.2.0
 
 ### Added
 
