@@ -142,7 +142,7 @@ def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0, un=1, split=0,
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
     16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes). un > 1
     (2-D, gfx950): each MFMA's 16 columns are 16 / un columns of un consecutive images. cf 1
-    (2-D, 16-bit, gfx950): packed channels-first activations read and written in place.
+    (2-D, 16-bit): packed channels-first activations read and written in place.
     """
     return dict(
         kind="rows",
@@ -264,6 +264,19 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8),
             RW(f"mfma16_{e}", F33, 8, 4, 1, 2, 4, 16, 8, un=4),
             RW(f"mfma16_{e}", F33, 5, 4, 4, 1, 2, 16, 8),
+        ],
+    )
+    # Packed channels-first activations in place on the dword-DMA parts (gather transpose in
+    # LDS): the 16 x 16 x 256, 16 x 32 x 128 and 20-row tiles at 16-channel chunks, and the
+    # 8 x 16 x 128 tile at 32.
+    add(
+        dt,
+        ["gfx90a", "gfx942"],
+        [
+            RW(f"mfma16_{e}", F33, 8, 4, 1, 2, 4, 16, 8, epi=0, cf=1),
+            RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, epi=0, cf=1),
+            RW(f"mfma16_{e}", F33, 5, 4, 4, 1, 2, 16, 8, epi=0, cf=1),
+            RW(f"mfma16_{e}", F33, 4, 4, 2, 1, 2, 32, 8, epi=0, cf=1),
         ],
     )
     # gfx950: the rows kernel (LDS DMA), then the halo-tile configs

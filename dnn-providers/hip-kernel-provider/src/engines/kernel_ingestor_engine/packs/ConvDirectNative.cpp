@@ -625,11 +625,10 @@ int64_t rowsLdsBytes(const Config& config)
 
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
-    // Channels-first rows need CDNA4's 16-byte LDS DMA and transpose reads.
-    const bool cfRuns = config.cf == 0
-                        || hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0;
+    // Channels-first rows run wherever rows run: 16-byte DMA and transpose reads on gfx950,
+    // dword DMA and a gather transpose on the other MFMA parts.
     return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
-           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName) && cfRuns;
+           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName);
 }
 
 std::optional<Plan>

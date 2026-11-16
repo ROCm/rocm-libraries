@@ -775,7 +775,7 @@ ConvShape cfShape()
     return shape;
 }
 
-TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivationsOnGfx950)
+TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivations)
 {
     const auto f = rowsCfFields();
     // Raw stage (10 halo rows x 64 channel rows x 6 runs of 16 bytes) plus one channels-last stage.
@@ -791,12 +791,15 @@ TEST(TestConvDirectKernelMatch, ChannelsFirstRowsTakePackedChannelsFirstActivati
     EXPECT_FALSE(admits(f, "gfx950", last));
     // Input rows must be whole 16-byte runs: width 6 is 12 bytes.
     EXPECT_FALSE(admits(f, "gfx950", baseShape()));
-    // 16-byte LDS DMA and transpose reads: gfx950 only, even when the ship list names another.
+    // gfx942 (dword DMA, gather transpose) within its 64 KiB of LDS.
     auto other = f;
     other.atom = "mfma16_f16";
     other.archs = "gfx942";
     other.bc = 32;
-    EXPECT_FALSE(admits(other, "gfx942", cfShape()));
+    EXPECT_TRUE(admits(other, "gfx942", cfShape()));
+    other.bc = 64;
+    EXPECT_FALSE(admits(other, "gfx942", cfShape())) << "raw and channels-last stages past 64 KiB";
+    other.bc = 32;
     other.cf = 0;
     EXPECT_TRUE(admits(other, "gfx942", cfShape())) << "the same tile, staged";
     // Not with the fp32 atom, ping-pong, batch unfold, split-C or the staged epilogue.
