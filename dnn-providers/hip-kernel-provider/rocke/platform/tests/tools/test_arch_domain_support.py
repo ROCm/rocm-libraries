@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Host-only support-policy controls, collected in source and installed CI.
+"""Host-only column and support-policy checks in source and installed CI.
 
-The exhaustive compiler sweep remains a separate CTest. These tests exercise
-losses, gains and invalid records without depending on a real LLVM installation.
+Every packaged column is validated without depending on its compiler flavor.
+Synthetic controls exercise losses, gains and invalid records. The exhaustive
+compiler sweep remains a separate CTest.
 """
 
 from __future__ import annotations
@@ -37,6 +38,33 @@ _STATUSES = {
     G.STATUS_PROBE_ERROR,
 }
 _NEEDS_EVIDENCE = _STATUSES - {G.STATUS_OK}
+
+
+class PackagedColumnTest(unittest.TestCase):
+    """Check the imported payload, including columns this host cannot re-probe."""
+
+    def _columns(self) -> list[Path]:
+        columns = sorted(G.DATA_DIR.glob("intrinsic_arch_domain.*.json"))
+        self.assertTrue(columns, f"no arch-domain columns under {G.DATA_DIR}")
+        return columns
+
+    def test_every_packaged_column_is_valid(self):
+        for path in self._columns():
+            with self.subTest(column=path.name):
+                doc = json.loads(path.read_text())
+                failures = G._validate_column(doc, path.name)
+                self.assertEqual(failures, [], "\n".join(failures))
+                self.assertEqual(doc["toolchain"]["flavor"], path.name.split(".")[1])
+
+    def test_every_packaged_column_is_canonically_serialized(self):
+        for path in self._columns():
+            with self.subTest(column=path.name):
+                text = path.read_text()
+                self.assertEqual(
+                    G._serialize_column(json.loads(text)),
+                    text,
+                    f"{path.name}: packaged column is not canonically serialized",
+                )
 
 
 class SupportComparisonTest(unittest.TestCase):

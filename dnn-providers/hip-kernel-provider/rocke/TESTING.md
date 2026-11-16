@@ -554,15 +554,18 @@ Expected crashes and timeouts whose normalized evidence still matches are not
 retried; changed evidence, unexpected verdicts, and unclassified outcomes still
 receive a contention-free retry.
 
-Structure and compiler-probe units remain source-only in
-`platform/tests/tools/test_arch_domain_artifact.py`. Host-only support-policy
-controls in `platform/tests/tools/test_arch_domain_support.py` run in both source
-pytest and the installed `rocke_pytest_*` CI parts, using the staged generator in
-installed artifacts. They check loss-fail, gain-pass, invalid records, and method/
-metadata guards, effective-probe contracts, and processor consistency for both
-gfx942 and gfx950 without a real compiler. Source-only CLI controls additionally
-check early live-provenance and final-document admission in write/check modes. Normal pytest
-and the `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
+The broader structure and compiler-probe units remain source-only in
+`platform/tests/tools/test_arch_domain_artifact.py`. Host-only column and
+support-policy checks in `platform/tests/tools/test_arch_domain_support.py` run in
+both source pytest and the installed `rocke_pytest_*` CI parts, using the staged
+generator in installed artifacts. They read every column from the imported
+package, validate its records and filename/flavor agreement, and require canonical
+serialization without a compiler or active-flavor filter. The synthetic controls
+check loss-fail, gain-pass, invalid records, method/metadata guards, effective-probe
+contracts, and processor consistency for both gfx942 and gfx950 without a real
+compiler. Source-only CLI controls additionally check early live-provenance and
+final-document admission in write/check modes. Normal pytest and the
+`ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
