@@ -601,21 +601,23 @@ namespace rocsparse
                     }
                 }
 
-                // All inter thread communication is done using atomics, therefore cache flushes or
-                // invalidates should not be needed (thus __threadfence() has been removed to regain
-                // performance).
-                // Because of atomics being relaxed, however, the compiler is allowed to reorder them
-                // with respect to ordinary memory accesses (and other relaxed atomic operations).
-                // In this case, out_val seem to be reordered with the xor and subsequently, accumulation
-                // ends up being wrong.
-                // To force the compiler to stick to the order of operations, we need acquire/release fences.
-                // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
-                // invalidations.
+                // The other workgroups read y through atomics. With beta = 0 the zero above is a
+                // plain store, so release it at agent scope: that writes it back from L2 to memory
+                // before the flag is flipped. The waiters take a matching agent-scope acquire.
+                // Otherwise the atomics on y and the flag are the only communication, and workgroup
+                // scope only keeps the compiler from reordering them.
 #if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
-                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                __builtin_amdgcn_s_waitcnt(0);
+                if(beta == static_cast<T>(0))
+                {
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+                }
+                else
+                {
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+                    __builtin_amdgcn_s_waitcnt(0);
+                }
 #endif
 
                 // Release other workgroups
@@ -653,8 +655,12 @@ namespace rocsparse
                     while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
                         ;
 
-                    // __builtin_amdgcn_s_waitcnt(0);
-                    // __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+                    // With beta = 0 the first workgroup published a plain store to y, so take an
+                    // agent-scope acquire before the atomics on y.
+                    if(beta == static_cast<T>(0))
+                    {
+                        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+                    }
 
                     // After you've passed the barrier, update your local flag to make sure that
                     // the next time through, you know what to wait on.
@@ -1329,21 +1335,23 @@ namespace rocsparse
                     y[row] = static_cast<Y>(0);
                 }
 
-                // All inter thread communication is done using atomics, therefore cache flushes or
-                // invalidates should not be needed (thus __threadfence() has been removed to regain
-                // performance).
-                // Because of atomics being relaxed, however, the compiler is allowed to reorder them
-                // with respect to ordinary memory accesses (and other relaxed atomic operations).
-                // In this case, out_val seem to be reordered with the xor and subsequently, accumulation
-                // ends up being wrong.
-                // To force the compiler to stick to the order of operations, we need acquire/release fences.
-                // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
-                // invalidations.
+                // The other workgroups read y through atomics. With beta = 0 the zero above is a
+                // plain store, so release it at agent scope: that writes it back from L2 to memory
+                // before the flag is flipped. The waiters take a matching agent-scope acquire.
+                // Otherwise the atomics on y and the flag are the only communication, and workgroup
+                // scope only keeps the compiler from reordering them.
 #if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
-                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                __builtin_amdgcn_s_waitcnt(0);
+                if(beta == static_cast<T>(0))
+                {
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
+                }
+                else
+                {
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+                    __builtin_amdgcn_s_waitcnt(0);
+                }
 #endif
 
                 // Release other workgroups
@@ -1377,8 +1385,12 @@ namespace rocsparse
                     while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
                         ;
 
-                    // __builtin_amdgcn_s_waitcnt(0);
-                    // __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+                    // With beta = 0 the first workgroup published a plain store to y, so take an
+                    // agent-scope acquire before the atomics on y.
+                    if(beta == static_cast<T>(0))
+                    {
+                        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+                    }
 
                     // After you've passed the barrier, update your local flag to make sure that
                     // the next time through, you know what to wait on.
