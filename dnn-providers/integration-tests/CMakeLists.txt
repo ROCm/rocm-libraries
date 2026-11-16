@@ -299,6 +299,7 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/input-init/FillInputs.cpp
     src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
+    src/harness/input-init/PhiloxBackward.cpp
 )
 
 # Golden-data validation: validates our checked-in .bin data against our own
@@ -331,6 +332,7 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/input-init/FillInputs.cpp
     src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
+    src/harness/input-init/PhiloxBackward.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     src/harness/reference-validation/GoldenDataPlan.cpp
     src/harness/reference-validation/GoldenDataRegistration.cpp

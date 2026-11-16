@@ -647,8 +647,8 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
         bool applicable = false;
         measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
             executor = &_deps.referenceExecutors->get(type);
-            applicable
-                = executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size());
+            const auto [graphData, graphSize] = referenceGraph();
+            applicable = executor->isApplicable(graphData, graphSize);
         });
         if(applicable)
         {
@@ -1200,7 +1200,55 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
 
     _inputs = std::move(inputs);
+    if(const auto why = prepareReferencePhiloxMask())
+    {
+        return unverifiable(*why);
+    }
     return checkRaggedLayouts(lengthUids);
+}
+
+IntegrationBundleVerificationHarness::PhiloxReference*
+    IntegrationBundleVerificationHarness::philoxReference() const
+{
+    if(!_philoxResolved)
+    {
+        _philoxResolved = true;
+        std::string unsupported;
+        const auto& graph = _bundle->graphWrapper().getGraph();
+        if(const auto dropout = findPhiloxBackwardDropout(graph, unsupported); dropout.has_value())
+        {
+            _philoxReference = PhiloxReference{
+                *dropout, rewritePhiloxBackwardWithExplicitMask(graph, *dropout), nullptr};
+        }
+    }
+    return _philoxReference.has_value() ? &*_philoxReference : nullptr;
+}
+
+std::pair<uint8_t*, std::size_t> IntegrationBundleVerificationHarness::referenceGraph() const
+{
+    if(auto* philox = philoxReference())
+    {
+        return {philox->graph.data(), philox->graph.size()};
+    }
+    return {_bundle->graphBuffer.data(), _bundle->graphBuffer.size()};
+}
+
+std::optional<std::string> IntegrationBundleVerificationHarness::prepareReferencePhiloxMask()
+{
+    auto* philox = philoxReference();
+    if(philox == nullptr)
+    {
+        return std::nullopt;
+    }
+    uint64_t seed = 0;
+    uint64_t offset = 0;
+    if(auto why = resolvePhiloxSeedAndOffset(
+           _bundle->graphWrapper().getGraph(), philox->dropout, _inputs, seed, offset))
+    {
+        return "Philox dropout: " + *why;
+    }
+    philox->mask = makePhiloxKeepMask(philox->dropout, seed, offset);
+    return std::nullopt;
 }
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRaggedLayouts(
@@ -1532,6 +1580,13 @@ IntegrationBundleVerificationHarness::RefRunResult
             try
             {
                 variantPack = buildVariantPack(refOutputs, useDevice);
+                if(const auto* philox = philoxReference(); philox != nullptr && philox->mask)
+                {
+                    variantPack.emplace(
+                        philox->dropout.maskUid,
+                        hipdnn_test_sdk::utilities::selectVariantPackPointer(
+                            *philox->mask, useDevice, /*isRuntimePassByValue=*/false));
+                }
             }
             catch(const std::invalid_argument& e)
             {
@@ -1544,7 +1599,8 @@ IntegrationBundleVerificationHarness::RefRunResult
             return {RefStatus::HARNESS_ERROR, *harnessError};
         }
         measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
-            executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+            const auto [graphData, graphSize] = referenceGraph();
+            executor.execute(graphData, graphSize, variantPack);
         });
     }
     catch(const ReferenceCapabilityError& e)

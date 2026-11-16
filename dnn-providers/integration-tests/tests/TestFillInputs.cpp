@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -41,6 +42,8 @@
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/input-init/PhiloxBackward.hpp"
+#include "harness/input-init/PhiloxDropout.hpp"
 #include "mocks/MockReferenceExecutors.hpp"
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -1308,6 +1311,29 @@ void expectMatchesDirectForward(const GraphResult& gr, InputTensorMap& inputs, f
         dropMask.emplace(view(14));
         opts.setDropout(&*dropMask, scalarValue(inputs, 15));
     }
+    // Philox dropout: the keep mask the harness draws from the seed and offset (SEM-015) and
+    // the scale 1 / (1 - p).
+    std::vector<float> philoxMask;
+    std::optional<ShallowTensor<float>> philoxView;
+    if(a.dropout_probability().value_or(0.0f) > 0.0f && a.seed_tensor_uid().has_value())
+    {
+        int64_t seed = 0;
+        int64_t offset = 0;
+        std::memcpy(&seed, inputs.at(18)->rawHostData(), sizeof(seed));
+        std::memcpy(&offset, inputs.at(19)->rawHostData(), sizeof(offset));
+        const hipdnn_integration_tests::philox::MaskExtent extent{
+            1, kSdpaHeads, kSdpaSeqQ, kSdpaSeqKv};
+        philoxMask.resize(static_cast<size_t>(extent.elements()));
+        hipdnn_integration_tests::philox::fillKeepMask(philoxMask.data(),
+                                                       static_cast<uint64_t>(seed),
+                                                       static_cast<uint64_t>(offset),
+                                                       extent,
+                                                       *a.dropout_probability());
+        const std::vector<int64_t> maskDims = {1, kSdpaHeads, kSdpaSeqQ, kSdpaSeqKv};
+        philoxView.emplace(philoxMask.data(), maskDims, generateStrides(maskDims));
+        opts.setDropout(&*philoxView,
+                        hipdnn_integration_tests::philox::dropoutScale(*a.dropout_probability()));
+    }
     hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward<float, float, float, float>(
         q, k, v, oView, opts);
 
@@ -1665,6 +1691,119 @@ TEST(TestFillInputs, SdpaBwdDerivationAppliesTheExplicitDropoutMask)
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
 
     expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// Philox dropout (a probability, a seed and an offset): the forward runs over the keep mask the
+// harness draws from the seed and offset (SEM-015) with the scale 1 / (1 - p), so O and stats are
+// the dropout forward, where they were refused before.
+TEST(TestFillInputs, SdpaBwdDerivationDrawsThePhiloxMaskFromSeedAndOffset)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutProbability = 0.4f;
+    opts.seed = true;
+    opts.offset = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(18,
+                FillRecipe::values(std::vector<int64_t>{0x0123456789ABCDEFLL}, /*repeat=*/false));
+    recipes.set(19, FillRecipe::values(std::vector<int64_t>{77}, /*repeat=*/false));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// A different seed draws a different mask, so the derived O differs.
+TEST(TestFillInputs, SdpaBwdPhiloxDerivationFollowsTheSeed)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutProbability = 0.5f;
+    opts.seed = true;
+    opts.offset = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    const auto derivedO = [&gr](int64_t seed) {
+        InputFillRecipes recipes;
+        recipes.set(18, FillRecipe::values(std::vector<int64_t>{seed}, /*repeat=*/false));
+        recipes.set(19, FillRecipe::values(std::vector<int64_t>{0}, /*repeat=*/false));
+        auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+        const auto* o = static_cast<const float*>(inputs.at(4)->rawHostData());
+        return std::vector<float>(o, o + inputs.at(4)->elementSpace());
+    };
+    EXPECT_NE(derivedO(1), derivedO(2));
+    EXPECT_EQ(derivedO(1), derivedO(1));
+}
+
+// A Philox graph on a ragged operand is not modelled, and says so.
+TEST(TestFillInputs, SdpaBwdPhiloxOnARaggedGraphIsRefused)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutProbability = 0.4f;
+    opts.seed = true;
+    opts.offset = true;
+    opts.ragged = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    auto inputs = makeTensorsFromGraph(gr, leafUids);
+
+    const auto result = fillSdpaBwd(gr, inputs, leafUids);
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("ragged"), std::string::npos) << result.reason;
+}
+
+// The explicit-mask form of a Philox backward graph, as the references run it: the probability,
+// seed and offset are gone, and a dropout mask, a scale 1 / (1 - p) and a scale inverse 1 - p
+// (cuDNN's custom dropout, which makes the gradient exact) are in.
+TEST(TestFillInputs, SdpaBwdPhiloxGraphRewritesToTheExplicitMaskForm)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutProbability = 0.25f;
+    opts.seed = true;
+    opts.offset = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+
+    std::string unsupported;
+    const auto dropout
+        = hipdnn_integration_tests::findPhiloxBackwardDropout(*gr.graph, unsupported);
+    ASSERT_TRUE(dropout.has_value()) << unsupported;
+    EXPECT_EQ(dropout->seedUid, 18);
+    EXPECT_EQ(dropout->offsetUid, 19);
+    EXPECT_EQ(dropout->extent.batch, 1);
+    EXPECT_EQ(dropout->extent.heads, kSdpaHeads);
+    EXPECT_EQ(dropout->extent.seqQ, kSdpaSeqQ);
+    EXPECT_EQ(dropout->extent.seqKv, kSdpaSeqKv);
+
+    const auto buffer
+        = hipdnn_integration_tests::rewritePhiloxBackwardWithExplicitMask(*gr.graph, *dropout);
+    const auto& rewritten = *GetGraph(buffer.data());
+    const auto& a = *rewritten.nodes()->Get(0)->attributes_as_SdpaBackwardAttributes();
+    EXPECT_FALSE(a.dropout_probability().has_value());
+    EXPECT_FALSE(a.seed_tensor_uid().has_value());
+    EXPECT_FALSE(a.offset_tensor_uid().has_value());
+    EXPECT_EQ(a.dropout_mask_tensor_uid().value(), dropout->maskUid);
+    EXPECT_EQ(a.dropout_scale_tensor_uid().value(), dropout->scaleUid);
+    EXPECT_EQ(a.dropout_scale_inv_tensor_uid().value(), dropout->scaleInvUid);
+
+    std::map<int64_t, const TensorAttributes*> byUid;
+    for(const auto* tensor : *rewritten.tensors())
+    {
+        byUid[tensor->uid()] = tensor;
+    }
+    EXPECT_EQ(byUid.count(18), 0U);
+    EXPECT_EQ(byUid.count(19), 0U);
+    ASSERT_EQ(byUid.count(dropout->maskUid), 1U);
+    EXPECT_EQ(byUid.at(dropout->maskUid)->data_type(), DataType::FLOAT);
+    EXPECT_EQ((std::vector<int64_t>(byUid.at(dropout->maskUid)->dims()->begin(),
+                                    byUid.at(dropout->maskUid)->dims()->end())),
+              (std::vector<int64_t>{1, kSdpaHeads, kSdpaSeqQ, kSdpaSeqKv}));
+    ASSERT_EQ(byUid.count(dropout->scaleUid), 1U);
+    EXPECT_FLOAT_EQ(byUid.at(dropout->scaleUid)->value_as_Float32Value()->value(), 1.0f / 0.75f);
+    EXPECT_FLOAT_EQ(byUid.at(dropout->scaleInvUid)->value_as_Float32Value()->value(), 0.75f);
+
+    // Explicit masks, probability 0 and plain graphs are not Philox graphs.
+    SdpaBwdOptions plain;
+    const auto grPlain = buildSdpaBwdGraph(plain);
+    EXPECT_FALSE(hipdnn_integration_tests::findPhiloxBackwardDropout(*grPlain.graph, unsupported)
+                     .has_value());
 }
 
 // Ragged Q, K, V and O take their offsets into the forward graph. One batch laid out
