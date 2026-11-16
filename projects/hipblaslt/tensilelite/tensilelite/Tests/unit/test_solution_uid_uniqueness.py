@@ -13,13 +13,14 @@ from types import ModuleType
 from typing import Dict, List, Optional, Tuple
 
 import pytest
+import yaml
 
 
 def _load_solution_id_gen() -> ModuleType:
     """Load SolutionIdGen without importing ``tensilelite.Common``.
 
-    This keeps the test runnable on a bare Python with only pytest, without
-    tensilelite or rocisa installed. ``from tensilelite.Common.SolutionIdGen
+    This keeps the test runnable on a Python with only pytest and PyYAML,
+    without tensilelite or rocisa installed. ``from tensilelite.Common.SolutionIdGen
     import ...`` would execute ``tensilelite.Common.__init__``, which imports rocisa.
 
     Args:
@@ -100,30 +101,27 @@ def test_collect_yaml_files_includes_all_yaml_names(tmp_path: Path) -> None:
 _SOLUTION_KEYS = ("SolutionIndex", "SolutionUID")
 
 
-def _strip_comment(line: str) -> str:
-    """Remove an unquoted YAML comment from one line.
+def _yaml_value(text: str) -> str:
+    """Return the value PyYAML loads from the text after a key's colon.
 
-    A ``#`` starts a comment at the start of the line or after whitespace,
-    outside single or double quotes.
+    Text without a quote or ``#`` is returned stripped, which is what PyYAML
+    loads for it. Other text is parsed by PyYAML.
 
     Args:
-        line: One line of a logic YAML file.
+        text: Text after the colon on one line.
 
     Returns:
-        The line without its comment.
+        The loaded value as text.
+
+    Raises:
+        ValueError: If PyYAML cannot parse the text.
     """
-    if "#" not in line:
-        return line
-    quote = ""
-    for position, character in enumerate(line):
-        if quote:
-            if character == quote:
-                quote = ""
-        elif character in "'\"":
-            quote = character
-        elif character == "#" and (position == 0 or line[position - 1] in " \t"):
-            return line[:position]
-    return line
+    if "#" not in text and '"' not in text and "'" not in text:
+        return text.strip()
+    try:
+        return str(yaml.safe_load(text))
+    except yaml.YAMLError as error:
+        raise ValueError(f"unreadable YAML value {text.strip()!r}") from error
 
 
 class _SolutionItem:
@@ -174,10 +172,10 @@ class _SolutionItem:
 def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
     """Extract SolutionUID entries from one logic YAML.
 
-    The file is read once, line by line, without a YAML parser. Unquoted
-    comments are removed. ``SolutionIndex`` and ``SolutionUID`` are collected
-    per sequence item, in either order, from block keys at the item's key
-    column. This covers dict-format files, where solutions are top-level items
+    The file is read once, line by line. Comment lines are skipped, and a
+    value is read as PyYAML loads it. ``SolutionIndex`` and ``SolutionUID``
+    are collected per sequence item, in either order, from block keys at the
+    item's key column. This covers dict-format files, where solutions are top-level items
     under ``Solutions:``, and list-format files, where solutions are nested one
     level deeper. Logic files do not write solutions as flow mappings.
 
@@ -190,9 +188,9 @@ def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
         ``missing_count`` counts solutions without the field.
 
     Raises:
-        ValueError: If a UID is malformed, zero, or out of range, an index is
-            not an integer, a solution repeats either key, or a UID has no
-            ``SolutionIndex`` in the same item.
+        ValueError: If a value is not valid YAML, a UID is malformed, zero, or
+            out of range, an index is not an integer, a solution repeats either
+            key, or a UID has no ``SolutionIndex`` in the same item.
     """
     entries: List[Tuple[int, str, int]] = []
     missing = 0
@@ -246,11 +244,7 @@ def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
                 and not content.startswith("Solution")
             ):
                 continue
-            if "#" in line:
-                line = _strip_comment(line)
-                content = line.lstrip(" ")
-                column = len(line) - len(content)
-            if not content or content.isspace():
+            if not content or content.isspace() or content.startswith("#"):
                 continue
             if column < top_column:
                 while stack and stack[-1].key_column > column:
@@ -279,7 +273,7 @@ def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
             key, _, value = content.partition(":")
             key = key.rstrip()
             if key in _SOLUTION_KEYS:
-                stack[-1].record(key, value.strip(), yaml_path)
+                stack[-1].record(key, _yaml_value(value), yaml_path)
 
     while stack:
         close(stack.pop())
@@ -307,7 +301,8 @@ def test_scan_handles_reordered_keys_and_comments(tmp_path: Path) -> None:
         "  SolutionIndex: 0\n"
         "  Nested:\n"
         "    SolutionUID: 0u5\n"
-        "- SolutionIndex: 1\n"
+        "# between items\n"
+        "- SolutionIndex: 1  # index comment\n"
         "  # SolutionUID: 0u3E\n"
         "  SolutionUID: 0u3F\n"
         "- SolutionIndex: 2\n"
@@ -397,6 +392,59 @@ def test_scan_rejects_invalid_solutions(tmp_path: Path, solutions: str) -> None:
 
     with pytest.raises(ValueError):
         _scan_yaml_file(logic)
+
+
+@pytest.mark.parametrize(
+    "uid_text",
+    [
+        "0u123",
+        "0u123 # comment",
+        "0u123# comment",
+        '"0u123" # comment',
+        '"0u123 # comment"',
+        "0U123 # comment",
+        '"0u123',
+    ],
+    ids=[
+        "plain",
+        "comment",
+        "glued-comment",
+        "quoted",
+        "hash-in-quotes",
+        "uppercase-prefix",
+        "unterminated-quote",
+    ],
+)
+def test_scan_reads_the_uid_pyyaml_loads(tmp_path: Path, uid_text: str) -> None:
+    """Verify the scan accepts a UID exactly when a full PyYAML load does.
+
+    TensileCreateLibrary loads logic with ``LibraryIO.readYAML``, a PyYAML
+    safe loader, and decodes the value it gets.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+        uid_text: Text written after ``SolutionUID:``.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the scan and the full load disagree.
+    """
+    logic = tmp_path / "logic.yaml"
+    logic.write_text(
+        "Solutions:\n- SolutionIndex: 0\n  SolutionUID: " + uid_text + "\n",
+        encoding="utf-8",
+    )
+    try:
+        loaded = yaml.safe_load(logic.read_text(encoding="utf-8"))
+        expected = decode_solution_uid(str(loaded["Solutions"][0]["SolutionUID"]))
+    except (yaml.YAMLError, ValueError):
+        with pytest.raises(ValueError):
+            _scan_yaml_file(logic)
+        return
+
+    assert _scan_yaml_file(logic) == ([(expected, str(logic), 0)], 0)
 
 
 def collect_solution_uids(
