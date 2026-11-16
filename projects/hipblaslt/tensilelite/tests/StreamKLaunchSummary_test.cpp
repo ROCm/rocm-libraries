@@ -252,6 +252,75 @@ TEST(StreamKLaunchSummaryTest, UniformSummationStaggerRespectsPersistentCapabili
     }
 }
 
+// One solution serves every grid and device, so its auto WGM and StaggerU caches
+// must return what an empty cache would compute for each grid, hardware model and
+// WGM, not the value cached first.
+TEST(StreamKLaunchSummaryTest, AutoMappingCachesKeyOnGridHardwareAndWgm)
+{
+    auto initDynamicMapping = [](ContractionSolution& solution) {
+        initStreamKSolution(solution, 3);
+        solution.sizeMapping.workGroupMapping    = 0;
+        solution.sizeMapping.workGroupMappingXCC = -1;
+    };
+
+    AnalyticalEnv env;
+
+    auto fewerCuHw = env.hw;
+    fewerCuHw.N_CU /= 4;
+    fewerCuHw.CU_per_L2 /= 4;
+    auto fewerCuDevice = makeHipDeviceWithAnalytical(fewerCuHw);
+
+    auto smallL2Hw        = env.hw;
+    smallL2Hw.L2_capacity = 1 << 16;
+    auto smallL2Device    = makeHipDeviceWithAnalytical(smallL2Hw);
+
+    // 64 tiles of 128x128 and 64 K iterations.
+    auto problem = makeGemmProblem(1024, 1024, 4096);
+
+    struct Case
+    {
+        hip::HipAMDGPU const* device;
+        uint32_t              grid;
+        int32_t               wgm;
+    };
+    // Each case differs from the first in one input.
+    const Case wgmCases[] = {{&env.device, 64, 0}, {&env.device, 256, 0}, {&fewerCuDevice, 64, 0}};
+    const Case staggerCases[]
+        = {{&env.device, 64, 1}, {&env.device, 64, 2}, {&smallL2Device, 64, 1}};
+
+    ContractionSolution shared;
+    initDynamicMapping(shared);
+    std::tuple<int32_t, size_t, size_t, size_t> firstWgm;
+    for(size_t i = 0; i < std::size(wgmCases); ++i)
+    {
+        auto const& c = wgmCases[i];
+        SCOPED_TRACE(::testing::Message() << "WGM case " << i);
+        ContractionSolution empty;
+        initDynamicMapping(empty);
+        auto const expected = empty.calculateAutoWGM(problem, c.device, c.grid);
+        if(i == 0)
+            firstWgm = expected;
+        else
+            ASSERT_NE(expected, firstWgm) << "case does not change the prediction";
+        EXPECT_EQ(shared.calculateAutoWGM(problem, c.device, c.grid), expected);
+    }
+
+    std::tuple<size_t, size_t, size_t> firstStagger;
+    for(size_t i = 0; i < std::size(staggerCases); ++i)
+    {
+        auto const& c = staggerCases[i];
+        SCOPED_TRACE(::testing::Message() << "StaggerU case " << i);
+        ContractionSolution empty;
+        initDynamicMapping(empty);
+        auto const expected = empty.calculateAutoStaggerU(problem, c.device, c.grid, c.wgm);
+        if(i == 0)
+            firstStagger = expected;
+        else
+            ASSERT_NE(expected, firstStagger) << "case does not change the prediction";
+        EXPECT_EQ(shared.calculateAutoStaggerU(problem, c.device, c.grid, c.wgm), expected);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // No-drift contract: the snapshot fields equal what the individual production
 // helpers report, so the summary reflects the REAL decisions (not a re-derivation

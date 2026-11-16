@@ -10,9 +10,11 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include <Tensile/Comparison.hpp>
 #include <Tensile/Debug.hpp>
 
 namespace TensileLite
@@ -190,12 +192,23 @@ namespace TensileLite
     /**
      * Cache whose entries are never replaced or removed. find() takes no lock;
      * add() serializes writers on a mutex and keeps the first value stored for
-     * a key. With TENSILE_DB lookup efficiency on, find() also counts lookups
-     * and hits, printed on destruction.
+     * a key. The key is the tuple of all Keys; find() looks it up without
+     * copying them. With TENSILE_DB lookup efficiency on, find() also counts
+     * lookups and hits, printed on destruction.
      */
-    template <typename Value, typename Key>
+    template <typename Value, typename... Keys>
     class InsertOnceCache
     {
+        // Hashes a tuple of keys and a tuple of references to them alike.
+        struct KeyHash
+        {
+            template <typename... Ts>
+            size_t operator()(std::tuple<Ts...> const& keys) const
+            {
+                return std::apply([](auto const&... k) { return hash_combine(k...); }, keys);
+            }
+        };
+
     public:
         explicit InsertOnceCache(Value const& nullValue)
             : m_nullValue(nullValue)
@@ -211,9 +224,9 @@ namespace TensileLite
         }
 
         /// The value stored for `key`, or the null value.
-        Value find(Key const& key) const
+        Value find(Keys const&... keys) const
         {
-            Value const* found = m_map.find(key);
+            Value const* found = m_map.find(std::tie(keys...));
             Value        rv    = found ? *found : m_nullValue;
 
             if(m_lookupEfficiency)
@@ -226,14 +239,14 @@ namespace TensileLite
             return rv;
         }
 
-        void add(Value const& value, Key const& key)
+        void add(Value const& value, Keys const&... keys)
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            m_map.insert(key, value);
+            m_map.insert(std::tie(keys...), value);
         }
 
     private:
-        ReadMostlyMap<Key, Value>    m_map;
+        ReadMostlyMap<std::tuple<Keys...>, Value, KeyHash, std::equal_to<>> m_map;
         std::mutex                   m_mutex;
         Value                        m_nullValue;
         bool                         m_lookupEfficiency;

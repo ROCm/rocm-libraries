@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -991,6 +992,20 @@ namespace TensileLite
         uniformSummationOrderSelectionTallyReport(size_t& examined, size_t& refused);
 
     /**
+     * Every field of an origami::hardware_t, doubles by their bits. Keys the auto
+     * WGM and StaggerU caches, whose values depend on the analytical model.
+     */
+    struct AnalyticalModelKey
+    {
+        std::array<uint64_t, 17> fields;
+
+        bool operator==(AnalyticalModelKey const& rhs) const
+        {
+            return fields == rhs.fields;
+        }
+    };
+
+    /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
      *
@@ -1003,9 +1018,17 @@ namespace TensileLite
         using Problem             = ContractionProblemGemm;
         using Inputs              = ContractionInputs;
         using GroupedInputs       = ContractionGroupedInputs;
-        using WGMParamsCache
-            = InsertOnceCache<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
-        using StaggerUParamsCache = InsertOnceCache<std::tuple<size_t, size_t, size_t>, Problem>;
+        // Keyed on every input of the cached prediction: problem, skgrid, hardware model
+        // and, for StaggerU, the WGM.
+        using WGMParamsCache      = InsertOnceCache<std::tuple<int32_t, size_t, size_t, size_t>,
+                                               Problem,
+                                               uint32_t,
+                                               AnalyticalModelKey>;
+        using StaggerUParamsCache = InsertOnceCache<std::tuple<size_t, size_t, size_t>,
+                                                    Problem,
+                                                    uint32_t,
+                                                    AnalyticalModelKey,
+                                                    int32_t>;
 
         /**
          * Indicate a solution's matching type
@@ -1718,3 +1741,15 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                      stream,
                                                     GL2PrefetchSAddrCheckPacket const& st);
 } // namespace TensileLite
+
+namespace std
+{
+    template <>
+    struct hash<TensileLite::AnalyticalModelKey>
+    {
+        size_t operator()(TensileLite::AnalyticalModelKey const& key) const
+        {
+            return TensileLite::hash_combine_iter(key.fields.begin(), key.fields.end());
+        }
+    };
+} // namespace std

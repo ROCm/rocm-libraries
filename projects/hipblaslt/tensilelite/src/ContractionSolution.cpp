@@ -82,6 +82,38 @@ namespace TensileLite
                                         - reinterpret_cast<intptr_t>(inputs.d));
         }
 
+        uint64_t doubleBits(double value)
+        {
+            uint64_t bits;
+            std::memcpy(&bits, &value, sizeof(bits));
+            return bits;
+        }
+
+        // Binds every hardware_t member, so adding or removing one fails to compile.
+        AnalyticalModelKey analyticalModelKey(origami::hardware_t const& hw)
+        {
+            auto const& [arch, cu, lds, rf, m1, m2, m3, l2, l1, cuPerL2, clk, mi, bw, xcd, pci]
+                = hw;
+            auto const& [bw0, bw1, bw2] = bw;
+            return {{static_cast<uint64_t>(arch),
+                     cu,
+                     lds,
+                     rf,
+                     doubleBits(m1),
+                     doubleBits(m2),
+                     doubleBits(m3),
+                     l2,
+                     l1,
+                     cuPerL2,
+                     doubleBits(clk),
+                     mi,
+                     doubleBits(bw0),
+                     doubleBits(bw1),
+                     doubleBits(bw2),
+                     xcd,
+                     pci ? static_cast<uint32_t>(*pci) : UINT64_MAX}};
+        }
+
         size_t checkedMultiply(size_t a, size_t b)
         {
             if(b != 0 && a > std::numeric_limits<size_t>::max() / b)
@@ -2120,8 +2152,9 @@ namespace TensileLite
            && sizeMapping.workGroupMappingXCC == -1)
         {
             auto sizes = problem.problemSizes();
+            auto model = analyticalModelKey(*hipAMDGPU->analyticalHardware);
             // Try to find cached WGM, WGMXCC, WGMXCCCHUNK, WGMXCCSPLITK
-            auto cachedWGMParams = wgmParamsCache.find(problem);
+            auto cachedWGMParams = wgmParamsCache.find(problem, skgrid, model);
 
             if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX))
             {
@@ -2169,8 +2202,11 @@ namespace TensileLite
 
                     // Add to cache only if dynamically calculated.
                     wgmParamsCache.add(
-                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK),
-                        problem);
+                        std::make_tuple(
+                            defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK),
+                        problem,
+                        skgrid,
+                        model);
                     if(Debug::Instance().printPropertyEvaluation())
                         std::cout << "AutoWGM - WGM: " << defaultWGM
                                   << ", WGMXCC: " << defaultWGMXCC
@@ -2264,8 +2300,9 @@ namespace TensileLite
            && sizeMapping.workGroupMappingXCC == -1)
         {
             auto sizes = problem.problemSizes();
+            auto model = analyticalModelKey(*hipAMDGPU->analyticalHardware);
             // Try to find cached StaggerUMapping, StaggerU and StaggerUStrideShift
-            auto cachedStaggerUParams = staggerUParamsCache.find(problem);
+            auto cachedStaggerUParams = staggerUParamsCache.find(problem, skgrid, model, autoWGM);
 
             if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
             {
@@ -2302,7 +2339,10 @@ namespace TensileLite
                     staggerUParamsCache.add(std::make_tuple(defaultStaggerUMapping,
                                                             defaultStaggerU,
                                                             defaultStaggerUStrideShift),
-                                            problem);
+                                            problem,
+                                            skgrid,
+                                            model,
+                                            autoWGM);
                     if(Debug::Instance().printPropertyEvaluation())
                         std::cout << "AutoStaggerU - Mapping: " << defaultStaggerUMapping
                                   << ", StaggerU: " << defaultStaggerU

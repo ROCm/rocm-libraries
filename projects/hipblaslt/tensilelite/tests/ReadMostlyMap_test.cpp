@@ -220,3 +220,12 @@ TEST(InsertOnceCacheTest, KeepsTheFirstValueAndReportsMisses)
     EXPECT_EQ(cache.find(3), std::make_tuple(1, 2));
     EXPECT_EQ(cache.find(4), std::make_tuple(-1, -1));
 }
+
+TEST(InsertOnceCacheTest, MatchesEveryKey)
+{
+    InsertOnceCache<int, int, int> cache(-1);
+    cache.add(1, 3, 7);
+    EXPECT_EQ(cache.find(3, 7), 1);
+    EXPECT_EQ(cache.find(3, 8), -1);
+    EXPECT_EQ(cache.find(4, 7), -1);
+}
