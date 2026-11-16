@@ -44,6 +44,8 @@ STREAMK_CONFIGS = (
     "streamk_config.json",
     "streamk_config_gfx1250.json",
     "streamk_tdm_config_gfx1250.json",
+    "streamk_narrow_m_config_gfx950.json",
+    "streamk_narrow_n_config_gfx950.json",
 )
 TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_v3")
 
@@ -120,6 +122,26 @@ class TestExpandBatchedStreamK(unittest.TestCase):
             self.assertEqual({c.persistent for c in cfgs}, {False, True})
             self.assertTrue(all(c.pad_m and c.pad_n and c.pad_k for c in cfgs))
             self.assertTrue(all(c.name.endswith("_batched") for c in cfgs))
+
+    def test_gfx950_narrow_blocks(self):
+        # A 32-wide M or N block with the 16x16x32 warp tile (streamk_config.json: 64+).
+        for half, narrow in (
+            ("m", lambda c: c.tile_m == 32),
+            ("n", lambda c: c.tile_n == 32 and c.tile_m >= 64),
+        ):
+            with self.subTest(half=half):
+                cfgs = bu.expand_sweep(
+                    _cfg(f"streamk_narrow_{half}_config_gfx950.json"), "gfx950", "bf16", "rcr"
+                )
+                self.assertTrue(cfgs)
+                self.assertEqual([c.name for c in cfgs if not narrow(c)], [])
+                self.assertEqual({c.variant for c in cfgs}, {"stream_k"})
+                self.assertEqual(
+                    {(c.warp_tile_m, c.warp_tile_n, c.warp_tile_k) for c in cfgs}, {(16, 16, 32)}
+                )
+                self.assertEqual({c.reduction_strategy for c in cfgs}, {"linear", "tree"})
+                self.assertEqual({c.persistent for c in cfgs}, {False, True})
+                self.assertTrue(all(c.pad_m and c.pad_n and c.pad_k for c in cfgs))
 
     def test_reduction_override(self):
         full = bu.expand_sweep(_cfg("streamk_config.json"), "gfx950", "bf16", "rcr")
