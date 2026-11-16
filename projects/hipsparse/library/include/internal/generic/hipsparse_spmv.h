@@ -277,6 +277,13 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  Only the \ref hipsparseSpMV_bufferSize and the \ref hipsparseSpMV routines support execution in a hipGraph context.
 *  The \ref hipsparseSpMV_preprocess stage does not support hipGraph.
 *
+*  \note
+*  With the rocSPARSE backend, the first \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or
+*  \p hipsparseSpMV call after \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, or
+*  \ref hipsparseCooSetPointers releases the state kept for the previous arrays, which synchronizes the device.
+*  While the stream of \p handle is being captured, that call returns \ref HIPSPARSE_STATUS_INVALID_VALUE and keeps
+*  that state; make it outside the capture.
+*
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
 *  @param[in]

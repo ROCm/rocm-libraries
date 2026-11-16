@@ -728,15 +728,17 @@ protected:
     std::vector<Entry> m_entries;
 
     // Set by the *SetPointers routines, which must not free device memory; the
-    // next SpMV routine destroys the entries on its stream.
+    // next SpMV routine destroys the entries.
     bool m_entries_stale{};
 
 public:
     // The arrays of the sparse matrix were replaced: no entry may be reused.
     void discard_entries();
 
-    // Destroy the entries after discard_entries, freeing the compute buffers
-    // on stream.
+    // Destroy the entries after discard_entries. The compute buffers are freed
+    // on stream; destroying the rocSPARSE SpMV descriptors synchronizes the
+    // device. Returns HIPSPARSE_STATUS_INVALID_VALUE, and keeps the entries,
+    // when there are entries to destroy and stream is being captured.
     hipsparseStatus_t release_discarded_entries(hipStream_t stream);
 
     // Look up an entry matching (operation, alg, scalar_datatype,

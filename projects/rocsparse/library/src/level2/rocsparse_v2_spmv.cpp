@@ -113,7 +113,7 @@ protected:
 
     // pattern_stamp of the matrix descriptor that the csrmv, cscmv and bsrmv
     // info above were computed for.
-    uint64_t m_analysed_stamp{};
+    uint64_t m_analyzed_stamp{};
 
 public:
     bool has_analysis() const
@@ -122,13 +122,13 @@ public:
                || this->m_bsrmv_info != nullptr;
     }
 
-    uint64_t get_analysed_stamp() const
+    uint64_t get_analyzed_stamp() const
     {
-        return this->m_analysed_stamp;
+        return this->m_analyzed_stamp;
     }
-    void set_analysed_stamp(uint64_t value)
+    void set_analyzed_stamp(uint64_t value)
     {
-        this->m_analysed_stamp = value;
+        this->m_analyzed_stamp = value;
     }
 
     rocsparse_cscmv_info get_cscmv_info()
@@ -660,7 +660,7 @@ namespace rocsparse
         {
         case rocsparse_v2_spmv_stage_analysis:
         {
-            spmv_descr->set_analysed_stamp(mat->pattern_stamp);
+            spmv_descr->set_analyzed_stamp(mat->pattern_stamp);
 
             switch(format)
             {
@@ -680,7 +680,8 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached coomv info object, instead of relying
                 // on the descriptor-wide mat->analysed flag.
-                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
+                RETURN_IF_ROCSPARSE_ERROR(
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
                 rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
                 if(coomv_info == nullptr)
                 {
@@ -802,8 +803,8 @@ namespace rocsparse
         case rocsparse_v2_spmv_stage_compute:
         {
             // rocsparse_*_set_pointers replaced the arrays that the analysis describes;
-            // a new rocsparse_spmv_descr has to be analysed for them.
-            if(spmv_descr->has_analysis() && spmv_descr->get_analysed_stamp() != mat->pattern_stamp)
+            // a new rocsparse_spmv_descr has to be analyzed for them.
+            if(spmv_descr->has_analysis() && spmv_descr->get_analyzed_stamp() != mat->pattern_stamp)
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
             }

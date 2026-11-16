@@ -425,7 +425,8 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached coomv info object, instead of relying
                 // on the descriptor-wide mat->analysed flag.
-                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
+                RETURN_IF_ROCSPARSE_ERROR(
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
                 rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
                 if(coomv_info == nullptr)
                 {
@@ -539,7 +540,8 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
-                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
+                RETURN_IF_ROCSPARSE_ERROR(
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
                 rocsparse_bsrmv_info bsrmv_info = mat->info->get_bsrmv_info();
                 if(bsrmv_info == nullptr)
                 {
@@ -619,7 +621,8 @@ namespace rocsparse
                 // Run the analysis only if it has not been performed yet,
                 // detected via the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
-                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
+                RETURN_IF_ROCSPARSE_ERROR(
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
                 if(csrmv_info == nullptr)
                 {
@@ -703,7 +706,8 @@ namespace rocsparse
                 // detected via the cached info object (CSC reuses the csrmv_info
                 // slot), instead of relying on the descriptor-wide mat->analysed
                 // flag.
-                mat->info->clear_spmv_info_if_stale(mat->pattern_stamp);
+                RETURN_IF_ROCSPARSE_ERROR(
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
                 if(csrmv_info == nullptr)
                 {

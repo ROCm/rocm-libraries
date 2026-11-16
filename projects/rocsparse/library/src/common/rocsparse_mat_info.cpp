@@ -350,13 +350,33 @@ bool _rocsparse_mat_info::is_spmv_info_current(uint64_t pattern_stamp) const
     return this->m_spmv_stamp == pattern_stamp;
 }
 
-void _rocsparse_mat_info::clear_spmv_info_if_stale(uint64_t pattern_stamp)
+rocsparse_status _rocsparse_mat_info::clear_spmv_info_if_stale(hipStream_t stream,
+                                                               uint64_t    pattern_stamp)
 {
-    if(this->m_spmv_stamp != pattern_stamp)
+    if(this->m_spmv_stamp == pattern_stamp)
     {
-        this->clear_spmv_info();
-        this->m_spmv_stamp = pattern_stamp;
+        return rocsparse_status_success;
     }
+
+    // Freeing the csrmv info synchronizes the device, which is illegal while the
+    // stream is being captured. The stale info is kept, so that a call outside
+    // the capture can still free it.
+    if(this->csrmv_info != nullptr || this->bsrmv_info != nullptr)
+    {
+        hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+        RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
+        if(capture_status != hipStreamCaptureStatusNone)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_value,
+                "the SpMV analysis of the arrays replaced by rocsparse_*_set_pointers cannot be "
+                "freed while the stream is being captured");
+        }
+    }
+
+    this->clear_spmv_info();
+    this->m_spmv_stamp = pattern_stamp;
+    return rocsparse_status_success;
 }
 
 void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
