@@ -94,6 +94,37 @@ def test_sweep_sets_the_size_arguments_its_test_reads(sweep):
             assert not missing, f"{sweep}: testing_{func}.hpp reads arg.{sorted(missing)} but the sweep does not set it"
 
 
+def test_flush_yaml_injection(tmp_path):
+    src = tmp_path / 'axpy.yaml'
+    src.write_text('Tests:\n  - name: axpy_bench\n    function: axpy\n  - name: other\n    function: dot\n')
+    out = benchmark.bench_yaml_for_run(str(src), 1048576)
+    data = yaml.safe_load(open(out).read())
+    assert out.endswith('.flush.yaml')
+    assert benchmark.bench_yaml_for_run(str(src), 0) == str(src)
+    assert [t['flush_memory_size'] for t in data['Tests']] == [1048576, 1048576]
+
+
+def test_flush_yaml_injection_matches_sweep_files(tmp_path):
+    for level, func in (('blas1', 'axpy'), ('blas2', 'gbmv'), ('blas3', 'gemm')):
+        src = os.path.join(MULTIPLOT_DIR, level, func + '.yaml')
+        dst = tmp_path / (func + '.yaml')
+        shutil.copy(src, dst)
+        out = benchmark.bench_yaml_for_run(str(dst), 4096)
+        text = open(out).read()
+        tests = text.count('- name:')
+        assert tests > 0 and text.count('flush_memory_size: 4096') == tests
+
+
+def test_large_sweeps_include_the_shared_definitions():
+    for level in ('blas1', 'blas2'):
+        large_dir = os.path.join(MULTIPLOT_DIR, level, 'large')
+        files = sorted(f for f in os.listdir(large_dir) if f.endswith('.yaml'))
+        assert files
+        for f in files:
+            text = open(os.path.join(large_dir, f)).read()
+            assert 'include: ../../../../../clients/include/hipblas_common.yaml' in text, f
+
+
 # ---------- plot.py end to end on the checked-in gfx90a results ----------
 
 @pytest.fixture

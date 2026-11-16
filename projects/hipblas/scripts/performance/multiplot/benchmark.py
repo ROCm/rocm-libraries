@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import re
 import subprocess
 import os
 from pathlib import Path
@@ -178,10 +179,23 @@ def write_machine_spec_yaml(machine_spec_filename, device_number=0, gbps=None):
         yaml.dump(machine_spec_dict, outfile)
 
 
-def run_command(bench_command, input_yaml_file, output_csv_file):
+def bench_yaml_for_run(input_yaml_file, flush_bytes):
+    """Input YAML for hipblas-bench, with flush_memory_size injected into every test when requested."""
+    if not flush_bytes:
+        return input_yaml_file
+    text = Path(input_yaml_file).read_text()
+    injected, count = re.subn(r'^(\s*)(- name:.*)$',
+                              lambda m: '{0}{1}\n{0}  flush_memory_size: {2}'.format(m.group(1), m.group(2), flush_bytes),
+                              text, flags=re.MULTILINE)
+    if count == 0:
+        raise SystemExit("no '- name:' test entries found in {}".format(input_yaml_file))
+    # Written next to the original so relative 'include:' paths still resolve.
+    flushed = os.path.splitext(input_yaml_file)[0] + '.flush.yaml'
+    Path(flushed).write_text(injected)
+    return flushed
 
-    with open(input_yaml_file, 'r') as file:
-        problems = file.read()
+
+def run_command(bench_command, input_yaml_file, output_csv_file):
 
     output = subprocess.check_output([bench_command,
                                       '--log_function_name',
@@ -206,6 +220,8 @@ if __name__ =='__main__':
     parser.add_argument('-b', help='bench command.',  dest='bench_command',  default="../../../build/release/clients/staging/hipblas-bench")
     parser.add_argument('-d', help='GPU device number.', dest='device_number', type=int, default=0)
     parser.add_argument('--gbps', help='memory bandwidth in GB/s for theoretical max; overrides built-in per-arch value.', dest='gbps', type=float, default=None)
+    parser.add_argument('--sizes', help='sweep size set: default ({level}/*.yaml) or large ({level}/large/*.yaml).', dest='sizes', choices=['default', 'large'], default='default')
+    parser.add_argument('--flush-mb', help='pass flush_memory_size (MiB) to hipblas-bench so inputs are evicted from cache between calls.', dest='flush_mb', type=float, default=None)
 
     args = parser.parse_args()
 
@@ -229,9 +245,20 @@ if __name__ =='__main__':
 
     write_machine_spec_yaml(machine_spec_filename, args.device_number, args.gbps)
 
+    input_dir = args.level if args.sizes == 'default' else os.path.join(args.level, 'large')
+    flush_bytes = int(args.flush_mb * 1024 * 1024) if args.flush_mb else 0
+
     for function_name in args.function_names:
 
-        input_filename = os.path.join(args.level, function_name+".yaml")
+        input_filename = os.path.join(input_dir, function_name+".yaml")
+        if not os.path.isfile(input_filename):
+            print("Warning: skipping {}: no {}".format(function_name, input_filename))
+            continue
+        input_filename = bench_yaml_for_run(input_filename, flush_bytes)
         output_filename = os.path.join(args.level, args.tag, function_name+".csv")
 
-        run_command(args.bench_command, input_filename, output_filename)
+        try:
+            run_command(args.bench_command, input_filename, output_filename)
+        finally:
+            if input_filename.endswith('.flush.yaml'):
+                os.remove(input_filename)

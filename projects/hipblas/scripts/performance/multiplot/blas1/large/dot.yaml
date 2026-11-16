@@ -1,0 +1,21 @@
+---
+include: ../../../../../clients/include/hipblas_common.yaml
+
+Definitions:
+  - &sizes
+    - {N:  67108864 }
+    - {N: 100663296 }
+    - {N: 134217728 }
+    - {N: 201326592 }
+    - {N: 268435456 }
+
+Tests:
+  - name: dot_bench
+    category: bench
+    function: dot
+    precision: *single_double_precisions_complex_real
+    iters: 20
+    incx: 1
+    incy: 1
+    matrix_size: *sizes
+...

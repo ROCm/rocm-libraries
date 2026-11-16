@@ -22,6 +22,11 @@
      gfx90a, gfx942, gfx950). Pass --gbps for any other part. A gfx name can cover several products with
      different bandwidths, so prefer --gbps with the value for the exact product.
 
+     Cache residency: results whose operands fit in the GPU caches measure cache bandwidth, not memory
+     bandwidth, and can exceed the theoretical maximum. Use --sizes large (blas1/large, blas2/large; about
+     0.8 GB and up per call) or --flush-mb <MiB> (hipblas-bench rotates through copies of the operands so they
+     are evicted between calls) to measure memory bandwidth on parts with a large L2 or Infinity Cache.
+
      Functions without a theoretical maximum in machine_spec.yaml (for example the banded BLAS2 functions,
      whose arithmetic intensity depends on the band width) are skipped with a message.
 
