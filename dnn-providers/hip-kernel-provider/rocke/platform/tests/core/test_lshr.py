@@ -202,7 +202,7 @@ def test_builder_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
     with pytest.raises(TypeError) as refusal:
         build(value, value)
     assert str(refusal.value) == (
-        f"{op_name} failed - element type='f32', expected an integer type"
+        f"{op_name} failed - element type='f32', expected an integer or i1 type"
     )
 
 
@@ -238,7 +238,7 @@ def test_verifier_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
     an f32 bitwise op or shift with the builder's text."""
     messages = [diagnostic.message for diagnostic in verify(_f32_kernel(op_name))]
     assert messages == [
-        f"{op_name} failed - element type='f32', expected an integer type"
+        f"{op_name} failed - element type='f32', expected an integer or i1 type"
     ]
 
 

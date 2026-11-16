@@ -1075,10 +1075,12 @@ rocke_value_t*
     ops[1] = c;
     attr = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attr, "pred", pred);
-    char pred_buf[ROCKE_ERR_MSG_CAP];
-    const char* pred_error = rocke_i_vector_cmp_pred_error(&attr, pred_buf, sizeof pred_buf);
-    if(pred_error)
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", pred_error);
+    /* Python IRBuilder.vector_cmp: refuse what ir._vector_cmp_error refuses. */
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status
+        = rocke_i_vector_cmp_error(&attr, a->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+        return (rocke_value_t*)rocke_i_set_err(b, cmp_status, "%s", cmp_buf);
     /* result_name_hint = "vcmp_{pred}" */
     i = 0;
     hint[i++] = 'v';

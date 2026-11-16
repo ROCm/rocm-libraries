@@ -300,7 +300,10 @@ def test_vector_arithmetic_rejected_after_serialization(operation):
     elif operation in ("sum", "reduce_max"):
         getattr(b, f"vector_{operation}")(v)
     elif operation == "cmp":
-        b.vector_cmp("lt", v, v)
+        # IRBuilder refuses a compare of non-integer lanes, so the op is written
+        # past it, as hand-assembled IR can reach the parser and the lowerings;
+        # there the TF32 rule, checked before any op rule, refuses it first.
+        b._op("vector.cmp", [v, v], [VectorType(I1, 2)], attrs={"pred": "lt"})
     elif operation in ("trunc", "sext", "trunc_result"):
         if operation == "trunc_result":
             b.vector_trunc(v, TF32)

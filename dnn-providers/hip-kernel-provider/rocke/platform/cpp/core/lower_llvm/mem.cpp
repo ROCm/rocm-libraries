@@ -860,9 +860,11 @@ static void op_tile_smem_store_distributed(rocke_lower_t* L, const rocke_op_t* o
 static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     char contract_error[ROCKE_ERR_MSG_CAP];
-    if(const char* error = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+    const rocke_status_t contract_status
+        = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error);
+    if(contract_status != ROCKE_OK)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        rocke_ll_fail(L, contract_status, "%s", contract_error);
         return;
     }
     const rocke_value_t* smem = op->operands[0];
@@ -917,9 +919,11 @@ static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 static void op_tile_smem_load_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     char contract_error[ROCKE_ERR_MSG_CAP];
-    if(const char* error = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+    const rocke_status_t contract_status
+        = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error);
+    if(contract_status != ROCKE_OK)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        rocke_ll_fail(L, contract_status, "%s", contract_error);
         return;
     }
     const rocke_value_t* smem = op->operands[0];

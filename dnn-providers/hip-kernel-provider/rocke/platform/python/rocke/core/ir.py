@@ -354,53 +354,52 @@ def _smem_store_vN_op_error(op: Op) -> str | None:
     return _smem_store_lanes_error(op.name, op.operands[-1].type, width, "vec")
 
 
-def _element_type_error(
-    access: str, param: str, operand_type: Type, expected: str
-) -> str | None:
-    """The error for an ``access`` whose operand ``param`` (a scalar, a vector
-    or an LDS tile, of type ``operand_type``) does not hold ``expected``
-    elements, or None when it does. The C++ engine
-    (``rocke_i_element_type_error``) reports the same texts."""
-    elem = (
-        operand_type.elem
-        if isinstance(operand_type, (VectorType, SmemType))
-        else operand_type
-    )
-    if elem.name != expected:
-        return f"{access} failed - {param}={elem.name}, expected {expected}"
-    return None
+def _type_name_message(what: str, param: str, type_name: str, expected: str) -> str:
+    """The text of every refusal of an operand by its type: ``what`` failed
+    because its ``param`` is ``type_name`` where ``expected`` (prose) is
+    required. Each such refusal is a ``TypeError`` (``ROCKE_ERR_TYPE``); the
+    C++ engine's ``rocke_i_type_name_message`` writes the same text."""
+    return f"{what} failed - {param}={type_name!r}, expected {expected}"
 
 
 def _smem_f32_access_error(
     access: str, tile_type: Type, value_type: Type | None
 ) -> str | None:
     """The error for an f32 epilogue LDS ``access`` (``smem_load_vN_f32`` or
-    ``smem_store_vN_f32``) of an LDS tile of type ``tile_type`` that does not
-    hold f32, or, for a store, whose stored value (``value_type``; None for a
+    ``smem_store_vN_f32``) of a tile of type ``tile_type`` whose elements are
+    not f32, or, for a store, whose stored value (``value_type``; None for a
     load) is not f32; None when both are f32. Both lowerings emit, and the
-    alignment rule sizes, an f32 access whatever the operand types are. The C++
-    engine (``rocke_i_smem_f32_access_error``) reports the same texts."""
-    error = _element_type_error(access, "tile_elem", tile_type, "f32")
-    if error or value_type is None:
-        return error
-    return _element_type_error(access, "value_elem", value_type, "f32")
+    alignment rule sizes, an f32 access whatever the operand types are, so the
+    callers raise it as a ``TypeError``. The C++ engine
+    (``rocke_i_smem_f32_access_error``) reports the same texts."""
+    tile_element = tile_type.elem if isinstance(tile_type, SmemType) else tile_type
+    if tile_element.name != "f32":
+        return _type_name_message(access, "tile element type", tile_element.name, "f32")
+    if value_type is not None and element_type(value_type).name != "f32":
+        return _type_name_message(
+            access, "value element type", element_type(value_type).name, "f32"
+        )
+    return None
 
 
-def _smem_vN_f32_op_error(op: Op) -> str | None:
-    """The contract of a built ``tile.smem_load_vN_f32`` or
-    ``tile.smem_store_vN_f32`` op: :func:`_smem_f32_access_error` for its tile
-    (the first operand) and, for the store, its value (the last operand), then
-    the store's :func:`_smem_store_vN_op_error`. Serialized IR reaches the
-    verifier and the lowerings without passing the builder, so they all use
-    this rule (C++ engine: ``rocke_i_smem_vN_f32_op_error``)."""
+def _smem_vN_f32_op_error(op: Op) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of a built
+    ``tile.smem_load_vN_f32`` or ``tile.smem_store_vN_f32`` op, or None when it
+    is sound: :func:`_smem_f32_access_error` for its tile (the first operand)
+    and, for the store, its value (the last operand), a ``TypeError``; then
+    the store's :func:`_smem_store_vN_op_error`, a ``ValueError``. Serialized
+    IR reaches the verifier and the lowerings without passing the builder, so
+    they all use this rule (C++ engine: ``rocke_i_smem_vN_f32_op_error``, which
+    returns the matching status)."""
     if not op.operands:
         return None
     is_store = op.name == "tile.smem_store_vN_f32"
     value_type = op.operands[-1].type if is_store else None
     error = _smem_f32_access_error(op.name, op.operands[0].type, value_type)
-    if error or not is_store:
-        return error
-    return _smem_store_vN_op_error(op)
+    if error:
+        return TypeError(error)
+    error = _smem_store_vN_op_error(op) if is_store else None
+    return ValueError(error) if error else None
 
 
 def _is_flag_ptr(t: "Type") -> bool:
@@ -416,11 +415,19 @@ def _is_flag_ptr(t: "Type") -> bool:
 # ``arith.cmp`` predicates: the signed orderings, equality, and one unsigned
 # ordering (``ult``, which reads both operands as unsigned at their width).
 _INT_CMP_PREDICATES = ("lt", "le", "gt", "ge", "eq", "ne", "ult")
-# The operand types ``arith.cmp`` compares: integers and i1. Floats compare
-# with ``arith.fcmp``.
-_INT_CMP_OPERAND_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
+# The integer element types: the integers and ``i1``, the types LLVM's integer
+# ops (``icmp``, the bitwise ops and shifts) are defined on. ``arith.cmp`` and
+# ``vector.cmp`` compare them (floats compare with ``arith.fcmp``), and the
+# bitwise ops and shifts (_INTEGER_ELEMENT_OPS) take them. The C++ engine's
+# twin is ``rocke_i_is_integer_type_name``.
+_INTEGER_ELEMENT_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
     DTypeCategory.PREDICATE
 )
+# The operand types ``arith.fcmp`` compares: the float types the IR computes in
+# (LLVM half, bfloat, float and double). fp8 and tf32 values are carried in
+# integer storage, so an fcmp of them would compare integers. The C++ engine's
+# twin is ``k_fcmp_operand_types``.
+_FCMP_OPERAND_TYPES = ("f16", "bf16", "f32", "f64")
 # ``vector.cmp`` predicates: the signed orderings and equality, lane by lane
 # (unsigned elements compare as unsigned). It has no unsigned form.
 _VECTOR_CMP_PREDICATES = ("lt", "le", "gt", "ge", "eq", "ne")
@@ -432,22 +439,32 @@ _FCMP_PREDICATES = ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno")
 _INT_ADD_WRAPS = ("nsw", "nuw")
 
 
+def _missing_attr_message(op_name: str, key: str) -> str:
+    """The refusal of an ``op_name`` op without its required attr ``key``. The
+    verifier's required-attr check and the compare rules report it; the C++
+    engine's ``rocke_i_missing_attr_message`` writes the same text."""
+    return f"op {op_name!r} missing required attr {key!r}"
+
+
 def _string_attr_error(
     attrs: Mapping[str, Any],
     op_name: str,
     key: str,
     allowed: Sequence[str],
     not_a_string: str,
+    *,
+    required: bool = False,
 ) -> str | None:
     """The error for the string attr ``key`` of an ``op_name`` op with
-    ``attrs``, or None when it is absent or one of ``allowed``.
+    ``attrs``, or None when it is one of ``allowed``, or absent and not
+    ``required``.
 
     ``not_a_string`` is the error for a value of another kind. The C++ engine's
     ``string_attr_error`` is its twin; the width rule of the unsigned forms
     (``nuw``, ``ult``) is its callers'.
     """
     if key not in attrs:
-        return None
+        return _missing_attr_message(op_name, key) if required else None
     value = attrs[key]
     if not isinstance(value, str):
         return not_a_string
@@ -480,30 +497,51 @@ def _int_add_wrap_error(attrs: Mapping[str, Any], operand_type: str) -> str | No
     return error
 
 
-def _int_cmp_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
-    """The error for an ``arith.cmp`` op with ``attrs`` on operands of type
-    ``operand_type`` (a type name), or None when it is valid.
-
-    The ``pred`` attr is checked first: absent means ``lt``, and ``ult`` is
-    ``cmp_ult``'s form, so it takes the builder's operands, i32 or i64. Then
-    the operands must be integers or i1. The builders, the verifier and both
-    lowerings use it, and the C++ engine reports the same texts.
-    """
+def _int_cmp_pred_error(attrs: Mapping[str, Any], operand_type: str) -> str | None:
+    """The error for the ``pred`` attr in an ``arith.cmp`` op's ``attrs`` on
+    operands of type ``operand_type`` (a type name), or None when it is valid:
+    one of the ``arith.cmp`` predicates (required), and ``ult``, ``cmp_ult``'s
+    form, only on the builder's operands, i32 or i64."""
     error = _string_attr_error(
         attrs,
         "arith.cmp",
         "pred",
         _INT_CMP_PREDICATES,
         "arith.cmp: pred must be a string",
+        required=True,
     )
-    if error is not None:
-        return error
-    if attrs.get("pred") == "ult" and operand_type not in ("i32", "i64"):
+    if (
+        error is None
+        and attrs.get("pred") == "ult"
+        and operand_type not in ("i32", "i64")
+    ):
         return f"arith.cmp: pred 'ult' needs i32 or i64 operands, got {operand_type}"
-    if operand_type not in _INT_CMP_OPERAND_TYPES:
-        return (
-            f"arith.cmp failed - operand_type={operand_type}, expected an integer "
-            "or i1 type (compare floats with fcmp)"
+    return error
+
+
+def _int_cmp_error(
+    attrs: Mapping[str, Any], operand_type: Type
+) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of an ``arith.cmp`` op with
+    ``attrs`` on operands of ``operand_type``, or None when it is valid.
+
+    Its ``pred`` follows :func:`_int_cmp_pred_error` (a ``ValueError``); then
+    its operands must be integers or i1 (:data:`_INTEGER_ELEMENT_TYPES`; a
+    ``TypeError``). The builders, the verifier and both lowerings use it, and
+    the C++ engine (``rocke_i_cmp_error``) returns the matching status and
+    text.
+    """
+    error = _int_cmp_pred_error(attrs, operand_type.name)
+    if error:
+        return ValueError(error)
+    if operand_type.name not in _INTEGER_ELEMENT_TYPES:
+        return TypeError(
+            _type_name_message(
+                "arith.cmp",
+                "operand type",
+                operand_type.name,
+                "an integer or i1 type (compare floats with fcmp)",
+            )
         )
     return None
 
@@ -525,11 +563,6 @@ _INTEGER_ELEMENT_OPS = frozenset(
         "vector.lshr",
     }
 )
-# The element types those ops take: the integers and ``i1``, the types LLVM's
-# integer ops are defined on.
-_INTEGER_ELEMENT_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
-    DTypeCategory.PREDICATE
-)
 
 
 def _integer_element_error(op_name: str, operand_type: Type) -> str | None:
@@ -545,7 +578,9 @@ def _integer_element_error(op_name: str, operand_type: Type) -> str | None:
     element = element_type(operand_type)
     if element.name in _INTEGER_ELEMENT_TYPES:
         return None
-    return f"{op_name} failed - element type={element.name!r}, expected an integer type"
+    return _type_name_message(
+        op_name, "element type", element.name, "an integer or i1 type"
+    )
 
 
 def _refuse_non_integer(op_name: str, operand_type: Type) -> None:
@@ -556,31 +591,66 @@ def _refuse_non_integer(op_name: str, operand_type: Type) -> None:
         raise TypeError(error)
 
 
-def _vector_cmp_pred_error(attrs: Mapping[str, Any]) -> str | None:
-    """The error for the ``pred`` attr in a ``vector.cmp`` op's ``attrs``, or
-    None when it is absent (``lt``) or valid. The builder, the verifier and both
-    lowerings use it, and the C++ engine reports the same texts."""
-    return _string_attr_error(
+def _vector_cmp_error(
+    attrs: Mapping[str, Any], operand_type: Type
+) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of a ``vector.cmp`` op with
+    ``attrs`` on operands of ``operand_type``, or None when it is valid.
+
+    Its ``pred`` is absent (``lt``) or one of the ``vector.cmp`` predicates (a
+    ``ValueError``); then its lanes must be integers or i1, as it lowers to
+    ``icmp`` (:func:`_integer_element_error`; a ``TypeError``). The builder,
+    the verifier and both lowerings use it, and the C++ engine
+    (``rocke_i_vector_cmp_error``) returns the matching status and text. A
+    TF32 vector meets the TF32 rule first in the verifier and the lowerings,
+    which check it before any op rule.
+    """
+    error = _string_attr_error(
         attrs,
         "vector.cmp",
         "pred",
         _VECTOR_CMP_PREDICATES,
         "vector.cmp: pred must be a string",
     )
+    if error:
+        return ValueError(error)
+    error = _integer_element_error("vector.cmp", operand_type)
+    return TypeError(error) if error else None
 
 
-def _fcmp_pred_error(attrs: Mapping[str, Any]) -> str | None:
-    """The error for the ``pred`` attr in an ``arith.fcmp`` op's ``attrs``, or
-    None when it is absent or valid (the verifier requires it to be present).
-    The builder, the verifier and both lowerings use it, and the C++ engine
-    reports the same texts."""
-    return _string_attr_error(
+def _fcmp_error(
+    attrs: Mapping[str, Any], operand_type: Type
+) -> ValueError | TypeError | None:
+    """The refusal, for its caller to raise, of an ``arith.fcmp`` op with
+    ``attrs`` on operands of ``operand_type``, or None when it is valid.
+
+    Its ``pred`` is one of the ``arith.fcmp`` predicates and is required (a
+    ``ValueError``); then its operands must be one of
+    :data:`_FCMP_OPERAND_TYPES` (a ``TypeError``). The builder, the verifier
+    and both lowerings use it, and the C++ engine (``rocke_i_fcmp_error``)
+    returns the matching status and text.
+    """
+    error = _string_attr_error(
         attrs,
         "arith.fcmp",
         "pred",
         _FCMP_PREDICATES,
         "arith.fcmp: pred must be a string",
+        required=True,
     )
+    if error:
+        return ValueError(error)
+    if operand_type.name not in _FCMP_OPERAND_TYPES:
+        return TypeError(
+            _type_name_message(
+                "arith.fcmp",
+                "operand type",
+                operand_type.name,
+                f"{', '.join(_FCMP_OPERAND_TYPES[:-1])} or {_FCMP_OPERAND_TYPES[-1]} "
+                "(compare integers with cmp)",
+            )
+        )
+    return None
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
@@ -3142,11 +3212,11 @@ class IRBuilder:
 
     def _int_cmp(self, pred: str, a: Value, b: Value) -> Value:
         """An ``arith.cmp`` of ``a`` and ``b`` by ``pred``; refuses what
-        ``_int_cmp_error`` refuses (a float operand, say) with a ValueError."""
+        ``_int_cmp_error`` refuses (a float operand, say: TypeError)."""
         attrs = {"pred": pred}
-        error = _int_cmp_error(attrs, a.type.name)
-        if error:
-            raise ValueError(error)
+        refusal = _int_cmp_error(attrs, a.type)
+        if refusal:
+            raise refusal
         return self._op(
             "arith.cmp", [a, b], [I1], attrs=attrs, result_name_hint=pred
         ).result
@@ -3354,10 +3424,13 @@ class IRBuilder:
         )
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
+        """An ``arith.fcmp`` of ``a`` and ``b`` by ``pred``; refuses what
+        ``_fcmp_error`` refuses (an unknown pred: ValueError; an integer
+        operand: TypeError)."""
         attrs = {"pred": pred}
-        error = _fcmp_pred_error(attrs)
-        if error:
-            raise ValueError(error)
+        refusal = _fcmp_error(attrs, a.type)
+        if refusal:
+            raise refusal
         return self._op(
             "arith.fcmp", [a, b], [I1], attrs=attrs, result_name_hint="fcmp"
         ).result
@@ -3953,8 +4026,12 @@ class IRBuilder:
         _refuse_non_integer("arith.lshr", a.type)
         if b_v.type != a.type:
             raise TypeError(
-                f"arith.lshr failed - shift amount type={b_v.type.name!r}, "
-                f"expected the shifted value's type {a.type.name!r}"
+                _type_name_message(
+                    "arith.lshr",
+                    "shift amount type",
+                    b_v.type.name,
+                    f"the shifted value's type {a.type.name!r}",
+                )
             )
         return self._op(
             "arith.lshr", [a, b_v], [a.type], result_name_hint="lshr"
@@ -4626,9 +4703,9 @@ class IRBuilder:
         if not isinstance(a.type, VectorType) or a.type != b.type:
             raise ValueError("vector_cmp expects matching vector operands")
         attrs = {"pred": pred}
-        error = _vector_cmp_pred_error(attrs)
-        if error:
-            raise ValueError(error)
+        refusal = _vector_cmp_error(attrs, a.type)
+        if refusal:
+            raise refusal
         return self._op(
             "vector.cmp",
             [a, b],
@@ -4669,14 +4746,16 @@ class IRBuilder:
     ) -> None:
         """Store ``value``, which holds f16, whole at ``indices`` of ``smem``.
 
-        A value of any other element type is refused with ValueError: the op
+        A value of any other element type is refused with TypeError: the op
         records ``elem_type`` f16.
         """
-        element_error = _element_type_error(
-            "smem_store_f16", "value_elem", value.type, "f16"
-        )
-        if element_error:
-            raise ValueError(element_error)
+        value_element = element_type(value.type).name
+        if value_element != "f16":
+            raise TypeError(
+                _type_name_message(
+                    "smem_store_f16", "value element type", value_element, "f16"
+                )
+            )
         self._op(
             "tile.smem_store",
             [smem, *indices, value],
@@ -7737,15 +7816,18 @@ class IRBuilder:
     ) -> None:
         """Store ``value``, ``n`` f32 lanes (n in {1, 2, 4}; a scalar for
         ``n=1``), at ``indices`` of ``smem``, an f32 tile. A tile or value that
-        does not hold f32, or a value of another lane count, is refused with
-        ValueError."""
+        does not hold f32 is refused with TypeError, a value of another lane
+        count with ValueError."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_store_vN_f32 n must be 1, 2, or 4 (got {n})")
-        contract_error = _smem_f32_access_error(
+        element_error = _smem_f32_access_error(
             "smem_store_vN_f32", smem.type, value.type
-        ) or _smem_store_lanes_error("smem_store_vN_f32", value.type, n, "n")
-        if contract_error:
-            raise ValueError(contract_error)
+        )
+        if element_error:
+            raise TypeError(element_error)
+        lanes_error = _smem_store_lanes_error("smem_store_vN_f32", value.type, n, "n")
+        if lanes_error:
+            raise ValueError(lanes_error)
         self._op(
             "tile.smem_store_vN_f32",
             [smem, *indices, value],
@@ -7754,14 +7836,14 @@ class IRBuilder:
 
     def smem_load_vN_f32(self, smem: Value, *indices, n: int = 0) -> Value:
         """Load ``n`` f32 lanes (n in {1, 2, 4}) at ``indices`` of ``smem``, an
-        f32 tile; a tile that does not hold f32 is refused with ValueError."""
+        f32 tile; a tile that does not hold f32 is refused with TypeError."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_load_vN_f32 n must be 1, 2, or 4 (got {n})")
         if not indices:
             raise ValueError("smem_load_vN_f32 needs at least one index")
         tile_error = _smem_f32_access_error("smem_load_vN_f32", smem.type, None)
         if tile_error:
-            raise ValueError(tile_error)
+            raise TypeError(tile_error)
         return self._op(
             "tile.smem_load_vN_f32",
             [smem, *indices],

@@ -31,12 +31,12 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
     F64,
-    _fcmp_pred_error,
+    _fcmp_error,
     _int_add_wrap_error,
     _int_cmp_error,
     _scf_for_error,
     _scf_if_error,
-    _vector_cmp_pred_error,
+    _vector_cmp_error,
     KernelDef,
     Op,
     PtrType,
@@ -56,6 +56,7 @@ from .ir import (
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
+    _type_name_message,
     _trap_op_error,
     claimed_align,
     dpp_ctrl_attr,
@@ -216,8 +217,12 @@ def _hip_unsigned_int_type(op_name: str, type_name: str) -> str:
         return _HIP_UNSIGNED_INT_TYPE[type_name]
     except KeyError:
         raise TypeError(
-            f"HIP lowering of {op_name} failed - element type={type_name!r}, "
-            f"expected an integer type, one of {tuple(_HIP_UNSIGNED_INT_TYPE)}"
+            _type_name_message(
+                f"HIP lowering of {op_name}",
+                "element type",
+                type_name,
+                f"an integer type, one of {tuple(_HIP_UNSIGNED_INT_TYPE)}",
+            )
         ) from None
 
 
@@ -646,9 +651,9 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        cmp_error = _int_cmp_error(op.attrs, a.type.name)
-        if cmp_error:
-            raise ValueError(cmp_error)
+        refusal = _int_cmp_error(op.attrs, a.type)
+        if refusal:
+            raise refusal
         pred = op.attrs.get("pred", "lt")
         if pred == "ult":
             unsigned = _hip_unsigned_int_type(op.name, a.type.name)
@@ -1874,11 +1879,11 @@ class _Lowerer:
         )
 
     def _op_arith_fcmp(self, op: Op) -> None:
-        pred_error = _fcmp_pred_error(op.attrs)
-        if pred_error:
-            raise ValueError(pred_error)
-        pred = op.attrs["pred"]
         a, b = op.operands
+        refusal = _fcmp_error(op.attrs, a.type)
+        if refusal:
+            raise refusal
+        pred = op.attrs["pred"]
         # IEEE ordered predicates: ``a OP b`` evaluates to true only when
         # neither operand is NaN AND the relation holds. Ordered comparisons
         # ``< <= > >= == !=`` in C++ on float types return false when either
@@ -2493,9 +2498,9 @@ class _Lowerer:
         # so we always emit the ``f32xN`` vector store (the prologue
         # provides ``f32x1``). For n>1 the reinterpret-cast lets the
         # backend coalesce into ``ds_write_b{64,128}``.
-        contract_error = _smem_vN_f32_op_error(op)
-        if contract_error:
-            raise ValueError(contract_error)
+        refusal = _smem_vN_f32_op_error(op)
+        if refusal:
+            raise refusal
         smem = op.operands[0]
         value = op.operands[-1]
         indices = op.operands[1:-1]
@@ -2509,9 +2514,9 @@ class _Lowerer:
         )
 
     def _op_tile_smem_load_vN_f32(self, op: Op) -> None:
-        contract_error = _smem_vN_f32_op_error(op)
-        if contract_error:
-            raise ValueError(contract_error)
+        refusal = _smem_vN_f32_op_error(op)
+        if refusal:
+            raise refusal
         smem = op.operands[0]
         indices = op.operands[1:]
         n = int(op.attrs["vec"])
@@ -2955,10 +2960,10 @@ class _Lowerer:
             )
 
     def _op_vector_cmp(self, op: Op) -> None:
-        pred_error = _vector_cmp_pred_error(op.attrs)
-        if pred_error:
-            raise ValueError(pred_error)
         a, bb = op.operands
+        refusal = _vector_cmp_error(op.attrs, a.type)
+        if refusal:
+            raise refusal
         pred = op.attrs.get("pred", "lt")
         cmap = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!="}
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1

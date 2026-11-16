@@ -16,8 +16,9 @@ byte-identical to the Python engine's and whose refusals must be the same.
 A vector store also claims a width: the value it stores must have that many
 lanes, and the builder and the verifier refuse one that does not. The f32
 epilogue load and store emit, and size their claim for, an f32 access, so they
-refuse a tile or value that does not hold f32; ``smem_store_f16`` records an
-f16 store, so it refuses a value that does not hold f16.
+refuse a tile or value that does not hold f32 with a TypeError;
+``smem_store_f16`` records an f16 store, so it refuses a value that does not
+hold f16 the same way.
 """
 
 from __future__ import annotations
@@ -722,14 +723,14 @@ def test_an_f32_epilogue_access_to_a_tile_not_holding_f32_is_refused(access, til
     tile = b.smem_alloc(tile_elem, [16], name_hint="t")
     value = b.global_load_vN(out, zero, F32, 4, align=4)
     ops_before = len(b.kernel.body.ops)
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(TypeError) as refusal:
         if access == "smem_load_vN_f32":
             b.smem_load_vN_f32(tile, zero, n=4)
         else:
             b.smem_store_vN_f32(tile, [zero], value, 4)
     assert (
         str(refusal.value)
-        == f"{access} failed - tile_elem={tile_elem.name}, expected f32"
+        == f"{access} failed - tile element type='{tile_elem.name}', expected f32"
     )
     assert len(b.kernel.body.ops) == ops_before
 
@@ -743,10 +744,11 @@ def test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused():
     tile = b.smem_alloc(F32, [16], name_hint="f")
     value = b.global_load_vN(out, zero, F16, 4, align=2)
     ops_before = len(b.kernel.body.ops)
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(TypeError) as refusal:
         b.smem_store_vN_f32(tile, [zero], value, 4)
     assert (
-        str(refusal.value) == "smem_store_vN_f32 failed - value_elem=f16, expected f32"
+        str(refusal.value)
+        == "smem_store_vN_f32 failed - value element type='f16', expected f32"
     )
     assert len(b.kernel.body.ops) == ops_before
 
@@ -761,23 +763,24 @@ def test_an_f16_store_of_a_value_not_holding_f16_is_refused(value_elem):
     tile = b.smem_alloc(F16, [16], name_hint="h")
     value = b.global_load(out, zero, value_elem)
     ops_before = len(b.kernel.body.ops)
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(TypeError) as refusal:
         b.smem_store_f16(tile, [zero], value)
     assert (
         str(refusal.value)
-        == f"smem_store_f16 failed - value_elem={value_elem.name}, expected f16"
+        == f"smem_store_f16 failed - value element type='{value_elem.name}', expected f16"
     )
     assert len(b.kernel.body.ops) == ops_before
 
 
 @pytest.mark.parametrize(
-    ("tile_elem", "access_lines", "message"),
+    ("tile_elem", "access_lines", "error_type", "message"),
     [
         (
             "f16",
             "%av4 : vec<f32x4> = tile.smem_load_vN_f32 ( %buf2, %c1 ) "
             '{ elem_type = s:"f32", rank = i:1, vec = i:4 }',
-            "tile.smem_load_vN_f32 failed - tile_elem=f16, expected f32",
+            TypeError,
+            "tile.smem_load_vN_f32 failed - tile element type='f16', expected f32",
         ),
         (
             "f16",
@@ -785,7 +788,8 @@ def test_an_f16_store_of_a_value_not_holding_f16_is_refused(value_elem):
             '{ align = i:4, elem_type = s:"f32", vec = i:4 }\n'
             "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
             '{ elem_type = s:"f32", rank = i:1, vec = i:4 }',
-            "tile.smem_store_vN_f32 failed - tile_elem=f16, expected f32",
+            TypeError,
+            "tile.smem_store_vN_f32 failed - tile element type='f16', expected f32",
         ),
         (
             "f32",
@@ -793,7 +797,8 @@ def test_an_f16_store_of_a_value_not_holding_f16_is_refused(value_elem):
             '{ align = i:2, elem_type = s:"f16", vec = i:4 }\n'
             "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
             '{ elem_type = s:"f32", rank = i:1, vec = i:4 }',
-            "tile.smem_store_vN_f32 failed - value_elem=f16, expected f32",
+            TypeError,
+            "tile.smem_store_vN_f32 failed - value element type='f16', expected f32",
         ),
         (
             "f32",
@@ -801,18 +806,19 @@ def test_an_f16_store_of_a_value_not_holding_f16_is_refused(value_elem):
             '{ align = i:4, elem_type = s:"f32", vec = i:4 }\n'
             "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
             '{ elem_type = s:"f32", rank = i:1, vec = i:2 }',
+            ValueError,
             "tile.smem_store_vN_f32 failed - lanes=4, expected vec=2",
         ),
     ],
     ids=["load-f16-tile", "store-f16-tile", "store-f16-value", "store-lanes"],
 )
 def test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused(
-    tile_elem, access_lines, message
+    tile_elem, access_lines, error_type, message
 ):
     """Serialized IR reaches the verifier and the lowerings without passing
     the builder: each refuses an f32 epilogue access to a tile that does not
-    hold f32, and a store whose value does not hold f32 or does not have
-    ``vec`` lanes, in both engines."""
+    hold f32 and a store whose value does not hold f32 (TypeError), or does
+    not have ``vec`` lanes (ValueError), in both engines."""
     kernel = parse(
         f"""ckdsl.ir v1
 kernel @lds_f32_epilogue_contract {{
@@ -832,7 +838,7 @@ kernel @lds_f32_epilogue_contract {{
     assert_refused_everywhere(
         kernel,
         _ARCH,
-        error_type=ValueError,
+        error_type=error_type,
         message=message,
         llvm_flavor=LLVM_FLAVOR_LLVM20,
     )

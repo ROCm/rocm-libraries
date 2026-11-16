@@ -306,11 +306,17 @@ rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value
     {
         rocke_i_refuse_non_integer("arith.lshr", a->type);
         if(!rocke_type_eq(a->type, c->type))
-            throw ckc::TypeError(
-                ckc::format_error("arith.lshr failed - shift amount type='%s', expected the "
-                                  "shifted value's type '%s'",
-                                  c->type->name,
-                                  a->type->name));
+        {
+            char expected[ROCKE_ERR_MSG_CAP];
+            char message[ROCKE_ERR_MSG_CAP];
+            snprintf(expected, sizeof expected, "the shifted value's type '%s'", a->type->name);
+            throw ckc::TypeError(rocke_i_type_name_message("arith.lshr",
+                                                           "shift amount type",
+                                                           c->type->name,
+                                                           expected,
+                                                           message,
+                                                           sizeof message));
+        }
     }
     return rocke_i_binop(b, ROCKE_OP_ARITH_LSHR, a, c, "lshr");
 }
@@ -500,9 +506,9 @@ static rocke_value_t* cmp_impl(
     rocke_attr_set_str(b, &at, "pred", pred);
     /* Python IRBuilder._int_cmp: refuse what ir._int_cmp_error refuses. */
     char cmp_buf[ROCKE_ERR_MSG_CAP];
-    const char* cmp_error = rocke_i_cmp_error(&at, a->type, cmp_buf, sizeof cmp_buf);
-    if(cmp_error)
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", cmp_error);
+    const rocke_status_t cmp_status = rocke_i_cmp_error(&at, a->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+        return (rocke_value_t*)rocke_i_set_err(b, cmp_status, "%s", cmp_buf);
     return rocke_i_op1(b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &at, hint);
 }
 
@@ -556,12 +562,13 @@ rocke_value_t*
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp predicate is NULL");
     at = rocke_i_attrs(b);
     rocke_attr_set_str(b, &at, "pred", pred);
-    char pred_buf[ROCKE_ERR_MSG_CAP];
-    const char* pred_error = rocke_i_fcmp_pred_error(&at, pred_buf, sizeof pred_buf);
-    if(pred_error)
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", pred_error);
     if(!a || !c)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp NULL operand");
+    /* Python IRBuilder.fcmp: refuse what ir._fcmp_error refuses. */
+    char fcmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t fcmp_status = rocke_i_fcmp_error(&at, a->type, fcmp_buf, sizeof fcmp_buf);
+    if(fcmp_status != ROCKE_OK)
+        return (rocke_value_t*)rocke_i_set_err(b, fcmp_status, "%s", fcmp_buf);
     operands[0] = a;
     operands[1] = c;
     return rocke_i_op1(b, ROCKE_OP_ARITH_FCMP, operands, 2, rocke_i1(), &at, "fcmp");

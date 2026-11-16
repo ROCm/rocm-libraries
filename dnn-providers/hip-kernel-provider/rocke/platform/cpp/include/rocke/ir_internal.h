@@ -345,35 +345,39 @@ const char* rocke_i_smem_store_lanes_error(const char* store,
  * here. The verifier and both lowerings use it. */
 const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
-/* The error for an `access` whose operand `param` (a scalar, a vector or an
- * LDS tile, of type `operand_type`) does not hold `expected` elements, or NULL
- * when it does (Python core/ir.py::_element_type_error, same texts). A
- * returned error is written to `buf`. */
-const char* rocke_i_element_type_error(const char* access,
-                                       const char* param,
-                                       const rocke_type_t* operand_type,
-                                       const char* expected,
-                                       char* buf,
-                                       size_t cap);
+/* The text of every refusal of an operand by its type, written into `buf`,
+ * which the result then points to: `what` failed because its `param` is
+ * `type_name` where `expected` (prose) is required (Python
+ * core/ir.py::_type_name_message, same text). Each such refusal is
+ * ROCKE_ERR_TYPE. */
+const char* rocke_i_type_name_message(const char* what,
+                                      const char* param,
+                                      const char* type_name,
+                                      const char* expected,
+                                      char* buf,
+                                      size_t cap);
 
 /* The error for an f32 epilogue LDS `access` (smem_load_vN_f32 or
- * smem_store_vN_f32) of a tile of type `tile_type` that does not hold f32 or,
- * for a store, whose value (`value_type`; NULL for a load) is not f32; NULL
- * when both are f32 (Python core/ir.py::_smem_f32_access_error, same texts).
- * Both lowerings emit, and the alignment rule sizes, an f32 access whatever
- * the operand types are. A returned error is written to `buf`. */
+ * smem_store_vN_f32) of a tile of type `tile_type` whose elements are not f32
+ * or, for a store, whose value (`value_type`; NULL for a load) is not f32;
+ * NULL when both are f32 (Python core/ir.py::_smem_f32_access_error, same
+ * texts). Both lowerings emit, and the alignment rule sizes, an f32 access
+ * whatever the operand types are, so the callers refuse it as ROCKE_ERR_TYPE.
+ * A returned error is written to `buf`. */
 const char* rocke_i_smem_f32_access_error(const char* access,
                                           const rocke_type_t* tile_type,
                                           const rocke_type_t* value_type,
                                           char* buf,
                                           size_t cap);
 
-/* The contract of a built tile.smem_load_vN_f32 or tile.smem_store_vN_f32 op:
- * rocke_i_smem_f32_access_error for its tile (the first operand) and, for the
- * store, its value (the last operand), then the store's
- * rocke_i_smem_store_vN_op_error (Python core/ir.py::_smem_vN_f32_op_error).
- * The verifier and both lowerings use it. */
-const char* rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap);
+/* Whether the built tile.smem_load_vN_f32 or tile.smem_store_vN_f32 `op` is
+ * sound (Python core/ir.py::_smem_vN_f32_op_error, which returns the exception
+ * whose status this returns, same text): ROCKE_OK, or the refusal's status
+ * with its text written into `buf`. rocke_i_smem_f32_access_error for its tile
+ * (the first operand) and, for the store, its value (the last operand) is
+ * ROCKE_ERR_TYPE; the store's rocke_i_smem_store_vN_op_error is
+ * ROCKE_ERR_VALUE. The verifier and both lowerings use it. */
+rocke_status_t rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* The code-object symbol of `kernel_name`'s GPU-check word, allocated in
  * `arena` (Python core/ir.py::gpu_check_word_symbol, same spelling). A wave
@@ -598,23 +602,49 @@ const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap);
 
-/* Mirrors ir._int_cmp_error: the error for an arith.cmp op with `attrs` on
- * operands of type `operand_type`, or NULL when it is valid. The "pred" attr is
- * checked first (absent means lt; "ult" takes i32 or i64 operands), then the
- * operands must be integers or i1. Writes into `buf` as above. */
-const char* rocke_i_cmp_error(const rocke_attr_map_t* attrs,
-                              const rocke_type_t* operand_type,
-                              char* buf,
-                              size_t cap);
+/* Mirrors ir._missing_attr_message: the refusal of an `op_name` op without its
+ * required attr `key`, written into `buf`, which the result then points to.
+ * The verifier's required-attr check and the compare rules report it. */
+const char*
+    rocke_i_missing_attr_message(const char* op_name, const char* key, char* buf, size_t cap);
 
-/* Mirrors ir._vector_cmp_pred_error: the error for vector.cmp's "pred" attr,
- * or NULL when it is absent (lt) or one of lt, le, gt, ge, eq, ne. Writes into
- * `buf` as above. */
-const char* rocke_i_vector_cmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap);
+/* Mirrors ir._INTEGER_ELEMENT_TYPES: whether `type_name` is an integer or i1
+ * type (a dtype of the integer or predicate category, by its canonical name). */
+bool rocke_i_is_integer_type_name(const char* type_name);
 
-/* Mirrors ir._fcmp_pred_error: the error for arith.fcmp's "pred" attr, or NULL
- * when it is absent or one of ir._FCMP_PREDICATES. Writes into `buf` as above. */
-const char* rocke_i_fcmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap);
+/* Mirrors ir._int_cmp_pred_error: the error for arith.cmp's "pred" attr on
+ * operands of type `operand_type`, or NULL when it is valid: one of the
+ * arith.cmp predicates (required), and "ult" only on i32 or i64 operands.
+ * Writes into `buf` as above. */
+const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
+                                   const rocke_type_t* operand_type,
+                                   char* buf,
+                                   size_t cap);
+
+/* Mirrors ir._int_cmp_error, which returns the exception whose status this
+ * returns: ROCKE_OK, or the refusal's status with its text written into `buf`.
+ * rocke_i_cmp_pred_error's refusal is ROCKE_ERR_VALUE; operands that are not
+ * integers or i1 are ROCKE_ERR_TYPE. */
+rocke_status_t rocke_i_cmp_error(const rocke_attr_map_t* attrs,
+                                 const rocke_type_t* operand_type,
+                                 char* buf,
+                                 size_t cap);
+
+/* Mirrors ir._vector_cmp_error, as rocke_i_cmp_error: a "pred" attr that is
+ * present but not one of lt, le, gt, ge, eq, ne is ROCKE_ERR_VALUE; lanes that
+ * are not integers or i1 (rocke_i_integer_element_error) are ROCKE_ERR_TYPE. */
+rocke_status_t rocke_i_vector_cmp_error(const rocke_attr_map_t* attrs,
+                                        const rocke_type_t* operand_type,
+                                        char* buf,
+                                        size_t cap);
+
+/* Mirrors ir._fcmp_error, as rocke_i_cmp_error: a "pred" attr that is absent or
+ * not one of ir._FCMP_PREDICATES is ROCKE_ERR_VALUE; operands that are not
+ * f16, bf16, f32 or f64 are ROCKE_ERR_TYPE. */
+rocke_status_t rocke_i_fcmp_error(const rocke_attr_map_t* attrs,
+                                  const rocke_type_t* operand_type,
+                                  char* buf,
+                                  size_t cap);
 
 /* Mirrors ir._INTEGER_ELEMENT_OPS: whether `opcode` is a bitwise op or shift
  * (arith.and / or / xor / shl / lshr, vector.and / or / shl / lshr), which LLVM

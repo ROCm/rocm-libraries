@@ -331,13 +331,20 @@ const char* rocke_h_require_unsigned_int_type(rocke_h_lowerer_t* lw,
         }
         if(used < sizeof names)
             snprintf(names + used, sizeof names - used, ")");
+        char what[ROCKE_ERR_MSG_CAP];
+        char expected[ROCKE_ERR_MSG_CAP];
+        char message[ROCKE_ERR_MSG_CAP];
+        snprintf(what, sizeof what, "HIP lowering of %s", op_name);
+        snprintf(expected, sizeof expected, "an integer type, one of %s", names);
         rocke_h_fail(lw,
                      ROCKE_ERR_TYPE,
-                     "HIP lowering of %s failed - element type='%s', expected an integer "
-                     "type, one of %s",
-                     op_name,
-                     ir_type_name ? ir_type_name : "(null)",
-                     names);
+                     "%s",
+                     rocke_i_type_name_message(what,
+                                               "element type",
+                                               ir_type_name ? ir_type_name : "(null)",
+                                               expected,
+                                               message,
+                                               sizeof message));
     }
     return spelling;
 }

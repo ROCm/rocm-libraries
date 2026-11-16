@@ -1652,16 +1652,17 @@ static rocke_status_t rocke_h_op_vector_max(rocke_h_lowerer_t* lw, const rocke_o
 }
 
 /* def _op_vector_cmp(self, op): per-lane comparison via pred attr, checked by
- * the IR rule first (_vector_cmp_pred_error, a ValueError). */
+ * the IR rule first (rocke_i_vector_cmp_error). */
 static rocke_status_t rocke_h_op_vector_cmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    char pred_buf[ROCKE_ERR_MSG_CAP];
-    const char* pred_error = rocke_i_vector_cmp_pred_error(&op->attrs, pred_buf, sizeof pred_buf);
-    if(pred_error)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", pred_error);
-    }
     const rocke_value_t* a = op->operands[0];
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status
+        = rocke_i_vector_cmp_error(&op->attrs, a->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+    {
+        return rocke_h_fail(lw, cmp_status, "%s", cmp_buf);
+    }
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
     const char* res_t = rocke_h_type_to_hip(lw, r->type);

@@ -429,9 +429,9 @@ static void _op_arith_fmin3(rocke_lower_t* L, const rocke_op_t* op)
 }
 
 /* Python _op_arith_cmp: the op is checked by the IR rule first
- * (rocke_i_cmp_error, ROCKE_ERR_VALUE: "ult" takes i32 or i64 operands, a pred
- * that is not a known string is refused, not read as "lt", and the operands
- * are integers or i1). */
+ * (rocke_i_cmp_error: a pred that is absent or not a known string is refused,
+ * not read as "lt", "ult" takes i32 or i64 operands, and the operands are
+ * integers or i1). */
 static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -442,10 +442,12 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     char cmp_buf[ROCKE_ERR_MSG_CAP];
-    const char* cmp_error = rocke_i_cmp_error(&op->attrs, a->type, cmp_buf, sizeof cmp_buf);
-    if(cmp_error)
+    const rocke_status_t cmp_status
+        = rocke_i_cmp_error(&op->attrs, a->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", cmp_error);
+        rocke_ll_fail(L, cmp_status, "%s", cmp_buf);
+        return;
     }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     if(pred == NULL)
@@ -462,8 +464,9 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, b));
 }
 
-/* Python _op_arith_fcmp: the pred is checked by the IR rule first
- * (rocke_i_fcmp_pred_error, ROCKE_ERR_VALUE), then emitted verbatim. */
+/* Python _op_arith_fcmp: the op is checked by the IR rule first
+ * (rocke_i_fcmp_error: a required, known pred and float operands), then the
+ * pred is emitted verbatim. */
 static void _op_arith_fcmp(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -471,18 +474,16 @@ static void _op_arith_fcmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    char pred_buf[ROCKE_ERR_MSG_CAP];
-    const char* pred_error = rocke_i_fcmp_pred_error(&op->attrs, pred_buf, sizeof pred_buf);
-    if(pred_error)
+    const rocke_value_t* a = op->operands[0];
+    char fcmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t fcmp_status
+        = rocke_i_fcmp_error(&op->attrs, a->type, fcmp_buf, sizeof fcmp_buf);
+    if(fcmp_status != ROCKE_OK)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", pred_error);
+        rocke_ll_fail(L, fcmp_status, "%s", fcmp_buf);
+        return;
     }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
-    if(pred == NULL)
-    {
-        pred = "olt";
-    }
-    const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     rocke_ll_emitf(L,
                    "  %s = fcmp %s %s %s, %s",

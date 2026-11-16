@@ -46,12 +46,12 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
-    _fcmp_pred_error,
+    _fcmp_error,
     _int_add_wrap_error,
     _int_cmp_error,
     _scf_for_error,
     _scf_if_error,
-    _vector_cmp_pred_error,
+    _vector_cmp_error,
     BF16,
     F32,
     F16,
@@ -2767,9 +2767,9 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        cmp_error = _int_cmp_error(op.attrs, a.type.name)
-        if cmp_error:
-            raise ValueError(cmp_error)
+        refusal = _int_cmp_error(op.attrs, a.type)
+        if refusal:
+            raise refusal
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
@@ -2777,11 +2777,11 @@ class _Lowerer:
         )
 
     def _op_arith_fcmp(self, op: Op) -> None:
-        pred_error = _fcmp_pred_error(op.attrs)
-        if pred_error:
-            raise ValueError(pred_error)
-        pred = op.attrs.get("pred", "olt")
         a, b = op.operands
+        refusal = _fcmp_error(op.attrs, a.type)
+        if refusal:
+            raise refusal
+        pred = op.attrs["pred"]
         self._current().emit(
             f"  {op.result.name} = fcmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
@@ -6668,9 +6668,9 @@ class _Lowerer:
     # ----- f32 LDS ops (cshuffle epilogue) -----
 
     def _op_tile_smem_store_vN_f32(self, op: Op) -> None:
-        contract_error = _smem_vN_f32_op_error(op)
-        if contract_error:
-            raise ValueError(contract_error)
+        refusal = _smem_vN_f32_op_error(op)
+        if refusal:
+            raise refusal
         smem = op.operands[0]
         indices = op.operands[1:-1]
         value = op.operands[-1]
@@ -6707,9 +6707,9 @@ class _Lowerer:
             )
 
     def _op_tile_smem_load_vN_f32(self, op: Op) -> None:
-        contract_error = _smem_vN_f32_op_error(op)
-        if contract_error:
-            raise ValueError(contract_error)
+        refusal = _smem_vN_f32_op_error(op)
+        if refusal:
+            raise refusal
         smem = op.operands[0]
         indices = list(op.operands[1:])
         vec = int(op.attrs["vec"])
@@ -6916,10 +6916,10 @@ class _Lowerer:
         self._vector_binop(op, "lshr")
 
     def _op_vector_cmp(self, op: Op) -> None:
-        pred_error = _vector_cmp_pred_error(op.attrs)
-        if pred_error:
-            raise ValueError(pred_error)
         a, b = op.operands
+        refusal = _vector_cmp_error(op.attrs, a.type)
+        if refusal:
+            raise refusal
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
