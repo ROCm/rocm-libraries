@@ -14,10 +14,11 @@
 /**
  * @file RankingTraceSupport.hpp
  * @brief Reads which ranker ordered an engine's catalog from the plugin's `uhd trace` lines,
- *        and the check a cold case applies to it. No GPU dependency, so a CPU unit test drives
- *        both with synthetic log lines (TestRankingTraceSupport.cpp).
+ *        and the check a cold case applies to it. No GPU dependency: the GPU integration suites
+ *        include it from here, and a CPU unit test drives both with synthetic log lines
+ *        (TestRankingTraceSupport.cpp).
  */
-namespace hip_kernel_provider::kernel_ingestor_engine::integration::detail
+namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
 
 /// The `decided_by` of the trained ranker's `uhd trace` line for @p engineName ("model", or
@@ -60,4 +61,4 @@ inline void expectRankerDecided(const std::optional<std::string>& decidedBy,
     }
 }
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::integration::detail
+} // namespace hip_kernel_provider::kernel_ingestor_engine::testing

@@ -47,9 +47,9 @@
 #endif
 
 #include "../IntegrationGraphVerificationHarness.hpp"
-#include "RankingTraceSupport.hpp"
 #include "ScopedPluginLogCapture.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RankingTraceSupport.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/UnpulledModelsRecord.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
@@ -419,7 +419,7 @@ inline std::optional<std::string>
     rankingDecidedBy(const ServedEngine& engine,
                      const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
 {
-    return rankingDecidedBy(engine.name, recorder.getRecordedLogs());
+    return testing::rankingDecidedBy(engine.name, recorder.getRecordedLogs());
 }
 
 // Whether every trained ranker that engine's UED binds for its arch was left out of the

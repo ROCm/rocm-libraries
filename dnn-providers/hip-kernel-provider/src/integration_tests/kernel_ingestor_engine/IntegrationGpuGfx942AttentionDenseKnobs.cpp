@@ -889,9 +889,9 @@ TEST_P(IntegrationGpuGfx942AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
         // of the class's lever variants it ranks first is the score's own policy (its goldens
         // pin that).
         const auto decidedBy = detail::rankingDecidedBy(ENGINE, recorder);
-        detail::expectRankerDecided(decidedBy,
-                                    detail::boundRankerLeftOutAsUnpulled(ENGINE),
-                                    recorder.getRecordedLogsAsString());
+        testing::expectRankerDecided(decidedBy,
+                                     detail::boundRankerLeftOutAsUnpulled(ENGINE),
+                                     recorder.getRecordedLogsAsString());
         if(decidedBy.has_value())
         {
             EXPECT_TRUE(selectedCarries(*selected, semanticKey(testCase.shape)))

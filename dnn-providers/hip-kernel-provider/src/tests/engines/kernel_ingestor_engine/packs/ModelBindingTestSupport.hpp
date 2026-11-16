@@ -28,7 +28,7 @@
 // The build's HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS, set by CMake on every census file
 // that includes this header (src/tests/CMakeLists.txt).
 #ifndef HKP_REQUIRE_DVC_DESCRIPTORS
-#define HKP_REQUIRE_DVC_DESCRIPTORS 0
+#error "add the including file to the HKP_REQUIRE_DVC_DESCRIPTORS list in src/tests/CMakeLists.txt"
 #endif
 
 /**

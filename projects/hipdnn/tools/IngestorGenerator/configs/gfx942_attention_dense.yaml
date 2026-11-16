@@ -55,7 +55,9 @@ engine:
       - 18bb432e-d871-4290-9ae8-f5111aaf2ffe
     predict_engine:
       gfx942:
-      - 3f368687-5222-489f-b354-ee0dca01bded
+      - 5d17863f-691b-44bd-bcab-e7a5c6225538
+  trained_catalog_sha256:
+    gfx942: 380a508ad8566e3be17143aae7cec238e5f796bce2538a11c409a1075b5539e4
 kmd_fields:
 - name: dtype
   type: string

@@ -10,7 +10,7 @@
 
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
-#include "integration_tests/kernel_ingestor_engine/RankingTraceSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RankingTraceSupport.hpp"
 
 /**
  * @file TestRankingTraceSupport.cpp
@@ -22,8 +22,8 @@
 namespace
 {
 
-using hip_kernel_provider::kernel_ingestor_engine::integration::detail::expectRankerDecided;
-using hip_kernel_provider::kernel_ingestor_engine::integration::detail::rankingDecidedBy;
+using hip_kernel_provider::kernel_ingestor_engine::testing::expectRankerDecided;
+using hip_kernel_provider::kernel_ingestor_engine::testing::rankingDecidedBy;
 using hipdnn_test_sdk::utilities::RecordedLog;
 
 constexpr const char* ENGINE = "hipkernel:Gfx942AttentionDense";

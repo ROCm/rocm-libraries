@@ -1,11 +1,10 @@
 {
   "version": "1.0",
-  "id": "3f368687-5222-489f-b354-ee0dca01bded",
+  "id": "5d17863f-691b-44bd-bcab-e7a5c6225538",
   "name": "hipkernel:Gfx942AttentionDense engine predictor (L1, gfx942, tflops)",
   "adapter": "tree_data",
   "features_signature": [
     "$gfx942_attention_dense.causal",
-    "$graph.arithmetic_intensity",
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
     "$graph.nodes[0].flops",
@@ -52,7 +51,7 @@
     "$graph.nodes[0].v.strides[1]",
     "$graph.nodes[0].v.strides[2]"
   ],
-  "features_hash": "sha256:fa82aaa20586cc32",
+  "features_hash": "sha256:1acb5188cc46b2a4",
   "trained_against": {
     "ued": {
       "id": "a74a5afb-30c0-41c2-8006-501d2961f808",
@@ -79,6 +78,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "b623e08430929e368b4e67f078ed6c64acde3f4db28335af1755877c3c7b8d96"
+    "hash": "0016cccc010e71e5df16e56f45db04e06c736fd49331cd3854531f718f096c3d"
   }
 }
