@@ -2967,9 +2967,24 @@ const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t
     return single_region_error(op, "body", buf, cap);
 }
 
+const char* rocke_i_scf_if_condition_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands == 1)
+        return NULL;
+    snprintf(buf, cap, "scf.if expects exactly 1 condition operand");
+    return buf;
+}
+
 const char* rocke_i_scf_if_region_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     return single_region_error(op, "then", buf, cap);
+}
+
+const char* rocke_i_scf_if_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(rocke_i_scf_if_condition_error(op, buf, cap))
+        return buf;
+    return rocke_i_scf_if_region_error(op, buf, cap);
 }
 
 /* Python core/ir.py::_scf_for_carried_count_error: the refusal for the scf.for
@@ -3211,7 +3226,7 @@ rocke_status_t rocke_i_check_control_flow(const rocke_region_t* region, char* er
         }
         else if(op->opcode == ROCKE_OP_SCF_IF)
         {
-            if(rocke_i_scf_if_region_error(op, err, err_cap))
+            if(rocke_i_scf_if_error(op, err, err_cap))
                 return ROCKE_ERR_VALUE;
         }
         else if(op->opcode == ROCKE_OP_SCF_IF_ELSE)

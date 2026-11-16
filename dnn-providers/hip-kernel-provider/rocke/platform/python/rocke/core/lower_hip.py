@@ -34,7 +34,7 @@ from .ir import (
     _int_add_wrap_error,
     _int_cmp_pred_error,
     _scf_for_error,
-    _scf_if_region_error,
+    _scf_if_error,
     KernelDef,
     Op,
     PtrType,
@@ -3083,7 +3083,7 @@ class _Lowerer:
             self._emit(f"{m['name'][1:]} = {_name(v)};")
 
     def _op_scf_if(self, op: Op) -> None:
-        error = _scf_if_region_error(op)
+        error = _scf_if_error(op)
         if error is not None:
             raise ValueError(error)
         (cond,) = op.operands

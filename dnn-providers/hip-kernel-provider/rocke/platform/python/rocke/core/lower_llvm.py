@@ -48,7 +48,7 @@ from .ir import (
     _ORPHAN_YIELD_ERROR,
     _int_add_wrap_error,
     _scf_for_error,
-    _scf_if_region_error,
+    _scf_if_error,
     BF16,
     F32,
     F16,
@@ -7367,7 +7367,7 @@ class _Lowerer:
             )
 
     def _op_scf_if(self, op: Op) -> None:
-        error = _scf_if_region_error(op)
+        error = _scf_if_error(op)
         if error is not None:
             raise ValueError(error)
         (cond,) = op.operands

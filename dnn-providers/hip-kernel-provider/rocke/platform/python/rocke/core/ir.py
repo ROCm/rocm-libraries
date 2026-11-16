@@ -1758,15 +1758,36 @@ def _scf_for_region_error(op: Op) -> str | None:
     return _single_region_error(op, "body")
 
 
+def _scf_if_condition_error(op: Op) -> str | None:
+    """The refusal for the ``scf.if`` ``op`` when it does not have exactly one
+    condition operand, or None when it does (``rocke_i_scf_if_condition_error``
+    in the C++ engine, same text). The verifier reports it beside the region
+    rule; :func:`_scf_if_error` checks it first.
+    """
+    if len(op.operands) != 1:
+        return "scf.if expects exactly 1 condition operand"
+    return None
+
+
 def _scf_if_region_error(op: Op) -> str | None:
     """The refusal for the ``scf.if`` ``op`` when it does not hold exactly one
     region, its then region, or None when it does
     (:func:`_single_region_error`; ``rocke_i_scf_if_region_error`` in the C++
-    engine). The verifier and every lowering of ``scf.if`` check it before
-    they read the region; an ``scf.if`` has no else region (``scf.if_else``
-    has one).
+    engine). An ``scf.if`` has no else region (``scf.if_else`` has one).
     """
     return _single_region_error(op, "then")
+
+
+def _scf_if_error(op: Op) -> str | None:
+    """The refusal for the ``scf.if`` ``op``, or None when it has exactly one
+    condition (:func:`_scf_if_condition_error`) and one then region
+    (:func:`_scf_if_region_error`), checked in that order.
+
+    Serialized IR can hold any operand or region count, so every lowering of
+    ``scf.if`` checks this before it reads the condition or the region, in
+    both engines (``rocke_i_scf_if_error``).
+    """
+    return _scf_if_condition_error(op) or _scf_if_region_error(op)
 
 
 def _scf_for_carried_count_error(op: Op) -> str | None:
@@ -1952,7 +1973,7 @@ def _scf_for_error(op: Op) -> ValueError | TypeError | None:
 
 def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
     """Apply the rule of every ``scf.for`` (:func:`_scf_for_error`), every
-    ``scf.if`` (:func:`_scf_if_region_error`) and every ``scf.if_else``
+    ``scf.if`` (:func:`_scf_if_error`) and every ``scf.if_else``
     (:func:`_if_else_yields`) among ``ops`` and nested in them.
 
     A lowering calls it on a loop body it does not lower (an unrolled loop of
@@ -1966,7 +1987,7 @@ def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
             if refusal is not None:
                 raise refusal
         elif op.name == "scf.if":
-            error = _scf_if_region_error(op)
+            error = _scf_if_error(op)
             if error is not None:
                 raise ValueError(error)
         elif op.name == "scf.if_else":

@@ -1800,17 +1800,17 @@ static rocke_status_t rocke_h_op_cf_return(rocke_h_lowerer_t* lw, const rocke_op
 }
 
 /* def _op_scf_if(self, op):
- *     error = _scf_if_region_error(op)
+ *     error = _scf_if_error(op)
  *     if error is not None: raise ValueError(error)
  *     self._emit(f"if({_name(cond)}) {{")
  *     push; lower_region(op.regions[0]); pop
  *     self._emit("}") */
 static rocke_status_t rocke_h_op_scf_if(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    char region_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_scf_if_region_error(op, region_error, sizeof region_error))
+    char if_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_if_error(op, if_error, sizeof if_error))
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", region_error);
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", if_error);
     }
     const rocke_value_t* cond = op->operands[0];
     rocke_h_emitf(lw, "if(%s) {", rocke_h_name(lw, cond));
