@@ -13,7 +13,9 @@
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "compilation/KernelCompileOptions.hpp"
 #include "engines/kernel_ingestor_engine/descriptors/conv/naive/kernels/ConvNaiveArgs.h"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogue.hpp"
 
 /**
  * @file ConvNaiveProblem.hpp
@@ -34,8 +36,18 @@ enum class ConvDirection
     BACKWARD_WEIGHTS,
 };
 
+/// Whether a forward convolution may carry a pointwise epilogue (ConvEpilogue.hpp). Engines whose
+/// kernels apply the epilogue ask for EPILOGUE; every other one keeps NONE and so declines every
+/// graph with more than its convolution node.
+enum class Fusion
+{
+    NONE,
+    EPILOGUE,
+};
+
 /// Tensor uids in forward-convolution roles: x is dx for backward data, w is dw for
-/// backward weights, y is dy for both backward directions.
+/// backward weights, y is dy for both backward directions. In a fused graph y is the graph's
+/// written output (the epilogue's), not the convolution node's virtual y.
 struct ConvNaiveOperands
 {
     int64_t x = 0;
@@ -51,6 +63,8 @@ struct ConvNaiveProblem
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
     ConvNaiveOperands operands;
+    /// The pointwise chain after the convolution; empty for a single-node graph.
+    conv_epilogue::ConvEpilogue epilogue;
     int64_t spatialRank = 0;
     /// Multiply-accumulates over the whole problem; the same for every direction.
     int64_t multiplyAccumulates = 0;
@@ -65,11 +79,18 @@ std::string_view engineName(ConvDirection direction);
  *        is not one the naive kernel computes correctly.
  *
  * Reads and gates every field of the graph, the node and the three operands. Does not apply
- * the workload gate; see withinWorkloadBudget.
+ * the workload gate; see withinWorkloadBudget. With @p fusion EPILOGUE a forward graph may chain
+ * pointwise nodes after its convolution (parseConvEpilogue gates them); y is then the chain's
+ * output, with the convolution's dims.
  */
 std::optional<ConvNaiveProblem>
     parseConvNaiveProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                          ConvDirection direction);
+                          ConvDirection direction,
+                          Fusion fusion = Fusion::NONE);
+
+/// The HIPRTC options the naive kernel of @p problem compiles with, beyond the architecture: the
+/// element type, and the generated epilogue of a fused forward graph (nothing for an unfused one).
+void addCompileOptions(compilation::KernelCompileOptions& options, const ConvNaiveProblem& problem);
 
 /**
  * @brief Multiply-accumulates each SIMD lane may spend on one launch before the problem is

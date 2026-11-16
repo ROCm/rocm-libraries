@@ -254,7 +254,7 @@ template <class T,
           int DIR = K5_FORWARD,
           int PF = 0,
           int TW = 0>
-__device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
+__device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_EPI_FN_PARAM)
 {
     typedef K5CoopCfg<T, W, MT, NT, KW, M, TW, DIR> C;
     constexpr bool B16 = C::B16;
@@ -890,6 +890,9 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                             z[i][1] = m1 - m2 - m3;
                         }
                         T* o = out + base + static_cast<long long>(k) * eChan;
+#if defined(CONV_EPI) && CONV_EPI
+                        const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                         for(int r = 0; r < 2; ++r)
                         {
@@ -899,8 +902,15 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                                                     : z[1][0] - z[2][0] - z[3][0];
                             const float y1 = r == 0 ? z[0][1] + z[1][1] + z[2][1]
                                                     : z[1][1] - z[2][1] - z[3][1];
+#if defined(CONV_EPI) && CONV_EPI
+                            const T v0 = K5Elem<T>::store(
+                                epi(((mask >> (2 * r)) & 1u) ? y0 : 0.0f, chan, 0, true));
+                            const T v1 = K5Elem<T>::store(
+                                epi(((mask >> (2 * r + 1)) & 1u) ? y1 : 0.0f, chan, 0, true));
+#else
                             const T v0 = K5Elem<T>::store(((mask >> (2 * r)) & 1u) ? y0 : 0.0f);
                             const T v1 = K5Elem<T>::store(((mask >> (2 * r + 1)) & 1u) ? y1 : 0.0f);
+#endif
                             if(pair)
                             {
                                 const unsigned lo = __builtin_bit_cast(unsigned short, v0);
@@ -1012,15 +1022,24 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                                       + eTh * 3)
                                          * a.wo
                                    + eTw * 3;
+#if defined(CONV_EPI) && CONV_EPI
+                            const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                             for(int r = 0; r < 3; ++r)
 #pragma unroll
                                 for(int s = 0; s < 3; ++s)
                                 {
                                     const int oh = eTh * 3 + r, ow = eTw * 3 + s;
+#if defined(CONV_EPI) && CONV_EPI
+                                    if(oh < a.ho && ow < a.wo)
+                                        o[r * a.wo + s] = K5Elem<T>::store(
+                                            epi(k5Live(a, oh, ow) ? y[r][s] : 0.0f, chan, 0, true));
+#else
                                     if(oh < a.ho && ow < a.wo)
                                         o[r * a.wo + s]
                                             = K5Elem<T>::store(k5Live(a, oh, ow) ? y[r][s] : 0.0f);
+#endif
                                 }
                         }
                     }
@@ -1194,14 +1213,24 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
                     }
                     T* o = ESTEP ? eOut + static_cast<long long>(kc) * eChan
                                  : out + eBase + static_cast<long long>(k) * eChan;
+#if defined(CONV_EPI) && CONV_EPI
+                    const ConvEpiGen::Chan chan = epi.chan(g * cgo + k, true);
+#endif
 #pragma unroll
                     for(int r = 0; r < 2; ++r)
                     {
                         if(!((eMask >> (4 + r)) & 1u))
                             continue; // row past the output
+#if defined(CONV_EPI) && CONV_EPI
+                        const T v0 = K5Elem<T>::store(
+                            epi(((eMask >> (2 * r)) & 1u) ? y[r][0] : 0.0f, chan, 0, true));
+                        const T v1 = K5Elem<T>::store(
+                            epi(((eMask >> (2 * r + 1)) & 1u) ? y[r][1] : 0.0f, chan, 0, true));
+#else
                         const T v0 = K5Elem<T>::store(((eMask >> (2 * r)) & 1u) ? y[r][0] : 0.0f);
                         const T v1
                             = K5Elem<T>::store(((eMask >> (2 * r + 1)) & 1u) ? y[r][1] : 0.0f);
+#endif
                         if(ePair)
                         {
                             // Both columns, a 4-byte aligned pair (even output width).

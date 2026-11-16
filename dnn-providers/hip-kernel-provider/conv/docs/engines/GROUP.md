@@ -88,6 +88,21 @@ store acc (fp32 -> T)
   The tile lists come from bench winners per target (one-block tiles, for example, are RDNA's best at 16 channels a group). Every tile that fits LDS ships for every atom. Shapes are runtime. There is no generic/specialized tier split: every config is specialized on filter and stride, and other filters go to K1, `CONV_GROUP_VALU`, or Winograd.
 - **Codegen.** `readfirstlane` on the FMA kernel's chunk index makes the filter loads scalar. Per-tap B offsets are compile-time. Out-of-plane depth taps are skipped uniformly across the workgroup.
 
+## Fusion
+
+`CONV_GROUP_FWD` and `CONV_GROUP_FWD_TF32` claim a forward convolution followed by a chain of
+pointwise nodes (scale, bias, relu / clipped relu / clamp / leaky relu, gelu, gelu-tanh,
+swish / silu, sigmoid, tanh, elu, abs, softplus; per-channel and scalar operands) under their own
+engine ids, with no extra catalog config. The pack compiles the generated epilogue
+(`ConvEpilogue.h`) into the convolution kernel only; the filter expansion, the staging copies and
+the three-bf16 split stay as they are. Every store path applies it to the fp32 accumulator before
+the single rounding: small groups on matrix cores and on FMA, wide groups (the padded channels past
+the group width are staged but never written, and load no operand), channels-last and in-place
+channels-first. The channel is the output channel itself (`group x channels a group + column`),
+known per accumulator column, so the per-channel operands load once per column. Staged
+channels-first outputs keep their bitwise transpose. Backward data and backward weights decline
+fused graphs. With no epilogue the kernels compile to the same code as without fusion support.
+
 ## Strengths and weaknesses
 - **Best-engine counts.** On the full 9,471-shape internal corpus (autotuned, our engines only), K4 is the best non-MIOpen engine on:
 

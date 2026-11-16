@@ -87,11 +87,13 @@ struct DirectProblem
  * within 32 bits, and one image of the forward-form input within 2^31 bytes (the kernels' 32-bit
  * buffer offsets). Any padding, asymmetric included (the output extent the graph declares is the
  * one computed), both convolution modes, fp32 / fp16 / bf16, and any operand layout (staged to
- * channels-last when it is not).
+ * channels-last when it is not). With @p fusion EPILOGUE a forward graph may carry a pointwise
+ * epilogue (base.epilogue), which the kernels apply before their single rounding.
  */
 std::optional<DirectProblem>
     parseDirectProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                       conv_naive::ConvDirection direction);
+                       conv_naive::ConvDirection direction,
+                       conv_naive::Fusion fusion = conv_naive::Fusion::NONE);
 
 /// A catalog config's compile-time choices, read from its metadata.
 struct Config

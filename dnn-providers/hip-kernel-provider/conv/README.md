@@ -50,6 +50,38 @@ An engine with several kernel configs lists each in its catalog, admitted by its
 on correctness alone. There is no shape-to-config routing table: the catalog's declared order
 (most general first) is the default, and autotune, then UHD, choose per shape and device.
 
+## Fused pointwise epilogues
+
+A forward convolution graph may chain pointwise nodes after its convolution node; the engines
+that apply the chain claim the graph under their own engine id, with no added catalog config.
+
+- **Graphs.** Node 0 is the convolution; each following node is pointwise and takes the previous
+  one's result (as `in_0`, or as either input of ADD and MUL); every intermediate is virtual and
+  has the convolution's dims; the last node writes the graph's only non-virtual output, of the
+  convolution's element type. Up to 8 nodes, 4 tensor operands and 8 values.
+- **Menu.** ADD and MUL with a per-channel (`[1, K, 1, ...]`) or one-element device tensor, or a
+  pass-by-value scalar (constant or supplied at execute); RELU_FWD with any lower and upper clip
+  and lower-clip slope (relu, clipped relu, clamp, leaky relu); GELU_FWD, GELU_APPROX_TANH_FWD,
+  SWISH_FWD (any beta; silu at 1), SIGMOID_FWD, TANH_FWD, ELU_FWD (any alpha), ABS and
+  SOFTPLUS_FWD (beta > 0). Node compute types UNSET, FLOAT, or the 16-bit type of the node's
+  operand or of the output. Every other mode, attribute or tensor form declines.
+- **Numerics.** The chain runs in fp32 on the convolution's accumulator and the kernel rounds once
+  to the output type, whatever type the graph declares for its intermediates. relu and clamp
+  propagate NaN; gates that saturate to 0 (silu, gelu at -inf) give 0. No fast-math.
+- **Mechanism.** `ConvEpilogue.h` is the hook every fusing kernel calls before its single
+  rounding. The pack generates the chain's code into the HIPRTC options (`CONV_EPI` and three
+  generated macros) and passes `ConvEpiArgs` as the kernel's second argument: operand pointers
+  and every value are runtime arguments, so one code object serves every graph of a pattern and
+  the code-object key changes with the pattern only. Fusion off adds no option: the kernels'
+  signatures, argument blocks and instructions are those of an unfused build. Split reductions
+  write fp32 partials unchanged and apply the chain once in their reduce pass, deriving the
+  channel without a division per element.
+- **Coverage.** Forward only. The naive engine applies any chain but keeps its own workload
+  gate, decided on the convolution alone, so fusion never widens what it claims. Per-engine
+  paths: the engine docs' Fusion sections.
+- **Autotune.** A fused graph is a different graph from its convolution, so it has its own
+  winner records; the same config id serves both.
+
 ## Not supported
 
 - **Mixed data types.** Every engine in the group requires x, w and y to share one data type

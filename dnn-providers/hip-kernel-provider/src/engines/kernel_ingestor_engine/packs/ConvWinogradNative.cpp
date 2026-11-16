@@ -265,7 +265,8 @@ size_t llcBytes(std::string_view gcnArchName)
 }
 
 std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
-                                                    ConvDirection direction)
+                                                    ConvDirection direction,
+                                                    conv_naive::Fusion fusion)
 {
     if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA
        && direction != ConvDirection::BACKWARD_WEIGHTS)
@@ -273,7 +274,7 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
         return std::nullopt;
     }
     const bool wrw = direction == ConvDirection::BACKWARD_WEIGHTS;
-    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    auto base = conv_naive::parseConvNaiveProblem(context, direction, fusion);
     if(!base.has_value() || base->spatialRank != 2)
     {
         return std::nullopt;
@@ -1306,7 +1307,9 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
 
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_winograd::parseWinogradProblem(context, direction);
+    // Forward graphs may carry a pointwise epilogue; parseConvNaiveProblem admits one only there.
+    const auto problem
+        = conv_winograd::parseWinogradProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value())
     {
         return std::nullopt;
@@ -1361,7 +1364,8 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
-    auto problem = conv_winograd::parseWinogradProblem(context, *direction);
+    auto problem
+        = conv_winograd::parseWinogradProblem(context, *direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value()
        || !conv_winograd::configRunsOn(*config, context.deviceProperties.gcnArchName))
     {
@@ -1468,6 +1472,15 @@ const std::vector<KernelArgument>& signatureOf()
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(Args)), 0, ""}};
+    return s_signature;
+}
+
+/// A kernel that writes y with a fused epilogue: its argument block, then ConvEpiArgs.
+const std::vector<KernelArgument>& fusedSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K5Args)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
     return s_signature;
 }
 
@@ -1599,14 +1612,33 @@ public:
             options.add("CONV_WINO_WRW_OPT", std::to_string(plan.wrwOpt));
         }
 
+        // A fused epilogue compiles into the kernel that writes y only (the multipass output
+        // transform, or the single-pass kernel); the filter, input and GEMM passes and the
+        // copies stay unfused. Fusion off adds no option.
+        const auto& epilogue = resolved->problem.base.epilogue;
+        const bool fused = !epilogue.empty();
         const auto build = [&](std::string_view entryPoint,
                                const std::vector<KernelArgument>& signature,
                                unsigned int threads,
-                               const std::array<unsigned int, 3>& blocks) {
+                               const std::array<unsigned int, 3>& blocks,
+                               bool writesY = false) {
             KernelDefinition definition = kernel;
             definition.source.entryPoint = std::string(entryPoint);
-            auto code = buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, definition, options, signature);
+            const bool epi = fused && writesY;
+            if(epi)
+            {
+                conv_epilogue::addEpilogueDefines(options, epilogue);
+            }
+            auto code = buildIngestorKernelCode(_kernelCompiler,
+                                                _kpackLoader,
+                                                context,
+                                                definition,
+                                                options,
+                                                epi ? fusedSignature() : signature);
+            if(epi)
+            {
+                conv_epilogue::removeEpilogueDefines(options);
+            }
             code.setBlockSize(threads, 1, 1);
             code.setGridSize(blocks[0], blocks[1], blocks[2]);
             return code;
@@ -1623,37 +1655,37 @@ public:
             kernels.push_back(
                 build("ConvWinogradInput", signatureOf<K5Args>(), 256, plan.inputBlocks));
             kernels.push_back(
-                build("ConvWinogradOutput", signatureOf<K5Args>(), 256, plan.outputBlocks));
+                build("ConvWinogradOutput", signatureOf<K5Args>(), 256, plan.outputBlocks, true));
             break;
         case Variant::FUSED:
             kernels.push_back(
                 build("ConvWinogradFusedFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
-            kernels.push_back(
-                build("ConvWinogradFused", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
+            kernels.push_back(build(
+                "ConvWinogradFused", signatureOf<K5Args>(), plan.mainThreads, mainGrid, true));
             break;
         case Variant::WMMA:
             kernels.push_back(
                 build("ConvWinogradWmmaFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
             kernels.push_back(
-                build("ConvWinogradWmma", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
+                build("ConvWinogradWmma", signatureOf<K5Args>(), plan.mainThreads, mainGrid, true));
             break;
         case Variant::WREG:
             kernels.push_back(
                 build("ConvWinogradWmmaFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
             kernels.push_back(
-                build("ConvWinogradWreg", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
+                build("ConvWinogradWreg", signatureOf<K5Args>(), plan.mainThreads, mainGrid, true));
             break;
         case Variant::SREG:
             kernels.push_back(
                 build("ConvWinogradFusedFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
             kernels.push_back(
-                build("ConvWinogradSreg", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
+                build("ConvWinogradSreg", signatureOf<K5Args>(), plan.mainThreads, mainGrid, true));
             break;
         case Variant::COOP:
             kernels.push_back(
                 build("ConvWinogradWmmaFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
             kernels.push_back(
-                build("ConvWinogradCoop", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
+                build("ConvWinogradCoop", signatureOf<K5Args>(), plan.mainThreads, mainGrid, true));
             break;
         case Variant::WRW:
             // 0 dy transform, 1 GEMM, 2 x transform, 3 dW.
@@ -1831,6 +1863,22 @@ public:
                                        : static_cast<long long>(args.co) * args.ho * args.wo;
         const long long tilesPerImage = static_cast<long long>(args.th) * args.tw;
         const bool multipass = resolved.config.variant == Variant::MULTIPASS;
+        const bool fused = !problem.base.epilogue.empty();
+        const ConvEpiArgs epiArgs = fused ? conv_epilogue::epilogueArgs(problem.base.epilogue,
+                                                                        deviceBuffers,
+                                                                        numDeviceBuffers)
+                                          : ConvEpiArgs{};
+        // The kernel that writes y: with the epilogue's arguments when fused.
+        const auto launchWriter = [&](compilation::IRunnableKernel& writer, const K5Args& slice) {
+            if(fused)
+            {
+                writer.launch(stream, slice, epiArgs);
+            }
+            else
+            {
+                writer.launch(stream, slice);
+            }
+        };
         for(long long n0 = 0; n0 < n; n0 += plan.sliceImages)
         {
             const long long images = std::min<long long>(plan.sliceImages, n - n0);
@@ -1858,11 +1906,11 @@ public:
                 gemm.sc = static_cast<long long>(cgo) * slice.tiles;
                 dispatch.kernelForStream(2, stream).launch(stream, slice);
                 dispatch.kernelForStream(1, stream).launch(stream, gemm);
-                dispatch.kernelForStream(3, stream).launch(stream, slice);
+                launchWriter(dispatch.kernelForStream(3, stream), slice);
             }
             else
             {
-                dispatch.kernelForStream(1, stream).launch(stream, slice);
+                launchWriter(dispatch.kernelForStream(1, stream), slice);
             }
         }
         if(plan.out.needed)

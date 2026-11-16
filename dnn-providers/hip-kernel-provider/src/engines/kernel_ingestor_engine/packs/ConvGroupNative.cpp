@@ -195,7 +195,9 @@ PhaseAxis phaseAxis(long long in, long long pad, long long filter, int st, int p
 
 std::optional<GroupProblem> parseGroupProblem(const MatchContext& context, ConvDirection direction)
 {
-    auto igemm = conv_igemm::parseIgemmProblem(context, direction);
+    // Forward may carry a fused pointwise epilogue; backward data never does (the parse declines
+    // every fused backward graph).
+    auto igemm = conv_igemm::parseIgemmProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!igemm.has_value())
     {
         return std::nullopt;
@@ -1180,6 +1182,15 @@ const std::vector<KernelArgument>& signatureOf()
     return s_signature;
 }
 
+/// The convolution's arguments, and a ConvEpiArgs after them when an epilogue is fused.
+const std::vector<KernelArgument>& convSignature(bool fused)
+{
+    static const std::vector<KernelArgument> s_fused{
+        {"by_value", static_cast<uint32_t>(sizeof(K4Args)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fused : signatureOf<K4Args>();
+}
+
 class PreparedConvGroup : public IngestorPreparedDispatch
 {
 public:
@@ -1276,7 +1287,7 @@ public:
                          conv_group::GroupWrwLaunch launch)
         : _conv(std::move(conv))
         , _reduce(std::move(reduce))
-        , _problem(problem)
+        , _problem(std::move(problem))
         , _launch(launch)
     {
     }
@@ -1446,8 +1457,13 @@ public:
             options.add("CONV_GROUP_RS", std::to_string(tile->rs));
             options.add("CONV_GROUP_NBI", std::to_string(tile->nbi));
         }
+        // The fused epilogue: in the convolution only, which writes y (the expansion, staging
+        // copies and three-bf16 split take none). Fusion off adds no option.
+        const bool fused = !problem->igemm.base.epilogue.empty();
+        conv_epilogue::addEpilogueDefines(options, problem->igemm.base.epilogue);
         auto conv = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K4Args>());
+            _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused));
+        conv_epilogue::removeEpilogueDefines(options);
         conv.setBlockSize(static_cast<unsigned int>(blockThreads(*tile)), 1, 1);
         conv.setGridSize(blocks.front(), 1, 1);
 
@@ -1610,6 +1626,11 @@ public:
             in = split.t[0].dst;
             splitFilter = reinterpret_cast<char*>(split.t[1].dst);
         }
+        const bool fused = !igemm.base.epilogue.empty();
+        const ConvEpiArgs epiArgs = fused ? conv_epilogue::epilogueArgs(igemm.base.epilogue,
+                                                                        deviceBuffers,
+                                                                        numDeviceBuffers)
+                                          : ConvEpiArgs{};
         for(size_t i = 0; i < dispatch.launches().size(); ++i)
         {
             const auto& launch = dispatch.launches()[i];
@@ -1629,7 +1650,14 @@ public:
             args.out = forward ? operand[1] : operand[0];
             auto& conv = dispatch.convForStream(stream);
             conv.setGridSize(dispatch.blocks()[i], 1, 1);
-            conv.launch(stream, args);
+            if(fused)
+            {
+                conv.launch(stream, args, epiArgs);
+            }
+            else
+            {
+                conv.launch(stream, args);
+            }
         }
         for(size_t i = 0; i < stagings.size(); ++i)
         {

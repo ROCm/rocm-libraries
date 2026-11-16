@@ -26,6 +26,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -540,6 +541,140 @@ TEST(TestConvDepthwiseMfmaCatalog, EveryConfigServesADeviceCase)
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): the channel-diagonal (channels-last) and channel-pair
+// (channels-first) cores at stride 1 and 2, every atom and fold, 16-bit.
+// ---------------------------------------------------------------------------
+
+namespace fused_mfma
+{
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+struct FusedShape
+{
+    std::string name;
+    ConvShape shape;
+};
+
+/// The config fields that select a different code path.
+const std::vector<std::string>& distinctPaths()
+{
+    static const std::vector<std::string> s_fields{"atom", "layout", "stride", "fold", "kh"};
+    return s_fields;
+}
+
+std::vector<FusedShape> shapes()
+{
+    std::vector<FusedShape> shapes;
+    shapes.push_back({"Nhwc3x3", depthwise(128, {13, 11}, {3, 3}, {1, 1}, {1, 1}, true)});
+    shapes.push_back({"Nchw3x3", depthwise(10, {13, 37}, {3, 3}, {1, 1}, {1, 1}, false)});
+    ConvShape strided = depthwise(128, {14, 13}, {3, 3}, {1, 1}, {1, 1}, true);
+    strided.stride = {2, 2};
+    shapes.push_back({"Nhwc3x3Stride2", strided});
+    ConvShape stridedCf = depthwise(10, {14, 37}, {3, 3}, {1, 1}, {1, 1}, false);
+    stridedCf.stride = {2, 2};
+    shapes.push_back({"Nchw3x3Stride2", stridedCf});
+    shapes.push_back({"Nhwc5x5", depthwise(128, {12, 9}, {5, 5}, {2, 2}, {1, 1}, true)});
+    shapes.push_back({"NarrowNhwc7x7", depthwise(64, {9, 6}, {7, 7}, {3, 3}, {1, 1}, true)});
+    return shapes;
+}
+
+/// The matrix-core configs run on CDNA only: elsewhere none is admitted, which is not a failure.
+void expectRan(int ran)
+{
+    if(ran == 0)
+    {
+        GTEST_SKIP() << "no matrix-core config runs on this device";
+    }
+}
+
+template <typename T>
+int run(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), distinctPaths());
+    return conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials);
+}
+
+class TestGpuConvDepthwiseMfmaFused
+    : public ::testing::TestWithParam<std::tuple<FusedShape, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseMfmaFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(
+        run<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE));
+}
+
+TEST_P(TestGpuConvDepthwiseMfmaFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(run<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE));
+}
+
+std::vector<FusedChain> chainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvDepthwiseMfmaFused,
+                         ::testing::Combine(::testing::ValuesIn(shapes()),
+                                            ::testing::ValuesIn(chainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvDepthwiseMfmaFused,
+                         ::testing::Combine(::testing::Values(shapes()[0], shapes()[1]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvDepthwiseMfmaFusedSpecials : public ::testing::TestWithParam<FusedShape>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseMfmaFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(run<BFloat16>(GetParam().shape,
+                            {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu()},
+                            Specials::NAN_INF));
+    expectRan(run<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF));
+}
+
+TEST_P(TestGpuConvDepthwiseMfmaFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(
+        run<Half>(GetParam().shape,
+                  {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+                  Specials::CLIP_BOUNDARY));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDepthwiseMfmaFusedSpecials,
+                         ::testing::ValuesIn(shapes()),
+                         [](const auto& info) { return info.param.name; });
+
+} // namespace fused_mfma
 
 } // namespace
 

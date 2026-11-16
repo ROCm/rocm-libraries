@@ -136,6 +136,16 @@ void writeCodeObject(const std::filesystem::path& path, const std::vector<char>&
 
 } // namespace
 
+std::string Program::codeObjectKey(const std::string& kernelFileName,
+                                   const std::vector<std::string>& options)
+{
+    const auto kernelSrc = hip_plugin::getKernelSrc(kernelFileName.c_str());
+    std::vector<std::string_view> includeTexts;
+    std::vector<const char*> includeNames;
+    hip_plugin::getKernelIncList(includeTexts, includeNames);
+    return cacheKey(kernelFileName, kernelSrc, includeTexts, includeNames, options);
+}
+
 Program::Program(std::string kernelFileName, const std::vector<std::string>& options)
     : _programName(std::move(kernelFileName))
 {
