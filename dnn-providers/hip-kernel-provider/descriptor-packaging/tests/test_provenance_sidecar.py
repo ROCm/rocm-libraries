@@ -449,6 +449,20 @@ def test_the_decompression_cap_grows_with_the_descriptors_ukds(tmp_path, monkeyp
         _attach_fresh(path)
 
 
+@pytest.mark.quick
+def test_the_decompression_cap_never_exceeds_the_absolute_ceiling():
+    """`ukd_count` comes from the descriptor being attached: a descriptor claiming
+    millions of UKDs must not grant a correspondingly unbounded inflation budget."""
+    assert (
+        provenance_sidecar.decompressed_limit(10_000_000)
+        == provenance_sidecar.MAX_DECOMPRESSED_BYTES_ABSOLUTE
+    )
+    assert (
+        provenance_sidecar.decompressed_limit(0)
+        == provenance_sidecar.MAX_DECOMPRESSED_BYTES
+    )
+
+
 # --- Malformed descriptors ---------------------------------------------------
 
 
