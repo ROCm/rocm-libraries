@@ -40,5 +40,6 @@ INSTANTIATE_GETF2_SMALL(rocblas_double_complex,
 
 #ifdef HAVE_ROCBLAS_64
 INSTANTIATE_GETF2_SMALL(rocblas_double_complex, int64_t, int64_t, rocblas_double_complex* const*);
+INSTANTIATE_GETF2_SMALL(rocblas_double_complex, int64_t, int32_t, rocblas_double_complex* const*);
 #endif
 ROCSOLVER_END_NAMESPACE
