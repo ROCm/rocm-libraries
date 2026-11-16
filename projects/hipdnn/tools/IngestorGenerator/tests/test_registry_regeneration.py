@@ -762,8 +762,13 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
 #: needs an entry here.
 # Keyed by builder, or by pack where two packs share a builder name.
 _PREDICATE_DECLINES = {
-    # gfx942 dense declines varlen in its predicate.
+    # gfx942 dense declines varlen in its predicate; its ALiBi satellite refuses varlen
+    # earlier (the ALiBi spec check), so its predicate case is a windowed bottom-right band.
     "gfx942_attention_dense": {"varlen": True},
+    "gfx942_attention_dense_alibi": {
+        "causal_bottom_right": True,
+        "sliding_window": 128,
+    },
     # gfx950 dense ships block_m 128 and 256 only.
     "build_attention_dense": {"block_m": 64},
     # The tiled 2D/3D kernels and the gfx950 and gfx942 split-KV modules (segment +
@@ -827,6 +832,44 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
     assert list(by_kernel) == ["renamed", "declined"], failures
     assert all("unexpected spec field" in f for f in by_kernel["renamed"]), failures
     assert all("spec rejected by" in f for f in by_kernel["declined"]), failures
+
+
+def test_g6_a_pinned_resolved_knob_is_what_the_kernel_resolves(
+    manifest, selection, registry
+):
+    """A `space: slice` section does not resolve a knob the spec leaves unset for the
+    kernel to resolve (a method binding such as resolved_use_cfvst), so a section that
+    needs its metadata pins the value in spec_overrides. Each shipped kernel's pinned value
+    must be what the kernel resolves with the knob unset: a later change of the kernel's
+    policy shows here instead of leaving the catalog on the old value."""
+    sections = [manifest["enumerate"], *manifest["enumerate"].get("also", [])]
+    bindings = manifest["specialization"]["bindings"]
+    pinned = {
+        field: bindings[field]["method"]
+        for section in sections
+        for field in section.get("spec_overrides") or {}
+        if "method" in (bindings.get(field) or {})
+    }
+    if not pinned:
+        pytest.skip("no section pins a knob the kernel resolves")
+    module = importlib.import_module(
+        rocke_compile._module_from_source(manifest["source"])
+    )
+    spec_cls = rocke_compile._resolve_spec_class(
+        module, getattr(module, manifest["builder"])
+    )
+    failures = []
+    for kernel in _selection_kernels(selection):
+        spec = dict(kernel.kernel_source.spec)
+        for field, method in pinned.items():
+            resolved = getattr(
+                rocke_compile.build_spec(spec_cls, {**spec, field: None}), method
+            )()
+            if int(resolved) != int(spec[field]):
+                failures.append(
+                    f"{kernel.name}: {field}={spec[field]}, {method}()={resolved}"
+                )
+    assert not failures, failures
 
 
 def _observation_failures(manifest: dict, kernels: list) -> list:

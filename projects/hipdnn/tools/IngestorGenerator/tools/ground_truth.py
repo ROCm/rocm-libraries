@@ -242,12 +242,7 @@ def ground_truth_block(manifest: dict, manifest_path) -> tuple:
         not isinstance(v, dict) for v in value_map.values()
     ):
         raise GroundTruthError("ground_truth.value_map must map field -> {value: x}")
-    decl = manifest["enumerate"]
-    sections = [decl, *(decl.get("also") or [])]
-    check_value_map_cells(
-        [group for section in sections for group in cell_groups(section.get("cells"))],
-        value_map,
-    )
+    check_value_map_cells(cell_groups(manifest["enumerate"].get("cells")), value_map)
     return template, value_map
 
 

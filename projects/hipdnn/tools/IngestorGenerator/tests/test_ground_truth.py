@@ -172,24 +172,6 @@ def test_a_value_map_must_cover_exactly_the_declared_cell_values(
     assert not out.exists()
 
 
-def test_a_value_map_covers_the_cell_values_of_every_section():
-    """The map is checked against the union of the sections' cells: gfx942 dense
-    lists use_alibi=true in its also sections only, so the key is not dead, and
-    dropping it is still caught, by the enumerator and by `ground_truth` alike."""
-    if not _ROCKE.is_dir():
-        pytest.skip(f"rocKE library not in this checkout: {_ROCKE}")
-    path = _ROOT / "configs" / "gfx942_attention_dense.engine.yaml"
-    manifest = yaml.safe_load(path.read_text())
-    re_.Registry(manifest)
-    gt.ground_truth_block(manifest, path)
-
-    manifest["ground_truth"]["value_map"]["use_alibi"].pop(True)
-    with pytest.raises(re_.EnumerationError, match=r"missing \['True'\]"):
-        re_.Registry(manifest)
-    with pytest.raises(re_.EnumerationError, match=r"missing \['True'\]"):
-        gt.ground_truth_block(manifest, path)
-
-
 def _recorded(sweep) -> dict:
     """``{graph name: entry}`` of the row map `graphs` wrote beside GT.json."""
     mapping = json.loads(gt.graphs_map_path(sweep.parent / "GT.json").read_text())

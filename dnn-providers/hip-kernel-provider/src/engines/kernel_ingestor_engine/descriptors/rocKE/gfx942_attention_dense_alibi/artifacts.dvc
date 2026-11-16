@@ -1,0 +1,7 @@
+outs:
+- md5: ca6c93bec6bd19f848586802a55ccb56.dir
+  size: 132839
+  nfiles: 1
+  hash: md5
+  path: artifacts
+  remote: ingestor

@@ -18,17 +18,7 @@ the specs differing from the cell's default only in ``free_fields``.
 ``space: full`` keeps those matching the default in ``reduction.fields.feature``,
 projects varying ``performance`` knobs into the spec, KMD, metadata, bindings and
 name, and holds any other varying field at the registry default (with a WARN
-unless ``ignored``). The default spec carries ``default: true``. A
-``feature_fields`` entry names a boolean spec field a cell can turn on. It is
-unrelated to ``reduction.fields.feature`` (the cell-defining fields of variant
-reduction), where it should also be listed, or reduction treats the feature's on
-and off kernels as one cell. A kernel holding it at a value other than its
-dataclass default (turned on) inserts the entry's ``name_token`` after the name
-template's last slot, e.g. ``..._bn64_addb.gfx950``; given ``free_fields`` it
-sweeps only those, and given ``select`` only the specs with those values; the
-cell's default is then the kept spec equal to the registry default outside the
-selected fields. The selects of two features a cell turns on must agree. The name
-check refuses any two kernels with one name, in both spaces.
+unless ``ignored``). The default spec carries ``default: true``.
 
 Two opt-in ``enumerate`` keys let a rule-driven candidate (one spec per request,
 picked from request fields) yield one cell per kernel family rather than one per
@@ -39,7 +29,7 @@ spec's value. See `cell_spaces`.
 
 One pack may draw kernels from more than one registry candidate: ``enumerate.also`` lists
 further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields``,
-``spec_fields``, ``feature_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
+``spec_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
 space are inherited from ``enumerate``, and a section may set its own ``space``). Kernels
 are emitted primary section first, then each ``also`` section in order; a cell listed by
 more than one section keeps the first section's default as its one ``default: true``
@@ -238,95 +228,6 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             f"{where}.sweep_level",
             "a string",
         )
-    # Every section's feature_fields: an `also` section's own are honoured by
-    # `Registry` (its space inherited from enumerate), so they get the same checks.
-    for label, sec in [("enumerate", decl)] + [
-        (f"enumerate.also[{i}]", {"space": decl.get("space", "slice"), **a})
-        for i, a in enumerate(also or [])
-    ]:
-        features = sec.get("feature_fields")
-        _require(
-            features is None
-            or (
-                isinstance(features, dict)
-                and all(isinstance(entry, dict) for entry in features.values())
-            ),
-            path,
-            f"{label}.feature_fields",
-            "a mapping of spec field name to {name_token, free_fields, select}",
-        )
-        for name, entry in (features or {}).items():
-            where = f"{label}.feature_fields.{name}"
-            _require(
-                set(entry) <= {"name_token", "free_fields", "select"},
-                path,
-                where,
-                "a mapping with only 'name_token', 'free_fields' and 'select'",
-            )
-            token = entry.get("name_token")
-            _require(
-                isinstance(token, str) and bool(token),
-                path,
-                f"{where}.name_token",
-                "a non-empty string",
-            )
-            _require(
-                entry.get("free_fields") is None or _is_names(entry["free_fields"]),
-                path,
-                f"{where}.free_fields",
-                "a list of field names",
-            )
-            # The spec the KDP builds from (spec_fields) and the catalog key the matcher
-            # compares (metadata_fields) must both carry the field.
-            _require(
-                sec.get("spec_fields") is None or name in sec["spec_fields"],
-                path,
-                where,
-                f"listed in {label}.spec_fields",
-            )
-            _require(
-                name in specialization["metadata_fields"],
-                path,
-                where,
-                "listed in specialization.metadata_fields",
-            )
-            narrowed = entry.get("free_fields")
-            _require(
-                narrowed is None
-                or (
-                    sec.get("space", "slice") == "slice"
-                    and set(narrowed) <= set(sec.get("free_fields") or [])
-                ),
-                path,
-                f"{where}.free_fields",
-                f"slice only, and a subset of {label}.free_fields (it narrows the "
-                "cell's sweep; it cannot widen it)",
-            )
-            _require(
-                name not in (sec.get("free_fields") or []),
-                path,
-                where,
-                f"not in {label}.free_fields (a feature is a cell field, not a "
-                "swept one)",
-            )
-            select = entry.get("select")
-            swept = narrowed if narrowed is not None else (sec.get("free_fields") or [])
-            _require(
-                select is None
-                or (
-                    isinstance(select, dict)
-                    and bool(select)
-                    and sec.get("space", "slice") == "slice"
-                    and set(select) <= set(swept)
-                    and all(
-                        isinstance(v, (bool, int, float, str)) for v in select.values()
-                    )
-                ),
-                path,
-                f"{where}.select",
-                "slice only, a non-empty mapping of the fields the feature's cells "
-                f"sweep (its free_fields, else {label}.free_fields) to scalar values",
-            )
     _require(
         manifest.get("ground_truth") is None
         or isinstance(manifest["ground_truth"], dict),
@@ -487,7 +388,7 @@ def cell_groups(raw) -> list:
 def check_value_map_cells(groups: list, value_map) -> None:
     """Each ``ground_truth.value_map`` field that is also a cell field maps exactly
     the values its cells declare (an enum cell by its member name), so no declared
-    value is unmapped and no key is dead. ``groups`` are every section's cell groups."""
+    value is unmapped and no key is dead."""
     if not isinstance(value_map, dict):
         return
     declared: dict = {}
@@ -579,7 +480,6 @@ class Registry:
         else:
             pins = [_mapping(decl, "pin")]
         self.fixed = _mapping(decl, "fixed")
-        self.features = _mapping(decl, "feature_fields")
         arch = manifest.get("arch")
         if "arch" in self.fixed and self.fixed["arch"] != arch:
             raise EnumerationError(
@@ -593,22 +493,9 @@ class Registry:
             )
         self.groups = self._parse_groups(decl["cells"])
         self.cell_fields = [f for fields, _ in self.groups for f in fields]
-        if primary:
-            # Over every section's cells: a section may list a feature value the others
-            # do not (a feature built at one geometry only). A section without cells is
-            # refused when it is built below.
-            check_value_map_cells(
-                [
-                    *self.groups,
-                    *(
-                        group
-                        for extra in decl.get("also") or []
-                        if isinstance(extra, dict) and "cells" in extra
-                        for group in self._parse_groups(extra["cells"])
-                    ),
-                ],
-                (manifest.get("ground_truth") or {}).get("value_map"),
-            )
+        check_value_map_cells(
+            self.groups, (manifest.get("ground_truth") or {}).get("value_map")
+        )
         self.selector_fields = list(decl.get("selector_fields") or [])
         unknown = [n for n in self.selector_fields if n not in self.cell_fields]
         if unknown:
@@ -894,84 +781,13 @@ class Registry:
             out["rocke_tuning_id"] = tuning_id
         return out
 
-    def features_on(self, spec) -> list:
-        """The ``feature_fields`` ``spec`` holds off their dataclass default, in
-        manifest order."""
-        fields = {f.name: f for f in dataclasses.fields(spec)}
-        on = []
-        for name in self.features:
-            if name not in fields:
-                raise EnumerationError(
-                    f"enumerate.feature_fields names '{name}', which the registry "
-                    f"spec {type(spec).__name__} does not have."
-                )
-            default = _field_default(fields[name])
-            if default is dataclasses.MISSING:
-                raise EnumerationError(
-                    f"enumerate.feature_fields names '{name}', which has no "
-                    f"default in {type(spec).__name__} to be off at."
-                )
-            if getattr(spec, name) != default:
-                on.append(name)
-        return on
-
-    def selected(self, base) -> dict:
-        """The ``select`` values of every feature ``base``'s cell turns on. As
-        their free_fields intersect, their selects must agree."""
-        out: dict = {}
-        for name in self.features_on(base):
-            for field, value in (self.features[name].get("select") or {}).items():
-                if field in out and out[field] != value:
-                    raise EnumerationError(
-                        f"enumerate.feature_fields.{name}.select sets {field}="
-                        f"{value!r}, but another feature this cell turns on "
-                        f"selects {out[field]!r}."
-                    )
-                out[field] = value
-        return out
-
-    def cell_default(self, base, kept: list):
-        """The kernel of ``kept`` that carries ``default: true``: ``base``, unless a
-        feature's ``select`` moved the cell off it; then the kept spec equal to
-        ``base`` outside the selected fields, else the first kept spec."""
-        select = self.selected(base)
-        if not select or base in kept:
-            return base
-        moved = [
-            ks
-            for ks in kept
-            if all(
-                getattr(ks, f.name) == getattr(base, f.name)
-                for f in dataclasses.fields(ks)
-                if f.name not in select
-            )
-        ]
-        return moved[0] if moved else kept[0]
-
     def slice_of(self, base, specs: list) -> list:
         free = set(self.decl.get("free_fields") or [])
-        declared = set(free).union(
-            *(entry.get("free_fields") or () for entry in self.features.values())
-        )
-        unknown = sorted(declared - set(_spec_fields(base)))
+        unknown = sorted(free - set(_spec_fields(base)))
         if unknown:
             raise EnumerationError(
-                f"enumerate.free_fields (or a feature field's free_fields) names "
-                f"{unknown}, which the registry spec {type(base).__name__} does "
-                "not have."
-            )
-        # A cell turning a feature on sweeps only what every such feature frees,
-        # and keeps only the specs with the values those features select.
-        select = self.selected(base)
-        for name in self.features_on(base):
-            narrowed = self.features[name].get("free_fields")
-            if narrowed is not None:
-                free &= set(narrowed)
-        held = sorted(set(select) - free)
-        if held:
-            raise EnumerationError(
-                f"a feature's select names {held}, which another feature's "
-                "free_fields holds at the cell default."
+                f"enumerate.free_fields names {unknown}, which the registry spec "
+                f"{type(base).__name__} does not have."
             )
         out = [
             ks
@@ -981,7 +797,6 @@ class Registry:
                 for f in dataclasses.fields(ks)
                 if f.name not in free
             )
-            and all(getattr(ks, n) == value for n, value in select.items())
         ]
         # Default first, then by the free fields, independent of sweep order.
         free_order = sorted(free)
@@ -1428,8 +1243,7 @@ def _section_rows(registry: Registry, classification: Classification) -> tuple:
                 f"the registry yields no spec for cell {_show(cell)}, which the "
                 f"manifest's cells promise."
             )
-        default = registry.cell_default(base, kept)
-        rows.extend((cell, ks, ks == default) for ks in kept)
+        rows.extend((cell, ks, ks == base) for ks in kept)
     limit = registry.decl.get("max_kernels")
     if not full and limit is not None and len(rows) > limit:
         raise EnumerationError(
@@ -1540,14 +1354,13 @@ def build_config(
                     {"method": accessors[n]} if n in accessors else {"field": n}
                 )
 
-    def name_layout(template: str, features) -> tuple:
+    def name_layout(template: str) -> tuple:
         """``(named, split)``: the projected knobs ``template`` has no slot for,
-        and where their ``_<knob><value>`` suffix and the section's feature name
-        tokens go (after the last slot)."""
+        and where their ``_<knob><value>`` suffix goes (after the last slot)."""
         slots = _template_slots(template)
         named = [n for n in projected if n not in slots]
         split = None
-        if named or features:
+        if named:
             last = None
             for last in _LAST_SLOT.finditer(template):
                 pass
@@ -1557,7 +1370,7 @@ def build_config(
     kernels = []
     for (cell, ks, is_default), section in zip(enumeration.rows, enumeration.sections):
         section_template = section.decl.get("kernel_name_template") or template
-        named, split = name_layout(section_template, section.features)
+        named, split = name_layout(section_template)
         names = list(section.decl.get("spec_fields") or _spec_fields(ks))
         names += [n for n in projected if n not in names]
         # An override is what sets the section's kernels apart: always ship it.
@@ -1592,8 +1405,6 @@ def build_config(
                         else f"_{n}u{_rendered(_resolved(ks, n, accessors[n]))}"
                     )
                     for n in named
-                ) + "".join(
-                    section.features[n]["name_token"] for n in section.features_on(ks)
                 )
                 name = (
                     section_template[:split].format(**fields)
@@ -1638,19 +1449,26 @@ def build_config(
             f"reduce the dispatcher launches after it. Build both from one module "
             f"builder and declare its launches."
         )
-    repeated = [n for n, c in Counter(k["name"] for k in kernels).items() if c > 1]
-    if repeated:
-        if registry.also:
+    merges = any(s.selector_fields or s.neutral_fields for s in registry.sections())
+    if (
+        any(s.space_kind == "full" for s in registry.sections())
+        or registry.also
+        or merges
+    ):
+        repeated = [n for n, c in Counter(k["name"] for k in kernels).items() if c > 1]
+        if repeated and registry.also:
             raise EnumerationError(
                 f"{len(repeated)} kernel name(s) repeat across enumerate sections, "
                 f"e.g. {repeated[:3]}: a section's kernels must differ from every "
                 f"other section's in a field the name template renders."
             )
-        raise EnumerationError(
-            f"space: {registry.space_kind} renders {len(repeated)} duplicated kernel "
-            f"name(s), e.g. {repeated[:3]}: a varying field reaches neither the name "
-            "template, a projected knob, nor a feature_fields name_token."
-        )
+        if repeated:
+            raise EnumerationError(
+                f"space: {registry.space_kind} renders {len(repeated)} duplicated "
+                f"kernel name(s), e.g. "
+                f"{repeated[:3]}: a varying field reaches neither the name template "
+                f"nor a projected knob."
+            )
     budget = enumeration.classification.budget
     if len(kernels) > budget:
         message = (

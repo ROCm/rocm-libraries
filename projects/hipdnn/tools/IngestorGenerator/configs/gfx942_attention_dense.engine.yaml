@@ -21,7 +21,8 @@
 # (alibi_mask, SdpaSemanticsRegister SEM-021) with slopes it computes from the query head
 # count, so its launch passes one null alibi_slopes_ptr. hipDNN defines ALiBi only on the
 # top-left causal band (any left window, no right bound), so only the causal cells carry
-# ALiBi kernels, at the 128/64 tile (enumerate.also).
+# ALiBi kernels, at the 128/64 tile, in the satellite bundle gfx942_attention_dense_alibi
+# (configs/gfx942_attention_dense_alibi.engine.yaml).
 #
 # emit_lse is a compile-time variant: an emit_lse kernel also writes the softmax
 # log-sum-exp (the graph's stats output) through one trailing lse_ptr argument. It is a
@@ -172,10 +173,12 @@ kmd_fields:
   type: int
 # 1: the kernel adds ALiBi with hipDNN's slopes, computed in the kernel from the query head
 # count (SdpaSemanticsRegister SEM-021), and serves only alibi_mask graphs; 0: neither. A
-# record omitting it completes to the plain kernel.
+# record omitting it completes to the plain kernel. Only the satellite bundle
+# gfx942_attention_dense_alibi builds it; builder_default keeps it out of this bundle's descriptors.
 - name: use_alibi
   type: int
   default_value: 0
+  builder_default: true
 specialization:
   metadata_fields:
   - dtype
@@ -206,8 +209,8 @@ specialization:
   - lds_k_group_pad
   - use_cfvst
   - use_exp2_fast
-  - use_alibi
-  matcher_only_fields: []
+  # The ALiBi satellite's field: no kernel here is built with it (builder_default).
+  matcher_only_fields: [use_alibi]
   vocabulary:
     dtype:
       bf16: BF16
@@ -269,8 +272,6 @@ specialization:
       method: resolved_use_cfvst
     use_exp2_fast:
       method: resolved_use_exp2_fast
-    use_alibi:
-      field: use_alibi
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -316,15 +317,14 @@ enumerate:
     # sinks land), 512 Phi-4-mini-flash-reasoning (D64), 1024 Gemma 3 27B (D128), 2048
     # Arcee Trinity and Phi-3-medium-4k (D128; its config says 2047). 4096 (Mistral-7B
     # v0.1, StarCoder2, Command R7B, OLMo 3, EXAONE 4.0) is a follow-up.
-    # use_alibi is off in every swept cell: the ALiBi kernels come from the also sections.
-    - fields: [mask_type, sliding_window, use_alibi]
+    - fields: [mask_type, sliding_window]
       values:
-        - [TOP_LEFT_CAUSAL, 0, false]
-        - [NO_MASK, 0, false]
-        - [TOP_LEFT_CAUSAL, 128, false]
-        - [TOP_LEFT_CAUSAL, 512, false]
-        - [TOP_LEFT_CAUSAL, 1024, false]
-        - [TOP_LEFT_CAUSAL, 2048, false]
+        - [TOP_LEFT_CAUSAL, 0]
+        - [NO_MASK, 0]
+        - [TOP_LEFT_CAUSAL, 128]
+        - [TOP_LEFT_CAUSAL, 512]
+        - [TOP_LEFT_CAUSAL, 1024]
+        - [TOP_LEFT_CAUSAL, 2048]
     # Innermost: each kernel's LSE twin follows it. The twin differs only in the trailing
     # lse_ptr store, so it shares the cell's knob space.
     - fields: [emit_lse]
@@ -335,68 +335,16 @@ enumerate:
   space: full
   # Fields of the registry spec every generated kernel carries: the whole
   # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
-  spec_fields: &spec_fields [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds, use_alibi]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
   # Frozen build cost of a `space: slice` enumeration (unused under `space: full`, whose
   # bound is reduction.aot_budget_per_arch).
   max_kernels: 1600
-  # ALiBi (hipDNN's alibi_mask, SdpaSemanticsRegister SEM-021) is defined only on the
-  # top-left causal band (any left window, no right bound), so only the causal cells get
-  # ALiBi kernels, outside the swept space: no swept graph binds ALiBi. One kernel per
-  # head size, dtype, window and emit_lse on the qb_minor grid, the only grid with window
-  # kernels, plus the D128 persistent grid that cold selection puts first at D128 (no
-  # window), each at its grid's default spec but the 128/64 tile: kernel_match needs
-  # Sq % block_m == 0, every Sq a 256 tile serves a 128 tile serves too, and every
-  # window is a multiple of block_n 64.
-  also:
-    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
-      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
-      space: slice
-      cells:
-        - fields: [hdim_q, hdim_v]
-          values:
-            - [64, 64]
-            - [128, 128]
-        - fields: [dtype]
-          values: [bf16, fp16]
-        - fields: [mask_type, sliding_window, use_alibi]
-          values:
-            - [TOP_LEFT_CAUSAL, 0, true]
-            - [TOP_LEFT_CAUSAL, 128, true]
-            - [TOP_LEFT_CAUSAL, 512, true]
-            - [TOP_LEFT_CAUSAL, 1024, true]
-            - [TOP_LEFT_CAUSAL, 2048, true]
-        - fields: [emit_lse]
-          values: [false, true]
-      free_fields: [block_m, block_n]
-      feature_fields:
-        use_alibi: {name_token: _alibi, select: {block_m: 128, block_n: 64}}
-      spec_fields: *spec_fields
-      max_kernels: 40
-    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_persist_aot}
-      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
-      space: slice
-      cells:
-        - fields: [hdim_q, hdim_v]
-          values:
-            - [128, 128]
-        - fields: [dtype]
-          values: [bf16, fp16]
-        - fields: [mask_type, sliding_window, use_alibi]
-          values:
-            - [TOP_LEFT_CAUSAL, 0, true]
-        - fields: [emit_lse]
-          values: [false, true]
-      free_fields: [block_m, block_n]
-      feature_fields:
-        use_alibi: {name_token: _alibi, select: {block_m: 128, block_n: 64}}
-      spec_fields: *spec_fields
-      max_kernels: 4
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, ragged, batch, seqlen_q, seqlen_kv, use_alibi]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, ragged, batch, seqlen_q, seqlen_kv]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -430,9 +378,6 @@ ground_truth:
     mask_type:
       TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
       NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
-    use_alibi:
-      false: {/nodes/sdpa_node/attributes/alibi_mask: false}
-      true: {/nodes/sdpa_node/attributes/alibi_mask: true}
 
 # Launch-surface audit (`tools/launch_surface.py --check <this file>`).
 launch_surface:

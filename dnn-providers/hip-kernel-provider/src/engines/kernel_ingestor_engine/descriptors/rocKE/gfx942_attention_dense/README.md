@@ -23,7 +23,8 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   timings, so they need not mirror the non-LSE cells. Max, Sum_exp, the dropout RNG dump
   and any other stats layout or dtype are declined.
 - ALiBi (`alibi_mask`, SdpaSemanticsRegister SEM-021): the `use_alibi` variants (KMD field
-  `use_alibi` 1, name slot `_alibi`) add hipDNN's ALiBi term with slopes the kernel
+  `use_alibi` 1, name slot `_alibi`; 44 kernels in the satellite bundle `../gfx942_attention_dense_alibi/`,
+  same engine and KMD, KDP of its own) add hipDNN's ALiBi term with slopes the kernel
   computes from the query head count; the launch passes a null `alibi_slopes_ptr` after
   the shape and any fast-division pairs, before `lse_ptr`. hipDNN defines ALiBi only on
   the top-left causal band (any left window, no right bound), so an ALiBi graph with no

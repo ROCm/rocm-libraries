@@ -1,0 +1,3578 @@
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense_alibi
+engine:
+  name: hipkernel:Gfx950AttentionDense
+  census_name_symbol: GFX950_ATTENTION_DENSE_ENGINE_NAME
+  sdk_version: 1.0.0
+  behavior_notes:
+  - supports_graph_capture
+  knobs:
+  - block_m
+  - block_n
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: causal
+  type: int
+  default_value: 1
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: batch
+  type: int
+  default_value: 1
+- name: seqlen_q
+  type: int
+  default_value: 512
+- name: seqlen_kv
+  type: int
+  default_value: 512
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+- name: use_alibi
+  type: int
+  default_value: 0
+  builder_default: true
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - causal
+  - ragged
+  - sliding_window
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+  - use_alibi
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+    use_alibi:
+      field: use_alibi
+kernel_source_kind: rocke
+workspace_policy: none
+reduction:
+  fields:
+    feature:
+    - dtype
+    - head_size
+    - num_query_heads
+    - num_kv_heads
+    - causal
+    - sliding_window
+    - ragged
+    - batch
+    - seqlen_q
+    - seqlen_kv
+    - use_alibi
+    performance:
+    - name: waves_per_eu
+    - name: lazy_rescale
+    - name: lds_k_group_pad
+    - name: lds_v_row_pad
+    - name: lds_k_row_pad
+    - name: lazy_rescale_threshold
+    - name: use_exp2_fast
+    - name: exp_per_pv_step
+      unset_resolves_by: resolved_exp_per_pv_step
+    - name: partial_vmcnt_prefetch
+    - name: pv_priority
+    - name: pv_sched_fence
+      unset_resolves_by: resolved_pv_sched_fence
+    - name: pv_sched_group_template
+      unset_resolves_by: resolved_pv_sched_group_template
+    - name: iglp_mode
+      unset_resolves_by: resolved_iglp_mode
+    - name: pv_sched_fence_mask
+    - name: pv_sched_group_ds_read
+    - name: pv_loop_order
+      unset_resolves_by: resolved_pv_loop_order
+    - name: causal_diag_split
+    - name: o_store_width
+    ignored: []
+  aot_budget_per_arch: 1000
+packs:
+- name: gfx950_attention_dense_alibi
+  arch:
+  - gfx950
+  kernels:
+  - name: attention_dense.bf16_d64_hq8_kv1_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 8
+        num_kv_heads: 1
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 1
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq8_kv1_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 8
+        num_kv_heads: 1
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 1
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq8_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq8_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 8
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 8
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq10_kv10_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 10
+        num_kv_heads: 10
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 10
+      num_kv_heads: 10
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq10_kv10_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 10
+        num_kv_heads: 10
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 10
+      num_kv_heads: 10
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq12_kv12_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 12
+        num_kv_heads: 12
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 12
+      num_kv_heads: 12
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq12_kv12_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 12
+        num_kv_heads: 12
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 12
+      num_kv_heads: 12
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq16_kv2_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 16
+        num_kv_heads: 2
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 16
+      num_kv_heads: 2
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq16_kv2_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 16
+        num_kv_heads: 2
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 16
+      num_kv_heads: 2
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq16_kv16_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 16
+        num_kv_heads: 16
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 16
+      num_kv_heads: 16
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq16_kv16_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 16
+        num_kv_heads: 16
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 16
+      num_kv_heads: 16
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq20_kv20_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 20
+        num_kv_heads: 20
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 20
+      num_kv_heads: 20
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq20_kv20_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 20
+        num_kv_heads: 20
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 20
+      num_kv_heads: 20
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq32_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 32
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 32
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq32_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 32
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 32
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq32_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 32
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 32
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq32_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 32
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 32
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq32_kv32_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 32
+        num_kv_heads: 32
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 32
+      num_kv_heads: 32
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq32_kv32_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 32
+        num_kv_heads: 32
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 32
+      num_kv_heads: 32
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq64_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 64
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq64_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 64
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 64
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d64_hq128_kv128_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 64
+        num_query_heads: 128
+        num_kv_heads: 128
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 64
+      num_query_heads: 128
+      num_kv_heads: 128
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d64_hq128_kv128_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 64
+        num_query_heads: 128
+        num_kv_heads: 128
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 64
+      num_query_heads: 128
+      num_kv_heads: 128
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq24_kv24_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 24
+        num_kv_heads: 24
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 24
+      num_kv_heads: 24
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq24_kv24_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 24
+        num_kv_heads: 24
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 24
+      num_kv_heads: 24
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq4_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 4
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 4
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq4_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 4
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 4
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq8_kv1_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 1
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 1
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq8_kv1_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 1
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 1
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq8_kv2_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 2
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 2
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq8_kv2_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 2
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 2
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq8_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq8_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 8
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 8
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq9_kv9_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 9
+        num_kv_heads: 9
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 9
+      num_kv_heads: 9
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq9_kv9_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 9
+        num_kv_heads: 9
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 9
+      num_kv_heads: 9
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq16_kv2_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 16
+        num_kv_heads: 2
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 16
+      num_kv_heads: 2
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq16_kv2_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 16
+        num_kv_heads: 2
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 16
+      num_kv_heads: 2
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq16_kv16_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 16
+        num_kv_heads: 16
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 16
+      num_kv_heads: 16
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq16_kv16_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 16
+        num_kv_heads: 16
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 16
+      num_kv_heads: 16
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq28_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 28
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 28
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq28_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 28
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 28
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq32_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 32
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 32
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq32_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 32
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 32
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq32_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 32
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 32
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq32_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 32
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 32
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq32_kv32_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 32
+        num_kv_heads: 32
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 32
+      num_kv_heads: 32
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq32_kv32_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 32
+        num_kv_heads: 32
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 32
+      num_kv_heads: 32
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq40_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 40
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 40
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq40_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 40
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 40
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq40_kv10_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 40
+        num_kv_heads: 10
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 40
+      num_kv_heads: 10
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq40_kv10_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 40
+        num_kv_heads: 10
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 40
+      num_kv_heads: 10
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq40_kv40_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 40
+        num_kv_heads: 40
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 40
+      num_kv_heads: 40
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq40_kv40_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 40
+        num_kv_heads: 40
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 40
+      num_kv_heads: 40
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq48_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 48
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 48
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq48_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 48
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 48
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq64_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq64_kv4_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 4
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 4
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq64_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq64_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq64_kv64_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 64
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 64
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq64_kv64_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 64
+        num_kv_heads: 64
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 64
+      num_kv_heads: 64
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq96_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 96
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 96
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq96_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 96
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 96
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.bf16_d128_hq128_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: bf16
+        head_size: 128
+        num_query_heads: 128
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: BF16
+      head_size: 128
+      num_query_heads: 128
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517
+  - name: attention_dense.fp16_d128_hq128_kv8_c1_bm128_bn64_alibi.gfx950
+    kernel_source:
+      kind: rocke
+      source: kernels/gfx950/attention_dense.py
+      builder: build_attention_dense
+      spec:
+        dtype: fp16
+        head_size: 128
+        num_query_heads: 128
+        num_kv_heads: 8
+        causal: true
+        batch: 1
+        seqlen_q: 512
+        seqlen_kv: 512
+        sliding_window: 0
+        ragged: false
+        varlen: false
+        paged: false
+        persistent: false
+        block_m: 128
+        block_n: 64
+        waves_per_eu: 2
+        lds_k_group_pad: 8
+        lds_v_row_pad: 32
+        lazy_rescale: true
+        wide_lds_dma: false
+        interleave: false
+        persist_decode: auto
+        nonpersist_decode: qb_minor
+        num_persistent: 256
+        block_size: 0
+        num_kv_blocks: 0
+        use_sinks: false
+        use_alibi: true
+    metadata:
+      dtype: FP16
+      head_size: 128
+      num_query_heads: 128
+      num_kv_heads: 8
+      causal: 1
+      ragged: 0
+      sliding_window: 0
+      batch: 1
+      seqlen_q: 512
+      seqlen_kv: 512
+      block_m: 128
+      block_n: 64
+      use_alibi: 1
+    default: true
+    provenance:
+      rocke_spec_id: gfx950_dense_qbminor
+      rocke_tuning_id: qbminor_wpe2@05eef12b2e2ae517

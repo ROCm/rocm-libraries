@@ -62,9 +62,12 @@ kmd_fields:
 - name: block_n
   type: int
   default_value: 64
+# 1 for a kernel that adds hipDNN's ALiBi (satellite bundle gfx950_attention_dense_alibi);
+# builder_default keeps it out of this bundle's descriptors.
 - name: use_alibi
   type: int
   default_value: 0
+  builder_default: true
 specialization:
   metadata_fields:
   - dtype
@@ -79,8 +82,8 @@ specialization:
   - seqlen_kv
   - block_m
   - block_n
-  - use_alibi
-  matcher_only_fields: []
+  # The ALiBi satellite's field: no kernel here is built with it (builder_default).
+  matcher_only_fields: [use_alibi]
   vocabulary:
     dtype:
       bf16: BF16
@@ -110,8 +113,6 @@ specialization:
       field: block_m
     block_n:
       field: block_n
-    use_alibi:
-      field: use_alibi
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -170,18 +171,8 @@ enumerate:
         - [128, 128, 128, 8]
     - fields: [dtype]
       values: [bf16, fp16]
-    # hipDNN defines ALiBi only with a top-left causal mask, so no other mask gets an
-    # ALiBi kernel.
-    - fields: [mask_type, use_alibi]
-      values:
-        - [TOP_LEFT_CAUSAL, false]
-        - [NO_MASK, false]
-        - [TOP_LEFT_CAUSAL, true]
-  # ALiBi kernels ship at one tile, 128/64: one per head configuration and dtype (66).
-  # 128/64 rather than the default 256/64 because kernel_match needs Sq % block_m == 0,
-  # and every Sq a 256 tile serves a 128 tile serves too, plus the odd multiples of 128.
-  feature_fields:
-    use_alibi: {name_token: _alibi, select: {block_m: 128, block_n: 64}}
+    - fields: [mask_type]
+      values: [TOP_LEFT_CAUSAL, NO_MASK]
   sweep_level: production
   space: slice
   # Spec fields the sweep may vary away from the candidate's own default spec.
@@ -195,15 +186,15 @@ enumerate:
   # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
   # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
   # diffs the enumeration against the shipped catalog on the shipped fields (g3).
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, use_alibi]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  max_kernels: 906
+  max_kernels: 840
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv, use_alibi]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -241,9 +232,6 @@ ground_truth:
     mask_type:
       TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
       NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
-    use_alibi:
-      false: {/nodes/sdpa_node/attributes/alibi_mask: false}
-      true: {/nodes/sdpa_node/attributes/alibi_mask: true}
 
 # Launch-surface audit (`tools/launch_surface.py --check <this file>`).
 launch_surface:
