@@ -462,7 +462,7 @@ def build_config(
     engine = {
         "name": engine_name,
         "sdk_version": "1.0.0",
-        "knobs": list(knobs),
+        "knobs": list(ENGINE_KNOBS),
         "heuristic": "native",
     }
     if engine_name != PRODUCT_ENGINE:
@@ -471,7 +471,7 @@ def build_config(
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
         "engine": engine,
-        "kmd_fields": kmd_fields,
+        "kmd_fields": kmd,
         "kernel_source_kind": "rocke",
         # Only the split-C instances use a workspace (their fp32 partial sums),
         # sized per graph by the native handler.
@@ -503,28 +503,6 @@ def kernel_uuid(
     """:func:`conv_aot_common.kernel_uuid` with :data:`PRODUCT_ENGINE` as the
     default for both arguments."""
     return _common.kernel_uuid(instance_id, engine_name, product)
-
-
-def identity_entries(paths: list) -> tuple:
-    """``(entries, identities, rejected)`` of the JSON identity lists ``paths``, read
-    as one catalog: every entry in order, ``index -> identity dict`` of each entry that
-    is one (a ``KernelIdentity`` dict, or an object carrying one under
-    ``"identity"``), and ``(index, reason)`` of each that is not. ``ValueError``
-    when a file does not hold a JSON list."""
-    entries = []
-    for path in paths:
-        listed = json.loads(Path(path).read_text())
-        if not isinstance(listed, list):
-            raise ValueError(f"--instances {path} must hold a JSON list")
-        entries += listed
-    identities, rejected = {}, []
-    for index, entry in enumerate(entries):
-        identity = entry.get("identity", entry) if isinstance(entry, dict) else None
-        if isinstance(identity, dict):
-            identities[index] = identity
-        else:
-            rejected.append((index, "entry is not an identity dict"))
-    return entries, identities, rejected
 
 
 def main(argv=None) -> int:
@@ -587,11 +565,20 @@ def main(argv=None) -> int:
         parser.error("--rocke-root, --instances and --output are required")
     _bind_rocke(args.rocke_root)
 
-    try:
-        entries, identities, rejected = identity_entries(args.instances)
-    except ValueError as exc:
-        parser.error(str(exc))
-    specs, seen = [], set()
+    entries = []
+    for path in args.instances:
+        listed = json.loads(path.read_text())
+        if not isinstance(listed, list):
+            parser.error(f"--instances {path} must hold a JSON list")
+        entries += listed
+    specs, seen, rejected = [], set(), []
+    identities = {}
+    for index, entry in enumerate(entries):
+        identity = entry.get("identity", entry) if isinstance(entry, dict) else None
+        if isinstance(identity, dict):
+            identities[index] = identity
+        else:
+            rejected.append((index, "entry is not an identity dict"))
     converted = instance_specs(list(identities.values()), args.jobs)
     for index, (spec, reason) in zip(identities, converted):
         if spec is None:
