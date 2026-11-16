@@ -1219,6 +1219,42 @@ def test_an_also_section_with_different_keying_is_refused(split, key, value):
         _kernels(_split_also(split, **{key: value}))
 
 
+def _gqa_also(gqa, **overrides) -> dict:
+    """``gqa`` plus a section over head pairs (6, 2) and (3, 1), both ratio 3."""
+    manifest = copy.deepcopy(gqa)
+    primary = manifest["enumerate"]
+    primary["also"] = [
+        {
+            "pin": primary["pin"],
+            "fixed": primary["fixed"],
+            "cells": [
+                {"fields": ["nhead_q", "nhead_k"], "values": [[6, 2], [3, 1]]},
+                {"fields": ["batch"], "values": [1, 2]},
+            ],
+            "neutral_fields": primary["neutral_fields"],
+            **overrides,
+        }
+    ]
+    return manifest
+
+
+def test_an_also_section_inherits_cell_keyed_by_when_the_primary_sets_it(gqa):
+    """The ``gqa`` primary keys cells by ratio, so an omitted ``cell_keyed_by`` must
+    be copied down: stating it by hand gives the same kernels, and the section's
+    head pairs merge into one ratio-3 cell."""
+    kernels = _kernels(_gqa_also(gqa))
+    ratio3 = [k for k in kernels if k["metadata"]["num_queries_per_kv"] == 3]
+    # (6, 2) picks segments 4 and 2, (3, 1) picks 8 and 4; the shared 4 merges.
+    segments = [k["kernel_source"]["spec"]["num_segments"] for k in ratio3]
+    assert sorted(segments) == [2, 4, 8]
+    restated = _gqa_also(
+        gqa,
+        selector_fields=["nhead_q", "nhead_k", "batch"],
+        cell_keyed_by=["num_queries_per_kv"],
+    )
+    assert _kernels(restated) == kernels
+
+
 def _full(manifest: dict) -> dict:
     """``manifest`` as a full space: ``tile_n`` a performance knob, ``order`` resolved
     by its accessor, every other varying field held."""
