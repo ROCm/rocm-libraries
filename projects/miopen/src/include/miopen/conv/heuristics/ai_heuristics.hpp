@@ -52,7 +52,6 @@ inline std::string NormalizeArch(const std::string& name)
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <unordered_map>
 #include <typeinfo>
-#include <string>
 #include <vector>
 #include <algorithm>
 #include <queue>
