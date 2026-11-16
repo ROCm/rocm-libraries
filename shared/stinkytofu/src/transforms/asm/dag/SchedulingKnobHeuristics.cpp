@@ -106,9 +106,10 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
     out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
 
-    // One pair for every schedulable main loop. A feature split (dtype, wave
-    // tile, cluster, estimated WMMA count) did not stay ahead of this constant
-    // once single-run spikes were removed.
+    // One pair for every schedulable main loop. Measured on the K>=1024 OOB
+    // winners only (see kPolicyTensorLoadWmmaSpace); K is not available here.
+    // A feature split (dtype, wave tile, cluster, estimated WMMA count) did not
+    // stay ahead of this constant once single-run spikes were removed.
     out.tensorLoadWmmaSpace = kPolicyTensorLoadWmmaSpace;
     out.tensorLoadWmmaSpaceSource = SchedulingKnobSource::Policy;
     out.tensorLoadDsLoadGapCycles = kPolicyTensorLoadDsLoadGapCycles;

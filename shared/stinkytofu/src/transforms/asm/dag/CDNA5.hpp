@@ -492,6 +492,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return dsIssueCyclesForWaves(
             hw_, inst.issueCycles, static_cast<int>(getPassContext().getGemmTileConfig().NumWaves));
     }
+    // A feature value of 0, including an explicit user 0, falls back to
+    // CDNA5Config::tensorLoadWmmaSpace. That config value is 0, so the
+    // thresholds stay unshifted. Only a value > 0 is applied as-is.
     int tensorLoadWmmaSpace() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
         return cfg > 0 ? cfg : config_.tensorLoadWmmaSpace;

@@ -45,10 +45,14 @@ inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
 inline constexpr int kStaticDefaultTensorLoadWmmaSpace = 0;
 inline constexpr int kStaticDefaultTensorLoadDsLoadGapCycles = 64;
 
-/// Policy values when both main-loop counts are positive. Chosen on the
-/// K>=1024 OOB winners: space 6 with gap 64 beat space 0 by 1.66% geomean,
-/// and no case was more than 5% slower. Kernel features did not hold a
-/// stabler per-kernel split.
+/// Policy values when both main-loop counts are positive. The pair was chosen
+/// on the K>=1024 OOB winners (GPU3): space 6 with gap 64 beat space 0 / gap 64
+/// by 1.66% geomean. The worst slowdowns on that set were nvf4_r28 (+4.7%),
+/// mxf4_r28 (+3.5%), and bbs_r20 (+3.4%); none were more than 5% slower.
+/// Kernel features did not hold a stabler per-kernel split.
+/// propose() applies the pair to every non-degenerate main loop. K is not a
+/// scheduling feature, so this is wider than the measured set; a check outside
+/// K>=1024 is separate from this default.
 inline constexpr int kPolicyTensorLoadWmmaSpace = 6;
 inline constexpr int kPolicyTensorLoadDsLoadGapCycles = 64;
 
