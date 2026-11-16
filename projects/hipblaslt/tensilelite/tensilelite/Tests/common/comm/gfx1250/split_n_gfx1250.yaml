@@ -1,0 +1,61 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# One GEMM split along N over the two partitions of a DPX gfx1250 (SplitDevices: 2), with A
+# replicated and D shared (SplitPlacementD: Shared, one D that both partitions write into).
+# It lives under comm/, so it is skipped unless two HIP devices are visible, and the
+# _gfx1250 suffix keeps it to gfx1250.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+  SplitDevices: 2
+  SplitDim: N
+  SplitPlacementD: Shared
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 1, 1, 2]
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - DepthU: [32]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128]
+          - Exact: [512, 1000, 1, 256]
+          - Exact: [257, 513, 1, 100]
