@@ -192,7 +192,7 @@ rocke_status_t rocke_emit_global_read_paths(rocke_ir_builder_t* b,
                                             void* user,
                                             const char* addressing)
 {
-    rocke_global_read_plan_t plans[ROCKE_GLOBAL_READ_MAX_INPUTS] = {0};
+    rocke_global_read_plan_t plans[ROCKE_GLOBAL_READ_MAX_INPUTS] = {};
     rocke_value_t* conditions[ROCKE_GLOBAL_READ_MAX_INPUTS];
     rocke_value_t* spans[ROCKE_GLOBAL_READ_MAX_INPUTS];
     bool can_buffer = true;
