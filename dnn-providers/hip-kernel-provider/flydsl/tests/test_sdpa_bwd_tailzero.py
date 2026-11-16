@@ -513,9 +513,38 @@ def test_the_op_is_registered_with_the_split_ops_kernel_directories() -> None:
 def test_the_generator_refuses_an_arch_it_does_not_build(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert tz.main(["--arch", "gfx90a", "--out-dir", str(tmp_path)]) == 1
+    assert tz.main(["--arch", "gfx12-generic", "--out-dir", str(tmp_path)]) == 1
     assert "gfx950" in capsys.readouterr().err
     assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+def test_a_cdna9_arch_has_companions_but_no_content_of_its_own(
+    arch: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert arch in tz.ARCHES
+    assert _instances.instances_for("sdpa_bwd_tailzero", arch) == []
+    assert tz.main(["--arch", arch, "--out-dir", str(tmp_path)]) == 1
+    assert "gfx950" in capsys.readouterr().err
+    with pytest.raises(GeneratorError, match="companions of its sdpa_bwd_dq manifest"):
+        tz.generate(arch, tmp_path)
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+def test_a_cdna9_object_comes_from_the_kernel_of_its_builder_family(arch: str) -> None:
+    """16-bit objects are the gfx11 kernel's (the RDNA family), fp32 the gfx950 kernel's (the CDNA family); the arches that were
+    already built keep their own kernel, and every arch but gfx11-generic is gated."""
+    for dtype in tz.SDPA_BWD_TAILZERO_DTYPES:
+        kernel = "gfx950" if dtype == "fp32" else "gfx11-generic"
+        assert tz.symbol_of(arch, dtype) == tz.SYMBOL[kernel]
+        assert tz.spec_key(arch, dtype) == f"tailzero,{dtype};arch={arch}"
+    for dtype in tz.HV_DTYPES:
+        assert tz.symbol_of(arch, dtype, hv=True) == tz.SYMBOL_HV["gfx11-generic"]
+    assert tz.symbol_of("gfx950", "f16") == tz.SYMBOL["gfx950"]
+    assert tz.symbol_of("gfx11-generic", "fp32") == tz.SYMBOL["gfx11-generic"]
+    assert tz._gated(arch) and tz._gated("gfx950")
+    assert not tz._gated("gfx11-generic")
 
 
 def test_a_companion_spec_names_its_role_and_dtype() -> None:
@@ -545,23 +574,20 @@ def test_the_existing_spec_keys_are_unchanged() -> None:
     assert tz.spec_key("gfx11-generic", "fp32") == "tailzero,fp32;arch=gfx11-generic"
 
 
-def test_the_ten_objects_have_distinct_names() -> None:
+def test_the_objects_of_every_arch_have_distinct_names() -> None:
     names = {
         tz.object_name(arch, dtype, hv)
         for arch in tz.ARCHES
         for hv, dtypes in ((False, tz.SDPA_BWD_TAILZERO_DTYPES), (True, tz.HV_DTYPES))
         for dtype in dtypes
     }
-    assert len(names) == 10
-
-
-def test_the_six_objects_have_distinct_names() -> None:
-    names = {
+    assert len(names) == len(tz.ARCHES) * 5
+    standard = {
         tz.object_name(arch, dtype)
         for arch in tz.ARCHES
         for dtype in tz.SDPA_BWD_TAILZERO_DTYPES
     }
-    assert len(names) == 6
+    assert len(standard) == len(tz.ARCHES) * 3
 
 
 # ---------------------------------------------------------------------------
