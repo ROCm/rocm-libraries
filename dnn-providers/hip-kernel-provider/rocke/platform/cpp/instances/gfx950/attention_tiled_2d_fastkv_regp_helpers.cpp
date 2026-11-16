@@ -10,6 +10,7 @@
 #include "rocke/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
+#include "rocke/helper_rocke.instances.common.attention_tiled_2d_rules.h" /* grouped-KV2 / early-V rules */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h" /* rocke_gfx942_attn2d_build_without_spec_checks */
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h" /* rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct */
 
@@ -316,6 +317,17 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
             return NULL;
         if(b->status != ROCKE_OK) /* dead builder: no-op */
             return NULL;
+
+        /* Python refuses these when the spec is constructed, before this builder
+         * runs, so check them ahead of the builder's own refusals. */
+        {
+            char why[ROCKE_ERR_MSG_CAP];
+            if(!rocke_attention_tiled_2d_validate_grouped_kv2_and_early_v(spec, why, sizeof(why)))
+            {
+                rocke__fastkv_regp_set_err(b, ROCKE_ERR_VALUE, why);
+                return NULL;
+            }
+        }
 
         /* if arch != "gfx950": raise ValueError(_NOT_GFX950) */
         {

@@ -874,32 +874,6 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "transposed softmax VALU opts do not support grouped_kv2"
                 )
-        if self.use_grouped_kv2_softmax:
-            if self.dtype != "bf16":
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 is restricted to dtype='bf16'"
-                )
-            if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
-                raise ValueError(
-                    "use_grouped_kv2_softmax requires the transposed 32x32 R4 path"
-                )
-            if self.block_m_per_warp != 32:
-                raise ValueError("use_grouped_kv2_softmax requires block_m_per_warp=32")
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 requires no sliding window"
-                )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, or QQ bias"
-                )
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
-        if self.use_early_v_schedule:
-            if self.use_grouped_kv2_softmax:
-                raise ValueError("use_early_v_schedule does not support grouped_kv2")
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_early_v_schedule v1 does not support FP8 KV")
         if self.use_fast_paged_kv_desc:
             if not (
                 self.dtype == "bf16"
