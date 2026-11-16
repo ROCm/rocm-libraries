@@ -16,6 +16,7 @@
 // Compiled only into the public wrapper library; never installed.
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <iosfwd>
 #include <string>
@@ -191,6 +192,43 @@ void ReportForwardedCall(const char* entryPoint, std::ostream& diagnostics);
 // call log entry, so without this it would be missing from the log.
 void LogForwardedCall(const char* entryPoint) noexcept;
 
+// Marks the calling thread as running a forwarded call for the scope's lifetime.
+//
+// A forwarded call must not come back into this wrapper. It does when the hipDNN
+// MIOpen plugin was linked against libMIOpen.so instead of libMIOpen_private (an
+// older plugin installed next to this library): the plugin's call lands in the
+// stub again, which forwards again, and every level creates another hipDNN
+// handle until the device runs out of memory. ForwardingAllowed() sends such a
+// call to MIOpen instead.
+class ForwardingScope
+{
+public:
+    ForwardingScope() noexcept;
+    ~ForwardingScope();
+    ForwardingScope(const ForwardingScope&)            = delete;
+    ForwardingScope& operator=(const ForwardingScope&) = delete;
+
+    // True while a ForwardingScope is alive on the calling thread.
+    static bool Active() noexcept;
+
+private:
+    bool previous_;
+};
+
+// Writes one "[MIOpen] Warning: ..." line naming entryPoint as a call that
+// reached the wrapper while the same thread was already forwarding.
+void ReportNestedForwarding(const char* entryPoint, std::ostream& diagnostics);
+
+// False while ForwardingScope::Active(); the first refusal for `warned` reports
+// itself to diagnostics.
+bool ForwardingAllowed(const char* entryPoint,
+                       std::atomic<bool>& warned,
+                       std::ostream& diagnostics);
+
+// The same against one process-wide flag and std::cerr, so the warning is
+// written once per process.
+bool ForwardingAllowed(const char* entryPoint) noexcept;
+
 // Route::Hipdnn only when mode is Enabled AND entryPoint is in the set AND the
 // deny list does not name it. hipdnnAvailable false still routes away from
 // MIOpen: an enabled-but-unavailable hipDNN has to fail loudly, and a route back
@@ -257,27 +295,33 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // Each route clears the last recorded hipDNN failure before the call, so a
 // callee that records none cannot leave the previous call's failure in place.
 //
+// A call that arrives while its thread is already forwarding is served by
+// MIOpen (see ForwardingScope). The check comes after the cached route, so the
+// MIOpen route pays nothing for it.
+//
 // Requires hipdnn_graph.hpp, for ClearForwardedFailure and
 // RecordCurrentException.
-#define MIOPEN_WRAPPER_FORWARD(fn, expr)                                  \
-    do                                                                    \
-    {                                                                     \
-        try                                                               \
-        {                                                                 \
-            static const ::miopen::wrapper::Route miopen_wrapper_route_ = \
-                ::miopen::wrapper::DispatchFromStub(#fn, __func__);       \
-            if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn) \
-            {                                                             \
-                ::miopen::wrapper::hipdnn::ClearForwardedFailure();       \
-                ::miopen::wrapper::LogForwardedCall(#fn);                 \
-                return (expr);                                            \
-            }                                                             \
-        }                                                                 \
-        catch(...)                                                        \
-        {                                                                 \
-            return ::miopen::wrapper::hipdnn::RecordCurrentException();   \
-        }                                                                 \
-        ::miopen::wrapper::hipdnn::ClearForwardedFailure();               \
+#define MIOPEN_WRAPPER_FORWARD(fn, expr)                                        \
+    do                                                                          \
+    {                                                                           \
+        try                                                                     \
+        {                                                                       \
+            static const ::miopen::wrapper::Route miopen_wrapper_route_ =       \
+                ::miopen::wrapper::DispatchFromStub(#fn, __func__);             \
+            if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn &&     \
+               ::miopen::wrapper::ForwardingAllowed(#fn))                       \
+            {                                                                   \
+                ::miopen::wrapper::hipdnn::ClearForwardedFailure();             \
+                ::miopen::wrapper::LogForwardedCall(#fn);                       \
+                const ::miopen::wrapper::ForwardingScope miopen_wrapper_scope_; \
+                return (expr);                                                  \
+            }                                                                   \
+        }                                                                       \
+        catch(...)                                                              \
+        {                                                                       \
+            return ::miopen::wrapper::hipdnn::RecordCurrentException();         \
+        }                                                                       \
+        ::miopen::wrapper::hipdnn::ClearForwardedFailure();                     \
     } while(false)
 
 // The same seam for the stubs with nowhere to forward to yet:

@@ -22,6 +22,7 @@
 
 #include <miopen/logger.hpp>
 
+#include <atomic>
 #include <climits>
 #include <cstdlib>
 #include <ostream>
@@ -580,6 +581,119 @@ TEST(CPU_WrapperRoutingReport_NONE, ForwardedCallLineHandlesANullEntryPoint)
     std::ostringstream os;
     miopen::wrapper::ReportForwardedCall(nullptr, os);
     EXPECT_EQ(os.str(), "[MIOpen] hipDNN forwarded: <null>\n");
+}
+
+// ---------------------------------------------------------------------------
+// Re-entry guard. A hipDNN MIOpen plugin linked against libMIOpen.so calls back
+// into the wrapper from inside a forwarded call; forwarding that call again
+// recurses until the device runs out of memory.
+// ---------------------------------------------------------------------------
+
+using miopen::wrapper::ForwardingAllowed;
+using miopen::wrapper::ForwardingScope;
+
+TEST(CPU_WrapperRoutingReentry_NONE, AllowedOutsideAForwardedCall)
+{
+    std::atomic<bool> warned{false};
+    std::ostringstream os;
+    EXPECT_FALSE(ForwardingScope::Active());
+    EXPECT_TRUE(ForwardingAllowed("miopenBatchNormalizationForwardTraining_V3", warned, os));
+    EXPECT_TRUE(os.str().empty()) << os.str();
+    EXPECT_FALSE(warned);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, RefusedInsideAForwardedCall)
+{
+    std::atomic<bool> warned{false};
+    std::ostringstream os;
+    const ForwardingScope scope;
+    EXPECT_FALSE(ForwardingAllowed("miopenBatchNormalizationForwardTraining_V3", warned, os));
+    const std::string line = os.str();
+    EXPECT_EQ(line.rfind("[MIOpen] Warning: miopenBatchNormalizationForwardTraining_V3 ", 0), 0)
+        << line;
+    EXPECT_NE(line.find("libMIOpen_private"), std::string::npos) << line;
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, WarnsOnlyOnce)
+{
+    std::atomic<bool> warned{false};
+    std::ostringstream os;
+    const ForwardingScope scope;
+    EXPECT_FALSE(ForwardingAllowed("miopenConvolutionForward", warned, os));
+    const std::string first = os.str();
+    EXPECT_FALSE(ForwardingAllowed("miopenBatchNormalizationBackward", warned, os));
+    EXPECT_EQ(os.str(), first);
+    EXPECT_TRUE(warned);
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, WarningIsOneWrite)
+{
+    WriteCountingBuf buf;
+    std::ostream os(&buf);
+    miopen::wrapper::ReportNestedForwarding("miopenConvolutionForward", os);
+    EXPECT_EQ(buf.writes, 1) << buf.text;
+    ASSERT_FALSE(buf.text.empty());
+    EXPECT_EQ(buf.text.find('\n'), buf.text.size() - 1) << buf.text;
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, WarningHandlesANullEntryPoint)
+{
+    std::ostringstream os;
+    miopen::wrapper::ReportNestedForwarding(nullptr, os);
+    EXPECT_EQ(os.str().rfind("[MIOpen] Warning: <null> ", 0), 0) << os.str();
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, ScopeEndsWithItsLifetime)
+{
+    {
+        const ForwardingScope scope;
+        EXPECT_TRUE(ForwardingScope::Active());
+    }
+    EXPECT_FALSE(ForwardingScope::Active());
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, ScopeEndsWhenTheForwardedCallThrows)
+{
+    try
+    {
+        const ForwardingScope scope;
+        throw std::runtime_error("forwarded call failed");
+    }
+    catch(const std::runtime_error&)
+    {
+    }
+    EXPECT_FALSE(ForwardingScope::Active());
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, InnerScopeKeepsTheOuterOneActive)
+{
+    const ForwardingScope outer;
+    {
+        const ForwardingScope inner;
+    }
+    EXPECT_TRUE(ForwardingScope::Active());
+}
+
+TEST(CPU_WrapperRoutingReentry_NONE, ScopeIsPerThread)
+{
+    const ForwardingScope scope;
+    bool activeElsewhere = true;
+    std::thread([&] { activeElsewhere = ForwardingScope::Active(); }).join();
+    EXPECT_FALSE(activeElsewhere);
+}
+
+// The overload the dispatch macro calls warns through one process-wide flag, so
+// this checks only that it refuses and that a repeat stays silent.
+TEST(CPU_WrapperRoutingReentry_NONE, ProcessWideOverloadRefusesAndRepeatsSilently)
+{
+    EXPECT_TRUE(ForwardingAllowed("miopenConvolutionForward"));
+    const ForwardingScope scope;
+    testing::internal::CaptureStderr();
+    EXPECT_FALSE(ForwardingAllowed("miopenConvolutionForward"));
+    static_cast<void>(testing::internal::GetCapturedStderr());
+    testing::internal::CaptureStderr();
+    EXPECT_FALSE(ForwardingAllowed("miopenConvolutionForward"));
+    EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
 }
 
 // ---------------------------------------------------------------------------

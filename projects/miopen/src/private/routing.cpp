@@ -329,6 +329,56 @@ void LogForwardedCall(const char* entryPoint) noexcept
     }
 }
 
+namespace {
+bool& ForwardingActive() noexcept
+{
+    thread_local bool active = false;
+    return active;
+}
+} // namespace
+
+ForwardingScope::ForwardingScope() noexcept : previous_(ForwardingActive())
+{
+    ForwardingActive() = true;
+}
+
+ForwardingScope::~ForwardingScope() { ForwardingActive() = previous_; }
+
+bool ForwardingScope::Active() noexcept { return ForwardingActive(); }
+
+void ReportNestedForwarding(const char* entryPoint, std::ostream& diagnostics)
+{
+    std::string line = "[MIOpen] Warning: ";
+    line += entryPoint == nullptr ? "<null>" : entryPoint;
+    line += " was called while forwarding to hipDNN and is served by MIOpen instead. The hipDNN "
+            "MIOpen plugin is likely linked against libMIOpen.so rather than libMIOpen_private; "
+            "check that the installed MIOpen and hipDNN plugin versions match. Shown once.\n";
+    diagnostics << line;
+}
+
+bool ForwardingAllowed(const char* entryPoint, std::atomic<bool>& warned, std::ostream& diagnostics)
+{
+    if(!ForwardingScope::Active())
+        return true;
+    if(!warned.exchange(true))
+        ReportNestedForwarding(entryPoint, diagnostics);
+    return false;
+}
+
+bool ForwardingAllowed(const char* entryPoint) noexcept
+{
+    static std::atomic<bool> warned{false};
+    try
+    {
+        return ForwardingAllowed(entryPoint, warned, std::cerr);
+    }
+    catch(...)
+    {
+        // Only the warning can throw, and a refusal is the safe answer either way.
+        return false;
+    }
+}
+
 RouteDecision ResolveRouteWithReason(ForwardingMode mode,
                                      const char* entryPoint,
                                      ForwardingSet set,
