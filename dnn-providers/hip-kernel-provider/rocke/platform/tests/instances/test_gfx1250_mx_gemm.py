@@ -7,6 +7,7 @@ from __future__ import annotations
 import itertools
 import re
 import shutil
+import types
 import unittest
 from dataclasses import replace
 
@@ -50,18 +51,21 @@ from rocke.instances.gfx1250.mx_gemm import (
     TILE_MN,
     WALKS,
     WAVE_GROUPS,
+    WAVE_MAPS,
     WMMA_REUSE,
     IntOps,
     LdsPad,
     HalfWalk,
     MxGemmSpec,
     PanelWalk,
+    RowMaps,
     ScaleRegisters,
     TileCompute,
     build_mx_gemm,
     derived_lds_pads,
     mx_gemm_lds_layout,
     validate,
+    wave_coords,
 )
 from rocke.runtime.hip_module import get_device_arch
 
@@ -107,6 +111,14 @@ _PANELS = {
     "walk": "panels",
 }
 _HALVES = {**_PANELS, "walk": "halves"}
+# wave_map "pairs" on the 256x256x256 tile, read-ahead, half-B late.
+_PAIRS = {
+    "tile_m": 256,
+    "tile_n": 256,
+    "local_prefetch": 1,
+    "half_b_order": "late",
+    "wave_map": "pairs",
+}
 
 
 def _spec8(*problem, a_dtype="fp8", b_dtype="fp8", **fields) -> MxGemmSpec:
@@ -555,6 +567,105 @@ class MxGemmSpecTest(unittest.TestCase):
         for label, (spec, reason) in bad.items():
             with self.subTest(label):
                 self.assertIn(reason, validate(spec) or "")
+
+    def test_wave_map_validate_and_name(self):
+        """The pair map takes 2x2 waves, the 16x16 WMMA, an even N-repeat
+        count, LDS scales and walk "tile"; it tags the name."""
+        self.assertEqual(WAVE_MAPS, ("rows", "pairs"))
+        for spec in (
+            _spec6(**_PAIRS),
+            _spec6(**_PAIRS, lds_buffers=3, k_reads="contiguous", scale_swap="wait"),
+            _spec6(tile_m=128, tile_n=128, tile_k=512, wave_map="pairs"),
+            _spec6(
+                tile_m=128,
+                tile_n=128,
+                tile_k=512,
+                local_prefetch=1,
+                half_plr="none",
+                lds_buffers=3,
+                k_reads="contiguous",
+                scale_swap="wait",
+                read_issue="interleave",
+                read_bases="fixed",
+                wave_map="pairs",
+            ),
+            _spec6(256, 512, 2048, tile_m=64, tile_n=64, tile_k=512, wave_map="pairs"),
+            _spec8(**_DIRECT, wave_map="pairs"),
+        ):
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                self.assertTrue(spec.kernel_name().endswith("_wmp"))
+                self.assertEqual(spec.n_group, spec.wave_repeat_n // 2)
+                rows = replace(spec, wave_map="rows")
+                self.assertNotIn("_wmp", rows.kernel_name())
+                self.assertEqual(rows.n_group, rows.wave_repeat_n)
+        bad = {
+            "value": (_spec6(wave_map="cols"), "wave_map must be one of"),
+            "waves": (
+                _spec6(tile_m=256, tile_n=64, wave_group=(4, 1), wave_map="pairs"),
+                "needs wave_group 2x2",
+            ),
+            "atom": (_spec(wave_map="pairs"), "needs wave_group 2x2 and the 16x16"),
+            "odd": (
+                _spec6(tile_m=128, tile_n=32, wave_map="pairs", half_plr="none"),
+                "needs an even wave_repeat_n",
+            ),
+            "scales": (
+                _spec6(**_DIRECT, scales="registers", wave_map="pairs"),
+                "scales 'lds'",
+            ),
+            "walk": (
+                _spec6(512, 512, 2048, **_PANELS, half_plr="none", wave_map="pairs"),
+                "walk 'tile'",
+            ),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
+
+    def test_pair_map_covers_d_once_and_splits_the_halves(self):
+        """With the pair map every D element of a tile has one lane, slot and
+        N-repeat, a lane's group is adjacent columns, SIMD pair p (waves p
+        and p + 2) holds A half p, and the pairs' first groups lie in
+        different B halves."""
+        for spec in (
+            _spec6(**_PAIRS),
+            _spec6(tile_m=128, tile_n=128, tile_k=512, wave_map="pairs"),
+            _spec6(256, 512, 2048, tile_m=64, tile_n=64, tile_k=512, wave_map="pairs"),
+            _spec8(**_DIRECT, wave_map="pairs"),
+        ):
+            with self.subTest(spec.kernel_name()):
+                tm, tn = spec.tile_m, spec.tile_n
+                group = spec.n_group
+                hits = np.zeros((tm, tn), dtype=np.int64)
+                for wave in range(4):
+                    wave_m, wave_n = wave_coords(spec, wave)
+                    rows = RowMaps(
+                        types.SimpleNamespace(
+                            ops=IntOps, spec=spec, wave_m=wave_m, wave_n=wave_n
+                        )
+                    )
+                    self.assertEqual(wave_m, wave % 2)
+                    for lane in range(32):
+                        n_local = lane % 16
+                        cols = [
+                            rows.n_row(rn, n_local) for rn in range(spec.wave_repeat_n)
+                        ]
+                        for first in range(0, spec.wave_repeat_n, group):
+                            run = cols[first : first + group]
+                            self.assertEqual(run, list(range(run[0], run[0] + group)))
+                            self.assertEqual(
+                                run[0] // (tn // 2), (first // group + wave_m) % 2
+                            )
+                        for rm, slot in itertools.product(
+                            range(spec.wave_repeat_m), range(spec.atom.c_frag_len)
+                        ):
+                            m_local = slot // 8 * 16 + slot % 8 + lane // 16 * 8
+                            row = rows.m_row(rm, m_local)
+                            self.assertEqual(row // (tm // 2), wave_m)
+                            for col in cols:
+                                hits[row, col] += 1
+                self.assertTrue((hits == 1).all())
 
     def test_panel_layout(self):
         """A panel slot holds four 32-row components of 384 B rows (16 B
@@ -1509,6 +1620,34 @@ class MxGemmIrTest(unittest.TestCase):
                     rf"@llvm\.amdgcn\.perm\((i32 %\w+), \1, i32 {name}\)", text
                 )
                 self.assertEqual(len(kept), a_units * (rm + 1) + b_units * (rn + 1))
+
+    def test_pair_map_ir(self):
+        """The pair map stores each group of a lane's N-repeats as its own
+        vector, reads the B scales per group (counted in the LDS waits) and
+        keeps the WMMA count."""
+        for fields, store, b_scale_load in (
+            (_PAIRS, "<4 x bfloat>", "load <4 x i32>"),
+            (
+                {"tile_m": 128, "tile_n": 128, "tile_k": 512, "wave_map": "pairs"},
+                "<2 x bfloat>",
+                "load <2 x i32>",
+            ),
+        ):
+            spec = _spec6(out_dtype="bf16", **fields)
+            rows = replace(spec, wave_map="rows")
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                self.assertEqual(spec.store_width, spec.n_group)
+                self.assertEqual(spec.b_scale_reads, max(2, spec.wave_repeat_n // 4))
+                llvm = _llvm(spec)
+                self.assertIn(f"store {store}", llvm)
+                self.assertNotIn(f"store <{2 * spec.n_group} x bfloat>", llvm)
+                self.assertIn(b_scale_load, llvm)
+                for count in spec.dscnt_waits:
+                    self.assertIn(f'"s_wait_dscnt {min(count, 63)}"', llvm)
+                self.assertEqual(
+                    len(re.findall(_WMMA, llvm)), len(re.findall(_WMMA, _llvm(rows)))
+                )
 
     def test_three_buffers_issue_wait_and_peel(self):
         """With three buffers the prologue loads three tiles and every tile
@@ -2952,6 +3091,71 @@ class MxGemmDeviceTest(unittest.TestCase):
                             "read_bases": "fixed",
                             "cluster_dim": (1, 2, 1),
                         },
+                    ),
+                )
+            ]
+            # Pair map: half-B late and ahead with two and three buffers,
+            # chunked and contiguous FP6, edge tiles and a K tail, interleaved
+            # reads with fixed read bases, groups of one and two N-repeats,
+            # clusters, FP8.
+            + [
+                make(*problem, **fields)
+                for make, problem, fields in (
+                    (
+                        _spec6,
+                        (512, 512, 2048),
+                        {
+                            **_PAIRS,
+                            "lds_buffers": 3,
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                    (
+                        _spec6,
+                        (512, 512, 2048),
+                        {**_PAIRS, "half_b_order": "ahead", "cluster_dim": (1, 1, 1)},
+                    ),
+                    (
+                        _spec6,
+                        (1000, 1000, 2048 + 96),
+                        {**_PAIRS, "k_reads": "contiguous", "cluster_dim": (1, 1, 1)},
+                    ),
+                    (
+                        _spec6,
+                        (1024, 1024, 3072 + 256),
+                        {
+                            "tile_m": 128,
+                            "tile_n": 128,
+                            "tile_k": 512,
+                            "local_prefetch": 1,
+                            "half_plr": "none",
+                            "lds_buffers": 3,
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "read_issue": "interleave",
+                            "read_bases": "fixed",
+                            "wave_map": "pairs",
+                        },
+                    ),
+                    (
+                        _spec6,
+                        (256, 512, 2048),
+                        {
+                            "tile_m": 64,
+                            "tile_n": 64,
+                            "tile_k": 512,
+                            "half_b_order": "late",
+                            "cluster_dim": (4, 2, 1),
+                            "wave_map": "pairs",
+                        },
+                    ),
+                    (_spec8, (512, 512, 2048), {**_DIRECT, "wave_map": "pairs"}),
+                    (
+                        _spec8,
+                        (512, 512, 2048),
+                        {**_PAIRS, "cluster_dim": (2, 2, 1), "out_dtype": "fp16"},
                     ),
                 )
             ]

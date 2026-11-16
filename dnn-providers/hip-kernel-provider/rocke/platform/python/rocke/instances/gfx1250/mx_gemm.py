@@ -63,6 +63,7 @@ __all__ = [
     "mx_gemm_lds_layout",
     "mx_gemm_signature",
     "validate",
+    "wave_coords",
 ]
 
 _ATOM_K = 128
@@ -134,6 +135,7 @@ SCALE_SWAPS = ("read", "wait")
 READ_ISSUES = ("block", "interleave")
 WALKS = ("tile", "panels", "halves")
 READ_BASES = ("loop", "fixed")
+WAVE_MAPS = ("rows", "pairs")
 # walk "panels": a workgroup's 256x256 output in four 128x128 passes over
 # 128-row panels of A and B, one panel per LDS slot, each panel split over
 # the four waves (one component of 32 rows each). walk "halves": two
@@ -275,6 +277,16 @@ class MxGemmSpec:
     scheduling an LDS read that takes a VALU result waits for every WMMA in
     flight; with ``"fixed"`` the loop computes no read addresses.
 
+    ``wave_map`` is how the 2x2 waves share the tile: ``"rows"`` gives wave
+    ``w`` A half ``w // 2`` and B half ``w % 2``. ``"pairs"`` (the 16x16
+    WMMA, an even ``wave_repeat_n``, scales "lds", walk "tile") gives each
+    SIMD pair, waves ``p`` and ``p + 2``, A half ``p``. A wave's N-repeats
+    are two groups of adjacent D columns, group ``g`` in B half
+    ``(g + p) % 2``; within a B half the pair's waves take one quarter of the
+    tile's columns each (``w // 2``). Where the WMMAs run group by group
+    (``half_plr`` "b"), the two pairs read different A and B halves at the
+    same time. D vectors are then one group wide.
+
     ``wmma_reuse`` (``local_prefetch`` 0, the 16x16 WMMA) orders each
     K-step's WMMAs and flags every WMMA whose next WMMA takes the same
     operand, so the hardware may keep that operand instead of reading it
@@ -328,6 +340,7 @@ class MxGemmSpec:
     read_issue: str = "block"
     walk: str = "tile"
     read_bases: str = "loop"
+    wave_map: str = "rows"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -458,10 +471,20 @@ class MxGemmSpec:
         )
 
     @property
+    def pairs(self) -> bool:
+        return self.wave_map == "pairs"
+
+    @property
+    def n_group(self) -> int:
+        """N-repeats a lane holds as adjacent D columns: all of them, or with
+        ``wave_map`` "pairs" each of its two groups."""
+        return self.wave_repeat_n // 2 if self.pairs else self.wave_repeat_n
+
+    @property
     def store_width(self) -> int:
         """Elements per D store and C load: at most 16 B and a divisor of N,
         so a vector is wholly inside or outside N and stays aligned."""
-        width = min(self.wave_repeat_n, 16 // _OUT_BYTES[self.out_dtype])
+        width = min(self.n_group, 16 // _OUT_BYTES[self.out_dtype])
         while self.N % width:
             width //= 2
         return width
@@ -496,7 +519,7 @@ class MxGemmSpec:
 
     @property
     def fp8_convert_width(self) -> int:
-        return 8 if self.wave_repeat_n % 8 == 0 else 4
+        return 8 if self.n_group % 8 == 0 else 4
 
     @property
     def scale_regs(self) -> bool:
@@ -558,7 +581,11 @@ class MxGemmSpec:
 
     @property
     def b_scale_reads(self) -> int:
-        return 0 if self.scale_regs else max(1, self.wave_repeat_n // 4)
+        """One read per 16 B, or per group of N-repeats if shorter."""
+        if self.scale_regs:
+            return 0
+        groups = self.wave_repeat_n // self.n_group
+        return groups * max(1, self.n_group // 4)
 
     @property
     def row_reads(self) -> int:
@@ -669,6 +696,7 @@ class MxGemmSpec:
                 "pw": self.walk == "panels",
                 "pwh": self.halves,
                 "rbf": self.fixed_bases,
+                "wmp": self.pairs,
             },
         )
 
@@ -1007,6 +1035,16 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
     atom = spec.atom
     if spec.tile_m % (spec.warp_m * atom.m) or spec.tile_n % (spec.warp_n * atom.n):
         return f"the tile must hold whole {spec.mma} WMMA atoms per wave"
+    if spec.wave_map not in WAVE_MAPS:
+        return f"wave_map must be one of {WAVE_MAPS}"
+    if spec.pairs:
+        if tuple(spec.wave_group) != (2, 2) or atom.a_rows != 1:
+            return "wave_map 'pairs' needs wave_group 2x2 and the 16x16 WMMA"
+        if spec.wave_repeat_n % 2 or spec.scale_regs or spec.walk != "tile":
+            return (
+                "wave_map 'pairs' needs an even wave_repeat_n, scales 'lds' and "
+                "walk 'tile'"
+            )
     rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
     # A, B and D offsets switch to i64 past 2^31 (wide_*); the scales' stay
     # i32. A partial last tile's rows reach the next whole tile.
@@ -1205,10 +1243,20 @@ class _Kernel:
         )
 
 
+def wave_coords(spec: MxGemmSpec, wave, ops=IntOps):
+    """``(wave_m, wave_n)`` of wave ``wave`` in the wave group (``wave_map``)."""
+    if spec.pairs:
+        # Waves p and p + 2 (SIMD pair p) take A half p.
+        return ops.mod(wave, 2), ops.div(wave, 2)
+    wave_n = ops.mod(wave, spec.warp_n)
+    return ops.div(wave, spec.warp_n), wave_n
+
+
 class RowMaps:
     """WMMA positions to tile rows. A lane's M-repeats are adjacent A rows,
     so its A scales of a K-step are contiguous; its N-repeats are adjacent
-    D columns, so one accumulator slot is one vector store."""
+    D columns (each group of ``n_group`` with ``wave_map`` "pairs"), so one
+    accumulator slot is one vector store per group."""
 
     def __init__(self, k: _Kernel):
         self.k = k
@@ -1219,8 +1267,21 @@ class RowMaps:
         return ops.add(base, ops.add(ops.mul(m_local, rm_count), rm))
 
     def n_row(self, rn, n_local):
-        ops, rn_count = self.k.ops, self.k.spec.wave_repeat_n
-        base = ops.mul(self.k.wave_n, rn_count * self.k.spec.atom.n)
+        k = self.k
+        ops, spec = k.ops, k.spec
+        if spec.pairs:
+            # Group g of SIMD pair p in B half (g + p) % 2, the quarter of the
+            # tile's columns that wave_n picks in it.
+            group = spec.n_group
+            half, j = divmod(rn, group)
+            side = k.wave_m if half == 0 else ops.mod(ops.add(k.wave_m, 1), 2)
+            base = ops.add(
+                ops.mul(side, spec.tile_n // 2),
+                ops.mul(k.wave_n, group * spec.atom.n),
+            )
+            return ops.add(base, ops.add(ops.mul(n_local, group), j))
+        rn_count = spec.wave_repeat_n
+        base = ops.mul(k.wave_n, rn_count * spec.atom.n)
         return ops.add(base, ops.add(ops.mul(n_local, rn_count), rn))
 
 
@@ -1896,11 +1957,17 @@ class LdsReader:
                             ops.add(ops.add(offset, row), half)
                         )
                 name = f"{operand}_scale"
-                if not spec.scale_regs and (name, offset) not in self.fixed:
-                    row = row_of(0, k.lane_col)
-                    self.fixed[name, offset] = keep(
-                        ops.add(offset, k.layout.scale_offset(ops, name, 0, row))
-                    )
+                # wave_map "pairs": one B scale base per group of N-repeats.
+                firsts = [0]
+                if operand == "b" and spec.pairs:
+                    firsts.append(spec.n_group)
+                for first in firsts:
+                    key = (name, offset) if first == 0 else (name, offset, first)
+                    if not spec.scale_regs and key not in self.fixed:
+                        row = row_of(first, k.lane_col)
+                        self.fixed[key] = keep(
+                            ops.add(offset, k.layout.scale_offset(ops, name, 0, row))
+                        )
 
     def _fixed_base(self, buffer, operand: str, index, step):
         offset = self._operand_buffer(buffer, operand)
@@ -1908,10 +1975,11 @@ class LdsReader:
             self.fixed[operand, offset, index], step * self.k.spec.step_bytes
         )
 
-    def _fixed_scale_base(self, buffer, name: str, step):
+    def _fixed_scale_base(self, buffer, name: str, step, first: int = 0):
         layout = self.k.layout.operand(name)
         offset = self._operand_buffer(buffer, name)
-        return self.k.ops.add(self.fixed[name, offset], step * layout.rows * 4)
+        key = (name, offset) if first == 0 else (name, offset, first)
+        return self.k.ops.add(self.fixed[key], step * layout.rows * 4)
 
     def _row_fragment(self, buffer, operand: str, row, lane_k):
         k, ops = self.k, self.k.ops
@@ -2029,28 +2097,32 @@ class LdsReader:
                 # one-element vector).
                 self.scale_reads.append(words)
             a_scales = [b.vec_extract(words, i) for i in range(rm_count)]
-        if self.fixed is not None:
-            b_base = self._fixed_scale_base(buffer, "b_scale", step)
-        else:
-            b_base = ops.add(
-                self._operand_buffer(buffer, "b"),
-                k.layout.scale_offset(
-                    ops, "b_scale", step, self.rows.n_row(0, k.lane_col)
-                ),
-            )
         b_scales = []
-        if rn_count >= 4:
-            for chunk in range(rn_count // 4):
-                words = self.load_i32(ops.add(b_base, chunk * 16))
-                self.scale_reads.append(words)
-                b_scales += [b.vec_extract(words, i) for i in range(4)]
-        else:
-            words = self.load_i32(b_base, n=rn_count)
-            if rn_count > 1:
-                # One word is the scale itself (an asm operand cannot be a
-                # one-element vector).
-                self.scale_reads.append(words)
-            b_scales = [b.vec_extract(words, i) for i in range(rn_count)]
+        # One run of words per group of adjacent N-repeats (two with
+        # wave_map "pairs").
+        group = spec.n_group
+        for first in range(0, rn_count, group):
+            if self.fixed is not None:
+                b_base = self._fixed_scale_base(buffer, "b_scale", step, first)
+            else:
+                b_base = ops.add(
+                    self._operand_buffer(buffer, "b"),
+                    k.layout.scale_offset(
+                        ops, "b_scale", step, self.rows.n_row(first, k.lane_col)
+                    ),
+                )
+            if group >= 4:
+                for chunk in range(group // 4):
+                    words = self.load_i32(ops.add(b_base, chunk * 16))
+                    self.scale_reads.append(words)
+                    b_scales += [b.vec_extract(words, i) for i in range(4)]
+            else:
+                words = self.load_i32(b_base, n=group)
+                if group > 1:
+                    # One word is the scale itself (an asm operand cannot be
+                    # a one-element vector).
+                    self.scale_reads.append(words)
+                b_scales += [b.vec_extract(words, i) for i in range(group)]
         if spec.contiguous_k and not spec.swap_after_wait:
             return self.swap_groups(a_scales, b_scales)
         return a_scales, b_scales
@@ -3241,102 +3313,114 @@ class Epilogue:
 
     def _store(self, final, read_c: bool) -> None:
         k = self.k
+        ops, spec = k.ops, k.spec
+        group = spec.n_group
+        # (first N-repeat, D column) of each group of adjacent columns.
+        groups = [
+            (first, ops.add(k.block_n, self.rows.n_row(first, k.lane_col)))
+            for first in range(0, spec.wave_repeat_n, group)
+        ]
+        for rm in range(spec.wave_repeat_m):
+            for slot in range(spec.atom.c_frag_len):
+                for first, col in groups:
+                    self._store_group(final, read_c, rm, slot, first, col)
+
+    def _store_group(self, final, read_c: bool, rm: int, slot: int, first: int, col):
+        """One accumulator slot's group of N-repeats from ``first``, at D
+        column ``col``."""
+        k = self.k
         b, ops, spec, p = k.b, k.ops, k.spec, k.params
-        rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
+        rn_count = spec.wave_repeat_n
         out_type = _OUT_TYPES[spec.out_dtype]
         out_bytes = _OUT_BYTES[spec.out_dtype]
         width = spec.store_width
-        chunks = range(0, rn_count, width)
+        chunks = range(0, spec.n_group, width)
         fp8 = spec.out_dtype == "fp8e4m3"
-        col = ops.add(k.block_n, self.rows.n_row(0, k.lane_col))
-        for rm in range(rm_count):
-            for slot in range(spec.atom.c_frag_len):
-                m_local = ops.add((slot // 8) * 16 + slot % 8, ops.mul(k.lane_half, 8))
-                row = ops.add(k.block_m, self.rows.m_row(rm, m_local))
-                c_ptr, d_ptr = p["C"], p["D"]
-                if spec.wide_d:
-                    # Row base in i64, the column offset in i32.
-                    row_bytes = k.offset64(row, ops.mul(p["N"], out_bytes), 0)
-                    d_ptr = b.global_ptr_add(p["D"], row_bytes)
-                    if read_c:
-                        c_ptr = b.global_ptr_add(p["C"], row_bytes)
-                    index = ops.v(col)
-                else:
-                    index = ops.v(ops.add(ops.mul(row, p["N"]), col))
-                if spec.edge_m or spec.edge_n:
-                    self._store_masked(
-                        final, read_c, rm, slot, row, col, (c_ptr, d_ptr, index)
+        m_local = ops.add((slot // 8) * 16 + slot % 8, ops.mul(k.lane_half, 8))
+        row = ops.add(k.block_m, self.rows.m_row(rm, m_local))
+        c_ptr, d_ptr = p["C"], p["D"]
+        if spec.wide_d:
+            # Row base in i64, the column offset in i32.
+            row_bytes = k.offset64(row, ops.mul(p["N"], out_bytes), 0)
+            d_ptr = b.global_ptr_add(p["D"], row_bytes)
+            if read_c:
+                c_ptr = b.global_ptr_add(p["C"], row_bytes)
+            index = ops.v(col)
+        else:
+            index = ops.v(ops.add(ops.mul(row, p["N"]), col))
+        if spec.edge_m or spec.edge_n:
+            self._store_masked(
+                final, read_c, rm, slot, row, (first, col), (c_ptr, d_ptr, index)
+            )
+            return
+        values = [
+            b.fmul(p["alpha"], b.vec_extract(final[rm * rn_count + rn], slot))
+            for rn in range(first, first + spec.n_group)
+        ]
+        if read_c:
+            c_words = [
+                (
+                    b.global_load(
+                        c_ptr, ops.v(ops.add(index, begin)), out_type, align=out_bytes
                     )
-                    continue
-                values = [
-                    b.fmul(p["alpha"], b.vec_extract(final[rm * rn_count + rn], slot))
-                    for rn in range(rn_count)
-                ]
-                if read_c:
-                    c_words = [
-                        (
-                            b.global_load(
-                                c_ptr,
-                                ops.v(ops.add(index, begin)),
-                                out_type,
-                                align=out_bytes,
-                            )
-                            if width == 1
-                            else b.global_load_vN(
-                                c_ptr,
-                                ops.v(ops.add(index, begin)),
-                                out_type,
-                                width,
-                                align=width * out_bytes,
-                            )
-                        )
-                        for begin in chunks
-                    ]
-
-                    def c_value(i, words=c_words):
-                        if width == 1:
-                            c = words[i]
-                        else:
-                            c = b.vec_extract(words[i // width], i % width)
-                        return b.cvt_fp8_to_f32(c) if fp8 else b.cast_to_f32(c)
-
-                    values = [
-                        b.fadd(value, b.fmul(p["beta"], c_value(i)))
-                        for i, value in enumerate(values)
-                    ]
-                if fp8:
-                    values = [self._saturate(v) for v in values]
-                for begin in chunks:
-                    part = values[begin : begin + width]
-                    if fp8:
-                        packed = self._pack_fp8(part)
-                    elif spec.out_dtype == "fp16":
-                        packed = b.vec_pack([b.trunc_f32_to_f16(v) for v in part], F16)
-                    else:
-                        packed = b.vec_pack(
-                            [b.trunc_f32_to_bf16(v) for v in part], BF16
-                        )
-                    if width == 1:
-                        b.global_store(
-                            d_ptr,
-                            ops.v(ops.add(index, begin)),
-                            b.vec_extract(packed, 0),
-                            align=out_bytes,
-                        )
-                        continue
-                    b.global_store_vN(
-                        d_ptr,
+                    if width == 1
+                    else b.global_load_vN(
+                        c_ptr,
                         ops.v(ops.add(index, begin)),
-                        packed,
+                        out_type,
                         width,
                         align=width * out_bytes,
                     )
+                )
+                for begin in chunks
+            ]
 
-    def _store_masked(self, final, read_c: bool, rm: int, slot: int, row, col, at_row):
-        """One accumulator slot of a partial tile: each vector of ``width``
-        columns is read and written only if its row and columns are in D.
-        ``at_row`` is the C and D pointers and the slot's index from them."""
+            def c_value(i, words=c_words):
+                if width == 1:
+                    c = words[i]
+                else:
+                    c = b.vec_extract(words[i // width], i % width)
+                return b.cvt_fp8_to_f32(c) if fp8 else b.cast_to_f32(c)
+
+            values = [
+                b.fadd(value, b.fmul(p["beta"], c_value(i)))
+                for i, value in enumerate(values)
+            ]
+        if fp8:
+            values = [self._saturate(v) for v in values]
+        for begin in chunks:
+            part = values[begin : begin + width]
+            if fp8:
+                packed = self._pack_fp8(part)
+            elif spec.out_dtype == "fp16":
+                packed = b.vec_pack([b.trunc_f32_to_f16(v) for v in part], F16)
+            else:
+                packed = b.vec_pack([b.trunc_f32_to_bf16(v) for v in part], BF16)
+            if width == 1:
+                b.global_store(
+                    d_ptr,
+                    ops.v(ops.add(index, begin)),
+                    b.vec_extract(packed, 0),
+                    align=out_bytes,
+                )
+                continue
+            b.global_store_vN(
+                d_ptr,
+                ops.v(ops.add(index, begin)),
+                packed,
+                width,
+                align=width * out_bytes,
+            )
+
+    def _store_masked(
+        self, final, read_c: bool, rm: int, slot: int, row, group, at_row
+    ):
+        """One accumulator slot's group of a partial tile: each vector of
+        ``width`` columns is read and written only if its row and columns are
+        in D. ``group`` is the group's first N-repeat and D column, ``at_row``
+        the C and D pointers and the group's index from them."""
         c_ptr, d_ptr, index = at_row
+        first, col = group
         k = self.k
         b, ops, spec, p = k.b, k.ops, k.spec, k.params
         rn_count, width = spec.wave_repeat_n, spec.store_width
@@ -3344,7 +3428,7 @@ class Epilogue:
         out_bytes = _OUT_BYTES[spec.out_dtype]
         fp8 = spec.out_dtype == "fp8e4m3"
         row_inside = b.cmp_lt(ops.v(row), p["M"]) if spec.edge_m else None
-        for begin in range(0, rn_count, width):
+        for begin in range(0, spec.n_group, width):
             inside = row_inside
             if spec.edge_n:
                 col_inside = b.cmp_lt(ops.v(ops.add(col, begin)), p["N"])
@@ -3353,7 +3437,7 @@ class Epilogue:
                 at = ops.v(ops.add(index, begin))
                 values = [
                     b.fmul(p["alpha"], b.vec_extract(final[rm * rn_count + rn], slot))
-                    for rn in range(begin, begin + width)
+                    for rn in range(first + begin, first + begin + width)
                 ]
                 if read_c:
                     if width == 1:
@@ -3484,8 +3568,7 @@ def build_mx_gemm(spec: MxGemmSpec, *, arch: str = "gfx1250") -> KernelDef:
     k.lane_half = ops.div(k.lane, 16)
     # Wave-uniform, so the TDM descriptors built from it stay scalar.
     k.wave = b.readfirstlane(ops.div(k.tid, _WAVE))
-    k.wave_n = ops.mod(k.wave, spec.warp_n)
-    k.wave_m = ops.div(k.wave, spec.warp_n)
+    k.wave_m, k.wave_n = wave_coords(spec, k.wave, ops)
 
     block_x, block_y = b.block_id_x(), b.block_id_y()
     k.block_m = ops.mul(block_y, spec.tile_m)
