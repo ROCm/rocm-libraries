@@ -22,8 +22,10 @@
 
 #include <miopen/logger.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <ostream>
 #include <sstream>
@@ -694,6 +696,84 @@ TEST(CPU_WrapperRoutingReentry_NONE, ProcessWideOverloadRefusesAndRepeatsSilentl
     testing::internal::CaptureStderr();
     EXPECT_FALSE(ForwardingAllowed("miopenConvolutionForward"));
     EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
+}
+
+// A stand-in for a wrapper stub: the dispatch macro under a forwarded entry
+// point's name, whose forwarded path calls the stub again, as a hipDNN MIOpen
+// plugin linked against libMIOpen.so does. The route stays Hipdnn even when
+// hipDNN cannot load, so this needs neither hipDNN nor a GPU.
+namespace reentry_stub {
+
+int& Depth()
+{
+    static int depth = 0;
+    return depth;
+}
+
+int& MaxDepth()
+{
+    static int maxDepth = 0;
+    return maxDepth;
+}
+
+// Past this the guard has failed; stop before the stack does.
+constexpr int kDepthCap = 4;
+
+miopenStatus_t miopenConvolutionForward();
+
+miopenStatus_t Forward()
+{
+    ++Depth();
+    MaxDepth() = std::max(MaxDepth(), Depth());
+    const miopenStatus_t status =
+        Depth() < kDepthCap ? miopenConvolutionForward() : miopenStatusInternalError;
+    --Depth();
+    return status;
+}
+
+miopenStatus_t miopenConvolutionForward()
+{
+    MIOPEN_WRAPPER_FORWARD(miopenConvolutionForward, Forward());
+    return miopenStatusSuccess;
+}
+
+// Runs in the death test's child, so the forwarding mode it caches is read from
+// the variables set here. The exit code is the verdict.
+int RunNestedForwardedCall()
+{
+#ifdef _WIN32
+    _putenv_s("MIOPEN_HIPDNN_FORWARDING", "1");
+    _putenv_s("MIOPEN_DISABLE_HIPDNN_FOR", "");
+#else
+    setenv("MIOPEN_HIPDNN_FORWARDING", "1", 1);
+    unsetenv("MIOPEN_DISABLE_HIPDNN_FOR");
+#endif
+    const miopenStatus_t status = miopenConvolutionForward();
+    std::fprintf(stderr,
+                 "nested call: status %d, forwarded %d time(s)\n",
+                 static_cast<int>(status),
+                 MaxDepth());
+    return status == miopenStatusSuccess && MaxDepth() == 1 ? 0 : 1;
+}
+
+} // namespace reentry_stub
+
+// The forwarding mode is cached per process and other tests in this binary set
+// it, so the call runs in a fresh process: threadsafe death-test style re-execs
+// this binary instead of forking it.
+TEST(CPU_WrapperRoutingReentry_NONE, NestedForwardedCallIsServedByMiopen)
+{
+#ifdef GTEST_FLAG_SET
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+#else
+    GTEST_FLAG(death_test_style) = "threadsafe";
+#endif
+    // GoogleTest 1.11's EXPECT_EXIT switches over a two-value enum with a
+    // default label, and the warning lands on this expansion site.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcovered-switch-default"
+    EXPECT_EXIT(std::exit(reentry_stub::RunNestedForwardedCall()), testing::ExitedWithCode(0), "");
+#pragma clang diagnostic pop
 }
 
 // ---------------------------------------------------------------------------
