@@ -22,6 +22,22 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   other graph only by the `emit_lse` 0 variants. The LSE cells are reduced on their own
   timings, so they need not mirror the non-LSE cells. Max, Sum_exp, the dropout RNG dump
   and any other stats layout or dtype are declined.
+- Additive bias (`use_additive_bias`, KMD field, name slot `_addb`): the bias variants are
+  D64 and D128, bf16 and fp16, causal and unmasked, with and without LSE, and no window.
+  They sweep the tile only (`block_m`, `block_n`; every other knob is held at its default)
+  and are all on the `qb_minor` grid: no persistent, `bt_hkv_minor` or `hq_minor_swz`
+  variant carries a bias, and a bias graph with a window matches no kernel. A bias graph
+  needs `Sq % block_m == 0` and `Skv % block_n == 0` for a bias tile the selection lists,
+  and a forced `block_m`/`block_n` knob outside them matches no bias kernel. A bias graph
+  with no matching bias kernel misses silently, like any other kernel-level miss.
+- `attn_mask`: the engine serves an fp32 tensor `[B|1, Hq|1, Sq|1, Skv]` (extent 1 or
+  full on each leading axis, indexed by the query head), real, not ragged and not
+  pass-by-value, with a unit-stride key axis and its largest element index below 2^31.
+  It declines any other `attn_mask`, with the cause in the INFO log.
+  `-inf` masks a key; a row with no unmasked key outputs 0, as the hipDNN reference
+  does for a row of `-inf` scores. A finite value, `finfo(float32).min` included, is a
+  score like any other (a row of them gets the uniform softmax), and a NaN on a visible
+  key makes its row NaN, as in the reference.
 - Launch grids: the one-CTA-per-block grid at the `qb_minor` block order (every cell),
   `bt_hkv_minor` and `hq_minor_swz` where the reduction kept them, and at D128 without a
   window the persistent grid: 304 CTAs (`num_persistent`) striding over the work items in
@@ -55,9 +71,12 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   seqlen_q = seqlen_kv = 512 and 8 query/KV heads.
 - Each grid is held fixed by its registry candidate: `gfx942_dense_qbminor`,
   `gfx942_dense_btminor_aot`, `gfx942_dense_hqswz_aot` and `gfx942_dense_persist_aot`.
+  Only `gfx942_dense_qbminor` declares the `attn_bias` feature, which is what keeps the
+  bias variants on that grid.
 - Not covered by this engine (follow-ups). A graph-level gap is declined with an INFO line
   naming the cause. A window size the catalog lacks, or a sequence length no shipped tile
-  divides, passes the graph match and then matches no kernel.
+  divides, passes the graph match and then matches no kernel; so does a bias graph that
+  needs a window, a tile or a grid no bias variant ships.
   - Not yet supported by this pack; the gfx942 kernel builds it, no variant ships it:
     - Attention sinks (`use_sinks`; gpt-oss). When this work started, hipDNN's SDPA
       references could not validate sinks; #14358 added that on 2026-11-02. gpt-oss's W=128
@@ -72,8 +91,8 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   - Not implemented in the gfx942 kernel: sequence lengths no shipped tile divides (no
     partial-tile path), varlen, ragged (packed) tensors and paged K/V (other rocKE kernels
     serve them), bottom-right windows, non-causal bands (`right_bound` > 0), head sizes
-    other than 64 and 128, FP32 and FP8 data types, dropout, additive / ALiBi / block
-    masks, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
+    other than 64 and 128, FP32 and FP8 data types, dropout, block masks, an `attn_mask`
+    other than the fp32 additive bias above, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
     64, 128, 256 and 512 with block_n 32, 64 and 128, per cell as listed in the selection.
   - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets).
   - Design limit: FLOAT accumulation, so a DOUBLE compute type is declined.
@@ -94,5 +113,12 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - Fetch `artifacts/` with `dvc pull -r ingestor artifacts.dvc`. See
   `../../README.md`.
 - The native symbols (`hipkernel.gfx942_attention_dense.*`) are registered in
-  `packs/Gfx942AttentionDenseNative.cpp`.
+  `packs/Gfx942AttentionDenseNative.cpp`, which binds this engine's arch descriptor
+  (tile rules, launch contracts, the `use_additive_bias` field). Matching, dispatch and the
+  saved launch values, the additive bias included, are shared with the gfx950 engine in
+  `packs/AttentionDenseNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
+- Saved plans store their launch values under `hipkernel.gfx942_attention_dense.dispatch.v1`
+  (the kernel reads the head counts at runtime: this engine's first contract), or `.v2` for
+  a plan that serves a bias kernel (v1 plus the bias uid and its batch, query-head and
+  query-row strides). Both stay registered so saved plans keep loading.

@@ -257,32 +257,65 @@ struct AttentionDenseArch
     /// A superseded contract whose plans still restore, or an empty symbol for none. It
     /// shares currentContract's launch values and differs only in its kernel arguments.
     AttentionDenseContract legacyContract;
-    /// The contract a plan with an additive bias is saved under, for an arch that serves one.
+    /// The contract a plan with an additive bias is saved under, for an arch that serves one
+    /// (an empty symbol for one that does not).
     /// Its values are currentContract's plus the bias values, and it launches
     /// AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS. The current handler serves both
     /// contracts, since a plan may only be saved under a name registered to the handler that
     /// saves it: a graph without a bias saves under currentContract, one with a bias under
-    /// this one. The legacy handler has no bias form.
+    /// this one. The legacy handler has no bias form. The bias contract is versioned with
+    /// currentContract: a change that needs a new current version needs a new bias version
+    /// too. An arch holds one contract per role, so superseding a contract that is still
+    /// restorable needs a list of restorable contracts here first.
     AttentionDenseContract biasContract;
 
-    bool servesSlidingWindow() const
+    constexpr bool servesSlidingWindow() const
     {
         return windowReachesKeys != nullptr;
     }
 
-    bool servesBias() const
+    constexpr bool servesBias() const
     {
         return candidateAddsBias != nullptr;
     }
 
-    bool servesStats() const
+    constexpr bool servesStats() const
     {
         return candidateWritesLse != nullptr;
     }
 
-    bool servesGrids() const
+    constexpr bool servesGrids() const
     {
         return candidateGrid != nullptr;
+    }
+
+    /// Whether the descriptor is coherent: a served stats output has its token spelled; a
+    /// bias hook and a bias contract come together, with all five bias tokens spelled, the
+    /// bias contract's own name (neither currentContract's nor legacyContract's) and the
+    /// kernel arguments of RUNTIME_HEAD_COUNTS_WITH_BIAS after currentContract's list. A hook
+    /// without its contract would otherwise prepare under an empty symbol and the 8-argument
+    /// list; a contract without its hook would never be reached. Each engine static_asserts
+    /// it on its descriptor.
+    constexpr bool isConsistent() const
+    {
+        if(servesStats() && tokens.stats.empty())
+        {
+            return false;
+        }
+        if(servesBias() != !biasContract.symbol.empty())
+        {
+            return false;
+        }
+        if(!servesBias())
+        {
+            return true;
+        }
+        return !tokens.bias.empty() && !tokens.biasUid.empty() && !tokens.biasStrideBatch.empty()
+               && !tokens.biasStrideHead.empty() && !tokens.biasStrideQuery.empty()
+               && currentContract.abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS
+               && biasContract.abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS
+               && biasContract.symbol != currentContract.symbol
+               && biasContract.symbol != legacyContract.symbol;
     }
 };
 
@@ -315,6 +348,35 @@ std::optional<int64_t> integerMetadata(const hipdnn_plugin_sdk::ingestor::Kernel
 std::optional<std::string>
     stringMetadata(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                    std::string_view field);
+
+/// Whether the candidate adds a bias (which also appends four kernel arguments), or nullopt
+/// for a malformed record: the descriptor hook of an arch that serves a bias
+/// (AttentionDenseArch::candidateAddsBias). An absent use_additive_bias is the KMD default
+/// 0; a field holding another type or a value other than 0/1 is malformed and declines,
+/// rather than reading as a plain kernel. Total: never throws.
+std::optional<bool>
+    candidateAdditiveBias(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel);
+
+/**
+ * @brief Refuses a binding and a launch contract that disagree on the additive bias.
+ *
+ * A binding that carries a bias must be prepared under the contract whose kernel takes the
+ * bias pointer and strides (RUNTIME_HEAD_COUNTS_WITH_BIAS), and only then. The other
+ * contracts pass no bias, so a bias binding under one would launch a kernel that silently
+ * ignores it (a wrong result, not a crash), and a bias contract without a binding has no
+ * pointer to pass. prepare() and restoreLaunch() derive each of the two from the other, so
+ * this holds today; it is checked once before the geometry is applied, so a change to either
+ * derivation fails the plan instead of the launch.
+ *
+ * @param archLabel  The arch's label, for the message.
+ * @param kernelName The kernel's name, for the message.
+ * @throws HipdnnPluginException with INTERNAL_ERROR (a defect of the caller, not a property
+ *         of the graph) naming which side carries the bias.
+ */
+void requireBiasBindingMatchesContract(const AttentionDenseBinding& binding,
+                                       const AttentionDenseContract& contract,
+                                       std::string_view archLabel,
+                                       std::string_view kernelName);
 
 /// The launch shape of @p launch, for AttentionDensePersistent.hpp's grid functions.
 AttentionDenseGridShape gridShape(const AttentionDenseLaunchInputs& launch);

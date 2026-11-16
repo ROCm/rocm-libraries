@@ -29,9 +29,18 @@ its dataclass default (turned on) inserts the entry's ``name_token`` after the
 name template's last slot, e.g. ``..._bn64_addb.gfx950``; given ``free_fields``
 it sweeps only those, and given ``select`` only the specs with those values;
 the cell's default is then the kept spec equal to the registry default outside
-the selected fields. The selects of two features a cell turns on must agree. The
-declaration is the primary section's and applies to every ``enumerate.also``
-section too. The name check refuses any two kernels with one name, in both spaces.
+the selected fields. A cell that turns on two features sweeps the intersection of
+their ``free_fields``, and their selects must agree. The declaration is the primary
+section's and applies to every ``enumerate.also`` section too, each narrowing its own
+sweep. In a ``space: slice`` section, ``free_fields`` is a subset of
+``enumerate.free_fields``. In a ``space: full`` section it is a subset of the
+``reduction.fields.performance`` names, and every performance knob it leaves out is
+held at the cell's registry default, silently and before the knobs are projected: the
+budget check, the catalog's projected knobs, the metadata and the names all see the
+narrowed cell. ``select`` names fields of the set the feature sweeps (its
+``free_fields``, else ``enumerate.free_fields`` in a slice or every performance knob
+in a full space). The name check refuses any two kernels with one name, in both
+spaces.
 
 Two opt-in ``enumerate`` keys let a rule-driven candidate (one spec per request,
 picked from request fields) yield one cell per kernel family rather than one per
@@ -128,6 +137,21 @@ def _require(ok: bool, path: str, field: str, shape: str) -> None:
 
 def _is_names(value) -> bool:
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _performance_names(reduction_fields) -> list:
+    """The knob names of a manifest's ``reduction.fields.performance`` list, read
+    leniently: a malformed block is `check_reduction`'s to name."""
+    entries = (
+        reduction_fields.get("performance")
+        if isinstance(reduction_fields, dict)
+        else None
+    )
+    return [
+        entry["name"]
+        for entry in (entries if isinstance(entries, list) else [])
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+    ]
 
 
 def _validate_manifest(path: str, manifest: dict) -> None:
@@ -271,6 +295,7 @@ def _validate_manifest(path: str, manifest: dict) -> None:
     # malformed block or list is left to check_reduction's own message.
     reduction = manifest.get("reduction")
     reduced = None
+    reduction_fields = None
     if isinstance(reduction, dict):
         reduction_fields = reduction.get("fields")
         listed = (
@@ -279,6 +304,10 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             else None
         )
         reduced = [] if listed is None else listed if isinstance(listed, list) else None
+    # In space: full a feature narrows the performance knobs; in a slice, the
+    # section's free_fields.
+    full = decl.get("space", "slice") == "full"
+    knobs = _performance_names(reduction_fields) if full else None
     for name, entry in (features or {}).items():
         where = f"enumerate.feature_fields.{name}"
         _require(
@@ -323,17 +352,23 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             "listed in reduction.fields.feature",
         )
         narrowed = entry.get("free_fields")
-        _require(
-            narrowed is None
-            or (
-                decl.get("space", "slice") == "slice"
-                and set(narrowed) <= set(decl.get("free_fields") or [])
-            ),
-            path,
-            f"{where}.free_fields",
-            "slice only, and a subset of enumerate.free_fields (it narrows the "
-            "cell's sweep; it cannot widen it)",
-        )
+        if full:
+            _require(
+                narrowed is None or set(narrowed) <= set(knobs),
+                path,
+                f"{where}.free_fields",
+                "a subset of the reduction.fields.performance names in space: "
+                "full (it narrows the knobs the cell sweeps; every other "
+                "performance knob is held at the cell default)",
+            )
+        else:
+            _require(
+                narrowed is None or set(narrowed) <= set(decl.get("free_fields") or []),
+                path,
+                f"{where}.free_fields",
+                "a subset of enumerate.free_fields (it narrows the cell's sweep; it "
+                "cannot widen it)",
+            )
         _require(
             name not in (decl.get("free_fields") or []),
             path,
@@ -342,20 +377,27 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             "swept one)",
         )
         select = entry.get("select")
-        swept = narrowed if narrowed is not None else (decl.get("free_fields") or [])
+        if narrowed is not None:
+            swept = narrowed
+        else:
+            swept = knobs if full else (decl.get("free_fields") or [])
+        unnarrowed = (
+            "every reduction.fields.performance knob"
+            if full
+            else "enumerate.free_fields"
+        )
         _require(
             select is None
             or (
                 isinstance(select, dict)
                 and bool(select)
-                and decl.get("space", "slice") == "slice"
                 and set(select) <= set(swept)
                 and all(isinstance(v, (bool, int, float, str)) for v in select.values())
             ),
             path,
             f"{where}.select",
-            "slice only, a non-empty mapping of the fields the feature's cells "
-            "sweep (its free_fields, else enumerate.free_fields) to scalar values",
+            "a non-empty mapping of the fields the feature's cells sweep (its "
+            f"free_fields, else {unnarrowed}) to scalar values",
         )
     for i, section in enumerate(also or []):
         _require(
@@ -1006,6 +1048,54 @@ class Registry:
             out["rocke_tuning_id"] = tuning_id
         return out
 
+    @staticmethod
+    def _check_selects_swept(select: dict, free: set) -> None:
+        """A feature's ``select`` may name only fields every feature the cell turns on
+        leaves free."""
+        held = sorted(set(select) - free)
+        if held:
+            raise EnumerationError(
+                f"a feature's select names {held}, which the section's free_fields "
+                "(slice) or another feature's free_fields holds at the cell default."
+            )
+
+    def narrow_full(self, base, specs: list, performance) -> list:
+        """The ``space: full`` counterpart of `slice_of`'s feature narrowing: ``specs``
+        of the cell of ``base`` cut to what the features the cell turns on allow.
+        ``performance`` is the performance knob names (a mapping's keys will do). A knob
+        outside the intersection of those features' ``free_fields`` is held at
+        ``base``'s value, and only the specs with the values those features ``select``
+        are kept. Applied before the knobs are projected, so a held knob is neither a
+        WARN nor a varying knob of this cell. ``specs`` itself when no feature narrows
+        the cell."""
+        select = self.selected(base)
+        freed = [
+            set(self.features[name]["free_fields"])
+            for name in self.features_on(base)
+            if self.features[name].get("free_fields") is not None
+        ]
+        if not select and not freed:
+            return specs
+        free = set.intersection(*freed) if freed else set(performance)
+        if freed:
+            self._check_selects_swept(select, free)
+        held = [n for n in performance if n not in free]
+        out = [
+            ks
+            for ks in specs
+            if all(getattr(ks, n) == getattr(base, n) for n in held)
+            and all(getattr(ks, n) == value for n, value in select.items())
+        ]
+        # Fail here, not in `_section_rows`: `plan_space` never reaches that check and
+        # would count the emptied cell as zero kernels, within budget.
+        if specs and not out:
+            raise EnumerationError(
+                f"enumerate.feature_fields {self.features_on(base)} leave no spec for "
+                f"cell with default spec {base}: the registry sweeps none with select "
+                f"{select} and knobs {held} held at that default."
+            )
+        return out
+
     def slice_of(self, base, specs: list) -> list:
         free = set(self.decl.get("free_fields") or [])
         declared = set(free).union(
@@ -1025,12 +1115,7 @@ class Registry:
             narrowed = self.features[name].get("free_fields")
             if narrowed is not None:
                 free &= set(narrowed)
-        held = sorted(set(select) - free)
-        if held:
-            raise EnumerationError(
-                f"a feature's select names {held}, which this section's free_fields "
-                "or another feature's free_fields holds at the cell default."
-            )
+        self._check_selects_swept(select, free)
         out = [
             ks
             for ks in specs
@@ -1139,9 +1224,13 @@ def _spec_fields(spec) -> list:
     return [f.name for f in dataclasses.fields(spec)]
 
 
-def _feature_matched(spaces: list, classification: Classification) -> list:
+def _feature_matched(
+    spaces: list, classification: Classification, registry: Registry | None = None
+) -> list:
     """``[(base, specs equal to base in every feature field), ...]``, after checking
-    that ``reduction.fields`` names only spec fields."""
+    that ``reduction.fields`` names only spec fields. Given the ``space: full``
+    ``registry`` section the spaces came from, each cell's specs are then narrowed by
+    the ``feature_fields`` its base turns on (`Registry.narrow_full`)."""
     out = []
     for base, specs in spaces:
         names = set(_spec_fields(base))
@@ -1158,12 +1247,10 @@ def _feature_matched(spaces: list, classification: Classification) -> list:
                     f"spec {type(base).__name__} does not have."
                 )
         want = {f: getattr(base, f) for f in classification.feature}
-        out.append(
-            (
-                base,
-                [s for s in specs if all(getattr(s, f) == v for f, v in want.items())],
-            )
-        )
+        same = [s for s in specs if all(getattr(s, f) == v for f, v in want.items())]
+        if registry is not None:
+            same = registry.narrow_full(base, same, classification.performance)
+        out.append((base, same))
     return out
 
 
@@ -1189,22 +1276,24 @@ def check_hold_fields(hold: "list | tuple", spec) -> None:
 
 
 def select_full(
-    spaces: list, classification: Classification, hold: "list | tuple" = ()
+    spaces: list, classification: Classification, registry: Registry | None = None
 ) -> FullSpace:
-    """Apply the ``space: full`` rules to ``[(base, specs), ...]``. ``hold`` names
-    performance fields this section keeps at its default spec's value (the
-    ``hold_fields`` key): they are neither projected nor varied."""
+    """Apply the ``space: full`` rules to ``[(base, specs), ...]``. ``registry`` is the
+    section the spaces came from: its ``feature_fields`` narrow each cell first, and
+    its ``hold_fields`` name performance fields this section keeps at its default
+    spec's value: they are neither projected nor varied."""
+    held_fields = registry.hold_fields if registry is not None else ()
     for base, _ in spaces:
-        check_hold_fields(hold, base)
+        check_hold_fields(held_fields, base)
     performance = OrderedDict(
         (n, accessor)
         for n, accessor in classification.performance.items()
-        if n not in hold
+        if n not in held_fields
     )
-    ignored = set(classification.ignored) | set(hold)
+    ignored = set(classification.ignored) | set(held_fields)
     held_notes: "OrderedDict[tuple, None]" = OrderedDict()
     projected: set = set()
-    sames = _feature_matched(spaces, classification)
+    sames = _feature_matched(spaces, classification, registry)
     unresolvable = _unresolvable(sames, performance)
     filtered = []
     for base, same in sames:
@@ -1492,7 +1581,7 @@ def _section_rows(registry: Registry, classification: Classification) -> tuple:
     merged = cell_spaces(registry, classification)
     cells, spaces = merged.cells, merged.spaces
     if full:
-        selected = select_full(spaces, classification, registry.hold_fields)
+        selected = select_full(spaces, classification, registry)
         kept_per_cell, projected, held = (
             selected.kept,
             selected.projected,
@@ -1825,7 +1914,7 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
                 selected = select_full(
                     section_spaces,
                     classification.with_performance(performance),
-                    section.hold_fields,
+                    section,
                 )
                 total += sum(len(kept) for kept in selected.kept)
             else:
@@ -1842,7 +1931,15 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
     ignored = set(classification.ignored)
     values: "OrderedDict[str, dict]" = OrderedDict()
     defaults: "OrderedDict[str, dict]" = OrderedDict()
-    sames = _feature_matched(spaces, classification)
+    sames = [
+        same
+        for section, _, section_spaces, _ in sections
+        for same in _feature_matched(
+            section_spaces,
+            classification,
+            section if section.space_kind == "full" else None,
+        )
+    ]
     for base, same in sames:
         for name in _spec_fields(base):
             seen = {repr(getattr(s, name)): getattr(s, name) for s in same}

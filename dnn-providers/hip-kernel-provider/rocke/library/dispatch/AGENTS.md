@@ -210,6 +210,24 @@ an otherwise invalid configuration can become valid before later knobs
 are considered. Only `lazy_rescale` is untunable on gfx942, because the
 kernel body does not read it.
 
+gfx942 dense also takes the additive bias (`use_attn_bias`, fp32 only) on both
+grids. The two spec fields it adds, `use_additive_bias` and `use_bias_x4` (the
+bias load width, which the kernel's policy resolves), are
+`DENSE_ARCH_PROBLEM_FIELDS`: sweeps never vary them and they stay out of the
+defaults fingerprint, so every `gfx942_dense` `tuning_id` is the one stored before
+they existed. Dispatch adds no eligibility rule beyond the fp32 refusal; the
+factory keeps the KV-segment split off a bias request's bottom-right chunk
+(the kernel refuses the combination), and the walk reaches only specs the kernel
+accepts, so a bias request is never offered the K double-buffer or V
+register-prefetch pipeline. It also gives a bias request over equal lengths (full or
+causal band, no sliding window, no sinks; not fp16 at D64 under a causal band, which
+keeps the default geometry) its own geometry
+(`gfx942_dense._bias_geometry_spec`): 128-row blocks on the non-persistent grid, a
+32-key tile at D128 and a 64-key tile at D64, a decode order that follows the mask
+and, at bf16 D64, the waves-per-eu of the other configs. That choice reads request
+fields only. The decode order is a recorded knob (`DenseSpace.recorded`) for those
+requests, so their tuning ids carry it; every other request's ids are unchanged.
+
 Two performance levers are **independent opt-ins** for supported BF16 D128
 causal attention (`sliding_window=0`, no sinks), with or without
 `causal_diag_split`: `lds_num_buffers=2` enables **K LDS double buffering

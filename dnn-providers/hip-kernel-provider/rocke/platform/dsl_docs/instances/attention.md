@@ -154,6 +154,30 @@ which the CI GPU lane runs; four bias-on cases (including the windowed start-til
 clamp) pin its IR in the representative golden. The hipDNN engine `hipkernel:Gfx950AttentionDense` serves an fp32
 `attn_mask` through its `use_additive_bias` variants (128/64 tile).
 
+The gfx942 dense kernel (`Gfx942AttentionDenseSpec.use_additive_bias`) takes the same
+bias and ABI tail on both its grids (default and persistent). It has no ragged or
+varlen body, so every row and key it visits lies inside the bias; it composes with
+every mask it serves (none, top-left, bottom-right, sliding window), sinks and LSE.
+It refuses the KV-segment split (the segment store skips the bias epilogue), the
+`lds_num_buffers=2` / `v_reg_prefetch=True` K/V pipeline (the bias load queues behind
+the next tile's loads) and paged K/V. Its scores are already in the log2 domain when
+the bias-on code adds the bias times log2e (a finite value raised to at least -2**97;
+`-inf` and NaN pass through), ahead of the mask, so unlike the gfx950 body it does not
+rescale them; the bias-off IR is unchanged. Semantics are the gfx950 dense kernel's
+(`-inf` masks a key, a finite value such as `finfo(float32).min` is an ordinary score,
+a NaN on a visible key makes its row NaN, a row with no unmasked key writes zeros).
+`use_bias_x4` chooses 4-wide or scalar bias loads; the policy
+(`_use_bias_x4`) picks 4-wide loads for every bias body (measured ahead of or level with
+the scalar form on every compiler generation checked), and the name tags only an explicit
+value that differs from it. Tests: the host contract
+[test_attention_dense_bias_gfx942.py](../../../library/tests/test_attention_dense_bias_gfx942.py)
+(CPU lane), the numerics
+[test_attention_dense_bias_gfx942_numeric.py](../../../library/tests/test_attention_dense_bias_gfx942_numeric.py)
+(needs torch) and its torch-free subset
+[test_attention_dense_bias_gfx942_gpu.py](../../../library/tests/test_attention_dense_bias_gfx942_gpu.py),
+which the CI GPU lane runs; bias-on cases pin its IR in the representative golden
+(see the [prefill builder README](../../../library/builders/gfx942/attention/prefill/README.md)).
+
 bf16 attention uses the `mfma_f32_16x16x16_bf16` op via the `_1k` LLVM variant (with `<4 x i16>` operands; the plain `bf16.16x16x16` intrinsic does not exist on this target).
 
 CK Tile ``01_fmha`` family parity:

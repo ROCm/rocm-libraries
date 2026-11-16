@@ -39,14 +39,24 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// pairs); and to a kernel that writes LSE last lse_ptr, the stats output: 10, 11, 14, 15,
 /// 16 or 17 arguments. The grid is (nqb, Hq, B), (B, Hq, nqb) or (8 nqb, Hq / 8, B) at the
 /// qb_minor, bt_hkv_minor or hq_minor_swz order, or (num_persistent, 1, 1). New plans are
-/// saved under it. Versions are per dispatch name, so this is gfx942's first contract, not
-/// gfx950's v1.
+/// saved under it for a graph without an additive bias. Versions are per dispatch name, so
+/// this is gfx942's first contract, not gfx950's v1.
 inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
     = "hipkernel.gfx942_attention_dense.dispatch.v1";
 
-/// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract
+/// Contract v2: the v1 values plus the bias uid and its batch, query-head and query-row
+/// element strides (attention_dense::BIAS_*_VALUE); the launch passes the v1 arguments, then
+/// additive_bias_ptr and the three strides, last after any lse_ptr: v1's 10, 11, 14, 15, 16
+/// or 17 arguments plus four. New plans with an additive bias are saved under it. The
+/// handler of v1 also serves it, so v1 stays the contract of every plan without a bias and
+/// those plans are unchanged.
+inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
+    = "hipkernel.gfx942_attention_dense.dispatch.v2";
+
+/// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` and `.v2` contracts
 /// (attention_dense::launchValues): the sixteen both arches save, and, as gfx942 serves
-/// stats and grids, `stats.uid`, `grid_order`, `persist_decode` and `num_persistent`.
+/// stats and grids, `stats.uid`, `grid_order`, `persist_decode` and `num_persistent`. v2
+/// adds the four bias values, which this writes exactly when the binding has a bias.
 hipdnn_plugin_sdk::ingestor::MetadataValues
     gfx942AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
                                      const AttentionDenseProblem& problem,
@@ -56,12 +66,13 @@ hipdnn_plugin_sdk::ingestor::MetadataValues
 /// Everything a gfx942 dense-attention launch is computed from.
 using Gfx942AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
-/// Reads the values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract.
+/// Reads the values of the `hipkernel.gfx942_attention_dense.dispatch.v1` or `.v2` contract
+/// (they differ in the bias values v2 adds and the kernel arguments the launch passes).
 /// `block_m` must be one gfx942 builds: a positive multiple of 32 within a 1024-thread CTA.
-/// For every other rule, including those for the stats and grid values, see
+/// For every other rule, including those for the stats, grid and bias values, see
 /// attention_dense::readLaunchInputs.
 ///
-/// @throws HipdnnPluginException with a load refusal when the dispatch name is not the
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
 ///         contract, or when a value is missing, extra, of another type or out of range.
 Gfx942AttentionDenseLaunchInputs readGfx942AttentionDenseLaunchInputs(
     const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);

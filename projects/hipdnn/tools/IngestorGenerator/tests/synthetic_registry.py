@@ -22,7 +22,7 @@ rocKE's catalog, tiles, names or admission rules do:
   ``batch`` and the KV head count, so head pairs sharing a ratio pick different
   segments;
 - the *feature probe* family: the probe family plus a ``bias`` request and spec field,
-  for ``enumerate.feature_fields``.
+  for ``enumerate.feature_fields``, in a slice and in a full space.
 
 ``provider(tmp_path, monkeypatch)`` binds all of them to a throw-away provider root.
 """
@@ -132,6 +132,10 @@ class FeatureProbeCandidate(ProbeCandidate):
     def select_spec(self, request: FeatureProbeRequest):
         base = super().select_spec(request)
         return FeatureProbeSpec(**dataclasses.asdict(base), bias=request.bias)
+
+    def sweep_space(self, request: FeatureProbeRequest):
+        """Last tile first, so the sweep's first spec is not the default spec."""
+        return list(reversed(super().sweep_space(request)))
 
 
 def feature_probe_candidates():
@@ -337,6 +341,30 @@ def feature_probe_manifest(provider_root) -> dict:
     manifest["kmd_fields"].append({"name": "bias", "type": "int", "default_value": 0})
     manifest["specialization"]["metadata_fields"].append("bias")
     manifest["specialization"]["bindings"]["bias"] = {"field": "bias"}
+    return manifest
+
+
+def full_feature_probe_manifest(provider_root) -> dict:
+    """The feature probe manifest at ``space: full``, ``bias`` a feature field with no
+    narrowing: ``tile_n`` and ``order`` are the performance knobs (an unset ``order``
+    resolves to the same binary as ``"row"``), so a cell sweeps 3 tiles x 2 resolved
+    orders = 6 kernels, and the 8 cells (two head sizes x two masks x ``bias`` off or
+    on) make 48."""
+    manifest = feature_probe_manifest(provider_root)
+    section = manifest["enumerate"]
+    section["space"] = "full"
+    del section["free_fields"]
+    section["feature_fields"] = {"bias": {"name_token": "_bias"}}
+    manifest["reduction"] = {
+        "fields": {
+            "feature": ["dtype", "causal", "tile_m", "bias"],
+            "performance": [
+                {"name": "tile_n"},
+                {"name": "order", "unset_resolves_by": "resolved_order"},
+            ],
+            "ignored": [],
+        }
+    }
     return manifest
 
 

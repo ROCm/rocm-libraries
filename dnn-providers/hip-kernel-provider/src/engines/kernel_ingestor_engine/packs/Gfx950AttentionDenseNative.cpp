@@ -55,9 +55,6 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_d
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
 
-/// 1 for a kernel that adds an fp32 bias; the KMD default 0 completes a record without it.
-constexpr std::string_view USE_ADDITIVE_BIAS_FIELD = "use_additive_bias";
-
 /// The tile every legacy record completes to, and the one cold selection prefers.
 constexpr int64_t BASELINE_BLOCK_M = 256;
 constexpr int64_t BASELINE_BLOCK_N = 64;
@@ -72,25 +69,6 @@ attention_dense::AttentionDenseGeometry gfx950Geometry(int64_t blockM,
         = gfx950AttentionDenseGeometry(blockM, seqLenQ, numQueryHeads, batch, kernelName);
     return attention_dense::AttentionDenseGeometry{
         geometry.gridX, geometry.gridY, geometry.gridZ, geometry.blockX};
-}
-
-/// Whether the candidate adds a bias (which also appends four kernel arguments), or nullopt
-/// for a malformed record. An absent field is the KMD default 0; a field holding another
-/// type or a value other than 0/1 is malformed and declines, rather than reading as a plain
-/// kernel. Total: never throws.
-std::optional<bool> candidateAdditiveBias(const KernelDefinition& kernel)
-{
-    const auto it = kernel.metadata.find(std::string(USE_ADDITIVE_BIAS_FIELD));
-    if(it == kernel.metadata.end())
-    {
-        return false;
-    }
-    const auto* value = std::get_if<int64_t>(&it->second);
-    if(value == nullptr || (*value != 0 && *value != 1))
-    {
-        return std::nullopt;
-    }
-    return *value == 1;
 }
 
 constexpr attention_dense::AttentionDenseArch gfx950Arch()
@@ -120,7 +98,7 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.windowReachesKeys = nullptr;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
-    arch.candidateAddsBias = &candidateAdditiveBias;
+    arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
     arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     arch.legacyContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
@@ -131,6 +109,9 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
 }
 
 constexpr attention_dense::AttentionDenseArch GFX950_ARCH = gfx950Arch();
+static_assert(GFX950_ARCH.isConsistent(),
+              "gfx950Arch(): a served feature's token is unspelled, or the bias hook and the bias "
+              "contract do not come together (their tokens, name and kernel-argument form)");
 
 std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& context)
 {

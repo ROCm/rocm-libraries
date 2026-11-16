@@ -7,7 +7,8 @@ shipped gfx942 dense selection (configs/gfx942_attention_dense.yaml).
 
 A row is what the knob suite forces one graph onto: head size, dtype, mask cell (causal,
 sliding window), the stats output, the tile, the launch grid and the body levers, which are
-engine knobs too, so each row selects exactly one kernel. The suite runs every row against
+engine knobs too, and whether the kernel adds the additive bias (use_additive_bias), so each
+row selects exactly one kernel. A bias row ends with a trailing `true`; a plain row omits it. The suite runs every row against
 the CPU reference, and its coverage test checks the rows' classes are exactly the runtime
 catalog's, so a reduction that changes the catalog fails until this is rerun.
 
@@ -46,7 +47,8 @@ LEVERS = (
 
 def classes() -> list:
     """Sorted rows (head_size, dtype, causal, window, emit_lse, block_m, block_n,
-    persistent, grid order, *LEVERS), one per kernel of the selection."""
+    persistent, grid order, *LEVERS, use_additive_bias), one per distinct class of the
+    selection's kernels."""
     if str(_GENERATOR) not in sys.path:
         sys.path.insert(0, str(_GENERATOR))
     from codegen.config_loader import load_config
@@ -70,6 +72,7 @@ def classes() -> list:
                     m[lever] if isinstance(m[lever], str) else int(m[lever])
                     for lever in LEVERS
                 ),
+                bool(m.get("use_additive_bias", 0)),
             )
         )
     return sorted(rows)
@@ -94,15 +97,18 @@ def render() -> str:
         "// Do not edit; rerun the generator after the selection changes.",
         "",
         "// {head_size, dtype, causal, window, emit_lse, block_m, block_n, persistent, order,",
-        "//  {" + ", ".join(LEVERS) + "}}",
+        "//  {" + ", ".join(LEVERS) + "}[, true]}",
+        "// The trailing true marks a use_additive_bias row; a plain row omits it.",
         f"constexpr std::array<KnobClass, {len(rows)}> KNOB_CLASSES{{{{",
     ]
     lines += [
         "    {"
         + ", ".join(_cpp(v) for v in row[:9])
         + ", {"
-        + ", ".join(_cpp(v) for v in row[9:])
-        + "}},"
+        + ", ".join(_cpp(v) for v in row[9:-1])
+        + "}"
+        + (", true" if row[-1] else "")
+        + "},"
         for row in rows
     ]
     lines.append("}};")
@@ -111,7 +117,9 @@ def render() -> str:
 
 def main() -> int:
     OUT.write_text(render(), encoding="utf-8")
-    print(f"{len(classes())} kernels -> {OUT}")
+    rows = classes()
+    bias = sum(1 for row in rows if row[-1])
+    print(f"{len(rows)} classes ({bias} bias) -> {OUT}")
     return 0
 
 
