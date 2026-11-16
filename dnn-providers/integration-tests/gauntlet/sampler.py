@@ -263,6 +263,12 @@ def _row(space, row_id, origin, data_seed, axis_values, case, generator=GENERATO
     )
     metadata = {"format_version": 1, "generator": generator, "notes": notes}
     metadata.update(case["metadata"])
+    # the `values` fill kind (exact per-element values, e.g. seq_len tensors) exists from format 2
+    if any(
+        isinstance(recipe, dict) and recipe.get("kind") == "values"
+        for recipe in metadata.get("inputs", {}).values()
+    ):
+        metadata["format_version"] = 2
     metadata.setdefault("purpose", DEFAULT_PURPOSE)
     metadata["seed"] = data_seed
     row = {"id": row_id, "values": case["values"], "metadata": metadata}
