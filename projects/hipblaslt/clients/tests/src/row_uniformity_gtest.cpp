@@ -1073,9 +1073,16 @@ namespace
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
             // The logic that routes these shapes to the gfx950 skinny kernels
             // declares CUCount: 256, so other CU counts (MI350P, compute
-            // partitions) keep the Tensile picks.
-            const bool expectPick = gfx950Pick != nullptr && gpuArchName().rfind("gfx950", 0) == 0
-                                    && currentCUCount() == 256;
+            // partitions) keep the Tensile picks. Rows for another CU count in
+            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml
+            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml
+            // that route here need expectPick to cover that count too.
+            const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
+            if(gfx950Pick != nullptr && gfx950)
+                ASSERT_NE(currentCUCount(), 0)
+                    << "TensileLite cannot describe this gfx950, so the test cannot tell whether "
+                       "the skinny-kernel logic applies";
+            const bool expectPick = gfx950Pick != nullptr && gfx950 && currentCUCount() == 256;
             if(candidates.empty() && gfx950Pick != nullptr && !expectPick)
                 GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
