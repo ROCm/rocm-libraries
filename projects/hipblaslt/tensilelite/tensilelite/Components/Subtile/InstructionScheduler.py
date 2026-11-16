@@ -3714,6 +3714,84 @@ def readInOpeningBarrierGap(module, dataReads):
     return module
 
 
+def _isLdsOp(inst) -> bool:
+    return isinstance(inst, (LocalReadInstruction, LocalWriteInstruction)) or _isBufferLoad(inst)
+
+
+def _isFreeOfBarrier(inst) -> bool:
+    """An instruction a barrier may move across: register-only SALU, VALU or MFMA work."""
+    if isinstance(inst, TextBlock):
+        return _isComment(inst)
+    return not (_isOrderFence(inst) or _isLdsOp(inst)
+                or isinstance(inst, SMemLoadInstruction))
+
+
+def barrierAloneInGap(module, maxInstructions=_MXFP8_FOLLOWER_SLOTS):
+    """Give each barrier of a uniform-epoch body an MFMA gap of its own.
+
+    A barrier that crosses only register-only SALU, VALU and MFMA work
+    moves up into the nearest earlier empty gap: every wave still reaches
+    it after the same LDS ops and waits, so it guards the same stores.
+    A barrier behind its own wait stays, and the VALUs after it in its gap
+    move back to the earlier gap where they cost least (_pullBackValus).
+    The m0 writes are spaced from their loads later, with the rest of the
+    loop (spaceMainLoopM0Writes), and the barrier is the filler of an m0
+    write right before a load in its gap. Without it the m0 moves into
+    the gap ahead, so the barrier stays when that gap is full.
+    """
+    def raiseTarget(leaves, gaps, mfmaAt, gapIndex, barrier):
+        """The MFMA the barrier moves in front of, or None when it stays."""
+        rest = [leaves[i][1] for i in _code(leaves, gaps[gapIndex]) if i != barrier]
+        if (any(_isM0Update(a) and _isBufferLoad(b) for a, b in zip(rest, rest[1:]))
+                and (gapIndex == 0 or len(_code(leaves, gaps[gapIndex - 1]))
+                     >= maxInstructions)):
+            return None
+        for index in range(barrier - 1, mfmaAt[0], -1):
+            inst = leaves[index][1]
+            if _isMfma(inst):
+                earlier = mfmaAt.index(index) - 1
+                if earlier >= 0 and not _code(leaves, gaps[earlier]):
+                    return index
+                continue
+            if not _isFreeOfBarrier(inst):
+                return None
+        return None
+
+    # The VALUs move first, so a raised barrier sees the gaps they fill.
+    for raising in (False, True):
+        done = set()
+        while True:
+            leaves = _bodyLeaves(module)
+            gaps = _mfmaGaps(leaves)
+            mfmaAt = [i for i, (_c, inst) in enumerate(leaves) if _isMfma(inst)]
+            for gapIndex, gap in enumerate(gaps):
+                code = _code(leaves, gap)
+                barrier = next((i for i in code if _isBarrier(leaves[i][1])
+                                and id(leaves[i][1]) not in done), None)
+                if barrier is None:
+                    continue
+                done.add(id(leaves[barrier][1]))
+                if len(code) == 1:
+                    break
+                target = raiseTarget(leaves, gaps, mfmaAt, gapIndex, barrier)
+                if raising and target is not None:
+                    _moveLeaves(leaves, [barrier], target, before=True)
+                elif not raising and target is None:
+                    run = []
+                    for index in code[code.index(barrier) + 1:]:
+                        if not _isVALU(leaves[index][1]):
+                            break
+                        run.append(index)
+                    # One slot stays free for an m0 write the spacer moves in.
+                    if run:
+                        _pullBackValus(leaves, gaps, mfmaAt, gapIndex, run,
+                                       maxInstructions - 1, mayOpen=True)
+                break
+            else:
+                break
+    return module
+
+
 def _schedulePartitionZeroIssueOrder(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, uniformPgrEpoch,

@@ -5482,6 +5482,7 @@ class LogicalScheduler:
         """
         from .InstructionScheduler import (
             appendC1ScaleShadowReads,
+            barrierAloneInGap,
             deferBalancedCurrentCellWait,
             dropEntryScaleReads,
             guardExitOverwriteReread,
@@ -5850,6 +5851,12 @@ class LogicalScheduler:
                 and self.config.uniformPgrEpoch
                 and self.config.dualPeriodScale):
             dropDominatedLgkmWaits(module)
+        if (label == "MAINLOOP_C1" and not self.halfDisjoint
+                and self.config.uniformPgrEpoch and self.config.dualPeriodScale
+                and self._mainloopC0Schedule is not None):
+            # C1 still places scale refreshes in C0, so C0 is final only here.
+            barrierAloneInGap(self._mainloopC0Schedule)
+            barrierAloneInGap(module)
         if self.halfDisjoint and label.startswith("MAINLOOP"):
             barrier_gap_reads = (label == "MAINLOOP_C1" and self.config.dualPeriodScale
                                  and self._mainloopC0Schedule is not None)

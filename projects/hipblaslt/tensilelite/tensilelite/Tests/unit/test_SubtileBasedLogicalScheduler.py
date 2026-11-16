@@ -6422,6 +6422,102 @@ class TestPartitionZeroIssueOrder:
         assert both.vlcnt == 4
 
 
+class TestUniformEpochBodyPasses:
+    """Post-passes of a uniform-epoch dual-period body, on hand-built bodies."""
+
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _mfma(comment):
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction
+        return MXMFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[16, 16, 128], acc=vgpr(200, 4), a=vgpr(8, 8), b=vgpr(84, 8),
+            mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+    @staticmethod
+    def _m0(comment):
+        from rocisa.container import mgpr, sgpr
+        from rocisa.instruction import SAddU32
+        return SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+                       comment=comment)
+
+    @staticmethod
+    def _load(comment):
+        from rocisa.container import MUBUFModifiers, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128
+        return BufferLoadB128(dst=None, vaddr=vgpr(1), saddr=sgpr("SrdA", 4), soffset=0,
+                              mubuf=MUBUFModifiers(offen=True, lds=True), comment=comment)
+
+    @staticmethod
+    def _salu(comment):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddU32
+        return SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment=comment)
+
+    @staticmethod
+    def _body(*items):
+        from rocisa.code import Module
+        body = Module()
+        for item in items:
+            body.add(item)
+        return body
+
+    def test_barrier_moves_up_into_an_empty_gap(self):
+        from rocisa.instruction import SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import barrierAloneInGap
+
+        self._gfx950()
+        body = self._body(self._mfma("M0"), self._mfma("M1"), self._salu("srd"),
+                          self._mfma("M2"), self._m0("m0"), SBarrier(comment="barrier"),
+                          self._load("load"), self._mfma("M3"))
+
+        barrierAloneInGap(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "M0", "barrier", "M1", "srd", "M2", "m0", "load", "M3"]
+
+    def test_barrier_between_m0_and_its_load_stays_when_the_gap_ahead_is_full(self):
+        from rocisa.instruction import SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import barrierAloneInGap
+
+        self._gfx950()
+        full = [self._salu(f"s{i}") for i in range(5)]
+        body = self._body(self._mfma("M0"), self._mfma("M1"), *full, self._mfma("M2"),
+                          self._m0("m0"), SBarrier(comment="barrier"), self._load("load"),
+                          self._mfma("M3"))
+        before = [inst.comment for inst in body.items()]
+
+        barrierAloneInGap(body)
+
+        assert [inst.comment for inst in body.items()] == before
+
+    def test_valu_behind_a_waiting_barrier_moves_back(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import SBarrier, SWaitCnt, VXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import barrierAloneInGap
+
+        self._gfx950()
+        body = self._body(self._mfma("M0"), self._salu("srd"), self._mfma("M1"),
+                          SWaitCnt(vlcnt=0, comment="vmcnt"), self._mfma("M2"),
+                          SBarrier(comment="barrier"),
+                          VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap"),
+                          self._mfma("M3"))
+
+        barrierAloneInGap(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "M0", "srd", "swap", "M1", "vmcnt", "M2", "barrier", "M3"]
+
+
 class TestLateScalePrefetch:
     """Staging VGPRs for scales that partition zero does not consume."""
 

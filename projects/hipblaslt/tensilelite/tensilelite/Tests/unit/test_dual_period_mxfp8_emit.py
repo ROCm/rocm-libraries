@@ -275,6 +275,12 @@ def test_uniform_epoch_bodies_keep_one_vmem_wait_and_three_barriers(uniform_src)
     assert _body_sync(uniform_src) == [(3, 1), (3, 1)]
 
 
+def test_uniform_epoch_barriers_have_no_valu_behind_them(uniform_src):
+    for gap in _mfma_gaps(_mainloop_lines(uniform_src)):
+        if "s_barrier" in gap:
+            assert not any(_is_valu(op) for op in gap[gap.index("s_barrier"):]), gap
+
+
 def test_six_scale_reads_per_epoch(base_src):
     body = _mainloop_lines(base_src)
     reads = [ln for ln in body if "ds_read" in ln and re.search(r"// S[AB] MT=", ln)]
