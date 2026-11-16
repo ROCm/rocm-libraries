@@ -95,10 +95,10 @@ TILES_MMA = {
 }
 RDNA = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152"]
 RDNA += ["gfx1200", "gfx1201"]
-# group -> (archs, tiles, layouts)
+# group -> (archs, tiles, layouts). Both packs ship every tile in both layouts; autotune picks.
 PACKS = {
     "valu": (["gfx906", "gfx908"], TILES_VALU, ("nchw", "nhwc")),
-    "mma": (["gfx90a", "gfx942", "gfx950"] + RDNA, TILES_MMA, ("nchw",)),
+    "mma": (["gfx90a", "gfx942", "gfx950"] + RDNA, TILES_MMA, ("nchw", "nhwc")),
 }
 for _, tiles_of, _ in PACKS.values():
     for direction, classes in tiles_of.items():

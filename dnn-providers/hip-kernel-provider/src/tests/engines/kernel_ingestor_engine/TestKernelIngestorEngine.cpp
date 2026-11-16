@@ -20,6 +20,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
@@ -45,6 +46,7 @@
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
+#include "core/PlanDescription.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
@@ -255,6 +257,8 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     stubAsThisEnginesConfig(engineConfig);
 
     Context context;
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     ASSERT_NO_THROW(
         engineManager.initializeExecutionContext(handle, wrap(graph), engineConfig, context));
     ASSERT_TRUE(context.hasValidPlan());
@@ -263,6 +267,17 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     const auto& plan
         = dynamic_cast<const hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>&>(context.plan());
     EXPECT_EQ(plan.kernel().getIntMetadata(std::string(BLOCK_SIZE_FIELD)), 256);
+
+    // The plan names the config it runs, and the build logs it with its one program.
+    const auto description = hip_kernel_provider::core::describePlan(context);
+    EXPECT_FALSE(description.autotunePending);
+    ASSERT_FALSE(plan.kernel().name.empty());
+    EXPECT_EQ(description.configName, plan.kernel().name);
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                  "plan build: engine '" + std::string(POINTWISE_ADD.engineName)
+                                      + "', config '" + plan.kernel().name + "', 1 program(s): "))
+        << recorder.getRecordedLogsAsString();
 }
 
 // ---------------------------------------------------------------------------
@@ -649,13 +664,8 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
-        "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx942_attention_unified3d.dispatch",
-        "hipkernel.gfx950_attention_unified_2d.dispatch",
-        "hipkernel.gfx950_attention_unified_3d.dispatch",
-        "hipkernel.gfx942_attention_dense.dispatch",
-        "hipkernel.gfx1151_wmma_attention.dispatch",
-        "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+
 #ifdef HIPDNN_ENGINE_FLYDSL
         // FlyDSL's packs, compiled in whenever the production root has FlyDSL content.
         "hipkernel.flydsl_rmsnorm.dispatch",
@@ -668,7 +678,19 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
         "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
         "hipkernel.flydsl_sdpa_head_pad.dispatch",
+        "hipkernel.flydsl_sdpa_bwd_merged.dispatch",
+        // The split engine is one pack with a handler per slot: the first slot stands for
+        // the pack above, the others are probed beside it.
+        "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
 #endif
+        "hipkernel.gfx950_attention_dense.dispatch",
+        "hipkernel.gfx950_attention_unified_2d.dispatch",
+        "hipkernel.gfx950_attention_unified_3d.dispatch",
+        "hipkernel.gfx942_attention_unified_2d.dispatch",
+        "hipkernel.gfx950_conv_fwd_aot.dispatch",
+        "hipkernel.gfx942_attention_dense.dispatch",
+        "hipkernel.gfx1151_wmma_attention.dispatch",
+        "hipkernel.gfx1151_wmma_attention_decode.dispatch",
 #ifdef HIPDNN_ENGINE_CONV
 #ifdef HIPDNN_ENGINE_CONV_NAIVE
         // The conv engine group's packs, compiled in with HIPKERNELPROVIDER_ENABLE_CONV and
@@ -724,6 +746,14 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
+#ifdef HIPDNN_ENGINE_FLYDSL
+    const std::vector<std::string_view> slotDispatchSymbols{
+        "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
+        "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch",
+    };
+#else
+    const std::vector<std::string_view> slotDispatchSymbols;
+#endif
 
     // Each handler once, with the first symbol that resolved to it.
     std::map<const IKernelDispatchHandler<Handle>*, std::string> handlers;
@@ -742,11 +772,14 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         }
     }
     registerNativeIngestorSymbols();
-    for(const auto symbol : packDispatchSymbols)
+    for(const auto& symbols : {packDispatchSymbols, slotDispatchSymbols})
     {
-        const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
-        ASSERT_NE(handler, nullptr) << symbol;
-        handlers.emplace(handler, std::string(symbol));
+        for(const auto symbol : symbols)
+        {
+            const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
+            ASSERT_NE(handler, nullptr) << symbol;
+            handlers.emplace(handler, std::string(symbol));
+        }
     }
 
     size_t saving = 0;

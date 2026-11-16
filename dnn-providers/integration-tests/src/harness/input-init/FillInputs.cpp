@@ -418,8 +418,8 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
 
-    // Overwritten by fillInputs() with the forward of Q, K and V. The fill stands only
-    // where the CPU forward rejects the shapes, and the backward reference fails those.
+    // Overwritten by fillInputs() with the forward of Q, K and V; a node whose forward
+    // cannot be derived is unsupported, so this fill is never verified against.
     recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
@@ -716,6 +716,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
+                      IReferenceExecutors& referenceExecutors,
                       DeviceInputFiller* device,
                       const std::vector<TensorAlias>& aliases)
 {
@@ -836,7 +837,8 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
 
     // O and the LSE of an SDPA backward node are outputs of a forward, not free inputs:
     // once Q, K and V hold their values, recompute them. Done after the waits, since
-    // the forward reads Q, K and V on the host.
+    // the forward reads Q, K and V. With a device filler it runs on the device too: the
+    // CPU forward costs seconds per graph at real sequence lengths.
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
         const auto& node = *graph.nodes()->Get(i);
@@ -845,7 +847,12 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         {
             continue;
         }
-        if(auto why = deriveSdpaBackwardForwardOutputs(graph, *sdpaBackward, inputs, ownedUids))
+        if(auto why = deriveSdpaBackwardForwardOutputs(graph,
+                                                       *sdpaBackward,
+                                                       inputs,
+                                                       ownedUids,
+                                                       referenceExecutors,
+                                                       /*onDevice=*/device != nullptr))
         {
             const auto* name = node.name();
             return FillResult::unsupported(

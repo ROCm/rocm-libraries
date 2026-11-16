@@ -44,14 +44,14 @@ constexpr int k5CoopCdnaWpe(int mt, int nt, int kw, bool packed, bool phases)
 }
 
 // LDS bytes of a transform-row-layout block (K5CoopCfg::LDSB): two V buffers of 16 bins x bt
-// tiles x 16 halves, or the epilogue's Z passes where those are larger.
-constexpr int k5CoopLdsBytes(int nt, int kw, int m, bool wave64)
+// tiles x 16 halves (one with @p single), or the epilogue's Z passes where those are larger.
+constexpr int k5CoopLdsBytes(int nt, int kw, int m, bool wave64, bool single = false)
 {
-    const int bt = 16 * nt, vb = 16 * bt * 16;
+    const int bt = 16 * nt, vb = 16 * bt * 16, nvb = single ? 1 : 2;
     const int kwp = kw < 2 ? kw : m == 2 ? 2 : 1;
-    const int zs = wave64 && 4 * m * 16 * kwp * (bt + 4) * 4 <= 2 * vb * 2 ? bt + 4 : bt;
+    const int zs = wave64 && 4 * m * 16 * kwp * (bt + 4) * 4 <= nvb * vb * 2 ? bt + 4 : bt;
     const int zb = 4 * m * 16 * kwp * zs;
-    return 2 * vb * 2 > zb * 4 ? 2 * vb * 2 : zb * 4;
+    return nvb * vb * 2 > zb * 4 ? nvb * vb * 2 : zb * 4;
 }
 
 struct K5Args

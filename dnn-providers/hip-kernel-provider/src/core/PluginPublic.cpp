@@ -19,7 +19,7 @@ using namespace hip_kernel_provider::core;
 // asserted below), so the backend routes the provider every graph the SDK can express. Which of
 // them an engine sees is the provider's schema guard's to say (GraphSchema.hpp): an engine that
 // has not opted in still declines any graph needing more than providerBaselineGraphSchema().
-#define HIPDNN_PLUGIN_API_VERSION "1.4.0"
+#define HIPDNN_PLUGIN_API_VERSION "1.6.0"
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
 
 #include <string_view>
@@ -30,6 +30,19 @@ static_assert(std::string_view(HIPDNN_PLUGIN_API_VERSION)
                   == hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION,
               "the SDK defines another engine plugin API: review the provider's schema guard "
               "(GraphSchema.hpp) and the engines that opt in, then raise this with it");
+
+#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+
+/// Drops every HIPRTC module the provider holds in memory, so the next plan build loads its
+/// programs from the disk cache or compiles them. FOR TESTS ONLY, and kept out of
+/// EnginePluginApi.h, for the reasons given for hipdnnEnginePluginResetKpackModuleCacheForTesting
+/// below: a test of what happens when a program is not resident (a compile failure, HIPRTC
+/// disabled) cannot observe anything while a resident module serves the plan. A module a live
+/// plan holds stays loaded until that plan goes.
+extern "C" HIPDNN_PLUGIN_EXPORT void hipdnnEnginePluginResetHiprtcModuleCacheForTesting()
+{
+    hip_kernel_provider::HipMlopsKernelCompiler::moduleCache().clear();
+}
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"

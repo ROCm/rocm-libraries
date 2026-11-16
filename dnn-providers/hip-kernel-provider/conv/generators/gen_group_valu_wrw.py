@@ -78,10 +78,10 @@ TILES = {
     F5: {"pass": [(1, 4, 4, 2), (2, 2, 8, 2)], "ring": [(2, 2, 4, 2)]},
 }
 
-# The matrix-core architectures take a small pack: there the matrix-core engines serve most
-# layers, and this engine wins only narrow ones (groups of 4 to 8 channels, few-channel dense
-# and pointwise layers) by 1.1-2.7x, channels-first only (no channels-last config won on any of
-# gfx90a, gfx942, gfx950, gfx1201, gfx1101).
+# The matrix-core architectures take a smaller set of tiles: there the matrix-core engines serve
+# most layers, and this engine wins narrow ones (groups of 4 to 8 channels, few-channel dense and
+# pointwise layers). Every tile ships in both layouts, except the ring form, which is
+# channels-first by construction (its register ring walks the packed width of consecutive rows).
 TILES_MMA = {
     F3: {
         "pass": [(4, 4, 8, 4), (1, 4, 8, 2), (1, 4, 4, 2), (1, 4, 2, 2), (1, 8, 4, 2)],
@@ -122,7 +122,7 @@ RDNA += ["gfx1200", "gfx1201"]
 PACKS = {
     # No matrix core for the type (gfx906), or a vector unit fast enough to matter (gfx908).
     "valu": (["gfx906", "gfx908"], TILES, ("nchw", "nhwc")),
-    "mma": (["gfx90a", "gfx942", "gfx950"] + RDNA, TILES_MMA, ("nchw",)),
+    "mma": (["gfx90a", "gfx942", "gfx950"] + RDNA, TILES_MMA, ("nchw", "nhwc")),
 }
 
 kmd, umd, udd, ued = U("kmd"), U("umd"), U("udd"), U("ued")
@@ -191,6 +191,7 @@ for group, (archs, tiles_of, layouts) in PACKS.items():
         for layout in set_layouts:
             for form, tiles in forms.items():
                 ring = 1 if form == "ring" else 0
+                # The ring walks consecutive rows along the packed width: channels-first only.
                 if ring and layout != "nchw":
                     continue
                 for dtype, dt in DTYPES:

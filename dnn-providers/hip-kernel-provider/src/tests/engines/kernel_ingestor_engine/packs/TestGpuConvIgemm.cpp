@@ -25,6 +25,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <nlohmann/json.hpp>
 
+#include "compilation/ProgramFetchRecording.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
@@ -2028,6 +2029,54 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvIgemmFusedSpecials,
                          ::testing::ValuesIn(fusedShapes()),
                          [](const auto& info) { return info.param.name; });
+
+// A fused plan's staging helpers (copy, transpose) are built from the same options with the
+// epilogue defines removed, so they must reuse the unfused plan's module rather than compile the
+// same source again under a new key: after the unfused plan, the fused one compiles exactly one
+// program, its fused convolution.
+TEST(TestGpuConvIgemmFused, StagingHelpersReuseTheUnfusedModule)
+{
+    SKIP_IF_NO_DEVICES();
+    // Channels-first, so x and y stage through the helpers.
+    const auto shape = dense(24, 40, {9, 7}, {3, 3}, {1, 1}, false);
+    const auto pack = packFor(ConvDirection::FORWARD);
+    const auto& handler = dispatchHandler(pack);
+
+    const GraphFixture plain(buildGraph(specFor(shape, ConvDirection::FORWARD)),
+                             currentDeviceProperties());
+    const GraphFixture fused(conv_epilogue_test::buildFusedGraph(conv_epilogue_test::fusedSpecFor(
+                                 shape, {conv_epilogue_test::bias(), conv_epilogue_test::relu()})),
+                             currentDeviceProperties());
+    const auto plainBound = matchesGraph(pack, plain.context());
+    const auto fusedBound = matchesGraph(pack, fused.context());
+    ASSERT_TRUE(plainBound.has_value() && fusedBound.has_value());
+
+    // The first config both graphs admit.
+    const auto& kernels = catalog(ConvDirection::FORWARD);
+    const auto kernel = std::find_if(kernels.begin(), kernels.end(), [&](const auto& candidate) {
+        return matchesKernel(pack, plain.context(), candidate, *plainBound)
+               && matchesKernel(pack, fused.context(), candidate, *fusedBound);
+    });
+    ASSERT_NE(kernel, kernels.end());
+
+    {
+        const compilation::ProgramFetchRecording recording;
+        ASSERT_NE(handler.prepare(plain.context(), *plainBound, *kernel), nullptr);
+        ASSERT_GE(recording.fetches().size(), 2u) << "the plan stages nothing";
+    }
+    const compilation::ProgramFetchRecording recording;
+    ASSERT_NE(handler.prepare(fused.context(), *fusedBound, *kernel), nullptr);
+    std::string sources;
+    size_t built = 0;
+    for(const auto& fetch : recording.fetches())
+    {
+        sources
+            += fetch.program + " " + std::string(compilation::codeSourceName(fetch.source)) + "; ";
+        built += fetch.source == compilation::CodeSource::IN_PROCESS ? 0 : 1;
+    }
+    EXPECT_LE(built, 1u) << kernel->name << ": " << sources;
+    EXPECT_GE(recording.fetches().size(), 2u) << sources;
+}
 
 // Opt-in: each config's time with and without a fused bias + relu (shapes in $K1_EPI_TIMING).
 TEST(TestGpuConvIgemmFusedTiming, BareAgainstFused)

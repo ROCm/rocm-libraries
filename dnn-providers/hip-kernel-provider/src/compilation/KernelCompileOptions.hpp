@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -75,16 +77,30 @@ public:
     KernelCompileOptions(KernelCompileOptions&&) = default;
     KernelCompileOptions& operator=(KernelCompileOptions&&) = default;
 
+    /// The base options in the order they were added, then one `-D<name>=<value>` per define,
+    /// sorted by name. The order is a function of the define set alone -- not of insertion,
+    /// removal or the map's hashing -- so the same defines always give the same option vector,
+    /// and with it the same code-object cache key, on every platform.
     operator std::vector<std::string>() const
     {
-        std::vector<std::string> compileOptions = _baseCompileOptions;
+        std::vector<const std::pair<const std::string, std::string>*> defines;
+        defines.reserve(_mutableCompileOptionsMap.size());
+        for(const auto& define : _mutableCompileOptionsMap)
+        {
+            defines.push_back(&define);
+        }
+        std::sort(defines.begin(), defines.end(), [](const auto* lhs, const auto* rhs) {
+            return lhs->first < rhs->first;
+        });
 
-        for(const auto& [name, value] : _mutableCompileOptionsMap)
+        std::vector<std::string> compileOptions = _baseCompileOptions;
+        compileOptions.reserve(compileOptions.size() + defines.size());
+        for(const auto* define : defines)
         {
             std::string option = "-D";
-            option += name;
+            option += define->first;
             option += '=';
-            option += value;
+            option += define->second;
             compileOptions.emplace_back(std::move(option));
         }
         return compileOptions;

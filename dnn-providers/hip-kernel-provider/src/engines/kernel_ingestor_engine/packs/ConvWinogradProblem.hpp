@@ -104,7 +104,9 @@ struct Config
     Variant variant = Variant::MULTIPASS;
     int m = 2; ///< output tile: F(m,3), or F(3,2) (m = 3) on stride 2's phase sub-filters
     Layout layout = Layout::NCHW; ///< what the kernels read; the fused variants read NCHW
-    std::string arch; ///< "any", or the WMMA family: "gfx11", "gfx12"
+    /// "any", or the matrix-core family: "gfx11", "gfx12" (WMMA), "gfx9" (MFMA, gfx908 and later
+    /// CDNA), "gfx942" (MFMA, gfx940-942), "gfx950" (MFMA, gfx950)
+    std::string arch;
     bool llcPlan = false; ///< multipass: slice the batch to fit the last-level cache
     int gemmBm = 0, gemmBn = 0, gemmBk = 0; ///< multipass GEMM tile
     int bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0; ///< fused VALU block
@@ -114,6 +116,9 @@ struct Config
     /// 1: prefetch further (cooperative: the next item's first chunk behind the epilogue; fused
     /// VALU: two input chunks ahead).
     int pf = 0;
+    /// Cooperative, CDNA transform-row layout: 1 for a single transformed-input buffer (half the
+    /// LDS, so more blocks a CU on 64 KiB parts; one more barrier per input chunk).
+    int sb = 0;
     // Backward weights (variant WRW) reads m = r of F(3,r) (2 or 4), arch = the GEMM's atom
     // family ("any": FMA on fp32 operands; "gfx9": MFMA 16x16; "gfx950": MFMA 16x16x32, 16-bit;
     // "gfx11" / "gfx12": WMMA, 16-bit), the block gemmBm (out channels) x gemmBn (in channels)
@@ -123,6 +128,12 @@ struct Config
 
 /// The config @p kernel describes, or nullopt for metadata the pack does not know.
 std::optional<Config> configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel);
+
+/// Whether @p config runs on CDNA MFMA (arch "gfx9", "gfx942" or "gfx950").
+inline bool isCdna(const Config& config)
+{
+    return config.arch == "gfx9" || config.arch == "gfx942" || config.arch == "gfx950";
+}
 
 /// Whether the device @p gcnArchName (suffix intact) runs @p config's instructions.
 bool configRunsOn(const Config& config, std::string_view gcnArchName);
