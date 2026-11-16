@@ -90,16 +90,22 @@ struct HandleState
     }
 };
 
+// The locks and maps below are never freed. Destroying what they hold at exit
+// would run hipDNN and its plugins while the process tears down, and a plugin
+// built against MIOpen calls miopenDestroy from there, which lands in
+// ReleaseHandle and would find these already destroyed. A handle still alive at
+// exit is left to the operating system, as MIOpen leaves its own.
 std::mutex& HandleMapMutex()
 {
-    static std::mutex mutex;
-    return mutex;
+    static auto* const mutex = new std::mutex;
+    return *mutex;
 }
 
 std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>>& HandleMap()
 {
-    static std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>> handles;
-    return handles;
+    static auto* const handles =
+        new std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>>;
+    return *handles;
 }
 
 class ScopedDevice
@@ -184,10 +190,11 @@ std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle
 
 using GraphPtr = std::shared_ptr<fe::graph::Graph>;
 
+// Never freed, like HandleMap.
 std::mutex& PlanMutex()
 {
-    static std::mutex mutex;
-    return mutex;
+    static auto* const mutex = new std::mutex;
+    return *mutex;
 }
 
 // Capped because a workload with changing shapes (varying batch size or input
@@ -198,8 +205,9 @@ constexpr size_t kPlanCacheCapacity = 128;
 
 LruCache<PlanKey, GraphPtr, PlanKeyHash>& PlanCache()
 {
-    static LruCache<PlanKey, GraphPtr, PlanKeyHash> plans(kPlanCacheCapacity);
-    return plans;
+    // Never freed, like HandleMap.
+    static auto* const plans = new LruCache<PlanKey, GraphPtr, PlanKeyHash>(kPlanCacheCapacity);
+    return *plans;
 }
 
 struct LastForwardedError
