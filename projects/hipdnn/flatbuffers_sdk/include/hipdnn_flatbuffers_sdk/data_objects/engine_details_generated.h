@@ -386,6 +386,7 @@ struct EngineDetailsT : public ::flatbuffers::NativeTable {
   std::vector<int32_t> behavior_notes{};
   std::string name{};
   std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT> candidate_page{};
+  std::vector<int32_t> numerical_notes{};
   EngineDetailsT() = default;
   EngineDetailsT(const EngineDetailsT &o);
   EngineDetailsT(EngineDetailsT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -400,7 +401,8 @@ struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_KNOBS = 6,
     VT_BEHAVIOR_NOTES = 8,
     VT_NAME = 10,
-    VT_CANDIDATE_PAGE = 12
+    VT_CANDIDATE_PAGE = 12,
+    VT_NUMERICAL_NOTES = 14
   };
   int64_t engine_id() const {
     return GetField<int64_t>(VT_ENGINE_ID, 0);
@@ -432,6 +434,12 @@ struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage *mutable_candidate_page() {
     return GetPointer<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage *>(VT_CANDIDATE_PAGE);
   }
+  const ::flatbuffers::Vector<int32_t> *numerical_notes() const {
+    return GetPointer<const ::flatbuffers::Vector<int32_t> *>(VT_NUMERICAL_NOTES);
+  }
+  ::flatbuffers::Vector<int32_t> *mutable_numerical_notes() {
+    return GetPointer<::flatbuffers::Vector<int32_t> *>(VT_NUMERICAL_NOTES);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_ENGINE_ID, 8) &&
@@ -444,6 +452,8 @@ struct EngineDetails FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyString(name()) &&
            VerifyOffset(verifier, VT_CANDIDATE_PAGE) &&
            verifier.VerifyTable(candidate_page()) &&
+           VerifyOffset(verifier, VT_NUMERICAL_NOTES) &&
+           verifier.VerifyVector(numerical_notes()) &&
            verifier.EndTable();
   }
   EngineDetailsT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -470,6 +480,9 @@ struct EngineDetailsBuilder {
   void add_candidate_page(::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page) {
     fbb_.AddOffset(EngineDetails::VT_CANDIDATE_PAGE, candidate_page);
   }
+  void add_numerical_notes(::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> numerical_notes) {
+    fbb_.AddOffset(EngineDetails::VT_NUMERICAL_NOTES, numerical_notes);
+  }
   explicit EngineDetailsBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -487,9 +500,11 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>> knobs = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> behavior_notes = 0,
     ::flatbuffers::Offset<::flatbuffers::String> name = 0,
-    ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page = 0) {
+    ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int32_t>> numerical_notes = 0) {
   EngineDetailsBuilder builder_(_fbb);
   builder_.add_engine_id(engine_id);
+  builder_.add_numerical_notes(numerical_notes);
   builder_.add_candidate_page(candidate_page);
   builder_.add_name(name);
   builder_.add_behavior_notes(behavior_notes);
@@ -503,17 +518,20 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetailsDirect(
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> *knobs = nullptr,
     const std::vector<int32_t> *behavior_notes = nullptr,
     const char *name = nullptr,
-    ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page = 0) {
+    ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePage> candidate_page = 0,
+    const std::vector<int32_t> *numerical_notes = nullptr) {
   auto knobs__ = knobs ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>(*knobs) : 0;
   auto behavior_notes__ = behavior_notes ? _fbb.CreateVector<int32_t>(*behavior_notes) : 0;
   auto name__ = name ? _fbb.CreateString(name) : 0;
+  auto numerical_notes__ = numerical_notes ? _fbb.CreateVector<int32_t>(*numerical_notes) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
       _fbb,
       engine_id,
       knobs__,
       behavior_notes__,
       name__,
-      candidate_page);
+      candidate_page,
+      numerical_notes__);
 }
 
 ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(::flatbuffers::FlatBufferBuilder &_fbb, const EngineDetailsT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -685,7 +703,8 @@ inline bool operator==(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
       (lhs.knobs.size() == rhs.knobs.size() && std::equal(lhs.knobs.cbegin(), lhs.knobs.cend(), rhs.knobs.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::KnobT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.behavior_notes == rhs.behavior_notes) &&
       (lhs.name == rhs.name) &&
-      ((lhs.candidate_page == rhs.candidate_page) || (lhs.candidate_page && rhs.candidate_page && *lhs.candidate_page == *rhs.candidate_page));
+      ((lhs.candidate_page == rhs.candidate_page) || (lhs.candidate_page && rhs.candidate_page && *lhs.candidate_page == *rhs.candidate_page)) &&
+      (lhs.numerical_notes == rhs.numerical_notes);
 }
 
 inline bool operator!=(const EngineDetailsT &lhs, const EngineDetailsT &rhs) {
@@ -697,7 +716,8 @@ inline EngineDetailsT::EngineDetailsT(const EngineDetailsT &o)
       : engine_id(o.engine_id),
         behavior_notes(o.behavior_notes),
         name(o.name),
-        candidate_page((o.candidate_page) ? new hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT(*o.candidate_page) : nullptr) {
+        candidate_page((o.candidate_page) ? new hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT(*o.candidate_page) : nullptr),
+        numerical_notes(o.numerical_notes) {
   knobs.reserve(o.knobs.size());
   for (const auto &knobs_ : o.knobs) { knobs.emplace_back((knobs_) ? new hipdnn_flatbuffers_sdk::data_objects::KnobT(*knobs_) : nullptr); }
 }
@@ -708,6 +728,7 @@ inline EngineDetailsT &EngineDetailsT::operator=(EngineDetailsT o) FLATBUFFERS_N
   std::swap(behavior_notes, o.behavior_notes);
   std::swap(name, o.name);
   std::swap(candidate_page, o.candidate_page);
+  std::swap(numerical_notes, o.numerical_notes);
   return *this;
 }
 
@@ -725,6 +746,7 @@ inline void EngineDetails::UnPackTo(EngineDetailsT *_o, const ::flatbuffers::res
   { auto _e = behavior_notes(); if (_e) { _o->behavior_notes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->behavior_notes[_i] = _e->Get(_i); } } else { _o->behavior_notes.resize(0); } }
   { auto _e = name(); if (_e) _o->name = _e->str(); }
   { auto _e = candidate_page(); if (_e) { if(_o->candidate_page) { _e->UnPackTo(_o->candidate_page.get(), _resolver); } else { _o->candidate_page = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineCandidatePageT>(_e->UnPack(_resolver)); } } else if (_o->candidate_page) { _o->candidate_page.reset(); } }
+  { auto _e = numerical_notes(); if (_e) { _o->numerical_notes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->numerical_notes[_i] = _e->Get(_i); } } else { _o->numerical_notes.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<EngineDetails> EngineDetails::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EngineDetailsT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -740,13 +762,15 @@ inline ::flatbuffers::Offset<EngineDetails> CreateEngineDetails(::flatbuffers::F
   auto _behavior_notes = _o->behavior_notes.size() ? _fbb.CreateVector(_o->behavior_notes) : 0;
   auto _name = _o->name.empty() ? 0 : _fbb.CreateString(_o->name);
   auto _candidate_page = _o->candidate_page ? CreateEngineCandidatePage(_fbb, _o->candidate_page.get(), _rehasher) : 0;
+  auto _numerical_notes = _o->numerical_notes.size() ? _fbb.CreateVector(_o->numerical_notes) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
       _fbb,
       _engine_id,
       _knobs,
       _behavior_notes,
       _name,
-      _candidate_page);
+      _candidate_page,
+      _numerical_notes);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::EngineDetails *GetEngineDetails(const void *buf) {

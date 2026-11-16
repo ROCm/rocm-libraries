@@ -73,6 +73,7 @@ include(ClangCheck)
 include(Sanitizers)
 include(WindowsDllStaging)
 include(Tests)
+include(LongPathManifest)
 include(HipdnnIntegrationTestHelpers)
 
 list(
@@ -603,3 +604,4 @@ install(FILES
 )
 
 add_clang_tidy_custom_target()
+hipdnn_apply_long_path_manifest()

@@ -23,6 +23,7 @@ test_categories:
     description: "Quick gfx950 attention BSHD bundle coverage"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_BshdStats.*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -33,7 +34,9 @@ test_categories:
     description: "Standard gfx950 attention BSHD bundle coverage"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_BshdStats.*"
       - "standard_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_BshdStats.*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -44,8 +47,11 @@ test_categories:
     description: "Comprehensive gfx950 attention coverage: quick + standard + comprehensive-tier bundles"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_BshdStats.*"
       - "standard_SdpaFwd_Default.*"
+      - "standard_SdpaFwd_BshdStats.*"
       - "comprehensive_SdpaFwd_Default.*"
+      - "comprehensive_SdpaFwd_BshdStats.*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -56,6 +62,7 @@ test_categories:
     description: "Full gfx950 attention coverage"
     test_patterns:
       - "*_SdpaFwd_Default.*"
+      - "*_SdpaFwd_BshdStats.*"
     exclude: *common_excludes
     labels:
       - "full"
@@ -65,6 +72,7 @@ test_categories:
     description: "Fast-feedback quick tier: BSHD quick bundles"
     test_patterns:
       - "quick_SdpaFwd_Default.*"
+      - "quick_SdpaFwd_BshdStats.*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"

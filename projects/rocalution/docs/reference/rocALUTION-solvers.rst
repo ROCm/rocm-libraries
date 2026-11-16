@@ -216,7 +216,7 @@ The Bi-Conjugate Gradient Stabilized (l) method is a generalization of BiCGStab 
 Chebyshev iteration scheme
 ==========================
 
-The Chebyshev Iteration scheme (also known as acceleration scheme) is similar to the CG method but requires minimum and maximum eigenvalues of the operator.
+The Chebyshev Iteration scheme (also known as acceleration scheme) is similar to the CG method but requires minimum and maximum eigenvalues of the operator. With a preconditioner, these are the eigenvalues of the preconditioned operator. The bounds can be given in either order. For real bounds, which includes complex values with an imaginary part of exactly 0, if the maximum eigenvalue is positive, a minimum eigenvalue that is not positive, such as the lower bound of :cpp:func:`rocalution::LocalMatrix::Gershgorin`, is replaced by the maximum eigenvalue divided by 30, which assumes that the operator is positive definite. Likewise, a maximum eigenvalue of 0 with a negative minimum eigenvalue is replaced by the minimum eigenvalue divided by 30. Bounds with a nonzero imaginary part are used as they are. If a bound is not finite or the segment between the bounds still contains 0, the program is terminated. The iteration can diverge if the maximum eigenvalue is underestimated.
 
 :cpp:class:`rocalution::Chebyshev`
 
