@@ -491,6 +491,36 @@ descriptor's `valid` predicate masks padded cells with the reduction's
 neutral element (`-inf` for max, `0` for sum / avg). One thread per
 output element.
 
+Source: `instances/common/pooling.py`.
+
+```python
+PoolOp = Literal["max", "avg", "sum"]   # Pooling2DSpec.op takes the string
+
+
+@dataclass(frozen=True)
+class PoolingProblem:
+    N: int; H: int; W: int; C: int   # NHWC input
+    Y: int; X: int        # pool window
+    sH: int = 1; sW: int = 1
+    pH: int = 0; pW: int = 0
+    dH: int = 1; dW: int = 1
+    # Ho / Wo / total_out are derived properties.
+```
+
+Algorithm:
+
+```text
+1. One thread per NHWC output element.
+2. Decompose flat output index into (n, ho, wo, c).
+3. Loop over pooling window (y, x).
+4. Compute input (hi, wi) via embed-style formulas.
+5. Mask out invalid (hi, wi).
+6. Reduce in f32: max / sum (for avg, divide by selected count or window count).
+7. Cast back to output dtype and store.
+```
+
+Grid: `ceil_div(total_output_elements, block_size)`.
+
 ## Permute (rank-N)
 
 File: `instances/permute_nd.py`. Matches CK Tile `06_permute`.

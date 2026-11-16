@@ -1,0 +1,34 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th",
+          "qgapped_fp16_mha_d64_nomask_sq_ne_skv_th"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th",
+          "qgapped_fp16_mha_d64_nomask_sq_ne_skv_th"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

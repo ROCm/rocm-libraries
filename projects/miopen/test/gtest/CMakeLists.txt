@@ -30,6 +30,7 @@ endif()
 if(THEROCK_SANITIZER STREQUAL "ASAN")
     # Disable tests that currently hang or crash under ASAN with CK kernels.
     list(APPEND SKIP_TESTS
+        group_conv_tf32_reuse_test.cpp
         group_conv3d_bwd.cpp
         group_conv3d_fwd.cpp
         group_conv3d_wrw.cpp
@@ -65,12 +66,6 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # temporarily disable: LeakSanitizer reports a memory leak at exit
     # (assertions pass but the process leaks).
     list(APPEND SKIP_TESTS find_2_conv.cpp)
-    # temporarily disable (ALMIOPEN-3097): LeakSanitizer reports leaks at exit because these tests never call
-    # miopenDestroySolution on the solutions returned by miopenFindSolutions (assertions pass).
-    list(APPEND SKIP_TESTS
-        na_inference_find2.cpp
-        na_train_find2.cpp
-    )
     # temporarily disable: these fail under ASan even when run individually
     # on gfx942.
     list(APPEND SKIP_TESTS
