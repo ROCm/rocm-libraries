@@ -44,8 +44,7 @@
  *
  * Hand-written, not generated: it belongs to the census binary beside the generated
  * TestGfx942ConvDgradAotPacks, and is registered with its own hkp_register_census_tests()
- * call in src/tests/CMakeLists.txt once the bundle ships a trained ranker (heuristics/);
- * until then the UED binds only the native fallback score and the call is skipped.
+ * call in src/tests/CMakeLists.txt.
  */
 namespace
 {

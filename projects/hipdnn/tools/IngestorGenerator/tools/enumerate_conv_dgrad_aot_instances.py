@@ -20,11 +20,12 @@ Every entry must also convert (``make_conv_dgrad_aot_config.py``); nothing is dr
 silently.
 
 gfx950's and gfx942's MFMA direct pipelines (``direct_variants.DIRECT_MFMA_DGRAD``)
-launch weight-transform helper kernels the labels do not name: the transpose always, the reorganize (keyed on
-``fold_k32``) when the entry splits K over waves or walks it at run time. The rocKE side
-decides which, in launch order, in ``direct_dgrad_weight_transforms()``; this tool asks it
-rather than restating the rule, so the runtime-channel pipeline's own helper variants come
-out right too. They are never selectable on their own.
+launch weight-transform helper kernels the labels do not name: the transpose always, the
+reorganize (keyed on ``fold_k32``) when the entry splits K over waves or walks it at run
+time. The rocKE side decides which, in launch order, in
+``direct_dgrad_weight_transforms()``; this tool asks it rather than restating the rule,
+so the runtime-channel pipeline's own helper variants come out right too. They are never
+selectable on their own.
 
 The sweep it checks identities against lowers with this process's LLVM flavor
 (:func:`check_flavor`), same as the committed lists embed; rerun under the catalog's

@@ -2492,7 +2492,8 @@ inline std::optional<Plan> instancePlan(const Problem& problem, const AotInstanc
 /// gfx1250's depthwise and WMMA dense, small-C and patch) in [3, 3.5], the MFMA pipelines
 /// (gfx950, gfx942) in [2, 2.5); implicit GEMM in [0, 1.01) by the fraction of the
 /// launched tile area that is real output times how well the grid fills a device of 256
-/// compute units (gfx950's; gfx942's 304 is not modeled), with wider vectors breaking ties.
+/// compute units (gfx950's; other targets' counts are not modeled), with wider vectors
+/// breaking ties.
 inline double planScore(const AotInstance& instance, const Plan& plan)
 {
     constexpr double CU_COUNT = 256.0;

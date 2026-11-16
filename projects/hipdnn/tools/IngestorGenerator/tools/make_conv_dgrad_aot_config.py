@@ -13,16 +13,16 @@ conv AOT tools' shared ones (``conv_aot_common.py``), with each engine as its ow
 product engine: kernel ids are ``uuid5(INSTANCE_UUID_NAMESPACE, instance_id)`` and the
 bundle names its own native symbols (no ``native_symbols_from``).
 
-Every entry must be a dgrad identity of the engine's architecture in fp16 or bf16
-that the packaged launch runs: an implicit-GEMM identity of the dgrad AOT sweep
+Every entry must be a dgrad identity of the engine's architecture in fp16 or bf16 that
+the packaged launch runs: an implicit-GEMM identity of the dgrad AOT sweep
 (``benchmarks/common/kernel_sweep.py``; it carries ``lds_k_outer`` and
 ``max_sub_gemms``), or a dgrad identity of the direct sweep
 (``benchmarks/common/direct_kernel_sweep.py``) of a packaged algorithm
-(:func:`packaged_direct_algorithms`), including each gfx950 and gfx942 MFMA
-pipeline's weight-transform helpers (``direct_dgrad_helper``). The helpers are packaged as kernels of their own
-family (``kernel_family`` 2) that the kernel matcher never admits; the MFMA dispatch
-loads them from the same pack. Anything else is listed with its reason and the tool
-exits non-zero, unless ``--skip-unsupported`` is given.
+(:func:`packaged_direct_algorithms`), including each gfx950 and gfx942 MFMA pipeline's
+weight-transform helpers (``direct_dgrad_helper``). The helpers are packaged as kernels
+of their own family (``kernel_family`` 2) that the kernel matcher never admits; the MFMA
+dispatch loads them from the same pack. Anything else is listed with its reason and the
+tool exits non-zero, unless ``--skip-unsupported`` is given.
 
 An engine's shipped catalog is ``configs/<arch>_conv_dgrad_aot_<dtype>.instances.json``,
 written by ``tools/enumerate_conv_dgrad_aot_instances.py``. Run under the catalog's
