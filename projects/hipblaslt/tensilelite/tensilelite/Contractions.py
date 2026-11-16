@@ -798,7 +798,10 @@ class ProblemPredicate(Properties.Predicate):
         if problemType.mxBlockA or problemType.mxBlockB:
             rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
 
-        if state['ProblemType']['FusedA2A'] == 'GemmA2A':
+        # Develop names this FusedA2A; older states still say FusedGemmA2A.
+        # Either key can be absent on a hand-built test state.
+        fusedA2A = state['ProblemType'].get('FusedA2A', state['ProblemType'].get('FusedGemmA2A'))
+        if fusedA2A == 'GemmA2A' or fusedA2A:
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
 
         # A rocRoller custom kernel is a pre-assembled object captured at one tile.
