@@ -1022,6 +1022,34 @@ TEST(TestBackendEnumStringUtils, GetBehaviorNoteString)
                  "HIPDNN_BEHAVIOR_NOTE_UNKNOWN");
 }
 
+TEST(TestBackendEnumStringUtils, GetNumericalNoteString)
+{
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE),
+                 "HIPDNN_NUMERICAL_NOTE_TENSOR_CORE");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS),
+                 "HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION),
+                 "HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_FFT),
+                 "HIPDNN_NUMERICAL_NOTE_FFT");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC),
+                 "HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP),
+                 "HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_TYPE_COUNT),
+                 "HIPDNN_NUMERICAL_NOTE_TYPE_COUNT");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(static_cast<hipdnnBackendNumericalNote_t>(-1)),
+                 "HIPDNN_NUMERICAL_NOTE_UNKNOWN");
+}
+
 TEST(TestBackendEnumStringUtils, GetPluginLoadingModeString)
 {
     EXPECT_STREQ(hipdnnGetPluginLoadingModeString(HIPDNN_PLUGIN_LOADING_ADDITIVE),

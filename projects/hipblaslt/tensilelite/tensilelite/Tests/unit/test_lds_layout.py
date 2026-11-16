@@ -12,7 +12,7 @@ from tensilelite.Common.GlobalParameters import globalParameters, _assertGlobalP
 from tensilelite.Common.TypeValidationErrors import ConfigTypeError
 from tensilelite.SolutionStructs.lds_layout import format_lds_layout
 from tensilelite.SolutionStructs.segment_interleave import evaluate, paired_buffer_offsets
-from tensilelite.Tests.unit.test_segment_interleave import _vw8_state
+from test_segment_interleave import _vw8_state
 
 pytestmark = pytest.mark.unit
 

@@ -174,6 +174,25 @@ if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang
   string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
 endif()
 
+# The SPIR-V translator of ROCm 10.1 and older crashes while it finalizes the SPIR-V of rocSPARSE
+# at runtime. The library runs on the ROCm it was built with, so the ROCm version found here
+# decides. Looked up in a function because the rocm-core config overwrites ROCM_PATH.
+function(rocsparse_get_rocm_version out_var)
+  find_package(rocm-core CONFIG QUIET PATHS ${ROCM_PATH} /opt/rocm)
+  set(${out_var} "${rocm-core_VERSION}" PARENT_SCOPE)
+endfunction()
+
+set(ROCSPARSE_SPIRV_GPU_TARGET)
+if(NOT BUILD_ADDRESS_SANITIZER AND (NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all"))
+  rocsparse_get_rocm_version(ROCSPARSE_ROCM_VERSION)
+  if(ROCSPARSE_ROCM_VERSION VERSION_GREATER_EQUAL 10.2)
+    set(ROCSPARSE_SPIRV_GPU_TARGET "amdgcnspirv")
+  else()
+    message(STATUS "Default GPU_TARGETS without amdgcnspirv, it needs ROCm 10.2 or later "
+                   "(found: '${ROCSPARSE_ROCM_VERSION}')")
+  endif()
+endif()
+
 #Set the GPU_TARGETS with backward compatibility
 if(COMMAND rocm_check_target_ids)
     if(BUILD_ADDRESS_SANITIZER)
@@ -181,7 +200,7 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+          TARGETS ${ROCSPARSE_SPIRV_GPU_TARGET} "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                   "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
                   "gfx1030;gfx1100;gfx1101;gfx1102"
                   "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
@@ -190,7 +209,7 @@ if(COMMAND rocm_check_target_ids)
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+        set(DEFAULT_GPU_TARGETS ${ROCSPARSE_SPIRV_GPU_TARGET} "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                                 "gfx1030;gfx1100;gfx1101;gfx1102"
                                 "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
                                 "gfx1200;gfx1201;gfx1250;gfx1250-strict")
@@ -206,7 +225,7 @@ if( AMDGPU_TARGETS AND NOT GPU_TARGETS )
 elseif( GPU_TARGETS )
   set( GFX_LIST ${GPU_TARGETS} )
 else ()
-  set( GFX_LIST ${DEFAULT_AMDGPU_TARGETS} ) # default if not set
+  set( GFX_LIST ${DEFAULT_GPU_TARGETS} ) # default if not set
 endif()
 
 set(GPU_TARGETS "${GFX_LIST}" CACHE STRING "GPU architectures to build for")
@@ -223,6 +242,20 @@ else()
 endif()
 
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
+
+if("amdgcnspirv" IN_LIST GPU_TARGETS)
+  if(BUILD_ADDRESS_SANITIZER)
+    message(FATAL_ERROR "The amdgcnspirv target cannot be combined with BUILD_ADDRESS_SANITIZER")
+  endif()
+  if(NOT DEFINED ROCSPARSE_ROCM_VERSION)
+    rocsparse_get_rocm_version(ROCSPARSE_ROCM_VERSION)
+  endif()
+  if(NOT ROCSPARSE_ROCM_VERSION VERSION_GREATER_EQUAL 10.2)
+    message(WARNING "The amdgcnspirv target needs ROCm 10.2 or later (found: "
+                    "'${ROCSPARSE_ROCM_VERSION}'). With older versions the process crashes when "
+                    "the runtime compiles the SPIR-V code object.")
+  endif()
+endif()
 
 # Setup version
 set(VERSION_STRING "5.2.0")

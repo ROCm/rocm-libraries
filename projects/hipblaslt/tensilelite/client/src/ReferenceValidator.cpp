@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <sstream>
 
 namespace TensileLite
@@ -128,6 +129,10 @@ namespace TensileLite
                     });
                 }
 
+                if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
+                   gemm != nullptr && gemm->fusedA2A() == FusedA2A::A2AGemm)
+                    interleaveA2AGemmReferences(*gemm);
+
                 {
                     ScopedTimer timer("cpu_reference_gemm");
                     for(auto const& reference : m_referenceInputs)
@@ -135,7 +140,7 @@ namespace TensileLite
                 }
 
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
-                   gemm != nullptr && gemm->fusedGemmA2A())
+                   gemm != nullptr && gemm->fusedA2A() == FusedA2A::GemmA2A)
                     referenceRecvs(*gemm);
             }
         }
@@ -145,7 +150,7 @@ namespace TensileLite
             m_validatedSolution = false;
             m_errorInSolution   = false;
             m_executedSolution  = false;
-            m_fusedA2A          = solution != nullptr && solution->problemType.fusedGemmA2A;
+            m_fusedA2A = solution != nullptr ? solution->problemType.fusedA2A : FusedA2A::Disabled;
 
             // Re-run CPU reference after DataInitialization refreshes MX inputs.
             if(!m_enabled || m_problem == nullptr || m_referenceInputs.empty()
@@ -167,6 +172,11 @@ namespace TensileLite
                                                                                       solution))
                         continue;
                     ScopedTimer timer("cpu_reference_gemm_per_solution");
+                    struct PerSolutionScope
+                    {
+                        PerSolutionScope() { g_inPerSolutionReference = true; }
+                        ~PerSolutionScope() { g_inPerSolutionReference = false; }
+                    } perSolutionScope;
                     SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
                 }
             }
@@ -221,10 +231,15 @@ namespace TensileLite
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
-                    auto reference
-                        = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[card]);
-                    auto result    = dynamic_cast<ContractionInputs const&>(*inputs);
-                    rv             = validate(*problem, reference, result);
+                    // These copy the whole ContractionInputs structs (including their vectors).
+                    std::optional<ContractionInputs> reference;
+                    std::optional<ContractionInputs> result;
+                    {
+                        ScopedTimer timer("validate_inputs_copy");
+                        reference.emplace(dynamic_cast<ContractionInputs const&>(*m_referenceInputs[card]));
+                        result.emplace(dynamic_cast<ContractionInputs const&>(*inputs));
+                    }
+                    rv = validate(*problem, *reference, *result);
                 }
                 else
                 {
@@ -268,7 +283,7 @@ namespace TensileLite
                 {
                     auto const& inputs = (*m_devices)[d]->inputArr[slot];
                     validateSolution(d, inputs);
-                    if(m_fusedA2A && m_elementsToValidate != 0)
+                    if(m_fusedA2A == FusedA2A::GemmA2A && m_elementsToValidate != 0)
                     {
                         auto const& problem
                             = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
@@ -283,6 +298,31 @@ namespace TensileLite
                                      -1.0);
                     }
                 }
+            }
+        }
+
+        void ReferenceValidator::interleaveA2AGemmReferences(ContractionProblemGemm const& problem)
+        {
+            const size_t world  = m_referenceInputs.size();
+            const size_t N      = problem.freeSizeB(0);
+            const size_t K      = problem.boundSize(0);
+            const size_t elem   = problem.b().elementBytes();
+            const size_t kLocal = K / world;
+
+            // Each rank's B: {K/W, N, W}; reference B: [N, K] with segment s from rank s.
+            std::vector<uint8_t const*> srcs;
+            for(auto const& ref : m_referenceInputs)
+                srcs.push_back(
+                    static_cast<uint8_t const*>(dynamic_cast<ContractionInputs const&>(*ref).b));
+            m_a2aGemmB.assign(world, std::vector<uint8_t>(N * K * elem));
+            for(size_t d = 0; d < world; d++)
+            {
+                for(size_t n = 0; n < N; n++)
+                    for(size_t s = 0; s < world; s++)
+                        std::memcpy(m_a2aGemmB[d].data() + (n * K + s * kLocal) * elem,
+                                    srcs[s] + (d * N + n) * kLocal * elem,
+                                    kLocal * elem);
+                dynamic_cast<ContractionInputs&>(*m_referenceInputs[d]).b = m_a2aGemmB[d].data();
             }
         }
 
@@ -487,11 +527,13 @@ namespace TensileLite
             if(problem.tensors().empty())
                 return false;
 
+            ScopedTimer validateTotalTimer("validate_total");
             bool rv = true;
 
             if(m_printAny)
                 printTensors(problem, reference, result);
 
+            auto const validateSetupStart = TimingClock::now();
             auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
             bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
             bool isTF32x1 = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
@@ -505,6 +547,7 @@ namespace TensileLite
             } else if (isTF32x1) {
                 threshold = 0.3 * sqrt(double(k));
             }
+            recordTimingSince("validate_setup", validateSetupStart);
 
             for(size_t i = 0; i < problem.tensors().size(); i++)
             {
@@ -921,6 +964,7 @@ namespace TensileLite
                                                    size_t                  validationStride,
                                                    double                  threshold)
         {
+            ScopedTimer checkTypedTimer("validate_check_results_typed");
             size_t elementsToCopy       = tensor.totalAllocatedElements();
             size_t elementsOffsetToCopy = 0;
             size_t elementsBeforeData   = 0;
@@ -951,7 +995,10 @@ namespace TensileLite
                 throw std::runtime_error(ss.str());
             }
 
-            allocateResultBuffer(bytesToCopy);
+            {
+                ScopedTimer timer("validate_result_buffer_alloc");
+                allocateResultBuffer(bytesToCopy);
+            }
 
             auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
 
@@ -1066,8 +1113,11 @@ namespace TensileLite
                 forEachElement(tensor, reference, resultData, validationStride, comparePrint);
             }
 
-            compareValid.report();
-            compareInvalid.report();
+            {
+                ScopedTimer timer("validate_report");
+                compareValid.report();
+                compareInvalid.report();
+            }
 
             if(compareValid.error() || compareInvalid.error())
             {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "bindings.hpp"
+#include "cudnn_compat.hpp"
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
@@ -226,5 +227,22 @@ void tensorBindings(nb::module_& m)
                  return valueToPython(
                      tensor.get_compile_time_constant().value_or(TensorAttributes::ValueVariant{}));
              })
-        .def("validate", &TensorAttributes::validate);
+        .def("validate", &TensorAttributes::validate)
+        // Registered last so positional DataType calls keep resolving to the overload
+        // above; anything that is neither a DataType nor a torch/numpy dtype (an int,
+        // for instance) falls back to it as well. This form is the only one that takes
+        // the cuDNN keyword and default.
+        .def(
+            "set_data_type",
+            [](TensorAttributes& self, nb::handle dataType) -> TensorAttributes& {
+                const auto type = hipdnn_python::dataTypeFromObject(dataType);
+                if(!type)
+                {
+                    throw nb::next_overload();
+                }
+                return self.set_data_type(*type);
+            },
+            nb::arg("data_type") = DataType::NOT_SET,
+            nb::rv_policy::reference_internal,
+            "set_data_type() taking cuDNN's keyword, or a torch or numpy dtype.");
 }

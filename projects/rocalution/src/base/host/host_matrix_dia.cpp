@@ -326,30 +326,12 @@ namespace rocalution
 
                 for(int j = 0; j < this->mat_.num_diag; ++j)
                 {
-                    int start    = 0;
-                    int end      = this->nrow_;
-                    int v_offset = 0;
-                    int offset   = this->mat_.offset[j];
+                    int col = i + this->mat_.offset[j];
 
-                    if(offset < 0)
-                    {
-                        start -= offset;
-                        v_offset = -start;
-                    }
-                    else
-                    {
-                        end -= offset;
-                        v_offset = offset;
-                    }
-
-                    if((i >= start) && (i < end))
+                    if((col >= 0) && (col < this->ncol_))
                     {
                         sum += this->mat_.val[DIA_IND(i, j, this->nrow_, this->mat_.num_diag)]
-                               * cast_in->vec_[i + v_offset];
-                    }
-                    else if(i >= end)
-                    {
-                        break;
+                               * cast_in->vec_[col];
                     }
                 }
 
@@ -385,32 +367,14 @@ namespace rocalution
             {
                 for(int j = 0; j < this->mat_.num_diag; ++j)
                 {
-                    int start    = 0;
-                    int end      = this->nrow_;
-                    int v_offset = 0;
-                    int offset   = this->mat_.offset[j];
+                    int col = i + this->mat_.offset[j];
 
-                    if(offset < 0)
-                    {
-                        start -= offset;
-                        v_offset = -start;
-                    }
-                    else
-                    {
-                        end -= offset;
-                        v_offset = offset;
-                    }
-
-                    if((i >= start) && (i < end))
+                    if((col >= 0) && (col < this->ncol_))
                     {
                         cast_out->vec_[i]
                             += scalar
                                * this->mat_.val[DIA_IND(i, j, this->nrow_, this->mat_.num_diag)]
-                               * cast_in->vec_[i + v_offset];
-                    }
-                    else if(i >= end)
-                    {
-                        break;
+                               * cast_in->vec_[col];
                     }
                 }
             }

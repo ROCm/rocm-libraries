@@ -11,6 +11,7 @@
 
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/UhdFeatureRows.hpp>
 
 #include <gtest/gtest.h>
 
@@ -547,7 +548,7 @@ TEST_F(TestTreeDataAdapter, BatchScoring)
         {-1.0},
     };
 
-    const auto scores = adapter->scoreBatch(batch);
+    const auto scores = hipdnn_test_sdk::utilities::scoreRows(*adapter, batch).raw;
 
     ASSERT_EQ(scores.size(), 4u);
     EXPECT_DOUBLE_EQ(scores[0], 10.0);
@@ -739,7 +740,7 @@ TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
         {512.0, 1024.0, 256.0, 128.0, 60.0}, // Edge case at thresholds
     };
 
-    const auto batchScores = adapter->scoreBatch(batch);
+    const auto batchScores = hipdnn_test_sdk::utilities::scoreRows(*adapter, batch).raw;
     ASSERT_EQ(batchScores.size(), batch.size());
 
     for(size_t i = 0; i < batch.size(); ++i)
@@ -1122,10 +1123,13 @@ TEST(TestTreeDataAdapterGrouped, NonfiniteGroupRowsCannotDisplaceAValidGroup)
     ASSERT_NE(adapter, nullptr);
     const auto infinity = std::numeric_limits<double>::infinity();
     // +infinity would otherwise have the higher layer-one score, displacing group zero.
-    const auto scores = adapter->scoreBatch({{infinity, 0.0},
-                                             {0.0, 0.0},
-                                             {-infinity, 0.0},
-                                             {std::numeric_limits<double>::quiet_NaN(), 0.0}});
+    const auto scores
+        = hipdnn_test_sdk::utilities::scoreRows(*adapter,
+                                                {{infinity, 0.0},
+                                                 {0.0, 0.0},
+                                                 {-infinity, 0.0},
+                                                 {std::numeric_limits<double>::quiet_NaN(), 0.0}})
+              .raw;
     ASSERT_EQ(scores.size(), 4u);
     EXPECT_DOUBLE_EQ(scores[1], 100.0);
     EXPECT_EQ(scores[0], -infinity);
@@ -1141,7 +1145,8 @@ TEST(TestTreeDataAdapterGrouped, RowsOutsideTheChosenGroupAreUnusable)
     ASSERT_NE(adapter, nullptr);
 
     // Group 1.0 wins layer 1 (leaf 9.0 against 1.0), so only its rows keep a score.
-    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}});
+    const auto scores
+        = hipdnn_test_sdk::utilities::scoreRows(*adapter, {{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}}).raw;
     ASSERT_EQ(scores.size(), 3u);
     EXPECT_DOUBLE_EQ(scores[1], 200.0);
     EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity());
@@ -1156,7 +1161,8 @@ TEST(TestTreeDataAdapterGrouped, AMinObjectiveChoosesTheGroupWithTheLowestLayerO
         buffer.data(), buffer.size(), "sha256:grouped", /*expectedModelHash=*/"", "min");
     ASSERT_NE(adapter, nullptr);
 
-    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}});
+    const auto scores
+        = hipdnn_test_sdk::utilities::scoreRows(*adapter, {{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}}).raw;
     ASSERT_EQ(scores.size(), 3u);
     // Raw, unoriented layer-2 scores: orientation is the ranker's job, not the adapter's.
     EXPECT_DOUBLE_EQ(scores[0], 100.0);
@@ -1173,7 +1179,8 @@ TEST(TestTreeDataAdapterGrouped, TheSurvivingRowsAreScoredByTheirOwnGroupsTrees)
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
     ASSERT_NE(adapter, nullptr);
 
-    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {0.0, 1.0}});
+    const auto scores
+        = hipdnn_test_sdk::utilities::scoreRows(*adapter, {{0.0, 0.0}, {0.0, 1.0}}).raw;
     ASSERT_EQ(scores.size(), 2u);
     EXPECT_DOUBLE_EQ(scores[0], 100.0);
     EXPECT_DOUBLE_EQ(scores[1], 100.0);
@@ -1194,8 +1201,10 @@ TEST(TestTreeDataAdapterGrouped, EqualGroupStandingsResolveIndependentlyOfRowOrd
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:grouped");
     ASSERT_NE(adapter, nullptr);
 
-    const auto forward = adapter->scoreBatch({{1.0, 0.0}, {0.0, 0.0}});
-    const auto reversed = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}});
+    const auto forward
+        = hipdnn_test_sdk::utilities::scoreRows(*adapter, {{1.0, 0.0}, {0.0, 0.0}}).raw;
+    const auto reversed
+        = hipdnn_test_sdk::utilities::scoreRows(*adapter, {{0.0, 0.0}, {1.0, 0.0}}).raw;
     ASSERT_EQ(forward.size(), 2u);
     ASSERT_EQ(reversed.size(), 2u);
     // The smaller group value wins the tie, whichever row came first.
@@ -1230,7 +1239,8 @@ TEST(TestTreeDataAdapterGrouped, ALayerOneScoreOutsideItsTargetCannotChooseTheGr
                                                          "time");
     ASSERT_NE(adapter, nullptr);
 
-    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}});
+    const auto scores
+        = hipdnn_test_sdk::utilities::scoreRows(*adapter, {{0.0, 0.0}, {1.0, 0.0}}).raw;
     ASSERT_EQ(scores.size(), 2u);
     EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity())
         << "a negative time chose the group";
@@ -1259,7 +1269,7 @@ TEST(TestTreeDataAdapterGrouped, AnUngroupedModelBatchesExactlyAsItScores)
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> rows = {{0.0, 0.0}, {1.0, 2.0}};
-    const auto batched = adapter->scoreBatch(rows);
+    const auto batched = hipdnn_test_sdk::utilities::scoreRows(*adapter, rows).raw;
     ASSERT_EQ(batched.size(), rows.size());
     for(size_t i = 0; i < rows.size(); ++i)
     {

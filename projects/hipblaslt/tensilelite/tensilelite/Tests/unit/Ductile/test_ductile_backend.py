@@ -1227,6 +1227,49 @@ def test_checkpoint_loading_failure_falls_back_to_fresh(monkeypatch, tmp_path):
 # Post-optimization verification — partial / all-fail paths
 # ---------------------------------------------------------------------------
 
+def test_verification_timing_excludes_nested_evaluation(monkeypatch, tmp_path):
+    import importlib
+
+    timing = importlib.import_module("tensilelite.Common.TimingInstrumentation")
+    buffer = []
+    monkeypatch.setattr(timing, "_timing_buffer", buffer)
+    monkeypatch.setitem(timing.globalParameters, "TimingInstrumentation", True)
+    clock_ns = [0]
+    monkeypatch.setattr(ductile_backend_mod.time, "perf_counter_ns", lambda: clock_ns[0])
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            # Earlier evaluations must not be subtracted again during verification.
+            self._evaluate([{"a": 0}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, best):
+            clock_ns[0] += 7_000_000
+            result = self._evaluate(best)
+            clock_ns[0] += 5_000_000
+            return result
+
+    def benchmark_runner(*args, **kwargs):
+        clock_ns[0] += 30_000_000
+        return str(csv_path), 0
+
+    monkeypatch.setattr(ductile_backend_mod, "GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(ductile_backend_mod, "_generate_ga_solutions",
+                        lambda *args, **kwargs: [types.SimpleNamespace()])
+    _patch_primitives(monkeypatch, _base_merged_config())
+    DuctileBackend().run({}, _make_benchmark_config(tmp_path), benchmark_runner)
+
+    # Verification takes 42 ms: 7 + 30 in the evaluation + 5. Its own work is 12 ms.
+    assert [record for record in buffer if record[0] == "python_ductile_verification"] == [
+        ("python_ductile_verification", 12.0)
+    ]
+
+
 def test_verification_all_fail_calls_exit(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
     _write_csv(csv_path, {"Cijk_0": [5.0]})

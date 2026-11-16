@@ -73,7 +73,17 @@ from rocke.core.codegen_policy import (
     apply_codegen_policy,
     scheduler_strategy_reason,
 )
-from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Value
+from rocke.core.ir import (
+    BF16,
+    F16,
+    F32,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Value,
+    encode_tdm_padding,
+)
 from rocke.helpers.spec import SignatureBuilder, ceil_div, kernel_name_join
 
 WMMA_K = 32  # K of the 16x16x32 atom
@@ -522,9 +532,10 @@ def build_winograd_gemm_wmma(
     pad_kw = {}
     tile0 = P
     if spec.lds_pad == "tdm":
-        # The TDM pads 4 dwords after every tile_k / 2 dwords; the fields
-        # encode 2^(interval + 1) and amount + 1 dwords.
-        pad_kw = dict(pad_interval=(CK // 2).bit_length() - 2, pad_amount=3)
+        # The TDM pads CH_PAD elements after every tile_k-element row (both
+        # 16-bit).
+        interval, amount = encode_tdm_padding(CK * 2, CH_PAD * 2)
+        pad_kw = dict(pad_interval=interval, pad_amount=amount)
         tile0 = CK
 
     def _issue(q: Value) -> None:

@@ -15,7 +15,7 @@ from tensilelite.ExecutionPolicy import (
 )
 from tensilelite.ExperimentalLibrary import _apply_overrides
 from tensilelite.SolutionStructs.Naming import getSolutionNameFull
-from tensilelite.TensileMergeLibrary import addKernel, reNameSolutions
+from tensilelite.merge_library import addKernel, reNameSolutions
 
 pytestmark = pytest.mark.unit
 
@@ -145,8 +145,6 @@ def test_merge_naming_uses_file_defaults_before_global_defaults():
     assert inherited["Solutions"][0]["SolutionNameMin"] == explicit["Solutions"][0]["SolutionNameMin"]
     assert inherited["Solutions"][0]["KernelNameMin"] == explicit["Solutions"][0]["KernelNameMin"]
     assert "GlobalSplitU" not in inherited["Solutions"][0]
-
-
 
 
 @pytest.fixture

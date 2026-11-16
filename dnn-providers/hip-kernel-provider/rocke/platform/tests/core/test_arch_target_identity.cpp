@@ -70,6 +70,33 @@ static void check_compile(const char* target,
     }
 }
 
+static void check_parse(const char* value, const char* expected)
+{
+    // expected NULL: the value is refused with the shared refusal text.
+    char out[256], err[512], want[512];
+    memset(out, '#', sizeof(out));
+    memset(err, '#', sizeof(err));
+    const char* result = rocke_parse_target_id(value, out, sizeof(out), err, sizeof(err));
+    bool ok;
+    if(expected)
+        ok = result == out && strcmp(out, expected) == 0 && err[0] == '#';
+    else
+    {
+        snprintf(want,
+                 sizeof(want),
+                 "'%s' is not a target ID: expected an optional amdgcn-amd-amdhsa-- or "
+                 "amdgcn-amd-amdhsa-unknown- prefix, a processor such as gfx942 or "
+                 "gfx11-generic, then any :feature+ or :feature- suffixes",
+                 value);
+        ok = result == NULL && out[0] == '#' && strcmp(err, want) == 0;
+    }
+    if(!ok)
+    {
+        fprintf(stderr, "FAIL: parse_target_id('%s')\n", value);
+        ++failures;
+    }
+}
+
 static void check_target(const char* target, const char* base, const char* compiler)
 {
     char isa[256];
@@ -135,13 +162,18 @@ static const char* generic_listing(const char* gfx)
 static void print_identity(const char* isa)
 {
     char target[1024], base[1024], compiler[1024], arch[1024], generic[1024];
+    // A refused value prints as "!" and the refusal text.
+    char processor[1024], parsed[1025];
     rocke_target_id_from_isa(isa, target, sizeof(target));
+    rocke_processor_from_target_id(target, processor, sizeof(processor));
+    if(rocke_parse_target_id(isa, parsed, sizeof(parsed), parsed + 1, sizeof(parsed) - 1) == NULL)
+        parsed[0] = '!';
     rocke_base_arch_from_target_id(target, base, sizeof(base));
     rocke_compiler_target_from_target_id(target, compiler, sizeof(compiler));
     rocke_arch_from_isa(isa, arch, sizeof(arch));
     if(rocke_generic_arch_from_target_id(target, generic, sizeof(generic)) == NULL)
         strcpy(generic, "-");
-    printf("%s\t%s\t%s\t%s\t%s", target, base, compiler, arch, generic);
+    printf("%s\t%s\t%s\t%s\t%s\t%s\t%s", target, base, compiler, arch, generic, processor, parsed);
     // The compile target and its message at every LLVM flavor; "!" for
     // a refused target.
     for(int i = 0; i < rocke_llvm_flavor_count(); ++i)
@@ -286,6 +318,25 @@ int main(int argc, char** argv)
     check(rocke_generic_arch_from_target_id, "gfx1100", "gfx11-generic");
     check(rocke_generic_arch_from_target_id, "gfx1151-strict:xnack-", "gfx11-generic");
     check(rocke_generic_arch_from_target_id, "gfx11-generic", "gfx11-generic");
+    check(rocke_processor_from_target_id, "gfx942:sramecc+:xnack-", "gfx942");
+    check(rocke_processor_from_target_id, "gfx1250-strict", "gfx1250");
+    check(rocke_processor_from_target_id, "gfx1100", "gfx1100");
+    check(rocke_processor_from_target_id, "gfx11-generic:xnack-", "gfx11-generic");
+    check_parse("gfx950", "gfx950");
+    check_parse("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-", "gfx942:sramecc+:xnack-");
+    check_parse("amdgcn-amd-amdhsa-unknown-gfx9-4-generic:xnack+", "gfx9-4-generic:xnack+");
+    check_parse("", NULL);
+    check_parse("notgfx950", NULL);
+    check_parse("amdgcn-amd-amdhsa-unknown-:gfx950", NULL);
+    check_parse("amdgcn-amd-amdhsa-linux-gfx950", NULL);
+    check_parse("gfx950:xnack", NULL);
+    check_parse("gfx950-", NULL);
+    char parsed[8] = "#";
+    if(rocke_parse_target_id(NULL, parsed, sizeof(parsed), NULL, 0) != NULL
+       || rocke_parse_target_id("gfx950", NULL, 1, NULL, 0) != NULL
+       || rocke_parse_target_id("gfx950", parsed, 0, NULL, 0) != NULL
+       || rocke_parse_target_id("bad", parsed, sizeof(parsed), NULL, 0) != NULL || parsed[0] != '#')
+        ++failures;
     char generic[32] = "#";
     if(rocke_generic_arch_from_target_id("gfx942", generic, sizeof(generic)) != NULL
        || rocke_generic_arch_from_target_id("gfx11000", generic, sizeof(generic)) != NULL

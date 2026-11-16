@@ -29,9 +29,4 @@ std::unique_ptr<IReferenceGraphExecutor>
     }
 }
 
-std::unique_ptr<IReferenceGraphExecutor> ReferenceGraphExecutorFactory::createFromConfig()
-{
-    return create(TestConfig::get().getReferenceExecutorType());
-}
-
 } // namespace hipdnn_integration_tests

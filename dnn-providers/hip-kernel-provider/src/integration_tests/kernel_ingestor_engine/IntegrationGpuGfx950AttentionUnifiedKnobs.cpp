@@ -543,6 +543,9 @@ std::vector<std::string> kernelIdsFor(const KnobCase& knobCase)
         {"num_kv_heads", knobCase.shape.kvHeads},
         {"mask_type", catalogMaskType(knobCase)},
         {"sliding_window", int64_t{0}},
+        // These graphs ask for no stats, so each cell's LSE-on twin, which shares its
+        // geometry and knobs, is not one of their kernels (kernelMatches declines it).
+        {"emit_lse", int64_t{0}},
     };
     for(const auto& [field, value] : knobCase.expected)
     {

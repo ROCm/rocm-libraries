@@ -261,7 +261,7 @@ def test_split_main_has_no_g4(row):
         # dS^T from there)
         relabel = r_split.pt_route == "relabel"
         assert nb_s == nb_a - (1 if relabel else 0)
-        ds_cells = geom.g0.frags_m * geom.g0.frags_n * geom.g0.op.c_frag_len
+        ds_cells = geom.g0.frags_m * geom.g0.frags_n * geom.g0.op.dst.frag_len
         assert body_s.count("tile.smem_store") == body_a.count("tile.smem_store") - (
             ds_cells if relabel else 0
         )

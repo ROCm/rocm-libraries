@@ -8,6 +8,7 @@ from __future__ import annotations
 import struct
 from typing import Optional, Tuple
 
+from ....numeric.fp8 import bf8e5m2_encode, fp8e4m3_encode
 from ....runtime.hip_module import Runtime
 from .utils import as_u8_buffer, nbytes, require_numpy
 
@@ -77,14 +78,14 @@ def run_gemm_manifest_problem(
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
         if is_bf16:
-            from ....dispatch.gemm.binding import _bf16_from_f32, _f32_from_bf16
+            from ....numeric.bf16 import bf16_to_f32, f32_to_bf16
 
             # Reference: fp32 accumulation (exact for small-integer inputs),
             # then round-to-nearest-even to bf16 matching the kernel's fptrunc.
-            ref_u16 = _bf16_from_f32(np, A_f32 @ B_f32.T)
-            ref_f32 = _f32_from_bf16(np, ref_u16)
+            ref_u16 = f32_to_bf16(A_f32 @ B_f32.T)
+            ref_f32 = bf16_to_f32(ref_u16)
             # Decode raw output bytes as bf16, not fp16.
-            out_f32 = _f32_from_bf16(np, C.view(np.uint16))
+            out_f32 = bf16_to_f32(C.view(np.uint16))
         else:
             ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
             ref_f32 = ref.astype(np.float32)
@@ -144,6 +145,129 @@ def run_gemm_iu8_manifest_problem(
         ref = A.astype(np.int32) @ B.astype(np.int32).T
         err = np.abs(C.astype(np.int64) - ref.astype(np.int64)).astype(np.float64)
         bad = err > 0.0
+        return float(err.max()), int(np.count_nonzero(bad)), C.size
+
+    return make_args, grid, block, flop, bytes_xfer, check
+
+
+# The 8-bit operand dtype (as spelled in the manifest's ``A`` pointer type) ->
+# its exact encoder. The kernel decodes the bytes in its own format, so feeding
+# a bf8 kernel e4m3 bytes fails every element of a correct kernel.
+_F8_ENCODERS = {"fp8e4m3": fp8e4m3_encode, "bf8e5m2": bf8e5m2_encode}
+
+
+def _gemm_f8_dtype(manifest: dict) -> str:
+    """The 8-bit A/B dtype of a ``gemm_fp8`` manifest, per the ``A`` ptr type.
+
+    Raises on anything else rather than guessing: the encoder must match what
+    the kernel decodes.
+    """
+    sig = manifest.get("args_signature", [])
+    ptr_type = next((a.get("type", "") for a in sig if a.get("name") == "A"), "")
+    for dtype in _F8_ENCODERS:
+        if dtype in ptr_type:
+            return dtype
+    raise ValueError(
+        f"gemm_fp8 manifest: A pointer type {ptr_type!r} is not one of "
+        f"{', '.join(_F8_ENCODERS)}"
+    )
+
+
+def _gemm_c_dtype(manifest: dict) -> str:
+    """The 16-bit C dtype of a ``gemm_fp8`` manifest, per the ``C`` ptr type.
+
+    ``bf16`` is tested first: its name contains ``f16``. Raises on anything else,
+    since decoding C in the wrong format makes a correct kernel fail.
+    """
+    sig = manifest.get("args_signature", [])
+    ptr_type = next((a.get("type", "") for a in sig if a.get("name") == "C"), "")
+    if "bf16" in ptr_type:
+        return "bf16"
+    if "f16" in ptr_type:
+        return "fp16"
+    raise ValueError(
+        f"gemm_fp8 manifest: C pointer type {ptr_type!r} is neither bf16 nor f16"
+    )
+
+
+def run_gemm_fp8_manifest_problem(
+    manifest: dict, shape: Optional[Tuple[int, int, int]], verify: bool
+) -> tuple:
+    """8-bit WMMA GEMM (fp8 e4m3 or bf8 e5m2 A/B in, bf16 or f16 C out):
+    ``C = A @ B.T``, exact.
+
+    The operand format comes from the manifest's ``A`` pointer type and the
+    output format from its ``C`` pointer type. Inputs are integers in -5..5,
+    every one of which is exact in e4m3 (four significand bits) and in e5m2
+    (three). With ``|sum| <= 25 * K`` the fp32 accumulator is exact for any K
+    below ~670k, so summation order cannot change the result and the only
+    rounding left is the kernel's final deterministic RNE to the C format --
+    which the reference reproduces. Hence an exact compare rather than a
+    tolerance. An f16 C overflows to inf on both sides past 65504, which still
+    compares equal; a NaN never does.
+    """
+    np = require_numpy()
+    if shape is None:
+        ds = manifest.get("default_shape", [4096, 4096, 8192])
+        M, N, K = int(ds[0]), int(ds[1]), int(ds[2])
+    else:
+        M, N, K = shape
+    if 25 * K >= (1 << 24):
+        raise ValueError(
+            f"gemm_fp8 verify: K={K} overflows the exact-fp32-accumulate "
+            f"argument (25*K must stay below 2^24); lower K or widen the check"
+        )
+    encode = _F8_ENCODERS[_gemm_f8_dtype(manifest)]
+    c_dtype = _gemm_c_dtype(manifest)
+    rng = np.random.default_rng(0xC0FFEE)
+    A_f32 = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float32)
+    B_f32 = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float32)
+    A = encode(A_f32)
+    B = encode(B_f32)
+    # C is bf16 or f16; carry the raw halves as uint16 so no float16 view lies
+    # about the encoding on the way to and from the device.
+    C = np.empty((M, N), dtype=np.uint16)
+    gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
+    gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
+    if manifest.get("grid_order") == "MN":
+        gx, gy = gy, gx
+    grid = (gx, gy, 1)
+    block = (int(manifest["threads_per_block"]), 1, 1)
+    flop = 2.0 * M * N * K
+    bytes_xfer = 1.0 * (M * K + N * K) + 2.0 * (M * N)
+
+    def make_args(rt: Runtime):
+        A_dev = rt.alloc(nbytes(A))
+        B_dev = rt.alloc(nbytes(B))
+        C_dev = rt.alloc(nbytes(C))
+        rt.memcpy_h2d(A_dev, as_u8_buffer(A), nbytes(A))
+        rt.memcpy_h2d(B_dev, as_u8_buffer(B), nbytes(B))
+        rt.memset(C_dev, 0, nbytes(C))
+        return struct.pack("<QQQiii", A_dev, B_dev, C_dev, M, N, K), (
+            A_dev,
+            B_dev,
+            C_dev,
+        )
+
+    def check(rt: Runtime, ptrs):
+        if not verify:
+            return 0.0, 0, C.size
+        rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
+        from ....numeric.bf16 import bf16_to_f32, f32_to_bf16
+
+        dot = A_f32 @ B_f32.T
+        if c_dtype == "bf16":
+            ref_f32 = bf16_to_f32(f32_to_bf16(dot))
+            out_f32 = bf16_to_f32(C)
+        else:
+            ref_f32 = dot.astype(np.float16).astype(np.float32)
+            out_f32 = C.view(np.float16).astype(np.float32)
+        # Exact: an element is bad unless it equals the reference. A NaN equals
+        # nothing, so it is always bad; `err > 0.0` would have let it through.
+        bad = ~(out_f32 == ref_f32)
+        with np.errstate(invalid="ignore"):
+            err = np.where(bad, np.abs(out_f32 - ref_f32), 0.0)
+        err = np.nan_to_num(err, nan=np.inf)
         return float(err.max()), int(np.count_nonzero(bad)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check

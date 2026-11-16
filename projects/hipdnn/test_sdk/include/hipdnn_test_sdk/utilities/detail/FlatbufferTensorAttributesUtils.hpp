@@ -170,6 +170,10 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
         return visitor(TypeTag<fp8_e4m3>{});
     case DataType::FP8_E5M2:
         return visitor(TypeTag<fp8_e5m2>{});
+    case DataType::FP8_E4M3_FNUZ:
+        return visitor(TypeTag<fp8_e4m3_fnuz>{});
+    case DataType::FP8_E5M2_FNUZ:
+        return visitor(TypeTag<fp8_e5m2_fnuz>{});
     case DataType::INT64:
         return visitor(TypeTag<int64_t>{});
     case DataType::FP8_E8M0:
@@ -221,13 +225,16 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 }
 
 /// Ragged graph tensors are SDPA operands, which keep logical dims [B, H, S, D] with the
-/// sequence axis fixed at SDPA_SEQ_AXIS.
+/// sequence axis fixed at SDPA_SEQ_AXIS. `lengths` is the optional per-batch length tensor
+/// (raggedLengthUids), null when the node has no seq_len.
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createRaggedTensor(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                        const std::vector<int64_t>& dims,
                        const std::vector<int64_t>& strides,
                        std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> offsets,
-                       int64_t raggedOffsetMultiplier = 1)
+                       int64_t raggedOffsetMultiplier = 1,
+                       const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& lengths
+                       = nullptr)
 {
     using namespace hipdnn_data_sdk::utilities;
     if(dims.size() != 4)
@@ -239,8 +246,13 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 
     return visitNativeType(dataType, [&](auto tag) -> std::unique_ptr<ITensor> {
         using T = typename decltype(tag)::type;
-        return std::make_unique<RaggedTensor<T>>(
-            dims, strides, SDPA_SEQ_AXIS, std::move(offsets), std::nullopt, raggedOffsetMultiplier);
+        return std::make_unique<RaggedTensor<T>>(dims,
+                                                 strides,
+                                                 SDPA_SEQ_AXIS,
+                                                 std::move(offsets),
+                                                 std::nullopt,
+                                                 raggedOffsetMultiplier,
+                                                 lengths);
     });
 }
 
@@ -266,7 +278,8 @@ inline bool isSubByteDataType(hipdnn_flatbuffers_sdk::data_objects::DataType dat
 inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
     createRaggedTensorFromAttributeAndOffset(
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attribute,
-        std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedOffset)
+        std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedOffset,
+        const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& lengths = nullptr)
 {
     auto dims
         = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
@@ -277,7 +290,8 @@ inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
                               dims,
                               strides,
                               std::move(raggedOffset),
-                              attribute.ragged_offset_multiplier());
+                              attribute.ragged_offset_multiplier(),
+                              lengths);
 }
 
 } // namespace hipdnn_test_sdk::detail
