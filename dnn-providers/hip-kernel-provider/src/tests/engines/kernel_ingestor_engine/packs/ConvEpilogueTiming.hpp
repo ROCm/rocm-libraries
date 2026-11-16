@@ -31,7 +31,9 @@
  *        dtype float|half|bfloat16). Not a correctness test: inputs are a constant, outputs
  *        unchecked. Every admitted config is timed bare; the fastest few (CONV_EPI_TIMING_TOP,
  *        default 4) are then timed bare and fused, interleaved, and one
- *        "FUSBENCH|shape|config|bare_ms|fused_ms|fused/bare" line is printed for each.
+ *        "FUSBENCH|shape|config|bare_ms|fused_ms|fused/bare" line is printed for each. The chain
+ *        is bias then CONV_EPI_TIMING_ACT: relu (default), silu, gelu, gelu_tanh, sigmoid, tanh,
+ *        elu or softplus.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::conv_epilogue_timing
 {
@@ -72,9 +74,15 @@ inline std::vector<std::pair<std::string, ConvShape>> shapesOf(const std::string
             continue;
         }
         ConvShape shape;
-        shape.dataType = f[1] == "half"       ? data_objects::DataType::HALF
-                         : f[1] == "bfloat16" ? data_objects::DataType::BFLOAT16
-                                              : data_objects::DataType::FLOAT;
+        shape.dataType = data_objects::DataType::FLOAT;
+        if(f[1] == "half")
+        {
+            shape.dataType = data_objects::DataType::HALF;
+        }
+        else if(f[1] == "bfloat16")
+        {
+            shape.dataType = data_objects::DataType::BFLOAT16;
+        }
         shape.n = std::stoll(f[2]);
         shape.c = std::stoll(f[3]);
         shape.k = std::stoll(f[4]);
@@ -89,6 +97,43 @@ inline std::vector<std::pair<std::string, ConvShape>> shapesOf(const std::string
         shapes.emplace_back(f[0], shape);
     }
     return shapes;
+}
+
+/// The activation step CONV_EPI_TIMING_ACT names (relu when unset).
+inline conv_epilogue_test::Step activationStep()
+{
+    const char* env = std::getenv("CONV_EPI_TIMING_ACT");
+    const std::string name = env != nullptr ? env : "relu";
+    using data_objects::PointwiseMode;
+    if(name == "silu")
+    {
+        return conv_epilogue_test::unary(PointwiseMode::SWISH_FWD);
+    }
+    if(name == "gelu")
+    {
+        return conv_epilogue_test::unary(PointwiseMode::GELU_FWD);
+    }
+    if(name == "gelu_tanh")
+    {
+        return conv_epilogue_test::unary(PointwiseMode::GELU_APPROX_TANH_FWD);
+    }
+    if(name == "sigmoid")
+    {
+        return conv_epilogue_test::unary(PointwiseMode::SIGMOID_FWD);
+    }
+    if(name == "tanh")
+    {
+        return conv_epilogue_test::unary(PointwiseMode::TANH_FWD);
+    }
+    if(name == "elu")
+    {
+        return conv_epilogue_test::unary(PointwiseMode::ELU_FWD);
+    }
+    if(name == "softplus")
+    {
+        return conv_epilogue_test::unary(PointwiseMode::SOFTPLUS_FWD);
+    }
+    return conv_epilogue_test::relu();
 }
 
 inline size_t bytesOf(const conv_naive_test::TensorSpec& tensor)
@@ -135,7 +180,7 @@ inline void
     {
         const auto bareSpec = conv_naive_test::specFor(shape, conv_naive::ConvDirection::FORWARD);
         const FusedGraphSpec fusedSpec = conv_epilogue_test::fusedSpecFor(
-            shape, {conv_epilogue_test::bias(shape.dataType), conv_epilogue_test::relu()});
+            shape, {conv_epilogue_test::bias(shape.dataType), activationStep()});
         const GraphFixture bare(conv_naive_test::buildGraph(bareSpec), currentDeviceProperties());
         const GraphFixture fused(conv_epilogue_test::buildFusedGraph(fusedSpec),
                                  currentDeviceProperties());

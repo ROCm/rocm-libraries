@@ -629,28 +629,104 @@ INSTANTIATE_TEST_SUITE_P(,
                                             ::testing::ValuesIn(enabledBackends())),
                          caseName);
 
-// Real-model channels-first fp16 convolutions (inception_v3, resnet50) whose fused graphs need an
-// fp32-output GEMM: every engine, the deterministic siblings included, claims the fused graph
-// exactly where it claims the bare convolution, and computes it.
-ConvGemmShape realModel(int64_t n, int64_t c, int64_t k, int64_t hw, int64_t f, int64_t pad)
+// Real-model fp16 convolutions of the conv census whose fused graphs need an fp32-output GEMM
+// (small n x HW against a long reduction): every engine, the deterministic siblings included,
+// claims the fused graph exactly where it claims the bare convolution, and computes it, or
+// declines it for the one reason fusion may add (below).
+ConvGemmShape censusShape(int64_t n,
+                          int64_t c,
+                          int64_t k,
+                          int64_t hw,
+                          int64_t f,
+                          int64_t pad,
+                          int64_t stride,
+                          int64_t groups,
+                          bool channelsLast)
 {
     ConvGemmShape shape;
     shape.n = n;
     shape.c = c;
     shape.k = k;
+    shape.groups = groups;
     shape.input = {hw, hw};
     shape.filter = {f, f};
     shape.prePadding = {pad, pad};
     shape.postPadding = {pad, pad};
+    shape.stride = {stride, stride};
+    shape.xChannelsLast = shape.wChannelsLast = shape.yChannelsLast = channelsLast;
     shape.dataType = DataType::HALF;
     return shape;
 }
 
 std::vector<EpilogueCase> realModelCases()
 {
-    return {{"InceptionDense", realModel(1, 448, 384, 8, 3, 1)},
-            {"InceptionPointOutput", realModel(16, 128, 768, 5, 5, 0)},
-            {"Resnet50Dense", realModel(1, 512, 512, 14, 3, 1)}};
+    std::vector<EpilogueCase> cases;
+    struct Row
+    {
+        const char* name;
+        int64_t n, c, k, hw, f, pad, stride, groups;
+    };
+    const std::vector<Row> rows{{"InceptionDense8", 1, 448, 384, 8, 3, 1, 1, 1},
+                                {"InceptionPointOutput5", 16, 128, 768, 5, 5, 0, 1, 1},
+                                {"Resnet50Dense7", 1, 512, 512, 7, 3, 1, 1, 1},
+                                {"Resnet50Dense8", 1, 512, 512, 8, 3, 1, 1, 1},
+                                {"Resnet50Dense14", 1, 512, 512, 14, 3, 1, 1, 1},
+                                {"Resnet50Dense14Stride2", 1, 512, 512, 14, 3, 1, 2, 1},
+                                {"Resnet50Dense16Stride2", 1, 512, 512, 16, 3, 1, 2, 1},
+                                {"Stylegan2Dense4", 1, 512, 512, 4, 3, 1, 1, 1},
+                                {"Stylegan2DenseN2Stride2", 2, 512, 512, 8, 3, 1, 2, 1},
+                                {"Stylegan2GroupedG2", 1, 1024, 1024, 4, 3, 1, 1, 2},
+                                {"Stylegan2GroupedG4", 1, 2048, 2048, 4, 3, 1, 1, 4},
+                                {"Yolo11Dense16", 1, 512, 64, 16, 3, 1, 1, 1},
+                                {"Yolo11Dense20", 1, 512, 64, 20, 3, 1, 1, 1}};
+    for(const auto& row : rows)
+    {
+        for(const bool channelsLast : {false, true})
+        {
+            cases.push_back({std::string(row.name) + (channelsLast ? "Nhwc" : "Nchw"),
+                             censusShape(row.n,
+                                         row.c,
+                                         row.k,
+                                         row.hw,
+                                         row.f,
+                                         row.pad,
+                                         row.stride,
+                                         row.groups,
+                                         channelsLast)});
+        }
+    }
+    return cases;
+}
+
+/// Which forms of @p call the backend runs: as given, its reduction cut in 8 (fp32 partials),
+/// fp32 operands, and a 16-bit output (the bare GEMM's). Probes why a fused GEMM is refused.
+std::string probeCall(const ConvGemmPlanBuilder::PlanFactory& factory,
+                      const HipdnnEnginePluginHandle& handle,
+                      const GemmCall& call,
+                      DataType elementType)
+{
+    const auto runs = [&](const GemmCall& variant) {
+        try
+        {
+            static_cast<void>(factory(handle, {variant}));
+            return std::string("y");
+        }
+        catch(const std::exception&)
+        {
+            return std::string("n");
+        }
+    };
+    GemmCall chunked = call;
+    chunked.k = std::max<int64_t>(1, call.k / 8);
+    GemmCall wide = call;
+    wide.a.dataType = DataType::FLOAT;
+    wide.b.dataType = DataType::FLOAT;
+    GemmCall narrow = call;
+    narrow.d.dataType = elementType;
+    return "gemm m" + std::to_string(call.m) + " n" + std::to_string(call.n) + " k"
+           + std::to_string(call.k) + " batch" + std::to_string(call.batchCount) + ": fp32-out "
+           + runs(call) + ", k/8 " + runs(chunked) + ", fp32-in " + runs(wide) + ", 16-bit-out "
+           + runs(narrow);
 }
 
 class TestGpuConvEpilogueClaims
@@ -716,6 +792,12 @@ TEST_P(TestGpuConvEpilogueClaims, FusedWhereBare)
                 catch(const std::exception&)
                 {
                     refused = true;
+                    for(const auto& call : stage.calls)
+                    {
+                        std::cout << "PROBE " << convCase.name << " " << chain.first << " layout "
+                                  << static_cast<int>(layout) << " "
+                                  << probeCall(factory, *handle, call, problem->dataType) << "\n";
+                    }
                 }
             }
             EXPECT_TRUE(refused) << "the backend runs every GEMM of a layout, yet the graph was "

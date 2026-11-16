@@ -318,4 +318,38 @@ TEST(TestConvEpilogueFormulation, ExtraPassAddsYsFp32Copy)
     EXPECT_GE(after->workspaceBytes, before + yBytes);
 }
 
+TEST(TestConvEpilogueFormulation, Fp32OutputReductionsSplitInOrder)
+{
+    // The extra pass of a channels-first 3x3: the GEMM writes y's fp32 copy from fp16 operands.
+    const auto calls = fused(threeByThree(false), {bias(DataType::HALF), relu()}, false);
+    ASSERT_TRUE(calls.has_value());
+    const auto& before = calls->stages.front().calls;
+    ASSERT_EQ(before.size(), 1U);
+    const GemmCall whole = before.front();
+    ASSERT_EQ(whole.d.dataType, DataType::FLOAT);
+    const auto split = splitFp32OutputReductions(*calls, 4);
+    const auto& parts = split.stages.front().calls;
+    ASSERT_EQ(parts.size(), 4U);
+    int64_t covered = 0;
+    for(size_t i = 0; i < parts.size(); ++i)
+    {
+        const auto& part = parts[i];
+        EXPECT_EQ(part.accumulate, i > 0) << "each part after the first adds to the fp32 sum";
+        EXPECT_EQ(part.d.uid, whole.d.uid);
+        EXPECT_EQ(part.d.offset, whole.d.offset);
+        EXPECT_EQ(part.m, whole.m);
+        EXPECT_EQ(part.n, whole.n);
+        EXPECT_EQ(part.a.offset,
+                  whole.a.offset
+                      + (whole.transposeA ? covered : covered * whole.a.leadingDimension));
+        EXPECT_EQ(part.b.offset,
+                  whole.b.offset
+                      + (whole.transposeB ? covered * whole.b.leadingDimension : covered));
+        covered += part.k;
+    }
+    EXPECT_EQ(covered, whole.k);
+    // The epilogue pass after it is unchanged.
+    EXPECT_EQ(split.stages.size(), calls->stages.size());
+}
+
 } // namespace
