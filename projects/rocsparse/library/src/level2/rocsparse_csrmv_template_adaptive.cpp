@@ -515,19 +515,23 @@ rocsparse_status
 
 namespace rocsparse
 {
-    template <uint32_t GEN_WG, typename J, typename Y, typename T>
+    template <uint32_t GEN_WG, typename J, typename Y, typename Z, typename T>
     ROCSPARSE_KERNEL(GEN_WG)
     void partial_scale_y_kernel(J m,
                                 J first_row,
                                 J last_row,
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                 Y* __restrict__ y,
-                                bool is_host_mode)
+                                rocsparse_int   num_extra,
+                                const T*        gamma_device_array,
+                                const Z* const* z_arrays,
+                                bool            is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(beta != 1)
+        if(beta != 1 || num_extra > 0)
         {
-            rocsparse::partial_scale_y_device<GEN_WG>(m, first_row, last_row, beta, y);
+            rocsparse::partial_scale_y_device<GEN_WG>(
+                m, first_row, last_row, beta, y, num_extra, gamma_device_array, z_arrays);
         }
     }
 
@@ -848,6 +852,9 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         last_row,                                                    \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host), \
         y,                                                           \
+        num_extra,                                                   \
+        gamma_device_array,                                          \
+        z_array,                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host)
             if(gen_wg == 128)
             {
@@ -862,7 +869,8 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     }
     else if(descr->type == rocsparse_matrix_type_symmetric)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m, beta_device_host, y));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
+            handle, m, num_extra, gamma_device_array, z_array, beta_device_host, y));
 
         I max_rows = static_cast<I>(info->max_rows);
 

@@ -183,9 +183,16 @@ namespace rocsparse
         }
     }
 
-    // Scales y by beta in the range [0, first_row) and [last_row, m)
-    template <uint32_t WG_SIZE, typename J, typename Y, typename T>
-    ROCSPARSE_DEVICE_ILF void partial_scale_y_device(J m, J first_row, J last_row, T beta, Y* y)
+    // Computes y = beta * y + sum_i gamma_i * z_i in the range [0, first_row) and [last_row, m)
+    template <uint32_t WG_SIZE, typename J, typename Y, typename Z, typename T>
+    ROCSPARSE_DEVICE_ILF void partial_scale_y_device(J               m,
+                                                     J               first_row,
+                                                     J               last_row,
+                                                     T               beta,
+                                                     Y*              y,
+                                                     rocsparse_int   num_extra,
+                                                     const T*        gamma_device_array,
+                                                     const Z* const* z_arrays)
     {
         const J required_threads = (first_row - 0) + (m - last_row);
 
@@ -195,28 +202,23 @@ namespace rocsparse
         const int64_t stride = static_cast<int64_t>(hipGridDim_x) * WG_SIZE;
         for(int64_t idx = gid; idx < required_threads; idx += stride)
         {
-            if(idx < first_row)
+            const int64_t row = (idx < first_row) ? idx : last_row + (idx - first_row);
+
+            T sum = static_cast<T>(0);
+            if(beta != static_cast<T>(0))
             {
-                if(beta == static_cast<T>(0))
+                sum = beta * static_cast<T>(y[row]);
+            }
+            for(rocsparse_int i = 0; i < num_extra; ++i)
+            {
+                T gamma = gamma_device_array[i];
+                if(gamma != static_cast<T>(0))
                 {
-                    y[idx] = static_cast<Y>(0);
-                }
-                else
-                {
-                    y[idx] *= beta;
+                    sum = rocsparse::fma<T>(
+                        gamma, rocsparse::nontemporal_load(z_arrays[i] + row), sum);
                 }
             }
-            else
-            {
-                if(beta == static_cast<T>(0))
-                {
-                    y[last_row + (idx - first_row)] = static_cast<Y>(0);
-                }
-                else
-                {
-                    y[last_row + (idx - first_row)] *= beta;
-                }
-            }
+            y[row] = static_cast<Y>(sum);
         }
     }
 
