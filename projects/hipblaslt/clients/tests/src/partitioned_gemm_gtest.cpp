@@ -59,6 +59,38 @@ namespace
         void* m_ptr = nullptr;
     };
 
+    // The pointers a test hands to PartitionedGemm::setProblem, one entry per partition. Kept as
+    // lists so a test can swap or repeat entries; toGemmInputs turns them into one GemmInputs
+    // per partition.
+    struct Pointers
+    {
+        std::vector<const void*> a, b, c;
+        std::vector<void*>       d;
+        bool                     storePeerD = false;
+        const void*              alpha      = nullptr;
+        const void*              beta       = nullptr;
+    };
+
+    std::vector<GemmInputs> toGemmInputs(Pointers const& in)
+    {
+        // The lists may have the wrong length on purpose; the library reports it.
+        const size_t            n = in.d.size();
+        std::vector<GemmInputs> v(n);
+        for(size_t i = 0; i < n; i++)
+        {
+            if(i < in.a.size())
+                v[i].setA(in.a[i]);
+            if(i < in.b.size())
+                v[i].setB(in.b[i]);
+            if(i < in.c.size())
+                v[i].setC(in.c[i]);
+            v[i].setD(in.d[i]);
+            v[i].setAlpha(in.alpha);
+            v[i].setBeta(in.beta);
+        }
+        return v;
+    }
+
     std::vector<half_t> randomHalf(size_t count, unsigned seed)
     {
         uint32_t            state = seed * 2654435761u + 1;
@@ -221,9 +253,9 @@ namespace
                 d.push_back(bufs.back()->get());
             }
         }
-        PartitionedGemmInputs inputs()
+        Pointers inputs()
         {
-            PartitionedGemmInputs in;
+            Pointers in;
             in.a.assign(a.begin(), a.end());
             in.b.assign(b.begin(), b.end());
             in.c.assign(c.begin(), c.end());
@@ -237,26 +269,11 @@ namespace
         float                                   alpha = 1.f, beta = 0.f;
     };
 
-    hipblasStatus_t setReplicated(PartitionedGemm&             gemm,
-                                  SplitDim                     dim,
-                                  PartitionedGemmInputs const& in,
-                                  int64_t                      m = kM,
-                                  int64_t                      n = kN)
+    hipblasStatus_t setReplicated(
+        PartitionedGemm& gemm, SplitDim dim, Pointers const& in, int64_t m = kM, int64_t n = kN)
     {
-        return gemm.setProblem(m,
-                               n,
-                               kK,
-                               1,
-                               kLda,
-                               kLdb,
-                               kLdc,
-                               kLdd,
-                               0,
-                               0,
-                               0,
-                               0,
-                               dim,
-                               in);
+        return gemm.setProblem(
+            m, n, kK, 1, kLda, kLdb, kLdc, kLdd, 0, 0, 0, 0, dim, toGemmInputs(in), in.storePeerD);
     }
 
     // Copies every partition's slice of D back and compares it with the reference.
@@ -615,7 +632,7 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
     }
 
     ReplicatedBuffers     buffers(parts, op);
-    PartitionedGemmInputs in = buffers.inputs();
+    Pointers              in = buffers.inputs();
     // A and B Shared: one pointer, on device 0.
     if(cs.a == Placement::Shared)
     {
@@ -649,7 +666,8 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
                               0,
                               0,
                               dim,
-                              in),
+                              toGemmInputs(in),
+                              in.storePeerD),
               HIPBLAS_STATUS_SUCCESS);
 
     GemmPreference pref;
@@ -832,14 +850,15 @@ TEST_P(partitioned_gemm_ext_placement_multi_gpu, SlicesFollowThePages)
         d.push_back(std::make_unique<DeviceBuf>(dev, size_t(m) * n * sizeof(half_t)));
     }
     const float           alpha = 1.f, beta = 0.f;
-    PartitionedGemmInputs in;
+    Pointers              in;
     in.a     = {a[0]->get(), a[1]->get()};
     in.b     = {b.va, b.va};
     in.c     = {d[0]->get(), d[1]->get()};
     in.d     = {d[0]->get(), d[1]->get()};
     in.alpha = &alpha;
     in.beta  = &beta;
-    ASSERT_EQ(gemm.setProblem(m, n, k, 1, k, k, m, m, 0, 0, 0, 0, SplitDim::N, in),
+    ASSERT_EQ(gemm.setProblem(
+                  m, n, k, 1, k, k, m, m, 0, 0, 0, 0, SplitDim::N, toGemmInputs(in), in.storePeerD),
               HIPBLAS_STATUS_SUCCESS);
 
     // Partition i computes the half of B that is on device i.
@@ -965,9 +984,22 @@ TEST(pre_checkin_partitioned_gemm_ext, BatchSplitSlices)
     auto              in = buffers.inputs();
 
     const int64_t sa = kLda * kM, sb = kLdb * kN, sc = kLdc * kN, sd = kLdd * kN;
-    ASSERT_EQ(
-        gemm.setProblem(kM, kN, kK, 5, kLda, kLdb, kLdc, kLdd, sa, sb, sc, sd, SplitDim::Batch, in),
-        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(gemm.setProblem(kM,
+                              kN,
+                              kK,
+                              5,
+                              kLda,
+                              kLdb,
+                              kLdc,
+                              kLdd,
+                              sa,
+                              sb,
+                              sc,
+                              sd,
+                              SplitDim::Batch,
+                              toGemmInputs(in),
+                              in.storePeerD),
+              HIPBLAS_STATUS_SUCCESS);
     int64_t offset = -1, size = -1;
     ASSERT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_SUCCESS);
     EXPECT_EQ(offset, 0);
@@ -977,9 +1009,22 @@ TEST(pre_checkin_partitioned_gemm_ext, BatchSplitSlices)
     EXPECT_EQ(size, 3);
 
     // One batch cannot be split between two partitions.
-    EXPECT_EQ(
-        gemm.setProblem(kM, kN, kK, 1, kLda, kLdb, kLdc, kLdd, sa, sb, sc, sd, SplitDim::Batch, in),
-        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(gemm.setProblem(kM,
+                              kN,
+                              kK,
+                              1,
+                              kLda,
+                              kLdb,
+                              kLdc,
+                              kLdd,
+                              sa,
+                              sb,
+                              sc,
+                              sd,
+                              SplitDim::Batch,
+                              toGemmInputs(in),
+                              in.storePeerD),
+              HIPBLAS_STATUS_INVALID_VALUE);
 }
 
 // Two devices, 5 batches split 2 + 3: each partition computes its batches into its own D.
@@ -1011,14 +1056,28 @@ TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
         d.push_back(std::make_unique<DeviceBuf>(dev, size_t(sd) * batch * 2));
     }
     const float           alpha = 1.f, beta = 0.f;
-    PartitionedGemmInputs in;
+    Pointers              in;
     in.a     = {a[0]->get(), a[1]->get()};
     in.b     = {b[0]->get(), b[1]->get()};
     in.c     = {d[0]->get(), d[1]->get()};
     in.d     = {d[0]->get(), d[1]->get()};
     in.alpha = &alpha;
     in.beta  = &beta;
-    ASSERT_EQ(gemm.setProblem(m, n, k, batch, k, k, m, m, sa, sb, sd, sd, SplitDim::Batch, in),
+    ASSERT_EQ(gemm.setProblem(m,
+                              n,
+                              k,
+                              batch,
+                              k,
+                              k,
+                              m,
+                              m,
+                              sa,
+                              sb,
+                              sd,
+                              sd,
+                              SplitDim::Batch,
+                              toGemmInputs(in),
+                              in.storePeerD),
               HIPBLAS_STATUS_SUCCESS);
 
     GemmPreference pref;
@@ -1076,7 +1135,8 @@ TEST(pre_checkin_partitioned_gemm_ext, BatchSplitNeedsABatchStrideOfD)
                               kLdc * kN,
                               0,
                               SplitDim::Batch,
-                              in),
+                              toGemmInputs(in),
+                              in.storePeerD),
               HIPBLAS_STATUS_INVALID_VALUE);
     // The same sizes with a stride of D are fine, and a stride of 0 is fine for one batch.
     EXPECT_EQ(gemm.setProblem(kM,
@@ -1092,9 +1152,24 @@ TEST(pre_checkin_partitioned_gemm_ext, BatchSplitNeedsABatchStrideOfD)
                               kLdc * kN,
                               kLdd * kN,
                               SplitDim::Batch,
-                              in),
+                              toGemmInputs(in),
+                              in.storePeerD),
               HIPBLAS_STATUS_SUCCESS);
-    EXPECT_EQ(gemm.setProblem(kM, kN, kK, 1, kLda, kLdb, kLdc, kLdd, 0, 0, 0, 0, SplitDim::N, in),
+    EXPECT_EQ(gemm.setProblem(kM,
+                              kN,
+                              kK,
+                              1,
+                              kLda,
+                              kLdb,
+                              kLdc,
+                              kLdd,
+                              0,
+                              0,
+                              0,
+                              0,
+                              SplitDim::N,
+                              toGemmInputs(in),
+                              in.storePeerD),
               HIPBLAS_STATUS_SUCCESS);
 }
 

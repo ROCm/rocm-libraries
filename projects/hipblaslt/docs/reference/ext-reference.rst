@@ -127,9 +127,6 @@ user arguments overloads are declared and return ``HIPBLAS_STATUS_NOT_SUPPORTED`
 
 .. doxygenenum:: hipblaslt_ext::SplitDim
 
-.. doxygenstruct:: hipblaslt_ext::PartitionedGemmInputs
-    :members:
-
 hipBLASLtExt API reference
 ================================
 

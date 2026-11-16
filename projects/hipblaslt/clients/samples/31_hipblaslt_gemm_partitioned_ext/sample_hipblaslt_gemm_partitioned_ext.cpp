@@ -80,13 +80,18 @@ int main(int argc, char** argv)
                                         HIP_R_16F,
                                         HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::PartitionedGemmInputs inputs;
-    inputs.a     = a; // N pointers for a Replicated matrix; one pointer for a Shared one
-    inputs.b     = b;
-    inputs.c     = c;
-    inputs.d     = d;
-    inputs.alpha = &alpha;
-    inputs.beta  = &beta;
+    // One GemmInputs per partition. A matrix that is shared has the same pointer in every
+    // element; a replicated one has its own copy in each.
+    std::vector<hipblaslt_ext::GemmInputs> inputs(partitions);
+    for(int i = 0; i < partitions; i++)
+    {
+        inputs[i].setA(a[i]);
+        inputs[i].setB(b[i]);
+        inputs[i].setC(c[i]);
+        inputs[i].setD(d[i]);
+        inputs[i].setAlpha(&alpha);
+        inputs[i].setBeta(&beta);
+    }
 
     CHECK_HIPBLASLT_ERROR(gemm.setProblem(m,
                                           n,

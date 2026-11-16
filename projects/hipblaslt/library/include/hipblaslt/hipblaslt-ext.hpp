@@ -1120,50 +1120,6 @@ namespace hipblaslt_ext
     };
 
     /*! \ingroup types_module
-     *  \brief The inputs of a PartitionedGemm.
-     *
-     *  \details ``a``, ``b``, ``c`` and ``d`` hold one pointer per partition, N in total. Each
-     * points at a whole matrix (the library
-     * adds the partition's slice offset), and the leading dimensions and batch strides of
-     * PartitionedGemm::setProblem describe that whole matrix. Passing the same pointer N times
-     * shares one matrix between the partitions (it must be reachable from every partition
-     * device); passing different pointers gives each partition its own copy, which the caller
-     * keeps equal. For D, the same pointer means every partition writes its slice into one D.
-     * Copies are matched to the partitions by device, whatever the order of the lists: partition
-     * ``p`` uses the copy on its device, so the D on device X receives the slice of the partition
-     * on device X. All copied matrices must agree on one assignment; if they do not (for example
-     * A listed in one order and B in the other), setProblem returns
-     * ``HIPBLAS_STATUS_INVALID_VALUE`` and logs an error.
-     * hipBLASLt allocates and copies nothing. ``alpha`` and ``beta`` are host pointers, as in
-     * GemmInputs, and apply to every partition.
-     *
-     *  Where the memory is (hipMalloc on one device, or a VMM range whose pages are on several
-     * devices) is up to the caller: for example, two copies of A back to back in one VMM range
-     * are passed as ``{va, va + sizeA}``, and one D whose halves are on the two devices as
-     * ``{va, va}``. The library reads where the pages of each slice are and gives every
-     * partition the slice that is on its device (see PartitionedGemm::getSlice).
-     */
-    struct PartitionedGemmInputs
-    {
-        std::vector<const void*> a; //!< A matrix pointers.
-        std::vector<const void*> b; //!< B matrix pointers.
-        std::vector<const void*> c; //!< C matrix pointers.
-        std::vector<void*>       d; //!< D matrix pointers.
-        /// Every partition also stores its slice into the D of the other partition, so that both
-        /// Ds are complete once the run has finished (the partitions are joined, see run()).
-        /// It needs exactly 2 partitions and a replicated D (two different pointers, in any
-        /// order: the peer of each partition is found by device), and the backend needs
-        /// kernels that store a second D; without them setProblem succeeds and algoGetHeuristic
-        /// returns nothing (also with a device library built before this feature). The peer D
-        /// is written with system-scope stores. Ordering a later kernel that reads D after the
-        /// run (including under graph capture) is up to the caller. When it is false, the
-        /// backend uses the plain kernels.
-        bool                     storePeerD = false;
-        const void*              alpha = nullptr; //!< Host pointer to alpha.
-        const void*              beta  = nullptr; //!< Host pointer to beta.
-    };
-
-    /*! \ingroup types_module
      *  \brief hipBLASLt extension that runs one GEMM as slices on several devices.
      *
      *  \details A device that is partitioned (for example DPX) shows up as several HIP
@@ -1242,29 +1198,66 @@ namespace hipblaslt_ext
         *  @param[in]
         *  dim                              The dimension to split.
         *  @param[in]
-        *  inputs                           The pointers and the host alpha and beta.
+        *  inputs                           One GemmInputs per partition (see below).
+        *  @param[in]
+        *  storePeerD                       Every partition also stores its slice into the D of
+        * the other partition (see below).
+        *
+        *  \details ``inputs`` holds one GemmInputs per partition, N in total, with ``setA``,
+        * ``setB``, ``setC``, ``setD``, ``setAlpha`` and ``setBeta`` set; any other pointer (bias,
+        * scales, aux, amax) must stay null, because a PartitionedGemm runs a plain GEMM. Each
+        * pointer points at a whole matrix (the library adds the partition's slice offset), and
+        * the leading dimensions and batch strides describe that whole matrix. The same pointer
+        * in every element shares one matrix between the partitions (it must be reachable from
+        * every partition device); different pointers give each partition its own copy, which
+        * the caller keeps equal. For D, the same pointer means every partition writes its slice
+        * into one D. Copies are matched to the partitions by device, whatever the order of
+        * ``inputs``: partition ``p`` uses the copy on its device, so the D on device X receives
+        * the slice of the partition on device X. All copied matrices must agree on one
+        * assignment; if they do not (for example A listed in one order and B in the other),
+        * setProblem returns ``HIPBLAS_STATUS_INVALID_VALUE`` and logs an error. hipBLASLt
+        * allocates and copies nothing. ``alpha`` and ``beta`` are host pointers, as in
+        * GemmInputs; they are read from the first element, must be set in every element, and
+        * apply to every partition.
+        *
+        *  Where the memory is (hipMalloc on one device, or a VMM range whose pages are on
+        * several devices) is up to the caller: for example, two copies of A back to back in one
+        * VMM range are passed as ``va`` and ``va + sizeA``, and one D whose halves are on the
+        * two devices as ``va`` in both elements. The library reads where the pages of each slice
+        * are and gives every partition the slice that is on its device (see
+        * PartitionedGemm::getSlice).
+        *
+        *  With ``storePeerD`` every partition also stores its slice into the D of the other
+        * partition, so that both Ds are complete once the run has finished (the partitions are
+        * joined, see run()). It needs exactly 2 partitions and a replicated D (two different
+        * pointers, in any order: the peer of each partition is found by device), and the backend
+        * needs kernels that store a second D; without them setProblem succeeds and
+        * algoGetHeuristic returns nothing (also with a device library built before this
+        * feature). The peer D is written with system-scope stores. Ordering a later kernel that
+        * reads D after the run (including under graph capture) is up to the caller.
         *
         *  \retval HIPBLAS_STATUS_SUCCESS           If the problem was set on every partition.
-        *  \retval HIPBLAS_STATUS_INVALID_VALUE     If a pointer list does not hold one
-        * pointer per partition, a size is not positive, or the split dimension is smaller than the
+        *  \retval HIPBLAS_STATUS_INVALID_VALUE     If `inputs` does not hold one GemmInputs
+        * per partition, a required pointer is null, a size is not positive, or the split dimension is smaller than the
         * number of partitions.
         *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If the types or operations are not
         * supported (conjugate transpose, sub-byte types), or a partition rejects its slice.
         */
-        HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t                      m,
-                                                    int64_t                      n,
-                                                    int64_t                      k,
-                                                    int64_t                      batch_count,
-                                                    int64_t                      lda,
-                                                    int64_t                      ldb,
-                                                    int64_t                      ldc,
-                                                    int64_t                      ldd,
-                                                    int64_t                      strideA,
-                                                    int64_t                      strideB,
-                                                    int64_t                      strideC,
-                                                    int64_t                      strideD,
-                                                    SplitDim                     dim,
-                                                    const PartitionedGemmInputs& inputs);
+        HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t                        m,
+                                                    int64_t                        n,
+                                                    int64_t                        k,
+                                                    int64_t                        batch_count,
+                                                    int64_t                        lda,
+                                                    int64_t                        ldb,
+                                                    int64_t                        ldc,
+                                                    int64_t                        ldd,
+                                                    int64_t                        strideA,
+                                                    int64_t                        strideB,
+                                                    int64_t                        strideC,
+                                                    int64_t                        strideD,
+                                                    SplitDim                       dim,
+                                                    const std::vector<GemmInputs>& inputs,
+                                                    bool storePeerD = false);
 
         /*! \ingroup library_module
         *  \brief The slice of partition ``partition`` along the split dimension.

@@ -2354,14 +2354,17 @@ public:
                 v.push_back(m_replicated[t] ? m_replica[t][i - 1] : src[t]);
             return v;
         };
-        hipblaslt_ext::PartitionedGemmInputs in;
-        in.a = pointers(0);
-        in.b = pointers(1);
-        in.c = pointers(2);
-        for(const void* p : pointers(3))
-            in.d.push_back(const_cast<void*>(p));
-        in.alpha = alpha;
-        in.beta  = beta;
+        const auto pa = pointers(0), pb = pointers(1), pc = pointers(2), pd = pointers(3);
+        std::vector<hipblaslt_ext::GemmInputs> in(m_streams.size());
+        for(size_t i = 0; i < in.size(); i++)
+        {
+            in[i].setA(pa[i]);
+            in[i].setB(pb[i]);
+            in[i].setC(pc[i]);
+            in[i].setD(pd[i]);
+            in[i].setAlpha(alpha);
+            in[i].setBeta(beta);
+        }
         m_m      = m;
         m_n      = n;
         m_batch   = batch;

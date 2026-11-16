@@ -25,6 +25,17 @@ namespace hipblaslt_ext
 {
     namespace
     {
+        // The pointers of every partition, as setProblem works with them: one entry per matrix
+        // copy, taken from the per-partition GemmInputs.
+        struct PartitionInputs
+        {
+            std::vector<const void*> a, b, c;
+            std::vector<void*>       d;
+            const void*              alpha      = nullptr;
+            const void*              beta       = nullptr;
+            bool                     storePeerD = false;
+        };
+
         // Size in bytes of one element, or 0 for a type this version cannot offset into
         // (sub-byte and block-scaled types).
         size_t elementBytes(hipDataType type)
@@ -289,20 +300,21 @@ namespace hipblaslt_ext
         return pimpl ? pimpl->count() : 0;
     }
 
-    hipblasStatus_t PartitionedGemm::setProblem(int64_t                      m,
-                                                int64_t                      n,
-                                                int64_t                      k,
-                                                int64_t                      batch_count,
-                                                int64_t                      lda,
-                                                int64_t                      ldb,
-                                                int64_t                      ldc,
-                                                int64_t                      ldd,
-                                                int64_t                      strideA,
-                                                int64_t                      strideB,
-                                                int64_t                      strideC,
-                                                int64_t                      strideD,
-                                                SplitDim                     dim,
-                                                const PartitionedGemmInputs& inputs)
+    hipblasStatus_t PartitionedGemm::setProblem(int64_t                        m,
+                                                int64_t                        n,
+                                                int64_t                        k,
+                                                int64_t                        batch_count,
+                                                int64_t                        lda,
+                                                int64_t                        ldb,
+                                                int64_t                        ldc,
+                                                int64_t                        ldd,
+                                                int64_t                        strideA,
+                                                int64_t                        strideB,
+                                                int64_t                        strideC,
+                                                int64_t                        strideD,
+                                                SplitDim                       dim,
+                                                const std::vector<GemmInputs>& gemmInputs,
+                                                bool                           storePeerD)
     {
         if(!pimpl) // moved from
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -329,13 +341,27 @@ namespace hipblaslt_ext
             if(b == 0)
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
 
-        // One pointer per partition for every matrix.
-        const size_t have[4] = {inputs.a.size(), inputs.b.size(), inputs.c.size(), inputs.d.size()};
-        for(int t = 0; t < 4; t++)
-            if(have[t] != parts)
-                return HIPBLAS_STATUS_INVALID_VALUE;
-        if(inputs.alpha == nullptr || inputs.beta == nullptr)
+        // One GemmInputs per partition. A PartitionedGemm runs a plain GEMM, so every pointer
+        // beyond A, B, C, D, alpha and beta must be null.
+        if(gemmInputs.size() != parts)
             return HIPBLAS_STATUS_INVALID_VALUE;
+        PartitionInputs inputs;
+        inputs.storePeerD = storePeerD;
+        for(auto const& g : gemmInputs)
+        {
+            if(g.getBias() || g.getScaleA() || g.getScaleB() || g.getScaleC() || g.getScaleD()
+               || g.getScaleAux() || g.getScaleAlphaVec() || g.getScaleAlphaScalar() || g.getAux()
+               || g.getAmaxD())
+                return HIPBLAS_STATUS_NOT_SUPPORTED;
+            if(g.getAlpha() == nullptr || g.getBeta() == nullptr)
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            inputs.a.push_back(g.getA());
+            inputs.b.push_back(g.getB());
+            inputs.c.push_back(g.getC());
+            inputs.d.push_back(const_cast<void*>(g.getD()));
+        }
+        inputs.alpha = gemmInputs[0].getAlpha();
+        inputs.beta  = gemmInputs[0].getBeta();
         // storePeerD: partition i also writes the other partition's D. Two partitions and two
         // different D buffers only.
         if(inputs.storePeerD)
@@ -357,7 +383,7 @@ namespace hipblaslt_ext
         // matrices must agree on one assignment (all in order, or all swapped the same way);
         // otherwise some partition would read or write the wrong device's copy, which is an error.
         // Shared matrices (one pointer repeated) and copies on no partition's device do not count.
-        PartitionedGemmInputs in = inputs;
+        PartitionInputs in = inputs;
         {
             const char*                     names[4] = {"A", "B", "C", "D"};
             const std::vector<const void*>  d0(inputs.d.begin(), inputs.d.end());
