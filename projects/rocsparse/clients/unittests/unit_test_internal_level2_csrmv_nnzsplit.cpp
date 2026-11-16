@@ -813,8 +813,17 @@ namespace
 
         // The long first row ends in the same wavefront slice as the last
         // nonzero, behind which the slice is padded. The empty rows keep the
-        // mean low enough for the skew guard.
+        // mean low enough for the skew guard. W / 4 is 8 on wave32, so each
+        // tail length is kept once.
+        std::vector<int64_t> tails;
         for(int64_t tail : {int64_t(1), int64_t(2), int64_t(3), int64_t(8), W / 4})
+        {
+            if(std::find(tails.begin(), tails.end(), tail) == tails.end())
+            {
+                tails.push_back(tail);
+            }
+        }
+        for(int64_t tail : tails)
         {
             for(int64_t head : {9 * W + W / 2, B + W / 2, 2 * B + W / 2 + 3})
             {
@@ -1457,8 +1466,11 @@ TEST_F(CsrmvNnzsplit, symmetric_matrices)
         });
     }
 
-    // Neither row 0 nor column 0 holds a nonzero, so a NaN in x[0] must not
-    // reach y.
+    // Locks in the current behavior: neither row 0 nor column 0 holds a
+    // nonzero, so a NaN in x[0] must not reach y. These cases cannot fail
+    // when the removed skip_diag guard is absent. Padding is row 0 and
+    // column 0, so the diagonal skip already drops it, and the transposed
+    // guard zeroes its value as well.
     std::vector<Named> unused;
     unused.emplace_back("row_and_column_0_unused", make_lower({0, 1, 2, 2}));
     unused.emplace_back("skew_row_and_column_0_unused", [&] {
@@ -1477,11 +1489,16 @@ TEST_F(CsrmvNnzsplit, symmetric_matrices)
         }
         a.x[0] = cd(std::numeric_limits<double>::quiet_NaN(), 0.0);
         each_mode([&](Opt o, const std::string& mode) {
-            o.symmetric = true;
-            run_f32(handle, a, o, shape.first + " " + mode + " symmetric f32");
+            o.symmetric            = true;
+            const std::string what = shape.first + " " + mode;
+            const Out         out  = run_f32(handle, a, o, what + " symmetric f32");
+            if(!o.v2 && shape.first == "skew_row_and_column_0_unused")
+            {
+                expect_npt(out, 8, what);
+            }
             o.alpha = 1.0;
             o.beta  = 0.0;
-            run_f64(handle, a, o, shape.first + " " + mode + " symmetric f64 beta=0");
+            run_f64(handle, a, o, what + " symmetric f64 beta=0");
         });
     }
 }
