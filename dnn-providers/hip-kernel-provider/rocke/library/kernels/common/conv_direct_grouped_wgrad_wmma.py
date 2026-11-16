@@ -50,6 +50,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
 from kernels.common.conv_direct_wgrad_wmma import (
     wgrad_wmma_arch_reason,
     wgrad_wmma_lds_reason,
@@ -205,12 +206,7 @@ def build_grouped_wgrad_wmma(
     PRE = KH - 1  # dY rows a unit needs before its first input row
     CH8 = BC // 8  # 16-byte chunks per staged pixel
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    from rocke.core.arch import ArchTarget
-
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = T

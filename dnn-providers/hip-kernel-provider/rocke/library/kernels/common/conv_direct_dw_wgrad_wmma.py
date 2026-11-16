@@ -64,6 +64,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     pad_w_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
 
 DW_WGRAD_WMMA_CH = 8  # channels per wave (the 8-wide K group of a lane half)
 
@@ -232,8 +233,6 @@ def is_valid_dw_wgrad_wmma_spec(
 
 def build_dw_wgrad_wmma(spec: DwWgradWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     """Build the one-hot WMMA depthwise wgrad kernel (see the module docstring)."""
-    from rocke.core.arch import ArchTarget
-
     # One validation: is_valid_dw_wgrad_wmma_spec runs dw_wgrad_wmma_reason.
     ok, why = is_valid_dw_wgrad_wmma_spec(spec, arch=arch)
     if not ok:
@@ -250,10 +249,7 @@ def build_dw_wgrad_wmma(spec: DwWgradWmmaSpec, arch: str = "gfx1250") -> KernelD
     NRB, NS = spec.n_rb, spec.n_s
     KK = KH * KW
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS

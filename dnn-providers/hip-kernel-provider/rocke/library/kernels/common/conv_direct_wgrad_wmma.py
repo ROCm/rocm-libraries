@@ -55,6 +55,7 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import wmma_fwd_op
 
 _WAVE = 32
 _TILE = 16  # WMMA M = N
@@ -278,12 +279,7 @@ def build_direct_wgrad_wmma(
     NS = D * G  # row slots: slot d * G + g holds row g of stage d
     PRE = KH - 1  # ring steps before a unit's first input row
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    from rocke.core.arch import ArchTarget
-
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = T
     b.kernel.attrs["lds_alias_scopes"] = True

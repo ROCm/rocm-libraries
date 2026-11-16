@@ -3408,54 +3408,6 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
     return -1;
 }
 
-/* Auto-launch tiled wgrad, emitted as WGRAD_AUTO_CFG_BASE + idx (see
- * _wgrad_auto_spec in the Python emitter). Returns 0 on success, -1 if
- * unknown. */
-static int make_wgrad_auto_cfg(int idx, rocke_direct_wgrad_tiled_spec_t* ts)
-{
-    *ts = rocke_direct_wgrad_tiled_spec_default();
-    ts->problem = mk_wp();
-    ts->rows_per_seg = 0;
-    switch(idx)
-    {
-    case 0: /* H not a multiple of the unroll */
-        ts->problem.cpg = 128;
-        ts->problem.kpg = 128;
-        ts->problem.H = 30;
-        ts->waves_k = 2;
-        ts->wave_c16 = 1;
-        ts->prefetch = 3;
-        ts->row_unroll = 4;
-        ts->target_blocks = 512;
-        return 0;
-    case 1: /* grid budget below the channel tiles, packed images */
-        ts->problem.N = 4;
-        ts->problem.H = 15;
-        ts->problem.W = 40;
-        ts->problem.dtype = "fp16";
-        ts->waves_k = 2;
-        ts->unfold_n = 4;
-        ts->target_blocks = 3;
-        return 0;
-    case 2: /* ping-pong wave groups */
-        ts->q_groups = 2;
-        ts->pingpong = true;
-        ts->waves_k = 2;
-        ts->wave_k16 = 1;
-        ts->prefetch = 3;
-        ts->target_blocks = 64;
-        return 0;
-    case 3: /* must reject: a negative rows_per_seg */
-        ts->rows_per_seg = -3;
-        return 0;
-    case 4: /* must reject: rows_per_seg not a multiple of the unroll (3) */
-        ts->rows_per_seg = 31;
-        return 0;
-    default:
-        return -1;
-    }
-}
-
 /* DwWgradFoldSpec block shapes, emitted as FOLD_KNOB_CFG_BASE + idx (see
  * _fold_knob_spec in the Python emitter). Returns 0 on success, -1 if unknown. */
 static int make_fold_knob_cfg(int idx, rocke_dw_wgrad_fold_spec_t* f, const char** arch)
