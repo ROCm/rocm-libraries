@@ -143,13 +143,14 @@ TEST_CASE("NN: load_models_for_logic loads gfx950 tilewright weights", "[nn][til
   REQUIRE(info->n_splits > 0);
 }
 
-TEST_CASE("NN: load_models_for_logic uses bundled gfx950 weights when hint_dir empty",
+TEST_CASE("NN: load_models_for_logic falls back to ORIGAMI_NN_WEIGHTS_DIR when hint_dir empty",
           "[nn][tilewright]") {
   if (!tilewright_weights_available()) {
     SUCCEED("tilewright weights not present; skipping.");
     return;
   }
 
+  ScopedEnvVar weights_dir_env("ORIGAMI_NN_WEIGHTS_DIR", ORIGAMI_TEST_TW_WEIGHTS_DIR);
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
   const auto models      = origami::nn::load_models_for_logic(logic_stem, "");
@@ -164,7 +165,7 @@ TEST_CASE("NN: rank_configs inference=nn ranks with loaded tilewright model", "[
 
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
-  const auto models      = origami::nn::load_models_for_logic(logic_stem, "");
+  const auto models      = origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR);
   REQUIRE(models.tilewright >= 0);
 
   const auto hardware = make_hardware(950);
@@ -237,7 +238,7 @@ TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
   const origami::nn::model_handle_t handle =
-      origami::nn::load_models_for_logic(logic_stem, "").tilewright;
+      origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR).tilewright;
   REQUIRE(handle >= 0);
   REQUIRE(origami::nn::model_info(handle) != nullptr);
 
@@ -264,7 +265,7 @@ TEST_CASE("NN: unload_model while ranking is in flight", "[nn][tilewright]") {
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
   const origami::nn::model_handle_t handle =
-      origami::nn::load_models_for_logic(logic_stem, "").tilewright;
+      origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR).tilewright;
   REQUIRE(handle >= 0);
 
   const auto hardware                    = make_hardware(950);
@@ -306,7 +307,7 @@ TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
   const origami::nn::model_handle_t handle =
-      origami::nn::load_models_for_logic(logic_stem, "").tilewright;
+      origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR).tilewright;
   REQUIRE(handle >= 0);
 
   const auto hardware = make_hardware(950);

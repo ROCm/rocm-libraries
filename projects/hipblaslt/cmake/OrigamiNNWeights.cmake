@@ -8,6 +8,10 @@
 # and are not tracked in git. The copy runs at build time, so files fetched after
 # configure are still picked up.
 
+# Resolved at include time. Inside the function CMAKE_CURRENT_LIST_DIR names the caller's
+# directory, not this file's.
+set(_ORIGAMI_NN_COLOCATE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/OrigamiNNColocate.cmake")
+
 function(origami_nn_colocate_weights ARCH SRC OUTPUT_ROOT DEPENDENT)
     set(_target "origami-nn-colocate-${ARCH}")
     set(_dst "${OUTPUT_ROOT}/library/${ARCH}")
@@ -16,7 +20,7 @@ function(origami_nn_colocate_weights ARCH SRC OUTPUT_ROOT DEPENDENT)
         COMMAND ${CMAKE_COMMAND}
             "-DSRC=${SRC}"
             "-DDST=${_dst}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/OrigamiNNColocate.cmake"
+            -P "${_ORIGAMI_NN_COLOCATE_SCRIPT}"
         COMMENT "Colocating origami tilewright weights for ${ARCH} from ${SRC}"
         VERBATIM
     )
