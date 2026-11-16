@@ -95,58 +95,126 @@ __device__ inline float convEpiGated(float v, float gate)
     return gate == 0.0f ? 0.0f : v * gate;
 }
 
-__device__ inline float convEpiSigmoid(float v)
+// The activations below are built from the hardware exp2, log2 and reciprocal (v_exp_f32,
+// v_log_f32, v_rcp_f32: 1 ulp each) rather than the library's expf/erfcf/expm1f/log1pf and IEEE
+// division, which cost them 25-130 instructions an element. Not fast math: NaN stays NaN and the
+// infinities keep their limits. Each states its error, measured on gfx942 against a double
+// reference over 29M inputs in [-100, 100]. exp2 of v log2(e) carries the rounding of the product,
+// a relative error of about |v| 2^-24 in e^v: it matters only where the result is a tail value far
+// below |v| (the fused tests' bound is 4e-6 times the chain's largest magnitude).
+//
+// They stay free of branches: a branch in the per-element epilogue splits the unrolled store code
+// of the tile kernels into blocks, and their register allocation then grows by up to the tile's
+// outputs (measured on the depthwise tiles: 49 to 215 VGPRs). Where a select chooses between v and
+// an expensive value, the value passes an empty asm so the compiler does not turn the select into
+// a branch around it.
+constexpr float CONV_EPI_LOG2E = 1.44269504088896341f;
+
+/// e^v from the hardware exp2: 0 at -inf, inf at +inf, NaN for NaN.
+__device__ inline float convEpiExp(float v)
 {
-    return 1.0f / (1.0f + expf(-v));
+    return __builtin_amdgcn_exp2f(CONV_EPI_LOG2E * v);
 }
 
-/// x * sigmoid(beta x): swish, silu at beta 1.
+/// 1 / (1 + e^-v). Relative error at most (|v| + 4) 2^-24; sigmoid(-inf) = rcp(inf) = 0.
+__device__ inline float convEpiSigmoid(float v)
+{
+    return __builtin_amdgcn_rcpf(1.0f + convEpiExp(-v));
+}
+
+/// x * sigmoid(beta x): swish, silu at beta 1. Error as sigmoid's at beta x, in the gate.
 __device__ inline float convEpiSwish(float v, float beta)
 {
     return convEpiGated(v, convEpiSigmoid(beta * v));
 }
 
-/// GELU with the exact normal CDF, 0.5 erfc(-x / sqrt 2), accurate in the negative tail.
+/// erfc(z) for z >= 0 (the Chebyshev fit of Numerical Recipes' erfcc, fractional error 1.2e-7 in
+/// exact arithmetic): t e^(-z^2 + P(t)), t = 1 / (1 + z / 2). 0 at +inf, NaN for NaN.
+__device__ inline float convEpiErfcPos(float z)
+{
+    const float t = __builtin_amdgcn_rcpf(fmaf(0.5f, z, 1.0f));
+    float p = 0.17087277f;
+    p = fmaf(p, t, -0.82215223f);
+    p = fmaf(p, t, 1.48851587f);
+    p = fmaf(p, t, -1.13520398f);
+    p = fmaf(p, t, 0.27886807f);
+    p = fmaf(p, t, -0.18628806f);
+    p = fmaf(p, t, 0.09678418f);
+    p = fmaf(p, t, 0.37409196f);
+    p = fmaf(p, t, 1.00002368f);
+    p = fmaf(p, t, -1.26551223f);
+    return t * convEpiExp(fmaf(-z, z, p));
+}
+
+/// GELU with the exact normal CDF, x 0.5 erfc(-x / sqrt 2), relative in the negative tail: the
+/// gate is 0.5 erfc(|x| / sqrt 2) at or below 0 and 1 minus it above. Error: 1 ulp above 0
+/// (3.8e-7 at 4.9); below 0 relative (v^2 + 16) 2^-23, the rounding of z^2 in the exponent
+/// (1.6e-5 at -11.4, where GELU is -1e-29).
 __device__ inline float convEpiGelu(float v)
 {
-    return convEpiGated(v, 0.5f * erfcf(-v * 0.70710678118654752f));
+    const float half = 0.5f * convEpiErfcPos(fabsf(v) * 0.70710678118654752f);
+    return convEpiGated(v, v <= 0.0f ? half : 1.0f - half);
 }
 
-/// GELU with the tanh approximation (PyTorch's approximate="tanh").
-// The activations below stay free of branches: a branch in the per-element epilogue splits the
-// unrolled store code of the tile kernels into blocks, and their register allocation then grows
-// by up to the tile's outputs (measured on the depthwise tiles: 49 to 215 VGPRs). The library's
-// tanhf branches over its ranges, so tanh is built on expm1f; where a select chooses between v
-// and an expensive value, the value passes an empty asm so the compiler does not turn the select
-// into a branch around it.
-
-/// tanh from expm1: -t / (t + 2) with t = e^(-2|v|) - 1, signed like v. Accurate near 0 (expm1),
-/// 1 at infinity, NaN for NaN.
+/// tanh: below |v| 0.625 the odd minimax polynomial v + v^3 P(v^2) (under 1 ulp; e^(2|v|) - 1
+/// would cancel there), above it 1 - 2 / (e^(2|v|) + 1); signed like v, 1 at infinity, NaN for
+/// NaN. Error: under 2 ulp (1.6 at 0.63).
 __device__ inline float convEpiTanh(float v)
 {
-    const float t = expm1f(-2.0f * fabsf(v));
-    return copysignf(-t / (t + 2.0f), v);
+    const float a = fabsf(v);
+    const float s = a * a;
+    float p = -0.005704977549612522f;
+    p = fmaf(p, s, 0.020639078691601753f);
+    p = fmaf(p, s, -0.05373971164226532f);
+    p = fmaf(p, s, 0.13331441581249237f);
+    p = fmaf(p, s, -0.3333328068256378f);
+    const float small = fmaf(a * s, p, a);
+    const float large = 1.0f - 2.0f * __builtin_amdgcn_rcpf(1.0f + convEpiExp(2.0f * a));
+    return copysignf(a < 0.625f ? small : large, v);
 }
 
+/// GELU with the tanh approximation (PyTorch's approximate="tanh"): its gate 0.5 (1 + tanh u) is
+/// sigmoid(2u), which keeps the negative tail's relative accuracy. Error: sigmoid's at 2u,
+/// relative (|2u| + 4) 2^-24 in the gate (5.2e-7 absolute at 4.7).
 __device__ inline float convEpiGeluTanh(float v)
 {
-    const float inner = 0.79788456080286536f * (v + 0.044715f * v * v * v);
-    return convEpiGated(v, 0.5f * (1.0f + convEpiTanh(inner)));
+    const float inner = 0.79788456080286536f * fmaf(0.044715f * v, v * v, v);
+    return convEpiGated(v, convEpiSigmoid(2.0f * inner));
 }
 
-/// ELU: v above 0, alpha (e^v - 1) at or below.
+/// ELU: v above 0, alpha (e^v - 1) at or below: above -0.5 the minimax polynomial v + v^2 P(v)
+/// (under 1 ulp; e^v - 1 would cancel there), else e^v - 1. Error: under 2 ulp (1.8 at -0.52),
+/// times alpha.
 __device__ inline float convEpiElu(float v, float alpha)
 {
-    float below = alpha * expm1f(v);
+    float p = 0.0011259219609200954f;
+    p = fmaf(p, v, 0.008193294517695904f);
+    p = fmaf(p, v, 0.04163204878568649f);
+    p = fmaf(p, v, 0.16666288673877716f);
+    p = fmaf(p, v, 0.49999985098838806f);
+    const float small = fmaf(v * v, p, v);
+    float below = alpha * (v > -0.5f ? small : convEpiExp(v) - 1.0f);
     asm("" : "+v"(below));
     return v > 0.0f ? v : below;
 }
 
-/// Softplus as PyTorch computes it: log(1 + e^(beta v)) / beta, and v itself where beta v > 20.
+/// log(1 + e) for e in [0, 1], relative for small e: log(u) e / (u - 1) with u = 1 + e corrects
+/// the rounding of u (Goldberg), and e itself where u rounds to 1.
+__device__ inline float convEpiLog1pUnit(float e)
+{
+    const float u = 1.0f + e;
+    const float l = __builtin_amdgcn_logf(u) * 0.69314718055994531f;
+    return u == 1.0f ? e : l * (e * __builtin_amdgcn_rcpf(u - 1.0f));
+}
+
+/// Softplus as PyTorch computes it, log(1 + e^(beta v)) / beta, and v itself where beta v > 20;
+/// as max(beta v, 0) + log(1 + e^-|beta v|), so the exponential never overflows.
+/// Error: relative (|beta v| + 4) 2^-24 (3.6e-6 at beta v = -68, where softplus is 3e-30).
 __device__ inline float convEpiSoftplus(float v, float beta)
 {
     const float bv = beta * v;
-    float smooth = log1pf(expf(bv)) / beta;
+    float smooth = (fmaxf(bv, 0.0f) + convEpiLog1pUnit(convEpiExp(-fabsf(bv))))
+                   * __builtin_amdgcn_rcpf(beta);
     asm("" : "+v"(smooth));
     return bv > 20.0f ? v : smooth;
 }
