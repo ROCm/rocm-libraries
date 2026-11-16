@@ -1207,6 +1207,8 @@ std::string Handle::GetDeviceNameImpl() const { return this->impl->get_device_na
 
 std::string Handle::GetDeviceName() const { return this->GetTargetProperties().Name(); }
 
+int Handle::GetDeviceId() const { return this->impl->device; }
+
 const TargetProperties& Handle::GetTargetProperties() const
 {
     return this->impl->target_properties;

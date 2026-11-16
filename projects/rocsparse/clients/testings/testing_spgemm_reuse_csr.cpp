@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -187,6 +187,56 @@ void testing_spgemm_reuse_csr_bad_arg(const Arguments& arg)
         select_bad_arg_analysis(rocsparse_spgemm, nargs_to_exclude, args_to_exclude, PARAMS);
     }
 #undef PARAMS
+
+    // An operation other than none is not implemented, at every stage, and the check
+    // runs before any device access.
+    {
+        const T* alpha       = (const T*)0x4;
+        const T* beta        = (const T*)0x4;
+        size_t*  buffer_size = (size_t*)0x4;
+        void*    temp_buffer = (void*)0x4;
+        for(const rocsparse_operation op :
+            {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose})
+        {
+            for(const rocsparse_spgemm_stage s : {rocsparse_spgemm_stage_buffer_size,
+                                                  rocsparse_spgemm_stage_nnz,
+                                                  rocsparse_spgemm_stage_compute,
+                                                  rocsparse_spgemm_stage_symbolic,
+                                                  rocsparse_spgemm_stage_numeric})
+            {
+                EXPECT_ROCSPARSE_STATUS(rocsparse_spgemm(handle,
+                                                         op,
+                                                         trans_B,
+                                                         alpha,
+                                                         A,
+                                                         B,
+                                                         beta,
+                                                         D,
+                                                         C,
+                                                         compute_type,
+                                                         alg,
+                                                         s,
+                                                         buffer_size,
+                                                         temp_buffer),
+                                        rocsparse_status_not_implemented);
+                EXPECT_ROCSPARSE_STATUS(rocsparse_spgemm(handle,
+                                                         trans_A,
+                                                         op,
+                                                         alpha,
+                                                         A,
+                                                         B,
+                                                         beta,
+                                                         D,
+                                                         C,
+                                                         compute_type,
+                                                         alg,
+                                                         s,
+                                                         buffer_size,
+                                                         temp_buffer),
+                                        rocsparse_status_not_implemented);
+            }
+        }
+    }
 }
 
 template <typename I, typename J, typename T>

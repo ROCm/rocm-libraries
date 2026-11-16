@@ -752,14 +752,6 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         rebase_k_window(k_dram_window, k_physical_pages[number<0>{}]);
 
         constexpr auto k_oob_ck = bool_constant<true>{};
-        constexpr auto k_pre_np = [&]() {
-            if constexpr(kPadSeqLenK &&
-                         (BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                          (BiasEnum != BlockAttentionBiasEnum::NO_BIAS && kHasDropout)))
-                return bool_constant<true>{};
-            else
-                return bool_constant<false>{};
-        }();
 
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
         auto bias_dram_window =
@@ -1037,19 +1029,17 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             prefetch_v_physical_pages(k_loop_start);
         };
 
-        auto load_k_tile = [&](auto i_buf, auto& k_dram_window_ref, auto pre_nop) {
+        auto load_k_tile = [&](auto i_buf, auto& k_dram_window_ref) {
             if constexpr(Policy::kUseSyncKLoad)
             {
                 auto k_buf        = load_tile(k_dram_window_ref, number<-1>{}, k_oob_ck);
                 auto k_lds_window = get_slice_tile(
                     k_lds_load, sequence<i_buf * kN0, 0>{}, sequence<(i_buf + 1) * kN0, kK0>{});
                 store_tile(k_lds_window, k_buf);
-                (void)pre_nop;
             }
             else
             {
-                async_load_tile_raw(
-                    k_lds_store(i_buf), k_dram_window_ref, number<-1>{}, k_oob_ck, pre_nop);
+                async_load_tile_raw(k_lds_store(i_buf), k_dram_window_ref, number<-1>{}, k_oob_ck);
             }
         };
         // Sync K loads land in LDS through ds_store, which the vmcnt fences before the
@@ -1060,7 +1050,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         };
 
         // prefetch K tile
-        load_k_tile(LdsSeq.at(number<0>{}), k_dram_window, k_pre_np);
+        load_k_tile(LdsSeq.at(number<0>{}), k_dram_window);
         move_tile_window(k_dram_window, {0, kK0});
         __builtin_amdgcn_sched_barrier(0);
 
@@ -1117,7 +1107,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
             if constexpr(k0_loops > 1)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    load_k_tile(LdsSeq.at(number<i_k0 + 1>{}), k_dram_window, k_pre_np);
+                    load_k_tile(LdsSeq.at(number<i_k0 + 1>{}), k_dram_window);
                     if constexpr(i_k0 < k0_loops - 1)
                         move_tile_window(k_dram_window, {0, kK0});
 
@@ -1759,7 +1749,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 if constexpr(k1_loops >= 2 &&
                              LdsSeq.at(number<0>{}) == LdsSeq.at(number<k0_loops + k1_loops - 2>{}))
                     __builtin_amdgcn_s_barrier();
-                load_k_tile(LdsSeq.at(number<0>{}), k_dram_window, k_pre_np);
+                load_k_tile(LdsSeq.at(number<0>{}), k_dram_window);
                 move_tile_window(k_dram_window, {0, kK0});
             }
             // tail

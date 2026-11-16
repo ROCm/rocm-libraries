@@ -68,7 +68,7 @@ extern "C" {
 *  @param[in]
 *  nnzb            number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA          descriptor of the sparse BSR matrix. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -86,7 +86,7 @@ extern "C" {
 *  x               array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y               array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
@@ -157,7 +157,7 @@ hipsparseStatus_t hipsparseSbsrmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb            number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA          descriptor of the sparse BSR matrix. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -175,7 +175,7 @@ hipsparseStatus_t hipsparseSbsrmv(hipsparseHandle_t         handle,
 *  x               array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y               array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
@@ -245,7 +245,7 @@ hipsparseStatus_t hipsparseDbsrmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb            number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA          descriptor of the sparse BSR matrix. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -263,7 +263,7 @@ hipsparseStatus_t hipsparseDbsrmv(hipsparseHandle_t         handle,
 *  x               array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y               array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
@@ -333,7 +333,7 @@ hipsparseStatus_t hipsparseCbsrmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb            number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA          descriptor of the sparse BSR matrix. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -351,7 +351,7 @@ hipsparseStatus_t hipsparseCbsrmv(hipsparseHandle_t         handle,
 *  x               array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y               array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
 *                  elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
