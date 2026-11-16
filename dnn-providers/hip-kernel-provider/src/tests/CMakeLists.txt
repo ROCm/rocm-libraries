@@ -23,6 +23,7 @@ add_executable(
     core/TestContext.cpp
     core/TestUtils.cpp
     core/TestPluginPublic.cpp
+    compilation/TestHiprtcDiskCache.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp

@@ -13,6 +13,7 @@ add_library(
     core/Container.cpp
     core/PluginPublic.cpp
     core/Utils.cpp
+    compilation/HiprtcDiskCache.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
     utilities/Digest.cpp
@@ -41,6 +42,8 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 
 dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc Threads::Threads)
+# dladdr/dl_iterate_phdr/dlsym name the compiler libraries in the HIPRTC cache key.
+target_link_libraries(hip_kernel_provider_impl PUBLIC ${CMAKE_DL_LIBS})
 if(KPACK_NEEDED)
     target_link_libraries(hip_kernel_provider_impl PRIVATE rocm::rocm_kpack)
     if(NOT WIN32)
