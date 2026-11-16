@@ -756,9 +756,9 @@ The base coefficient, which the SDK uses for an engine that sets nothing, is 4:
 the smallest whole number that leaves a headroom of at least 1.5 (the floor used
 for MIOpen's value below) over the largest need of any solver family but
 Winograd, 2.59 on xdlops solvers on gfx90a (2.46 on CK fused solvers on
-gfx942). At 4 that headroom is 1.54. 3
-would be enough to pass the data (1.22) but is too thin for hardware nobody has
-measured. For Winograd the same constant fails up to 5 correct outputs in a run
+gfx942). At 4 that headroom is 1.54. 3 would still pass the data (1.16) but is
+too thin for hardware nobody has measured. For Winograd the same constant fails
+up to 5 correct outputs in a run
 (one seed, one bundle set, one architecture); no theory term tells the two
 apart, and the harness does not know the solver.
 
