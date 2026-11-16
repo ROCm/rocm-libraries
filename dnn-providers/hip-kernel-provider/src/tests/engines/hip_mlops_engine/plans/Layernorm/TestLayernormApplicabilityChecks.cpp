@@ -969,3 +969,290 @@ TEST(TestLayernormValidator, MismatchStatsShapesBprop)
     EXPECT_THROW(validator.checkTensorConfigSupported(attr),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+namespace
+{
+
+using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+std::vector<int64_t> nchwStrides()
+{
+    return {128, 16, 4, 1};
+}
+std::vector<int64_t> nhwcStrides()
+{
+    return {128, 1, 32, 8};
+}
+
+// Strides are per tensor so a test can mutate exactly one tensor. Fprop ignores dscale and dbias.
+struct LayoutCase
+{
+    std::vector<int64_t> xDims = {2, 8, 4, 4};
+    std::vector<int64_t> xStrides = nchwStrides();
+    std::vector<int64_t> affineDims = {1, 8, 4, 4};
+    std::vector<int64_t> scaleStrides = nchwStrides();
+    std::vector<int64_t> biasStrides = nchwStrides();
+    std::vector<int64_t> dscaleStrides = nchwStrides();
+    std::vector<int64_t> dbiasStrides = nchwStrides();
+    std::vector<int64_t> statDims = {2, 1, 1, 1};
+    std::vector<int64_t> meanStrides = {1, 1, 1, 1};
+    std::vector<int64_t> invVarianceStrides = {1, 1, 1, 1};
+};
+
+LayoutCase makeNhwcCase()
+{
+    LayoutCase layout;
+    layout.xStrides = nhwcStrides();
+    layout.scaleStrides = nhwcStrides();
+    layout.biasStrides = nhwcStrides();
+    layout.dscaleStrides = nhwcStrides();
+    layout.dbiasStrides = nhwcStrides();
+    return layout;
+}
+
+void expectFprop(const LayoutCase& layout, bool declined)
+{
+    const std::vector<int64_t> epsilonDims = {1};
+    auto builder = createInvalidShapeLayernormFpropGraph(layout.xDims,
+                                                         layout.xStrides,
+                                                         layout.xDims,
+                                                         layout.xStrides,
+                                                         layout.affineDims,
+                                                         layout.scaleStrides,
+                                                         layout.affineDims,
+                                                         layout.biasStrides,
+                                                         epsilonDims,
+                                                         epsilonDims,
+                                                         layout.statDims,
+                                                         layout.meanStrides,
+                                                         layout.statDims,
+                                                         layout.invVarianceStrides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attr = *graph.getNode(0).attributes_as_LayernormAttributes();
+
+    LayernormValidator validator(graph.getTensorMap());
+    if(declined)
+    {
+        EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+    else
+    {
+        EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    }
+}
+
+void expectBprop(const LayoutCase& layout, bool declined)
+{
+    const std::vector<int64_t> epsilonDims = {1};
+    auto builder = createInvalidShapeLayernormBwdGraph(layout.xDims,
+                                                       layout.xStrides,
+                                                       layout.xDims,
+                                                       layout.xStrides,
+                                                       layout.xDims,
+                                                       layout.xStrides,
+                                                       layout.affineDims,
+                                                       layout.scaleStrides,
+                                                       layout.affineDims,
+                                                       layout.dscaleStrides,
+                                                       layout.affineDims,
+                                                       layout.dbiasStrides,
+                                                       epsilonDims,
+                                                       epsilonDims,
+                                                       layout.statDims,
+                                                       layout.meanStrides,
+                                                       layout.statDims,
+                                                       layout.invVarianceStrides);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attr = *graph.getNode(0).attributes_as_LayernormBackwardAttributes();
+
+    LayernormValidator validator(graph.getTensorMap());
+    if(declined)
+    {
+        EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+    else
+    {
+        EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    }
+}
+
+void expectBpropDxType(DT xType, DT dxType, bool declined)
+{
+    auto builder = createInvalidTypeLayernormBwdGraph(
+        xType, xType, dxType, xType, xType, xType, DT::FLOAT, xType, xType);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attr = *graph.getNode(0).attributes_as_LayernormBackwardAttributes();
+
+    LayernormValidator validator(graph.getTensorMap());
+    if(declined)
+    {
+        EXPECT_THROW(validator.checkTensorConfigSupported(attr),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+    else
+    {
+        EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
+    }
+}
+
+} // anonymous namespace
+
+TEST(TestLayernormValidator, MatchingAffineLayoutAcceptedFprop)
+{
+    expectFprop(LayoutCase{}, false);
+    expectFprop(makeNhwcCase(), false);
+}
+
+TEST(TestLayernormValidator, AffineLayoutDifferentFromXDeclinedFprop)
+{
+    {
+        SCOPED_TRACE("NCHW x, NHWC scale");
+        LayoutCase layout;
+        layout.scaleStrides = nhwcStrides();
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("NCHW x, NHWC bias");
+        LayoutCase layout;
+        layout.biasStrides = nhwcStrides();
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("NHWC x, NCHW scale");
+        auto layout = makeNhwcCase();
+        layout.scaleStrides = nchwStrides();
+        expectFprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("NHWC x, NCHW bias");
+        auto layout = makeNhwcCase();
+        layout.biasStrides = nchwStrides();
+        expectFprop(layout, true);
+    }
+}
+
+TEST(TestLayernormValidator, LowerRankAffineAlignsToTrailingDimsOfXFprop)
+{
+    LayoutCase layout;
+    layout.affineDims = {8, 4, 4};
+    layout.scaleStrides = {16, 4, 1};
+    layout.biasStrides = {16, 4, 1};
+    expectFprop(layout, false);
+
+    // Row-major [C,H,W] against an NHWC x reads C with the wrong stride.
+    layout.xStrides = nhwcStrides();
+    expectFprop(layout, true);
+}
+
+TEST(TestLayernormValidator, MatchingAffineLayoutAcceptedBprop)
+{
+    expectBprop(LayoutCase{}, false);
+    expectBprop(makeNhwcCase(), false);
+}
+
+TEST(TestLayernormValidator, AffineLayoutDifferentFromXDeclinedBprop)
+{
+    {
+        SCOPED_TRACE("NHWC x, row-major scale");
+        auto layout = makeNhwcCase();
+        layout.scaleStrides = nchwStrides();
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("NHWC x, row-major dscale");
+        auto layout = makeNhwcCase();
+        layout.dscaleStrides = nchwStrides();
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("NHWC x, row-major dbias");
+        auto layout = makeNhwcCase();
+        layout.dbiasStrides = nchwStrides();
+        expectBprop(layout, true);
+    }
+    {
+        SCOPED_TRACE("NCHW x, NHWC scale");
+        LayoutCase layout;
+        layout.scaleStrides = nhwcStrides();
+        expectBprop(layout, true);
+    }
+}
+
+TEST(TestLayernormValidator, PaddedOrTransposedDscaleDbiasDeclinedBprop)
+{
+    const std::vector<int64_t> padded = {168, 56, 8, 1};
+    const std::vector<int64_t> nhwc = {96, 1, 24, 3};
+
+    LayoutCase layout;
+    layout.xDims = {2, 3, 4, 8};
+    layout.xStrides = {96, 32, 8, 1};
+    layout.affineDims = {1, 3, 4, 8};
+    layout.scaleStrides = {96, 32, 8, 1};
+    layout.dscaleStrides = {96, 32, 8, 1};
+    layout.dbiasStrides = {96, 32, 8, 1};
+    expectBprop(layout, false);
+
+    for(const auto* strides : {&padded, &nhwc})
+    {
+        {
+            SCOPED_TRACE("dscale");
+            auto mutated = layout;
+            mutated.dscaleStrides = *strides;
+            expectBprop(mutated, true);
+        }
+        {
+            SCOPED_TRACE("dbias");
+            auto mutated = layout;
+            mutated.dbiasStrides = *strides;
+            expectBprop(mutated, true);
+        }
+    }
+
+    // The same NHWC pitch is consistent with an NHWC x.
+    layout.xStrides = nhwc;
+    layout.scaleStrides = nhwc;
+    layout.dscaleStrides = nhwc;
+    layout.dbiasStrides = nhwc;
+    expectBprop(layout, false);
+}
+
+TEST(TestLayernormValidator, StatOrderDifferentFromXDeclinedBprop)
+{
+    // Normalizing over H and W leaves stats [N,C,1,1] with two non-unit dims.
+    auto layout = makeNhwcCase();
+    layout.affineDims = {1, 1, 4, 4};
+    layout.scaleStrides = {16, 16, 4, 1};
+    layout.dscaleStrides = {16, 16, 4, 1};
+    layout.dbiasStrides = {16, 16, 4, 1};
+    layout.statDims = {2, 8, 1, 1};
+    layout.meanStrides = {8, 1, 1, 1};
+    layout.invVarianceStrides = {8, 1, 1, 1};
+    // Strides {C,1,1,1} order N before C exactly as NHWC x does, despite the unit-dim ties.
+    expectBprop(layout, false);
+
+    {
+        SCOPED_TRACE("mean");
+        auto mutated = layout;
+        mutated.meanStrides = {1, 2, 1, 1};
+        expectBprop(mutated, true);
+    }
+    {
+        SCOPED_TRACE("inv_variance");
+        auto mutated = layout;
+        mutated.invVarianceStrides = {1, 2, 1, 1};
+        expectBprop(mutated, true);
+    }
+}
+
+TEST(TestLayernormValidator, DxDataTypeDifferentFromXDeclinedBprop)
+{
+    expectBpropDxType(DT::FLOAT, DT::FLOAT, false);
+    expectBpropDxType(DT::FLOAT, DT::HALF, true);
+    expectBpropDxType(DT::FLOAT, DT::BFLOAT16, true);
+    expectBpropDxType(DT::HALF, DT::FLOAT, true);
+}

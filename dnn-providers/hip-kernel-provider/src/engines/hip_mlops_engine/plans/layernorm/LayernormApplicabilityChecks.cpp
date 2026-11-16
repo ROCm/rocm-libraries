@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "LayernormApplicabilityChecks.hpp"
 #include "core/Utils.hpp"
@@ -218,6 +220,79 @@ void LayernormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
     }
 }
 
+void LayernormValidator::checkTensorMemoryOrderSupported(
+    int64_t xTensorId,
+    const std::vector<NamedTensorId>& affineTensors,
+    const std::vector<NamedTensorId>& statTensors)
+{
+    const auto& xAttr = findTensorAttributes(_tensorMap, xTensorId);
+    const std::vector<int64_t> xStrides(xAttr.strides()->begin(), xAttr.strides()->end());
+    const size_t xRank = xAttr.dims()->size();
+
+    const auto check = [&](const NamedTensorId& named, bool alignTrailing) {
+        const auto& attr = findTensorAttributes(_tensorMap, named.second);
+        if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&attr))
+        {
+            return;
+        }
+
+        const std::vector<int64_t> dims(attr.dims()->begin(), attr.dims()->end());
+        const std::vector<int64_t> strides(attr.strides()->begin(), attr.strides()->end());
+        if(dims.size() > xRank)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Layernorm ") + named.first + " tensor has more dimensions than x.");
+        }
+        if(!hipdnn_data_sdk::utilities::isTensorPacked(dims, strides))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           std::string("Layernorm ") + named.first
+                                                               + " tensor must be packed.");
+        }
+
+        const size_t offset = alignTrailing ? xRank - dims.size() : 0;
+        for(size_t a = 0; a < dims.size(); ++a)
+        {
+            for(size_t b = a + 1; b < dims.size(); ++b)
+            {
+                if(dims[a] <= 1 || dims[b] <= 1)
+                {
+                    continue;
+                }
+                if((strides[a] < strides[b]) != (xStrides[a + offset] < xStrides[b + offset]))
+                {
+                    throw hipdnn_plugin_sdk::HipdnnPluginException(
+                        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                        std::string("Layernorm ") + named.first
+                            + " tensor must have the same memory order as x.");
+                }
+            }
+        }
+    };
+
+    for(const auto& named : affineTensors)
+    {
+        check(named, true);
+    }
+    for(const auto& named : statTensors)
+    {
+        check(named, false);
+    }
+}
+
+void LayernormValidator::checkDxDataTypeSupported(int64_t xTensorId, int64_t dxTensorId)
+{
+    const auto& xAttr = findTensorAttributes(_tensorMap, xTensorId);
+    const auto& dxAttr = findTensorAttributes(_tensorMap, dxTensorId);
+    if(dxAttr.data_type() != xAttr.data_type())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Layernorm backward requires dx to have the same data type as x.");
+    }
+}
+
 // --- High-level Configuration Validators ---
 
 void LayernormValidator::checkTensorConfigSupported(
@@ -235,6 +310,15 @@ void LayernormValidator::checkTensorConfigSupported(
     {
         statTensorIds.push_back(lnAttr.inv_variance_tensor_uid().value());
     }
+    std::vector<NamedTensorId> fwdStatTensors;
+    if(lnAttr.mean_tensor_uid().has_value())
+    {
+        fwdStatTensors.emplace_back("mean", lnAttr.mean_tensor_uid().value());
+    }
+    if(lnAttr.inv_variance_tensor_uid().has_value())
+    {
+        fwdStatTensors.emplace_back("inv_variance", lnAttr.inv_variance_tensor_uid().value());
+    }
     const std::vector<int64_t> epsilonTensorIds = {lnAttr.epsilon_tensor_uid()};
 
     std::vector<int64_t> ioAndStatTensorIds
@@ -245,6 +329,10 @@ void LayernormValidator::checkTensorConfigSupported(
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorMemoryOrderSupported(
+        lnAttr.x_tensor_uid(),
+        {{"scale", lnAttr.scale_tensor_uid()}, {"bias", lnAttr.bias_tensor_uid()}},
+        fwdStatTensors);
 }
 
 void LayernormValidator::checkTensorConfigSupported(
@@ -263,6 +351,15 @@ void LayernormValidator::checkTensorConfigSupported(
     {
         statTensorIds.push_back(lnAttr.inv_variance_tensor_uid().value());
     }
+    std::vector<NamedTensorId> bwdStatTensors;
+    if(lnAttr.mean_tensor_uid().has_value())
+    {
+        bwdStatTensors.emplace_back("mean", lnAttr.mean_tensor_uid().value());
+    }
+    if(lnAttr.inv_variance_tensor_uid().has_value())
+    {
+        bwdStatTensors.emplace_back("inv_variance", lnAttr.inv_variance_tensor_uid().value());
+    }
     std::vector<int64_t> epsilonTensorIds;
     if(lnAttr.epsilon_tensor_uid().has_value())
     {
@@ -273,6 +370,12 @@ void LayernormValidator::checkTensorConfigSupported(
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds, epsilonTensorIds);
     validateNormalizedDim(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
+    checkTensorMemoryOrderSupported(lnAttr.x_tensor_uid(),
+                                    {{"scale", lnAttr.scale_tensor_uid()},
+                                     {"dscale", lnAttr.dscale_tensor_uid()},
+                                     {"dbias", lnAttr.dbias_tensor_uid()}},
+                                    bwdStatTensors);
+    checkDxDataTypeSupported(lnAttr.x_tensor_uid(), lnAttr.dx_tensor_uid());
 }
 
 } // namespace hip_kernel_provider::layernorm

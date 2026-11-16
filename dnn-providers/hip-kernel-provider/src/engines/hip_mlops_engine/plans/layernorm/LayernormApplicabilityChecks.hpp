@@ -6,8 +6,10 @@
 #include "engines/hip_mlops_engine/plans/ApplicabilityChecks.hpp"
 
 #include <array>
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
@@ -16,6 +18,7 @@
 
 namespace hip_kernel_provider::layernorm
 {
+using NamedTensorId = std::pair<const char*, int64_t>;
 
 class LayernormValidator : public IValidator
 {
@@ -45,6 +48,15 @@ public:
     void checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
                                     const std::vector<int64_t>& affineTensorIds,
                                     const std::vector<int64_t>& statTensorIds);
+
+    // Affine tensors align to x's trailing dims, stat tensors to x's leading dims.
+    // Each must be packed and, over its dims of size > 1, ordered in memory as x is.
+    void checkTensorMemoryOrderSupported(int64_t xTensorId,
+                                         const std::vector<NamedTensorId>& affineTensors,
+                                         const std::vector<NamedTensorId>& statTensors);
+
+    // The backward kernel writes dx with x's data type.
+    void checkDxDataTypeSupported(int64_t xTensorId, int64_t dxTensorId);
 
     // --- High-level Configuration Validators ---
 
