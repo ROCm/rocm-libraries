@@ -169,6 +169,7 @@ int main(int argc, char** argv) {
 
     // Other initializations
     int missingFuncFlag = 0;
+    int exitStatus = 0;  // non-zero once a run fails; returned after cleanup
     int i = 0, j = 0;
     int maxHeight = 0, maxWidth = 0;
     Rpp64u ioBufferSize = 0;
@@ -2154,19 +2155,22 @@ int main(int argc, char** argv) {
             wallTime = endWallTime - startWallTime;
             if (missingFuncFlag == 1) {
                 cout << "\nThe functionality " << func << " doesn't yet exist in RPP\n";
-                return RPP_ERROR_NOT_IMPLEMENTED;
+                exitStatus = RPP_ERROR_NOT_IMPLEMENTED;
+                break;
             }
             if (errorCodeCapture != RPP_SUCCESS) {
                 cout << "\nThe functionality " << func << " returned an error status "
                      << rppGetStatusString(errorCodeCapture) << " on run number "
                      << perfRunCount + 1 << " of " << numRuns << " runs.\n";
-                return errorCodeCapture;
+                exitStatus = errorCodeCapture;
+                break;
             }
 
             maxWallTime = std::max(maxWallTime, wallTime);
             minWallTime = std::min(minWallTime, wallTime);
             avgWallTime += wallTime;
         }
+        if (exitStatus != 0) break;
         cpuTime *= 1000;
         wallTime *= 1000;
 
@@ -2422,7 +2426,7 @@ int main(int argc, char** argv) {
 
     rppDestroy(handle, backend);
 
-    if (testType == PERFORMANCE_TEST)  // performance tests
+    if (testType == PERFORMANCE_TEST && exitStatus == 0)  // performance tests
     {
         // Display measured times
         maxWallTime *= 1000;
@@ -2458,5 +2462,5 @@ int main(int argc, char** argv) {
         free(cropRoi);
         free(patchRoi);
     }
-    return 0;
+    return exitStatus;
 }

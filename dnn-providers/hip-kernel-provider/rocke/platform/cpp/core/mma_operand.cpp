@@ -13,17 +13,18 @@
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
 
-/* The operand roles: A, B and the accumulator C (ROCKE_MMA_ROLE_ACC). The
- * operand rule applies to no other. */
+/* Machine operand roles: the multiplicands src0/src1 and accumulator src2.
+ * The result has its own admission rule. */
 static bool is_operand_role(rocke_mma_role_t role)
 {
-    return role == ROCKE_MMA_ROLE_A || role == ROCKE_MMA_ROLE_B || role == ROCKE_MMA_ROLE_ACC;
+    return role == ROCKE_MMA_ROLE_SRC0 || role == ROCKE_MMA_ROLE_SRC1
+           || role == ROCKE_MMA_ROLE_SRC2;
 }
 
 /* Python spells the roles "a", "b" and "c". */
 static const char* role_name(rocke_mma_role_t role)
 {
-    return role == ROCKE_MMA_ROLE_A ? "a" : role == ROCKE_MMA_ROLE_B ? "b" : "c";
+    return role == ROCKE_MMA_ROLE_SRC0 ? "a" : role == ROCKE_MMA_ROLE_SRC1 ? "b" : "c";
 }
 
 const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_role_t role)
@@ -31,7 +32,7 @@ const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_rol
     if(!is_operand_role(role))
         throw ckc::ValueError("an MMA operand role is A, B or C");
     /* A is operand 0, B operand 1 and C, the accumulator, operand 2. */
-    const int index = role == ROCKE_MMA_ROLE_A ? 0 : role == ROCKE_MMA_ROLE_B ? 1 : 2;
+    const int index = role == ROCKE_MMA_ROLE_SRC0 ? 0 : role == ROCKE_MMA_ROLE_SRC1 ? 1 : 2;
     if(op->num_operands <= index)
         throw ckc::ValueError(ckc::format_error("%s has %d operands; an MMA op takes A, B and C",
                                                 op->name ? op->name : "(unnamed op)",
@@ -130,10 +131,8 @@ bool rocke_mma_operand_needs_reinterpret(const char* op_id,
     if(rocke_type_eq(operand_type, register_type))
         return false;
     const rocke_mma_op_t* catalog_op = catalog_row(op_id, gfx);
-    const char* catalog_dtype = !catalog_op                ? NULL
-                                : role == ROCKE_MMA_ROLE_A ? catalog_op->a_dtype
-                                : role == ROCKE_MMA_ROLE_B ? catalog_op->b_dtype
-                                                           : catalog_op->c_dtype;
+    const int index = role == ROCKE_MMA_ROLE_SRC0 ? 0 : role == ROCKE_MMA_ROLE_SRC1 ? 1 : 2;
+    const char* catalog_dtype = catalog_op ? catalog_op->srcs[index].dtype : NULL;
     const rocke_type_t* admitted[2];
     const int num_admitted = admitted_elements(register_type, catalog_dtype, admitted);
     const int register_bits = rocke_i_type_bits(register_type);

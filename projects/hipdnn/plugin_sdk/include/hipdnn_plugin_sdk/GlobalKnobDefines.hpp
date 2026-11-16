@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <charconv>
+#include <cstddef>
 #include <optional>
 #include <string>
 
@@ -50,6 +52,48 @@ inline std::optional<bool> benchmarkingOverrideFromEnv()
 
     HIPDNN_PLUGIN_LOG_WARN("ignoring unrecognized value for " << FORCE_BENCHMARKING_ENV_NAME
                                                               << ": '" << raw << "'");
+    return std::nullopt;
+}
+
+/// Process-wide cap on how many of the best-ranked candidates the kernel ingestor builds a
+/// plan from. Read by GenericPlanBuilder only; an engine with thousands of applicable
+/// kernels otherwise loads and benchmarks every one of them on a cold plan build.
+///
+/// Two effects worth knowing before setting it: (1) if every kernel in the shortlist fails
+/// to prepare, the build throws rather than falling through to a lower-ranked kernel outside
+/// the limit -- a build that would otherwise have succeeded can now fail outright. (2) any
+/// limit, even one larger than the knob-filtered candidate set, makes a benchmarked winner
+/// record that only covers that (smaller) set serve the build instead of being ignored as
+/// partial coverage -- so turning the limit on and off changes whether an existing record is
+/// trusted, not just how many candidates are tried.
+static constexpr const char* INGESTOR_SHORTLIST_LIMIT_ENV_NAME = "HIPDNN_INGESTOR_SHORTLIST_LIMIT";
+
+/// Reads and parses HIPDNN_INGESTOR_SHORTLIST_LIMIT per call, never cached. A positive
+/// decimal integer, surrounding whitespace allowed, is the limit. Unset, empty, and
+/// whitespace-only are silent and return std::nullopt, meaning no limit. Anything else --
+/// zero, a sign, trailing text, a value past size_t -- logs a WARN naming the variable and
+/// the value and also returns std::nullopt: a typo must not quietly shortlist.
+inline std::optional<size_t> ingestorShortlistLimitFromEnv()
+{
+    const auto raw = hipdnn_data_sdk::utilities::getEnv(INGESTOR_SHORTLIST_LIMIT_ENV_NAME);
+    const std::string normalized = hipdnn_data_sdk::utilities::trim(raw);
+    if(normalized.empty())
+    {
+        return std::nullopt;
+    }
+
+    size_t limit = 0;
+    const auto* begin = normalized.data();
+    const auto* end = begin + normalized.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, limit);
+    if(ec == std::errc{} && ptr == end && limit > 0)
+    {
+        return limit;
+    }
+
+    HIPDNN_PLUGIN_LOG_WARN("ignoring invalid value for " << INGESTOR_SHORTLIST_LIMIT_ENV_NAME
+                                                         << ": '" << raw
+                                                         << "'; expected a positive integer");
     return std::nullopt;
 }
 }
