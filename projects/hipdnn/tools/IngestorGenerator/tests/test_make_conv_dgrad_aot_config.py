@@ -73,6 +73,10 @@ _PIPELINES = {
 #: and its implicit-GEMM kernels per dtype.
 _PARTITIONS = {"gfx942": 32, "gfx950": 34, "gfx1250": 46}
 _IMPLICIT_PER_DTYPE = {"gfx942": 128, "gfx950": 141, "gfx1250": 25}
+#: Per engine, whether it ships a trained ranker: its UED binds the model after the
+#: native scorer and ``heuristics.dvc`` sits beside the KDPs. Stated here, not read
+#: from the bundle under test, so a regenerated bundle that drops its ranker fails.
+_SHIPS_A_RANKER = {"gfx942": True, "gfx950": True, "gfx1250": True}
 
 
 def slug(arch):
@@ -131,13 +135,6 @@ def document(arch, kind):
     return json.loads((shipped_dir(arch) / f"{slug(arch)}.{kind}.json").read_text())
 
 
-def ships_a_ranker(arch):
-    """Whether ``arch``'s engine ships a trained ranker: a promoted model packet
-    turns the UED's default sort list into a list (the native scorer, then the
-    model) and adds the DVC-tracked ``heuristics/`` beside the KDPs."""
-    return isinstance(document(arch, "ued")["sort_kernel_catalog"]["default"], list)
-
-
 @pytest.fixture(scope="module", autouse=True)
 def _rocke_on_path():
     before = list(sys.path)
@@ -183,7 +180,7 @@ def gfx950_shipped():
 
 def test_every_engine_states_its_expectations():
     """A dgrad engine the adapter gains fails here until its expectations are stated."""
-    for table in (_PIPELINES, _PARTITIONS, _IMPLICIT_PER_DTYPE):
+    for table in (_PIPELINES, _PARTITIONS, _IMPLICIT_PER_DTYPE, _SHIPS_A_RANKER):
         assert set(table) == set(ARCHES)
 
 
@@ -271,7 +268,7 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(arch, specs)
     assert names == sorted(
         [f"{slug(arch)}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
         + ["kernel_dtype_matches_graph.umd.json", "artifacts.dvc", ".gitignore"]
-        + (["heuristics.dvc"] if ships_a_ranker(arch) else [])
+        + (["heuristics.dvc"] if _SHIPS_A_RANKER[arch] else [])
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
     top_level = [path for path in folder.iterdir() if path.is_file()]
@@ -300,7 +297,7 @@ def test_the_bundle_names_its_own_native_symbols(arch):
     # id after it instead of replacing it, so "default" is a list once one ships.
     assert list(ued["sort_kernel_catalog"]) == ["default"]
     default = ued["sort_kernel_catalog"]["default"]
-    if ships_a_ranker(arch):
+    if _SHIPS_A_RANKER[arch]:
         assert len(default) > 1 and default[0] == uhd["id"]
         assert all(isinstance(i, str) for i in default)
     else:
