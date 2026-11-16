@@ -48,6 +48,7 @@
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* rocke__mfma_32x32_c_* */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join  */
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
+#include "rocke/helper_rocke.instances.common.attention_tiled_2d_rules.h" /* grouped-KV2 / early-V rules */
 
 #include <math.h>
 #include <stdio.h>
@@ -469,6 +470,13 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     if(spec->lse_head_major && !spec->emit_lse)
     {
         rocke_g950_fail(b, ROCKE_ERR_VALUE, "lse_layout='head_major' requires emit_lse");
+    }
+    /* ---- grouped-KV2 softmax and early-V schedule rules (Python __post_init__,
+     * kernels.common.attention_tiled_2d_rules). */
+    {
+        char reason[ROCKE_ERR_MSG_CAP];
+        if(!rocke_attention_tiled_2d_validate_grouped_kv2_and_early_v(spec, reason, sizeof(reason)))
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, reason);
     }
 
     /* ---- V-double-buffer / deep-ring / staggered-wait / q-reread.

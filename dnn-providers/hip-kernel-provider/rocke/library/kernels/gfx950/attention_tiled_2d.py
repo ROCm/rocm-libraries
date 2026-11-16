@@ -55,6 +55,7 @@ from kernels.common._lse_store import (
 )
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
+from kernels.common.attention_tiled_2d_rules import validate_grouped_kv2_and_early_v
 
 from rocke.core.ir import (
     BF16,
@@ -664,38 +665,16 @@ class UnifiedAttention2DTiledSpec:
                 "use_additive_bias does not support use_transposed_invariant_hoist, "
                 "use_transposed_mask_once, or the non-transposed 32x32 path"
             )
-        if self.use_grouped_kv2_softmax:
-            if self.dtype != "bf16":
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 is restricted to dtype='bf16'"
-                )
-            if not (self.use_mfma_32x32 and self.use_transposed_qk_32x32):
-                raise ValueError(
-                    "use_grouped_kv2_softmax requires the transposed 32x32 R4 path"
-                )
-            if self.block_m_per_warp != 32:
-                raise ValueError("use_grouped_kv2_softmax requires block_m_per_warp=32")
-            if self.sliding_window > 0:
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 requires no sliding window"
-                )
-            if (
-                self.has_softcap
-                or self.use_alibi
-                or self.use_qq_bias
-                or self.use_additive_bias
-            ):
-                raise ValueError(
-                    "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, "
-                    "QQ bias, or additive bias"
-                )
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_grouped_kv2_softmax v1 does not support FP8 KV")
-        if self.use_early_v_schedule:
-            if self.use_grouped_kv2_softmax:
-                raise ValueError("use_early_v_schedule does not support grouped_kv2")
-            if self.kv_storage_dtype is not None:
-                raise ValueError("use_early_v_schedule v1 does not support FP8 KV")
+        ok, reason = validate_grouped_kv2_and_early_v(self)
+        if not ok:
+            raise ValueError(reason)
+        # Checked after the shared rules: the C++ spec has no additive-bias
+        # field, so both engines then report the same first refusal.
+        if self.use_grouped_kv2_softmax and self.use_additive_bias:
+            raise ValueError(
+                "use_grouped_kv2_softmax v1 does not support additive bias - "
+                "use_additive_bias=True, expected False"
+            )
         if self.use_v_double_buffer:
             # v1 wires the V[i+1] prefetch through both the early-V and the
             # post-QK issue sites + the 2x partial-wait before PV. Grouped-KV2
