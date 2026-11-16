@@ -168,15 +168,85 @@ def test_clock_sampler_parsing_and_summary():
     assert benchmark.ClockSampler.summary([]) is None
 
 
+def _sample(sclk, activity):
+    return {'sclk': sclk, 'sclk_min': sclk, 'sclk_max': sclk, 'mclk': 1000.0, 'activity': activity,
+            'fclk': None, 'power': None, 'hotspot': None}
+
+
 def test_clock_sampler_keeps_only_busy_samples():
-    samples = [(50.0, 900.0, 0.0), (1600.0, 1300.0, 98.0), (1400.0, 1300.0, 75.0), (400.0, 900.0, 10.0)]
+    samples = [_sample(50.0, 0.0), _sample(1600.0, 98.0), _sample(1400.0, 75.0), _sample(400.0, 10.0)]
     busy, have_activity = benchmark.ClockSampler.busy_samples(samples)
     assert have_activity
-    assert [smp[0] for smp in busy] == [1600.0, 1400.0]
+    assert [smp['sclk'] for smp in busy] == [1600.0, 1400.0]
     # without activity readings nothing can be filtered
-    no_activity = [(50.0, 900.0, None), (1600.0, 1300.0, None)]
+    no_activity = [_sample(50.0, None), _sample(1600.0, None)]
     busy, have_activity = benchmark.ClockSampler.busy_samples(no_activity)
     assert not have_activity and busy == no_activity
+
+
+# amd-smi metric -c -u -p -t --csv layout: several GFX clock domains, list-valued columns,
+# memory clock reported as uclk_* with mem_0_clk N/A (values are made up)
+SMI_MULTI_DOMAIN = (
+    'gpu,gfx_activity,umc_activity,vcn_activity,socket_power,gfx_0_clk,gfx_0_min_clk,gfx_1_clk,'
+    'gfx_1_min_clk,gfx_2_clk,gfx_3_clk,mem_0_clk,fclk_0_clk,uclk_aid_aid_0,uclk_aid_aid_1,hotspot\n'
+    '0,90,7,"[\'N/A\', \'N/A\']",900,1000,100,1100,100,1200,1300,N/A,800,700,700,60\n'
+)
+
+
+def test_parse_smi_metrics_multi_domain():
+    sample = benchmark.parse_smi_metrics(SMI_MULTI_DOMAIN, 0)
+    assert sample['sclk'] == pytest.approx(1150.0)       # mean of the four domains
+    assert sample['sclk_min'] == 1000.0 and sample['sclk_max'] == 1300.0
+    assert sample['mclk'] == 700.0                        # from uclk_* since mem_0_clk is N/A
+    assert sample['activity'] == 90.0
+    assert sample['fclk'] == 800.0 and sample['power'] == 900.0 and sample['hotspot'] == 60.0
+
+
+def test_parse_smi_metrics_single_clocks_and_other_gpus():
+    text = 'gpu,gfx_activity,gfx_0_clk,mem_0_clk\n0,50,1500,1200\n1,99,900,900\n'
+    sample = benchmark.parse_smi_metrics(text, 0)
+    assert sample['sclk'] == 1500.0 and sample['mclk'] == 1200.0 and sample['activity'] == 50.0
+    assert benchmark.parse_smi_metrics(text, 1)['sclk'] == 900.0
+    assert benchmark.parse_smi_metrics(text, 2) is None
+    assert benchmark.parse_smi_metrics('', 0) is None
+
+
+def test_flush_yaml_injection(tmp_path):
+    src = tmp_path / 'axpy.yaml'
+    src.write_text('Tests:\n  - name: axpy_bench\n    function: axpy\n  - name: other\n    function: dot\n')
+    out = benchmark.bench_yaml_for_run(str(src), 1048576)
+    data = yaml.safe_load(open(out).read())
+    assert out.endswith('.flush.yaml')
+    assert benchmark.bench_yaml_for_run(str(src), 0) == str(src)
+    assert [t['flush_memory_size'] for t in data['Tests']] == [1048576, 1048576]
+
+
+def test_flush_yaml_injection_matches_sweep_files(tmp_path):
+    for level, func in (('blas1', 'axpy'), ('blas2', 'gbmv'), ('blas3', 'gemm')):
+        src = os.path.join(MULTIPLOT_DIR, level, func + '.yaml')
+        dst = tmp_path / (func + '.yaml')
+        shutil.copy(src, dst)
+        out = benchmark.bench_yaml_for_run(str(dst), 4096)
+        text = open(out).read()
+        tests = text.count('- name:')
+        assert tests > 0 and text.count('flush_memory_size: 4096') == tests
+
+
+@pytest.mark.parametrize('prefix', ['s', 'd', 'c', 'z'])
+def test_level1_theo_max_covers_the_level1_sweep(prefix):
+    factors = benchmark.L1_theo_max(1.0)
+    for func in ('axpy', 'dot', 'scal', 'nrm2', 'iamax'):
+        assert prefix + func in factors
+
+
+def test_large_sweeps_include_the_shared_definitions():
+    for level in ('blas1', 'blas2'):
+        large_dir = os.path.join(MULTIPLOT_DIR, level, 'large')
+        files = sorted(f for f in os.listdir(large_dir) if f.endswith('.yaml'))
+        assert files
+        for f in files:
+            text = open(os.path.join(large_dir, f)).read()
+            assert 'include: ../../../../../clients/include/hipblas_common.yaml' in text, f
 
 
 HIPBLAS_DIR = os.path.abspath(os.path.join(MULTIPLOT_DIR, '..', '..', '..'))
@@ -225,44 +295,6 @@ def test_sweep_sets_the_size_arguments_its_test_reads(sweep):
         for size in sizes:
             missing = reads - set(size) - set(test)
             assert not missing, f"{sweep}: testing_{func}.hpp reads arg.{sorted(missing)} but the sweep does not set it"
-
-
-def test_flush_yaml_injection(tmp_path):
-    src = tmp_path / 'axpy.yaml'
-    src.write_text('Tests:\n  - name: axpy_bench\n    function: axpy\n  - name: other\n    function: dot\n')
-    out = benchmark.bench_yaml_for_run(str(src), 1048576)
-    data = yaml.safe_load(open(out).read())
-    assert out.endswith('.flush.yaml')
-    assert benchmark.bench_yaml_for_run(str(src), 0) == str(src)
-    assert [t['flush_memory_size'] for t in data['Tests']] == [1048576, 1048576]
-
-
-def test_flush_yaml_injection_matches_sweep_files(tmp_path):
-    for level, func in (('blas1', 'axpy'), ('blas2', 'gbmv'), ('blas3', 'gemm')):
-        src = os.path.join(MULTIPLOT_DIR, level, func + '.yaml')
-        dst = tmp_path / (func + '.yaml')
-        shutil.copy(src, dst)
-        out = benchmark.bench_yaml_for_run(str(dst), 4096)
-        text = open(out).read()
-        tests = text.count('- name:')
-        assert tests > 0 and text.count('flush_memory_size: 4096') == tests
-
-
-@pytest.mark.parametrize('prefix', ['s', 'd', 'c', 'z'])
-def test_level1_theo_max_covers_the_level1_sweep(prefix):
-    factors = benchmark.L1_theo_max(1.0)
-    for func in ('axpy', 'dot', 'scal', 'nrm2', 'iamax'):
-        assert prefix + func in factors
-
-
-def test_large_sweeps_include_the_shared_definitions():
-    for level in ('blas1', 'blas2'):
-        large_dir = os.path.join(MULTIPLOT_DIR, level, 'large')
-        files = sorted(f for f in os.listdir(large_dir) if f.endswith('.yaml'))
-        assert files
-        for f in files:
-            text = open(os.path.join(large_dir, f)).read()
-            assert 'include: ../../../../../clients/include/hipblas_common.yaml' in text, f
 
 
 # ---------- plot.py end to end on the checked-in gfx90a results ----------
