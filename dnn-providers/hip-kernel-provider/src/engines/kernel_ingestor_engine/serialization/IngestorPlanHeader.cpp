@@ -67,7 +67,7 @@ std::vector<uint8_t> encodeIngestorPlanHeader(IngestorPlanKind kind,
     std::memcpy(
         bytes.data() + MARKER_OFFSET, INGESTOR_PLAN_MARKER.data(), INGESTOR_PLAN_MARKER.size());
     writeU16(bytes, FORMAT_MAJOR_OFFSET, INGESTOR_PLAN_FORMAT_MAJOR);
-    writeU16(bytes, FORMAT_MINOR_OFFSET, INGESTOR_PLAN_FORMAT_MINOR);
+    writeU16(bytes, FORMAT_MINOR_OFFSET, ingestorPlanMinorOf(kind));
     writeU16(bytes, KIND_OFFSET, static_cast<uint16_t>(kind));
     writeU16(bytes, HEADER_SIZE_OFFSET, static_cast<uint16_t>(INGESTOR_PLAN_HEADER_SIZE));
     std::memcpy(bytes.data() + INGESTOR_PLAN_DIGEST_OFFSET, bodyDigest.data(), bodyDigest.size());
@@ -109,12 +109,13 @@ IngestorPlanHeader decodeIngestorPlanHeader(const uint8_t* data, size_t size)
     }
 
     const uint16_t kind = readU16(data, KIND_OFFSET);
-    if(kind != static_cast<uint16_t>(IngestorPlanKind::SINGLE_KERNEL_PLAN))
+    if(kind != static_cast<uint16_t>(IngestorPlanKind::SINGLE_KERNEL_PLAN)
+       && kind != static_cast<uint16_t>(IngestorPlanKind::MULTI_KERNEL_PLAN))
     {
         refuseIngestorPlan(IngestorPlanRefusal::INCOMPATIBLE,
                            "unknown ingestor plan kind " + std::to_string(kind));
     }
-    header.kind = IngestorPlanKind::SINGLE_KERNEL_PLAN;
+    header.kind = static_cast<IngestorPlanKind>(kind);
 
     header.headerSize = readU16(data, HEADER_SIZE_OFFSET);
     if(header.headerSize < INGESTOR_PLAN_HEADER_SIZE

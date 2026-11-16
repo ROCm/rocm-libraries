@@ -173,6 +173,13 @@ public:
         served->execute(handle, deviceBuffers, numDeviceBuffers, workspace);
     }
 
+    /// The program this benchmark executes, or nullptr before the first execute. Never changes
+    /// once set, so a concurrent reader sees nullptr or the final program.
+    const SlotProgramPlan<THandle>* servedProgram() const
+    {
+        return _served.load(std::memory_order_acquire);
+    }
+
 private:
     using Program = SlotProgramPlan<THandle>;
 

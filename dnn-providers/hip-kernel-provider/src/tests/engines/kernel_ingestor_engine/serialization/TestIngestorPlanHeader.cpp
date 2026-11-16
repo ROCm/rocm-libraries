@@ -14,6 +14,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanHeader.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanPayload.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
@@ -84,6 +85,36 @@ TEST(TestIngestorPlanHeader, WritesTheFortyEightByteLayoutLittleEndian)
     EXPECT_EQ(INGESTOR_PLAN_DIGEST_OFFSET, DIGEST_OFFSET);
 }
 
+TEST(TestIngestorPlanHeader, WritesAKindTwoHeaderWithMinorOne)
+{
+    const std::vector<uint8_t> bytes
+        = encodeIngestorPlanHeader(IngestorPlanKind::MULTI_KERNEL_PLAN, knownDigest());
+
+    ASSERT_EQ(bytes.size(), HEADER_SIZE);
+    EXPECT_EQ(bytes[MAJOR_OFFSET], 0x01);
+    EXPECT_EQ(bytes[MAJOR_OFFSET + 1], 0x00);
+    EXPECT_EQ(bytes[MINOR_OFFSET], 0x01); // format minor 1
+    EXPECT_EQ(bytes[MINOR_OFFSET + 1], 0x00);
+    EXPECT_EQ(bytes[KIND_OFFSET], 0x02); // kind MULTI_KERNEL_PLAN
+    EXPECT_EQ(bytes[KIND_OFFSET + 1], 0x00);
+
+    const IngestorPlanHeader header = decodeIngestorPlanHeader(bytes.data(), bytes.size());
+    EXPECT_EQ(header.kind, IngestorPlanKind::MULTI_KERNEL_PLAN);
+    EXPECT_EQ(header.formatMinor, ingestorPlanMinorOf(IngestorPlanKind::MULTI_KERNEL_PLAN));
+}
+
+TEST(TestIngestorPlanHeader, RefusesToWriteAKindThisProviderDoesNotWrite)
+{
+    // The value 0 is never written, and 3 is the next kind no provider version defines yet.
+    for(const uint16_t kind : {uint16_t{0}, uint16_t{3}})
+    {
+        SCOPED_TRACE("kind " + std::to_string(kind));
+        expectPluginInternalError(
+            [&]() { encodeIngestorPlanHeader(static_cast<IngestorPlanKind>(kind), knownDigest()); },
+            "no format minor for ingestor plan kind " + std::to_string(kind));
+    }
+}
+
 TEST(TestIngestorPlanHeader, RejectsAPayloadShorterThanTheFixedFields)
 {
     const std::vector<uint8_t> bytes = validHeader();
@@ -115,15 +146,23 @@ TEST(TestIngestorPlanHeader, RefusesAnotherMajorVersion)
         const std::string payloadVersion = "version " + std::to_string(major) + ".0 ";
         expectHeaderRefusal(
             bytes, bytes.size(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, payloadVersion);
-        expectHeaderRefusal(bytes, bytes.size(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "1.0 to 1.0");
+        expectHeaderRefusal(bytes,
+                            bytes.size(),
+                            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                            "1.0 to " + std::to_string(INGESTOR_PLAN_FORMAT_MAJOR) + "."
+                                + std::to_string(INGESTOR_PLAN_FORMAT_MINOR));
     }
 }
 
 TEST(TestIngestorPlanHeader, RefusesANewerMinorVersion)
 {
+    const auto newer = static_cast<uint16_t>(INGESTOR_PLAN_FORMAT_MINOR + 1);
     std::vector<uint8_t> bytes = validHeader();
-    setU16(bytes, MINOR_OFFSET, 1);
-    expectHeaderRefusal(bytes, bytes.size(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "version 1.1 ");
+    setU16(bytes, MINOR_OFFSET, newer);
+    expectHeaderRefusal(bytes,
+                        bytes.size(),
+                        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                        "version 1." + std::to_string(newer) + " ");
 }
 
 TEST(TestIngestorPlanHeader, ReadableVersionRuleAcceptsAnyMinorUpToTheReaders)
@@ -140,9 +179,15 @@ TEST(TestIngestorPlanHeader, ReadableVersionRuleAcceptsAnyMinorUpToTheReaders)
     }
 }
 
+TEST(TestIngestorPlanHeader, AFormat1Point0ReaderRefusesAFormat1Point1Payload)
+{
+    EXPECT_FALSE(detail::isReadableIngestorPlanVersion(1, 1, 1, 0));
+    EXPECT_TRUE(detail::isReadableIngestorPlanVersion(1, 0, 1, 1));
+}
+
 TEST(TestIngestorPlanHeader, RefusesAnUnknownKind)
 {
-    for(const uint16_t kind : {uint16_t{0}, uint16_t{2}})
+    for(const uint16_t kind : {uint16_t{0}, uint16_t{3}})
     {
         SCOPED_TRACE("kind " + std::to_string(kind));
         std::vector<uint8_t> bytes = validHeader();
@@ -152,6 +197,11 @@ TEST(TestIngestorPlanHeader, RefusesAnUnknownKind)
                             HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                             "unknown ingestor plan kind " + std::to_string(kind));
     }
+
+    std::vector<uint8_t> bytes = validHeader();
+    setU16(bytes, KIND_OFFSET, static_cast<uint16_t>(IngestorPlanKind::MULTI_KERNEL_PLAN));
+    EXPECT_EQ(decodeIngestorPlanHeader(bytes.data(), bytes.size()).kind,
+              IngestorPlanKind::MULTI_KERNEL_PLAN);
 }
 
 TEST(TestIngestorPlanHeader, RejectsABadHeaderSize)
@@ -171,9 +221,24 @@ TEST(TestIngestorPlanHeader, RejectsABadHeaderSize)
     const IngestorPlanHeader header = decodeIngestorPlanHeader(bytes.data(), bytes.size());
     EXPECT_EQ(header.headerSize, 64);
     EXPECT_EQ(header.formatMajor, INGESTOR_PLAN_FORMAT_MAJOR);
-    EXPECT_EQ(header.formatMinor, INGESTOR_PLAN_FORMAT_MINOR);
+    EXPECT_EQ(header.formatMinor, ingestorPlanMinorOf(IngestorPlanKind::SINGLE_KERNEL_PLAN));
     EXPECT_EQ(header.kind, IngestorPlanKind::SINGLE_KERNEL_PLAN);
     EXPECT_EQ(header.bodyDigest, knownDigest());
+}
+
+TEST(TestIngestorPlanHeader, ResealKeepsTheKindOfTheHeaderAndMatchesTheDigestToTheBody)
+{
+    const std::vector<uint8_t> body{1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<uint8_t> payload
+        = encodeIngestorPlanHeader(IngestorPlanKind::MULTI_KERNEL_PLAN, knownDigest());
+    payload.insert(payload.end(), body.begin(), body.end());
+
+    resealIngestorPlan(payload);
+
+    const IngestorPlanHeader header = decodeIngestorPlanHeader(payload.data(), payload.size());
+    EXPECT_EQ(header.kind, IngestorPlanKind::MULTI_KERNEL_PLAN);
+    EXPECT_EQ(header.bodyDigest, detail::computeIngestorPlanBodyDigest(body.data(), body.size()));
+    EXPECT_EQ(bodyOfIngestorPlan(payload), body);
 }
 
 TEST(TestIngestorPlanHeader, ChecksTheVersionBeforeAnythingElse)

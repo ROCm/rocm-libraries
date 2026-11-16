@@ -21,9 +21,10 @@ struct SavedLaunchInputs
     /// the contract between `values` and the launch. A saved plan pairs an older code
     /// object with the current launch. Use a new version for a change to the names,
     /// types or meanings of `values`, to the kernel arguments the launch passes (order,
-    /// count, kinds, sizes or meanings), or to how the launch derives grid, block or
-    /// dynamic LDS from `values`. Keep the handler of the old version registered while
-    /// plans saved under it must load.
+    /// count, kinds, sizes or meanings), to how the launch derives grid, block or
+    /// dynamic LDS from `values`, or to the size or layout of the workspace the launch
+    /// uses. Keep the handler of the old version registered while plans saved under it
+    /// must load.
     std::string dispatchSymbol;
     /// The named, typed inputs the launch is computed from. Never computed grid or
     /// argument values.
@@ -46,6 +47,9 @@ struct SavedKernelCode
     /// The argument list recorded for `symbol` when the kernel was packaged.
     std::vector<KernelArgument> recordedSignature;
     std::vector<uint8_t> codeObject;
+    /// Names the launch when the stage launches several kernels. Empty when the stage
+    /// launches exactly one kernel.
+    std::string launchName;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

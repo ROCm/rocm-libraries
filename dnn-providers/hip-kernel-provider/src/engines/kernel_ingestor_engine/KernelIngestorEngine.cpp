@@ -261,18 +261,31 @@ void rediscoverSharedStatesForTesting()
 
 bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
 {
-    bool hasKernel = false;
-    for(const auto& pack : set.packs)
+    // The packs of an unslotted engine, and the packs of every slot of a slotted one.
+    std::vector<const std::vector<hipdnn_plugin_sdk::ingestor::KernelDescriptorPack>*> groups;
+    groups.push_back(&set.packs);
+    for(const auto& slot : set.slots)
     {
-        for(const auto& kernel : pack.kernels)
+        groups.push_back(&slot.packs);
+    }
+
+    const auto isSerializable = [](const hipdnn_plugin_sdk::ingestor::KernelSource& source) {
+        return serialization::isSerializableSourceKind(source.kind);
+    };
+    bool hasKernel = false;
+    for(const auto* packs : groups)
+    {
+        for(const auto& pack : *packs)
         {
-            // As captureIngestorPlan(): a multi-launch kernel cannot be saved.
-            const auto* source = hipdnn_plugin_sdk::ingestor::singleLaunchSource(kernel);
-            if(source == nullptr || !serialization::isSerializableSourceKind(source->kind))
+            for(const auto& kernel : pack.kernels)
             {
-                return false;
+                // As captureIngestorPlan(): every launch of the kernel is saved.
+                if(!hipdnn_plugin_sdk::ingestor::allLaunchSources(kernel, isSerializable))
+                {
+                    return false;
+                }
+                hasKernel = true;
             }
-            hasKernel = true;
         }
     }
     if(!hasKernel)
@@ -281,21 +294,34 @@ bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::Descr
     }
 
     registerNativeIngestorSymbols();
-    for(const auto& pack : set.packs)
+    for(const auto* packs : groups)
     {
-        const auto dispatch = std::find_if(
-            set.dispatches.begin(), set.dispatches.end(), [&pack](const auto& candidate) {
-                return candidate.id == pack.dispatchId;
-            });
-        if(dispatch == set.dispatches.end())
+        for(const auto& pack : *packs)
         {
-            return false;
-        }
-        const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::tryResolve(
-            dispatch->dispatchSymbol);
-        if(handler == nullptr || !handler->supportsSaving())
-        {
-            return false;
+            const auto dispatch = std::find_if(
+                set.dispatches.begin(), set.dispatches.end(), [&pack](const auto& candidate) {
+                    return candidate.id == pack.dispatchId;
+                });
+            if(dispatch == set.dispatches.end())
+            {
+                return false;
+            }
+            const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::tryResolve(
+                dispatch->dispatchSymbol);
+            if(handler == nullptr || !handler->supportsSaving())
+            {
+                return false;
+            }
+            // A kernel with `sources` is saved launch by launch, which only a handler that
+            // opted in does.
+            const bool hasMultiLaunchKernel
+                = std::any_of(pack.kernels.begin(), pack.kernels.end(), [](const auto& kernel) {
+                      return !kernel.sources.empty();
+                  });
+            if(hasMultiLaunchKernel && !handler->supportsSavingAllLaunches())
+            {
+                return false;
+            }
         }
     }
     return true;

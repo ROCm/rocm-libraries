@@ -1263,8 +1263,8 @@ class SplitEngine:
     Each slot names its own KMD and carries only the tuning fields of its own schema as
     knobs. The engine has no ranker (the loader falls back to priority, then id), no
     top-level ``metadata``, ``sort_kernel_catalog``, ``knobs`` or
-    ``predict_applicable_kernels``, and does not author the serialization note: a slotted
-    engine's plans cannot be saved.
+    ``predict_applicable_kernels``, and does not author the serialization note: the runtime
+    computes it from the dispatch handlers of the slots' packs.
     """
 
     def __init__(self, slot_ops: dict[str, OpDescriptors]) -> None:
