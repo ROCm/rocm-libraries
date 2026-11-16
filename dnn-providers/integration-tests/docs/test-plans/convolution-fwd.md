@@ -397,8 +397,11 @@ where they matched a signature it was often at a small fraction of real size.
 - **Purpose and provenance.** R cases are `claim` cases. `plan_items` holds the
   R id (R001…R137); `metadata.notes` names the corpus shape id, the models and the
   family. The pick, the selection rule and the pin (repository commit and archive
-  md5) are data in `conv_fwd_corpus.json`; a corpus update is a deliberate
-  regeneration.
+  md5) are data in `conv_fwd_corpus.json`. Each case's `why` records how the rule
+  chose it: its signature, the ceiling bin, how many corpus graphs share the
+  signature in that bin, the pick's position in FLOP order (the median), and the
+  reason (signature median, or the one graph that gives a model its first case).
+  A corpus update is a deliberate regeneration.
 - **Limits of the corpus.** It was captured at small batch on one GPU, with
   `MIOPEN_FIND_MODE=fast`, and holds no fused graphs and no int8 or fp8. S, H
   and X keep large batch and the awkward cases; the fused topologies keep their
