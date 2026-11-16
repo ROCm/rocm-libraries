@@ -21,6 +21,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A` (`Disabled`, `GemmA2A` or `A2AGemm`), and the `tensilelite-client` option `--fused-gemm-a2a=1` is now `--fused-a2a=GemmA2A`. Device libraries and client configuration files from before this change must be regenerated.
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 
+### Changed
+
+* `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
+
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
