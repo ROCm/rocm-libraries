@@ -1368,6 +1368,43 @@ TEST(TestConvFwdDynamicTolerance, GradedOutputIsNoRoundingPointOfItself)
     expectPoint(ofBranch->roundingPoints[0], BFLOAT16_EPS, SIGMA, 1.0);
 }
 
+// A tensor stored in bfloat16 that another output's branch reads is no point of this output: the
+// multiply's result below feeds the output through the bias add only.
+TEST(TestConvFwdDynamicTolerance, IntermediateThatDoesNotReachTheGradedOutputIsNoRoundingPoint)
+{
+    GraphSpec spec;
+    spec.mul = Mul::SCALE_SECOND;
+    spec.withBias = true;
+    spec.branch = true;
+    spec.intermediateType = DataType::BFLOAT16;
+    const auto in = defaultInputs(spec);
+
+    const auto viaMultiply = errorScale(spec, in, OUT_UID);
+    ASSERT_TRUE(viaMultiply.has_value());
+    ASSERT_EQ(viaMultiply->roundingPoints.size(), 1u);
+    expectPoint(viaMultiply->roundingPoints[0], BFLOAT16_EPS, 3.0 * SIGMA, 1.0);
+
+    const auto viaBranch = errorScale(spec, in, BRANCH_OUT_UID);
+    ASSERT_TRUE(viaBranch.has_value());
+    EXPECT_TRUE(viaBranch->roundingPoints.empty());
+}
+
+// Scales whose product overflows leave the output without a finite scale, which the tolerance
+// function would throw on: the graph is outside the model.
+TEST(TestConvFwdDynamicTolerance, ScalesThatOverflowTheOutputScaleAreNotModeled)
+{
+    GraphSpec spec;
+    spec.mul = Mul::TWO_SCALES;
+    const auto lookup = [](int64_t uid) -> std::optional<tol::InputMoments> {
+        return tol::InputMoments{uid == X_UID || uid == W_UID ? 1.0 : 1e200,
+                                 uid == X_UID || uid == W_UID ? 1.0 : 1e200,
+                                 false};
+    };
+    flatbuffers::FlatBufferBuilder b;
+    EXPECT_FALSE(
+        tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value());
+}
+
 // ── Modes, nodes and fills outside the model ────────────────────────────────
 
 // The modes whose slope the model takes as about 1 are modeled, wherever they sit: the bias node

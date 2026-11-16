@@ -299,6 +299,12 @@ inline bool
 /// Any other result that no node reads is a graph output: its one rounding to its own type is the
 /// model's rtol, not a point. A node that does not reach the graded output has no point here.
 ///
+/// The last two kinds, a node's own conversions and result in its compute type, were written to
+/// cover a CPU reference that ignored the node's compute type (it added in double and rounded
+/// once). The reference honours it since e766aebc760c and 60837ab26fa7; the terms stay until the
+/// outputs with such points are re-measured against it. The points at stored tensors stay in any
+/// case: a one-step difference in the convolution's sum can flip a stored half or bfloat16 value.
+///
 /// The magnitude at a point is a root mean square. A value is modeled as a factor (the one above)
 /// times the convolution's result plus a remainder that does not depend on it: a multiply
 /// multiplies both by the scale's max |v|; an add, a subtract and every other mode with several
@@ -386,10 +392,6 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
         }
     }
     if(conv == nullptr)
-    {
-        return std::nullopt;
-    }
-    if(produced.count(outputUid) == 0)
     {
         return std::nullopt;
     }
