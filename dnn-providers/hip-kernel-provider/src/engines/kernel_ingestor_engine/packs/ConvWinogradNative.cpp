@@ -468,8 +468,9 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         const int llc = intField("llc");
         const int f16Math = intField("f16math");
         config.pf = intField("pf");
+        config.sb = intField("sb");
         if((llc != 0 && llc != 1) || (f16Math != 0 && f16Math != 1)
-           || (config.pf != 0 && config.pf != 1))
+           || (config.pf != 0 && config.pf != 1) || (config.sb != 0 && config.sb != 1))
         {
             return std::nullopt;
         }
@@ -486,7 +487,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                && (config.tm != 0 || config.tn != 0))
            || (!registerVariant && config.variant != Variant::WRW && config.f16Math)
            || (config.variant != Variant::COOP && config.variant != Variant::FUSED
-               && config.pf != 0))
+               && config.pf != 0)
+           || (config.variant != Variant::COOP && config.sb != 0))
         {
             return std::nullopt;
         }
@@ -613,7 +615,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                    || (config.arch != "gfx11" && config.arch != "gfx12") || config.tm != 1
                    || config.tn != 1 || config.bk % 16 != 0 || (kw != 2 && kw != 4 && kw != 8)
                    || config.bt % 16 != 0 || (tw != 1 && tw != 2) || config.waves != kw * tw
-                   || config.pf != 0)
+                   || config.pf != 0 || config.sb != 0)
                 {
                     return std::nullopt;
                 }
@@ -621,15 +623,16 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             }
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
-            // CDNA ("gfx9") runs wave64 MFMA: at most 16 waves in a 1024-thread block. F(2,3), or
-            // F(3,2) for stride 2 by phases.
-            const bool cdna = config.arch == "gfx9";
+            // CDNA ("gfx9", "gfx942", "gfx950") runs wave64 MFMA: at most 16 waves in a 1024-thread block.
+            // F(2,3), or F(3,2) for stride 2 by phases. The single input buffer (sb) is CDNA's.
+            const bool cdna = isCdna(config);
             if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
                || (config.arch != "gfx11" && config.arch != "gfx12" && !cdna)
                || (config.waves != 4 && config.waves != 8 && config.waves != 16
                    && (config.waves != 32 || cdna))
                || (config.bt != 16 && config.bt != 32 && config.bt != 64)
-               || (mt != 1 && mt != 2 && mt != 4) || (!cdna && mt * (config.bt / 16) > 4))
+               || (mt != 1 && mt != 2 && mt != 4) || (!cdna && mt * (config.bt / 16) > 4)
+               || (config.sb != 0 && !cdna))
             {
                 return std::nullopt;
             }
@@ -676,6 +679,15 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
         }
         return true;
     case Variant::COOP:
+        // Per-chip configs, tuned for their LDS, register files and clocks.
+        if(config.arch == "gfx942")
+        {
+            return arch == "gfx940" || arch == "gfx941" || arch == "gfx942";
+        }
+        if(config.arch == "gfx950")
+        {
+            return arch == "gfx950";
+        }
         if(config.arch == "gfx9")
         {
             // 16 x 16 x 16 f16 / bf16 MFMA: gfx908 and later CDNA.
@@ -1157,8 +1169,7 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     case Variant::COOP:
     {
         // About 1024 resident threads per unit (the configs run at 4-8 waves per SIMD).
-        plan.mainThreads
-            = static_cast<unsigned int>((config.arch == "gfx9" ? 64 : 32) * config.waves);
+        plan.mainThreads = static_cast<unsigned int>((isCdna(config) ? 64 : 32) * config.waves);
         const long long items = groups * divUp(cgo, config.bk) * divUp(tiles, config.bt);
         // The kernel counts items in 32 bits (and steps past the last by the grid size).
         if(items > (INT_LIMIT >> 1))
@@ -1168,7 +1179,7 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         // RDNA: tile blocks fastest where a group's transformed filter is past cache size (4 MiB
         // and up: large C x K; re-reading it per tile block dominates), else K blocks fastest.
         // CDNA's caches hold it either way (measured neutral to 7% slower): K blocks fastest.
-        plan.args.order = config.arch != "gfx9" && uBytes / groups >= (4LL << 20) ? 1 : 0;
+        plan.args.order = !isCdna(config) && uBytes / groups >= (4LL << 20) ? 1 : 0;
         if(!grid(plan.filterBlocks, divUp(groups * cgo * divUp(cgi, 16) * 16, 256), 1, 1))
         {
             return std::nullopt;
@@ -1184,7 +1195,7 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
                                    || arch == "gfx1200" || arch == "gfx1201";
             perUnit = std::max<long long>(1, 4 * (largeFile ? 6 : 4) / config.waves);
         }
-        else if(config.arch == "gfx9")
+        else if(isCdna(config))
         {
             // CDNA: the blocks a CU holds, by registers (the kernel's k5CoopCdnaWpe waves per
             // SIMD; gfx908 keeps 2 and the 1024-thread grid) and by LDS (160 KiB a CU on gfx950,
@@ -1195,7 +1206,8 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
             const int mt = std::max(1, config.bk / (16 * kw));
             const int nt = std::max(1, config.bt / 16);
             const long long ldsPerUnit = arch == "gfx950" ? 160LL << 10 : 64LL << 10;
-            const long long byLds = ldsPerUnit / k5CoopLdsBytes(nt, kw, config.m, true);
+            const long long byLds
+                = ldsPerUnit / k5CoopLdsBytes(nt, kw, config.m, true, config.sb != 0);
             const bool half = problem.base.dataType == data_objects::DataType::HALF;
             const long long byRegs
                 = arch == "gfx908" ? perUnit
@@ -1419,7 +1431,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
         = !config->f16Math || problem->base.dataType == data_objects::DataType::HALF;
     // CDNA bf16 MFMA (bf16_1k) starts at gfx90a.
     const bool noBf16Mfma
-        = config->variant == Variant::COOP && config->arch == "gfx9" && bf16
+        = config->variant == Variant::COOP && isCdna(*config) && bf16
           && hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) == "gfx908";
     if((config->m == 4 && !fp32) || (wmmaFamily && fp32)
        || (config->variant == Variant::SREG && bf16) || !f16MathOk || noBf16Mfma)
@@ -1603,9 +1615,13 @@ public:
         options.add("CONV_WINO_PF", std::to_string(config.pf));
         // Fused VALU: pf 1 prefetches two chunks ahead (depth 2).
         options.add("CONV_WINO_PFD", std::to_string(config.pf + 1));
-        options.add(
-            "CONV_WINO_MFMA",
-            std::string(config.variant == Variant::COOP && config.arch == "gfx9" ? "1" : "0"));
+        options.add("CONV_WINO_MFMA",
+                    std::string(config.variant == Variant::COOP && isCdna(config) ? "1" : "0"));
+        // Only where set: the other configs' compile options (and cache keys) stay as they are.
+        if(config.sb != 0)
+        {
+            options.add("CONV_WINO_SB", std::string("1"));
+        }
         if(wrw)
         {
             options.add("CONV_WINO_WRW_ATOM", std::to_string(plan.wrwAtom));

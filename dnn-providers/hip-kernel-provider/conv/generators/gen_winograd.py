@@ -37,6 +37,7 @@ FIELDS = [
     "bins",
     "f16math",
     "pf",
+    "sb",
 ]
 STRINGS = {"direction", "dtype", "variant", "layout", "arch"}
 # The integer fields identify a config among those one graph admits (the enrolled knob tuple):
@@ -56,6 +57,7 @@ KNOBS = [
     "bins",
     "f16math",
     "pf",
+    "sb",
 ]
 ENTRY = {
     "multipass": "ConvWinogradGemm",
@@ -84,6 +86,7 @@ def C(
     bins=0,
     f16math=0,
     pf=0,
+    sb=0,
 ):
     return dict(
         variant=variant,
@@ -103,6 +106,7 @@ def C(
         bins=bins,
         f16math=f16math,
         pf=pf,
+        sb=sb,
     )
 
 
@@ -152,7 +156,7 @@ WREG_BF16 = [(32, 2, 4, 0), (64, 1, 2, 0)]
 # 4 x kw (one per transform row per K group), each 16 x mt out channels by 16 x nt tiles.
 # m = 3 is F(3,2): stride 2 by phases. pf = 1 loads the next item's first input chunk behind the
 # epilogue (CDNA, few input chunks per item).
-def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0):
+def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0, sb=0):
     return [
         C(
             "coop",
@@ -163,6 +167,7 @@ def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0):
             waves=4 * kw,
             f16math=h,
             pf=pf,
+            sb=sb,
         )
         for mt, nt, kw, h in blocks
         for a in archs
@@ -227,6 +232,16 @@ COOP_CDNA_BF16 = [(2, 4, 2, 0), (2, 2, 2, 0), (1, 4, 1, 0), (2, 2, 1, 0)]
 # Cross-item prefetch on CDNA, small C (gfx950 inception c32 k32 149² n128: 7-8%).
 COOPPF_CDNA_F16 = [(2, 2, 1, 1)]
 COOPPF_CDNA_BF16 = [(2, 2, 1, 0)]
+# Per-chip fp16 configs (dnnb autotune A/B against the gfx9 configs, best Winograd config per graph).
+# gfx942 (MI300 family): cross-item prefetch on 2 x 4 / 4 x 2 tiles, and one transformed-input
+# buffer (sb: 16 KiB of LDS for 2 x 2 tiles, 3 blocks a CU in 64 KiB instead of 2; one more barrier
+# per input chunk). MI325X: realesrgan c160 k32 128² bwd 1.13x, unet c128 k64 512² fwd 1.12x, c1024
+# k512 64² bwd 1.12x, inception c32 k32 149² 1.04-1.19x, hrnet c64 28² bwd 1.09x.
+COOPPF_GFX942_F16 = [(2, 4, 2, 1), (4, 2, 1, 1)]
+COOPSB_GFX942_F16 = [(2, 2, 1, 1), (4, 2, 1, 1), (2, 4, 2, 1)]
+# gfx950 (160 KiB of LDS: no single buffer): prefetch on 4 x 2 tiles only. Prefetch on 2 x 4 tiles runs
+# its large-C layers (unet c512-c1024) 4-5% slower than without, and autotune picks it there.
+COOPPF_GFX950_F16 = [(4, 2, 1, 1)]
 COOP3_CDNA_F16 = [(1, 4, 4, 1), (2, 2, 1, 1), (1, 2, 1, 1), (2, 2, 2, 1)]
 COOP3_CDNA_BF16 = [(1, 4, 4, 0), (2, 2, 1, 0), (1, 2, 1, 0)]
 
@@ -283,6 +298,9 @@ CATALOG = {
     + coop(COOP_CDNA_F16, ("gfx9",))
     + coop(COOP3_CDNA_F16, ("gfx9",), m=3)
     + coop(COOPPF_CDNA_F16, ("gfx9",), pf=1)
+    + coop(COOPPF_GFX942_F16, ("gfx942",), pf=1)
+    + coop(COOPSB_GFX942_F16, ("gfx942",), pf=1, sb=1)
+    + coop(COOPPF_GFX950_F16, ("gfx950",), pf=1)
     + wreg(WREG_F16)
     + wmma()
     + sreg([1, 0])
@@ -371,7 +389,7 @@ def label(c):
         return f"coop.f2.nchw.{c['arch']}.k{c['bk'] // 16}t{c['bt'] // 16}b16{'h' if c['f16math'] else 'f'}"
     if c["variant"] == "coop":
         kw = c["waves"] // 4
-        return f"coop.f{c['m']}.nchw.{c['arch']}.m{c['bk'] // (16 * kw)}n{c['bt'] // 16}k{kw}{'h' if c['f16math'] else 'f'}{'.pf1' if c['pf'] else ''}"
+        return f"coop.f{c['m']}.nchw.{c['arch']}.m{c['bk'] // (16 * kw)}n{c['bt'] // 16}k{kw}{'h' if c['f16math'] else 'f'}{'.pf1' if c['pf'] else ''}{'.sb' if c['sb'] else ''}"
     if c["variant"] == "sreg":
         return f"sreg.f2.nchw.{c['arch']}.{c['bk']}{'h' if c['f16math'] else 'f'}"
     return f"wmma.f2.nchw.{c['arch']}.{c['bk']}w{c['waves']}"

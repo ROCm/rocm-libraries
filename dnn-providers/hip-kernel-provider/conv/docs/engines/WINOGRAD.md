@@ -32,9 +32,9 @@ SPDX-License-Identifier:  MIT
   - fp32 Mask R-CNN 200² fwd/bwd against `ConvBinWinogradRxSf2x3g1` (1.13-1.24x), F(2,3) only;
   - gfx906 fwd/bwd against MIOpen's asm Winograd (about 1.55x behind, weighted).
   - NHWC 3x3 fp16 backward weights and backward data against MIOpen's transpose-wrapped asm (`Transposed*`); other engines serve those graphs.
-  - Kernel against kernel, K5 trails MIOpen's Winograd on gfx906 and RDNA (0.55-0.70x) and is near parity on gfx90a/gfx908 (0.96-0.98x); it leads on gfx950/gfx942 (1.04-1.30x) except against Rage. See "Next steps".
+  - Kernel against kernel, K5 trails MIOpen's Winograd on gfx906 and RDNA (0.55-0.70x) and is near parity on gfx90a/gfx908 (0.96-0.98x); it leads on gfx950/gfx942 (1.03-1.32x) except against Rage (0.93x). See "Next steps".
 - **Precision:** every engine reports the `WINOGRAD` numerical note, with `WINOGRAD_TILE_4x4` on the fwd/bwd and BF16 engines and `WINOGRAD_TILE_6x6` on the F43 engines (wrw mixes F(3,2), F(3,4) and F(3,6) and names no tile). Transforms are fp32; 16-bit operands are rounded once after their transform, except the input transform of `f16math` configs. Accumulation is fp32. An output whose window lies wholly in padding is exactly 0. Deterministic.
-- **Instances:** 420: `CONV_WINOGRAD_FWD/BWD` 106 each, `CONV_WINOGRAD_FWD/BWD_BF16` 54 each (every bf16 fwd/bwd config), `CONV_WINOGRAD_FWD/BWD_F43` 8 each (fp32 F(4,3) multipass), `CONV_WINOGRAD_WRW` 84. All are offered by default.
+- **Instances:** 432: `CONV_WINOGRAD_FWD/BWD` 112 each, `CONV_WINOGRAD_FWD/BWD_BF16` 54 each (every bf16 fwd/bwd config), `CONV_WINOGRAD_FWD/BWD_F43` 8 each (fp32 F(4,3) multipass), `CONV_WINOGRAD_WRW` 84. All are offered by default.
 - **vs MIOpen** (usage-weighted speedup on the graphs where it is our best engine, search mode), fwd / bwd / wrw:
 
   | GPU | fwd | bwd | wrw |
@@ -82,6 +82,7 @@ SPDX-License-Identifier:  MIT
   - Wave w owns transform row w % 4 (4 bins) and a K slice. A fragments (U) come from a fragment-major pre-pass buffer, one contiguous 512-byte run per fragment, prefetched a chunk ahead.
   - Epilogue: the wave folds its 4 bins to 2 values in registers, writes them to LDS, then applies Aᵀ over the rows.
   - RDNA and CDNA share one body over the atom traits (wave32 WMMA, wave64 MFMA 16x16x16).
+  - Single input buffer (`sb 1`, CDNA): one V buffer instead of two, so the next chunk's transform waits for a barrier after the current chunk's MFMAs. Half the LDS: 2 x 2-tile blocks take 16 KiB, so MI325X's 64 KiB holds 3 of them (registers bound it there) instead of 2. Measured on MI325X: HRNet c32 56² 1.07x, Inception c32 k32 149² 1.09-1.10x, realesrgan c192 k64 128² backward data 1.06x. gfx950's 160 KiB already holds 3 blocks, so it gains nothing there.
 - **16-bin layout** (`bins 16`, RDNA F(2,3)):
   - A wave owns all 16 bins of 16 channels x 16 tiles, so the output transform runs in registers: no LDS round trip and no epilogue barriers.
   - It wins where the output side dominates: backward data with few dy channels. Measured on UNet c128 k64 512² backward data against the 4-bin layout: 7.76 against 9.07 ms on gfx1201, 8.66 against 9.83 ms on gfx1100.
@@ -89,7 +90,7 @@ SPDX-License-Identifier:  MIT
 - **wreg / sreg:** register-operand variants.
   - In `wreg` (gfx11/gfx12), each wave owns one transform row and builds its WMMA B fragments from the loaded input rows in registers: no LDS for V, and no barrier in the channel loop. gfx11's half-waves exchange channels with `v_permlanex16`.
   - In `sreg` (wave64 gfx9), lane = tile, and the transformed filter is a wave-uniform operand through the scalar cache.
-- **Grids and order.** Fused / sreg use 2 blocks per dispatch unit. Coop uses about 1024 resident threads per unit, capped on CDNA by a shared occupancy model (`k5CoopCdnaWpe`, `k5CoopLdsBytes`) for registers and LDS (160 KiB a CU on gfx950, 64 KiB on earlier CDNA). Items run K blocks fastest, or tile blocks fastest on RDNA when a group's U is ≥ 4 MiB.
+- **Grids and order.** Fused / sreg use 2 blocks per dispatch unit. Coop uses about 1024 resident threads per unit, capped on CDNA by a shared occupancy model (`k5CoopCdnaWpe`, `k5CoopLdsBytes`, which counts the single input buffer) for registers and LDS (160 KiB a CU on gfx950, 64 KiB on earlier CDNA). Items run K blocks fastest, or tile blocks fastest on RDNA when a group's U is ≥ 4 MiB.
 - **Codegen.**
   - Branch-free 32-bit transform offsets with an out-of-range sentinel for padding: the fused input slice is kept under about 1 GiB.
   - Chunk loads use the chunk as a scalar offset, so a load needs no VALU.
@@ -99,14 +100,14 @@ SPDX-License-Identifier:  MIT
 - **Gates.**
   - Problem gates, everything the naive parser gates, plus: 2-D; 3x3 filter; dilation 1; equal stride 1 or 2 (wrw 1); n, c·stride², k and groups within 32 bits; extents and padding within 32 bits.
   - fwd/bwd bf16 only with the switch.
-  - Per config: dtype and direction equal to the graph's; atom on the device; WMMA / coop not fp32; sreg not bf16; `f16math` only for fp16; coop bf16 MFMA from gfx90a; F(3,2) exactly for stride 2; F(4,3) only fp32; a device reporting no units declined for persistent variants.
+  - Per config: dtype and direction equal to the graph's; atom on the device; WMMA / coop not fp32; sreg not bf16; `f16math` only for fp16; coop bf16 MFMA from gfx90a; per-chip coop configs (`gfx942`: gfx940-942; `gfx950`) only on their chip; `sb` only on the CDNA transform-row layout; F(3,2) exactly for stride 2; F(4,3) only fp32; a device reporting no units declined for persistent variants.
   - wrw per-dtype rules (below); every plan within launch, buffer and item-count limits.
 - **wrw.**
   - x and dy are read in place when packed channels-first. Packed channels-last operands go through 64 x 64 LDS transposes, which measured 3-23% faster than transforming in place on gfx906 / gfx90a UNet; others are copied.
   - GEMM on MFMA (gfx9 16x16, gfx950 16x16x32), WMMA, or FMA thread tiles.
   - Tile splits are chosen for about 2048 threads per unit; batch slices stay under the workspace limit.
 - **Large tensors.** Fused slices are capped so one slice's input is under about 1 GiB. Multipass and wrw slice the batch under the workspace limit. A single image past those limits is declined, and other engines serve it.
-- **Catalog.** Variants x tiles per dtype and arch family. The knobs are `m`, `llc`, the GEMM tile, `bk`, `bt`, `ccv`, `tm`, `tn`, `waves`, `bins`, `f16math` and `pf`. Configs ship where they win measured layers (realesrgan, UNet, Mask R-CNN, HRNet, Inception, IGM).
+- **Catalog.** Variants x tiles per dtype and arch family (coop: `gfx11`, `gfx12`, `gfx9` for every MFMA part, and per-chip `gfx942` (gfx940-942) and `gfx950`). The knobs are `m`, `llc`, the GEMM tile, `bk`, `bt`, `ccv`, `tm`, `tn`, `waves`, `bins`, `f16math`, `pf` and `sb`. The per-chip fp16 configs add, on gfx942, cross-item prefetch on 2 x 4 and 4 x 2 tiles and the single input buffer on 2 x 2, 4 x 2 and 2 x 4 tiles; on gfx950, prefetch on 4 x 2 tiles (prefetch on 2 x 4 tiles ran large-C UNet layers 4-5% slower there). Configs ship where they win measured layers (realesrgan, UNet, Mask R-CNN, HRNet, Inception, IGM).
 
 ## Fusion
 
@@ -150,7 +151,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - RDNA fp16 small-C (c32-c192, k32-k64) against Rage / Fury: the cost is per-item overhead (load latency, barriers, the Z round trip), not the MMAs.
   - RDNA fp32 large layers, where F(2,3) runs (F(4,3) is the F43 engines').
   - gfx906 fused, where the Hadamard runs near peak but staging, loads and barriers cost as much again.
-  - CDNA small-C: Inception c32 and EfficientNet c24 trail Rage by 1.5-1.7x, HRNet c32 by about 1.15-1.2x.
+  - CDNA small-C against Rage: Inception c32 149² trails by 1.6-1.75x, realesrgan c160 k32 backward data by 1.33-1.38x, HRNet c32 56² by 1.18x (gfx950) and 1.27x (MI325X).
 
 ## Numerical precision
 - **Error model.** Winograd's rounding error scales with the magnitude of the whole tile it shares, Σ|products| over the neighbourhood, not with the output alone. An infinity in a tile poisons its neighbours (inf x structural zero gives NaN). Both are what the `WINOGRAD` note declares; the non-finite behaviour is documented, not fixed.
@@ -195,8 +196,8 @@ No code was copied.
 
 | GPU | K5 vs MIOpen Winograd | Graphs (K5 faster / slower by >5%) | K5 excess (all / without `Transposed*`) |
 |---|---|---|---|
-| gfx950 | 1.04x | 159 (67 / 68) | 16 / 8 ms |
-| gfx942 (MI325X) | 1.30x | 213 (89 / 103) | 37 / 18 ms |
+| gfx950 | 1.03x | 159 (66 / 69) | 16 / 9 ms |
+| gfx942 (MI325X) | 1.32x | 213 (88 / 100) | 34 / 14 ms |
 | gfx90a | 0.96x | 88 (25 / 50) | 50 / 11 ms |
 | gfx908 | 0.98x | 148 (61 / 71) | 155 / 78 ms |
 | gfx906 | 0.56x | 286 (29 / 249) | 3405 / 742 ms |
@@ -219,11 +220,15 @@ No code was copied.
 2. **RDNA fp16 small-C against Fury / Rage** (0.39-0.72x).
    - Autotune does not pick the 16-bin config where it would win, so the planner needs register counts at plan time.
    - Per-item overhead (loads, about 5 barriers per item) is the cost to cut.
-3. **gfx942 / gfx950 against Rage** (0.88-0.93x; mostly fp16 small-C backward data).
-   - Remove the extra VALU and the bank conflicts in V stores and B reads.
-   - Fold the 3-4 µs filter-transform launch into the kernel with an LDS-resident U.
-   - Use 32-bit/scalar index math, and per-arch tile shapes as on gfx950.
-   - Use scheduling hints (`__builtin_amdgcn_sched_group_barrier`, wave priority) and `launch_bounds` register budgets.
+3. **gfx942 / gfx950 against Rage** (0.93x on both; 7 / 6 ms excess, mostly fp16 small-C backward data: realesrgan c160 k32, HRNet c32, Inception c32 149²).
+   - What is left is per-item overhead at low occupancy. Profiled on MI325X (HRNet c32 56² forward), K5 issues about 1.2x Rage's VALU, and Rage keeps 12 waves a CU against K5's 12 with the single input buffer (8 with two). Most of an item is load latency, transform VALU and the epilogue's LDS round trip with 2 barriers per 16-channel slab, not MFMA (about 3% busy).
+   - Measured and not taken:
+     - An in-kernel filter transform (U built per block in registers, filter staged through LDS) costs more than the 3-4 µs filter launch it removes.
+     - A 32-bank V swizzle for gfx942 removes the modelled bank conflicts but times the same.
+     - 4 waves a SIMD (128 VGPRs) spills.
+     - Multiply-shift division for the tile index split is neutral.
+   - Next: a cheaper epilogue (fewer barriers per item, Z in fewer passes), 16x16x32 MFMA with 32-channel chunks on gfx950, and transform VALU.
+   - Autotune ranks some coop configs by a tuning time that differs from their steady-state time by up to 10% (e.g. 2 x 4 tiles without prefetch). It then picks the prefetch sibling, 3-5% slower in steady state, on a few large-C layers.
 4. **gfx908 against `ConvBinWinograd3x3U`** (0.77x).
 5. **gfx906 fused** (0.56-0.77x): reader/writer wave specialization, or a persistent design with U in LDS, aimed at near-peak fp32 VALU.
 6. **gfx90a / gfx908 multipass backward weights** against `ConvWinograd3x3MultipassWrW` (0.66-0.93x on its graphs).
@@ -236,8 +241,8 @@ Gate for each item: parity with the MIOpen solver on the graphs it wins, and no 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvWinogradProblem.cpp` (host):
   - **Gates:** one refusal per field; direction exclusivity; bf16 fwd/bwd graphs and F(4,3) fp32 configs admitted by the matches (the catalogs put them in their sibling engines); stride-2 phase gather/scatter and 16 positions.
-  - **Variant placement:** each variant on its arch family and dtypes; the 16-bin layout on RDNA stride 1; coop MFMA from gfx908 and bf16 from gfx90a; fused stride-2 chunking; inconsistent register-variant fields refused.
-  - **Plans:** LLC slicing and workspace; occupancy-sized grids (16-bin on RDNA, CDNA); item order for a large U; fused slices clear of the out-of-range offset.
+  - **Variant placement:** each variant on its arch family and dtypes; the 16-bin layout on RDNA stride 1; coop MFMA from gfx908 and bf16 from gfx90a; per-chip coop configs only on their chip and the single input buffer only on CDNA; fused stride-2 chunking; inconsistent register-variant fields refused.
+  - **Plans:** LLC slicing and workspace; occupancy-sized grids (16-bin on RDNA, CDNA, the single input buffer); item order for a large U; fused slices clear of the out-of-range offset.
   - **wrw:** error-band admission (FMA every dtype, fp32 F(3,4) from 512 products, half-operand rules), tile splits, batch slicing, NHWC transpose staging, cuDNN compute types.
 - `TestGpuConvWinograd.cpp` (device):
   - every admitted config, fp32/fp16/bf16 (the BF16 and F43 engines' configs included), fwd and bwd;
