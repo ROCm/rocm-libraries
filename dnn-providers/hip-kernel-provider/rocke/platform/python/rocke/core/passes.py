@@ -14,7 +14,7 @@ import struct
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Tuple
 
-from .ir import KernelDef, Op, Region, Type, Value
+from .ir import KernelDef, Op, Region, Type, Value, _int_cmp_error
 
 
 @dataclass(frozen=True)
@@ -264,7 +264,11 @@ def _try_fold(op: Op) -> Optional[int]:
     if op.name == "arith.sext":
         return ints[0]
     if op.name == "arith.cmp":
-        pred = op.attrs.get("pred", "lt")
+        # A compare the IR rule refuses (an absent or unknown pred, say) is left
+        # for the verifier and the lowerings to refuse, not folded.
+        if _int_cmp_error(op.attrs, op.operands[0].type):
+            return None
+        pred = op.attrs["pred"]
         a, b = ints
         if pred == "ult":
             # Unsigned at the operand width: -1 reads as the largest value.

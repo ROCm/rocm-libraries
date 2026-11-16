@@ -52,7 +52,8 @@ from .ir import (
     _if_else_yields,
     _ldexp_op_error,
     _smem_store_vN_op_error,
-    _smem_vN_f32_op_error,
+    _smem_store_vN_f32_op_error,
+    _refuse_non_integer_op,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -566,6 +567,7 @@ class _Lowerer:
         named_op_id = named_mma_op_id(op.name)
         if named_op_id is not None:
             backend_for(self.arch).require_mma_available(named_op_id)
+        _refuse_non_integer_op(op)
         if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
             self._emit_wmma_gfx1250_scaled(op)
             return
@@ -658,7 +660,7 @@ class _Lowerer:
         refusal = _int_cmp_error(op.attrs, a.type)
         if refusal:
             raise refusal
-        pred = op.attrs.get("pred", "lt")
+        pred = op.attrs["pred"]
         if pred == "ult":
             unsigned = _hip_unsigned_int_type(op.name, a.type.name)
             self._emit(
@@ -2501,7 +2503,7 @@ class _Lowerer:
         # so we always emit the ``f32xN`` vector store (the prologue
         # provides ``f32x1``). For n>1 the reinterpret-cast lets the
         # backend coalesce into ``ds_write_b{64,128}``.
-        refusal = _smem_vN_f32_op_error(op)
+        refusal = _smem_store_vN_f32_op_error(op)
         if refusal:
             raise refusal
         smem = op.operands[0]
@@ -2517,9 +2519,6 @@ class _Lowerer:
         )
 
     def _op_tile_smem_load_vN_f32(self, op: Op) -> None:
-        refusal = _smem_vN_f32_op_error(op)
-        if refusal:
-            raise refusal
         smem = op.operands[0]
         indices = op.operands[1:]
         n = int(op.attrs["vec"])

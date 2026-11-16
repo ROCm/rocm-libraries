@@ -701,10 +701,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
             v_errf(v, op, "%s", error);
         }
     }
-    else if(o == ROCKE_OP_TILE_SMEM_LOAD_VN_F32 || o == ROCKE_OP_TILE_SMEM_STORE_VN_F32)
+    else if(o == ROCKE_OP_TILE_SMEM_STORE_VN_F32)
     {
         char err[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_smem_vN_f32_op_error(op, err, sizeof err) != ROCKE_OK)
+        if(rocke_i_smem_store_vN_f32_op_error(op, err, sizeof err) != ROCKE_OK)
         {
             v_errf(v, op, "%s", err);
         }

@@ -239,19 +239,11 @@ void rocke_b_smem_store_f16(rocke_ir_builder_t* b,
         return;
     }
     {
-        const char* value_element = rocke_i_elem_of(value->type)->name;
-        if(strcmp(value_element, "f16") != 0)
+        char element_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_value_element_error(
+               "smem_store_f16", value->type, "f16", element_error, sizeof element_error))
         {
-            char element_error[ROCKE_ERR_MSG_CAP];
-            rocke_i_set_err(b,
-                            ROCKE_ERR_TYPE,
-                            "%s",
-                            rocke_i_type_name_message("smem_store_f16",
-                                                      "value element type",
-                                                      value_element,
-                                                      "f16",
-                                                      element_error,
-                                                      sizeof element_error));
+            rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", element_error);
             return;
         }
     }
@@ -508,24 +500,19 @@ void rocke_b_smem_store_vN_f32(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_store_vN_f32 n must be 1, 2, or 4 (got %d)", n);
         return;
     }
-    if(!smem || !value)
+    if(!value)
     {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "smem_store_vN_f32 %s is NULL", smem ? "value" : "smem");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_store_vN_f32 value is NULL");
         return;
     }
     {
         char contract_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_smem_f32_access_error(
-               "smem_store_vN_f32", smem->type, value->type, contract_error, sizeof contract_error))
+        const int64_t width = n;
+        const rocke_status_t contract_status = rocke_i_smem_store_vN_f32_error(
+            "smem_store_vN_f32", value->type, &width, "n", contract_error, sizeof contract_error);
+        if(contract_status != ROCKE_OK)
         {
-            rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", contract_error);
-            return;
-        }
-        if(rocke_i_smem_store_lanes_error(
-               "smem_store_vN_f32", value->type, n, "n", contract_error, sizeof contract_error))
-        {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", contract_error);
+            rocke_i_set_err(b, contract_status, "%s", contract_error);
             return;
         }
     }
@@ -565,18 +552,6 @@ rocke_value_t* rocke_b_smem_load_vN_f32(rocke_ir_builder_t* b,
     {
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "smem_load_vN_f32 needs at least one index");
-    }
-    if(!smem)
-    {
-        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_load_vN_f32 smem is NULL");
-    }
-    {
-        char tile_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_smem_f32_access_error(
-               "smem_load_vN_f32", smem->type, NULL, tile_error, sizeof tile_error))
-        {
-            return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", tile_error);
-        }
     }
     vt = rocke_vector_type(b, rocke_f32(), n);
     if(!vt)

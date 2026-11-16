@@ -233,28 +233,6 @@ void case_lshr_hip_text()
                std::string("HIP lshr form for ") + c.type->name + ": want '" + want + "'");
         rocke_ir_builder_free(&b);
     }
-
-    /* An f32 shift, scalar or lane by lane, has no unsigned type of its width:
-     * refused with the Python engine's TypeError text, naming the op. */
-    for(const bool vector : {false, true})
-    {
-        rocke_ir_builder_t b;
-        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_f32");
-        const rocke_type_t* type = vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
-        build_binary_past_the_builder(
-            &b, vector ? ROCKE_OP_VECTOR_LSHR : ROCKE_OP_ARITH_LSHR, type, type);
-        std::string hip;
-        const rocke_status_t status = lower_hip_status(&b, &hip);
-        const char* msg = rocke_ir_builder_error(&b);
-        const std::string want = std::string("HIP lowering of ")
-                                 + (vector ? "vector.lshr" : "arith.lshr")
-                                 + " failed - element type='f32', expected an integer type, "
-                                   "one of ('i1', 'i8', 'u8', 'i16', 'i32', 'i64')";
-        EXPECT(status == ROCKE_ERR_TYPE && msg && want == msg,
-               "want status " + std::to_string((int)ROCKE_ERR_TYPE) + " '" + want + "', got status "
-                   + std::to_string((int)status) + " '" + (msg ? msg : "") + "'");
-        rocke_ir_builder_free(&b);
-    }
 }
 
 /* The builder must throw a TypeError with exactly `want` from `build`. */
@@ -415,6 +393,36 @@ void case_integer_element_verifier_rule()
             = verify_past_the_builder(c.opcode, c.vector, c.value_element, c.amount_element);
         EXPECT(errors == std::string(c.want) + "\n",
                std::string("want '") + c.want + "', got '" + errors + "'");
+    }
+}
+
+/* IR written past the builders reaches the lowerings without the verifier:
+ * the LLVM and HIP lowerings refuse an f32 bitwise op or shift, scalar or lane
+ * by lane, with ROCKE_ERR_TYPE and the builders' text (the same texts as
+ * test_lshr.py). */
+void case_integer_element_lowering_rule()
+{
+    for(const IntegerElementOp& op : k_integer_element_ops)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_integer_op_lower");
+        const rocke_type_t* type = op.vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
+        build_binary_past_the_builder(&b, op.opcode, type, type);
+        const std::string want = std::string(rocke_opcode_name(op.opcode))
+                                 + " failed - element type='f32', expected an integer or i1 type";
+        std::string llvm;
+        std::string llvm_error;
+        const rocke_status_t llvm_status = lower_llvm_status(&b, &llvm, &llvm_error);
+        EXPECT(llvm_status == ROCKE_ERR_TYPE && llvm_error == want,
+               "LLVM: want '" + want + "', got status " + std::to_string((int)llvm_status) + " '"
+                   + llvm_error + "'");
+        std::string hip;
+        const rocke_status_t hip_status = lower_hip_status(&b, &hip);
+        const char* hip_error = rocke_ir_builder_error(&b);
+        EXPECT(hip_status == ROCKE_ERR_TYPE && hip_error && want == hip_error,
+               "HIP: want '" + want + "', got status " + std::to_string((int)hip_status) + " '"
+                   + (hip_error ? hip_error : "") + "'");
+        rocke_ir_builder_free(&b);
     }
 }
 
@@ -896,6 +904,28 @@ bool folded_store_value(rocke_ir_builder_t* b, int64_t* out)
 
 void case_constant_folding()
 {
+    /* A compare of constants that the IR rule refuses (no pred, or an unknown
+     * one) is not folded: the verifier and the lowerings refuse it. The same
+     * cases as test_a_compare_the_ir_rule_refuses_is_not_folded. */
+    for(const char* pred : {kAbsentPred, "ugt"})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_fold_refused");
+        rocke_value_t* out
+            = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_i1(), "global"), nullptr);
+        rocke_value_t* operands[2] = {rocke_b_const_i32(&b, 1), rocke_b_const_i32(&b, 2)};
+        rocke_attr_map_t attrs = rocke_i_attrs(&b);
+        if(pred != kAbsentPred)
+            rocke_attr_set_str(&b, &attrs, "pred", pred);
+        rocke_value_t* compare
+            = rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &attrs, "cmp");
+        rocke_b_global_store(&b, out, rocke_b_const_i32(&b, 0), compare, 1);
+        int64_t folded = -2;
+        EXPECT(!folded_store_value(&b, &folded),
+               std::string("a compare with pred ") + pred + " was folded");
+        rocke_ir_builder_free(&b);
+    }
+
     const int64_t n = 7;
     for(bool wide : {false, true})
         for(int64_t x : {int64_t{-1}, int64_t{0}, n - 1, n})
@@ -1072,6 +1102,7 @@ int main(int argc, char** argv)
     case_lshr_hip_text();
     case_integer_element_builder_rule();
     case_integer_element_verifier_rule();
+    case_integer_element_lowering_rule();
     case_compares_refused_by_the_ir_rule();
     case_compare_builders_refuse_what_the_ir_rule_refuses();
     case_builder_refusals();

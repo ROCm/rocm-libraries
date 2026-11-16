@@ -13,8 +13,8 @@
  * engine, and each case pins the segment offset and the claim the Python test
  * pins for the same kernel. A vector store also claims a width: the builder
  * and the verifier refuse a stored value without that many lanes. The f32
- * epilogue load and store refuse a tile or value that does not hold f32, and
- * smem_store_f16 a value that does not hold f16.
+ * epilogue store refuses a value that does not hold f32, and smem_store_f16 a
+ * value that does not hold f16.
  */
 
 #include "rocke/error.hpp"
@@ -725,50 +725,6 @@ int test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused()
     return 0;
 }
 
-/* The f32 epilogue ops emit an f32 access and size its alignment claim for f32
- * elements, so they refuse a tile of any other element type. Mirrors
- * test_an_f32_epilogue_access_to_a_tile_not_holding_f32_is_refused. */
-int test_an_f32_epilogue_access_to_a_tile_not_holding_f32_is_refused()
-{
-    const struct
-    {
-        const rocke_type_t* tile_elem;
-        bool is_store;
-        const char* message;
-    } cases[] = {
-        {rocke_f16(), false, "smem_load_vN_f32 failed - tile element type='f16', expected f32"},
-        {rocke_bf16(), false, "smem_load_vN_f32 failed - tile element type='bf16', expected f32"},
-        {rocke_f16(), true, "smem_store_vN_f32 failed - tile element type='f16', expected f32"},
-        {rocke_bf16(), true, "smem_store_vN_f32 failed - tile element type='bf16', expected f32"},
-    };
-    for(const auto& test_case : cases)
-    {
-        rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "lds_f32_epilogue_tile") == ROCKE_OK);
-        rocke_value_t* out
-            = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
-        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
-        const int tile_shape[] = {16};
-        rocke_value_t* tile = rocke_b_smem_alloc(&b, test_case.tile_elem, tile_shape, 1, "t");
-        rocke_value_t* value = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), 4, 4);
-        CHECK(rocke_ir_builder_ok(&b));
-        rocke_value_t* const at_zero[] = {zero};
-        const bool refused = builder_refuses(
-            &b,
-            [&] {
-                if(test_case.is_store)
-                    rocke_b_smem_store_vN_f32(&b, tile, at_zero, 1, value, 4);
-                else
-                    rocke_b_smem_load_vN_f32(&b, tile, at_zero, 1, 4);
-            },
-            ROCKE_ERR_TYPE,
-            test_case.message);
-        rocke_ir_builder_free(&b);
-        CHECK(refused);
-    }
-    return 0;
-}
-
 /* smem_store_vN_f32 emits an f32 store, so it refuses a value of any other
  * element type. Mirrors
  * test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused. */
@@ -830,66 +786,77 @@ int test_an_f16_store_of_a_value_not_holding_f16_is_refused()
 
 /* Serialized IR reaches the verifier and the lowerings without passing the
  * builder: the verifier reports, and the LLVM lowering refuses, an f32
- * epilogue access to a tile that does not hold f32 and a store whose value
- * does not hold f32 (ROCKE_ERR_TYPE), or does not have `vec` lanes
- * (ROCKE_ERR_VALUE).
- * Mirrors test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused. */
-int test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused()
+ * epilogue store whose value does not hold f32 (ROCKE_ERR_TYPE) or does not
+ * have `vec` lanes (ROCKE_ERR_VALUE). Mirrors
+ * test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused. */
+int test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused()
 {
     const struct
     {
-        const char* tile_elem;
-        const char* access_lines;
+        const char* value_line;
+        int vec;
         rocke_status_t status;
         const char* message;
     } cases[] = {
-        {"f16",
-         "%av4 : vec<f32x4> = tile.smem_load_vN_f32 ( %buf2, %c1 ) "
-         "{ elem_type = s:\"f32\", rank = i:1, vec = i:4 }",
-         ROCKE_ERR_TYPE,
-         "tile.smem_load_vN_f32 failed - tile element type='f16', expected f32"},
-        {"f16",
-         "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
-         "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }\n"
-         "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
-         "{ elem_type = s:\"f32\", rank = i:1, vec = i:4 }",
-         ROCKE_ERR_TYPE,
-         "tile.smem_store_vN_f32 failed - tile element type='f16', expected f32"},
-        {"f32",
-         "%v3 : vec<f16x4> = memref.global_load_vN ( %outh, %c1 ) "
-         "{ align = i:2, elem_type = s:\"f16\", vec = i:4 }\n"
-         "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
-         "{ elem_type = s:\"f32\", rank = i:1, vec = i:4 }",
+        {"%v3 : vec<f16x4> = memref.global_load_vN ( %outh, %c1 ) "
+         "{ align = i:2, elem_type = s:\"f16\", vec = i:4 }",
+         4,
          ROCKE_ERR_TYPE,
          "tile.smem_store_vN_f32 failed - value element type='f16', expected f32"},
-        {"f32",
-         "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
-         "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }\n"
-         "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) "
-         "{ elem_type = s:\"f32\", rank = i:1, vec = i:2 }",
+        {"%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+         "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }",
+         2,
          ROCKE_ERR_VALUE,
          "tile.smem_store_vN_f32 failed - lanes=4, expected vec=2"},
     };
     for(const auto& test_case : cases)
     {
-        const std::string text = std::string("ckdsl.ir v1\n"
-                                             "kernel @lds_f32_epilogue_contract {\n"
-                                             "  params {\n"
-                                             "    %out : ptr<f32,global>\n"
-                                             "    %outh : ptr<f16,global>\n"
-                                             "  }\n"
-                                             "  region @entry {\n"
-                                             "    %c1 : i32 = arith.constant (  ) "
-                                             "{ ity = s:\"i32\", value = i:0 }\n"
-                                             "    %buf2 : smem<")
-                                 + test_case.tile_elem + ", [16]> = tile.smem_alloc (  )\n    "
-                                 + test_case.access_lines
-                                 + "\n"
-                                   "    cf.return (  )\n"
-                                   "  }\n"
-                                   "}\n";
+        const std::string text
+            = std::string("ckdsl.ir v1\n"
+                          "kernel @lds_f32_epilogue_contract {\n"
+                          "  params {\n"
+                          "    %out : ptr<f32,global>\n"
+                          "    %outh : ptr<f16,global>\n"
+                          "  }\n"
+                          "  region @entry {\n"
+                          "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n"
+                          "    %buf2 : smem<f32, [16]> = tile.smem_alloc (  )\n"
+                          "    ")
+              + test_case.value_line
+              + "\n"
+                "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) { elem_type = s:\"f32\", "
+                "rank = i:1, vec = i:"
+              + std::to_string(test_case.vec)
+              + " }\n"
+                "    cf.return (  )\n"
+                "  }\n"
+                "}\n";
         CHECK(serialized_kernel_is_refused(text, test_case.status, test_case.message));
     }
+    return 0;
+}
+
+/* An f16 tile whose rows are 12 halves (24 bytes), read and written 4 f32 wide
+ * (16 bytes) by the f32 epilogue ops, as a kernel that reuses an f16 LDS ring
+ * to stage f32 values does: row 1 starts 24 bytes in, so both accesses claim
+ * only the 8 bytes every row start guarantees (gcd(16, 24)). Mirrors
+ * test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile. */
+int test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_align_f32_epilogue_f16_rows") == ROCKE_OK);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {2, 12};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f16(), tile_shape, 2, "t");
+    rocke_value_t* const row_zero[] = {zero, zero};
+    rocke_value_t* row = rocke_b_smem_load_vN_f32(&b, tile, row_zero, 2, 4);
+    rocke_value_t* const row_one[] = {rocke_b_const_i32(&b, 1), zero};
+    rocke_b_smem_store_vN_f32(&b, tile, row_one, 2, row, 4);
+    rocke_b_ret(&b);
+    const Lowering lowering = lower_and_free(&b);
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(every_lds_access_claims(lowering.text, "= load <4 x float>, ptr addrspace(3)", 8));
+    CHECK(every_lds_access_claims(lowering.text, "store <4 x float> %", 8));
     return 0;
 }
 
@@ -913,10 +880,10 @@ int main()
        || test_a_one_lane_vector_is_a_one_element_store()
        || test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused()
        || test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused()
-       || test_an_f32_epilogue_access_to_a_tile_not_holding_f32_is_refused()
        || test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused()
        || test_an_f16_store_of_a_value_not_holding_f16_is_refused()
-       || test_a_serialized_f32_epilogue_access_breaking_its_contract_is_refused())
+       || test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused()
+       || test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile())
     {
         std::fprintf(stderr, "LDS alignment contract failed\n");
         return 1;

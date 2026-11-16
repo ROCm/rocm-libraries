@@ -589,6 +589,27 @@ def test_folded_cmp_ult_reads_operands_as_unsigned(int_type):
         assert _fold_cmp_ult(x, n, int_type) == expected, x
 
 
+@pytest.mark.parametrize("pred", [_ABSENT, "ugt"], ids=["absent", "unknown"])
+def test_a_compare_the_ir_rule_refuses_is_not_folded(pred):
+    """A compare of constants that the IR rule refuses (no pred, or an unknown
+    one) is not folded into a constant: it stays for the verifier and the
+    lowerings to refuse. The ctest checks the C++ folder with the same
+    cases."""
+    b = IRBuilder("fold_refused_compare")
+    out = b.param("out", PtrType(I1, "global"))
+    attrs = {} if pred is _ABSENT else {"pred": pred}
+    compare = b._op(
+        "arith.cmp", [b.const_i32(1), b.const_i32(2)], [I1], attrs=attrs
+    ).result
+    b.store(compare, out)
+    b.ret()
+    optimize_kernel(b.kernel)
+    (store,) = [
+        op for op in b.kernel.body.ops if op.name == "memref.global_store_typed"
+    ]
+    assert store.operands[2].op.name == "arith.cmp"
+
+
 def _store_one(name, out_type, compute):
     """A kernel that stores ``compute(b)`` to ``out[0]`` (an ``out_type`` array)."""
     b = IRBuilder(name)

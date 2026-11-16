@@ -77,7 +77,8 @@ from .ir import (
     _is_unsigned,
     _ldexp_op_error,
     _smem_store_vN_op_error,
-    _smem_vN_f32_op_error,
+    _smem_store_vN_f32_op_error,
+    _refuse_non_integer_op,
     _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -1432,7 +1433,7 @@ def _lds_natural_align(op: Op) -> int | None:
         return smem_vector_access_align(
             op.operands[0].type, int(op.attrs["vec"]), element_type(op.result.type)
         )
-    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32"):
+    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32") and op.operands:
         return smem_vector_access_align(op.operands[0].type, int(op.attrs["vec"]), F32)
     if name == "tile.smem_load_v4":
         # One scalar load per element.
@@ -2569,6 +2570,7 @@ class _Lowerer:
         named_op_id = named_mma_op_id(op.name)
         if named_op_id is not None:
             self._backend.require_mma_available(named_op_id)
+        _refuse_non_integer_op(op)
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no LLVM lowering for op {op.name!r}")
@@ -2786,7 +2788,7 @@ class _Lowerer:
         refusal = _int_cmp_error(op.attrs, a.type)
         if refusal:
             raise refusal
-        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
+        pred = _icmp_predicate(op.attrs["pred"], a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
@@ -6679,7 +6681,7 @@ class _Lowerer:
     # ----- f32 LDS ops (cshuffle epilogue) -----
 
     def _op_tile_smem_store_vN_f32(self, op: Op) -> None:
-        refusal = _smem_vN_f32_op_error(op)
+        refusal = _smem_store_vN_f32_op_error(op)
         if refusal:
             raise refusal
         smem = op.operands[0]
@@ -6718,9 +6720,6 @@ class _Lowerer:
             )
 
     def _op_tile_smem_load_vN_f32(self, op: Op) -> None:
-        refusal = _smem_vN_f32_op_error(op)
-        if refusal:
-            raise refusal
         smem = op.operands[0]
         indices = list(op.operands[1:])
         vec = int(op.attrs["vec"])
