@@ -571,6 +571,29 @@ static void test_dw_fwd_build_null_arch(void)
     free(ll_1250);
 }
 
+/* grid Z = ceil(N / w_fold) * ceil(Ho / block_h): exactly 65535 is admitted,
+ * 65536 is refused (test_direct_dw_fwd_wmma.py test_grid_z_boundary). */
+static void test_dw_fwd_grid_z_boundary(void)
+{
+    rocke_direct_dw_fwd_wmma_spec_t s = rocke_direct_dw_fwd_wmma_spec_default();
+    char reason[ERR_CAP];
+
+    s.problem = dw_problem(3, 3, 1, -1);
+    s.problem.N = 1;
+    s.problem.W = 1;
+    s.problem.groups = 8;
+    s.block_h = 1;
+    s.w_fold = 1;
+    s.problem.H = 65535;
+    CHECK(rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 65535 refused: %s",
+          reason);
+    s.problem.H = 65536;
+    CHECK(!rocke_direct_dw_fwd_wmma_is_valid_spec(&s, "gfx1250", reason, sizeof(reason)),
+          "grid Z 65536 accepted");
+    CHECK(strstr(reason, "grid Z") != NULL, "reason names grid Z: %s", reason);
+}
+
 static void test_toeplitz_wmma_refusals(void)
 {
     char reason[ERR_CAP];
@@ -1186,6 +1209,7 @@ int main(void)
     test_stem_wmma_kernels_refuse_per_axis_padding();
     test_toeplitz_wmma_refusals();
     test_dw_fwd_build_null_arch();
+    test_dw_fwd_grid_z_boundary();
     test_fwd_wmma_strided_view_refusals();
     test_fwd_wmma_poly_view_refusals();
     test_fwd_wmma_padded_poly_view_chunk();
