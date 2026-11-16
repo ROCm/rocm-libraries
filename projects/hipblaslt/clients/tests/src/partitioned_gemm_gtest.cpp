@@ -104,14 +104,24 @@ namespace
         ScopedEnv(const char* name, const char* value)
             : m_name(name)
         {
-            setenv(name, value, 1);
+            set(name, value);
         }
         ~ScopedEnv()
         {
-            unsetenv(m_name);
+            // An empty value is "not set" for the library's check (it looks for "1").
+            set(m_name, "");
         }
 
     private:
+        static void set(const char* name, const char* value)
+        {
+#ifdef _WIN32
+            _putenv_s(name, value);
+#else
+            setenv(name, value, 1);
+#endif
+        }
+
         const char* m_name;
     };
 
