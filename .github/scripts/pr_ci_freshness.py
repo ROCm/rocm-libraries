@@ -43,7 +43,10 @@ The run cannot reveal it (its ``pull_requests[].base`` already reads
 ``develop``), so the PR timeline is asked instead.
 
 A head with no CI run yet is fresh, since whatever run it gets will merge the
-current tip.
+current tip. The exception is a PR that conflicts with ``develop``: GitHub
+builds no merge for it, so no run can start, and its status says that rather
+than promising a run. When GitHub has not yet worked out whether a PR
+conflicts, the status promises nothing either way.
 
 The CI-run trigger fires for stacked PRs into feature branches as well. Those
 get no status: they are judged against a different branch, if at all, and the
@@ -392,6 +395,8 @@ class PullRequest:
     # When the PR was last pointed at a different base branch. A retarget
     # starts no CI run, so a run from before it merged some other branch.
     retargeted_at: Optional[datetime] = None
+    # GitHub's merge state for the PR: MERGEABLE, CONFLICTING or UNKNOWN.
+    mergeable: str = "UNKNOWN"
 
     @property
     def label(self) -> str:
@@ -432,6 +437,8 @@ class Verdict:
     ci_run: Optional[CIRun] = None
     # Stale because the PR was retargeted after its CI run merged a base.
     retargeted: bool = False
+    # The PR's merge state, which says whether a missing run is on its way.
+    mergeable: str = "UNKNOWN"
     error: Optional[str] = None
     # Why this head gets no status at all, when it is not ours to report on.
     ignored: Optional[str] = None
@@ -523,7 +530,7 @@ def evaluate(
     except (GitHubError, KeyError, TypeError, ValueError, AttributeError) as e:
         return Verdict(fresh=True, error=str(e))
     if ci_run is None:
-        return Verdict(fresh=True)
+        return Verdict(fresh=True, mergeable=pr.mergeable)
     if pr.number is None:
         # Scoped by head alone, which is the CI-run trigger. That fires for
         # every PR the CI workflow runs on, stacked PRs into feature branches
@@ -548,29 +555,51 @@ def evaluate(
     )
 
 
-RETARGET_BATCH = 50
+PR_FACTS_BATCH = 50
 
 
-def find_retargets(gh: GitHub, numbers: list[int]) -> dict[int, datetime]:
-    """Returns when each PR in ``numbers`` last changed its base branch.
+@dataclass
+class PRFacts:
+    """What the run records cannot say about a PR, read from GraphQL."""
 
-    PRs that never did are absent. This is the one thing the run records
-    cannot say: a run's ``pull_requests[].base`` is the PR's base now, so a
-    stacked PR retargeted onto develop when its parent merged looks, from its
-    run, as if CI had merged develop all along.
+    # When the PR last changed its base branch. A run's
+    # ``pull_requests[].base`` is the PR's base now, so a stacked PR
+    # retargeted onto develop when its parent merged looks, from its run, as
+    # if CI had merged develop all along.
+    retargeted_at: Optional[datetime] = None
+    # MERGEABLE, CONFLICTING or UNKNOWN. GitHub builds no merge ref for a
+    # conflicting PR, so no CI run can start until the conflict is resolved.
+    # It computes this lazily: the first ask often answers UNKNOWN and starts
+    # the computation, so the next sweep usually sees the real state.
+    mergeable: str = "UNKNOWN"
 
-    GraphQL, because REST has no way to ask for one event type, and batched,
-    because a timeline lookup per PR would double the cost of a sweep. A
-    batch of this size costs one point from the separate GraphQL allowance.
-    Raises ``GitHubError`` when a batch returns nothing usable; a partial
-    answer is kept.
+
+@dataclass
+class FactsLookup:
+    facts: dict[int, PRFacts] = field(default_factory=dict)
+    # PRs whose facts could not be read, and why. They are judged on CI age
+    # alone, which is the verdict they would have had without this lookup.
+    unread: list[int] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+def find_pr_facts(gh: GitHub, numbers: list[int]) -> FactsLookup:
+    """Reads each PR's last retarget and whether it conflicts with its base.
+
+    GraphQL, because REST has no way to ask for one timeline event type and
+    lists no merge state, and batched, because a lookup per PR would double
+    the cost of a sweep. A batch of this size costs one point from the
+    separate GraphQL allowance.
+
+    Never raises. A batch that fails, or a PR whose answer is malformed,
+    costs only those PRs their facts; everything that was read is kept.
     """
     owner, name = gh.repo.split("/", 1)
-    found: dict[int, datetime] = {}
-    for start in range(0, len(numbers), RETARGET_BATCH):
-        batch = numbers[start : start + RETARGET_BATCH]
+    lookup = FactsLookup()
+    for start in range(0, len(numbers), PR_FACTS_BATCH):
+        batch = numbers[start : start + PR_FACTS_BATCH]
         fields = " ".join(
-            f"pr{n}: pullRequest(number: {int(n)}) {{ timelineItems("
+            f"pr{n}: pullRequest(number: {int(n)}) {{ mergeable timelineItems("
             f"itemTypes: [BASE_REF_CHANGED_EVENT], last: 1) "
             f"{{ nodes {{ ... on BaseRefChangedEvent {{ createdAt }} }} }} }}"
             for n in batch
@@ -579,18 +608,64 @@ def find_retargets(gh: GitHub, numbers: list[int]) -> dict[int, datetime]:
             "query($owner: String!, $name: String!) "
             f"{{ repository(owner: $owner, name: $name) {{ {fields} }} }}"
         )
-        data = gh.graphql(query, {"owner": owner, "name": name})
         try:
-            repository = data["repository"]
-            for n in batch:
-                nodes = (
-                    (repository.get(f"pr{n}") or {}).get("timelineItems") or {}
-                ).get("nodes") or []
-                if nodes and nodes[-1].get("createdAt"):
-                    found[n] = parse_timestamp(nodes[-1]["createdAt"])
-        except (KeyError, TypeError, AttributeError, ValueError) as e:
-            raise GitHubError(f"malformed retarget answer: {e}") from e
-    return found
+            repository = gh.graphql(query, {"owner": owner, "name": name})["repository"]
+            if not isinstance(repository, dict):
+                raise TypeError(f"repository is {type(repository).__name__}")
+        except (GitHubError, KeyError, TypeError) as e:
+            lookup.unread += batch
+            lookup.errors.append(str(e))
+            continue
+        for n in batch:
+            try:
+                node = repository[f"pr{n}"]
+                nodes = (node.get("timelineItems") or {}).get("nodes") or []
+                created = nodes[-1].get("createdAt") if nodes else None
+                lookup.facts[n] = PRFacts(
+                    retargeted_at=parse_timestamp(created) if created else None,
+                    mergeable=node.get("mergeable") or "UNKNOWN",
+                )
+            except (KeyError, TypeError, AttributeError, ValueError) as e:
+                lookup.unread.append(n)
+                lookup.errors.append(f"#{n}: {e!r}")
+    return lookup
+
+
+# How long GitHub usually takes to work out a merge state it was just asked
+# for. On a base branch this busy every merge resets it across the queue, so
+# a sweep's first ask often finds it still UNKNOWN.
+MERGEABLE_SETTLE_SECONDS = 10.0
+
+
+def recheck_unknown_merge_states(
+    gh: GitHub,
+    pairs: list[tuple[PullRequest, Verdict]],
+    waited: float,
+    sleep=time.sleep,
+) -> None:
+    """Asks once more for the merge state of PRs with no CI run.
+
+    Only those PRs, because only their description depends on it: whether a
+    run is coming or a conflict is in the way. ``waited`` is how long it has
+    been since the first ask, which a full sweep has usually spent already.
+    Anything still unread or UNKNOWN keeps the noncommittal description.
+    """
+    pending = [
+        (pr, verdict)
+        for pr, verdict in pairs
+        if pr.number
+        and verdict.ci_run is None
+        and verdict.mergeable == "UNKNOWN"
+        and not (verdict.error or verdict.ignored or verdict.skipped)
+    ]
+    if not pending:
+        return
+    sleep(max(0.0, MERGEABLE_SETTLE_SECONDS - waited))
+    lookup = find_pr_facts(gh, [pr.number for pr, _ in pending])
+    for pr, verdict in pending:
+        facts = lookup.facts.get(pr.number)
+        if facts:
+            pr.mergeable = verdict.mergeable = facts.mergeable
 
 
 def current_status(
@@ -661,7 +736,19 @@ def describe(
     if verdict.error:
         text = f"Could not evaluate CI freshness ({verdict.error})"
     elif verdict.fresh and verdict.ci_run is None:
-        text = f"No CI run on this head yet; the next one merges current {base_branch}"
+        # Only promise a run when GitHub has said the PR can be merged.
+        if verdict.mergeable == "CONFLICTING":
+            text = (
+                f"No CI run: this PR conflicts with {base_branch}, and CI cannot "
+                f"start until that is resolved"
+            )
+        elif verdict.mergeable == "MERGEABLE":
+            text = (
+                f"No CI run on this head yet; the next one merges current "
+                f"{base_branch}"
+            )
+        else:
+            text = "No CI run on this head yet"
     elif verdict.fresh:
         text = f"CI merged {base_branch} within the last {max_age_days} days"
     else:
@@ -968,16 +1055,21 @@ def main() -> int:
         )
 
     numbered = [pr.number for pr in prs if pr.number]
-    if numbered:
-        try:
-            retargets = find_retargets(gh, numbered)
-        except GitHubError as e:
-            # Fail open on this signal alone: the age check still stands, it
-            # just cannot see a retarget this run.
-            print(f"::warning::could not read PR retargets; judging on age only: {e}")
-            retargets = {}
-        for pr in prs:
-            pr.retargeted_at = retargets.get(pr.number)
+    lookup = find_pr_facts(gh, numbered) if numbered else FactsLookup()
+    facts_read_at = time.monotonic()
+    if lookup.unread:
+        # Fail open on these facts alone: the age check still stands for
+        # those PRs, it just cannot see a retarget or a conflict this run.
+        print(
+            f"::warning::could not read retarget and conflict facts for "
+            f"{len(lookup.unread)} of {len(numbered)} PRs; those are judged on "
+            f"CI age alone: {'; '.join(lookup.errors[:3])}"
+        )
+    for pr in prs:
+        facts = lookup.facts.get(pr.number)
+        if facts:
+            pr.retargeted_at = facts.retargeted_at
+            pr.mergeable = facts.mergeable
 
     this_run_url = None
     server, run_id = os.environ.get("GITHUB_SERVER_URL"), os.environ.get(
@@ -995,6 +1087,11 @@ def main() -> int:
                 prs,
             )
         )
+    recheck_unknown_merge_states(
+        gh,
+        [(pr, a.verdict) for pr, a in zip(prs, assessments)],
+        waited=time.monotonic() - facts_read_at,
+    )
 
     stale = []
     skipped = []
@@ -1094,6 +1191,13 @@ def main() -> int:
         summary += [
             "**Listing stopped at the rate-limit reserve.** This sweep ran "
             "against a partial list of open PRs.",
+            "",
+        ]
+    if lookup.unread:
+        summary += [
+            f"**Retarget and conflict facts could not be read for "
+            f"{len(lookup.unread)} PRs**, which were judged on CI age alone: "
+            + ", ".join(f"#{n}" for n in lookup.unread[:50]),
             "",
         ]
     if stale:

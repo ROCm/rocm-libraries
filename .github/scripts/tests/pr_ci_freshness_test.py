@@ -215,6 +215,14 @@ class EvaluateTest(unittest.TestCase):
         self.assertIsNone(verdict.ci_run)
         self.assertIsNone(verdict.error)
 
+    def test_a_missing_run_carries_the_prs_merge_state(self):
+        # A conflicting PR has no merge ref, so no run is coming until the
+        # conflict is resolved; the description needs to know that.
+        conflicting = PullRequest(42, "deadbeef", False, mergeable="CONFLICTING")
+        _, verdict = self.evaluate(NO_RUNS, pr=conflicting)
+        self.assertTrue(verdict.fresh)
+        self.assertEqual(verdict.mergeable, "CONFLICTING")
+
     def test_lookup_asks_for_the_newest_pull_request_run_of_this_head(self):
         gh, _ = self.evaluate(runs(created_days_ago=1))
         self.assertEqual(gh.paths, [RUNS])
@@ -400,17 +408,30 @@ class BudgetTest(unittest.TestCase):
 
 
 class FakeGraphQL:
-    """Answers retarget queries from ``createdAt`` values keyed by PR number."""
+    """Answers PR-facts queries, batch by batch, from per-PR settings.
 
-    def __init__(self, retargets: dict, missing: tuple = ()):
+    ``retargets`` maps a PR to how many days ago it changed base,
+    ``conflicting`` and ``unknown`` list PRs GitHub reports in those merge
+    states (the rest are MERGEABLE), ``missing``
+    PRs it cannot resolve, and ``broken`` PRs whose whole batch fails.
+    """
+
+    def __init__(
+        self, retargets=None, conflicting=(), unknown=(), missing=(), broken=()
+    ):
         self.repo = "o/r"
-        self._retargets = retargets
+        self._retargets = retargets or {}
+        self._conflicting = conflicting
+        self._unknown = unknown
         self._missing = missing
+        self._broken = broken
         self.queries: list[str] = []
 
     def graphql(self, query: str, variables: dict):
         self.queries.append(query)
         numbers = [int(n) for n in re.findall(r"pullRequest\(number: (\d+)\)", query)]
+        if set(numbers) & set(self._broken):
+            raise pcf.GitHubError("POST graphql -> 502")
         repository = {}
         for n in numbers:
             if n in self._missing:
@@ -419,31 +440,85 @@ class FakeGraphQL:
             nodes = (
                 [{"createdAt": iso(self._retargets[n])}] if n in self._retargets else []
             )
-            repository[f"pr{n}"] = {"timelineItems": {"nodes": nodes}}
+            repository[f"pr{n}"] = {
+                "mergeable": self._mergeable(n),
+                "timelineItems": {"nodes": nodes},
+            }
         return {"repository": repository}
 
+    def _mergeable(self, n: int) -> str:
+        if n in self._conflicting:
+            return "CONFLICTING"
+        return "UNKNOWN" if n in self._unknown else "MERGEABLE"
 
-class RetargetTest(unittest.TestCase):
-    def test_reports_only_prs_that_changed_base(self):
-        gh = FakeGraphQL({7: 0.25})
+
+class PRFactsTest(unittest.TestCase):
+    def test_reads_retargets_and_conflicts(self):
+        gh = FakeGraphQL({7: 0.25}, conflicting=(8,), unknown=(9,))
+        lookup = pcf.find_pr_facts(gh, [7, 8, 9])
+        self.assertEqual(lookup.facts[7].retargeted_at, NOW - timedelta(days=0.25))
         self.assertEqual(
-            pcf.find_retargets(gh, [7, 8]), {7: NOW - timedelta(days=0.25)}
+            [lookup.facts[n].mergeable for n in (7, 8, 9)],
+            ["MERGEABLE", "CONFLICTING", "UNKNOWN"],
         )
-
-    def test_a_pr_graphql_cannot_resolve_is_left_out_not_fatal(self):
-        gh = FakeGraphQL({7: 1.0}, missing=(8,))
-        self.assertEqual(list(pcf.find_retargets(gh, [7, 8])), [7])
+        self.assertIsNone(lookup.facts[9].retargeted_at)
+        self.assertEqual(lookup.unread, [])
 
     def test_a_sweep_is_batched_rather_than_one_query_per_pr(self):
-        gh = FakeGraphQL({})
-        pcf.find_retargets(gh, list(range(1, 2 * pcf.RETARGET_BATCH + 2)))
+        gh = FakeGraphQL()
+        pcf.find_pr_facts(gh, list(range(1, 2 * pcf.PR_FACTS_BATCH + 2)))
         self.assertEqual(len(gh.queries), 3)
 
-    def test_a_malformed_answer_is_an_error(self):
-        gh = FakeGraphQL({})
-        gh.graphql = lambda query, variables: {"repository": "nope"}
-        with self.assertRaises(pcf.GitHubError):
-            pcf.find_retargets(gh, [7])
+    def test_a_failed_batch_costs_only_its_own_prs(self):
+        numbers = list(range(1, 2 * pcf.PR_FACTS_BATCH + 1))
+        lookup = pcf.find_pr_facts(FakeGraphQL({70: 1.0}, broken=(5,)), numbers)
+        self.assertEqual(lookup.unread, numbers[: pcf.PR_FACTS_BATCH])
+        self.assertEqual(sorted(lookup.facts), numbers[pcf.PR_FACTS_BATCH :])
+        self.assertIsNotNone(lookup.facts[70].retargeted_at)
+        self.assertEqual(len(lookup.errors), 1)
+
+    def test_a_malformed_batch_costs_only_its_own_prs(self):
+        gh = FakeGraphQL()
+        real = gh.graphql
+        answers = iter([{"repository": "nope"}])
+        gh.graphql = lambda query, variables: next(answers, None) or real(
+            query, variables
+        )
+        numbers = list(range(1, pcf.PR_FACTS_BATCH + 3))
+        lookup = pcf.find_pr_facts(gh, numbers)
+        self.assertEqual(lookup.unread, numbers[: pcf.PR_FACTS_BATCH])
+        self.assertEqual(sorted(lookup.facts), numbers[pcf.PR_FACTS_BATCH :])
+
+    def test_unknown_merge_states_of_runless_prs_are_asked_again(self):
+        # GitHub's first answer is often UNKNOWN while it computes; by the
+        # second ask it usually knows.
+        runless = PullRequest(8, "a", False)
+        with_run = PullRequest(9, "b", False)
+        pairs = [
+            (runless, Verdict(fresh=True)),
+            (with_run, Verdict(fresh=True, ci_run=ci_run(days_ago=1))),
+        ]
+        gh = FakeGraphQL(conflicting=(8, 9))
+        slept: list[float] = []
+        pcf.recheck_unknown_merge_states(gh, pairs, waited=4.0, sleep=slept.append)
+        self.assertEqual(pairs[0][1].mergeable, "CONFLICTING")
+        # A PR with a run has nothing riding on its merge state.
+        self.assertEqual(pairs[1][1].mergeable, "UNKNOWN")
+        self.assertEqual(re.findall(r"number: (\d+)", gh.queries[0]), ["8"])
+        self.assertEqual(slept, [pcf.MERGEABLE_SETTLE_SECONDS - 4.0])
+
+    def test_nothing_to_recheck_costs_nothing(self):
+        gh = FakeGraphQL()
+        known = Verdict(fresh=True, mergeable="MERGEABLE")
+        pcf.recheck_unknown_merge_states(
+            gh, [(PullRequest(8, "a", False), known)], waited=0.0, sleep=self.fail
+        )
+        self.assertEqual(gh.queries, [])
+
+    def test_one_unreadable_pr_does_not_cost_its_batch(self):
+        lookup = pcf.find_pr_facts(FakeGraphQL({7: 1.0}, missing=(8,)), [7, 8, 9])
+        self.assertEqual(lookup.unread, [8])
+        self.assertEqual(sorted(lookup.facts), [7, 9])
 
 
 class PublishedStatusTest(unittest.TestCase):
@@ -847,11 +922,28 @@ class StableDescriptionTest(unittest.TestCase):
                 "CI merged develop within the last 3 days",
             )
 
-    def test_no_run_description_is_constant(self):
+    def no_run(self, mergeable: str) -> str:
+        return pcf.describe(
+            Verdict(fresh=True, mergeable=mergeable), "develop", 3, True
+        )
+
+    def test_a_mergeable_pr_is_promised_a_run_on_current_develop(self):
         self.assertEqual(
-            pcf.describe(Verdict(fresh=True), "develop", 3, enforcing=True),
+            self.no_run("MERGEABLE"),
             "No CI run on this head yet; the next one merges current develop",
         )
+
+    def test_a_conflicting_pr_is_told_why_no_run_is_coming(self):
+        self.assertEqual(
+            self.no_run("CONFLICTING"),
+            "No CI run: this PR conflicts with develop, and CI cannot start "
+            "until that is resolved",
+        )
+
+    def test_an_unknown_merge_state_promises_nothing(self):
+        # GitHub's first answer is often UNKNOWN while it computes, and the
+        # PR may well be conflicting.
+        self.assertEqual(self.no_run("UNKNOWN"), "No CI run on this head yet")
 
 
 class WorkflowTest(unittest.TestCase):
