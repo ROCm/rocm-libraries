@@ -46,7 +46,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the host conversion of non-square matrices to DIA writing past the end of the values when the matrix has more rows than columns, for example in `LocalMatrix::ExtractSubMatrices()` and in the multicolored preconditioners. When the matrix has more columns than rows, `LocalMatrix::LeaveDataPtrDIA()` aborted on the result. The host now sizes the DIA values and decides whether the conversion succeeds as the accelerator does, so some non-square matrices that the host converted to DIA before now stay in CSR, with the fallback warning.
 * Fixed the host `LocalMatrix::Apply()` and `LocalMatrix::ApplyAdd()` of non-square DIA matrices ignoring the entries in the columns at or past the number of rows, and reading past the end of the input vector when the matrix has more rows than columns. They also skipped diagonals in the last rows, for square matrices too, when the offsets set with `LocalMatrix::SetDataPtrDIA()` were not in ascending order.
 * Fixed the conversion to DIA of matrices with more than 2^31 - 1 DIA entries, which overflowed the number of entries or the index into the values. These matrices now stay in CSR, with the fallback warning.
-* Fixed the hash sets and maps that the HIP kernels build in LDS for a single wavefront synchronizing with a block-wide barrier, which other wavefronts of the block do not necessarily reach. Under GPU AddressSanitizer, this was reported as a heap-use-after-free when a wavefront returned early.
+* Fixed the hash sets and maps that the HIP kernels build in LDS for a single wavefront synchronizing with a block-wide barrier, which other wavefronts of the block do not necessarily reach.
 
 ## (Unreleased) rocALUTION 4.1.1
 
