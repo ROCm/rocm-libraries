@@ -5,7 +5,8 @@
 
 Drives ``run_attention_dense_torch`` (and once the dispatcher's own binding) with an
 fp32 ``[B|1, Hq|1, Sq|1, Skv]`` bias and checks the output against the float64
-``sdpa_reference`` oracle, which adds the bias after the scale as hipDNN does. The
+``sdpa_reference`` oracle (through ``_dense_bias_common``, shared with the gfx942 lane),
+which adds the bias after the scale as hipDNN does. The
 matrix crosses every bias shape with every mask the grid body serves (none, top-left,
 bottom-right with Sq != Skv, sliding window), then dtype x head size, then the
 sub-modes the bias composes with (ragged lengths, packed varlen, sinks, LSE, a padded
@@ -29,6 +30,15 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from _dense_bias_common import (
+    BIAS_SHAPES,
+    MASKS,
+    SHAPE_FOR_MASK,
+    WINDOW,
+    band_kwargs,
+    reference,
+    tolerance,
+)
 from kernels.gfx950.attention_dense import run_attention_dense_torch
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
@@ -48,22 +58,6 @@ pytestmark = [
 
 _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16}
 _MASK_TYPES = {"none": 0, "top_left": 1, "bottom_right": 2, "window": 3}
-_WINDOW = 128
-
-# Bias extents, each axis but the key one full or broadcast.
-_BIAS_SHAPES = {
-    "full": lambda b, h, sq, skv: (b, h, sq, skv),
-    "batch_bcast": lambda b, h, sq, skv: (1, h, sq, skv),
-    "head_bcast": lambda b, h, sq, skv: (b, 1, sq, skv),
-    "both_bcast": lambda b, h, sq, skv: (1, 1, sq, skv),
-    "key_row": lambda b, h, sq, skv: (1, 1, 1, skv),
-}
-
-
-def _tolerance(dtype):
-    """The dense numeric lane's max_abs tolerance (fp16 2e-2, bf16 4e-2)."""
-    return 2e-2 if dtype == "fp16" else 4e-2
-
 
 # The tiles every case runs at: (candidate, knobs on top of its default spec).
 _TILES = {
@@ -81,7 +75,7 @@ def _spec(dtype, d, hq, hkv, *, batch, sq, skv, mask, tile, sinks=False, lse=Fal
     """The grid-body spec for a bias request at ``tile``, from the dispatch factory."""
     from dispatch.attention import AttentionRequest, attention_tuning_spec
 
-    extra = {"sliding_window": _WINDOW, "right_bound": 0} if mask == "window" else {}
+    extra = {"sliding_window": WINDOW, "right_bound": 0} if mask == "window" else {}
     req = AttentionRequest(
         batch=batch,
         nhead_q=hq,
@@ -117,38 +111,24 @@ def _inputs(dtype, d, hq, hkv, batch, sq, skv, bias_shape, *, seed=0):
     return q, k, v, bias
 
 
-def _band(mask):
-    """sdpa_reference band arguments for ``mask``. The dense window keeps keys with
-    ``q - k < W``, i.e. a left bound of W - 1."""
-    if mask == "top_left":
-        return {"causal": True}
-    if mask == "bottom_right":
-        return {"causal_bottom_right": True}
-    if mask == "window":
-        return {"left_bound": _WINDOW - 1, "right_bound": 0, "top_left": True}
-    return {}
-
-
-def _bhsd(t):
-    return t.float().permute(0, 2, 1, 3).cpu().numpy()
+def _host(t):
+    """``t`` as a float32 numpy array."""
+    return t.detach().float().cpu().numpy()
 
 
 def _reference(q, k, v, scale, bias, mask):
-    """``(O [B, Sq, Hq, D], LSE [B, Hq, Sq])`` from the float64 oracle."""
-    from rocke.numeric.sdpa_reference import sdpa_reference
-
-    o, lse = sdpa_reference(
-        _bhsd(q),
-        _bhsd(k),
-        _bhsd(v),
-        scale=scale,
-        bias=None if bias is None else bias.cpu().numpy().astype(np.float64),
-        **_band(mask),
+    """``(O [B, Sq, Hq, D], LSE [B, Hq, Sq])`` as float32 torch tensors: the shared
+    float64 oracle on the inputs the kernel reads (NaN bias entries read as ``-inf``;
+    the kernel's NaN rows are checked apart)."""
+    o, lse = reference(
+        _host(q),
+        _host(k),
+        _host(v),
+        scale,
+        None if bias is None else _host(bias),
+        mask,
     )
-    return (
-        torch.from_numpy(o).permute(0, 2, 1, 3).float(),
-        torch.from_numpy(lse).float(),
-    )
+    return torch.from_numpy(o).float(), torch.from_numpy(lse).float()
 
 
 def _max_abs(out, ref):
@@ -165,40 +145,31 @@ def _run(spec, q, k, v, bias, scale, **kw):
     return out
 
 
-@pytest.mark.parametrize("bias_name", list(_BIAS_SHAPES))
-@pytest.mark.parametrize("mask", list(_MASK_TYPES))
+@pytest.mark.parametrize("bias_name", list(BIAS_SHAPES))
+@pytest.mark.parametrize("mask", MASKS)
 def test_bias_shape_x_mask(bias_name, mask, tile):
     """Every bias shape under every mask, bf16 D128 GQA-4, B=2. Bottom-right runs
     Sq != Skv so its diagonal moves; the window runs past one KV tile."""
     dtype, d, hq, hkv, batch = "bf16", 128, 8, 2, 2
     sq, skv = (256, 512) if mask == "bottom_right" else (512, 512)
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
-    shape = _BIAS_SHAPES[bias_name](batch, hq, sq, skv)
+    shape = BIAS_SHAPES[bias_name](batch, hq, sq, skv)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias, mask)
-    assert _max_abs(out, ref) < _tolerance(dtype), (bias_name, mask)
+    assert _max_abs(out, ref) < tolerance(dtype), (bias_name, mask)
     # The bias must move the output far past the tolerance, or a kernel that
     # ignored it (or read a constant row) would pass the check above.
     plain, _ = _reference(q, k, v, scale, None, mask)
-    assert _max_abs(out, plain) > 5 * _tolerance(dtype), (bias_name, mask)
-
-
-# One bias shape per mask, so dtype x head x mask also walks every shape.
-_SHAPE_FOR_MASK = {
-    "none": "full",
-    "top_left": "head_bcast",
-    "bottom_right": "batch_bcast",
-    "window": "both_bcast",
-}
+    assert _max_abs(out, plain) > 5 * tolerance(dtype), (bias_name, mask)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize(
     "d,hq,hkv", [(64, 16, 16), (128, 32, 4)], ids=["d64-mha", "d128-gqa"]
 )
-@pytest.mark.parametrize("mask", list(_MASK_TYPES))
+@pytest.mark.parametrize("mask", MASKS)
 def test_dtype_x_head_size(dtype, d, hq, hkv, mask, tile):
     """Both dtypes and both head sizes (64, 128: all the dense kernel serves) under
     every mask, each with a different bias shape; B=2 so a batch broadcast is
@@ -206,12 +177,12 @@ def test_dtype_x_head_size(dtype, d, hq, hkv, mask, tile):
     batch = 2
     sq, skv = (256, 512) if mask == "bottom_right" else (512, 512)
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
-    shape = _BIAS_SHAPES[_SHAPE_FOR_MASK[mask]](batch, hq, sq, skv)
+    shape = BIAS_SHAPES[SHAPE_FOR_MASK[mask]](batch, hq, sq, skv)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias, mask)
-    assert _max_abs(out, ref) < _tolerance(dtype), (dtype, d, mask)
+    assert _max_abs(out, ref) < tolerance(dtype), (dtype, d, mask)
 
 
 @pytest.mark.parametrize(
@@ -230,12 +201,12 @@ def test_ragged_lengths(mask, bias_name, tile):
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 8, 8, 2, 300, 700
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
     assert spec.ragged
-    shape = _BIAS_SHAPES[bias_name](batch, hq, sq, skv)
+    shape = BIAS_SHAPES[bias_name](batch, hq, sq, skv)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias, mask)
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 def test_padded_bias_row_pitch(tile):
@@ -254,7 +225,7 @@ def test_padded_bias_row_pitch(tile):
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias.contiguous(), "top_left")
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("d", [64, 128])
@@ -283,7 +254,7 @@ def test_misaligned_bias_view(mask, d, tile):
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias.contiguous(), mask)
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 def test_minus_inf_entries_mask_keys(tile):
@@ -298,7 +269,7 @@ def test_minus_inf_entries_mask_keys(tile):
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias, "none")
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("mask", ["none", "top_left"])
@@ -321,7 +292,7 @@ def test_bias_below_the_mask_sentinel(mask, tile):
     ref, _ = _reference(q, k, v, scale, bias, mask)
     assert torch.isfinite(out).all()
     assert ref[:, :4].abs().mean().item() > 0.5  # the rows under test are not zero
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 def test_a_finfo_min_mask_matches_the_reference(tile):
@@ -338,7 +309,7 @@ def test_a_finfo_min_mask_matches_the_reference(tile):
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias, "none")
     assert not torch.isnan(out).any()
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -367,14 +338,12 @@ def test_a_row_of_finfo_min_biases_is_the_uniform_softmax(mask, lse, tile):
     ref, lse_ref = _reference(q, k, v, scale, bias, mask)
     assert torch.isfinite(out).all()
     assert ref[:, :, 1].abs().mean().item() > 0.5
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
     if lse:
         got = kw["lse"][..., 0].cpu()
         assert torch.isfinite(got).all() and (got[:, 1] < -1e28).all()
         other = [0, 2, 3]
-        assert (got[:, other] - lse_ref[:, other]).abs().max().item() < _tolerance(
-            dtype
-        )
+        assert (got[:, other] - lse_ref[:, other]).abs().max().item() < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -403,7 +372,7 @@ def test_minus_inf_and_finfo_min_in_one_row(mask, lse, tile):
     ref, _ = _reference(q, k, v, scale, bias, mask)
     assert torch.isfinite(out).all()
     assert ref[:, :, 1].abs().mean().item() > 0.5
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
     if lse:
         assert torch.isfinite(kw["lse"][:, 1]).all()
 
@@ -438,11 +407,11 @@ def test_a_row_with_no_finite_score_outputs_zero(lse, tile):
     ref, lse_ref = _reference(q, k, v, scale, bias, "top_left")
     assert not torch.isnan(out).any()
     assert out[:, :64].abs().max().item() == 0.0
-    assert _max_abs(out[:, 64:], ref[:, 64:]) < _tolerance(dtype)
+    assert _max_abs(out[:, 64:], ref[:, 64:]) < tolerance(dtype)
     if lse:
         got = kw["lse"][..., 0].cpu()
         assert torch.isneginf(got[:, :, :64]).all()
-        assert (got[:, :, 64:] - lse_ref[:, :, 64:]).abs().max().item() < _tolerance(
+        assert (got[:, :, 64:] - lse_ref[:, :, 64:]).abs().max().item() < tolerance(
             dtype
         )
 
@@ -467,14 +436,12 @@ def test_a_head_of_minus_inf_biases_outputs_zero(lse, tile):
     out = _run(spec, q, k, v, bias, scale, **kw)
     ref, lse_ref = _reference(q, k, v, scale, bias, "none")
     assert out[:, :, 1].abs().max().item() == 0.0
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
     if lse:
         got = kw["lse"][..., 0].cpu()
         assert torch.isneginf(got[:, 1]).all()
         other = [0, 2, 3]
-        assert (got[:, other] - lse_ref[:, other]).abs().max().item() < _tolerance(
-            dtype
-        )
+        assert (got[:, other] - lse_ref[:, other]).abs().max().item() < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -508,14 +475,14 @@ def test_window_rows_past_the_keys(lse, tile):
         )
     out = _run(spec, q, k, v, bias, scale, **kw)
     ref, lse_ref = _reference(q, k, v, scale, bias, "window")
-    dead = skv + _WINDOW - 1
+    dead = skv + WINDOW - 1
     assert out[:, dead:].abs().max().item() == 0.0
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
     if lse:
         got = kw["lse"][..., 0].cpu()
         assert torch.isneginf(got[:, :, dead:]).all()
         live = (got[:, :, :dead] - lse_ref[:, :, :dead]).abs().max().item()
-        assert live < _tolerance(dtype)
+        assert live < tolerance(dtype)
 
 
 def test_varlen_window_sequences_past_their_keys(tile):
@@ -558,11 +525,11 @@ def test_varlen_window_sequences_past_their_keys(tile):
         bias=bias.cpu().numpy().astype(np.float64),
         q_offsets=q_offsets,
         kv_offsets=k_offsets,
-        **_band("window"),
+        **band_kwargs("window"),
     )
-    assert _max_abs(out, torch.from_numpy(ref).float()) < _tolerance(dtype)
+    assert _max_abs(out, torch.from_numpy(ref).float()) < tolerance(dtype)
     for s, kv_len in enumerate(kv_lens):
-        dead = q_offsets[s] + kv_len + _WINDOW - 1
+        dead = q_offsets[s] + kv_len + WINDOW - 1
         assert out[dead : q_offsets[s + 1]].abs().max().item() == 0.0, s
 
 
@@ -603,12 +570,12 @@ def test_a_nan_bias_makes_its_row_nan(mask, lse, tile):
     assert torch.equal(torch.isnan(got).all(-1), expect_nan)
     assert not (torch.isnan(got).any(-1) & ~expect_nan).any()
     live = ~expect_nan
-    assert (got - ref).abs().amax(-1)[live].max().item() < _tolerance(dtype)
+    assert (got - ref).abs().amax(-1)[live].max().item() < tolerance(dtype)
     if lse:
         got_lse = kw["lse"][..., 0].cpu().permute(0, 2, 1)  # [B, Sq, Hq]
         assert torch.equal(torch.isnan(got_lse), expect_nan)
         diff = (got_lse - lse_ref.permute(0, 2, 1)).abs()
-        assert diff[live].max().item() < _tolerance(dtype)
+        assert diff[live].max().item() < tolerance(dtype)
 
 
 @pytest.mark.parametrize("mask", ["top_left", "window"])
@@ -625,8 +592,8 @@ def test_lse_includes_the_bias(mask, tile):
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale, lse=lse)
     ref, lse_ref = _reference(q, k, v, scale, bias, mask)
-    assert _max_abs(out, ref) < _tolerance(dtype), mask
-    assert (lse[..., 0].cpu() - lse_ref).abs().max().item() < _tolerance(dtype), mask
+    assert _max_abs(out, ref) < tolerance(dtype), mask
+    assert (lse[..., 0].cpu() - lse_ref).abs().max().item() < tolerance(dtype), mask
 
 
 def test_sinks_with_bias(tile):
@@ -659,7 +626,7 @@ def test_sinks_with_bias(tile):
     sink = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
     p = torch.softmax(torch.cat([s, sink], dim=-1), dim=-1)[..., :skv]
     ref = (p @ vf).transpose(1, 2).cpu()
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 @pytest.mark.parametrize(
@@ -705,7 +672,7 @@ def test_varlen_indexes_the_bias_by_in_sequence_position(
     q = torch.randn(q_offsets[-1], hq, d, device="cuda", dtype=tdt)
     k = torch.randn(k_offsets[-1], hkv, d, device="cuda", dtype=tdt)
     v = torch.randn_like(k)
-    shape = _BIAS_SHAPES[bias_name](nseq, hq, max_q, max_kv)
+    shape = BIAS_SHAPES[bias_name](nseq, hq, max_q, max_kv)
     bias = 2 * torch.randn(shape, device="cuda", dtype=torch.float32)
     cu_q = torch.tensor(q_offsets, device="cuda", dtype=torch.int32)
     cu_k = torch.tensor(k_offsets, device="cuda", dtype=torch.int32)
@@ -726,10 +693,10 @@ def test_varlen_indexes_the_bias_by_in_sequence_position(
         q_offsets=q_offsets,
         kv_offsets=k_offsets,
     )
-    assert _max_abs(out, torch.from_numpy(ref).float()) < _tolerance(dtype)
+    assert _max_abs(out, torch.from_numpy(ref).float()) < tolerance(dtype)
     if lse:
         got = kw["lse"][..., 0].cpu().numpy()
-        assert np.abs(got - lse_ref).max() < _tolerance(dtype)
+        assert np.abs(got - lse_ref).max() < tolerance(dtype)
 
 
 def test_an_lse_buffer_overlapping_the_bias_is_refused(tile):
@@ -814,7 +781,7 @@ def test_dispatcher_binding_passes_the_bias(tile):
     result.bind_torch({**tensors, "attn_bias": bias}, scale=scale).launch()
     torch.cuda.synchronize()
     ref, _ = _reference(q, k, v, scale, bias, "top_left")
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert _max_abs(out, ref) < tolerance(dtype)
 
 
 def test_runtime_shape_bias_kernel_serves_another_shape(tile):
@@ -830,4 +797,4 @@ def test_runtime_shape_bias_kernel_serves_another_shape(tile):
         scale = 1.0 / math.sqrt(d)
         out = _run(spec, q, k, v, bias, scale)
         ref, _ = _reference(q, k, v, scale, bias, "top_left")
-        assert _max_abs(out, ref) < _tolerance(dtype), (batch, seq)
+        assert _max_abs(out, ref) < tolerance(dtype), (batch, seq)

@@ -8,13 +8,14 @@ The numeric lanes (torch: ``test_attention_dense_bias_<arch>_numeric.py``; torch
 inputs, bias shapes, band names and tolerances; this module holds them so a second arch
 adds only its launch code. numpy only: no torch, no GPU, no kernel import, so the CPU
 lane can import it too (``test_attention_dense_bias_gfx942.py`` checks the oracle's
-sink handling here, on the host, before a GPU test relies on it).
+sink handling here, on the host, before a GPU test relies on it). The two device-buffer
+helpers import ``rocke.runtime`` when called, not here.
 
 Layout: dense inputs are ``q [B, Sq, Hq, D]`` and ``k``/``v [B, Skv, Hkv, D]``, the
 kernels' own; the oracle returns ``O [B, Sq, Hq, D]`` and ``LSE [B, Hq, Sq]``.
 
-Only the gfx942 files import this module so far; the gfx950 files keep their own copies
-until the gfx950 bias PR has landed.
+The gfx950 and gfx942 lanes both import this module; what stays in a lane's own file is
+its spec factory, its launch code and, for the torch lanes, the torch-side inputs.
 """
 
 from __future__ import annotations
@@ -108,6 +109,29 @@ def from_bits(bits: np.ndarray, dtype: str) -> np.ndarray:
 def round_to(x, dtype: str) -> np.ndarray:
     """``x`` rounded to ``dtype``, as float32: what the kernel reads."""
     return from_bits(to_bits(x, dtype), dtype)
+
+
+# --------------------------------------------------------------------------- #
+# Device buffers (the torch-free GPU lanes)
+# --------------------------------------------------------------------------- #
+
+
+def device(array):
+    """A device copy of ``array`` (a ``DeviceMem``; the caller keeps it alive)."""
+    from rocke.runtime.host_buffers import as_u8_buffer
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import DeviceMem
+
+    array = np.ascontiguousarray(array)
+    mem = DeviceMem(array.nbytes)
+    Runtime().memcpy_h2d(mem.ptr(), as_u8_buffer(array), array.nbytes)
+    return mem
+
+
+def nan_filled(nbytes: int):
+    """``nbytes`` of device memory, every byte 0xFF: NaN as f16, bf16 and f32, so
+    an element the kernel skips fails the comparison."""
+    return device(np.full(nbytes, 0xFF, np.uint8))
 
 
 # --------------------------------------------------------------------------- #

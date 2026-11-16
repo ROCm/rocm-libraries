@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -58,6 +59,9 @@
  * prepares that form and a plain graph the ten-argument one. The saved plan of a bias kernel
  * (gfx942 dispatch v2, gfx950 v3) restores against the same. Those cases run on the arches
  * that serve a bias (biasServingArches()).
+ *
+ * The last section pins AttentionDenseArch::isConsistent(), the rule each engine static_asserts
+ * on its descriptor, as compile-time checks on broken descriptors.
  *
  * No device, no compile and no launch: the archive named here does not exist, and both
  * the signature refusal and the archive's absence are raised on the host.
@@ -797,6 +801,112 @@ TEST(TestGfx942AttentionDenseSignature, RestoresTheLseBiasFormOfABiasPlanWithSta
     EXPECT_NE(tailless.message.find(RESTORE_MISMATCH_MARKER), std::string::npos)
         << tailless.message;
 }
+
+// =============================================================================
+// The arch descriptor's coherence rule
+// =============================================================================
+//
+// Each engine static_asserts AttentionDenseArch::isConsistent() on its own descriptor, so a
+// shipped descriptor is checked where it is defined. That says nothing about a BROKEN one: a
+// branch of isConsistent() could be loosened and both engines would still build. These are
+// compile-time checks too, so a loosened rule fails this file's build. Each descriptor below is
+// a coherent one (stats and a bias served) with one rule broken, and must read as inconsistent.
+
+namespace
+{
+
+using attention_dense::AttentionDenseAbi;
+using attention_dense::AttentionDenseArch;
+
+/// A hook the descriptors below carry: isConsistent() reads whether one is set, never calls it.
+std::optional<bool> unreachedHook(const hipdnn_plugin_sdk::ingestor::KernelDefinition&)
+{
+    return std::nullopt;
+}
+
+/// A descriptor that serves stats and a bias, with every rule of isConsistent() met.
+constexpr AttentionDenseArch coherentArch()
+{
+    AttentionDenseArch arch{};
+    arch.tokens.stats = "arch.stats";
+    arch.tokens.bias = "arch.bias";
+    arch.tokens.biasUid = "arch.bias.uid";
+    arch.tokens.biasStrideBatch = "arch.bias.stride_batch";
+    arch.tokens.biasStrideHead = "arch.bias.stride_head";
+    arch.tokens.biasStrideQuery = "arch.bias.stride_query";
+    arch.candidateWritesLse = &unreachedHook;
+    arch.candidateAddsBias = &unreachedHook;
+    arch.currentContract = {"arch.dispatch.v2", AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
+    arch.legacyContract = {"arch.dispatch.v1", AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    arch.biasContract = {"arch.dispatch.v3", AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    return arch;
+}
+
+/// Whether the coherent descriptor, after @p edit, still reads as consistent.
+template <typename Edit>
+constexpr bool consistentAfter(Edit edit)
+{
+    AttentionDenseArch arch = coherentArch();
+    edit(arch);
+    return arch.isConsistent();
+}
+
+} // namespace
+
+// The rule is not simply "refuse everything": a coherent descriptor, a plain one that serves
+// neither stats nor a bias (gfx950 serves no stats) and one with no superseded contract (gfx942
+// has none) are all accepted.
+static_assert(consistentAfter([](AttentionDenseArch&) {}),
+              "the coherent baseline must be consistent, or no refusal below means anything");
+static_assert(consistentAfter([](AttentionDenseArch& arch) {
+                  arch.candidateWritesLse = nullptr;
+                  arch.candidateAddsBias = nullptr;
+                  arch.biasContract = {};
+              }),
+              "a descriptor that serves neither stats nor a bias is consistent");
+static_assert(consistentAfter([](AttentionDenseArch& arch) { arch.legacyContract = {}; }),
+              "a descriptor with no superseded contract is consistent");
+
+// A served stats output needs its token spelled.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.stats = {}; }),
+              "stats served with no stats token must be refused");
+
+// A bias hook and a bias contract come together.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.biasContract = {}; }),
+              "a bias hook without a bias contract must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.candidateAddsBias = nullptr; }),
+              "a bias contract without a bias hook must be refused");
+
+// A served bias spells all five of its tokens.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.bias = {}; }),
+              "a served bias with no bias token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasUid = {}; }),
+              "a served bias with no bias uid token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasStrideBatch = {}; }),
+              "a served bias with no batch stride token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasStrideHead = {}; }),
+              "a served bias with no head stride token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasStrideQuery = {}; }),
+              "a served bias with no query stride token must be refused");
+
+// The bias contract's kernel arguments follow the current contract's, and its name is its own.
+static_assert(
+    !consistentAfter([](AttentionDenseArch& arch) {
+        arch.currentContract.abi = AttentionDenseAbi::BAKED_HEAD_COUNTS;
+    }),
+    "a bias contract after a current contract that bakes the head counts must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.abi = AttentionDenseAbi::RUNTIME_HEAD_COUNTS;
+}),
+              "a bias contract that launches the form without the bias must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.symbol = arch.currentContract.symbol;
+}),
+              "a bias contract under the current contract's name must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.symbol = arch.legacyContract.symbol;
+}),
+              "a bias contract under the legacy contract's name must be refused");
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

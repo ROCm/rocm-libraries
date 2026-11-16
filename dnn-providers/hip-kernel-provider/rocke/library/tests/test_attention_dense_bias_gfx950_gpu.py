@@ -7,7 +7,8 @@ The CI GPU lane has no torch, so the full matrix in
 ``test_attention_dense_bias_gfx950_numeric.py`` (driven through
 ``run_attention_dense_torch``) skips there. This file launches the same kernels
 through ``rocke.runtime`` from numpy arrays and checks a representative subset
-against the float64 ``sdpa_reference``: one bias shape per mask, ragged lengths,
+against the float64 oracle in ``_dense_bias_common`` (inputs, 16-bit storage,
+tolerances and device buffers are shared with the gfx942 lane): one bias shape per mask, ragged lengths,
 packed varlen with and without LSE, ``-inf`` keys, ``finfo(float32).min`` rows (the
 uniform softmax) and NaN keys (a NaN row), rows with no live key with and without
 LSE, and window q-blocks past the keys (dead rows store zeros).
@@ -34,6 +35,20 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from _dense_bias_common import (
+    WINDOW,
+    band_kwargs,
+    bias_strides,
+    device,
+    from_bits,
+    make_inputs,
+    max_abs,
+    nan_filled,
+    reference,
+    round_to,
+    tolerance,
+    to_bits,
+)
 from dispatch.attention import AttentionRequest, attention_tuning_spec
 from kernels.common._attention_additive_bias import additive_bias_launch_values
 from kernels.common.attention_dense_spec import attention_dense_cache_key
@@ -45,17 +60,14 @@ from kernels.gfx950.attention_dense import (
     build_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel
-from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime import KernelLauncher, LaunchConfig
 from rocke.runtime.hip_module import Runtime, get_device_arch
 from rocke.runtime.host_buffers import as_u8_buffer
-from rocke.runtime.launcher import DeviceMem
 
 pytestmark = pytest.mark.gpu
 
 _MASK_TYPES = {"none": 0, "top_left": 1, "bottom_right": 2, "window": 3}
-_WINDOW = 128
 _LAUNCHERS: dict = {}
 
 
@@ -69,14 +81,9 @@ def gfx950():
     pytest.skip("needs a gfx950 GPU")
 
 
-def _tolerance(dtype):
-    """The dense numeric lane's max_abs tolerance (fp16 2e-2, bf16 4e-2)."""
-    return 2e-2 if dtype == "fp16" else 4e-2
-
-
 def _spec(dtype, d, hq, hkv, *, batch, sq, skv, mask, lse=False):
     """The shipped grid-body spec for a bias request, from the dispatch factory."""
-    extra = {"sliding_window": _WINDOW, "right_bound": 0} if mask == "window" else {}
+    extra = {"sliding_window": WINDOW, "right_bound": 0} if mask == "window" else {}
     req = AttentionRequest(
         batch=batch,
         nhead_q=hq,
@@ -95,47 +102,6 @@ def _spec(dtype, d, hq, hkv, *, batch, sq, skv, mask, lse=False):
     spec = attention_tuning_spec(req, "gfx950_dense_grid").kernel_spec
     assert spec.use_additive_bias and not spec.persistent
     return spec
-
-
-def _bits(x, dtype):
-    """16-bit storage of ``x`` in ``dtype``."""
-    if dtype == "bf16":
-        return f32_to_bf16(np.asarray(x, np.float32))
-    return np.asarray(x, np.float16).view(np.uint16)
-
-
-def _values(bits, dtype):
-    """float32 values of 16-bit ``bits``."""
-    if dtype == "bf16":
-        return bf16_to_f32(bits)
-    return bits.view(np.float16).astype(np.float32)
-
-
-def _round(x, dtype):
-    """``x`` rounded to ``dtype``, as float32: what the kernel reads."""
-    return _values(_bits(x, dtype), dtype)
-
-
-def _device(array):
-    """A device copy of ``array``."""
-    array = np.ascontiguousarray(array)
-    mem = DeviceMem(array.nbytes)
-    Runtime().memcpy_h2d(mem.ptr(), as_u8_buffer(array), array.nbytes)
-    return mem
-
-
-def _nan_filled(nbytes):
-    """``nbytes`` of device memory, every byte 0xFF: NaN as f16, bf16 and f32, so
-    an element the kernel skips fails the comparison."""
-    return _device(np.full(nbytes, 0xFF, np.uint8))
-
-
-def _bias_strides(bias):
-    """``(batch, head, sq)`` element strides of a C-contiguous rank-4 fp32 array,
-    0 on each size-1 (broadcast) axis."""
-    return tuple(
-        0 if bias.shape[a] == 1 else bias.strides[a] // bias.itemsize for a in range(3)
-    )
 
 
 def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None, bias_view=None):
@@ -162,18 +128,18 @@ def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None, bias_view=None
         )
         _LAUNCHERS[key] = launcher
     out_bits = np.empty(q.shape, np.uint16)
-    out = _nan_filled(out_bits.nbytes)
+    out = nan_filled(out_bits.nbytes)
     vals = {
-        "q_ptr": _device(_bits(q, spec.dtype)),
-        "k_ptr": _device(_bits(k, spec.dtype)),
-        "v_ptr": _device(_bits(v, spec.dtype)),
+        "q_ptr": device(to_bits(q, spec.dtype)),
+        "k_ptr": device(to_bits(k, spec.dtype)),
+        "v_ptr": device(to_bits(v, spec.dtype)),
         "o_ptr": out,
         "scale": float(scale),
     }
     vals.update(attention_dense_runtime_args(spec))
     if spec.varlen:
-        vals["cu_seqlens_q"] = _device(np.asarray(cu_q, np.int32))
-        vals["cu_seqlens_kv"] = _device(np.asarray(cu_kv, np.int32))
+        vals["cu_seqlens_q"] = device(np.asarray(cu_q, np.int32))
+        vals["cu_seqlens_kv"] = device(np.asarray(cu_kv, np.int32))
     lse = None
     if spec.emit_lse:
         lse_shape = (
@@ -182,14 +148,14 @@ def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None, bias_view=None
             else (spec.batch, spec.num_query_heads, spec.seqlen_q)
         )
         lse = np.empty(lse_shape, np.float32)
-        lse_mem = _nan_filled(lse.nbytes)
+        lse_mem = nan_filled(lse.nbytes)
         vals["lse_ptr"] = lse_mem
     if bias_view is None:
         bias = np.ascontiguousarray(bias, np.float32)
-        vals.update(additive_bias_launch_values(_device(bias), _bias_strides(bias)))
+        vals.update(additive_bias_launch_values(device(bias), bias_strides(bias)))
     else:
         storage, offset, strides = bias_view
-        bias_mem = _device(np.asarray(storage, np.float32))
+        bias_mem = device(np.asarray(storage, np.float32))
         # A raw pointer into bias_mem, which this frame keeps alive until the
         # synchronous launch returns.
         vals.update(
@@ -205,50 +171,7 @@ def _launch(spec, q, k, v, bias, scale, *, cu_q=None, cu_kv=None, bias_view=None
     Runtime().memcpy_d2h(as_u8_buffer(out_bits), out.ptr(), out_bits.nbytes)
     if lse is not None:
         Runtime().memcpy_d2h(as_u8_buffer(lse), lse_mem.ptr(), lse.nbytes)
-    return _values(out_bits, spec.dtype), lse
-
-
-def _band(mask):
-    """sdpa_reference band arguments for ``mask``. The dense window keeps keys with
-    ``q - k < W``, i.e. a left bound of W - 1."""
-    if mask == "top_left":
-        return {"causal": True}
-    if mask == "bottom_right":
-        return {"causal_bottom_right": True}
-    if mask == "window":
-        return {"left_bound": _WINDOW - 1, "right_bound": 0, "top_left": True}
-    return {}
-
-
-def _reference(q, k, v, scale, bias, mask):
-    """``(O [B, Sq, Hq, D], LSE [B, Hq, Sq])`` from the float64 oracle, for dense
-    [B, S, H, D] inputs."""
-
-    def bhsd(x):
-        return x.transpose(0, 2, 1, 3)
-
-    o, lse = sdpa_reference(
-        bhsd(q),
-        bhsd(k),
-        bhsd(v),
-        scale=scale,
-        bias=None if bias is None else np.asarray(bias, np.float64),
-        **_band(mask),
-    )
-    return o.transpose(0, 2, 1, 3), lse
-
-
-def _inputs(dtype, d, hq, hkv, batch, sq, skv, bias_shape, *, seed=0):
-    rng = np.random.default_rng(seed)
-    q = _round(rng.standard_normal((batch, sq, hq, d)), dtype)
-    k = _round(rng.standard_normal((batch, skv, hkv, d)), dtype)
-    v = _round(rng.standard_normal((batch, skv, hkv, d)), dtype)
-    bias = (2 * rng.standard_normal(bias_shape)).astype(np.float32)
-    return q, k, v, bias
-
-
-def _max_abs(out, ref):
-    return float(np.abs(out.astype(np.float64) - ref).max())
+    return from_bits(out_bits, spec.dtype), lse
 
 
 @pytest.mark.parametrize("block_m", [256, 128], ids=["factory-tile", "catalog-tile"])
@@ -277,13 +200,13 @@ def test_one_bias_shape_per_mask(mask, bias_shape, block_m):
         _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask),
         block_m=block_m,
     )
-    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
     scale = 1.0 / math.sqrt(d)
     out, _ = _launch(spec, q, k, v, bias, scale)
-    ref, _ = _reference(q, k, v, scale, bias, mask)
-    assert _max_abs(out, ref) < _tolerance(dtype)
-    plain, _ = _reference(q, k, v, scale, None, mask)
-    assert _max_abs(out, plain) > 5 * _tolerance(dtype)
+    ref, _ = reference(q, k, v, scale, bias, mask)
+    assert max_abs(out, ref) < tolerance(dtype)
+    plain, _ = reference(q, k, v, scale, None, mask)
+    assert max_abs(out, plain) > 5 * tolerance(dtype)
 
 
 @pytest.mark.parametrize("d", [64, 128])
@@ -296,7 +219,7 @@ def test_misaligned_bias_view(mask, d):
     dtype, hq, hkv, batch, sq, skv = "bf16", 4, 2, 2, 256, 512
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
     assert not spec.ragged
-    q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
+    q, k, v, _ = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
     pitch = skv + 5
     strides = (hq * sq * pitch, sq * pitch, pitch)
     rng = np.random.default_rng(1)
@@ -313,8 +236,8 @@ def test_misaligned_bias_view(mask, d):
     assert {(1 + r * pitch) % 4 for r in range(4)} == {0, 1, 2, 3}
     scale = 1.0 / math.sqrt(d)
     out, _ = _launch(spec, q, k, v, None, scale, bias_view=(storage, 1, strides))
-    ref, _ = _reference(q, k, v, scale, np.array(view), mask)
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    ref, _ = reference(q, k, v, scale, np.array(view), mask)
+    assert max_abs(out, ref) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -329,7 +252,7 @@ def test_vector_bias_loads_match_the_scalar_path_bitwise(d, lse):
         dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left", lse=lse
     )
     assert not spec.ragged
-    q, k, v, _ = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
+    q, k, v, _ = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (1,))
     pitch = skv + 5
     strides = (hq * sq * pitch, sq * pitch, pitch)
     rng = np.random.default_rng(1)
@@ -356,11 +279,11 @@ def test_ragged_lengths(mask, bias_shape):
     shape = (batch, hq, sq, skv) if bias_shape == "full" else (1, 1, 1, skv)
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask)
     assert spec.ragged
-    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
     scale = 1.0 / math.sqrt(d)
     out, _ = _launch(spec, q, k, v, bias, scale)
-    ref, _ = _reference(q, k, v, scale, bias, mask)
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    ref, _ = reference(q, k, v, scale, bias, mask)
+    assert max_abs(out, ref) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -371,17 +294,17 @@ def test_rows_with_no_live_key_store_zero(lse):
     spec = _spec(
         dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="top_left", lse=lse
     )
-    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     bias[:, :, :64, :64] = -np.inf
     scale = 1.0 / math.sqrt(d)
     out, got_lse = _launch(spec, q, k, v, bias, scale)
-    ref, ref_lse = _reference(q, k, v, scale, bias, "top_left")
+    ref, ref_lse = reference(q, k, v, scale, bias, "top_left")
     assert np.isfinite(out).all()
     assert np.abs(out[:, :64]).max() == 0.0
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert max_abs(out, ref) < tolerance(dtype)
     if lse:
         assert np.isneginf(got_lse[:, :, :64]).all()
-        assert _max_abs(got_lse[:, :, 64:], ref_lse[:, :, 64:]) < _tolerance(dtype)
+        assert max_abs(got_lse[:, :, 64:], ref_lse[:, :, 64:]) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -395,23 +318,23 @@ def test_finfo_min_rows_are_the_uniform_softmax(mask, lse):
     over the even keys only, -inf and finfo.min being different keys."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 256, 256
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask, lse=lse)
-    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
-    v = _round(v + 1.0, dtype)
-    v[:, 1::2, 2] = _round(v[:, 1::2, 2] + 10.0, dtype)
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    v = round_to(v + 1.0, dtype)
+    v[:, 1::2, 2] = round_to(v[:, 1::2, 2] + 10.0, dtype)
     lowest = np.finfo(np.float32).min
     bias[:, 1] = lowest
     bias[:, 2, :, 0::2] = lowest
     bias[:, 2, :, 1::2] = -np.inf
     scale = 1.0 / math.sqrt(d)
     out, got_lse = _launch(spec, q, k, v, bias, scale)
-    ref, ref_lse = _reference(q, k, v, scale, bias, mask)
+    ref, ref_lse = reference(q, k, v, scale, bias, mask)
     assert np.isfinite(out).all()
     assert np.abs(ref[:, :, 1:3]).mean() > 0.5  # the rows under test are not zero
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert max_abs(out, ref) < tolerance(dtype)
     if lse:
         assert np.isfinite(got_lse[:, 1:3]).all()
         assert (got_lse[:, 1] < -1e28).all()
-        assert _max_abs(got_lse[:, [0, 3]], ref_lse[:, [0, 3]]) < _tolerance(dtype)
+        assert max_abs(got_lse[:, [0, 3]], ref_lse[:, [0, 3]]) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -426,7 +349,7 @@ def test_a_nan_bias_makes_its_row_nan(mask, lse):
     reference."""
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 256
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask, lse=lse)
-    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     bias[0, 0, 10, 7] = np.nan
     bias[0, 2, 20, :] = np.nan
     bias[0, 1, 5, 200] = np.nan
@@ -435,19 +358,19 @@ def test_a_nan_bias_makes_its_row_nan(mask, lse):
     expect_nan[0, 5, 1] = mask == "none"
     scale = 1.0 / math.sqrt(d)
     out, got_lse = _launch(spec, q, k, v, bias, scale)
-    ref, ref_lse = _reference(
+    ref, ref_lse = reference(
         q, k, v, scale, np.where(np.isnan(bias), -np.inf, bias), mask
     )
     nan_out = np.isnan(out)
     np.testing.assert_array_equal(nan_out.all(-1), expect_nan)
     assert not (nan_out.any(-1) & ~expect_nan).any()
     live = ~expect_nan
-    assert np.abs(out - ref).max(-1)[live].max() < _tolerance(dtype)
+    assert np.abs(out - ref).max(-1)[live].max() < tolerance(dtype)
     if lse:
         got = got_lse.transpose(0, 2, 1)  # [B, Sq, Hq]
         np.testing.assert_array_equal(np.isnan(got), expect_nan)
         diff = np.abs(got - ref_lse.transpose(0, 2, 1))
-        assert diff[live].max() < _tolerance(dtype)
+        assert diff[live].max() < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -463,16 +386,16 @@ def test_window_rows_past_the_keys(lse):
     fails if the clamp is removed."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 1024, 256
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask="window", lse=lse)
-    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (1, 1, 1, skv))
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (1, 1, 1, skv))
     scale = 1.0 / math.sqrt(d)
     out, got_lse = _launch(spec, q, k, v, bias, scale)
-    ref, ref_lse = _reference(q, k, v, scale, bias, "window")
-    dead = skv + _WINDOW - 1
+    ref, ref_lse = reference(q, k, v, scale, bias, "window")
+    dead = skv + WINDOW - 1
     assert np.abs(out[:, dead:]).max() == 0.0
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert max_abs(out, ref) < tolerance(dtype)
     if lse:
         assert np.isneginf(got_lse[:, :, dead:]).all()
-        assert _max_abs(got_lse[:, :, :dead], ref_lse[:, :, :dead]) < _tolerance(dtype)
+        assert max_abs(got_lse[:, :, :dead], ref_lse[:, :, :dead]) < tolerance(dtype)
 
 
 @pytest.mark.parametrize(
@@ -501,9 +424,9 @@ def test_varlen(mask, lse, q_lens, kv_lens):
     )
     spec = replace(base, varlen=True, ragged=False)
     rng = np.random.default_rng(5)
-    q = _round(rng.standard_normal((q_off[-1], hq, d)), dtype)
-    k = _round(rng.standard_normal((kv_off[-1], hkv, d)), dtype)
-    v = _round(rng.standard_normal((kv_off[-1], hkv, d)), dtype)
+    q = round_to(rng.standard_normal((q_off[-1], hq, d)), dtype)
+    k = round_to(rng.standard_normal((kv_off[-1], hkv, d)), dtype)
+    v = round_to(rng.standard_normal((kv_off[-1], hkv, d)), dtype)
     bias = (2 * rng.standard_normal((nseq, hq, max_q, max_kv))).astype(np.float32)
     scale = 1.0 / math.sqrt(d)
     out, got_lse = _launch(spec, q, k, v, bias, scale, cu_q=q_off, cu_kv=kv_off)
@@ -515,16 +438,16 @@ def test_varlen(mask, lse, q_lens, kv_lens):
         bias=bias.astype(np.float64),
         q_offsets=q_off,
         kv_offsets=kv_off,
-        **_band(mask),
+        **band_kwargs(mask),
     )
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert max_abs(out, ref) < tolerance(dtype)
     if mask == "window":
         # Each sequence's rows past its own keys + W - 1 store exact zeros.
         for s, kv_len in enumerate(kv_lens):
-            dead = q_off[s] + kv_len + _WINDOW - 1
+            dead = q_off[s] + kv_len + WINDOW - 1
             assert np.abs(out[dead : q_off[s + 1]]).max() == 0.0, s
     if lse:
-        assert _max_abs(got_lse, ref_lse) < _tolerance(dtype)
+        assert max_abs(got_lse, ref_lse) < tolerance(dtype)
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -546,9 +469,9 @@ def test_varlen_finfo_min_rows(mask, lse):
     )
     spec = replace(base, varlen=True, ragged=False)
     rng = np.random.default_rng(6)
-    q = _round(rng.standard_normal((q_off[-1], hq, d)), dtype)
-    k = _round(rng.standard_normal((kv_off[-1], hkv, d)), dtype)
-    v = _round(rng.standard_normal((kv_off[-1], hkv, d)) + 1.0, dtype)
+    q = round_to(rng.standard_normal((q_off[-1], hq, d)), dtype)
+    k = round_to(rng.standard_normal((kv_off[-1], hkv, d)), dtype)
+    v = round_to(rng.standard_normal((kv_off[-1], hkv, d)) + 1.0, dtype)
     bias = np.full((nseq, hq, max_q, max_kv), np.finfo(np.float32).min, np.float32)
     scale = 1.0 / math.sqrt(d)
     out, got_lse = _launch(spec, q, k, v, bias, scale, cu_q=q_off, cu_kv=kv_off)
@@ -560,13 +483,13 @@ def test_varlen_finfo_min_rows(mask, lse):
         bias=bias.astype(np.float64),
         q_offsets=q_off,
         kv_offsets=kv_off,
-        **_band(mask),
+        **band_kwargs(mask),
     )
     assert np.isfinite(out).all()
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    assert max_abs(out, ref) < tolerance(dtype)
     if mask == "window":
         for s, kv_len in enumerate(kv_lens):
-            dead = q_off[s] + kv_len + _WINDOW - 1
+            dead = q_off[s] + kv_len + WINDOW - 1
             assert np.abs(out[dead : q_off[s + 1]]).max() == 0.0, s
             assert np.abs(ref[q_off[s] : dead]).mean() > 0.5, s
     else:

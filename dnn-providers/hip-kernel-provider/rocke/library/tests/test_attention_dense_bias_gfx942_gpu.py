@@ -44,10 +44,12 @@ from _dense_bias_common import (
     WINDOW,
     bias_strides,
     check_window_row_classes,
+    device,
     extents,
     from_bits,
     make_inputs,
     max_abs,
+    nan_filled,
     reference,
     round_to,
     tolerance,
@@ -68,7 +70,6 @@ from rocke.helpers.compile import compile_kernel
 from rocke.runtime import KernelLauncher, LaunchConfig
 from rocke.runtime.hip_module import Runtime
 from rocke.runtime.host_buffers import as_u8_buffer
-from rocke.runtime.launcher import DeviceMem
 from rocke.tests.gpu import current_device_arch_in
 
 pytestmark = pytest.mark.gpu
@@ -138,20 +139,6 @@ def _spec(
     return spec if x4 is None else replace(spec, use_bias_x4=x4)
 
 
-def _device(array):
-    """A device copy of ``array``."""
-    array = np.ascontiguousarray(array)
-    mem = DeviceMem(array.nbytes)
-    Runtime().memcpy_h2d(mem.ptr(), as_u8_buffer(array), array.nbytes)
-    return mem
-
-
-def _nan_filled(nbytes):
-    """``nbytes`` of device memory, every byte 0xFF: NaN as f16, bf16 and f32, so
-    an element the kernel skips fails the comparison."""
-    return _device(np.full(nbytes, 0xFF, np.uint8))
-
-
 def _launch(spec, q, k, v, bias, scale, *, sinks=None, bias_view=None):
     """Launch ``spec`` on float32 arrays of ``spec.dtype`` values: ``q``/``k``/``v``
     dense [B, S, H, D], ``bias`` a contiguous rank-4 fp32 array, ``sinks`` [Hq] values
@@ -176,28 +163,28 @@ def _launch(spec, q, k, v, bias, scale, *, sinks=None, bias_view=None):
         )
         _LAUNCHERS[key] = launcher
     out_bits = np.empty(q.shape, np.uint16)
-    out = _nan_filled(out_bits.nbytes)
+    out = nan_filled(out_bits.nbytes)
     vals = {
-        "q_ptr": _device(to_bits(q, spec.dtype)),
-        "k_ptr": _device(to_bits(k, spec.dtype)),
-        "v_ptr": _device(to_bits(v, spec.dtype)),
+        "q_ptr": device(to_bits(q, spec.dtype)),
+        "k_ptr": device(to_bits(k, spec.dtype)),
+        "v_ptr": device(to_bits(v, spec.dtype)),
         "o_ptr": out,
         "scale": float(scale),
     }
     vals.update(attention_dense_runtime_args(spec))
     if spec.use_sinks:
-        vals["sink_ptr"] = _device(to_bits(sinks, spec.dtype))
+        vals["sink_ptr"] = device(to_bits(sinks, spec.dtype))
     lse, lse_mem = None, None
     if spec.emit_lse:
         lse = np.empty((spec.batch, spec.num_query_heads, spec.seqlen_q), np.float32)
-        lse_mem = _nan_filled(lse.nbytes)
+        lse_mem = nan_filled(lse.nbytes)
         vals["lse_ptr"] = lse_mem
     if bias_view is None:
         bias = np.ascontiguousarray(bias, np.float32)
-        vals.update(additive_bias_launch_values(_device(bias), bias_strides(bias)))
+        vals.update(additive_bias_launch_values(device(bias), bias_strides(bias)))
     else:
         storage, offset, strides = bias_view
-        bias_mem = _device(np.asarray(storage, np.float32))
+        bias_mem = device(np.asarray(storage, np.float32))
         # A raw pointer into bias_mem, which this frame keeps alive until the
         # synchronous launch returns.
         vals.update(
