@@ -75,13 +75,17 @@
 
 // Whether test `test_name` fails, rather than skips, when memory is short. `setting` is the value
 // of HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP: 0 always skips and any other value always fails. Unset or
-// empty, the tests that the quick and standard tiers select (smoke, quick and pre_checkin, matched
-// as clients/tests/test_categories.yaml matches them) fail, since their cases fit every CI host,
-// and the rest skip.
-inline bool hipblaslt_memory_stop_fails(const char* setting, const std::string& test_name)
+// empty, a stop by the memory preflight skips, since the preflight measured the shortage. An
+// allocation that fails after the preflight let the case run fails the tests that the quick and
+// standard tiers select (smoke, quick and pre_checkin, matched as clients/tests/test_categories.yaml
+// matches them), and skips the rest.
+inline bool
+    hipblaslt_memory_stop_fails(const char* setting, const std::string& test_name, bool preflight)
 {
     if(setting && *setting)
         return strcmp(setting, "0") != 0;
+    if(preflight)
+        return false;
     for(const char* category : {"smoke", "quick", "pre_checkin"})
         if(test_name.find(category) != std::string::npos)
             return true;
@@ -89,24 +93,28 @@ inline bool hipblaslt_memory_stop_fails(const char* setting, const std::string& 
 }
 
 // hipblaslt_memory_stop_fails for the running test.
-inline bool hipblaslt_memory_skip_fails()
+inline bool hipblaslt_memory_skip_fails(bool preflight)
 {
     const auto*       info = ::testing::UnitTest::GetInstance()->current_test_info();
     const std::string name
         = info ? std::string(info->test_suite_name()) + "." + info->name() : std::string();
-    return hipblaslt_memory_stop_fails(std::getenv("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP"), name);
+    return hipblaslt_memory_stop_fails(
+        std::getenv("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP"), name, preflight);
 }
 
 // Ends the test because memory is short, as WHY explains: a failure or a skip, as
 // hipblaslt_memory_skip_fails decides.
-#define SKIP_FOR_MEMORY(WHY)                                 \
+#define STOP_FOR_MEMORY(WHY, PREFLIGHT)                      \
     do                                                       \
     {                                                        \
-        if(hipblaslt_memory_skip_fails())                    \
+        if(hipblaslt_memory_skip_fails(PREFLIGHT))           \
             FAIL() << MEMORY_SHORTAGE_STRING << (WHY);       \
         else                                                 \
             GTEST_SKIP() << MEMORY_SHORTAGE_STRING << (WHY); \
     } while(0)
+
+// Ends the test because the memory preflight found that the case does not fit.
+#define SKIP_FOR_MEMORY(WHY) STOP_FOR_MEMORY(WHY, true)
 
 // The tests that stopped because memory was short, for the summary at the end of the run.
 class MemoryShortageLog
@@ -147,18 +155,18 @@ private:
     std::vector<std::pair<std::string, std::string>> m_entries;
 };
 
-#define CHECK_DEVICE_ALLOCATION(ERROR)                                    \
-    do                                                                    \
-    {                                                                     \
-        /* Use error__ in case ERROR contains "error" */                  \
-        hipError_t error__ = (ERROR);                                     \
-        if(error__ == hipErrorOutOfMemory)                                \
-            SKIP_FOR_MEMORY("a device allocation failed: out of memory"); \
-        else if(error__ != hipSuccess)                                    \
-        {                                                                 \
-            FAIL() << hipGetErrorString(error__);                         \
-            return;                                                       \
-        }                                                                 \
+#define CHECK_DEVICE_ALLOCATION(ERROR)                                           \
+    do                                                                           \
+    {                                                                            \
+        /* Use error__ in case ERROR contains "error" */                         \
+        hipError_t error__ = (ERROR);                                            \
+        if(error__ == hipErrorOutOfMemory)                                       \
+            STOP_FOR_MEMORY("a device allocation failed: out of memory", false); \
+        else if(error__ != hipSuccess)                                           \
+        {                                                                        \
+            FAIL() << hipGetErrorString(error__);                                \
+            return;                                                              \
+        }                                                                        \
     } while(0)
 
 // This wraps the hipBLASLt call with catch_signals_and_exceptions_as_failures().
@@ -183,12 +191,12 @@ private:
     } while(0)
 
 // WHY is empty when the host allocations succeeded, and otherwise says which one failed.
-#define CHECK_HOST_ALLOCATION(WHY)  \
-    do                              \
-    {                               \
-        std::string why__ = (WHY);  \
-        if(!why__.empty())          \
-            SKIP_FOR_MEMORY(why__); \
+#define CHECK_HOST_ALLOCATION(WHY)         \
+    do                                     \
+    {                                      \
+        std::string why__ = (WHY);         \
+        if(!why__.empty())                 \
+            STOP_FOR_MEMORY(why__, false); \
     } while(0)
 
 #define CHECK_SOLUTION_FOUND(SOL_COUNT)     \
