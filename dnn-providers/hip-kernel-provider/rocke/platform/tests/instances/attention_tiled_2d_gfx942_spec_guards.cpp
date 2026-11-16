@@ -17,7 +17,9 @@
  *   4. the 3D segment builder rejects num_segments < 1 (ROCKE_ERR_VALUE) and
  *      paged use_i64_kv_addr (ROCKE_ERR_NOTIMPL);
  *   5. the 2D validator's gfx950-only-knob and fp8 K/V rejects carry Python's
- *      exact text, the knob list untruncated and in Python's order.
+ *      exact text, the knob list untruncated and in Python's order;
+ *   6. one message per band shape, HBM-direct + use_i64_kv_addr rejected,
+ *      and use_k_hbm_direct refused (ROCKE_ERR_NOTIMPL) while V from HBM builds.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -176,6 +178,15 @@ static void test_2d_spec_guards(void)
     spec.use_transposed_mask_limit = true;
     spec.sliding_window = 64;
     expect_2d_rejects("2d/mask_limit_sliding_window", &spec, ROCKE_ERR_VALUE, "no sliding window");
+
+    /* 7. K from HBM is refused by the C++ engine; V from HBM still builds. */
+    spec = spec_2d_x8_transposed();
+    spec.use_k_hbm_direct = true;
+    expect_2d_rejects("2d/k_hbm_direct_not_ported", &spec, ROCKE_ERR_NOTIMPL, "not ported");
+
+    spec = spec_2d_x8_transposed();
+    spec.use_v_hbm_direct = true;
+    expect_2d_builds("2d/v_hbm_direct_builds", &spec);
 }
 
 /* Runs the validator directly, outside the builder's ROCKE_ERR_MSG_CAP error
@@ -244,6 +255,40 @@ static void test_2d_reject_messages(void)
                                &spec,
                                "gfx942 tiled-2D attention does not support the fp8 K/V cache "
                                "(its PV path uses ds_read_tr_b8, a gfx950-only transpose read)");
+
+    /* Each band shape gets exactly one message. */
+    spec = spec_2d(64, 32, 32, 32, "bf16");
+    spec.causal_top_left = true;
+    spec.right_bound = -1;
+    expect_2d_validate_message(
+        "2d/band_top_left_unbounded",
+        &spec,
+        "gfx942 tiled attention does not implement top-left/unbounded masks");
+    spec.right_bound = 0;
+    expect_2d_validate_message("2d/band_top_left_causal",
+                               &spec,
+                               "gfx942 tiled attention does not implement top-left/causal masks");
+    spec.causal_top_left = false;
+    spec.right_bound = 5;
+    expect_2d_validate_message(
+        "2d/band_bottom_right_bounded",
+        &spec,
+        "gfx942 tiled attention does not implement bottom-right/right_bound=5 masks");
+
+    /* The HBM-direct readers have no 64-bit K/V offset path. */
+    spec = spec_2d_x8_transposed();
+    spec.use_v_hbm_direct = true;
+    spec.use_i64_kv_addr = true;
+    expect_2d_validate_message(
+        "2d/v_hbm_direct_i64",
+        &spec,
+        "use_v_hbm_direct reads K/V with i32 offsets; it cannot be combined with use_i64_kv_addr");
+    spec.use_v_hbm_direct = false;
+    spec.use_k_hbm_direct = true;
+    expect_2d_validate_message(
+        "2d/k_hbm_direct_i64",
+        &spec,
+        "use_k_hbm_direct reads K/V with i32 offsets; it cannot be combined with use_i64_kv_addr");
 }
 
 /* ----------------------------------------------------------------- supports */

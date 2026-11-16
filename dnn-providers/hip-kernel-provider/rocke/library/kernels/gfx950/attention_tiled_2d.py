@@ -706,6 +706,10 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_staggered_iter_wait does not support grouped_kv2")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_staggered_iter_wait v1 does not support FP8 KV")
+            if self.use_early_v_schedule:
+                raise ValueError(
+                    "use_staggered_iter_wait does not support use_early_v_schedule"
+                )
         if self.use_q_reread:
             # The re-read path is wired only through the transposed-32x32 QK
             # MFMA (the combo). It reads Q from the dedicated Q_lds.

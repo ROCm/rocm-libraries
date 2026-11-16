@@ -721,7 +721,7 @@ _CONFIGS[37] = dict(
     use_v_hbm_direct=True,
 )
 
-# K and V read straight from HBM on the D128 bf16 wide flash spec.
+# V read straight from HBM on the D128 bf16 wide flash spec.
 _CONFIGS[38] = dict(
     head_size=128,
     block_size=64,
@@ -744,11 +744,10 @@ _CONFIGS[38] = dict(
     use_transposed_mask_limit=True,
     use_k_single_buffer=True,
     kv_cache_policy="all",
-    use_k_hbm_direct=True,
     use_v_hbm_direct=True,
 )
 
-# K read straight from HBM with the causal mask phase split and sinks.
+# V read straight from HBM with the causal mask phase split and sinks.
 _CONFIGS[39] = dict(
     head_size=64,
     block_size=32,
@@ -763,7 +762,7 @@ _CONFIGS[39] = dict(
     tile_size=64,
     use_mfma_32x32x8=True,
     use_transposed_qk_32x32=True,
-    use_k_hbm_direct=True,
+    use_v_hbm_direct=True,
     use_causal_mask_phase_split=True,
 )
 

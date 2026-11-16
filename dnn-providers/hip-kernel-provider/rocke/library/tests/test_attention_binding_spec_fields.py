@@ -66,9 +66,7 @@ def test_gfx942_2d_binding_keeps_the_x8_path(engine):
     assert actual == expected
 
 
-@pytest.mark.parametrize(
-    "field", ["use_v_hbm_direct", "use_k_hbm_direct", "use_causal_mask_phase_split"]
-)
+@pytest.mark.parametrize("field", ["use_v_hbm_direct", "use_causal_mask_phase_split"])
 def test_gfx942_2d_binding_reads_gfx942_only_fields(engine, field):
     spec = Gfx942Spec2D(
         **_REQUIRED_2D,
@@ -82,6 +80,61 @@ def test_gfx942_2d_binding_reads_gfx942_only_fields(engine, field):
     expected = _lower_python(build_gfx942_2d(spec, arch="gfx942"), "gfx942")
     actual = engine.gfx942_attention_tiled_2d_lower_llvm(asdict(spec), "gfx942")
     assert actual == expected
+
+
+def _x8_spec_fields(**overrides):
+    d = asdict(
+        Gfx942Spec2D(
+            **_REQUIRED_2D,
+            dtype="fp16",
+            block_m_per_warp=32,
+            tile_size=64,
+            use_mfma_32x32x8=True,
+            use_transposed_qk_32x32=True,
+        )
+    )
+    d.update(overrides)
+    return d
+
+
+def test_gfx942_2d_binding_refuses_k_hbm_direct(engine):
+    d = _x8_spec_fields(use_k_hbm_direct=True)
+    build_gfx942_2d(Gfx942Spec2D(**d), arch="gfx942")
+    with pytest.raises(RuntimeError, match="use_k_hbm_direct is not ported"):
+        engine.gfx942_attention_tiled_2d_lower_llvm(d, "gfx942")
+
+
+def _hbm_i64_message(flag):
+    return (
+        f"{flag} reads K/V with i32 offsets; it cannot be combined with use_i64_kv_addr"
+    )
+
+
+@pytest.mark.parametrize("flag", ["use_k_hbm_direct", "use_v_hbm_direct"])
+def test_gfx942_2d_spec_rejects_hbm_direct_with_i64(flag):
+    d = _x8_spec_fields(**{flag: True, "use_i64_kv_addr": True})
+    with pytest.raises(ValueError, match=re.escape(_hbm_i64_message(flag))):
+        Gfx942Spec2D(**d)
+
+
+@pytest.mark.parametrize("flag", ["use_k_hbm_direct", "use_v_hbm_direct"])
+def test_gfx942_2d_binding_rejects_hbm_direct_with_i64(engine, flag):
+    d = _x8_spec_fields(**{flag: True, "use_i64_kv_addr": True})
+    with pytest.raises(RuntimeError, match=re.escape(_hbm_i64_message(flag))):
+        engine.gfx942_attention_tiled_2d_lower_llvm(d, "gfx942")
+
+
+@pytest.mark.parametrize("block_size", [0, -16])
+def test_gfx942_2d_spec_rejects_nonpositive_block_size(block_size):
+    with pytest.raises(ValueError, match="block_size must be positive"):
+        Gfx942Spec2D(**dict(_REQUIRED_2D, block_size=block_size), dtype="bf16")
+
+
+@pytest.mark.parametrize("block_size", [0, -16])
+def test_gfx942_2d_binding_rejects_nonpositive_block_size(engine, block_size):
+    d = _x8_spec_fields(block_size=block_size)
+    with pytest.raises(RuntimeError, match="block_size must be positive"):
+        engine.gfx942_attention_tiled_2d_lower_llvm(d, "gfx942")
 
 
 def test_gfx950_2d_default_spec_round_trips(engine):
@@ -160,6 +213,23 @@ _TRANSPOSED_32X32 = {
     "tile_size": 64,
 }
 
+_STAGGERED_EARLY_V = {
+    "use_v_double_buffer": True,
+    "use_staggered_iter_wait": True,
+    "use_early_v_schedule": True,
+}
+
+
+def test_gfx950_2d_spec_rejects_staggered_wait_with_early_v():
+    d = dict(
+        _REQUIRED_2D, dtype="bf16", **dict(_TRANSPOSED_32X32, **_STAGGERED_EARLY_V)
+    )
+    with pytest.raises(
+        ValueError,
+        match="use_staggered_iter_wait does not support use_early_v_schedule",
+    ):
+        Gfx950Spec2D(**d)
+
 
 @pytest.mark.parametrize(
     "changes",
@@ -178,6 +248,7 @@ _TRANSPOSED_32X32 = {
         },
         {"kv_ring_depth": 3, "use_transposed_qk_32x32": False},
         {"kv_ring_depth": 3, "use_k_single_buffer": True},
+        _STAGGERED_EARLY_V,
     ],
 )
 def test_gfx950_2d_ring_and_q_reread_rejects_match_python(engine, changes):

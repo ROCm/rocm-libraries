@@ -36,6 +36,7 @@
 
 #include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
+#include "rocke/instance_attention_unified_internal.h"
 #include "rocke/ir.h"
 
 /* ------------------------------------------------------------- error latch */
@@ -256,27 +257,22 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_2d spec is NULL");
         return false;
     }
+    if(s->block_size <= 0)
+    {
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "block_size must be positive, got %d", s->block_size);
+        return false;
+    }
 
     /* The Python gfx942 spec has no band fields; only a hand-built C spec can
      * carry one, so this message has no Python counterpart. */
     if(s->causal_top_left || s->right_bound != 0)
     {
-        const char* align = s->causal_top_left ? "top-left" : "bottom-right";
-        if(s->right_bound == -1)
-            rocke_attn2d_set_err(b,
-                                 ROCKE_ERR_VALUE,
-                                 "gfx942 tiled attention does not implement %s/unbounded masks",
-                                 align);
-        else if(s->right_bound == 0)
-            rocke_attn2d_set_err(b,
-                                 ROCKE_ERR_VALUE,
-                                 "gfx942 tiled attention does not implement %s/causal masks",
-                                 align);
-        rocke_attn2d_set_err(b,
-                             ROCKE_ERR_VALUE,
-                             "gfx942 tiled attention does not implement %s/right_bound=%d masks",
-                             align,
-                             s->right_bound);
+        char label[64];
+        rocke_attn_unified_band_label(s->causal_top_left, s->right_bound, label, sizeof(label));
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "gfx942 tiled attention does not implement %s masks", label);
+        return false;
     }
 
     /* gfx950-only experimental knobs rejected up front on gfx942, named in
@@ -600,6 +596,23 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         return false;
     }
 
+    {
+        const char* const hbm_names[] = {"use_k_hbm_direct", "use_v_hbm_direct"};
+        const bool hbm_on[] = {s->use_k_hbm_direct, s->use_v_hbm_direct};
+        for(int i = 0; i < 2; ++i)
+        {
+            if(hbm_on[i] && s->use_i64_kv_addr)
+            {
+                rocke_attn2d_set_err(b,
+                                     ROCKE_ERR_VALUE,
+                                     "%s reads K/V with i32 offsets; it cannot be combined "
+                                     "with use_i64_kv_addr",
+                                     hbm_names[i]);
+                return false;
+            }
+        }
+    }
+
     if(s->use_k_hbm_direct)
     {
         if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
@@ -626,6 +639,11 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                                  "use_global_load_lds_k");
             return false;
         }
+        /* The K stub left in LDS is too small for the Q tile that aliases it;
+         * the C++ engine refuses the flag until that sizing is fixed. */
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_NOTIMPL, "use_k_hbm_direct is not ported to the C++ engine yet");
+        return false;
     }
 
     if(s->use_global_load_lds_k && s->kv_storage_dtype != NULL)

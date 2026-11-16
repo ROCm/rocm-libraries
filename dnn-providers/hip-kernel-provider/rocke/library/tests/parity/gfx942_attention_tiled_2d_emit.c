@@ -703,7 +703,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_v_hbm_direct = true;
         break;
 
-    case 38: /* K and V read straight from HBM on the D128 bf16 wide flash spec. */
+    case 38: /* V read straight from HBM on the D128 bf16 wide flash spec. */
         s->head_size = 128;
         s->block_size = 64;
         s->num_query_heads = 32;
@@ -727,11 +727,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_mask_limit = true;
         s->use_k_single_buffer = true;
         s->kv_cache_policy = "all";
-        s->use_k_hbm_direct = true;
         s->use_v_hbm_direct = true;
         break;
 
-    case 39: /* K read straight from HBM with the causal mask phase split and sinks. */
+    case 39: /* V read straight from HBM with the causal mask phase split and sinks. */
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -746,7 +745,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 64;
         s->use_mfma_32x32x8 = true;
         s->use_transposed_qk_32x32 = true;
-        s->use_k_hbm_direct = true;
+        s->use_v_hbm_direct = true;
         s->use_causal_mask_phase_split = true;
         break;
 

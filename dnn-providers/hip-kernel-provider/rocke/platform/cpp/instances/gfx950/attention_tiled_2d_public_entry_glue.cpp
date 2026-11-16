@@ -405,6 +405,10 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
         if(spec->kv_storage_dtype != NULL)
             rocke_g950_fail(
                 b, ROCKE_ERR_VALUE, "use_staggered_iter_wait v1 does not support FP8 KV");
+        if(spec->use_early_v_schedule)
+            rocke_g950_fail(b,
+                            ROCKE_ERR_VALUE,
+                            "use_staggered_iter_wait does not support use_early_v_schedule");
     }
 
     if(spec->use_q_reread)

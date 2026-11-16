@@ -2534,7 +2534,6 @@ GFX942_ATTENTION_TILED_2D += [
         "use_transposed_mask_limit": True,
         "use_k_single_buffer": True,
         "kv_cache_policy": "all",
-        "use_k_hbm_direct": True,
         "use_v_hbm_direct": True,
     },
     {
@@ -2551,7 +2550,7 @@ GFX942_ATTENTION_TILED_2D += [
         "tile_size": 64,
         "use_mfma_32x32x8": True,
         "use_transposed_qk_32x32": True,
-        "use_k_hbm_direct": True,
+        "use_v_hbm_direct": True,
         "use_causal_mask_phase_split": True,
     },
     {
