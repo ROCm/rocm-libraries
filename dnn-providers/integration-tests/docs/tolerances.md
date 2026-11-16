@@ -156,10 +156,12 @@ the sample passes it. With `double` compute, as the GPU reference tests pass
 it, bfloat16 is 9.8 and 518 and half 1.2 and 65 at the two larger `K`.
 
 The SDK bound is tighter than the dynamic tolerance only for half at
-`K` of 6 or less. In the calibration data it also failed 22 of the 10,434
-correct half and bfloat16 outputs graded (12 distinct cases): 2 of the 5,091
-of the fit seeds and 2 of the 3,394 of the held-out seeds on gfx942 (one half
-and one bfloat16 each), and 18 of the 1,949 on gfx90a.
+`K` of 6 or less. Counted by its largest error against its `atol` alone, as the
+first calibration did, it failed 22 of the 10,434 correct half and bfloat16
+outputs graded (12 distinct cases); recounted at the current head, over more seeds,
+it is 32 outputs of the same 12 cases, and used the way its callers use it (the
+one number as both `atol` and `rtol`) 30 outputs of 10 cases. No case is a bound
+that was not given the true input maxima: see "The cases the SDK bound failed".
 
 The function is `calculateConvFpropOutputTolerance<T>()` in
 `projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp`.
@@ -189,7 +191,7 @@ inside it is not a proof that the kernel is right. It rests on:
   summation term with its split over `sigma` and `|ref|`, and the coefficient 1
   of the rounding points. Fitted to MIOpen: `lambda` = 12 and the float
   coefficient `c` (the value 1 of half and bfloat16 is a margin over a
-  measured bfloat16 need of at most 0.4).
+  measured bfloat16 need of at most 0.43).
 - **The probability it stands for.** A fixed `c` is a fixed number of standard
   deviations of the error at each element: at least `c / 0.41`, since 0.41 is
   the largest factor of the standard deviation (step 2), which is 9.8 for the
@@ -233,7 +235,7 @@ What supports using constants fitted to MIOpen for another engine: the
 derivation puts `c` at about 1.3 to 2.5 for two orderings of ideal float
 arithmetic, so the base 4 is a margin over theory and does not depend on the
 engine, as long as the engine accumulates in float and sums in some order.
-MIOpen's measured non-Winograd solver families (1.77 to 2.46) sit there.
+MIOpen's measured non-Winograd solver families (1.77 to 2.59) sit there.
 Winograd's 5.68 is the one number the derivation does not explain. An engine
 whose kernels differ sets its own float constant in its TOML (`summation_order`,
 see "The base coefficient and the engine's"). `lambda` has no such support: it
@@ -274,11 +276,11 @@ summation order (see "What kind of tolerance this is").
 So `c` is about 0.41 times the number of standard deviations that the largest
 of all elements reaches (4.5 to 6 for 10^5 to 10^9 elements, for a normal
 error). That predicts a need of about 1.3 to 2.5 for two summation orderings
-of ideal float arithmetic. The non-Winograd measurements (1.77 to 2.46, see
+of ideal float arithmetic. The non-Winograd measurements (1.77 to 2.59, see
 "Float outputs") sit there; `c` = 4 is a margin over the theory, and
 Winograd's 5.68 is the one number it does not explain. The half and
 bfloat16 bands keep `c` = 1 on the `sigma` term, and the bfloat16 data needs
-at most 0.4 of it (see "Calibration"): below the figure the derivation gives
+at most 0.43 of it (see "Calibration"): below the figure the derivation gives
 for ideal float arithmetic, and not explained by it.
 
 References:
@@ -315,13 +317,17 @@ The CPU reference used to ignore the node's compute type: its pointwise nodes
 added in double and rounded once, whatever `compute_data_type` said, while
 the GPU reference and the engine honour it. That is fixed (e766aebc760c and
 60837ab26fa7: the plan passes the compute type to the reference), and the
-two figures above were measured before it. The terms of the rounding points
-that cover a node's own compute-type roundings (the operand conversions and
-the result, below) were written to cover that difference; they are kept
-until the Variant2 outputs are re-measured against the fixed reference. The
-points at stored tensors stay in any case: a one-step difference in the
-convolution's float sum can flip a stored half or bfloat16 value, and no
-reference fix removes that.
+two figures above were measured before it. Re-measured against the fixed
+reference (see "Calibration of the rounding points"), the reference matches the
+emulation with the roundings at 99.96 % or more of the elements of every
+bfloat16 output (before the fix it matched the one without them), and the plain
+band, without the terms of a node's own compute-type roundings, passes every
+output of develop's Variant2 bundles but fails 28 of the 324 bfloat16 outputs
+of the test-plan ones: a one-step difference in the convolution's float sum
+flips the conversion of its result to bfloat16, and the add of the bias cancels
+the result and leaves the step. No reference fix removes that, so the terms
+stay, as do the points at stored tensors; the data needs at most 0.049 of the
+compute-type term.
 
 Every place between the convolution and the output where a value is rounded
 to half or bfloat16 is a rounding point:
@@ -483,27 +489,29 @@ same inputs.
   Outputs that fail even the fixed 0.1 are MIOpen defects, not data for the
   fit, and were left out (7 cases).
 - bfloat16: after the relative term, what is left is float accumulation
-  noise, at most 0.4 `u32 * sqrt(K) * sigma`, flat in `K`. The largest error
+  noise, at most 0.43 `u32 * sqrt(K) * sigma`, flat in `K`. The largest error
   of any bfloat16 output is within the relative term: one rounding step.
-- half: MIOpen half kernels leave up to `8 * eps * sigma` on outputs near zero,
-  mostly NCHW cases with short reductions. `lambda = 12` is 1.5 times the
-  largest value seen.
+- half: MIOpen's Winograd solvers and one assembly implicit-GEMM solver leave up
+  to 8.1 `eps * sigma` on outputs near zero, mostly short reductions (table in
+  "Which half solvers need lambda"); every other solver family needs no
+  `lambda`. `lambda = 12` is 1.5 times the largest value seen, 8.09.
 
 Validation on data the fit did not see:
 
-| Data | Outputs graded | Fail the dynamic tolerance | Smallest headroom |
-|---|---|---|---|
-| gfx942, 2 new input seeds | 3,394 | 0 | 1.44 |
-| gfx90a (MI250), 2 seeds | 1,949 | 0 | 2.0 |
+| Data | Fail the dynamic tolerance | Smallest headroom |
+|---|---|---|
+| gfx942, current head: 5 seed sets of the test-plan bundles, 4 of develop's | 0 | 1.437 (half), 2.000 (bfloat16) |
+| gfx90a (MI250), current head: 3 seed sets of the test-plan bundles, 2 of develop's | 0 | 1.747 (half), 2.000 (bfloat16) |
 
 Headroom is the tolerance divided by the error, at the element of an output
 where that ratio is smallest: the factor by which the error could grow before
-the output fails. It is 1 at the point of failure. It was taken over the 48
-largest-error elements (by absolute error and by rounding steps) and 48
-random elements of each output; the failure counts use every element.
-The sample is a part of the elements, and the element with the smallest ratio
-need not be among them, so a headroom here is an upper bound on the smallest
-headroom of its output. The headrooms will be re-measured over all elements.
+the output fails. It is 1 at the point of failure. The headrooms of this
+document are the minimum over every element of every dumped output (outputs up
+to 2^27 elements; the failure counts use every element too). The first
+calibration took it over 48 largest-error and 48 random elements per output and
+reported 1.44 and 2.0, upper bounds; the exact values are 1.437 and, on gfx90a,
+1.747. The smallest bfloat16 headroom is exactly 2: one rounding step at a power
+of two is half of the `2 * eps * |ref|` term.
 
 The C++ implementation was then run through the harness, on every half and
 bfloat16 conv-fwd case MIOpen runs, at all four levels. The MI325X runs and the
@@ -542,10 +550,11 @@ nothing) and wrong values in 3D and mixed-layout cases. One correct gfx90a
 half output that the fixed 0.1 failed (one element 0.12 off at `|ref|` of
 about 0.1, with `K` = 18,432) passes.
 
-How much tighter it is: the median headroom per output, by range of `K`, is
-2.0 to 2.7 for bfloat16 and 3 to 12 for half. For the fixed 0.1 it is 15 to
-66 (bfloat16) and 4 to 160 (half), and for the older bound it passes 5,000 at
-large `K`.
+How much tighter it is: the median headroom per output, by range of `K` (up to
+64, 65 to 512, 513 to 4,608, above), is 2.3, 2.1, 2.0 and 2.7 for bfloat16 and
+12.3, 9.4, 6.3 and 19.1 for half. For the fixed 0.1 it is 48, 19, 15 and 21
+(bfloat16) and 163, 119, 106 and 125 (half), and for the older bound with the
+true input maxima 100 to 53,000 (bfloat16) and 42 to 107,000 (half).
 
 Against the fixed 0.1 per element (a band of 0.1 + 0.1 * `|ref|`), bfloat16 is
 tighter at every element and every `K`: for inputs uniform in [-1, 1] its
@@ -685,14 +694,17 @@ maxima):
 |---|---|---|
 | Winograd (`ConvBinWinograd*`, `ConvWinoRage*`) | 1,178 | gfx942 5.68, gfx90a 5.40 |
 | CK fused (`ConvCKIgemmGrpFwd*Fused`) | 2,874 | gfx942 2.46 |
-| rocBLAS GEMM | 424 | gfx942 2.35, gfx90a 2.11 |
-| Implicit GEMM, xdlops | 3,779 | gfx942 2.31, gfx90a 2.31 |
+| rocBLAS GEMM | 424 | gfx942 2.36, gfx90a 2.11 |
+| Implicit GEMM, xdlops | 3,779 | gfx942 2.31, gfx90a 2.59 |
 | Naive direct | 2,023 | gfx942 1.77, gfx90a 1.77 |
 
-The `c` an output needs is taken over the six worst-error elements kept for
-it, and the element that needs most need not be one of them, so these maxima
-are lower bounds on what the outputs need (5.68 and 2.46 included). They will
-be re-measured over all elements.
+The `c` an output needs is the largest over every element of the output, and
+every output up to 2^27 elements was analysed whole, so the maxima above are
+exact for the data, not bounds (the bfloat16 summation coefficient the data
+needs is at most 0.43). Re-measured at the current head on 5 seed sets on gfx942
+and 3 on gfx90a: Winograd 5.68 and 4.95 (5.40 on gfx90a over 5 seed sets), CK
+fused 2.46, rocBLAS 2.36 and 2.11, xdlops 2.31 and 2.59, naive 1.77 and 1.36.
+See "Float against float64" for the same outputs graded against the exact sum.
 
 ### Float against the fixed 1e-5
 
@@ -718,12 +730,11 @@ wider from `K` of about 540 (`c` = 4) or 130 (`c` = 9) at a typical output,
 and from about 126 or 56 at an output near zero. It is wider on purpose:
 long reductions need it. Of the correct float outputs in the calibration data
 (a correct output has an error within 0.1, see above), the fixed 1e-5 fails
-1,561 of the 10,451 distinct (case, seed, architecture) outputs, counted from the
-largest errors and the sampled elements of each output, so at least that many:
-none of the 2,237 outputs of develop's bundles, whose reductions are at most 512
-long, and 1,561 of the 8,214 of the test-plan bundles, with `K` from 128 to 93,312:
-1,470 of the 1,704 outputs with `K` above 512, and 91 of the 6,510 with `K`
-of 512 or less.
+1,629 of the 7,746 distinct (case, seed, architecture) outputs, counted over
+every element: none of the 1,432 outputs of develop's bundles, whose reductions
+are at most 432 long, and 1,629 of the 6,314 of the test-plan bundles, with `K`
+from 3 to 628,864: 1,283 of the 1,340 outputs with `K` above 512, and 346 of
+the 4,974 with `K` of 512 or less.
 
 What the wider band gives up is detection at long reductions: at `K` = 18,432
 a float output that is wrong by less than 6.5e-5 of its size at a typical element
@@ -744,7 +755,8 @@ typical output the base band is tighter than the fixed one up to `K` of about
 The base coefficient, which the SDK uses for an engine that sets nothing, is 4:
 the smallest whole number that leaves a headroom of at least 1.5 (the floor used
 for MIOpen's value below) over the largest need of any solver family but
-Winograd, 2.46 on CK fused solvers on gfx942. At 4 that headroom is 1.63. 3
+Winograd, 2.59 on xdlops solvers on gfx90a (2.46 on CK fused solvers on
+gfx942). At 4 that headroom is 1.54. 3
 would be enough to pass the data (1.22) but is too thin for hardware nobody has
 measured. For Winograd the same constant fails up to 5 correct outputs in a run
 (one seed, one bundle set, one architecture); no theory term tells the two
@@ -792,10 +804,98 @@ MIOpen's file sets 9. Its worst solver family, Winograd, needs 5.68 on gfx942
 and 5.40 on gfx90a, so 9 leaves it a headroom of 1.58 and 1.67: at least 1.5,
 a little above the 1.44 of half and bfloat16. The same 9 makes the other
 families' bands wider than they need: their headroom is 3.6 or more.
-The headrooms in this section come from sampled elements (see "Calibration"):
-they are upper bounds on the smallest headroom of an output, and will be
-re-measured over all elements.
+The headrooms in this section are the minimum over every element of every
+dumped output (see "Calibration").
 
+
+### Which half solvers need lambda
+
+Per output, the `lambda` it needs is the largest error left after `2 * eps *
+|ref|` and `sqrt(K) * u32 * sigma`, over `eps * sigma`, over every element,
+from the MIOpen log's solver of the output (half `ConvolutionFwd*` outputs of
+develop's and the test-plan bundles, gfx942 and gfx90a, without rounding
+points). Against the float64 result instead of the reference it is the same
+within 0.1 (the reference needs none: at most 0).
+
+| Solver | Outputs | `lambda` needed, max (p99) |
+|---|---|---|
+| `ConvWinoRageRxS<2-3>` | 235 | 8.09 (6.52) |
+| `ConvWinoRageRxSFused<2-3>` | 257 | 8.05 (6.77) |
+| `ConvBinWinogradRxSf2x3g1` | 321 | 6.80 (4.05) |
+| `ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC` | 1,025 | 5.21 (2.84) |
+| `ConvBinWinogradRxSf2x3` | 61 | 4.75 (4.75) |
+| `ConvBinWinogradRxSf3x2` | 40 | 3.56 (3.56) |
+| `ConvHipImplicitGemm3DGroupFwdXdlops`, `ConvHipImplicitGemmGroupFwdXdlops`, `ConvCKIgemmGrpFwdActivFused`, `ConvDirectNaiveConvFwd`, `GemmFwdRest`, `GemmFwd1x1_0_1`, `GemmFwd1x1_0_2`, `ConvDepthwiseFwd2D` | 5,659 | none (at most 0.00) |
+
+The solvers that keep intermediates in half are the five Winograd solvers and
+`ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC`; the rest are within one rounding and
+float accumulation (error beyond one rounding at most 0.27 `eps * sigma` rms).
+The excess is not that of a half running sum, which grows as `sqrt(K)` and in
+emulation needs `lambda` of 2.5 at `K` = 48 and more beyond: Winograd's falls
+with `K` (8.09 up to 64, 5.25 up to 512, 4.22 up to 4,608, 1.21 above) and the
+assembly solver's is 0 up to 64, 2.52, 2.63 and 5.21 for the ranges above. Both
+are rms 0.5 to 0.9 `eps * sigma` beyond one rounding at every `K`, which is
+what a fixed number of extra roundings of partial results (transformed tiles,
+blocks) gives. Per solver and arch it is 8.09 on gfx942 and 6.80 on gfx90a for
+Winograd. Without those six solvers `lambda` would be 0; the max-to-12 ratio is
+1.48. ALMIOPEN-3243 tracks the kernels.
+
+### The cases the SDK bound failed
+
+Twelve distinct cases (the 22 outputs of the first calibration, 32 at the
+current head) exceed `calculateConvFpropTolerance<T, T, float>()` in the sense
+of their largest error against its `atol`. The bound was given the true input
+maxima in every one (the largest input of each is within 0.1 % of the sweep's
+bounds). Causes, from the solver of each case and its elements:
+
+- 7 bfloat16 `F21tiny` cases (inputs 1e-20: the products and the outputs, 1e-39,
+  are below the smallest normal float): gfx90a with
+  `ConvHipImplicitGemm3DGroupFwdXdlops`, `ConvHipImplicitGemmGroupFwdXdlops` and
+  `ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC`, which return 0 for the
+  subnormal results (the reference, and float64, keep them: the error is the
+  size of the output). On gfx942 the same case differs in 1 to 2 elements, one
+  subnormal step of the reference's own sum. This is a flush of subnormals, not
+  one of float accumulation, intermediates or the graph; the dynamic
+  tolerance's `minNormal` term covers it.
+- 3 half `F21tiny` cases (`s3` 1d and 2d, `s2` 1d: outputs at 6.4e-5 to 1.4e-4,
+  next to the smallest normal half, 6.1e-5): `ConvBinWinogradRxSf2x3g1` on
+  gfx90a, a Winograd solver, which does not sum the `K` products; it breaks the
+  hypothesis of the bound at 729 to 13,471 elements.
+- 2 half cases, `l17_1d` with a relu and `l17_2d`, `K` = 3 and 9, Winograd
+  solvers on gfx942: they exceed the `atol` alone by up to 17 %, and pass when
+  the number is also the `rtol`, as its callers use it (`|ref|` is 2.6 and 5.2).
+  They are no failure of the bound.
+
+No case is a rounding point of the graph and none is a bound given smaller
+input maxima than the true ones. Under its hypothesis (float accumulation, one
+rounding) the per-element bound `2 * gamma_K * sum|p_i| + eps_out * |y|` is
+exceeded by 966 of the 16,232 half and bfloat16 outputs, 208 cases, all of the
+same families: Winograd and the half solvers above, and the flushing ones.
+
+### Float against float64
+
+Graded against the float64 result instead of the sequential float32 reference,
+with the exact value in the relative term, the `c` the engines need (maximum
+and p99 over outputs, units `sqrt(K) * u32 * (sigma + |y|)`):
+
+| Solver family | Against the reference | Against float64 |
+|---|---|---|
+| Winograd | 5.68 (4.97) | 5.76 (4.95) |
+| CK fused | 2.46 (1.84) | 2.25 (1.62) |
+| rocBLAS GEMM | 2.36 (2.07) | 1.85 (1.76) |
+| Implicit GEMM, xdlops | 2.59 (2.07) | 2.30 (1.85) |
+| Naive direct | 1.77 (1.14) | 1.98 (1.61) |
+
+The reference itself needs up to 2.24 (p99 1.7) against float64, 2.05 up to
+`K` of 64, 2.22 up to 512, 2.24 up to 4,608 and 1.57 above: a sequential float32
+sum errs as much as the engines do. The `c` that the engines need does not fall
+when the oracle is exact (at most 12 % for the non-Winograd families, and
+Winograd's needs the same): their summation is a float sum of the same size,
+not a better ordered one. So `c` = 4 and 9 keep their headroom (at least 1.54
+and 1.58), and no detection comes back at long `K`: a missing filter tap, a
+missing input channel and a shifted input are caught in every non-Winograd output
+at `c` of 3 and above against either oracle (with `K` above 4,608: 97 of 98
+missing taps), and one element off by 4 ULP in none at any `c` of 1 and above.
 
 ### When an engine needs more
 
