@@ -254,6 +254,8 @@ class StateValues:
   ## ShadowInit
   doShadowInit: int                      = 0
   scalarLoadBIter: int                   = 0 # ScalarLoadB: summation iteration of the MACs being emitted
+  startVgprScalarLoadBPark: int          = -1 # ScalarLoadB: VGPRs holding store-only SGPRs during the summation
+  scalarLoadBParked: list                = field(default_factory=list)
   startVgprScalarLoadBPrefetch: int      = -1
   vmemLoadsAfterGlobalRead: int          = 0 # vector loads issued after the reads a local write waits for
   sgprAliases: dict                      = field(default_factory=dict) # SGPR name -> [(alias, offset)]
@@ -3544,6 +3546,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           tensorParameters1st, tensorParameters2nd = tensorParameters2nd, tensorParameters1st
           tdm1st, tdm2nd = tdm2nd, tdm1st
         pfi = 1 if kernel["PrefetchGlobalRead"] < 3 else kernel["PrefetchGlobalRead"] - 1
+        if kernel.get("ScalarLoadB"):
+          # before the zero-iteration skip: the store unparks on every path
+          module.add(ScalarLoadB.park(self, kernel))
         module.addComment1("prefetch: global -> local")
         module.add(self.openSumAtLeastUnroll(kernel, prefetch=True, isOptNLL=isOptNLL))
         usePrimedSkip = self.isPrefetchAcrossPersistentEnabled(kernel)
@@ -10381,6 +10386,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         vgprIdx += 1
   
       if kernel.get("ScalarLoadB"):
+        self.states.startVgprScalarLoadBPark = vgprIdx
+        vgprIdx += ScalarLoadB.numParkVgprs(kernel)
         if kernel.get("ScalarLoadBPrefetch"):
           self.states.startVgprScalarLoadBPrefetch = vgprIdx  # 64-bit address, discarded result
           vgprIdx += 3

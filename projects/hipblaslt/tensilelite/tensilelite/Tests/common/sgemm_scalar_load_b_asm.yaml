@@ -42,7 +42,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - ScalarLoadB: [2, 4]
+        - ScalarLoadB: [2, 4, 8]
         - ScalarLoadBPrefetch: [0]
         - UseDualFMAC: [False, True]
         - GlobalReadVectorWidthA: [2]
@@ -94,7 +94,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - ScalarLoadB: [4]
+        - ScalarLoadB: [8]
         - ScalarLoadBPrefetch: [1, 2]
         - UseDualFMAC: [True]
         - GlobalReadVectorWidthA: [2]
@@ -146,7 +146,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - ScalarLoadB: [2, 4]
+        - ScalarLoadB: [2, 4, 8]
         - ScalarLoadBPrefetch: [0]
         - UseDualFMAC: [False, True]
         - GlobalReadVectorWidthA: [2]
@@ -198,7 +198,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - ScalarLoadB: [4]
+        - ScalarLoadB: [8]
         - ScalarLoadBPrefetch: [2]
         - UseDualFMAC: [True]
         - GlobalReadVectorWidthA: [2]
