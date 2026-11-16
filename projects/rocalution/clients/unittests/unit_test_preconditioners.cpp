@@ -2056,6 +2056,34 @@ TYPED_TEST(preconditioners, aichebyshev_of_a_low_order_is_its_chebyshev_series)
     }
 }
 
+// A = [[0, 1], [-2, 3]] has the eigenvalues 1 and 2 and stores no entry at (0, 0), so the
+// shift and the constant term of the series reach row 0 only through an entry the build adds
+TYPED_TEST(preconditioners, aichebyshev_of_a_matrix_without_a_stored_diagonal_entry)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> ref(2);
+    ref.add(1, static_cast<T>(1));
+    ref.end_row();
+    ref.add(0, static_cast<T>(-2));
+    ref.add(1, static_cast<T>(3));
+    ref.end_row();
+    const std::vector<T> r = rhs<T>(ref.n);
+    auto                 A = this->make(ref);
+
+    KNOWN_BUG("AIChebyshev adds the shift and the constant term only to stored diagonal entries");
+    for(int order : {1, 2, 3})
+    {
+        SCOPED_TRACE("order " + std::to_string(order));
+        rocalution::AIChebyshev<Matrix<T>, Vector<T>, T> p;
+        p.Set(order, 1.0, 2.0);
+        p.SetOperator(*A);
+        p.Build();
+        expect_near(apply(p, *A, r),
+                    chebyshev_series(ref, static_cast<T>(1), static_cast<T>(2), order + 1, r),
+                    scaled_tol<T>(1e-13));
+    }
+}
+
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
 // solves cannot see a stale or unmoved preconditioner. Its action after the build is
 // compared after every step instead; aichebyshev_approximates_the_inverse checks the
