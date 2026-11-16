@@ -1893,6 +1893,30 @@ def test_wmma_wgrad_keeps_the_default_grid_and_covers_the_new_variants():
 
 
 @pytest.mark.parametrize("gfx", ["gfx1250", "gfx1151", "gfx1201"])
+def test_wmma_wgrad_deepk_geometries_only_on_their_arches(gfx):
+    """The deep-K wgrad geometries are built, with the cover's variants, on
+    the :data:`aj.CACHE_WGRAD_DEEPK_ARCHES` only: the RDNA parts lack the LDS
+    for a 64x64x512 tile pair.
+    """
+    from rocke.core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(gfx)
+    deepk = set(aj.CACHE_WGRAD_DEEPK_GEOMETRIES)
+    found = {}
+    for job in aj._wgrad_jobs(gfx, "fp16", 32, "wmma", target, (1,)):
+        i = job.identity
+        geo = (i.tile_m, i.tile_n, i.tile_k, i.warp_m, i.warp_n)
+        if geo in deepk:
+            found.setdefault(geo, set()).add((i.async_dma, i.split_k))
+    if gfx in aj.CACHE_WGRAD_DEEPK_ARCHES:
+        assert set(found) == deepk
+        # On the cover: the async loop next to the synchronous one.
+        assert all({a for a, _ in v} == {False, True} for v in found.values())
+    else:
+        assert not found
+
+
+@pytest.mark.parametrize("gfx", ["gfx1250", "gfx1151", "gfx1201"])
 def test_wmma_wgrad_count_matches_the_walk(gfx):
     """:func:`aj.count_jobs` counts exactly the wgrad jobs the generator
     yields on every wave32 target. The async loop is built only where the
