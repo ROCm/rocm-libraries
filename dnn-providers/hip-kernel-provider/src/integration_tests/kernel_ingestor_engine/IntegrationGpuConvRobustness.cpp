@@ -236,7 +236,8 @@ ConvSpec spec(Direction direction,
     return result;
 }
 
-/// gtest prints a case by its name rather than its bytes.
+/// gtest prints a case by its name rather than its bytes; gtest looks the function up by this name.
+// NOLINTNEXTLINE(readability-identifier-naming)
 void PrintTo(const ConvCase& value, std::ostream* out)
 {
     *out << value.name;
@@ -396,7 +397,7 @@ protected:
         return graph.build_plans();
     }
 
-    int64_t servingEngine(Graph& graph)
+    static int64_t servingEngine(Graph& graph)
     {
         int64_t serving = 0;
         const auto result = graph.get_execution_plan_engine_id(serving);
@@ -503,7 +504,7 @@ TEST_P(IntegrationGpuConvRobustness, WorkspaceLimitBelowTheNeedDeclinesAtPlanBui
         hip_kernel_provider::test_utilities::VerificationRun run;
         ASSERT_NO_FATAL_FAILURE(prepareVerification(context, 0, run));
 
-        constexpr size_t GUARD = 64 * 1024;
+        constexpr size_t GUARD = size_t{64} * 1024;
         constexpr unsigned char PATTERN = 0xA5;
         void* workspace = nullptr;
         ASSERT_EQ(hipMalloc(&workspace, static_cast<size_t>(need) + GUARD), hipSuccess);
