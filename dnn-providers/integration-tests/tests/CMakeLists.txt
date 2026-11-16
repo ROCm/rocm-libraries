@@ -34,6 +34,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/input-init/FillInputs.cpp
     ../src/harness/input-init/ResampleBackwardInputs.cpp
     ../src/harness/input-init/SdpaBackwardInputs.cpp
+    ../src/harness/input-init/PhiloxBackward.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     ../src/harness/reference-validation/GoldenDataPlan.cpp
     ../src/harness/reference-validation/GoldenOutputProbe.cpp
@@ -124,6 +125,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestOutcomeReport.cpp
     TestKernelLogTap.cpp
     TestOutputComparison.cpp
+    TestPhiloxDropout.cpp
     TestRngDumpHandoff.cpp
 )
 

@@ -44,6 +44,7 @@
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/bundle/VerificationOutcome.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
+#include "harness/input-init/PhiloxBackward.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -726,6 +727,26 @@ private:
     // raggedLengthUids() would throw; nothing is cached on a throwing call.
     const std::unordered_map<int64_t, int64_t>& cachedRaggedLengthUids() const;
     mutable std::optional<std::unordered_map<int64_t, int64_t>> _raggedLengthUidsCache;
+
+    // SDPA backward Philox dropout (SEM-015). No reference reproduces an engine's random stream,
+    // but the mask bits are pinned, so the references run the explicit-mask form of the graph
+    // (PhiloxBackward.hpp): the graph is rewritten once per bundle, and the keep mask is drawn
+    // from the filled seed and offset after the fill.
+    struct PhiloxReference
+    {
+        PhiloxBackwardDropout dropout;
+        std::vector<uint8_t> graph;
+        std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> mask; // set once the inputs are filled
+    };
+    // The bundle's Philox backward dropout, or null when it has none the harness can model.
+    PhiloxReference* philoxReference() const;
+    mutable std::optional<PhiloxReference> _philoxReference;
+    mutable bool _philoxResolved = false;
+    // The graph the references run: the explicit-mask rewrite for a Philox backward graph, else
+    // the bundle's own.
+    std::pair<uint8_t*, std::size_t> referenceGraph() const;
+    // Draws the keep mask from the filled seed and offset. Returns why that is not possible.
+    std::optional<std::string> prepareReferencePhiloxMask();
 
     OutputTensors allocateSentinelOutputs(bool onDevice, bool payloadNanSentinel = false) const;
     // The input set that a variant pack reads: the packed set for a device pack of a
