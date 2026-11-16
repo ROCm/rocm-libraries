@@ -602,10 +602,17 @@ std::vector<std::string> kernelIdsFor(const KnobCase& knobCase)
     std::vector<std::string> ids;
     forEachServedKernel(
         knobCase.engine, [&key, &ids](const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel) {
+            // Unified2D's home descriptors omit use_alibi (builder_default: only the ALiBi
+            // satellite builds it); the engine completes it to the KMD default 0.
             const bool carriesKey
                 = std::all_of(key.begin(), key.end(), [&kernel](const auto& field) {
                       const auto value = kernel.metadata.find(field.first);
-                      return value != kernel.metadata.end() && value->second == field.second;
+                      if(value == kernel.metadata.end())
+                      {
+                          const auto* wanted = std::get_if<int64_t>(&field.second);
+                          return field.first == "use_alibi" && wanted != nullptr && *wanted == 0;
+                      }
+                      return value->second == field.second;
                   });
             if(carriesKey)
             {

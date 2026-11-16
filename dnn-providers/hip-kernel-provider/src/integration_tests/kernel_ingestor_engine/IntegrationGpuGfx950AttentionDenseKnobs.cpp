@@ -575,16 +575,18 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
             const auto* causal = intField("causal");
             const auto* blockM = intField("block_m");
             const auto* blockN = intField("block_n");
-            const auto* alibi = intField("use_alibi");
+            // A record without use_alibi is a plain kernel (the KMD default 0).
+            const auto* alibiField = intField("use_alibi");
+            const int64_t alibi = alibiField == nullptr ? 0 : *alibiField;
             if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || blockM == nullptr
-               || blockN == nullptr || alibi == nullptr)
+               || blockN == nullptr)
             {
                 ADD_FAILURE() << "kernel " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
                               << " carries no string dtype and integer head_size, causal, "
-                                 "block_m, block_n and use_alibi";
+                                 "block_m and block_n";
                 return;
             }
-            catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN, *alibi);
+            catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN, alibi);
         });
 
     const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
