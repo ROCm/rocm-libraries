@@ -114,8 +114,9 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
         handle, make_fat_row_matrix<double>(40, 3), opt, "fat 40", one);
 }
 
-// IC(0) of a full Hermitian matrix is its exact Cholesky factor (issue #15943), so a
-// defect shared by the kernels and the host reference cannot pass.
+// On a Hermitian positive definite matrix with every entry stored, IC(0) drops no fill and
+// is the exact Cholesky factorization, so the factor is compared with L itself and not only
+// with the host reference (issue #15943).
 TEST_F(PrecondGeneric, spic0_csr_exact_cholesky_factor)
 {
     const run_options opt;

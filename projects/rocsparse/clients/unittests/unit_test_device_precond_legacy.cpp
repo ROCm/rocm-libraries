@@ -540,7 +540,8 @@ TYPED_TEST(PrecondLegacyCsr, tolerance_argument_checks)
     EXPECT_EQ(position, -1);
 }
 
-// IC(0) of a full Hermitian matrix is its exact Cholesky factor (issue #15943).
+// IC(0) of a Hermitian positive definite matrix with every entry stored is its exact
+// Cholesky factor, compared with L itself (issue #15943).
 TEST_F(PrecondLegacy, csric0_exact_cholesky_factor)
 {
     for_all_types([&](auto tag) {
