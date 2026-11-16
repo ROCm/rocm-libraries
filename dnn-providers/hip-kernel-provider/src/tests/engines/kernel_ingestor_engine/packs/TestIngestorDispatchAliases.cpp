@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <string>
 #include <string_view>
 
@@ -88,7 +89,7 @@ struct FlydslSdpaBwdDispatch
     std::string_view versioned;
 };
 
-const FlydslSdpaBwdDispatch FLYDSL_SDPA_BWD_DISPATCHES[] = {
+const std::array<FlydslSdpaBwdDispatch, 8> FLYDSL_SDPA_BWD_DISPATCHES = {{
     {"hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
      FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1},
     {"hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
@@ -103,7 +104,7 @@ const FlydslSdpaBwdDispatch FLYDSL_SDPA_BWD_DISPATCHES[] = {
     {"hipkernel.flydsl_sdpa_bwd_merged.dispatch", FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1},
     {"hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch",
      FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1},
-};
+}};
 
 TEST(TestIngestorDispatchAliases,
      EachFlydslSdpaBwdAliasResolvesToTheHandlerOfItsUnversionedNameAndSavesEveryLaunch)

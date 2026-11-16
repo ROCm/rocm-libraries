@@ -3186,8 +3186,8 @@ private:
 
         if(c.bias)
         {
-            const auto biasBytes = static_cast<size_t>(biasViewOf(c).extent())
-                                   * (c.biasDtype() == DataType::FLOAT ? 4U : 2U);
+            const auto biasBytes
+                = biasViewOf(c).extent() * (c.biasDtype() == DataType::FLOAT ? 4U : 2U);
             _bias = std::make_unique<DeviceBuffer>(host.bias.size() * sizeof(B));
             EXPECT_EQ(_bias->bytes(), biasBytes);
             _bias->upload(host.bias);
