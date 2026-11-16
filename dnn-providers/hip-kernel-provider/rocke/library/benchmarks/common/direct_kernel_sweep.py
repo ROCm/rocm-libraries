@@ -46,6 +46,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from benchmarks.common.kernel_sweep import BuildJob, compile_jobs
+from benchmarks.common.tf32_verify import TF32_VERIFY_TOL
 from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     BLOCK_GROUPS,
@@ -69,10 +70,12 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     DGRAD_RTC_VGPR_FILL,
     DGRAD_WAVES,
     DIRECT_CAPABILITIES,
+    DIRECT_COMPILE_DTYPES,
     DIRECT_DIRECTIONS,
     DIRECT_DTYPE,
     DIRECT_DTYPES,
     DOUBLE_BUFFER,
+    GROUPED_FOLD_K32,
     DW_BLOCK_W_DGRAD,
     DW_BLOCK_W_FWD,
     DW_BLOCK_WAVES,
@@ -99,9 +102,15 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     dgrad_rtc_k_atoms,
     dgrad_rtc_spills,
     dgrad_rtc_vgprs,
+    dgrad_waves,
+    direct_dtype_triple,
     direct_job_for_identity,
     direct_kernel_for_job,
+    direct_storage_dtype,
     probe_problem,
+    tf32_is_emulated,
+    tf32_narrow_reason,
+    wgrad_reduce_identity,
     wgrad_waves,
 )
 from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_spec re-exported)
@@ -120,9 +129,34 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     direct_dgrad_workspaces,
     direct_entry_wave_reason,
     direct_spec_for_problem,
+    direct_wgrad_reduce_spec,
+    direct_wgrad_replicas,
+    direct_wgrad_workspaces,
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
 )
+
+# --verify bound on the peak-normalised error max|out-ref| / max(max|ref|, 1)
+# against an IEEE fp32 reference. The two TF32 rows, native (gfx942) and
+# emulated (gfx950), are tf32_verify.TF32_VERIFY_TOL, shared with the
+# implicit-GEMM driver. The scalar-FMA kernels run a tf32 problem in fp32 and
+# clear either bound.
+DIRECT_VERIFY_TOL = {
+    "fp16": 5e-2,
+    "bf16": 5e-2,
+    "fp32": 1e-4,
+    **TF32_VERIFY_TOL,
+}
+
+
+def direct_verify_tol(dtype: str, arch: str) -> float:
+    """``--verify`` bound for a direct kernel of problem dtype ``dtype``."""
+    if dtype == "tf32":
+        return DIRECT_VERIFY_TOL[
+            "tf32_emulated" if tf32_is_emulated(arch) else "tf32_native"
+        ]
+    direct_storage_dtype(dtype)  # reject an unknown dtype
+    return DIRECT_VERIFY_TOL[dtype]
 
 
 def _caps_worker(payload):
@@ -392,7 +426,9 @@ class DirectStep:
     ``buffers`` names the buffers bound to the A, B and D kernarg slots (B is
     ``None`` for the two-operand weight transforms). ``conv_args`` is ``None``
     for those too; a conv kernel takes its extents from it. ``scalars`` are
-    the transforms' remaining kernargs (name, value), if any.
+    the transforms' remaining kernargs (name, value), if any, and
+    ``operand_args`` the kernarg names the A and D buffers and their sizes
+    bind to when there is no ``conv_args``.
     """
 
     kernel_name: str
@@ -407,6 +443,7 @@ class DirectStep:
     # buffer the step binds, or None for the whole buffer: a batch-split
     # launch sees only its images (see _batch_chunks).
     views: Tuple[Optional[Tuple[int, int]], ...] = ()
+    operand_args: Tuple[str, str, str, str] = ("A", "D", "A_bytes", "D_bytes")
 
 
 @dataclass(frozen=True)
@@ -415,12 +452,14 @@ class DirectPlan:
 
     Buffer names: ``x``/``w``/``y`` for forward, ``dy``/``w``/``dx`` for
     dgrad, ``dy``/``x``/``dw`` (fp32) for wgrad, plus the scratch buffers in
-    ``workspaces`` (name -> bytes).
+    ``workspaces`` (name -> bytes). The caller zeroes the ``zeroed`` ones
+    before a run, as it zeroes wgrad's dW.
     """
 
     identity: KernelIdentity
     steps: Tuple[DirectStep, ...]
     workspaces: Dict[str, int] = field(default_factory=dict)
+    zeroed: Tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -430,21 +469,10 @@ class DirectPlan:
 def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
-    from kernels.common.conv_dgrad_patch_wmma import DgradPatchWmmaSpec
-    from kernels.common.conv_dgrad_smallc_wmma import DgradSmallcWmmaSpec
-    from kernels.common.conv_direct_dgrad_wmma import DirectDgradWmmaSpec
     from kernels.common.conv_direct_grouped import direct_launch_geometry
     from kernels.common.conv_direct_nongrouped import DirectNongroupedConvSpec
 
-    if isinstance(
-        spec,
-        (
-            DirectNongroupedConvSpec,
-            DirectDgradWmmaSpec,
-            DgradPatchWmmaSpec,
-            DgradSmallcWmmaSpec,
-        ),
-    ):
+    if isinstance(spec, DirectNongroupedConvSpec):
         grid, block = spec.grid(), (spec.threads_per_block, 1, 1)
     elif hasattr(spec, "launch_geometry"):
         grid, block = spec.launch_geometry()
@@ -453,12 +481,26 @@ def _conv_step(identity, hsaco_path, meta, spec, problem, direction, buffers):
     return DirectStep(
         kernel_name=meta["kernel_name"],
         hsaco_path=hsaco_path,
-        signature=conv_direct_args_signature(identity.dtype_a, direction=direction),
+        # The ABI takes the storage type: a tf32 kernel's tensors are fp32.
+        signature=conv_direct_args_signature(
+            direct_storage_dtype(identity.dtype_a), direction=direction
+        ),
         grid=grid,
         block=block,
         buffers=buffers,
         conv_args=ConvArgs.from_problem(problem, direction=direction),
     )
+
+
+def _image_bytes(problem) -> Tuple[int, int]:
+    """Bytes of one image of ``problem``'s activation and of its output, in
+    the storage type (fp32 for an fp32 or tf32 problem)."""
+    from kernels.common.conv_direct_grouped import _elem_bytes
+
+    eb = _elem_bytes(getattr(problem, "dtype", DIRECT_DTYPE))
+    in_img = eb * problem.H * problem.W * problem.total_c
+    out_img = eb * problem.Ho * problem.Wo * problem.total_k
+    return in_img, out_img
 
 
 def _batch_chunks(problem) -> Optional[List[int]]:
@@ -473,8 +515,7 @@ def _batch_chunks(problem) -> Optional[List[int]]:
     """
     from kernels.common.conv_direct_nongrouped import _OOB_BASE
 
-    in_img = 2 * problem.H * problem.W * problem.total_c
-    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    in_img, out_img = _image_bytes(problem)
     per_launch = _OOB_BASE // max(in_img, out_img)
     if problem.N <= per_launch or per_launch < 1:
         return None
@@ -516,6 +557,9 @@ def plan_for(
             return _batch_split_plan(
                 cache, identity, hsaco_path, meta, problem, arch, knobs, chunks
             )
+    why = tf32_narrow_reason(variant, problem, knobs, arch)
+    if why:
+        return None, why
     spec, why = direct_spec_for_problem(
         variant, problem, knobs, arch, identity.wave_size
     )
@@ -596,11 +640,51 @@ def plan_for(
         return DirectPlan(identity, (main, fold), {"ws": spec.workspace_bytes()}), "ok"
     if identity.direction == "direct_wgrad":
         # dY rides A, X rides B, and D is the fp32 dW the kernel accumulates
-        # into atomically (the caller zeroes it).
-        step = _conv_step(
-            identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+        # into atomically (the caller zeroes it) -- or, for a two-stage
+        # kernel, the replicated fp32 scratch the reduce helper then folds
+        # into dW.
+        replicas = direct_wgrad_replicas(spec)
+        if replicas == 1:
+            step = _conv_step(
+                identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
+            )
+            return DirectPlan(identity, (step,)), "ok"
+        from kernels.common.conv_wgrad_workspace_reduce import (
+            wgrad_reduce_grid,
+            wgrad_reduce_signature,
         )
-        return DirectPlan(identity, (step,)), "ok"
+
+        reduce_id = wgrad_reduce_identity(
+            identity.arch, identity.wave_size, replicas, identity.dtype_a
+        )
+        entry = cache.entry_meta(reduce_id)
+        if entry is None:
+            return None, "missing cached wgrad reduce helper (rebuild the cache)"
+        rspec = direct_wgrad_reduce_spec(variant, problem, replicas)
+        reduce_step = DirectStep(
+            kernel_name=entry["kernel_name"],
+            hsaco_path=cache.hsaco_path(reduce_id),
+            signature=wgrad_reduce_signature(rspec),
+            grid=wgrad_reduce_grid(rspec),
+            block=(rspec.block_size, 1, 1),
+            buffers=("ws_wgrad", None, "dw"),
+            scalars=(
+                ("wg_M", rspec.wg_M),
+                ("wg_N", rspec.wg_N),
+                ("groups", rspec.groups),
+            ),
+            operand_args=("ws_ptr", "dw_ptr", "ws_bytes", "dw_bytes"),
+        )
+        step = _conv_step(
+            identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "ws_wgrad")
+        )
+        workspaces = direct_wgrad_workspaces(variant, spec)
+        return (
+            DirectPlan(
+                identity, (step, reduce_step), workspaces, zeroed=tuple(workspaces)
+            ),
+            "ok",
+        )
     if direct_dgrad_kernarg_direction(variant) == "fwd":
         # A single forward kernel over the transposed problem that reads the
         # original weights itself: forward ABI, transposed extents.
@@ -677,8 +761,7 @@ def _batch_split_plan(
     )
     if knobs["tile_w"] not in widths:
         return None, f"tile_w={knobs['tile_w']} does not fit Wo={problem.Wo}"
-    in_img = 2 * problem.H * problem.W * problem.total_c
-    out_img = 2 * problem.Ho * problem.Wo * problem.total_k
+    in_img, out_img = _image_bytes(problem)
     steps = []
     n0 = 0
     for n in chunks:
@@ -741,11 +824,12 @@ def launch_values(
 
     (a_ptr, a_bytes), (d_ptr, d_bytes) = bind(0, a), bind(2, d)
     if step.conv_args is None:
+        a_key, d_key, a_bytes_key, d_bytes_key = step.operand_args
         return {
-            "A": a_ptr,
-            "D": d_ptr,
-            "A_bytes": a_bytes,
-            "D_bytes": d_bytes,
+            a_key: a_ptr,
+            d_key: d_ptr,
+            a_bytes_key: a_bytes,
+            d_bytes_key: d_bytes,
             **dict(step.scalars),
         }
     b_ptr, b_bytes = bind(1, b)

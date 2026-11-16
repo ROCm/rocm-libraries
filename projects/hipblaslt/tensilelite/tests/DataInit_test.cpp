@@ -149,7 +149,7 @@ namespace
         setOption(args, "mx-a-type", rocisa::DataType::E8);
         setOption(args, "mx-b-type", rocisa::DataType::E8);
         setOption(args, "mx-scale-format", mxScaleFormat);
-        setOption(args, "fused-gemm-a2a", false);
+        setOption(args, "fused-a2a", TensileLite::FusedA2A::Disabled);
         setOption(args, "metadata-layout", 0);
         setOption(args, "a-ops", TensileLite::TensorOps{});
         setOption(args, "b-ops", TensileLite::TensorOps{});
@@ -204,6 +204,37 @@ TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
         setOption(args, "use-scaleAlphaVec", modes);
         EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args), std::invalid_argument);
     }
+}
+
+// A random alpha or beta is drawn once for the problem and again for the launch, so a
+// draw of +-1 here must not restrict the problem to a value-specialized solution: the
+// launch would then throw "Alpha value X doesn't match that set in problem".
+TEST(ClientScalarRestriction, RandomAlphaAndBetaAreUnrestricted)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::Random);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::Random);
+    // Each draw is in [-1000, 1000]; 4000 problems draw +-1 with probability 1 - e^-8.
+    for(int i = 0; i < 4000; ++i)
+    {
+        TensileLite::Client::ClientProblemFactory factory(args);
+        auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+        ASSERT_NE(problem, nullptr);
+        ASSERT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+        ASSERT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+    }
+}
+
+TEST(ClientScalarRestriction, FixedAlphaAndBetaKeepTheirRestriction)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::One);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::One);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+    ASSERT_NE(problem, nullptr);
+    EXPECT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::One);
+    EXPECT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::One);
 }
 
 TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
@@ -1119,4 +1150,69 @@ TEST(CopyTensorVoid, CopiesSource)
     ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
     EXPECT_EQ(dst, src);
+}
+
+// =============================================================================
+//   Section 8 — DataInitialization::initArrayTrig over a broadcast dimension
+// =============================================================================
+// A zero-stride batch dimension shares one matrix across batches, so the 3 x 4 x 2 tensor below
+// has 12 allocated elements. Trig must fill them once, from batch 0 (sin of the logical index
+// 0..11); otherwise batch 1 races to overwrite them with sin(12..23).
+TEST(TrigInit, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    TensorDescriptor desc("a", rocisa::DataType::Float, {3, 4, 2}, {1, 3, 0});
+    ASSERT_EQ(desc.totalAllocatedElements(), 12u);
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<float> array(12, 42.0f);
+        DataInitialization::initArrayTrig<float, false, false>(array.data(), desc);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], static_cast<float>(std::sin(double(k))))
+                << "rep " << rep << ", element " << k;
+    }
+}
+
+// =============================================================================
+//   Section 9 — DataInitialization::getValue<T, InitMode::RandomNarrow>
+// =============================================================================
+// RandomNarrow assembles random sign/significand bits with an exponent in [-100, 0], so every
+// value must be finite with magnitude below 2 and a biased exponent in [bias - 100, bias].
+// BFloat16 used to pass the assembled bit pattern to BFloat16's value constructor, which treats
+// it as a number (0x3f80 became 16256.0f instead of 1.0f).
+namespace
+{
+    template <typename T>
+    void expectRandomNarrowRange(int expBits, int sigBits, uint32_t (*bitsOf)(T))
+    {
+        using TensileLite::Client::DataInitialization;
+        using TensileLite::Client::InitMode;
+        const int bias = (1 << (expBits - 1)) - 1;
+        for(int i = 0; i < 10000; i++)
+        {
+            T        v    = DataInitialization::getValue<T, InitMode::RandomNarrow>();
+            float    f    = static_cast<float>(v);
+            uint32_t bits = bitsOf(v);
+            int      exp  = (bits >> sigBits) & ((1 << expBits) - 1);
+            ASSERT_TRUE(std::isfinite(f)) << "bits=0x" << std::hex << bits;
+            ASSERT_LT(std::fabs(f), 2.0f) << "bits=0x" << std::hex << bits;
+            ASSERT_GE(exp, bias - 100) << "bits=0x" << std::hex << bits;
+            ASSERT_LE(exp, bias) << "bits=0x" << std::hex << bits;
+        }
+    }
+} // namespace
+
+TEST(RandomNarrowInit, FloatStaysInNarrowRange)
+{
+    expectRandomNarrowRange<float>(8, 23, [](float v) {
+        uint32_t u;
+        std::memcpy(&u, &v, sizeof(u));
+        return u;
+    });
+}
+
+TEST(RandomNarrowInit, BFloat16StaysInNarrowRange)
+{
+    expectRandomNarrowRange<TensileLite::BFloat16>(
+        8, 7, [](TensileLite::BFloat16 v) { return uint32_t(v.data); });
 }

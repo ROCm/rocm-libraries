@@ -25,6 +25,8 @@
 
 // Seed for randomized tests; replay a failing run with --seed <value>.
 size_t random_seed = std::random_device{}();
+// Number of random configurations checked by each randomized test.
+size_t num_random_cases = 200;
 
 int main(int argc, char** argv)
 {
@@ -34,6 +36,11 @@ int main(int argc, char** argv)
     CLI::App app{"rocFFT internal tests"};
     app.add_option(
         "--seed", random_seed, "Seed for randomized tests; replay a failing run with its value");
+    app.add_option("--num_random_cases",
+                   num_random_cases,
+                   "Number of random configurations checked by each randomized test")
+        ->check(CLI::PositiveNumber)
+        ->capture_default_str();
     CLI11_PARSE(app, argc, argv);
 
     // keep --gtest_list_tests output parseable for gtest_discover_tests

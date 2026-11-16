@@ -107,6 +107,7 @@ hipsparseStatus_t
  *                     hipsparseCbsric02_analysis(), hipsparseZbsric02_analysis(),
  *                     hipsparseSbsric02(), hipsparseDbsric02(), hipsparseCbsric02(),
  *                     and hipsparseZbsric02().
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -165,6 +166,7 @@ hipsparseStatus_t hipsparseSbsric02_bufferSize(hipsparseHandle_t         handle,
  *                     hipsparseCbsric02_analysis(), hipsparseZbsric02_analysis(),
  *                     hipsparseSbsric02(), hipsparseDbsric02(), hipsparseCbsric02(),
  *                     and hipsparseZbsric02().
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -222,6 +224,7 @@ hipsparseStatus_t hipsparseDbsric02_bufferSize(hipsparseHandle_t         handle,
  *                     hipsparseCbsric02_analysis(), hipsparseZbsric02_analysis(),
  *                     hipsparseSbsric02(), hipsparseDbsric02(), hipsparseCbsric02(),
  *                     and hipsparseZbsric02().
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -279,6 +282,7 @@ hipsparseStatus_t hipsparseCbsric02_bufferSize(hipsparseHandle_t         handle,
  *                     hipsparseCbsric02_analysis(), hipsparseZbsric02_analysis(),
  *                     hipsparseSbsric02(), hipsparseDbsric02(), hipsparseCbsric02(),
  *                     and hipsparseZbsric02().
+ *                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.

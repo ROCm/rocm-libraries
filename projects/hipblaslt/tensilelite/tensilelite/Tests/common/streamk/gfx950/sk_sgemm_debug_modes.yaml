@@ -7,6 +7,9 @@ TestParameters:
 GlobalParameters:
   # Modes 1-3 omit reduction steps and provide launch-only coverage.
   NumElementsToValidate: 0
+  # Omitted reduction steps leave Stream-K flags set (mode 1: 48 of them), which the
+  # Synchronizer check reports at the end of every run iteration that launched.
+  CheckSynchronizer: False
   SyncsPerBenchmark: 1
   KernelTime: True
   DataInitTypeAlpha: 1

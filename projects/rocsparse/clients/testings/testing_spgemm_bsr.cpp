@@ -246,6 +246,56 @@ void testing_spgemm_bsr_bad_arg(const Arguments& arg)
     }
 #undef PARAMS
 
+    // An operation other than none is not implemented, at every stage, and the check
+    // runs before any device access.
+    {
+        const T* alpha       = (const T*)0x4;
+        const T* beta        = (const T*)0x4;
+        size_t*  buffer_size = (size_t*)0x4;
+        void*    temp_buffer = (void*)0x4;
+        for(const rocsparse_operation op :
+            {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose})
+        {
+            for(const rocsparse_spgemm_stage s : {rocsparse_spgemm_stage_buffer_size,
+                                                  rocsparse_spgemm_stage_nnz,
+                                                  rocsparse_spgemm_stage_compute,
+                                                  rocsparse_spgemm_stage_symbolic,
+                                                  rocsparse_spgemm_stage_numeric})
+            {
+                EXPECT_ROCSPARSE_STATUS(rocsparse_spgemm(handle,
+                                                         op,
+                                                         trans_B,
+                                                         alpha,
+                                                         A,
+                                                         B,
+                                                         beta,
+                                                         D,
+                                                         C,
+                                                         compute_type,
+                                                         alg,
+                                                         s,
+                                                         buffer_size,
+                                                         temp_buffer),
+                                        rocsparse_status_not_implemented);
+                EXPECT_ROCSPARSE_STATUS(rocsparse_spgemm(handle,
+                                                         trans_A,
+                                                         op,
+                                                         alpha,
+                                                         A,
+                                                         B,
+                                                         beta,
+                                                         D,
+                                                         C,
+                                                         compute_type,
+                                                         alg,
+                                                         s,
+                                                         buffer_size,
+                                                         temp_buffer),
+                                        rocsparse_status_not_implemented);
+            }
+        }
+    }
+
     const T* alpha = (const T*)0x4;
     const T* beta  = (const T*)0x4;
     EXPECT_ROCSPARSE_STATUS(rocsparse_spgemm(handle,
