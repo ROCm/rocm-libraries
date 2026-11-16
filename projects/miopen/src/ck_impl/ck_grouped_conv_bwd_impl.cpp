@@ -134,12 +134,6 @@ bool CheckIsArgSupported(const ProblemDescription& problem,
         problem, kernel_id, use_tf32);
 }
 
-template <typename DataType>
-size_t GetWorkspaceSize(const ProblemDescription& problem, bool use_tf32)
-{
-    return GetWorkspaceSizeCommon<DeviceOpGBwdPtrs, CKArgs, DataType>(problem, use_tf32);
-}
-
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -197,17 +191,17 @@ ck_impl_bwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
 }
 
 extern "C" ck_impl_status_t
-ck_impl_bwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
-                               miopenDataType_t data_type,
-                               bool use_tf32,
+ck_impl_bwd_get_workspace_size(const miopen::conv::ProblemDescription* /*problem*/,
+                               miopenDataType_t /*data_type*/,
+                               bool /*use_tf32*/,
                                size_t* out_size)
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_size, CK_IMPL_STATUS_BAD_PARAM, "Null out_size");
-        CK_IMPL_THROW_IF_NULL(problem, CK_IMPL_STATUS_BAD_PARAM, "Null problem");
-        *out_size = DispatchByDataType(data_type, [&](auto type_val) {
-            return GetWorkspaceSize<decltype(type_val)>(*problem, use_tf32);
-        });
+        // Only backward weights uses a CK split-K workspace; a 2D backward-data solution needs the
+        // layout transform buffers alone, which the solver computes via
+        // GetWorkspaceSizeLayoutTransformConv().
+        *out_size = 0;
     });
 }
 
