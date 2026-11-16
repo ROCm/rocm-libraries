@@ -126,13 +126,12 @@ class ORIGAMI_EXPORT hardware_t {
    *
    */
   struct architecture_constants {
-    double mem1_perf_ratio;
-    double mem2_perf_ratio;
-    double mem3_perf_ratio;
+    double mem1_perf_ratio;  ///< L2 bandwidth in TB/s
+    double mem2_perf_ratio;  ///< MALL bandwidth in TB/s
+    double mem3_perf_ratio;  ///< DRAM/HBM bandwidth in TB/s
     size_t parallel_mi_cu;  ///< Number of parallel matrix instructions per compute unit
     std::tuple<double, double, double>
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
-    double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
     size_t simds_per_cu;   ///< SIMD units per Compute Unit (CDNA: 4 SIMD16, RDNA3/4: 2 SIMD32)
     size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
     constexpr architecture_constants(double mem1_perf_ratio,
@@ -140,7 +139,6 @@ class ORIGAMI_EXPORT hardware_t {
                                      double mem3_perf_ratio,
                                      size_t parallel_mi_cu,
                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
-                                     double mem_clock_ratio,  // Obtained through microbenchmarking
                                      size_t simds_per_cu,
                                      size_t l1_capacity)
         : mem1_perf_ratio(mem1_perf_ratio)
@@ -148,7 +146,6 @@ class ORIGAMI_EXPORT hardware_t {
         , mem3_perf_ratio(mem3_perf_ratio)
         , parallel_mi_cu(parallel_mi_cu)
         , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
-        , mem_clock_ratio(mem_clock_ratio)
         , simds_per_cu(simds_per_cu)
         , l1_capacity(l1_capacity) {}
   };
@@ -260,7 +257,6 @@ class ORIGAMI_EXPORT hardware_t {
               2.55,
               4,
               std::make_tuple(-0.000098, 0.02011, 0),
-              1.5,
               4,
               32 * 1024};
     }
@@ -269,7 +265,6 @@ class ORIGAMI_EXPORT hardware_t {
             6,
             4,
             std::make_tuple(-0.0000194, 0.008772, 0.007898),
-            1.5,
             4,
             32 * 1024};
   }
@@ -292,15 +287,15 @@ class ORIGAMI_EXPORT hardware_t {
       std::optional<int> pci_chip_id = std::nullopt) noexcept {
     switch (arch) {
       case architecture_t::gfx90a:
-        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 4, 16 * 1024};
+        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 4, 16 * 1024};
       case architecture_t::gfx942:
-        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5, 4, 32 * 1024};
+        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 4, 32 * 1024};
       case architecture_t::gfx950:
         return get_gfx950_arch_constants(pci_chip_id);
       case architecture_t::gfx1200:
-        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5, 2, 64 * 1024};
+        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 2, 64 * 1024};
       case architecture_t::gfx1201:
-        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5, 2, 64 * 1024};
+        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 2, 64 * 1024};
       case architecture_t::gfx1170:
       case architecture_t::gfx1171: {
         // TODO: Double-check gfx117x constants when measured values are available.
@@ -309,39 +304,37 @@ class ORIGAMI_EXPORT hardware_t {
         return c;
       }
       case architecture_t::gfx1100:
-        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5, 2, 32 * 1024};
+        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 2, 32 * 1024};
       case architecture_t::gfx1101:
         // AMD Navi 32
-        return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5, 2, 32 * 1024};
+        return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 2, 32 * 1024};
       case architecture_t::gfx1150:
         // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
+        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 2, 32 * 1024};
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU
-        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};
+        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 2, 32 * 1024};
       case architecture_t::gfx1152:
         // AMD Radeon 840M iGPU
-        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5, 2, 32 * 1024};
+        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 2, 32 * 1024};
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
-        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
+        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 2, 32 * 1024};
       case architecture_t::gfx1250: {
         // Measured at a 2.4 GHz engine clock and 1.9 GHz memory clock.  Peak tensor-DMA read
         // bandwidth: L2 41.93 TB/s, sustained DRAM 17.13 TB/s.  The quadratic is the fraction
         // of the DRAM peak reached vs active WGPs (fit on 256 WGPs, rescaled to the part's N_CU
-        // by compute_mem_bw_from_occupancy).  mem3 is the DRAM peak scaled by memory/engine
-        // clock, and mem_clock_ratio is engine/memory clock.
+        // by compute_mem_bw_from_occupancy).
         auto c                       = get_gfx950_arch_constants(std::nullopt);
         c.mem1_perf_ratio            = 41.93;
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem3_perf_ratio            = 17.13 * 1.9 / 2.4;
+        c.mem3_perf_ratio            = 17.13;
         c.mem_bw_per_wg_coefficients = std::make_tuple(-1.81e-5, 8.43e-3, -1.42e-3);
-        c.mem_clock_ratio            = 2.4 / 1.9;
         c.simds_per_cu               = 4;
         c.l1_capacity                = 0;  // tensor-DMA loads bypass L1
         return c;
       }
-      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 4, 32 * 1024};
+      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 4, 32 * 1024};
     }
   }
 
@@ -808,9 +801,9 @@ class ORIGAMI_EXPORT hardware_t {
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
   size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
 
-  double mem1_perf_ratio;  ///< L1/shared memory performance ratio (microbenchmarked)
-  double mem2_perf_ratio;  ///< L2 cache performance ratio (microbenchmarked)
-  double mem3_perf_ratio;  ///< MALL/HBM performance ratio (microbenchmarked)
+  double mem1_perf_ratio;  ///< L2 bandwidth in bytes per compute-clock cycle
+  double mem2_perf_ratio;  ///< MALL bandwidth in bytes per compute-clock cycle
+  double mem3_perf_ratio;  ///< DRAM/HBM bandwidth in bytes per compute-clock cycle
 
   size_t L2_capacity;   ///< Capacity of one L2 cache (one XCD's on CDNA, one AID's on gfx1250) in bytes
   size_t l1_capacity;   ///< Capacity of L1 data cache per CU in bytes (shared across all SIMDs in a CU)
@@ -873,7 +866,6 @@ class ORIGAMI_EXPORT hardware_t {
    *                 it can come from a runtime query or a known-architecture table
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_ghz Compute clock frequency in GHz
-   * @param memory_clock_ghz Memory clock frequency in GHz
    * @param pci_chip_id Optional PCI chip ID stored on this object (default none)
    */
   hardware_t(architecture_t arch,
@@ -884,7 +876,6 @@ class ORIGAMI_EXPORT hardware_t {
              size_t num_xcds,
              size_t L2_capacity,
              double compute_clock_ghz,
-             double memory_clock_ghz,
              std::optional<int> pci_chip_id = std::nullopt);
 
   /**

@@ -27,6 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstdio>
 #include <limits>
 #include "common.hpp"
 
@@ -1961,4 +1962,39 @@ TEST_CASE("gfx950 pci_chip_id id75a0 vs id75a8", "[hardware]") {
   REQUIRE_FALSE(hw_def.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.has_value());
   REQUIRE(hw_v2.pci_chip_id.value() == 0x75a8);
+}
+
+TEST_CASE("Memory bandwidths are bytes per compute-clock cycle", "[hardware]") {
+  using origami::hardware_t;
+  const auto arch = hardware_t::architecture_t::gfx1151;
+  const auto c    = hardware_t::get_arch_constants(arch);
+
+  // perf_ratio * compute clock is the bandwidth in B/ns (1 TB/s = 1e3 B/ns), whatever the clock.
+  for (int khz : {1'400'000, 2'100'000, 2'900'000}) {
+    const auto hw    = hardware_t::get_hardware_for_arch(arch, 40, 65536, 512 * 1024, 2 << 20, khz);
+    const double clk = khz / 1.e6;
+    REQUIRE(hw.compute_clock_ghz == Catch::Approx(clk));
+    REQUIRE(hw.mem1_perf_ratio * clk == Catch::Approx(c.mem1_perf_ratio * 1e3));
+    REQUIRE(hw.mem2_perf_ratio * clk == Catch::Approx(c.mem2_perf_ratio * 1e3));
+    REQUIRE(hw.mem3_perf_ratio * clk == Catch::Approx(c.mem3_perf_ratio * 1e3));
+  }
+
+  // The device path matches the arch path and does not depend on the reported memory clock.
+  hipDeviceProp_t prop{};
+  std::snprintf(prop.gcnArchName, sizeof(prop.gcnArchName), "gfx1151:xnack-");
+  prop.multiProcessorCount = 20;
+  prop.sharedMemPerBlock   = 65536;
+  prop.regsPerBlock        = 131072;
+  prop.l2CacheSize         = 2 << 20;
+  prop.clockRate           = 2'900'000;
+  prop.memoryClockRate     = 1'000'000;
+  const auto dev = hardware_t::get_hardware_for_properties(prop);
+  REQUIRE(dev.N_CU == 40);
+  REQUIRE(dev.mem2_perf_ratio * dev.compute_clock_ghz == Catch::Approx(c.mem2_perf_ratio * 1e3));
+  REQUIRE(dev.mem3_perf_ratio * dev.compute_clock_ghz == Catch::Approx(c.mem3_perf_ratio * 1e3));
+
+  prop.memoryClockRate = 0;
+  const auto no_mclk = hardware_t::get_hardware_for_properties(prop);
+  REQUIRE(no_mclk.mem2_perf_ratio == dev.mem2_perf_ratio);
+  REQUIRE(no_mclk.mem3_perf_ratio == dev.mem3_perf_ratio);
 }

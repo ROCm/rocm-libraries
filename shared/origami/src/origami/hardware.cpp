@@ -65,7 +65,6 @@ hardware_t::hardware_t(architecture_t arch,
                        size_t num_xcds,
                        size_t L2_capacity,
                        double compute_clock_ghz,
-                       double memory_clock_ghz,
                        std::optional<int> pci_chip_id)
    : hardware_t(
           arch,
@@ -74,8 +73,8 @@ hardware_t::hardware_t(architecture_t arch,
           rf_capacity,
           num_xcds,
           1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
-          1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
-          1e9 * constants.mem3_perf_ratio / (memory_clock_ghz * 1e6),
+          1e9 * constants.mem2_perf_ratio / (compute_clock_ghz * 1e6),
+          1e9 * constants.mem3_perf_ratio / (compute_clock_ghz * 1e6),
           L2_capacity,
           compute_clock_ghz,
           constants.parallel_mi_cu,
@@ -155,7 +154,6 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                     num_xcds,
                     properties.l2CacheSize,
                     properties.clockRate / 1.e6,
-                    properties.memoryClockRate / 1.e6,
                     pci_chip_id);
 }
 
@@ -211,7 +209,6 @@ hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
                     get_default_num_xcds(arch),
                     L2_capacity,
                     compute_clock_khz / 1.e6,
-                    compute_clock_khz / 1.e6 / constants.mem_clock_ratio,
                     pci_chip_id);
 }
 
