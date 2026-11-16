@@ -635,6 +635,42 @@ const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap)
     return NULL;
 }
 
+/* Python core/ir.py::_smem_store_lanes_error; the texts are the Python engine's. */
+const char* rocke_i_smem_store_lanes_error(const char* store,
+                                           const rocke_type_t* value_type,
+                                           int64_t width,
+                                           const char* width_param,
+                                           char* buf,
+                                           size_t cap)
+{
+    const int64_t lanes
+        = value_type && value_type->kind == ROCKE_TYPE_VECTOR ? value_type->count : 1;
+    if(lanes != width)
+    {
+        snprintf(buf,
+                 cap,
+                 "%s failed - lanes=%lld, expected %s=%lld",
+                 store,
+                 (long long)lanes,
+                 width_param,
+                 (long long)width);
+        return buf;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_smem_store_vN_op_error; the texts are the Python engine's. */
+const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    int64_t width = 0;
+    if(op->num_operands == 0 || !rocke_attr_get_int(&op->attrs, "vec", &width))
+    {
+        return NULL;
+    }
+    return rocke_i_smem_store_lanes_error(
+        "tile.smem_store_vN", op->operands[op->num_operands - 1]->type, width, "vec", buf, cap);
+}
+
 const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     if(op->num_operands != 0 || op->num_results != 0 || op->num_regions != 0)

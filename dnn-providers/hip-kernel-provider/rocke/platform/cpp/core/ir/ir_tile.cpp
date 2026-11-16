@@ -262,14 +262,23 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     {
         return;
     }
+    if(!value)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_store_vN value is NULL");
+        return;
+    }
+    {
+        char lanes_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_smem_store_lanes_error(
+               "smem_store_vN", value->type, n, "n", lanes_error, sizeof lanes_error))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lanes_error);
+            return;
+        }
+    }
     if(n == 1)
     {
         /* Single-element store; route through scalar tile.smem_store. */
-        if(!value)
-        {
-            rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_store_vN value is NULL");
-            return;
-        }
         ops = rocke_build_mem_operands(b, smem, indices, num_indices, value, true, &nops);
         if(!ops)
         {
@@ -279,11 +288,6 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
         rocke_attr_set_int(b, &attrs, "rank", (int64_t)num_indices);
         rocke_attr_set_str(b, &attrs, "elem_type", value->type->name);
         rocke_i_op0(b, ROCKE_OP_TILE_SMEM_STORE, ops, nops, &attrs);
-        return;
-    }
-    if(!value || !rocke_i_is_vector(value->type, NULL, -1))
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "smem_store_vN expects vector value for n > 1");
         return;
     }
     elem_name = value->type->elem->name;

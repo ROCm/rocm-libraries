@@ -11,12 +11,15 @@
  * (which compares the two engines byte for byte only where the pybind engine
  * is built): the kernels are built with the C builders and lowered by the C++
  * engine, and each case pins the segment offset and the claim the Python test
- * pins for the same kernel.
+ * pins for the same kernel. A vector store also claims a width: the builder
+ * and the verifier refuse a stored value without that many lanes.
  */
 
+#include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -247,32 +250,56 @@ int test_store_alignment_not_an_integer_is_refused()
 }
 
 /* A one-element f16 buffer, then an f32 buffer written at element 1 by one
- * smem_store_vN(..., n=1) of a <lanes x float> value, which goes through the
- * whole-value tile.smem_store. The scalar store records no align, so a vector
- * stored whole claims only its 4-byte element, whatever its width, and its
- * segment stays at byte 4. Mirrors
- * test_a_whole_value_store_claims_element_alignment. */
+ * whole-value tile.smem_store of a <lanes x float> value. smem_store_vN
+ * refuses a vector whose lanes are not its n, so the kernel is serialized IR,
+ * as hand-written IR may still carry it. Mirrors _f16_then_one_f32_vector_store
+ * in the Python test. */
+std::string f16_then_one_f32_vector_store(int lanes)
+{
+    const std::string lane_count = std::to_string(lanes);
+    const std::string vector = "vec<f32x" + lane_count + ">";
+    return "ckdsl.ir v1\n"
+           "kernel @lds_align_f16_one_f32x"
+           + lane_count
+           + " {\n"
+             "  params {\n"
+             "    %out : ptr<f32,global>\n"
+             "  }\n"
+             "  region @entry {\n"
+             "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n"
+             "    %h2 : smem<f16, [1]> = tile.smem_alloc (  )\n"
+             "    %f3 : smem<f32, [12]> = tile.smem_alloc (  )\n"
+             "    %c4 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n"
+             "    %t5 : f16 = arith.trunc_f32_to_f16 ( %c4 )\n"
+             "    tile.smem_store ( %h2, %c1, %t5 ) { elem_type = s:\"f16\", rank = i:1 }\n"
+             "    %v6 : "
+           + vector
+           + " = memref.global_load_vN ( %out, %c1 ) { align = i:4, elem_type = s:\"f32\", "
+             "vec = i:"
+           + lane_count
+           + " }\n"
+             "    %c7 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n"
+             "    tile.smem_store ( %f3, %c7, %v6 ) { elem_type = s:\""
+           + vector
+           + "\", rank = i:1 }\n"
+             "    tile.smem_store ( %h2, %c1, %t5 ) { elem_type = s:\"f16\", rank = i:1 }\n"
+             "    cf.return (  )\n"
+             "  }\n"
+             "}\n";
+}
+
+/* The scalar store records no align, so a vector stored whole claims only its
+ * 4-byte element, whatever its width, and its segment stays at byte 4.
+ * Mirrors test_a_whole_value_store_claims_element_alignment. */
 int test_a_whole_value_store_claims_element_alignment()
 {
     for(const int lanes : {3, 4})
     {
         rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "lds_align_f16_one_f32_vector") == ROCKE_OK);
-        rocke_value_t* out
-            = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
-        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
-        const int half_shape[] = {1};
-        const int float_shape[] = {12};
-        rocke_value_t* half_buf = rocke_b_smem_alloc(&b, rocke_f16(), half_shape, 1, "h");
-        rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
-        rocke_value_t* half_value = rocke_b_trunc_f32_to_f16(&b, rocke_b_const_f32(&b, 1.0));
-        rocke_value_t* const at_zero[] = {zero};
-        rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, half_value);
-        rocke_value_t* vector = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), lanes, 4);
-        rocke_value_t* const at_one[] = {rocke_b_const_i32(&b, 1)};
-        rocke_b_smem_store_vN(&b, float_buf, at_one, 1, vector, 1);
-        rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, half_value);
-        rocke_b_ret(&b);
+        CHECK(rocke_ir_builder_init(&b, "parsed") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = NULL;
+        CHECK(rocke_ir_parse(f16_then_one_f32_vector_store(lanes).c_str(), &b, &kernel)
+              == ROCKE_OK);
         const Lowering lowering = lower_and_free(&b);
         CHECK(lowering.status == ROCKE_OK);
         CHECK(segment_offsets(lowering.text) == std::vector<int>({4}));
@@ -486,6 +513,149 @@ int test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts()
     return 0;
 }
 
+/* The lowerings store the value as an n-element vector, so smem_store_vN
+ * refuses a value of any other lane count (a scalar has one) with
+ * ROCKE_ERR_VALUE and adds no op; for n = 1 that includes a wider vector, which
+ * is no longer stored whole. Mirrors
+ * test_a_store_whose_value_lanes_differ_from_n_is_refused. */
+int test_a_store_whose_value_lanes_differ_from_n_is_refused()
+{
+    const struct
+    {
+        int lanes;
+        int n;
+        const char* message;
+    } cases[] = {
+        {4, 2, "smem_store_vN failed - lanes=4, expected n=2"},
+        {4, 8, "smem_store_vN failed - lanes=4, expected n=8"},
+        {2, 4, "smem_store_vN failed - lanes=2, expected n=4"},
+        {4, 1, "smem_store_vN failed - lanes=4, expected n=1"},
+        {3, 1, "smem_store_vN failed - lanes=3, expected n=1"},
+        {1, 4, "smem_store_vN failed - lanes=1, expected n=4"},
+    };
+    for(const auto& test_case : cases)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "lds_store_lanes") == ROCKE_OK);
+        rocke_value_t* out
+            = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+        const int float_shape[] = {16};
+        rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
+        rocke_value_t* value
+            = test_case.lanes == 1
+                  ? rocke_b_global_load(&b, out, zero, rocke_f32(), 4)
+                  : rocke_b_global_load_vN(&b, out, zero, rocke_f32(), test_case.lanes, 4);
+        CHECK(rocke_ir_builder_ok(&b));
+        rocke_value_t* const at_zero[] = {zero};
+        const int ops_before = b.kernel->body->num_ops;
+        bool refused = false;
+        try
+        {
+            rocke_b_smem_store_vN(&b, float_buf, at_zero, 1, value, test_case.n);
+        }
+        catch(const ckc::Error& error)
+        {
+            refused = error.code() == ROCKE_ERR_VALUE
+                      && std::strcmp(error.what(), test_case.message) == 0;
+        }
+        const bool no_op_added = b.kernel->body->num_ops == ops_before;
+        rocke_ir_builder_free(&b);
+        CHECK(refused);
+        CHECK(no_op_added);
+    }
+    return 0;
+}
+
+/* n = 1 takes a one-lane vector as it takes a scalar: one element, stored as
+ * <1 x float>, which the verifier accepts. Mirrors
+ * test_a_one_lane_vector_is_a_one_element_store. */
+int test_a_one_lane_vector_is_a_one_element_store()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_store_f32x1") == ROCKE_OK);
+    rocke_value_t* out = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int float_shape[] = {16};
+    rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
+    rocke_value_t* one_lane
+        = rocke_b_vector_splat(&b, rocke_b_global_load(&b, out, zero, rocke_f32(), 4), 1);
+    rocke_value_t* const at_zero[] = {zero};
+    rocke_b_smem_store_vN(&b, float_buf, at_zero, 1, one_lane, 1);
+    rocke_b_ret(&b);
+    CHECK(rocke_ir_builder_ok(&b));
+    rocke_diag_t* diags = NULL;
+    size_t num_diags = 0;
+    CHECK(rocke_verify(b.kernel, &diags, &num_diags) == ROCKE_OK);
+    rocke_diags_free(diags, num_diags);
+    const Lowering lowering = lower_and_free(&b);
+    CHECK(num_diags == 0);
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(every_lds_access_claims(lowering.text, "store <1 x float> %", 4));
+    return 0;
+}
+
+/* Serialized IR reaches the verifier and the lowerings without passing the
+ * builder: the verifier reports, and the LLVM lowering refuses with
+ * ROCKE_ERR_VALUE, a tile.smem_store_vN whose value does not have `vec` lanes
+ * (a scalar has one). Mirrors
+ * test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused. */
+int test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused()
+{
+    const struct
+    {
+        const char* value_line;
+        int vec;
+        const char* message;
+    } cases[] = {
+        {"%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+         "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }",
+         2,
+         "tile.smem_store_vN failed - lanes=4, expected vec=2"},
+        {"%v3 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }",
+         4,
+         "tile.smem_store_vN failed - lanes=1, expected vec=4"},
+    };
+    for(const auto& test_case : cases)
+    {
+        const std::string text
+            = std::string("ckdsl.ir v1\n"
+                          "kernel @lds_store_lanes {\n"
+                          "  params {\n"
+                          "    %out : ptr<f32,global>\n"
+                          "  }\n"
+                          "  region @entry {\n"
+                          "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n"
+                          "    %buf2 : smem<f32, [16]> = tile.smem_alloc (  )\n"
+                          "    ")
+              + test_case.value_line
+              + "\n"
+                "    tile.smem_store_vN ( %buf2, %c1, %v3 ) { align = i:4, elem_type = "
+                "s:\"f32\", rank = i:1, vec = i:"
+              + std::to_string(test_case.vec)
+              + " }\n"
+                "    cf.return (  )\n"
+                "  }\n"
+                "}\n";
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "parsed") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = NULL;
+        CHECK(rocke_ir_parse(text.c_str(), &b, &kernel) == ROCKE_OK);
+        rocke_diag_t* diags = NULL;
+        size_t num_diags = 0;
+        CHECK(rocke_verify(kernel, &diags, &num_diags) == ROCKE_OK);
+        const bool reported
+            = num_diags == 1 && std::strcmp(diags[0].message, test_case.message) == 0;
+        rocke_diags_free(diags, num_diags);
+        const Lowering lowering = lower_and_free(&b);
+        CHECK(reported);
+        CHECK(lowering.status == ROCKE_ERR_VALUE);
+        CHECK(lowering.text.empty());
+        CHECK(lowering.error == test_case.message);
+    }
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -501,7 +671,10 @@ int main()
        || test_an_eight_byte_element_segment_is_aligned_to_its_width()
        || test_eight_wide_fp8_load_claims_eight_bytes()
        || test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts()
-       || test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts())
+       || test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts()
+       || test_a_store_whose_value_lanes_differ_from_n_is_refused()
+       || test_a_one_lane_vector_is_a_one_element_store()
+       || test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused())
     {
         std::fprintf(stderr, "LDS alignment contract failed\n");
         return 1;

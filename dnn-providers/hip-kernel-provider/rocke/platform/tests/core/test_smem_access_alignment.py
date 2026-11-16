@@ -13,6 +13,8 @@ access's byte offset from the pool base, and the pool must be at least
 ``N``-aligned. Each check runs per engine: on the Python engine everywhere,
 and on the C++ engine where its binding is built, whose IR must also be
 byte-identical to the Python engine's and whose refusals must be the same.
+A vector store also claims a width: the value it stores must have that many
+lanes, and the builder and the verifier refuse one that does not.
 """
 
 from __future__ import annotations
@@ -34,11 +36,13 @@ from rocke.core.ir import (
 )
 from rocke.core.ir_serialize import parse
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
+from rocke.core.verify import verify
 from rocke.tests.engines import (
     BACKEND_LANES,
     ENGINES,
     assert_backend_lane_rejects,
     assert_engine_rejects,
+    assert_refused_everywhere,
     lower_with_engine,
 )
 
@@ -543,28 +547,39 @@ def test_an_eight_byte_element_segment_is_aligned_to_its_width(engine):
     assert segs == ["8"]
 
 
-def _f16_then_one_f32_vector_store(lanes: int):
+def _f16_then_one_f32_vector_store(lanes: int) -> KernelDef:
     """A one-element f16 buffer, then an f32 buffer written at element 1 by
-    one ``smem_store_vN(..., n=1)`` of a ``<lanes x float>`` value. ``n=1``
-    routes the store through the whole-value ``tile.smem_store``."""
-    b = IRBuilder(f"lds_align_f16_one_f32x{lanes}")
-    out = b.param("out", PtrType(F32, "global"))
-    zero = b.const_i32(0)
-    half_buf = b.smem_alloc(F16, [1], name_hint="h")
-    float_buf = b.smem_alloc(F32, [12], name_hint="f")
-    h = b.trunc_f32_to_f16(b.const_f32(1.0))
-    b.smem_store_f16(half_buf, [zero], h)
-    vector = b.global_load_vN(out, zero, F32, lanes, align=4)
-    b.smem_store_vN(float_buf, [b.const_i32(1)], vector, 1)
-    b.smem_store_f16(half_buf, [zero], h)
-    b.ret()
-    return b.kernel
+    one whole-value ``tile.smem_store`` of a ``<lanes x float>`` value.
+    ``smem_store_vN`` refuses a vector whose lanes are not its ``n``, so the
+    kernel is serialized IR, as hand-written IR may still carry it."""
+    return parse(
+        f"""ckdsl.ir v1
+kernel @lds_align_f16_one_f32x{lanes} {{
+  params {{
+    %out : ptr<f32,global>
+  }}
+  region @entry {{
+    %c1 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:0 }}
+    %h2 : smem<f16, [1]> = tile.smem_alloc (  )
+    %f3 : smem<f32, [12]> = tile.smem_alloc (  )
+    %c4 : f32 = arith.constant (  ) {{ ity = s:"f32", value = f:1.0 }}
+    %t5 : f16 = arith.trunc_f32_to_f16 ( %c4 )
+    tile.smem_store ( %h2, %c1, %t5 ) {{ elem_type = s:"f16", rank = i:1 }}
+    %v6 : vec<f32x{lanes}> = memref.global_load_vN ( %out, %c1 ) {{ align = i:4, elem_type = s:"f32", vec = i:{lanes} }}
+    %c7 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:1 }}
+    tile.smem_store ( %f3, %c7, %v6 ) {{ elem_type = s:"vec<f32x{lanes}>", rank = i:1 }}
+    tile.smem_store ( %h2, %c1, %t5 ) {{ elem_type = s:"f16", rank = i:1 }}
+    cf.return (  )
+  }}
+}}
+"""
+    )
 
 
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("lanes", [3, 4])
 def test_a_whole_value_store_claims_element_alignment(engine, lanes):
-    """A vector stored whole (``n=1``, the scalar store, which records no
+    """A vector stored whole (``tile.smem_store``, which records no
     ``align``) claims only its 4-byte element, whatever its width: a
     ``<4 x float>`` at f32 element 1 sits at byte 4 of its segment, so a
     16-byte claim would be false there. The segment stays at byte 4. Both
@@ -579,3 +594,90 @@ def test_a_whole_value_store_claims_element_alignment(engine, lanes):
     segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
     assert segs == ["4"]
     assert _alignment_violations(ll) == []
+
+
+@pytest.mark.parametrize(
+    ("lanes", "n"), [(4, 2), (4, 8), (2, 4), (4, 1), (3, 1), (1, 4)]
+)
+def test_a_store_whose_value_lanes_differ_from_n_is_refused(lanes, n):
+    """The lowerings store the value as an ``n``-element vector, so a value of
+    any other lane count (a scalar has one) would be stored as a type it does
+    not have; for ``n=1`` that includes a wider vector, which is no longer
+    stored whole. The builder adds no op."""
+    b = IRBuilder(f"lds_store_f32x{lanes}_n{n}")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    buf = b.smem_alloc(F32, [16], name_hint="f")
+    if lanes == 1:
+        value = b.global_load(out, zero, F32)
+    else:
+        value = b.global_load_vN(out, zero, F32, lanes, align=4)
+    ops_before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError) as refusal:
+        b.smem_store_vN(buf, [zero], value, n)
+    assert str(refusal.value) == f"smem_store_vN failed - lanes={lanes}, expected n={n}"
+    assert len(b.kernel.body.ops) == ops_before
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_one_lane_vector_is_a_one_element_store(engine):
+    """``n=1`` takes a one-lane vector as it takes a scalar: one element,
+    stored as ``<1 x float>``, which the verifier accepts."""
+    b = IRBuilder("lds_store_f32x1")
+    out = b.param("out", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    buf = b.smem_alloc(F32, [16], name_hint="f")
+    one_lane = b.vector_splat(b.global_load(out, zero, F32), 1)
+    b.smem_store_vN(buf, [zero], one_lane, 1)
+    b.ret()
+    assert verify(b.kernel) == []
+    ll = lower_with_engine(
+        b.kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
+    assert re.search(
+        r"store <1 x float> \S+, ptr addrspace\(3\) \S+, align 4$", ll, re.MULTILINE
+    )
+
+
+@pytest.mark.parametrize(
+    ("value_line", "lanes", "vec"),
+    [
+        (
+            "%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+            '{ align = i:4, elem_type = s:"f32", vec = i:4 }',
+            4,
+            2,
+        ),
+        ('%v3 : f32 = arith.constant (  ) { ity = s:"f32", value = f:1.0 }', 1, 4),
+    ],
+    ids=["vector", "scalar"],
+)
+def test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused(
+    value_line, lanes, vec
+):
+    """Serialized IR reaches the verifier and the lowerings without passing
+    the builder: each reports a ``tile.smem_store_vN`` whose value does not
+    have ``vec`` lanes (a scalar has one), in both engines."""
+    kernel = parse(
+        f"""ckdsl.ir v1
+kernel @lds_store_lanes {{
+  params {{
+    %out : ptr<f32,global>
+  }}
+  region @entry {{
+    %c1 : i32 = arith.constant (  ) {{ ity = s:"i32", value = i:0 }}
+    %buf2 : smem<f32, [16]> = tile.smem_alloc (  )
+    {value_line}
+    tile.smem_store_vN ( %buf2, %c1, %v3 ) {{ align = i:4, elem_type = s:"f32", rank = i:1, vec = i:{vec} }}
+    cf.return (  )
+  }}
+}}
+"""
+    )
+    assert_refused_everywhere(
+        kernel,
+        _ARCH,
+        error_type=ValueError,
+        message=f"tile.smem_store_vN failed - lanes={lanes}, expected vec={vec}",
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )
