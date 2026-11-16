@@ -95,9 +95,13 @@ def _spec(
     *,
     batch=1,
     sq=512,
+    sk=None,
     use_sinks=False,
     sliding_window=0,
     causal=True,
+    causal_bottom_right=False,
+    num_cus=None,
+    use_fp8=False,
 ):
     """The SHIPPED gfx950 dense spec for a cohort row, built through the dispatch
     factory rather than hand-rolled.
@@ -119,20 +123,28 @@ def _spec(
         spec_id = "gfx950_dense_persist_widedma"
     else:
         spec_id = "gfx950_dense_persist"
+    if causal_bottom_right:
+        mask_type = 2
+    elif causal:
+        mask_type = 1
+    else:
+        mask_type = 0
     return attention_tuning_spec(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
             nhead_k=hkv,
             seqlen_q=sq,
-            seqlen_k=sq,
+            seqlen_k=sq if sk is None else sk,
             hdim_q=d,
             hdim_v=d,
             arch="gfx950",
-            mask_type=1 if causal else 0,
+            mask_type=mask_type,
             dtype=dtype,
             use_sinks=use_sinks,
             sliding_window=sliding_window,
+            use_fp8=use_fp8,
+            **({} if num_cus is None else {"num_cus": num_cus}),
         ),
         spec_id,
     ).kernel_spec
@@ -161,8 +173,8 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _standard_reference(q, k, v, scale, sliding_window=0):
-    """Standard causal attention reference using PyTorch SDPA.
+def _standard_reference(q, k, v, scale, sliding_window=0, causal=True):
+    """Standard (optionally causal) attention reference using PyTorch SDPA.
 
     Args:
         q: [B, S, Hq, D] query tensor
@@ -190,13 +202,19 @@ def _standard_reference(q, k, v, scale, sliding_window=0):
         sq, sk = q.shape[1], k.shape[1]
         qi = torch.arange(sq, device=q.device).view(-1, 1)
         ki = torch.arange(sk, device=q.device).view(1, -1)
-        allowed = (ki <= qi) & (ki > qi - sliding_window)
+        # The window's LEFT bound always applies. The causal (right) bound applies
+        # only when causal: gfx950 dense runs a left-only window too, and folding
+        # the causal bound in unconditionally would score a non-causal window
+        # against a causal reference and hide a real mask bug.
+        allowed = ki > qi - sliding_window
+        if causal:
+            allowed = allowed & (ki <= qi)
         ref = F.scaled_dot_product_attention(
             qf, kf, vf, attn_mask=allowed, scale=scale
         ).transpose(1, 2)
     else:
         ref = F.scaled_dot_product_attention(
-            qf, kf, vf, is_causal=True, scale=scale
+            qf, kf, vf, is_causal=causal, scale=scale
         ).transpose(
             1, 2
         )  # -> [B, S, Hq, D]
@@ -352,6 +370,87 @@ class TestDenseNumeric:
         assert max_abs < tol, (
             f"bf16 D{d} SWA{window} scale={scale:g} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    @pytest.mark.parametrize("d,hq,hkv", [(64, 16, 4), (128, 16, 4)])
+    # (causal, sliding_window): flash-causal, SWA-128, non-causal (full), and the
+    # left-only window. Each is a distinct mask path the PR adds; the IR golden
+    # pins their bytes, this pins their correctness. The kernel does serve a
+    # non-causal window (_supports_noncausal_window is True and the validator
+    # accepts it), and that band runs its own left-only pipeline, so it needs its
+    # own numeric case rather than being assumed unreachable.
+    @pytest.mark.parametrize(
+        "causal,sliding_window", [(True, 0), (True, 128), (False, 0), (False, 128)]
+    )
+    def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(
+        self, d, hq, hkv, dtype, causal, sliding_window
+    ):
+        """fp8 KV-dequant dense: the kernel reads float8_e4m3fn K/V and dequants
+        with per-tensor k_scale/v_scale into the bf16 or fp16 compute/output
+        path; the reference attends over the SAME dequantized K/V,
+        so this isolates kernel error from quantization loss (the convention the
+        live bench uses). Covered over the causal, sliding-window and non-causal
+        masks the grid variant serves for fp8."""
+        import torch
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        B, S = 1, 512
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt) * 0.3
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
+
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            amax = t.abs().max().clamp(min=1e-8)
+            s = (amax / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        k_deq = (k_fp8.float() * k_scale).to(tdt)
+        v_deq = (v_fp8.float() * v_scale).to(tdt)
+
+        spec = _spec(
+            dtype,
+            d,
+            hq,
+            hkv,
+            persistent=False,
+            batch=B,
+            sq=S,
+            use_fp8=True,
+            causal=causal,
+            sliding_window=sliding_window,
+        )
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        ref = _standard_reference(
+            q, k_deq, v_deq, scale, sliding_window=sliding_window, causal=causal
+        )
+        max_abs = (ref - out.float()).abs().max().item()
+        # Reference attends over the dequantized K/V, so the residual is kernel
+        # compute error at the compute precision; keep a small fp8 margin over tol.
+        assert max_abs < 6e-2, (
+            f"fp8 {dtype} D{d} GQA{hq}/{hkv} causal={causal} "
+            f"swa={sliding_window}: max_abs={max_abs:.3e}"
         )
 
     @requires_gfx950_gpu
@@ -1076,6 +1175,163 @@ class TestDenseBottomRightNumeric:
             f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
         )
 
+    # fp8 KV is aligned-only and has no sink path, so only aligned, sink-free
+    # moving diagonals apply. D128 and D64 cover both K layouts of the fp8 loader.
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,sq,skv",
+        [
+            pytest.param(128, 256, 512, id="d128-256x512"),
+            pytest.param(128, 512, 1024, id="d128-512x1024"),
+            pytest.param(64, 512, 1024, id="d64-512x1024"),
+        ],
+    )
+    def test_fp8_kv_matches_shifted_diagonal_not_top_left(self, d, sq, skv):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        spec = Gfx950AttentionDenseSpec(
+            batch=1,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=d,
+            causal=True,
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            persistent=False,
+            causal_bottom_right=True,
+            kv_storage_dtype="fp8e4m3",
+        )
+        assert skv > sq, "every case must exercise a moving diagonal"
+
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        # The oracle attends over the same dequantized K/V the kernel reads, so
+        # the check isolates kernel error from quantization loss.
+        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
+        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(d)
+
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
+        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
+        shifted_err = (out.float() - shifted).abs().max().item()
+        top_left_err = (out.float() - top_left).abs().max().item()
+        label = f"fp8 D{d} {sq}x{skv}"
+        assert (
+            shifted_err < _BOTTOM_RIGHT_TOL
+        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+        assert (
+            top_left_err > 1e-3
+        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
+
+    # The test above pins the fp8 bottom-right MATH on a hand-built default-tile
+    # spec, which takes one KV segment. Dispatch does not select that spec: for a
+    # moving diagonal it splits KV across segments and runs the combine kernel, a
+    # different code path. This case runs what dispatch actually ships.
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,sq,skv",
+        [
+            pytest.param(128, 512, 1024, id="d128-512x1024"),
+            pytest.param(64, 512, 1024, id="d64-512x1024"),
+        ],
+    )
+    def test_fp8_bottom_right_dispatched_split_matches_reference(self, d, sq, skv):
+        import torch
+
+        spec = _spec(
+            "bf16",
+            d,
+            4,
+            1,
+            persistent=False,
+            batch=1,
+            sq=sq,
+            sk=skv,
+            use_fp8=True,
+            causal=True,
+            causal_bottom_right=True,
+            num_cus=256,
+        )
+        # Assert the split, so this never silently degrades into a second copy of
+        # the single-segment case if dispatch stops splitting.
+        assert spec.kv_segments > 1, (
+            "dispatch no longer splits KV for fp8 bottom-right "
+            f"(kv_segments={spec.kv_segments}); this case must cover the "
+            "segment+combine path"
+        )
+
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
+        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(d)
+
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
+        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
+        shifted_err = (out.float() - shifted).abs().max().item()
+        top_left_err = (out.float() - top_left).abs().max().item()
+        label = f"fp8 split D{d} {sq}x{skv} segs={spec.kv_segments}"
+        assert (
+            shifted_err < _BOTTOM_RIGHT_TOL
+        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+        assert (
+            top_left_err > 1e-3
+        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
+
 
 # KV-segment split on the default grid: (geometry, mask, diag_split, segments, sq,
 # skv, head_size). mask "br" is bottom-right causal, "tl" top-left causal (early
@@ -1775,6 +2031,104 @@ class TestDenseLseNumeric:
         )
         torch.cuda.synchronize()
         assert torch.equal(out.view(torch.int16), off_out.view(torch.int16))
+
+    @pytest.mark.parametrize(
+        "shape",
+        [("fp16", 128, 2), ("bf16", 64, 1)],
+        ids=["fp16-d128-kv2", "bf16-d64-kv1"],
+    )
+    @pytest.mark.parametrize(
+        "window,q_lens,kv_lens,emit_lse,keyless",
+        [
+            (0, (256, 256), (192, 64), False, False),
+            (0, (256, 256), (192, 64), True, False),
+            (256, (512, 256), (512, 64), False, False),
+            (256, (512, 256), (512, 64), True, False),
+            (64, (256, 512), (256, 64), True, True),
+        ],
+        ids=["plain", "plain-lse", "window", "window-lse", "window-keyless-lse"],
+    )
+    def test_packed_dense_short_last_sequence(
+        self, shape, window, q_lens, kv_lens, emit_lse, keyless
+    ):
+        """Packed varlen whose last sequence has far fewer keys than ``seqlen_kv``.
+
+        The kernel bounds each workgroup's K/V buffers by the end of its own
+        sequence, so the loads past it (the last sequence's one-tile-ahead prefetch,
+        and a sliding-window start tile past the sequence's keys) are dropped by the
+        hardware instead of reading past the allocation. Every row that has keys must
+        still match the fp32 reference: a bound too tight by a row or a tile zeroes
+        consumed K/V and fails, while the over-read itself is not observable in the
+        output (a too-loose bound passes unless the read faults). In
+        ``window-keyless-lse`` the last sequence has a q-block whose window starts
+        past its keys; its rows are 0 with LSE -inf. Without LSE the launcher rejects
+        keyless rows, so only the LSE case has them.
+        """
+        dtype, head_size, kv_heads = shape
+        q_offsets = [0, q_lens[0], q_lens[0] + q_lens[1]]
+        k_offsets = [0, kv_lens[0], kv_lens[0] + kv_lens[1]]
+        spec = Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=512,
+            seqlen_kv=512,
+            num_query_heads=4,
+            num_kv_heads=kv_heads,
+            head_size=head_size,
+            dtype=dtype,
+            varlen=True,
+            emit_lse=emit_lse,
+            sliding_window=window,
+        )
+        torch.manual_seed(31)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.randn(q_offsets[-1], 4, head_size, device="cuda", dtype=tdt)
+        k = torch.randn(k_offsets[-1], kv_heads, head_size, device=q.device, dtype=tdt)
+        v = torch.randn_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse_out = torch.full(
+            (q_offsets[-1], 4, 1), float("nan"), device=q.device, dtype=torch.float32
+        )
+        scale = 0.5
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            lse=lse_out if emit_lse else None,
+            scale=scale,
+            cu_seqlens_q=torch.tensor(q_offsets, device=q.device, dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor(k_offsets, device=q.device, dtype=torch.int32),
+        )
+        torch.cuda.synchronize()
+        expected_out = torch.empty_like(out, dtype=torch.float32)
+        expected_lse = torch.empty_like(lse_out)
+        for seq in range(2):
+            q0, q1 = q_offsets[seq : seq + 2]
+            k0, k1 = k_offsets[seq : seq + 2]
+            ref, lse_ref = _lse_reference(
+                q[q0:q1].unsqueeze(0),
+                k[k0:k1].unsqueeze(0),
+                v[k0:k1].unsqueeze(0),
+                scale,
+                causal=True,
+                window=window,
+            )
+            expected_out[q0:q1] = ref[0]
+            expected_lse[q0:q1] = lse_ref[0].transpose(0, 1)
+        has_key = torch.isfinite(expected_lse)
+        # The case must have the rows it claims: the launcher rejects keyless rows
+        # without LSE, and the keyless case is only worth running with some.
+        assert bool((~has_key).any()) == keyless
+        tol = _tolerance(dtype)
+        # NaN anywhere in ``out`` (a row never stored) fails the comparison.
+        assert (out.float() - expected_out).abs().max().item() < tol
+        if emit_lse:
+            assert torch.equal(torch.isfinite(lse_out), has_key)
+            assert (lse_out[has_key] - expected_lse[has_key]).abs().max().item() < tol
+            assert bool((lse_out[~has_key] == float("-inf")).all())
+            keyless_out = out[~has_key.squeeze(-1)]
+            assert torch.equal(keyless_out, torch.zeros_like(keyless_out))
 
     @pytest.mark.parametrize(
         "failure",
@@ -2512,6 +2866,54 @@ class TestDenseBandIndexTruthTable:
                 expected[p, :, visible] = 1.0 / len(visible)
         err = (out.float().cpu() - expected[None]).abs().max().item()
         assert err < 1e-2, f"max_abs={err:.3e}"
+
+
+class TestDenseRowIndependence:
+    """A row's output depends only on the keys that row sees.
+
+    Causal (top-left), Sq = Skv = S: key S-1 is visible to row S-1 only, which shares
+    a 32-row wave with rows S-32..S-2. K at that key is 1e4 * sign(Q of row S-1), so
+    row S-1's running max jumps far past the lazy-rescale threshold, and V there is
+    +-1e4. Every other row masks the key, so its output must not change by a single
+    bit. A wave-wide lazy-rescale decision breaks this: the jump makes every row of
+    the wave move its max and round differently.
+    """
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("window", [0, 128], ids=["causal", "causal_w128"])
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    def test_rows_independent_of_wave_neighbours(self, dtype, d, persistent, window):
+        import torch
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        B, S, H = 1, 512, 16
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k_hot, v_hot = k.clone(), v.clone()
+        k_hot[:, S - 1] = 1e4 * torch.sign(q[:, S - 1])
+        v_hot[:, S - 1] = 1e4 * torch.sign(torch.randn_like(v[:, S - 1]))
+
+        spec = _spec(dtype, d, H, H, persistent, sq=S, sliding_window=window)
+        outs = []
+        for kk, vv in ((k, v), (k_hot, v_hot)):
+            out = torch.empty_like(q)
+            run_attention_dense_torch(spec=spec, q=q, k=kk, v=vv, out=out, scale=scale)
+            torch.cuda.synchronize()
+            outs.append(out)
+        base, hot = outs
+        assert torch.isfinite(hot).all(), "non-finite output"
+        assert not torch.equal(base[:, S - 1], hot[:, S - 1]), "key S-1 had no effect"
+        changed = (base[:, : S - 1] != hot[:, : S - 1]).any(dim=-1).nonzero()
+        assert changed.numel() == 0, (
+            f"{len(changed)} (row, head) pairs that mask key {S - 1} changed, rows "
+            f"{sorted(set(changed[:, 1].tolist()))}"
+        )
 
 
 if __name__ == "__main__":

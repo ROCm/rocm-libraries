@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -29,9 +30,13 @@
 
 #include "TestDescriptorRoot.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradTestCatalog.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvDgradMatcherTestSupport.hpp"
+#ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
+#include "tests/engines/kernel_ingestor_engine/packs/ConvDgradShippedCatalog.hpp"
+#endif
+#include "tests/engines/kernel_ingestor_engine/packs/ConvDgradTestCatalog.hpp"
 
 /**
  * @file TestGfx950ConvDgradMatchers.cpp
@@ -49,10 +54,10 @@ namespace
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using namespace hipdnn_plugin_sdk::ingestor;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-namespace dgrad = hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad;
+namespace dgrad = hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot;
 namespace vectors = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_vectors;
 namespace catalog = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_catalog;
-using hip_kernel_provider::kernel_ingestor_engine::registerNativeIngestorSymbols;
+using namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test;
 
 constexpr PackSymbols GFX950_CONV_DGRAD_AOT{"hipkernel:Gfx950ConvDgradAot",
                                             "hipkernel.gfx950_conv_dgrad_aot.graph_match",
@@ -65,204 +70,19 @@ constexpr PackSymbols GFX950_CONV_DGRAD_AOT{"hipkernel:Gfx950ConvDgradAot",
                                             "gfx950_conv_dgrad.dx.uid"};
 constexpr std::string_view PROBLEM_TOKEN = "_gfx950_conv_dgrad.problem";
 
-struct TensorSpec
-{
-    std::vector<int64_t> dims;
-    std::vector<int64_t> strides;
-    data_objects::DataType dtype = data_objects::DataType::HALF;
-    bool isVirtual = false;
-    bool omitDims = false;
-    int64_t alignment = 16;
-};
-
-/// dims [N, C, H, W] with packed NHWC strides.
-TensorSpec nhwc(int64_t n, int64_t c, int64_t h, int64_t w)
-{
-    return TensorSpec{{n, c, h, w}, {h * w * c, 1, w * c, c}};
-}
-
-/// A complete backward-data problem: groups divides c and k; the filter holds c / groups
-/// channels; Hi and Wi are dX's.
-struct DgradShape
-{
-    int64_t n = 2;
-    int64_t c = 32;
-    int64_t k = 32;
-    int64_t groups = 1;
-    int64_t h = 14;
-    int64_t w = 14;
-    int64_t y = 3;
-    int64_t x = 3;
-    int64_t sH = 1;
-    int64_t sW = 1;
-    int64_t pH = 1;
-    int64_t pW = 1;
-    int64_t dH = 1;
-    int64_t dW = 1;
-};
-
-DgradShape shapeOf(const vectors::ProblemValues& v)
-{
-    return DgradShape{
-        v[0], v[1], v[2], v[13], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12]};
-}
-
-struct GraphSpec
-{
-    /// dY (uid 1), W (uid 2), dX (uid 3).
-    std::array<TensorSpec, 3> tensors;
-    std::vector<int64_t> stride{1, 1};
-    std::vector<int64_t> dilation{1, 1};
-    std::vector<int64_t> prePadding{1, 1};
-    std::vector<int64_t> postPadding{1, 1};
-    data_objects::DataType computeType = data_objects::DataType::FLOAT;
-    data_objects::ConvMode mode = data_objects::ConvMode::CROSS_CORRELATION;
-    bool forwardNode = false;
-    unsigned int nodeCount = 1;
-    int64_t dyUid = 1;
-    int64_t wUid = 2;
-    int64_t dxUid = 3;
-};
-
-/// dY's extent by Python's floor rule, for shapes the tests know are valid.
-int64_t outputExtent(int64_t in, int64_t filter, int64_t stride, int64_t pad, int64_t dilation)
-{
-    return (in + 2 * pad - dilation * (filter - 1) - 1) / stride + 1;
-}
-
-GraphSpec graphSpec(const DgradShape& s,
-                    data_objects::DataType dtype = data_objects::DataType::HALF)
-{
-    GraphSpec spec;
-    const auto ho = outputExtent(s.h, s.y, s.sH, s.pH, s.dH);
-    const auto wo = outputExtent(s.w, s.x, s.sW, s.pW, s.dW);
-    spec.tensors[0] = nhwc(s.n, s.k, ho, wo);
-    spec.tensors[1] = nhwc(s.k, s.c / s.groups, s.y, s.x);
-    spec.tensors[2] = nhwc(s.n, s.c, s.h, s.w);
-    for(auto& tensor : spec.tensors)
-    {
-        tensor.dtype = dtype;
-    }
-    spec.stride = {s.sH, s.sW};
-    spec.dilation = {s.dH, s.dW};
-    spec.prePadding = spec.postPadding = {s.pH, s.pW};
-    return spec;
-}
-
-DeviceProperties gfx950Properties(std::string arch = "gfx950")
-{
-    // By value: matcher tests run on CPU-only and non-gfx950 hosts.
-    DeviceProperties properties;
-    properties.gcnArchName = std::move(arch);
-    properties.warpSize = 64;
-    return properties;
-}
-
-flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
-{
-    flatbuffers::FlatBufferBuilder builder;
-    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
-    for(size_t i = 0; i < spec.tensors.size(); ++i)
-    {
-        const auto& tensor = spec.tensors[i];
-        const auto dims = tensor.omitDims ? flatbuffers::Offset<flatbuffers::Vector<int64_t>>()
-                                          : builder.CreateVector(tensor.dims);
-        const auto strides = tensor.omitDims ? flatbuffers::Offset<flatbuffers::Vector<int64_t>>()
-                                             : builder.CreateVector(tensor.strides);
-        data_objects::TensorAttributesBuilder tensorBuilder(builder);
-        tensorBuilder.add_uid(static_cast<int64_t>(i + 1));
-        tensorBuilder.add_data_type(tensor.dtype);
-        tensorBuilder.add_dims(dims);
-        tensorBuilder.add_strides(strides);
-        tensorBuilder.add_virtual_(tensor.isVirtual);
-        tensorBuilder.add_alignment(tensor.alignment);
-        tensors.push_back(tensorBuilder.Finish());
-    }
-    flatbuffers::Offset<void> attributes;
-    auto attributesType = data_objects::NodeAttributes::ConvolutionBwdAttributes;
-    if(spec.forwardNode)
-    {
-        attributesType = data_objects::NodeAttributes::ConvolutionFwdAttributes;
-        attributes = data_objects::CreateConvolutionFwdAttributesDirect(builder,
-                                                                        spec.dxUid,
-                                                                        spec.wUid,
-                                                                        spec.dyUid,
-                                                                        &spec.prePadding,
-                                                                        &spec.postPadding,
-                                                                        &spec.stride,
-                                                                        &spec.dilation,
-                                                                        spec.mode)
-                         .Union();
-    }
-    else
-    {
-        attributes = data_objects::CreateConvolutionBwdAttributesDirect(builder,
-                                                                        spec.dyUid,
-                                                                        spec.wUid,
-                                                                        spec.dxUid,
-                                                                        &spec.prePadding,
-                                                                        &spec.postPadding,
-                                                                        &spec.stride,
-                                                                        &spec.dilation,
-                                                                        spec.mode)
-                         .Union();
-    }
-    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    nodes.reserve(spec.nodeCount);
-    for(unsigned int i = 0; i < spec.nodeCount; ++i)
-    {
-        nodes.push_back(data_objects::CreateNodeDirect(
-            builder, "gfx950_conv_dgrad_test", spec.computeType, attributesType, attributes));
-    }
-    const auto tensorVector = builder.CreateVector(tensors);
-    const auto nodeVector = builder.CreateVector(nodes);
-    data_objects::GraphBuilder graphBuilder(builder);
-    graphBuilder.add_tensors(tensorVector);
-    graphBuilder.add_nodes(nodeVector);
-    builder.Finish(graphBuilder.Finish());
-    return builder;
-}
-
 GraphFixture fixtureOf(const DgradShape& shape,
                        data_objects::DataType dtype = data_objects::DataType::HALF)
 {
-    return GraphFixture(buildGraph(graphSpec(shape, dtype)), gfx950Properties());
+    return GraphFixture(buildGraph(graphSpec(shape, dtype), "gfx950_conv_dgrad_test"),
+                        gfx950Properties());
 }
 
-DescriptorId idOf(uint32_t value, uint8_t tag)
-{
-    DescriptorId id{};
-    id[0] = tag;
-    id[12] = static_cast<uint8_t>(value >> 24U);
-    id[13] = static_cast<uint8_t>(value >> 16U);
-    id[14] = static_cast<uint8_t>(value >> 8U);
-    id[15] = static_cast<uint8_t>(value);
-    return id;
-}
-
-/// A kpack kernel carrying @p entry's complete metadata, as the descriptor loader delivers
-/// it (every field present, omitted ones completed from the KMD defaults), in pack @p pack.
+/// A kpack kernel of @p entry in pack @p pack (dgrad_matcher_test::kernelOf), named as the
+/// gfx950 bundle names it.
 KernelDefinition kernelOf(const catalog::Entry& entry, uint8_t pack = 1)
 {
-    KernelDefinition kernel;
-    const auto& id = entry.text("instance_id");
-    kernel.kernelId = idOf(static_cast<uint32_t>(std::hash<std::string>{}(id + entry.dtype)), pack);
-    kernel.packId = idOf(0, pack);
-    kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.name
-        = "gfx950_conv_dgrad_aot_" + entry.dtype + "_" + entry.text("direct_variant") + "_" + id;
-    for(const auto& [name, value] : entry.fields)
-    {
-        if(const auto* integer = std::get_if<int64_t>(&value))
-        {
-            kernel.metadata[name] = *integer;
-        }
-        else
-        {
-            kernel.metadata[name] = std::get<std::string>(value);
-        }
-    }
-    return kernel;
+    return hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test::kernelOf(
+        entry, pack, "gfx950_conv_dgrad_aot_");
 }
 
 /// Runs the pack's KernelPrepareFn over @p kernels as the engine's shared state does at
@@ -270,27 +90,14 @@ KernelDefinition kernelOf(const catalog::Entry& entry, uint8_t pack = 1)
 /// pipelines of its own pack.
 void prepare(std::vector<KernelDefinition>& kernels)
 {
-    registerNativeIngestorSymbols();
-    const auto prepareFn
-        = KernelPrepareRegistry::tryResolve(std::string(GFX950_CONV_DGRAD_AOT.kernelMatcher));
-    ASSERT_NE(prepareFn, nullptr);
-    for(auto& kernel : kernels)
-    {
-        kernel.prepared = prepareFn(kernel);
-        kernel.preparedBy = prepareFn;
-    }
+    prepareKernels(kernels, GFX950_CONV_DGRAD_AOT.kernelMatcher);
 }
 
 /// The @p dtype catalog as one pack, prepared, in catalog order.
 std::vector<KernelDefinition> catalogPack(const std::string& dtype, uint8_t pack)
 {
-    std::vector<KernelDefinition> kernels;
-    for(const auto& entry : catalog::catalog(dtype))
-    {
-        kernels.push_back(kernelOf(entry, pack));
-    }
-    prepare(kernels);
-    return kernels;
+    return hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test::catalogPack(
+        dtype, pack, dgrad::GFX950, GFX950_CONV_DGRAD_AOT.kernelMatcher);
 }
 
 const catalog::Entry& variantEntry(
@@ -375,6 +182,23 @@ TEST(TestGfx950ConvDgradGraphMatcher, AcceptsBothStorageTypesAndBindsTheBackward
                                         1,
                                         static_cast<int64_t>(dtype)}));
         EXPECT_EQ(bound->size(), 4U);
+    }
+}
+
+// The matcher reads the 1.3.0 alignment field (the UED's sdk_version claims it): a declared
+// alignment that is a multiple of 16 bytes is served, as the 8-byte one is refused below.
+TEST(TestGfx950ConvDgradGraphMatcher, AcceptsAlignmentsThatAreMultiplesOf16Bytes)
+{
+    for(const int64_t alignment : {32, 64})
+    {
+        auto spec = graphSpec(DgradShape{});
+        for(auto& tensor : spec.tensors)
+        {
+            tensor.alignment = alignment;
+        }
+        const GraphFixture fixture(buildGraph(spec), gfx950Properties());
+        EXPECT_TRUE(matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context()))
+            << "alignment " << alignment;
     }
 }
 
@@ -717,11 +541,7 @@ TEST(TestGfx950ConvDgradKernelMatcher, ServesExactlyWhatTheAdapterServesOverTheC
             const bool expected = row.served[i] == '1';
             const bool actual
                 = matchesKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), own[i], *bound);
-            EXPECT_EQ(actual, expected)
-                << own[i].name << " on N" << shape.n << " C" << shape.c << " K" << shape.k << " G"
-                << shape.groups << " " << shape.h << "x" << shape.w << " f" << shape.y << "x"
-                << shape.x << " s" << shape.sH << "x" << shape.sW << " p" << shape.pH << "x"
-                << shape.pW << " d" << shape.dH << "x" << shape.dW;
+            EXPECT_EQ(actual, expected) << own[i].name << " on " << shape;
             // A served kernel scores, a refused one ranks last.
             const auto score
                 = scoreKernel(GFX950_CONV_DGRAD_AOT, fixture.context(), own[i], *bound);
@@ -959,55 +779,20 @@ TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsThePlanAndPrepareReachesCodeLo
 }
 
 #ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
-/// The gfx950 shard of the production tree this build packed, when it holds the dgrad
-/// bundle; an empty path otherwise. The whole shard is loaded, not the bundle's folder: a
-/// kernel's archive sits at the shard root and must lie inside the tree it was read from.
-std::filesystem::path packedDgradShard()
-{
-    const auto shard = hip_kernel_provider::testing::descriptorSetRoot(
-                           HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR)
-                       / "gfx950";
-    std::error_code missing;
-    return std::filesystem::is_directory(shard / "rocKE" / "gfx950_conv_dgrad_aot", missing)
-               ? shard
-               : std::filesystem::path();
-}
+namespace shipped = hip_kernel_provider::kernel_ingestor_engine::dgrad_shipped_catalog;
 
 /// The shipped bundle's state manager, built once, or null when it is not staged.
-const KernelIngestorStateManager<Handle>* shippedManager(std::vector<std::string>* knobs = nullptr)
+const shipped::StateManager* shippedManager(std::vector<std::string>* knobs = nullptr)
 {
-    static const auto s_loaded = []() {
-        std::pair<std::unique_ptr<KernelIngestorStateManager<Handle>>, std::vector<std::string>>
-            loaded;
-        const auto shard = packedDgradShard();
-        if(shard.empty())
-        {
-            return loaded;
-        }
-        registerNativeIngestorSymbols();
-        auto sets = resolveDescriptorSets(loadDescriptorCatalog(shard));
-        const auto set = std::find_if(sets.begin(), sets.end(), [](const auto& candidate) {
-            return candidate.engine.name == GFX950_CONV_DGRAD_AOT.engineName;
-        });
-        if(set == sets.end())
-        {
-            throw std::runtime_error("the staged bundle holds no hipkernel:Gfx950ConvDgradAot");
-        }
-        loaded.second = set->engine.knobs;
-        const auto graphMatch = set->engine.graphMatchNativeSymbol;
-        loaded.first = makeStateManager<Handle>(std::move(*set), graphMatch);
-        return loaded;
-    }();
+    const auto& loaded = shipped::shippedCatalog("gfx950", GFX950_CONV_DGRAD_AOT.engineName);
     if(knobs != nullptr)
     {
-        *knobs = s_loaded.second;
+        *knobs = loaded.knobs;
     }
-    return s_loaded.first.get();
+    return loaded.manager.get();
 }
 
-constexpr const char* NOT_STAGED
-    = "this configuration packed no gfx950 production tree, so the shipped "
-      "hipkernel:Gfx950ConvDgradAot bundle is not staged beside this binary";
+const std::string NOT_STAGED = shipped::notStaged("gfx950", GFX950_CONV_DGRAD_AOT.engineName);
 
 TEST(TestGfx950ConvDgradCatalog, EveryGraphsCandidatesHaveDistinctKnobTuples)
 {
@@ -1039,9 +824,7 @@ TEST(TestGfx950ConvDgradCatalog, EveryGraphsCandidatesHaveDistinctKnobTuples)
             = dtypeName == "fp16" ? data_objects::DataType::HALF : data_objects::DataType::BFLOAT16;
         const auto fixture = fixtureOf(shape, dtype);
         const auto shipped = manager->unsortedCatalog(fixture.context());
-        EXPECT_EQ(shipped.entries.size(), expected)
-            << "N" << shape.n << " C" << shape.c << " K" << shape.k << " G" << shape.groups << " "
-            << shape.h << "x" << shape.w << " f" << shape.y << "x" << shape.x;
+        EXPECT_EQ(shipped.entries.size(), expected) << shape;
         std::set<std::vector<int64_t>> tuples;
         for(const auto& kernel : shipped.entries)
         {
@@ -1106,21 +889,15 @@ TEST(TestGfx950ConvDgradCatalog, ShippedKernelsMatchThePacksSignaturesAndLoad)
                               == variant;
             });
         ASSERT_NE(kernel, catalog.entries.end());
-        try
-        {
-            const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
-            ASSERT_TRUE(bound);
-            EXPECT_NE(handler.prepare(fixture.context(), *bound, **kernel), nullptr);
-            EXPECT_TRUE(loadable) << "loaded a gfx950 code object without a gfx950 device";
-        }
-        catch(const std::exception& error)
-        {
-            const std::string message = error.what();
-            EXPECT_FALSE(loadable) << message;
-            EXPECT_EQ(message.find("is packaged with arguments"), std::string::npos) << message;
-            EXPECT_EQ(message.find("convolution contract"), std::string::npos) << message;
-            EXPECT_EQ(message.find("weight-transform helper"), std::string::npos) << message;
-        }
+        const auto bound = matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context());
+        ASSERT_TRUE(bound);
+        shipped::expectPreparesOnItsDeviceOnly(
+            handler,
+            fixture.context(),
+            *bound,
+            **kernel,
+            loadable,
+            {"is packaged with arguments", "convolution contract", "weight-transform helper"});
     }
 }
 #endif

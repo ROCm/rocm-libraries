@@ -25,7 +25,8 @@ Tests:
     diag: N
     alpha: 1
     matrix_size: *qmcpack_sizes
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_batched_additional_sizes_m64
     category: bench
@@ -37,7 +38,8 @@ Tests:
     diag: N
     alpha: 1
     matrix_size: *additional_sizes_m64
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_batched_additional_sizes_largen
     category: bench
@@ -49,7 +51,8 @@ Tests:
     diag: N
     alpha: 1
     matrix_size: *additional_sizes_largen
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trsm_batched_substitution
     category: bench
@@ -62,5 +65,5 @@ Tests:
     alpha: 1
     matrix_size: *trsm_batched_substitution_sizes
     cold_iters: 20
-    iters: 50
+    iters: 100
 ...

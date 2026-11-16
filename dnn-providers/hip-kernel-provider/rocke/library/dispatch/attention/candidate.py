@@ -44,6 +44,14 @@ from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_s
 DENSE_ALGORITHM = "attention_dense"
 DENSE_GRID_ALGORITHM = "attention_dense_grid"
 DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
+# Every algorithm that routes through the dense launch path (SDPA's dense
+# gate, ``dispatch.sdpa.bind_dense``, builds its own "which algorithms do I
+# serve" set from this one; so does the attention route-coverage test), so a
+# new dense candidate cannot go unnoticed by only adding a literal nobody
+# re-checks.
+DENSE_ALGORITHMS = frozenset(
+    {DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM}
+)
 
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
