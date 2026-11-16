@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -182,6 +183,43 @@ void expectServedOrDeclined(const ParityCase& parity, const std::string& arch)
               });
         EXPECT_GE(serving, 1) << parity.name << ": no shipped " << slotName(SLOT_ORDER[index])
                               << " object serves the graph";
+
+        // A pinned rung: the tile of the object with the highest descriptor priority (the split
+        // slots have no score symbol, so priority orders the candidates); a wide row serves every
+        // head dim above its floor, so membership alone does not say which rung serves.
+        const int64_t pinnedTile
+            = SLOT_ORDER[index] == FlydslSdpaBwdSplitSlot::DKDV
+                  ? parity.dkdvTile
+                  : (SLOT_ORDER[index] == FlydslSdpaBwdSplitSlot::DQ ? parity.dqTile : 0);
+        if(pinnedTile != 0)
+        {
+            std::optional<int64_t> best;
+            std::vector<int64_t> bestTiles;
+            for(const auto& kernel : shipped[index])
+            {
+                if(!matchesKernel(symbols, context, kernel, *bound))
+                {
+                    continue;
+                }
+                const auto score = kernel.priority;
+                if(!best.has_value() || score > *best)
+                {
+                    best = score;
+                    bestTiles.clear();
+                }
+                if(score == *best)
+                {
+                    bestTiles.push_back(intField(kernel, "head_dim"));
+                }
+            }
+            ASSERT_TRUE(best.has_value()) << parity.name;
+            for(const int64_t tile : bestTiles)
+            {
+                EXPECT_EQ(tile, pinnedTile)
+                    << parity.name << ": the top-ranked " << slotName(SLOT_ORDER[index])
+                    << " object is not the " << pinnedTile << " rung";
+            }
+        }
     }
 }
 

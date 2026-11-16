@@ -46,6 +46,10 @@ struct ParityCase
     std::string rule;
     /// The decline's cause, as the matcher names it.
     std::string cause;
+    /// For a served graph whose rungs are pinned (servedOnRungs): the tile of the top-ranked
+    /// dK/dV and dQ object; 0 when not pinned.
+    int64_t dkdvTile = 0;
+    int64_t dqTile = 0;
 };
 
 inline ParityCase served(std::string name, BwdCase c)
@@ -54,6 +58,17 @@ inline ParityCase served(std::string name, BwdCase c)
     parity.name = std::move(name);
     parity.spec = specOf(c);
     parity.run = std::move(c);
+    return parity;
+}
+
+/// A served graph whose top-ranked dK/dV object has tile @p dkdvTile and dQ object @p dqTile
+/// (the `head_dim` of the row): a wide row serves every head dim above its floor, so the
+/// rung is the best-ranked row's tile, not mere membership.
+inline ParityCase servedOnRungs(std::string name, BwdCase c, int64_t dkdvTile, int64_t dqTile)
+{
+    auto parity = served(std::move(name), std::move(c));
+    parity.dkdvTile = dkdvTile;
+    parity.dqTile = dqTile;
     return parity;
 }
 
@@ -342,35 +357,51 @@ inline const std::vector<ParityCase>& gfx12WideParityCases()
         std::vector<ParityCase> list;
 
         // 16-bit: dK/dV 320 and dQ 384 (dQ has no 320 row).
-        list.push_back(
-            served("ComputesHeadDim300OnTheDkdv320AndDq384Rungs", caseOf(HALF, 300, 70, 190)));
-        list.push_back(served("ComputesHeadDim320OnTheDkdv320AndDq384Rungs",
-                              withMask(caseOf(BF16, 320, 100, 100, 8, 2), BwdMask::TOP_LEFT)));
+        list.push_back(servedOnRungs(
+            "ComputesHeadDim300OnTheDkdv320AndDq384Rungs", caseOf(HALF, 300, 70, 190), 320, 384));
+        list.push_back(servedOnRungs("ComputesHeadDim320OnTheDkdv320AndDq384Rungs",
+                                     withMask(caseOf(BF16, 320, 100, 100, 8, 2), BwdMask::TOP_LEFT),
+                                     320,
+                                     384));
         // 384 is a rung of both slots.
-        list.push_back(served("ComputesHeadDim384OnTheDkdv384AndDq384Rungs",
-                              withMask(caseOf(HALF, 384, 90, 150, 4, 2), BwdMask::BOTTOM_RIGHT)));
-        // dK/dV 448 and dQ 512 (dQ has no 448 row).
         list.push_back(
-            served("ComputesHeadDim400OnTheDkdv448AndDq512Rungs", caseOf(BF16, 400, 64, 130)));
-        list.push_back(served("ComputesHeadDim448OnTheDkdv448AndDq512Rungs",
-                              withMask(caseOf(HALF, 448, 100, 100, 4, 2), BwdMask::TOP_LEFT)));
+            servedOnRungs("ComputesHeadDim384OnTheDkdv384AndDq384Rungs",
+                          withMask(caseOf(HALF, 384, 90, 150, 4, 2), BwdMask::BOTTOM_RIGHT),
+                          384,
+                          384));
+        // dK/dV 448 and dQ 512 (dQ has no 448 row).
+        list.push_back(servedOnRungs(
+            "ComputesHeadDim400OnTheDkdv448AndDq512Rungs", caseOf(BF16, 400, 64, 130), 448, 512));
+        list.push_back(servedOnRungs("ComputesHeadDim448OnTheDkdv448AndDq512Rungs",
+                                     withMask(caseOf(HALF, 448, 100, 100, 4, 2), BwdMask::TOP_LEFT),
+                                     448,
+                                     512));
         // 512 is a rung of both slots, the widest the matcher accepts.
-        list.push_back(served("ComputesHeadDim512OnTheDkdv512AndDq512Rungs",
-                              withMask(caseOf(BF16, 512, 96, 160, 4, 2), BwdMask::BOTTOM_RIGHT)));
-        list.push_back(served("ComputesHeadDim512NonCausal", caseOf(HALF, 512, 70, 130)));
+        list.push_back(
+            servedOnRungs("ComputesHeadDim512OnTheDkdv512AndDq512Rungs",
+                          withMask(caseOf(BF16, 512, 96, 160, 4, 2), BwdMask::BOTTOM_RIGHT),
+                          512,
+                          512));
+        list.push_back(
+            servedOnRungs("ComputesHeadDim512NonCausal", caseOf(HALF, 512, 70, 130), 512, 512));
         // V narrower or wider than Q/K: the slot's rung follows the wider of the two, prep's
         // the value width.
         auto narrowValue = caseOf(HALF, 448, 80, 150);
         narrowValue.headDimV = 128;
-        list.push_back(served("ServesAValueHeadDimNarrowerThanAWideQueryOne", narrowValue));
+        list.push_back(
+            servedOnRungs("ServesAValueHeadDimNarrowerThanAWideQueryOne", narrowValue, 448, 512));
         auto wideValue = caseOf(BF16, 192, 80, 150);
         wideValue.headDimV = 320;
-        list.push_back(served("ServesAValueHeadDimWiderThanTheQueryOneOnAWideRung", wideValue));
+        list.push_back(servedOnRungs(
+            "ServesAValueHeadDimWiderThanTheQueryOneOnAWideRung", wideValue, 320, 384));
 
         // fp32 has one wide rung, 512, for every head dim from 257.
-        list.push_back(served("ComputesFp32HeadDim512", caseOf(FP32, 512, 64, 96)));
-        list.push_back(served("ComputesFp32HeadDim300OnTheDkdv512AndDq512Rungs",
-                              withMask(caseOf(FP32, 300, 64, 96, 4, 2), BwdMask::TOP_LEFT)));
+        list.push_back(
+            servedOnRungs("ComputesFp32HeadDim512", caseOf(FP32, 512, 64, 96), 512, 512));
+        list.push_back(servedOnRungs("ComputesFp32HeadDim300OnTheDkdv512AndDq512Rungs",
+                                     withMask(caseOf(FP32, 300, 64, 96, 4, 2), BwdMask::TOP_LEFT),
+                                     512,
+                                     512));
 
         // Past 512 the shared matcher declines (DT-4), whichever of Q/K and V is wider, in every
         // dtype.
