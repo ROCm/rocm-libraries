@@ -309,6 +309,20 @@ namespace TensileLite
 
         void ReferenceValidator::validateSlots(std::vector<size_t> const& slots)
         {
+            // OutputPeerD: a card's D is also written by the other cards' kernels, so every card
+            // must be done before any card's D is read. Reading one card's results only waits for
+            // that card.
+            if(m_split != nullptr)
+            {
+                auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(m_problem);
+                if(gemm != nullptr && gemm->outputPeerD())
+                    for(size_t d = 0; d < m_devices->size(); d++)
+                    {
+                        ScopedDevice device((*m_devices)[d]->deviceId);
+                        HIP_CHECK_EXC(hipDeviceSynchronize());
+                    }
+            }
+
             for(size_t d = 0; d < m_devices->size(); d++)
             {
                 ScopedDevice device((*m_devices)[d]->deviceId);

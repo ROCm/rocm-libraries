@@ -111,6 +111,26 @@ TEST(ClientProblemFactorySplit, DKeepsTheFullStridesAndCShrinks)
     }
 }
 
+TEST(ClientProblemFactorySplit, ADefaultBatchStrideOfAPaddedDStaysTheFullOne)
+{
+    // The client config gives d-strides as "-1,ld,-1": a padded ld, the other strides left at
+    // the default. The default batch stride must be that of the full D (256 * 256), not that of
+    // the slice (256 * 128 for an N split), or the batches land in the wrong place in a shared D.
+    const size_t useDefault = TensorDescriptor::UseDefaultStride;
+    for(const char* dim : {"M", "N"})
+    {
+        auto args = makeArgs({256, 256, 4, 128}, 2, dim);
+        TensileLite::TestUtils::setOption(
+            args, "d-strides", std::vector<std::vector<size_t>>{{useDefault, 256, useDefault}});
+        ClientProblemFactory factory(args);
+        auto*                full = factory.problems()[0].get();
+        for(size_t d = 0; d < 2; d++)
+            EXPECT_EQ(gemm(factory.sliceProblem(full, d)).d().strides(),
+                      (std::vector<size_t>{1, 256, 65536}))
+                << "split " << dim << ", device " << d;
+    }
+}
+
 TEST(ClientProblemFactorySplit, CEqualsDSharesTheStrides)
 {
     auto args = makeArgs({128, 96, 1, 64}, 2, "M");

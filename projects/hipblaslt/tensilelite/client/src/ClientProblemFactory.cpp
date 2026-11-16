@@ -653,11 +653,26 @@ namespace TensileLite
                                     retighten(ContractionProblemGemm::TENSOR::C, m_splitFree.c, cS);
                                     // D keeps the full strides: the slice sits inside a full-size D
                                     // at its final offset, where an all-gather can add the peers'.
-                                    if(dS.empty())
+                                    // A partial list (a padded ld with the other entries left at
+                                    // the default) is resolved against the full sizes, so the batch
+                                    // stride is that of the full D and not that of the slice.
                                     {
-                                        dS      = fullStrides(ContractionProblemGemm::TENSOR::D,
-                                                         m_splitFree.d);
-                                        changed = true;
+                                        auto const& dDesc
+                                            = probe.tensors()[ContractionProblemGemm::TENSOR::D];
+                                        auto sizes = dDesc.sizes();
+                                        sizes.at(m_splitFree.d)
+                                            = m_fullProblemSizes[i].at(m_splitFree.d);
+                                        TensorDescriptor fullD("",
+                                                               dDesc.dataType(),
+                                                               sizes.begin(),
+                                                               sizes.end(),
+                                                               dS.begin(),
+                                                               dS.end());
+                                        if(fullD.strides() != dS)
+                                        {
+                                            dS      = fullD.strides();
+                                            changed = true;
+                                        }
                                     }
                                     if(m_cEqualsD)
                                     {
