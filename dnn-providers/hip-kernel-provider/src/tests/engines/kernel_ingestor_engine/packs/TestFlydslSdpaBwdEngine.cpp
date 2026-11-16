@@ -926,15 +926,6 @@ TEST(TestFlydslSdpaBwdMergedDispatch, LaunchesTheMergedKernelAndTheTailZeroKerne
               (std::set<std::string>{"merged", "dbias_reduce", "tailzero"}));
 }
 
-TEST(TestFlydslSdpaBwdMergedDispatch, EveryMergedHandlerSupportsSavingAllLaunches)
-{
-    for(const auto* symbols : {&MERGED, &MERGED_REDUCE})
-    {
-        EXPECT_TRUE(dispatchHandler(*symbols).supportsSaving()) << symbols->dispatch;
-        EXPECT_TRUE(dispatchHandler(*symbols).supportsSavingAllLaunches()) << symbols->dispatch;
-    }
-}
-
 TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectOnceTheGroupPassesThePackSplitBound)
 {
     RowSpec packed = plainRow(128);

@@ -1134,6 +1134,11 @@ public:
         return _ptr;
     }
 
+    size_t bytes() const
+    {
+        return _bytes;
+    }
+
     template <typename T>
     void upload(const std::vector<T>& values)
     {
@@ -3105,44 +3110,13 @@ class BwdStagedInputs
 public:
     void stage(const BwdCase& c)
     {
-        using T = hipdnn_data_sdk::types::half;
-        const auto host = hostStagingOf<T>(c);
-        const auto& views = host.views;
-        _device = uploadStaging(host);
-        _buffers = tensorBuffers<T>(views, _device);
-        _dq = _device[views.dq.group].get();
-        _dk = _device[views.dk.group].get();
-        _dv = _device[views.dv.group].get();
-
-        if(c.padded())
+        if(c.bias && c.biasDtype() == DataType::FLOAT)
         {
-            _buffers.push_back({uid::SEQ_LEN_Q, stageInt32(c.lengthsQ)});
-            _buffers.push_back({uid::SEQ_LEN_KV, stageInt32(c.lengthsKv)});
+            stageWithBias<float>(c);
         }
-        for(const auto& tensor : raggedTensorsOf(c))
+        else
         {
-            const auto rows = tensor.queryAxis ? c.seqQ : c.seqKv;
-            std::vector<int32_t> offsets;
-            offsets.reserve(static_cast<size_t>(c.batch) + 1);
-            for(int64_t b = 0; b <= c.batch; ++b)
-            {
-                offsets.push_back(static_cast<int32_t>(b * rows));
-            }
-            _buffers.push_back({tensor.offsetUid, stageInt32(offsets)});
-        }
-
-        if(c.bias)
-        {
-            _bias = std::make_unique<DeviceBuffer>(host.bias.size() * sizeof(T));
-            _bias->upload(host.bias);
-            _buffers.push_back({uid::BIAS, _bias->get()});
-            if(c.dbias)
-            {
-                _dbiasOwner = std::make_unique<DeviceBuffer>(host.bias.size() * sizeof(T));
-                _dbiasOwner->poison();
-                _buffers.push_back({uid::DBIAS, _dbiasOwner->get()});
-                _dbias = _dbiasOwner.get();
-            }
+            stageWithBias<hipdnn_data_sdk::types::half>(c);
         }
     }
 
@@ -3179,6 +3153,56 @@ public:
     }
 
 private:
+    /// Stages the case with a bias of type @p B: the bias and the dBias buffers hold one B per
+    /// element of the bias view.
+    template <typename B>
+    void stageWithBias(const BwdCase& c)
+    {
+        using T = hipdnn_data_sdk::types::half;
+        const auto host = hostStagingOf<T, B>(c);
+        const auto& views = host.views;
+        _device = uploadStaging(host);
+        _buffers = tensorBuffers<T>(views, _device);
+        _dq = _device[views.dq.group].get();
+        _dk = _device[views.dk.group].get();
+        _dv = _device[views.dv.group].get();
+
+        if(c.padded())
+        {
+            _buffers.push_back({uid::SEQ_LEN_Q, stageInt32(c.lengthsQ)});
+            _buffers.push_back({uid::SEQ_LEN_KV, stageInt32(c.lengthsKv)});
+        }
+        for(const auto& tensor : raggedTensorsOf(c))
+        {
+            const auto rows = tensor.queryAxis ? c.seqQ : c.seqKv;
+            std::vector<int32_t> offsets;
+            offsets.reserve(static_cast<size_t>(c.batch) + 1);
+            for(int64_t b = 0; b <= c.batch; ++b)
+            {
+                offsets.push_back(static_cast<int32_t>(b * rows));
+            }
+            _buffers.push_back({tensor.offsetUid, stageInt32(offsets)});
+        }
+
+        if(c.bias)
+        {
+            const auto biasBytes = static_cast<size_t>(biasViewOf(c).extent())
+                                   * (c.biasDtype() == DataType::FLOAT ? 4U : 2U);
+            _bias = std::make_unique<DeviceBuffer>(host.bias.size() * sizeof(B));
+            EXPECT_EQ(_bias->bytes(), biasBytes);
+            _bias->upload(host.bias);
+            _buffers.push_back({uid::BIAS, _bias->get()});
+            if(c.dbias)
+            {
+                _dbiasOwner = std::make_unique<DeviceBuffer>(host.bias.size() * sizeof(B));
+                EXPECT_EQ(_dbiasOwner->bytes(), biasBytes);
+                _dbiasOwner->poison();
+                _buffers.push_back({uid::DBIAS, _dbiasOwner->get()});
+                _dbias = _dbiasOwner.get();
+            }
+        }
+    }
+
     /// A device copy of @p values, which this object owns.
     void* stageInt32(const std::vector<int32_t>& values)
     {

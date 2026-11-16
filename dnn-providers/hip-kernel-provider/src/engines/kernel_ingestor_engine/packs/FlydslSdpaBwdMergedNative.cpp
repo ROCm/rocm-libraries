@@ -608,7 +608,7 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
 /// The plan from saved values, with no graph, bound tokens or kernel record. The workspace
 /// layout, grid, window, threshold and flags are recomputed from the restored problem, and a
 /// problem that cannot be launched is refused. The plain handler also refuses a problem that
-/// needs the reduce kernel, which it launches no more than its rows name one.
+/// needs the reduce kernel, which it does not launch.
 template <bool REDUCES>
 MergedPlan restoredPlan(const SavedLaunchInputs& inputs)
 {

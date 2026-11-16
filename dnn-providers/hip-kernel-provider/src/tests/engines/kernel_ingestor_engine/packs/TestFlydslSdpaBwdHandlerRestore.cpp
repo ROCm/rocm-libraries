@@ -480,8 +480,15 @@ TEST(TestFlydslSdpaBwdHandlerRestore, RefusesAMergedProblemOfFullPrecision)
 /// thing, and expects the refusal to print the expected and the found set. Both sets are
 /// spelled here, so a case that refused for any other reason would not match. The plain dq and
 /// merged stages never launch the dBias reduce kernel, so a saved one is a set they refuse; the
-/// dq_reduce and merged_reduce stages launch it exactly when the problem broadcasts its dBias.
+/// dq_reduce and merged_reduce stages launch it exactly when the problem broadcasts its dBias;
+/// dkdv_u2 saves {dkdv, dvonly} and dq_u2 {dq, tailzero}. The tests every stage shares run over
+/// all of them; the standard stages alone have a reduce launch to refuse, and a single unnamed
+/// launch to name.
 class TestFlydslSdpaBwdLaunchSetRestore : public ::testing::TestWithParam<Stage>
+{
+};
+
+class TestFlydslSdpaBwdStandardLaunchSetRestore : public ::testing::TestWithParam<Stage>
 {
 };
 
@@ -531,7 +538,7 @@ TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesAnExtraLaunch)
     expectSetRefusal(stage, full, std::move(saved), expectedLaunchesOf(stage, full));
 }
 
-TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesAReduceLaunchWhenTheProblemHasNone)
+TEST_P(TestFlydslSdpaBwdStandardLaunchSetRestore, RefusesAReduceLaunchWhenTheProblemHasNone)
 {
     const auto stage = GetParam();
 
@@ -541,7 +548,7 @@ TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesAReduceLaunchWhenTheProblemHasN
                      expectedLaunchesOf(stage, PLAIN_STAGE));
 }
 
-TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesAMissingTailzeroLaunch)
+TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesAMissingLastLaunch)
 {
     const auto stage = GetParam();
     const auto full = fullStageOf(stage);
@@ -551,7 +558,7 @@ TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesAMissingTailzeroLaunch)
     expectSetRefusal(stage, full, std::move(saved), expectedLaunchesOf(stage, full));
 }
 
-TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesATailzeroLaunchWhenTheProblemHasNone)
+TEST_P(TestFlydslSdpaBwdStandardLaunchSetRestore, RefusesATailzeroLaunchWhenTheProblemHasNone)
 {
     const auto stage = GetParam();
     const auto full = fullStageOf(stage);
@@ -587,7 +594,7 @@ TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesAnUnnamedLaunchWhenTheStageLaun
         cause);
 }
 
-TEST_P(TestFlydslSdpaBwdLaunchSetRestore, RefusesANamedLaunchWhenTheStageLaunchesOne)
+TEST_P(TestFlydslSdpaBwdStandardLaunchSetRestore, RefusesANamedLaunchWhenTheStageLaunchesOne)
 {
     constexpr StageLaunches ONE_LAUNCH{false, false};
     const auto stage = GetParam();
@@ -628,7 +635,7 @@ void expectSetAccepted(Stage stage, const StageLaunches& shape)
     expectRestoreReachesTheCode(stage, shape, inputsOf(stage, shape), "for the saved problem");
 }
 
-TEST_P(TestFlydslSdpaBwdLaunchSetRestore, TakesTheSingleUnnamedLaunchPastTheSetRule)
+TEST_P(TestFlydslSdpaBwdStandardLaunchSetRestore, TakesTheSingleUnnamedLaunchPastTheSetRule)
 {
     expectSetAccepted(GetParam(), StageLaunches{false, false});
 }
@@ -638,9 +645,21 @@ TEST_P(TestFlydslSdpaBwdLaunchSetRestore, TakesTheFullLaunchSetPastTheSetRule)
     expectSetAccepted(GetParam(), fullStageOf(GetParam()));
 }
 
+INSTANTIATE_TEST_SUITE_P(,
+                         TestFlydslSdpaBwdLaunchSetRestore,
+                         ::testing::Values(Stage::SPLIT_DQ,
+                                           Stage::SPLIT_DQ_REDUCE,
+                                           Stage::MERGED,
+                                           Stage::MERGED_REDUCE,
+                                           Stage::DKDV_U2,
+                                           Stage::DQ_U2),
+                         [](const ::testing::TestParamInfo<Stage>& info) {
+                             return std::string(stageName(info.param));
+                         });
+
 INSTANTIATE_TEST_SUITE_P(
     ,
-    TestFlydslSdpaBwdLaunchSetRestore,
+    TestFlydslSdpaBwdStandardLaunchSetRestore,
     ::testing::Values(Stage::SPLIT_DQ, Stage::SPLIT_DQ_REDUCE, Stage::MERGED, Stage::MERGED_REDUCE),
     [](const ::testing::TestParamInfo<Stage>& info) { return std::string(stageName(info.param)); });
 
@@ -704,73 +723,6 @@ INSTANTIATE_TEST_SUITE_P(,
                              return std::string(stageName(info.param));
                          });
 
-// ---------------------------------------------------------------------------
-// The launch set of the u2 stages: dkdv_u2 saves {dkdv, dvonly}, dq_u2 {dq, tailzero}
-// ---------------------------------------------------------------------------
-
-class TestFlydslSdpaBwdU2LaunchSetRestore : public ::testing::TestWithParam<Stage>
-{
-};
-
-TEST_P(TestFlydslSdpaBwdU2LaunchSetRestore, RefusesAnExtraLaunch)
-{
-    const auto stage = GetParam();
-    const auto full = fullStageOf(stage);
-    auto saved = savedLaunches(stage, full);
-    saved.push_back(savedKernel("extra", primarySignatureOf(stage)));
-
-    expectSetRefusal(stage, full, std::move(saved), expectedLaunchesOf(stage, full));
-}
-
-TEST_P(TestFlydslSdpaBwdU2LaunchSetRestore, RefusesAMissingSecondLaunch)
-{
-    // The dV-only launch of dkdv_u2, the tail-zero launch of dq_u2.
-    const auto stage = GetParam();
-    const auto full = fullStageOf(stage);
-    auto saved = savedLaunches(stage, full);
-    saved.pop_back();
-
-    expectSetRefusal(stage, full, std::move(saved), expectedLaunchesOf(stage, full));
-}
-
-TEST_P(TestFlydslSdpaBwdU2LaunchSetRestore, RefusesAWrongPrimaryLaunchName)
-{
-    const auto stage = GetParam();
-    const auto full = fullStageOf(stage);
-    auto saved = savedLaunches(stage, full);
-    saved.front().launchName = "wrong";
-
-    expectSetRefusal(stage, full, std::move(saved), expectedLaunchesOf(stage, full));
-}
-
-TEST_P(TestFlydslSdpaBwdU2LaunchSetRestore, RefusesAnUnnamedLaunchWhenTheStageLaunchesTwo)
-{
-    const auto stage = GetParam();
-    const auto full = fullStageOf(stage);
-    const std::string cause = "launches " + setText(expectedLaunchesOf(stage, full))
-                              + " for the saved problem, and the plan holds the launches {''}";
-
-    // restoreLaunch hands the handler one code, with no launch name.
-    expectRefusal(
-        [&] {
-            handlerOf(stage).restoreLaunch(
-                inputsOf(stage, full), savedKernel("", primarySignatureOf(stage)), 0);
-        },
-        cause);
-}
-
-TEST_P(TestFlydslSdpaBwdU2LaunchSetRestore, TakesTheFullLaunchSetPastTheSetRule)
-{
-    expectSetAccepted(GetParam(), fullStageOf(GetParam()));
-}
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestFlydslSdpaBwdU2LaunchSetRestore,
-                         ::testing::Values(Stage::DKDV_U2, Stage::DQ_U2),
-                         [](const ::testing::TestParamInfo<Stage>& info) {
-                             return std::string(stageName(info.param));
-                         });
-
 TEST(TestFlydslSdpaBwdHandlerRestore, RefusesTheStandardTailzeroKernelForTheU2DqStage)
 {
     // dq_u2 launches the V-head tail-zero kernel, which has one more argument.
@@ -806,30 +758,49 @@ TEST(TestFlydslSdpaBwdHandlerRestore, TakesTheSingleUnnamedU2LaunchPastTheSetRul
 // A saved problem whose launch grid is past a limit is refused
 // ---------------------------------------------------------------------------
 
-/// The sample problem of @p stage, shaped as @p shape, with @p batch batches.
-SavedLaunchInputs inputsWithBatch(Stage stage, const StageLaunches& shape, int64_t batch)
+/// Changes the saved values of a stage's sample problem.
+using EditInputs = std::function<void(SavedLaunchInputs&)>;
+
+/// The sample problem of @p stage, shaped as @p shape, with @p edit applied.
+SavedLaunchInputs inputsEdited(Stage stage, const StageLaunches& shape, const EditInputs& edit)
 {
     auto inputs = inputsOf(stage, shape);
-    inputs.values["batch"] = batch;
+    edit(inputs);
     return inputs;
+}
+
+/// An edit that gives the problem @p batch batches.
+EditInputs withBatch(int64_t batch)
+{
+    return [batch](SavedLaunchInputs& inputs) { inputs.values["batch"] = batch; };
+}
+
+/// An edit that gives the problem @p heads query heads and @p kvHeads key and value heads.
+EditInputs withHeads(int64_t heads, int64_t kvHeads)
+{
+    return [heads, kvHeads](SavedLaunchInputs& inputs) {
+        inputs.values["num_heads"] = heads;
+        inputs.values["num_kv_heads"] = kvHeads;
+        inputs.values["num_v_heads"] = kvHeads;
+    };
 }
 
 void expectGridRefusal(Stage stage,
                        const StageLaunches& shape,
-                       int64_t batch,
+                       const EditInputs& edit,
                        std::string_view cause)
 {
     expectRefusal(
         [&] {
             handlerOf(stage).restoreLaunches(
-                inputsWithBatch(stage, shape, batch), savedLaunches(stage, shape), 0);
+                inputsEdited(stage, shape, edit), savedLaunches(stage, shape), 0);
         },
         cause);
 }
 
-void expectPastTheGridRule(Stage stage, const StageLaunches& shape, int64_t batch)
+void expectPastTheGridRule(Stage stage, const StageLaunches& shape, const EditInputs& edit)
 {
-    expectRestoreReachesTheCode(stage, shape, inputsWithBatch(stage, shape, batch), "grid exceeds");
+    expectRestoreReachesTheCode(stage, shape, inputsEdited(stage, shape, edit), "grid exceeds");
 }
 
 // A split launch's batch is its grid's z extent, limited to 65535.
@@ -837,8 +808,42 @@ TEST(TestFlydslSdpaBwdHandlerRestore, RefusesASplitProblemWhoseBatchPutsItsGridP
 {
     constexpr StageLaunches NO_TAILS{false, false};
 
-    expectGridRefusal(Stage::SPLIT_DQ, NO_TAILS, 65536, "limits for kernel");
-    expectPastTheGridRule(Stage::SPLIT_DQ, NO_TAILS, 65535);
+    expectGridRefusal(Stage::SPLIT_DQ, NO_TAILS, withBatch(65536), "limits for kernel");
+    expectPastTheGridRule(Stage::SPLIT_DQ, NO_TAILS, withBatch(65535));
+}
+
+// The dV-only launch of a dkdv_u2 stage runs the dK-only object's grid spelling over the V heads:
+// with the key blocks first, the V heads are the y extent, limited to 65535. The key heads stay
+// at 4, so the dK-only grid is inside the limit.
+TEST(TestFlydslSdpaBwdHandlerRestore, RefusesADkdvU2ProblemWhoseDvOnlyGridIsPastTheLimit)
+{
+    const auto valueHeads = [](int64_t heads, int64_t vHeads) {
+        return [heads, vHeads](SavedLaunchInputs& inputs) {
+            inputs.values["grid"] = std::string("kvblocks_by_kheads_by_seqs");
+            inputs.values["num_heads"] = heads;
+            inputs.values["num_v_heads"] = vHeads;
+        };
+    };
+
+    expectGridRefusal(
+        Stage::DKDV_U2, DKDV_U2_STAGE, valueHeads(65536, 65536), "dV-only launch grid exceeds");
+    expectPastTheGridRule(Stage::DKDV_U2, DKDV_U2_STAGE, valueHeads(262140, 65535));
+}
+
+// The dBias reduce launch has one plane for every batch and head the dBias is not broadcast over:
+// the sample broadcasts it over the batch, so the planes are the heads, limited to 65535. The
+// stage has no tail-zero launch, which has its own plane limit.
+TEST(TestFlydslSdpaBwdHandlerRestore, RefusesAReduceProblemWhoseDbiasPlanesArePastTheLimit)
+{
+    constexpr StageLaunches REDUCE_ONLY{true, false};
+
+    for(const auto stage : {Stage::SPLIT_DQ_REDUCE, Stage::MERGED_REDUCE})
+    {
+        SCOPED_TRACE(stageName(stage));
+        expectGridRefusal(
+            stage, REDUCE_ONLY, withHeads(65536, 65536), "reduce launch grid exceeds");
+        expectPastTheGridRule(stage, REDUCE_ONLY, withHeads(65535, 65535));
+    }
 }
 
 // The tail-zero launch has one plane for every batch and head of Q, K and V: the sample's 8 query
@@ -846,8 +851,17 @@ TEST(TestFlydslSdpaBwdHandlerRestore, RefusesASplitProblemWhoseBatchPutsItsGridP
 // planes.
 TEST(TestFlydslSdpaBwdHandlerRestore, RefusesASplitProblemWhoseTailzeroGridIsPastTheLimit)
 {
-    expectGridRefusal(Stage::SPLIT_DQ, PLAIN_STAGE, 4096, "tail-zero launch grid exceeds");
-    expectPastTheGridRule(Stage::SPLIT_DQ, PLAIN_STAGE, 4095);
+    expectGridRefusal(
+        Stage::SPLIT_DQ, PLAIN_STAGE, withBatch(4096), "tail-zero launch grid exceeds");
+    expectPastTheGridRule(Stage::SPLIT_DQ, PLAIN_STAGE, withBatch(4095));
+}
+
+// The merged stage's tail-zero launch has the same planes: the merged grid is far from its own
+// limit at the same batch.
+TEST(TestFlydslSdpaBwdHandlerRestore, RefusesAMergedProblemWhoseTailzeroGridIsPastTheLimit)
+{
+    expectGridRefusal(Stage::MERGED, PLAIN_STAGE, withBatch(4096), "tail-zero launch grid exceeds");
+    expectPastTheGridRule(Stage::MERGED, PLAIN_STAGE, withBatch(4095));
 }
 
 // The merged launch is one block for every (batch, key tile, key head) and (batch, query tile,
@@ -857,8 +871,8 @@ TEST(TestFlydslSdpaBwdHandlerRestore, RefusesAMergedProblemWhoseGridIsPastTheLim
 {
     constexpr StageLaunches NO_TAILS{false, false};
 
-    expectGridRefusal(Stage::MERGED, NO_TAILS, 67108864, "grid exceeds");
-    expectPastTheGridRule(Stage::MERGED, NO_TAILS, 67108863);
+    expectGridRefusal(Stage::MERGED, NO_TAILS, withBatch(67108864), "grid exceeds");
+    expectPastTheGridRule(Stage::MERGED, NO_TAILS, withBatch(67108863));
 }
 
 // ---------------------------------------------------------------------------

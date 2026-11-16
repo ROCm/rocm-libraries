@@ -82,45 +82,41 @@ TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasOneContractOnItsCatalog
 }
 
 #ifdef HIPDNN_ENGINE_FLYDSL
-TEST(TestIngestorDispatchAliases, EachFlydslSdpaBwdAliasResolvesToTheHandlerOfItsUnversionedName)
+struct FlydslSdpaBwdDispatch
+{
+    std::string_view unversioned;
+    std::string_view versioned;
+};
+
+const FlydslSdpaBwdDispatch FLYDSL_SDPA_BWD_DISPATCHES[] = {
+    {"hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dq.dispatch", FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_merged.dispatch", FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch",
+     FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1},
+};
+
+TEST(TestIngestorDispatchAliases,
+     EachFlydslSdpaBwdAliasResolvesToTheHandlerOfItsUnversionedNameAndSavesEveryLaunch)
 {
     registerNativeIngestorSymbols();
 
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
-                     FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1);
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
-                     FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1);
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_split.dq.dispatch",
-                     FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1);
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch",
-                     FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1);
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch",
-                     FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1);
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch",
-                     FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1);
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_merged.dispatch",
-                     FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1);
-    expectOneHandler("hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch",
-                     FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1);
-}
-
-TEST(TestIngestorDispatchAliases, EveryFlydslSdpaBwdHandlerSavesAndRestoresEveryLaunch)
-{
-    registerNativeIngestorSymbols();
-
-    for(const auto alias : {FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1,
-                            FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1,
-                            FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1,
-                            FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1,
-                            FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1,
-                            FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1,
-                            FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1,
-                            FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1})
+    for(const auto& [unversioned, versioned] : FLYDSL_SDPA_BWD_DISPATCHES)
     {
-        const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(alias));
-        ASSERT_NE(handler, nullptr) << alias;
-        EXPECT_TRUE(handler->supportsSaving()) << alias;
-        EXPECT_TRUE(handler->supportsSavingAllLaunches()) << alias;
+        expectOneHandler(unversioned, versioned);
+        const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(unversioned));
+        ASSERT_NE(handler, nullptr) << unversioned;
+        EXPECT_TRUE(handler->supportsSaving()) << unversioned;
+        EXPECT_TRUE(handler->supportsSavingAllLaunches()) << unversioned;
     }
 }
 #endif // HIPDNN_ENGINE_FLYDSL
