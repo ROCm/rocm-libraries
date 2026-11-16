@@ -510,9 +510,19 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_v = k.stride_v; });
     if constexpr(kVectorized)
     {
-        // The token stride is implied by the layout; page and head strides keep 8-wide vectors.
-        expect_refused("stride not a multiple of 8", need, [](Kargs& k) { k.nhead_stride_k += 1; });
-        expect_refused("stride not a multiple of 8", need, [](Kargs& k) { k.batch_stride_v += 4; });
+        // The token stride is implied by the layout; page and head strides keep whole 16-byte
+        // vectors of kVecElems elements: a stride grown by one vector is accepted, one grown by
+        // part of a vector is refused.
+        constexpr int kVecElems = 16 / static_cast<int>(sizeof(Data));
+        const std::string rule  = "stride not a multiple of " + std::to_string(kVecElems);
+        EXPECT_EQ(refusal(need,
+                          [](Kargs& k) {
+                              k.nhead_stride_k += kVecElems;
+                              k.batch_stride_v += kVecElems;
+                          }),
+                  "");
+        expect_refused(rule.c_str(), need, [](Kargs& k) { k.nhead_stride_k += 1; });
+        expect_refused(rule.c_str(), need, [](Kargs& k) { k.batch_stride_v += kVecElems / 2; });
         expect_refused("token stride not positive", need, [](Kargs& k) { k.stride_k = 0; });
     }
     else
