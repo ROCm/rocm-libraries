@@ -34,7 +34,14 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DSignature.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified2DMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified2DGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified2DSignature.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified2DDispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestUnifiedAttentionGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotSelection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdMatcher.cpp
@@ -42,6 +49,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPaged.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanHeader.cpp
@@ -108,16 +116,21 @@ set_property(
 target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwisePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDensePacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvFwdAotSeedPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dModelBinding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified2DPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified2DCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionCatalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradAotPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradAotPacks.cpp

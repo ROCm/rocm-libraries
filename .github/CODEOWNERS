@@ -34,7 +34,7 @@
 
 # Individual contributors
 /.github/workflows/auto-retry-failed.yml            @ROCm/rocm-libraries-reviewers @tony-davis
-/.github/workflows/pr-base-freshness.yml            @ROCm/rocm-libraries-reviewers @tony-davis
+/.github/workflows/pr-ci-freshness.yml              @ROCm/rocm-libraries-reviewers @tony-davis
 /.github/workflows/libraries-pr-bot.yml             @samathew121 @amd-shiraz
 /.github/workflows/issue-import.yml                 @jayhawk-commits @ammallya
 /.github/workflows/multiple_pr_import.yml           @jayhawk-commits @ammallya

@@ -64,8 +64,8 @@ endif()
 if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     target_link_libraries(tensilelite-client-common
         PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
-    # DeviceContext.cpp gates its SdmaQueue setup on this macro; without it
-    # the fused run fails fast instead of handing the kernel a null queue array.
+    # DeviceContext.cpp gates its SdmaQueue setup on this macro; without it the
+    # setup fails fast instead of handing the kernel a null queue array.
     target_compile_definitions(tensilelite-client-common
         PRIVATE TENSILELITE_ENABLE_SDMA)
 endif()

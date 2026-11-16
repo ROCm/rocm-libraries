@@ -1157,6 +1157,16 @@ def supports_attention_dense(
             "gfx942 attention_dense: causal_bottom_right is not supported with "
             "sliding_window>0"
         )
+    # fp8 KV dequant is a gfx950-only loader, so the field lives on the gfx950
+    # spec and a gfx942 spec has none. getattr, not attribute access: this
+    # validator is also handed foreign specs, and one carrying fp8 must be
+    # refused rather than emit a bf16-identical kernel under an fp8 name.
+    kv_storage_dtype = getattr(spec, "kv_storage_dtype", None)
+    if kv_storage_dtype is not None:
+        return False, (
+            "gfx942 attention_dense: fp8 KV storage is gfx950-only "
+            f"(got kv_storage_dtype={kv_storage_dtype!r})"
+        )
     try:
         spec = _as_gfx942_spec(spec)
     except TypeError as exc:
