@@ -1,4 +1,34 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "reg07c_b1h2k2v2_64x96_d128_fp16_none_biasm4to0_bias11io_told"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "gl05_fp16_none_told",
+          "h76_b1h2k2v2_72x120_d128_fp16_none_biasr1fp32_told",
+          "reg07c_b1h2k2v2_64x96_d128_fp16_none_biasm4to0_bias11io_told"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }
