@@ -178,6 +178,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a CONV
 #ifndef CONV_WINO_TW
 #define CONV_WINO_TW 0
 #endif
+#ifndef CONV_WINO_SB
+#define CONV_WINO_SB 0
+#endif
 
 #if CONV_WINO_MFMA
 #define CONV_WINO_COOP_ATOM K5CoopMfma<CONV_WINO_T>
@@ -192,7 +195,8 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a CONV
               CONV_WINO_KW,        \
               CONV_WINO_M,         \
               CONV_WINO_TW,        \
-              CONV_WINO_DIR>
+              CONV_WINO_DIR,       \
+              CONV_WINO_SB>
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
 {
@@ -216,7 +220,8 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
                 CONV_WINO_M,
                 CONV_WINO_DIR,
                 CONV_WINO_PF,
-                CONV_WINO_TW>(a CONV_EPI_ARG);
+                CONV_WINO_TW,
+                CONV_WINO_SB>(a CONV_EPI_ARG);
 }
 
 #elif CONV_WINO_VARIANT == 6

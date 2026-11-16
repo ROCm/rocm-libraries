@@ -37,6 +37,7 @@ FIELDS = [
     "bins",
     "f16math",
     "pf",
+    "sb",
 ]
 STRINGS = {"direction", "dtype", "variant", "layout", "arch"}
 # The integer fields identify a config among those one graph admits (the enrolled knob tuple):
@@ -56,6 +57,7 @@ KNOBS = [
     "bins",
     "f16math",
     "pf",
+    "sb",
 ]
 ENTRY = {
     "multipass": "ConvWinogradGemm",
@@ -84,6 +86,7 @@ def C(
     bins=0,
     f16math=0,
     pf=0,
+    sb=0,
 ):
     return dict(
         variant=variant,
@@ -103,6 +106,7 @@ def C(
         bins=bins,
         f16math=f16math,
         pf=pf,
+        sb=sb,
     )
 
 
@@ -152,7 +156,7 @@ WREG_BF16 = [(32, 2, 4, 0), (64, 1, 2, 0)]
 # 4 x kw (one per transform row per K group), each 16 x mt out channels by 16 x nt tiles.
 # m = 3 is F(3,2): stride 2 by phases. pf = 1 loads the next item's first input chunk behind the
 # epilogue (CDNA, few input chunks per item).
-def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0):
+def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0, sb=0):
     return [
         C(
             "coop",
@@ -163,6 +167,7 @@ def coop(blocks, archs=("gfx11", "gfx12"), m=2, pf=0):
             waves=4 * kw,
             f16math=h,
             pf=pf,
+            sb=sb,
         )
         for mt, nt, kw, h in blocks
         for a in archs
@@ -227,6 +232,14 @@ COOP_CDNA_BF16 = [(2, 4, 2, 0), (2, 2, 2, 0), (1, 4, 1, 0), (2, 2, 1, 0)]
 # Cross-item prefetch on CDNA, small C (gfx950 inception c32 k32 149² n128: 7-8%).
 COOPPF_CDNA_F16 = [(2, 2, 1, 1)]
 COOPPF_CDNA_BF16 = [(2, 2, 1, 0)]
+# MI300 and later ("cdna3": gfx940-942, gfx950), fp16, with cross-item prefetch. Measured on MI325X /
+# MI355X against the gfx9 configs (best config per layer): realesrgan c160 k32 128² bwd 1.14x / 1.01x,
+# hrnet c64 28² 1.10-1.13x / 1.0x, unet c128 k64 512² fwd 1.05x / 1.02x, c64 256² fwd 1.14x / 1.0x.
+COOPPF_CDNA3_F16 = [(2, 4, 2, 1), (4, 2, 1, 1)]
+# ... and one transformed-input buffer (sb): 16 KiB of LDS for 32 tiles, 3 blocks a CU on MI325X's
+# 64 KiB (2 with two buffers); one more barrier per input chunk. MI325X hrnet c32 k32 56² 1.07x,
+# inception c32 k32 149² 1.09-1.10x, realesrgan c192 k64 128² bwd 1.06x.
+COOPSB_CDNA3_F16 = [(2, 2, 1, 1), (4, 2, 1, 1), (2, 4, 2, 1)]
 COOP3_CDNA_F16 = [(1, 4, 4, 1), (2, 2, 1, 1), (1, 2, 1, 1), (2, 2, 2, 1)]
 COOP3_CDNA_BF16 = [(1, 4, 4, 0), (2, 2, 1, 0), (1, 2, 1, 0)]
 
@@ -283,6 +296,8 @@ CATALOG = {
     + coop(COOP_CDNA_F16, ("gfx9",))
     + coop(COOP3_CDNA_F16, ("gfx9",), m=3)
     + coop(COOPPF_CDNA_F16, ("gfx9",), pf=1)
+    + coop(COOPPF_CDNA3_F16, ("cdna3",), pf=1)
+    + coop(COOPSB_CDNA3_F16, ("cdna3",), pf=1, sb=1)
     + wreg(WREG_F16)
     + wmma()
     + sreg([1, 0])
@@ -371,7 +386,7 @@ def label(c):
         return f"coop.f2.nchw.{c['arch']}.k{c['bk'] // 16}t{c['bt'] // 16}b16{'h' if c['f16math'] else 'f'}"
     if c["variant"] == "coop":
         kw = c["waves"] // 4
-        return f"coop.f{c['m']}.nchw.{c['arch']}.m{c['bk'] // (16 * kw)}n{c['bt'] // 16}k{kw}{'h' if c['f16math'] else 'f'}{'.pf1' if c['pf'] else ''}"
+        return f"coop.f{c['m']}.nchw.{c['arch']}.m{c['bk'] // (16 * kw)}n{c['bt'] // 16}k{kw}{'h' if c['f16math'] else 'f'}{'.pf1' if c['pf'] else ''}{'.sb' if c['sb'] else ''}"
     if c["variant"] == "sreg":
         return f"sreg.f2.nchw.{c['arch']}.{c['bk']}{'h' if c['f16math'] else 'f'}"
     return f"wmma.f2.nchw.{c['arch']}.{c['bk']}w{c['waves']}"
