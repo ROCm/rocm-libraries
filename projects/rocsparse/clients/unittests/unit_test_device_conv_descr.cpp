@@ -1397,4 +1397,20 @@ namespace
         EXPECT_EQ(nnz, 717);
         EXPECT_EQ(rocsparse_bell_set_pointers(d, nullptr, nullptr), st_size);
     }
+
+    // rocsparse_sparse_to_sparse writes ell_width after create, so rows * ell_width can
+    // overflow in rocsparse_spmat_get_nnz. The ELL branch of get_nnz must reject it and
+    // leave nnz unchanged.
+    TEST_F(ConvDescr, EllNnzAfterWidthUpdate)
+    {
+        Spmat d;
+        ASSERT_EQ(rocsparse_create_ell_descr(
+                      &d, int64_t(1) << 62, 1, nullptr, nullptr, 0, i32, base0, f32),
+                  st_ok);
+        d.get()->ell_width = 16;
+
+        int64_t nnz = 717;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_size);
+        EXPECT_EQ(nnz, 717);
+    }
 } // namespace

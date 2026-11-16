@@ -2910,6 +2910,7 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr, \p bell_col_ind, or \p bell_val is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows*ell_cols does not fit in int64_t.
  *  \retval rocsparse_status_not_initialized if \p descr is not initialized.
  */
 ROCSPARSE_EXPORT
