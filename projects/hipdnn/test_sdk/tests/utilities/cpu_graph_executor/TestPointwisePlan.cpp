@@ -3349,6 +3349,10 @@ TEST(TestPointwisePlanDataTypes, Fp8Operations)
               (std::vector<double>{2.0, 0.5, 1.0, 4.0}));
     EXPECT_EQ((runUnary<E4, F, F>(PointwiseMode::RELU_FWD, a)),
               (std::vector<double>{0.0, 0.0, 1.0, 4.0}));
+    EXPECT_EQ((runUnary<E5, F, F>(PointwiseMode::NEG, a)),
+              (std::vector<double>{2.0, 0.5, -1.0, -4.0}));
+    EXPECT_EQ((runBinary<E4, E4, F, E4>(PointwiseMode::SUB, a, b)),
+              (std::vector<double>{-3.0, 0.0, -1.0, 2.0}));
     EXPECT_EQ((runBinary<E5, E5, F, E5>(PointwiseMode::ADD, a, b)),
               (std::vector<double>{-1.0, -1.0, 3.0, 6.0}));
     EXPECT_EQ((runBinary<E5, E5, F, F>(PointwiseMode::MUL, a, b)),
