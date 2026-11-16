@@ -316,54 +316,59 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableSdpaVariations)
                                       false,
                                       true),
                    "compute_data_type != FLOAT"},
-         false},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      DataType::HALF),
-                   "mma_core_mode = HALF (cuDNN-frontend default) on bf16 inputs"},
-         true},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      DataType::BFLOAT16),
-                   "mma_core_mode = BFLOAT16 on bf16 inputs"},
-         true},
-        {GraphTest{createSdpaFwdGraph({4, 8, 256, 128},
-                                      {4, 8, 256, 128},
-                                      DataType::BFLOAT16,
-                                      DataType::FLOAT,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      false,
-                                      DataType::FLOAT),
-                   "mma_core_mode = FLOAT"},
          false}};
 
     for(const auto& [test, applicability] : applicabilityTests)
     {
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
+    }
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableBf16MmaCoreModePolicy)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // HALF is cuDNN's 16-bit MMA path; BFLOAT16 is accepted as its equivalent.
+    const std::vector<std::pair<DataType, bool>> policy = {
+        {DataType::UNSET, true},
+        {DataType::HALF, true},
+        {DataType::BFLOAT16, true},
+        {DataType::FLOAT, false},
+        {DataType::FP8_E4M3, false},
+        {DataType::FP8_E5M2, false},
+        {DataType::FP8_E8M0, false},
+        {DataType::FP8_E4M3_FNUZ, false},
+        {DataType::FP8_E5M2_FNUZ, false},
+    };
+
+    for(const auto& [mode, accepted] : policy)
+    {
+        const auto builder = createSdpaFwdGraph({4, 8, 256, 128},
+                                                {4, 8, 256, 128},
+                                                DataType::BFLOAT16,
+                                                DataType::FLOAT,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                mode);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), accepted)
+            << "bf16 inputs, mma_core_mode = " << EnumNameDataType(mode);
     }
 }
 
@@ -1417,11 +1422,11 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithNonScalarDescale)
         << "fp8 inputs with non-scalar (per-[B, H_kv]) descales must be rejected";
 }
 
-// The fp8 kernels run fp8 MFMA, so a 16-bit mma_core_mode (HALF, the cuDNN-frontend
-// default that is accepted for bf16 inputs) does not describe them and must decline.
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithHalfMmaCoreMode)
+// The mode names the MMA path: cuDNN treats FP8_E4M3 (the sdpa_fp8() default) and FP8_E5M2
+// as one FP8 path. The FP8_E4M3_FNUZ input encoding is a separate check.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableFp8MmaCoreModePolicy)
 {
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     SKIP_IF_NO_DEVICES();
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
@@ -1429,19 +1434,27 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithHalfMmaCoreMode)
         GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
     }
 
-    auto unsetBuilder = createSdpaFwdFp8Graph(
-        /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, DataType::UNSET);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper unsetGraph(
-        unsetBuilder.GetBufferPointer(), unsetBuilder.GetSize());
-    ASSERT_TRUE(_planBuilder.isApplicable(_handle, unsetGraph))
-        << "control: fp8 inputs with scalar descales and UNSET mma_core_mode are accepted";
+    const std::vector<std::pair<DataType, bool>> policy = {
+        {DataType::UNSET, true},
+        {DataType::FP8_E4M3, true},
+        {DataType::FP8_E5M2, true},
+        {DataType::HALF, false},
+        {DataType::BFLOAT16, false},
+        {DataType::FLOAT, false},
+        {DataType::FP8_E8M0, false},
+        {DataType::FP8_E4M3_FNUZ, false},
+        {DataType::FP8_E5M2_FNUZ, false},
+    };
 
-    auto halfBuilder = createSdpaFwdFp8Graph(
-        /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, DataType::HALF);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfGraph(
-        halfBuilder.GetBufferPointer(), halfBuilder.GetSize());
-    EXPECT_FALSE(_planBuilder.isApplicable(_handle, halfGraph))
-        << "fp8 inputs with mma_core_mode = HALF must be rejected";
+    for(const auto& [mode, accepted] : policy)
+    {
+        const auto builder = createSdpaFwdFp8Graph(
+            /*withDescale=*/true, {1, 1, 1, 1}, /*qStrides=*/{}, /*vStrides=*/{}, mode);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), accepted)
+            << "FP8_E4M3_FNUZ inputs, mma_core_mode = " << EnumNameDataType(mode);
+    }
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
