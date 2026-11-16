@@ -2354,11 +2354,15 @@ namespace TensileLite
             defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
 
             // The tuned stagger spreads aliased rows over DRAM channels. With the aliasing
-            // padded away it only breaks L2 sharing, so start all workgroups in phase.
+            // padded away it only breaks L2 sharing, so do not stagger.
             auto aliasBytes = kStaggerAliasBytes.find(pAMDGPU->processor);
             if(aliasBytes != kStaggerAliasBytes.end() && defaultStaggerU != 0
                && callerPaddedAwayAliasing(problem, aliasBytes->second))
-                defaultStaggerUMapping = StaggerUMapping::InPhase;
+            {
+                defaultStaggerUMapping     = StaggerUMapping::WG0;
+                defaultStaggerU            = 0;
+                defaultStaggerUStrideShift = 0;
+            }
         }
 
         // If values are explicitly specified at runtime, they override predictions and default values
