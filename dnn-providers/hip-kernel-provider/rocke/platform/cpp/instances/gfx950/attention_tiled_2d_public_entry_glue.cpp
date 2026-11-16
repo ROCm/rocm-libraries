@@ -410,7 +410,10 @@ bool rocke_gfx950_attention_tiled_2d_validate_post_init_rules(
                         reason_cap,
                         "use_transposed_qk_32x32 requires the 32x32 MFMA atom - "
                         "use_mfma_32x32=False, expected True");
-    return rocke_attention_tiled_2d_validate_transposed_softmax_valu_opts(spec, reason, reason_cap)
+    return rocke_attention_tiled_2d_validate_transposed_sub_knobs(spec, reason, reason_cap)
+           && rocke_attention_tiled_2d_validate_skip_legacy_qreg(spec, reason, reason_cap)
+           && rocke_attention_tiled_2d_validate_transposed_softmax_valu_opts(
+               spec, reason, reason_cap)
            && rocke_attention_tiled_2d_validate_grouped_kv2_and_early_v(spec, reason, reason_cap);
 }
 

@@ -10,8 +10,8 @@
  *
  *   Python (attention_tiled_2d.py)              C99 (this header)
  *   -----------------------------------------   ----------------------------------------------
- *   class UnifiedAttention2DTiledSpec           rocke_attention_tiled_2d_spec_t
- *     (the spec dataclass + __post_init__)        + rocke_attention_tiled_2d_spec_default()
+ *   class UnifiedAttention2DTiledSpec           rocke_attention_tiled_2d_spec_t (+ default and
+ *     (the spec dataclass + __post_init__)        accessors: common.attention_tiled_2d_spec.h)
  *                                                 + rocke_attention_tiled_2d_spec_validate()
  *   (config constants derived in build_*)       rocke_unified_attention_2d_tiled_config_from_spec
  *   build_unified_attention_2d_tiled            rocke_build_unified_attention_2d_tiled_scalar
@@ -24,9 +24,10 @@
  * rocke_tile_distribution_calculate_x exactly as the Python drives
  * ``_C32_DIST.calculate_x``.
  *
- * ``rocke_attention_tiled_2d_spec_t`` is a structural mirror of the Python
- * dataclass: every field carries its Python default (materialised by
- * rocke_attention_tiled_2d_spec_default). Python ``Optional`` fields are encoded
+ * ``rocke_attention_tiled_2d_spec_t`` (declared, with its default and accessors,
+ * in rocke/helper_rocke.instances.common.attention_tiled_2d_spec.h) is a
+ * structural mirror of the Python dataclass: every field carries its Python
+ * default (materialised by rocke_attention_tiled_2d_spec_default). Python ``Optional`` fields are encoded
  * as a ``has_<field>`` flag + value pair (the absence flag == Python None).
  * ``__post_init__`` maps to rocke_attention_tiled_2d_spec_validate (a builder
  * variant that latches the first Python ValueError onto the sticky-error
@@ -69,35 +70,9 @@ extern "C" {
 #define ROCKE_ATTN_TILED_2D_MFMA_M 16
 #define ROCKE_ATTN_TILED_2D_MFMA_N 16
 
-/* rocke_attention_tiled_2d_spec_t lives in
+/* rocke_attention_tiled_2d_spec_t, its default constructor and its derived
+ * @property accessors live in
  * rocke/helper_rocke.instances.common.attention_tiled_2d_spec.h. */
-
-/* Materialise every defaulted field (the dataclass defaults). The required
- * fields are zero/NULL-initialised; the caller must set them before use. */
-rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void);
-
-/* ------------------------------------------------ derived @property accessors *
- *
- * Pure, IR-free; faithful ports of the dataclass @property bodies. */
-
-/* num_queries_per_kv = num_query_heads // num_kv_heads */
-int rocke_attention_tiled_2d_spec_num_queries_per_kv(const rocke_attention_tiled_2d_spec_t* s);
-/* block_m = block_m_per_warp * num_warps */
-int rocke_attention_tiled_2d_spec_block_m(const rocke_attention_tiled_2d_spec_t* s);
-/* regs_per_lane: 16 for the 32x32 paths, else block_m_per_warp // 4 */
-int rocke_attention_tiled_2d_spec_regs_per_lane(const rocke_attention_tiled_2d_spec_t* s);
-/* block_q = block_m // num_queries_per_kv */
-int rocke_attention_tiled_2d_spec_block_q(const rocke_attention_tiled_2d_spec_t* s);
-/* tile_size_eff = tile_size if has_tile_size else block_size */
-int rocke_attention_tiled_2d_spec_tile_size_eff(const rocke_attention_tiled_2d_spec_t* s);
-/* n_blocks_per_tile = tile_size_eff // block_size */
-int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_2d_spec_t* s);
-/* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
-const rocke_type_t*
-    rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s);
-/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))).
- * Exported for existing callers; the kernels derive the search at runtime. */
-int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tiled_2d_spec_t* s);
 
 /* Refuses a spec that reads K or V straight from global memory
  * (use_k_hbm_direct / use_v_hbm_direct) where the kernel being built cannot.

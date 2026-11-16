@@ -28,7 +28,6 @@
  * IRBuilder and return the sentinel. A dead/NULL builder is a no-op.
  */
 
-#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -65,169 +64,6 @@ static bool rocke_streq(const char* a, const char* c)
         return a == c;
     }
     return strcmp(a, c) == 0;
-}
-
-/* ------------------------------------------------------------- spec default */
-
-rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
-{
-    rocke_attention_tiled_2d_spec_t s;
-    memset(&s, 0, sizeof(s));
-
-    /* required fields stay zero/NULL until the caller sets them. */
-
-    /* defaulted fields (mirror the dataclass defaults). */
-    s.use_alibi = false;
-    s.use_qq_bias = false;
-    s.num_seqs = 0;
-    s.num_warps = 1;
-    s.has_waves_per_eu = false;
-    s.waves_per_eu = 0;
-    s.kv_storage_dtype = NULL;
-    s.use_fp8_mfma_qk = false;
-    s.use_fp8_mfma_pv = false;
-    s.use_register_pv = false;
-    s.use_v_double_buffer = false;
-    s.kv_ring_depth = 2;
-    s.use_staggered_iter_wait = false;
-    s.use_q_reread = false;
-    s.use_q_direct_reg = false; /* #79 */
-    s.use_sched_barrier = false;
-    s.sched_barrier_mask = 0;
-    s.use_softmax_mfma_interleave = false; /* #80 */
-    s.softmax_interleave_mode = 1;
-    s.softmax_interleave_groups = 4;
-    s.has_tile_size = false;
-    s.tile_size = 0;
-    s.block_m_per_warp = 16;
-    s.use_mfma_32x32 = false;
-    s.use_mfma_32x32x8 = false;
-    s.use_transposed_qk_32x32 = false;
-    s.use_transposed_scalar_state = false;
-    s.use_transposed_invariant_hoist = false;
-    s.use_transposed_mask_once = false;
-    s.use_transposed_half_local_pv = false;
-    s.use_mfma32_skip_legacy_qreg = false;
-    s.use_transposed_mask_limit = false;
-    s.use_grouped_kv2_softmax = false;
-    s.use_fast_paged_kv_desc = false;
-    s.use_i64_kv_addr = false;
-    s.use_early_v_schedule = false;
-    s.use_agpr_alloc_zero = false;
-    s.use_conflict_free_v = false;
-    s.use_conflict_free_v_store = false;
-    s.use_conflict_free_v_store_split = true;
-    s.use_conflict_free_v_ck_vlds = true;
-    s.use_k_single_buffer = false;
-    s.use_k_sliced_ring = false;
-    s.ring_depth = 3;
-    s.k_slice_hd = 32;
-    s.use_k_sliced_ldsseq = false;
-    s.use_iglp_opt = false;
-    s.use_qk_pv_sched_group_barrier = false;
-    s.use_q_direct_global = false;
-    s.use_v_hbm_direct = false;
-    s.use_k_hbm_direct = false;
-    s.kv_cache_policy = "stream";
-    s.use_global_load_lds_k = false;
-    s.use_q_major_grid = false;
-    s.use_qblock_reverse = false;
-    s.emit_lse = false;
-    s.lse_head_major = false;
-    return s;
-}
-
-/* ------------------------------------------------- derived @property bodies */
-
-int rocke_attention_tiled_2d_spec_num_queries_per_kv(const rocke_attention_tiled_2d_spec_t* s)
-{
-    if(s == NULL || s->num_kv_heads == 0)
-    {
-        return 0;
-    }
-    return s->num_query_heads / s->num_kv_heads;
-}
-
-int rocke_attention_tiled_2d_spec_block_m(const rocke_attention_tiled_2d_spec_t* s)
-{
-    if(s == NULL)
-    {
-        return 0;
-    }
-    return s->block_m_per_warp * s->num_warps;
-}
-
-int rocke_attention_tiled_2d_spec_regs_per_lane(const rocke_attention_tiled_2d_spec_t* s)
-{
-    if(s == NULL)
-    {
-        return 0;
-    }
-    if(s->use_mfma_32x32 || s->use_mfma_32x32x8)
-    {
-        return 16;
-    }
-    return s->block_m_per_warp / 4; /* 4 for M=16, 8 for M=32 */
-}
-
-int rocke_attention_tiled_2d_spec_block_q(const rocke_attention_tiled_2d_spec_t* s)
-{
-    int nqk;
-    if(s == NULL)
-    {
-        return 0;
-    }
-    nqk = rocke_attention_tiled_2d_spec_num_queries_per_kv(s);
-    if(nqk == 0)
-    {
-        return 0;
-    }
-    return rocke_attention_tiled_2d_spec_block_m(s) / nqk;
-}
-
-int rocke_attention_tiled_2d_spec_tile_size_eff(const rocke_attention_tiled_2d_spec_t* s)
-{
-    if(s == NULL)
-    {
-        return 0;
-    }
-    return s->has_tile_size ? s->tile_size : s->block_size;
-}
-
-int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_2d_spec_t* s)
-{
-    int bs;
-    if(s == NULL)
-    {
-        return 0;
-    }
-    bs = s->block_size;
-    if(bs == 0)
-    {
-        return 0;
-    }
-    return rocke_attention_tiled_2d_spec_tile_size_eff(s) / bs;
-}
-
-const rocke_type_t* rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s)
-{
-    if(s != NULL && rocke_streq(s->dtype, "fp16"))
-    {
-        return rocke_f16();
-    }
-    return rocke_bf16();
-}
-
-int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tiled_2d_spec_t* s)
-{
-    int it;
-    if(s == NULL || s->num_seqs <= 0)
-    {
-        return 32;
-    }
-    /* max(1, ceil(log2(num_seqs + 1))) */
-    it = (int)ceil(log2((double)(s->num_seqs + 1)));
-    return it < 1 ? 1 : it;
 }
 
 /* ------------------------------------------- direct K / V read refusal */
@@ -366,24 +202,14 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         }
     }
 
-    /* transposed sub-knob dependencies. */
-    if(s->use_transposed_scalar_state && !s->use_transposed_qk_32x32)
+    /* transposed sub-knob dependencies (the rule both tiled-2D specs share). */
     {
-        rocke_attn2d_set_err(
-            b, ROCKE_ERR_VALUE, "use_transposed_scalar_state requires use_transposed_qk_32x32");
-        return false;
-    }
-    if(s->use_transposed_invariant_hoist && !s->use_transposed_qk_32x32)
-    {
-        rocke_attn2d_set_err(
-            b, ROCKE_ERR_VALUE, "use_transposed_invariant_hoist requires use_transposed_qk_32x32");
-        return false;
-    }
-    if(s->use_transposed_mask_once && !s->use_transposed_qk_32x32)
-    {
-        rocke_attn2d_set_err(
-            b, ROCKE_ERR_VALUE, "use_transposed_mask_once requires use_transposed_qk_32x32");
-        return false;
+        char reason[ROCKE_ERR_MSG_CAP];
+        if(!rocke_attention_tiled_2d_validate_transposed_sub_knobs(s, reason, sizeof(reason)))
+        {
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+            return false;
+        }
     }
 
     /* conflict-free V feed requires the transposed-x8 orientation. */
@@ -609,6 +435,26 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
             return false;
         }
     }
+    if(s->use_global_load_lds_k && s->kv_storage_dtype != NULL)
+    {
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_global_load_lds_k v1 supports bf16/fp16 KV only");
+        return false;
+    }
+
+    /* use_mfma32_skip_legacy_qreg, then the transposed-softmax VALU opts (rules
+     * both tiled-2D specs share), then the fast descriptor's K/V read refusal:
+     * the Python relative order. */
+    {
+        char reason[ROCKE_ERR_MSG_CAP];
+        if(!rocke_attention_tiled_2d_validate_skip_legacy_qreg(s, reason, sizeof(reason))
+           || !rocke_attention_tiled_2d_validate_transposed_softmax_valu_opts(
+               s, reason, sizeof(reason)))
+        {
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+            return false;
+        }
+    }
     if(s->use_fast_paged_kv_desc
        && !rocke_attention_tiled_2d_spec_check_no_kv_hbm_direct(
            b,
@@ -618,31 +464,6 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
            "descriptor, which the fast descriptor path does not build"))
     {
         return false;
-    }
-
-    if(s->use_global_load_lds_k && s->kv_storage_dtype != NULL)
-    {
-        rocke_attn2d_set_err(
-            b, ROCKE_ERR_VALUE, "use_global_load_lds_k v1 supports bf16/fp16 KV only");
-        return false;
-    }
-
-    if(s->use_mfma32_skip_legacy_qreg && !s->use_mfma_32x32)
-    {
-        rocke_attn2d_set_err(
-            b, ROCKE_ERR_VALUE, "use_mfma32_skip_legacy_qreg requires use_mfma_32x32");
-        return false;
-    }
-
-    /* Transposed-softmax VALU opts: the rule both tiled-2D specs share. */
-    {
-        char reason[ROCKE_ERR_MSG_CAP];
-        if(!rocke_attention_tiled_2d_validate_transposed_softmax_valu_opts(
-               s, reason, sizeof(reason)))
-        {
-            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
-            return false;
-        }
     }
 
     /* use_agpr_alloc_zero detailed pairing guard (mirrors Python

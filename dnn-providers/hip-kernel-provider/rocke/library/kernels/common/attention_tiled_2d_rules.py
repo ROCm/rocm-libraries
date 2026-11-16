@@ -3,6 +3,10 @@
 
 """Spec rules the gfx942 and gfx950 tiled-2D attention specs share.
 
+* :func:`validate_transposed_sub_knobs` -- the transposed-softmax sub-knobs
+  each need the transposed QK; both specs run it at construction.
+* :func:`validate_skip_legacy_qreg` -- ``use_mfma32_skip_legacy_qreg`` needs
+  the 32x32x16 atom; both specs run it at construction.
 * :func:`validate_transposed_softmax_valu_opts` -- the transposed-softmax VALU
   opts (``use_transposed_mask_limit``); both specs run it at construction.
 * :func:`validate_grouped_kv2_and_early_v` -- grouped-KV2 softmax and the
@@ -21,7 +25,9 @@ from typing import Protocol
 __all__ = [
     "TiledAttention2DRuleFields",
     "validate_grouped_kv2_and_early_v",
+    "validate_skip_legacy_qreg",
     "validate_transposed_softmax_valu_opts",
+    "validate_transposed_sub_knobs",
 ]
 
 
@@ -70,6 +76,15 @@ class TiledAttention2DRuleFields(Protocol):
     @property
     def use_transposed_mask_limit(self) -> bool: ...
 
+    @property
+    def use_transposed_invariant_hoist(self) -> bool: ...
+
+    @property
+    def use_transposed_half_local_pv(self) -> bool: ...
+
+    @property
+    def use_mfma32_skip_legacy_qreg(self) -> bool: ...
+
 
 def _unsupported_feature_refusal(
     does_not_support: str, features: tuple[tuple[str, str, bool], ...]
@@ -77,12 +92,51 @@ def _unsupported_feature_refusal(
     """Refuse the first enabled ``(feature, field name, enabled)``.
 
     ``does_not_support`` is the message head, e.g. ``"... does not support"``.
+    Returns ``(True, "")`` when none is enabled, else ``(False, reason)``.
     """
     for feature, field_name, enabled in features:
         if enabled:
             return False, (
                 f"{does_not_support} {feature} - {field_name}=True, expected False"
             )
+    return True, ""
+
+
+def validate_transposed_sub_knobs(
+    spec: TiledAttention2DRuleFields,
+) -> tuple[bool, str]:
+    """Admit a spec whose transposed-softmax sub-knobs have the transposed QK.
+
+    Returns ``(True, "")``, or ``(False, reason)`` naming the first sub-knob
+    (scalar state, invariant hoist, mask-once, half-local PV) that is on
+    without ``use_transposed_qk_32x32``.
+    """
+    if spec.use_transposed_qk_32x32:
+        return True, ""
+    for field_name, enabled in (
+        ("use_transposed_scalar_state", spec.use_transposed_scalar_state),
+        ("use_transposed_invariant_hoist", spec.use_transposed_invariant_hoist),
+        ("use_transposed_mask_once", spec.use_transposed_mask_once),
+        ("use_transposed_half_local_pv", spec.use_transposed_half_local_pv),
+    ):
+        if enabled:
+            return False, (
+                f"{field_name} requires use_transposed_qk_32x32 - "
+                "use_transposed_qk_32x32=False, expected True"
+            )
+    return True, ""
+
+
+def validate_skip_legacy_qreg(spec: TiledAttention2DRuleFields) -> tuple[bool, str]:
+    """Admit ``use_mfma32_skip_legacy_qreg`` only with the 32x32x16 atom.
+
+    Returns ``(True, "")``, or ``(False, reason)``.
+    """
+    if spec.use_mfma32_skip_legacy_qreg and not spec.use_mfma_32x32:
+        return False, (
+            "use_mfma32_skip_legacy_qreg requires use_mfma_32x32 - "
+            "use_mfma_32x32=False, expected True"
+        )
     return True, ""
 
 

@@ -10,6 +10,8 @@
 
 #include "rocke/helper_rocke.helpers.spec.h" /* ROCKE_SPEC_FAIL */
 
+namespace
+{
 typedef struct rocke_t2d_feature
 {
     const char* feature;
@@ -19,11 +21,11 @@ typedef struct rocke_t2d_feature
 
 /* Python: _unsupported_feature_refusal. Refuses the first enabled feature;
  * `does_not_support` is the message head ("... does not support"). */
-static bool rocke_i_t2d_refuse_unsupported_feature(const char* does_not_support,
-                                                   const rocke_t2d_feature_t* features,
-                                                   size_t num_features,
-                                                   char* reason,
-                                                   size_t reason_cap)
+bool rocke_i_t2d_refuse_unsupported_feature(const char* does_not_support,
+                                            const rocke_t2d_feature_t* features,
+                                            size_t num_features,
+                                            char* reason,
+                                            size_t reason_cap)
 {
     for(size_t i = 0; i < num_features; ++i)
     {
@@ -35,6 +37,46 @@ static bool rocke_i_t2d_refuse_unsupported_feature(const char* does_not_support,
                             features[i].feature,
                             features[i].field);
     }
+    return true;
+}
+} // namespace
+
+bool rocke_attention_tiled_2d_validate_transposed_sub_knobs(
+    const rocke_attention_tiled_2d_spec_t* spec, char* reason, size_t reason_cap)
+{
+    if(spec->use_transposed_qk_32x32)
+        return true;
+    const struct
+    {
+        const char* field;
+        bool enabled;
+    } sub_knobs[] = {
+        {"use_transposed_scalar_state", spec->use_transposed_scalar_state},
+        {"use_transposed_invariant_hoist", spec->use_transposed_invariant_hoist},
+        {"use_transposed_mask_once", spec->use_transposed_mask_once},
+        {"use_transposed_half_local_pv", spec->use_transposed_half_local_pv},
+    };
+    for(const auto& sub_knob : sub_knobs)
+    {
+        if(sub_knob.enabled)
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "%s requires use_transposed_qk_32x32 - "
+                            "use_transposed_qk_32x32=False, expected True",
+                            sub_knob.field);
+    }
+    return true;
+}
+
+bool rocke_attention_tiled_2d_validate_skip_legacy_qreg(const rocke_attention_tiled_2d_spec_t* spec,
+                                                        char* reason,
+                                                        size_t reason_cap)
+{
+    if(spec->use_mfma32_skip_legacy_qreg && !spec->use_mfma_32x32)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "use_mfma32_skip_legacy_qreg requires use_mfma_32x32 - "
+                        "use_mfma_32x32=False, expected True");
     return true;
 }
 
