@@ -135,5 +135,42 @@ if(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
     target_link_libraries(tensilelite-client PRIVATE rocprofiler-sdk)
 endif()
 
+# The toolchain tags the executables' search path as DT_RUNPATH, which the
+# loader consults only after LD_LIBRARY_PATH. Tools that put <ROCM>/lib on
+# LD_LIBRARY_PATH (rocprofv3, the rocprofiler-sdk modulefiles) then make the
+# client load that ROCm's libtensilelite-host.so.1 instead of the one it was
+# built against; both share the SONAME but not the ABI or library format.
+# Re-tagging the same path list as DT_RPATH puts it ahead of LD_LIBRARY_PATH.
+# That holds for every directory in the list, so LD_LIBRARY_PATH can no longer
+# swap in another libamdhip64 or libhsa-runtime64 either; configure with
+# -DTENSILELITE_CLIENT_FORCE_RPATH=OFF for that. The re-tag needs patchelf.
+# The list is read back from the binary rather than recomputed, so it stays
+# whatever CMake (or a superbuild) chose, and install-time RPATH_CHANGE keeps
+# the tag. The build-tree list keeps the empty entries CMake pads it with when
+# the install list is longer: install-time RPATH_CHANGE matches and overwrites
+# them in place and fails if they are stripped. The loader reads an empty entry
+# as the current directory; any padded build-tree binary already searches it
+# for libraries the real entries don't have (system libraries included), and
+# the re-tag moves that search ahead of LD_LIBRARY_PATH. Installed clients have
+# no empty entries.
+option(TENSILELITE_CLIENT_FORCE_RPATH
+    "Tag the client executables' search path as DT_RPATH (ahead of LD_LIBRARY_PATH); needs patchelf" ON)
+if(TENSILELITE_CLIENT_FORCE_RPATH AND UNIX AND NOT APPLE)
+    find_program(TENSILELITE_PATCHELF patchelf)
+    if(TENSILELITE_PATCHELF)
+        foreach(_client IN ITEMS tensilelite-client cpu-gemm-driver)
+            add_custom_command(TARGET ${_client} POST_BUILD
+                COMMAND sh -c "r=$(\"$0\" --print-rpath \"$1\") || exit 1; [ -z \"$r\" ] || exec \"$0\" --force-rpath --set-rpath \"$r\" \"$1\""
+                        "${TENSILELITE_PATCHELF}" "$<TARGET_FILE:${_client}>"
+                VERBATIM)
+        endforeach()
+    else()
+        message(WARNING
+            "patchelf not found: tensilelite-client keeps DT_RUNPATH, so an "
+            "LD_LIBRARY_PATH holding another ROCm's lib/ can replace its "
+            "tensilelite-host library at run time.")
+    endif()
+endif()
+
 add_subdirectory(include)
 add_subdirectory(src)
