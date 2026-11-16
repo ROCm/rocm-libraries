@@ -50,7 +50,8 @@ public:
         return _fetches;
     }
 
-    /// Adds @p fetch to the innermost recording open on this thread, if any.
+    /// Adds @p fetch to the innermost recording open on this thread, if any, and to the
+    /// process counters (CompileCounters.hpp).
     static void record(ProgramFetch fetch);
 
     /// How many fetches this thread has recorded since it started, open recording or not. A

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Program.hpp"
+#include "CompileCounters.hpp"
 #include "HiprtcDiskCache.hpp"
 #include "ProgramFetchRecording.hpp"
 #include "Utils.hpp"
@@ -82,6 +83,7 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
         // caller checking hipGetLastError later must not see a failure that did not happen.
         if(cached.outcome == hiprtc_cache::ReadOutcome::CORRUPT)
         {
+            countCorruptEntry();
             HIPDNN_PLUGIN_LOG_WARN("hipRTC cache: " << cachePath.string() << " " << cached.problem
                                                     << "; recompiling " << _programName
                                                     << " and replacing it");
@@ -137,6 +139,7 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
             }
         }
         hiprtcDestroyProgram(&prog);
+        countCompileFailure();
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "hiprtcCompileProgram failed for " + _programName + ": " + hiprtcGetErrorString(result)

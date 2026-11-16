@@ -14,6 +14,7 @@ add_library(
     core/PlanDescription.cpp
     core/PluginPublic.cpp
     core/Utils.cpp
+    compilation/CompileCounters.cpp
     compilation/HiprtcDiskCache.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp

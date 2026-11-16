@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include "compilation/CompileCounters.hpp"
 #include "compilation/ProgramFetchRecording.hpp"
 
 #include <thread>
@@ -60,4 +61,34 @@ TEST(TestProgramFetchRecording, CollectsOnItsOwnThreadAndNests)
     EXPECT_EQ(outer.fetches()[0].program, "b.cpp");
     EXPECT_EQ(outer.fetches()[1].program, "e.cpp");
     EXPECT_EQ(ProgramFetchRecording::recordedOnThisThread(), before + 4);
+}
+
+TEST(TestCompileCounters, CountEachSourceAndFormatAsOneLine)
+{
+    const auto before = compileCounters();
+    ProgramFetchRecording::record({"a.cpp", CodeSource::COMPILED, 1500.0});
+    ProgramFetchRecording::record({"b.cpp", CodeSource::DISK_CACHE, 1.0});
+    ProgramFetchRecording::record({"c.cpp", CodeSource::IN_PROCESS, 0.0});
+    ProgramFetchRecording::record({"c.cpp", CodeSource::IN_PROCESS, 0.0});
+    countCompileFailure();
+    countCorruptEntry();
+    const auto after = compileCounters();
+    EXPECT_EQ(after.compiles - before.compiles, 1u);
+    EXPECT_NEAR(after.compileSeconds - before.compileSeconds, 1.5, 1e-6);
+    EXPECT_EQ(after.diskHits - before.diskHits, 1u);
+    EXPECT_EQ(after.inProcessHits - before.inProcessHits, 2u);
+    EXPECT_EQ(after.compileFailures - before.compileFailures, 1u);
+    EXPECT_EQ(after.corruptEntries - before.corruptEntries, 1u);
+    EXPECT_EQ(after.storeHits, before.storeHits);
+
+    CompileCounters counters;
+    counters.compiles = 3;
+    counters.compileSeconds = 2.414;
+    counters.compileFailures = 1;
+    counters.diskHits = 12;
+    counters.corruptEntries = 2;
+    counters.inProcessHits = 40;
+    EXPECT_EQ(formatCompileCounters(counters),
+              "hipRTC: 3 compiled (2.41 s), 1 failed, 12 disk-cache hits, 2 corrupt entries "
+              "replaced, 40 in-process hits, 0 store hits");
 }

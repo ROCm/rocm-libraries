@@ -3,6 +3,8 @@
 
 #include "ProgramFetchRecording.hpp"
 
+#include "CompileCounters.hpp"
+
 #include <cstdio>
 #include <utility>
 
@@ -75,6 +77,7 @@ ProgramFetchRecording::~ProgramFetchRecording()
 void ProgramFetchRecording::record(ProgramFetch fetch)
 {
     ++recorded();
+    countFetch(static_cast<int>(fetch.source), fetch.milliseconds);
     if(sink() != nullptr)
     {
         sink()->push_back(std::move(fetch));
