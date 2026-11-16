@@ -822,9 +822,11 @@ passes as `--test-config`). Only
 holds any, after the comment line `-- SdpaFwdPlan known engine defects --`.
 Read the TOML files for the current list. This document does not copy it.
 
-A refusal at run time is not a defect and gets no skip. The FlyDSL SDPA lanes
-exclude the run-time zero and negative scale cases in their tier YAML file
-instead (section 9.5, ALMIOPEN-3247).
+A refusal at run time is not a defect, but the suite cannot yet accept a
+refusal as the expected outcome (ALMIOPEN-3247). The FlyDSL SDPA lanes exclude
+the run-time zero and negative scale cases in their tier YAML file (section
+9.5). `ASM_SDPA_ENGINE` declines most of these cases. Its TOML file skips the
+4 cases that it refuses at run time, under ALMIOPEN-3247.
 
 ### 10.1 Running the cases
 
@@ -917,16 +919,14 @@ that the engine is correct for it. Examples:
 - ALMIOPEN-3042: every case with self-overlapping Q, K or V sequence strides,
   and every case with a Stats layout that the kernel cannot address. The
   result depends on the input data and on the memory contents.
-- ALMIOPEN-3043: every case with an attention scale that is zero, negative or
-  subnormal.
 
 ALMIOPEN-3123 and ALMIOPEN-3124 are an exception to this rule: their entries
 cover the cases observed to fail, not every case with the trigger. Most
 trigger cases pass or the engine declines them, and the uncovered cases keep
-running so they still exercise the engine. ALMIOPEN-3123 has 2,292 trigger
+running so they still exercise the engine. ALMIOPEN-3123 has 2,360 trigger
 cases with no entry; 156 of them ran, 153 passing on gfx942 and gfx950 and 3
 passing on gfx942 but declined on gfx950, the rest declined on both.
-ALMIOPEN-3124 has 297 trigger cases with no entry, all declined on both.
+ALMIOPEN-3124 has 313 trigger cases with no entry, all declined on both.
 
 Use a list of exact names from measured failures only for a defect that has no
 known trigger. For example, the ALMIOPEN-3212 entry names the one case that
