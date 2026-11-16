@@ -275,7 +275,8 @@ std::optional<MatchedProblem> matchProblem(const MatchContext& context)
         return std::nullopt;
     }
     const auto groups = xDims->Get(1) / channelsPerGroup;
-    // gridDim.z carries the group, and each group owns K / groups output channels.
+    // Both engines cap groups at 65535 (gfx950's gridDim.z carries the group), and each
+    // group owns K / groups output channels.
     if(groups < 1 || groups > 65535 || wDims->Get(0) % groups != 0)
     {
         return std::nullopt;

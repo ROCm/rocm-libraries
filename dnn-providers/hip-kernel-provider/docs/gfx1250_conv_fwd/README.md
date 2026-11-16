@@ -4,8 +4,10 @@
 (wave32 WMMA direct kernels, VALU depthwise kernels and implicit GEMM) through the
 HIP Kernel Provider. It accepts one 2D cross-correlation with x, w and y in the same
 FP16 or BF16 type, FP32 accumulation, packed channels-last storage (NHWC input, KYXC
-filter, NHWK output), symmetric padding, and every tensor within the kernels' i32 byte
-sizes. Grouped convolution, depthwise included, is supported: the group count is
+filter, NHWK output), symmetric padding, every tensor within the kernels' i32 byte
+sizes, and the padded input and dilated filter extents within signed 32 bits. x, w and
+y must be 16-byte aligned (a multiple of 16) and not ragged. Grouped convolution,
+depthwise included, is supported up to 65535 groups, as on gfx950: the group count is
 inferred as X channels divided by W dimension 1. Every other device is declined
 (architecture, warp size and compute type are checked).
 

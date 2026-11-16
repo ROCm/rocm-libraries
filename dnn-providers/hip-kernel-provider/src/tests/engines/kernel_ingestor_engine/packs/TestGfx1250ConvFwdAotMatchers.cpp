@@ -273,6 +273,20 @@ TEST(TestGfx1250ConvFwdAotMatchers, InfersGroupsFromTheFiltersChannels)
     EXPECT_EQ(boundProblem(*bound).at(16), 4);
 }
 
+// The groups cap is gfx950's: 65535 groups are matched, 65536 are declined.
+TEST(TestGfx1250ConvFwdAotMatchers, GroupsAreCappedAt65535)
+{
+    for(const auto groups : {int64_t{65535}, int64_t{65536}})
+    {
+        SCOPED_TRACE(groups);
+        ConvShape depthwise;
+        depthwise.n = 1;
+        depthwise.h = depthwise.w = 4;
+        depthwise.c = depthwise.k = depthwise.groups = groups;
+        EXPECT_EQ(serves(depthwise), groups == 65535);
+    }
+}
+
 TEST(TestGfx1250ConvFwdAotMatchers, ServesBf16)
 {
     ConvShape shape;
