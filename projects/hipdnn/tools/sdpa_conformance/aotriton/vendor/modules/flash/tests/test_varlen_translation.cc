@@ -271,11 +271,13 @@ test_version_translation() {
                          AOTRITON_NS::DType::kInt32);
     attn_fwd_params out;
     const auto& as_current = *reinterpret_cast<const attn_fwd_params*>(&v3);
-    check(translate_fwd_params(as_current, 3, &out), "fwd: version 3 translates");
+    check(translate_fwd_params(as_current, 3, &out) == TranslateStatus::kOk,
+          "fwd: version 3 translates");
     check_eq(varlen_to_wire(out.varlen_bits), 0x0B0Bu, "fwd: version 3 -> compact");
-    check(!translate_fwd_params(as_current, 2, &out),
+    check(translate_fwd_params(as_current, 2, &out) == TranslateStatus::kTooOld,
           "fwd: version 2 is refused, not read as a v3");
-    check(!translate_fwd_params(as_current, 0, &out), "fwd: version 0 is refused");
+    check(translate_fwd_params(as_current, 0, &out) == TranslateStatus::kTooOld,
+          "fwd: version 0 is refused");
 
     versioned_attn_bwd_params<6> v6{};
     v6.varlen_type = VarlenType::PaddedVarlen;
@@ -283,13 +285,15 @@ test_version_translation() {
                          AOTRITON_NS::DType::kInt32);
     attn_bwd_params outb;
     const auto& b_as_current = *reinterpret_cast<const attn_bwd_params*>(&v6);
-    check(translate_bwd_params(b_as_current, 6, &outb), "bwd: version 6 translates");
+    check(translate_bwd_params(b_as_current, 6, &outb) == TranslateStatus::kOk,
+          "bwd: version 6 translates");
     check_eq(varlen_to_wire(outb.varlen_bits), 0x0202u, "bwd: version 6 -> padded");
-    check(!translate_bwd_params(b_as_current, 5, &outb),
+    check(translate_bwd_params(b_as_current, 5, &outb) == TranslateStatus::kTooOld,
           "bwd: version 5 is refused, not read as a v6");
     // The current version is not a legacy row: the shims handle it by not
     // translating at all, so the dispatcher must not claim it either.
-    check(!translate_fwd_params(as_current, attn_fwd_params::kVersion, &out),
+    check(translate_fwd_params(as_current, attn_fwd_params::kVersion, &out)
+              == TranslateStatus::kTooOld,
           "fwd: current version is not in the legacy table");
   }
 
@@ -306,6 +310,94 @@ test_version_translation() {
            "current caller: seqused_k on packed KV, which no VarlenType can spell");
   fresh.varlen_bits.lse_layout = VarlenLseLayout::TH;
   check_eq(varlen_to_wire(fresh.varlen_bits), 0x1'150Bu, "current caller: + _TH");
+}
+
+// principal_diagonal_choice (bit 18) and the kVersion 5 (fwd) / 8 (bwd) bump.
+void
+test_principal_diagonal() {
+  // Wire round trip.
+  VarlenBits pd = kCompact;
+  pd.principal_diagonal_choice = VarlenPrincipalDiagonal::BOTTOM_RIGHT;
+  check_eq(varlen_to_wire(pd), 0x4'0B0Bu, "compact + BOTTOM_RIGHT encodes bit 18");
+  const VarlenBits back = varlen_from_wire(0x4'0B0Bu);
+  check(back.principal_diagonal_choice == 1u && back.reserved == 0u && back.lse_layout == 0u,
+        "bit 18 decodes to principal_diagonal_choice only");
+  check_eq(varlen_to_wire(varlen_from_wire(0x7'0B0Bu)), 0x7'0B0Bu,
+           "bits 16..18 round-trip together");
+  check(varlen_from_wire(0x8'0000u).reserved == 1u
+        && varlen_from_wire(0x8'0000u).principal_diagonal_choice == 0u,
+        "bit 19 is reserved, not principal_diagonal_choice");
+  check_eq(varlen_to_wire(varlen_from_wire(0xFFF8'0000u)) , 0xFFF8'0000u,
+           "reserved bits 31:19 round-trip");
+
+  // Validity: bit 18 is legal, bit 19 is not.
+  const auto q = side_of(0x0000u, true, 1, 0, 0, 0);
+  const auto k = side_of(0x0000u, false, 1, 0, 0, 0);
+  check(varlen_valid(varlen_from_wire(0x4'0000u), q, k), "bit 18 alone is valid");
+  check(!varlen_valid(varlen_from_wire(0x8'0000u), q, k), "bit 19 still fails varlen_valid");
+  check(!varlen_valid(varlen_from_wire(0xC'0000u), q, k), "bits 19+18 fail varlen_valid");
+  // The persistent-path mask must not see bit 18.
+  check(varlen_addressing(0x4'0000u) == 0u, "bit 18 is not an addressing bit");
+
+  // v4 forward: translates with the bit at 0, everything else intact.
+  versioned_attn_fwd_params<4> f4{};
+  f4.varlen_bits.qmode = kCompact.qmode;
+  f4.varlen_bits.kmode = kCompact.kmode;
+  f4.varlen_bits.lse_layout = VarlenLseLayout::TH;
+  f4.window_left = -3;
+  f4.window_right = 9;
+  f4.Max_seqlen_q = 17;
+  attn_fwd_params fout;
+  const auto& f4_as_current = *reinterpret_cast<const attn_fwd_params*>(&f4);
+  check(translate_fwd_params(f4_as_current, 4, &fout) == TranslateStatus::kOk,
+        "fwd: version 4 translates");
+  check_eq(varlen_to_wire(fout.varlen_bits), 0x1'0B0Bu, "fwd v4 keeps its word, bit 18 = 0");
+  check(fout.varlen_bits.principal_diagonal_choice == VarlenPrincipalDiagonal::TOP_LEFT,
+        "fwd v4 -> TOP_LEFT");
+  check(fout.window_left == -3 && fout.window_right == 9 && fout.Max_seqlen_q == 17,
+        "fwd v4: plain fields survive");
+
+  // v4 forward with a non-zero reserved bit above 18: keeps flowing to
+  // varlen_valid as bit 19 (still reserved), not silently dropped.
+  f4.varlen_bits.reserved = 2;  // bit 19 of the word
+  check(translate_fwd_params(f4_as_current, 4, &fout) == TranslateStatus::kOk
+        && fout.varlen_bits.reserved == 1u && fout.varlen_bits.principal_diagonal_choice == 0u,
+        "fwd v4: bit 19 stays reserved after translation");
+  f4.varlen_bits.reserved = 0;
+
+  // v4 forward with bit 18 set: malformed, not reinterpreted, not "too old".
+  f4.varlen_bits.reserved = 1;  // bit 18 of the word
+  fout = attn_fwd_params();
+  check(translate_fwd_params(f4_as_current, 4, &fout) == TranslateStatus::kMalformed,
+        "fwd: version 4 with bit 18 set is malformed");
+  check(fout.varlen_bits.principal_diagonal_choice == 0u,
+        "fwd: rejected v4 object is not translated");
+
+  // v7 backward.
+  versioned_attn_bwd_params<7> b7{};
+  b7.varlen_bits.qmode = kCompact.qmode;
+  b7.varlen_bits.kmode = kCompact.kmode;
+  b7.window_right = 4;
+  attn_bwd_params bout;
+  const auto& b7_as_current = *reinterpret_cast<const attn_bwd_params*>(&b7);
+  check(translate_bwd_params(b7_as_current, 7, &bout) == TranslateStatus::kOk,
+        "bwd: version 7 translates");
+  check_eq(varlen_to_wire(bout.varlen_bits), 0x0B0Bu, "bwd v7 keeps its word, bit 18 = 0");
+  check(bout.varlen_bits.principal_diagonal_choice == VarlenPrincipalDiagonal::TOP_LEFT
+        && bout.window_right == 4, "bwd v7 -> TOP_LEFT, fields survive");
+  b7.varlen_bits.reserved = 1;
+  check(translate_bwd_params(b7_as_current, 7, &bout) == TranslateStatus::kMalformed,
+        "bwd: version 7 with bit 18 set is malformed");
+
+  // The current version is not translated; versions beyond it are not
+  // described, which the dispatcher reports as kTooOld (the shims refuse
+  // params_version > kVersion before ever calling it).
+  check(attn_fwd_params::kVersion == 5 && attn_bwd_params::kVersion == 8,
+        "kVersion is 5 (fwd) / 8 (bwd)");
+  check(translate_fwd_params(f4_as_current, 6, &fout) != TranslateStatus::kOk,
+        "fwd: version 6 is not translated");
+  check(translate_bwd_params(b7_as_current, 9, &bout) != TranslateStatus::kOk,
+        "bwd: version 9 is not translated");
 }
 
 // PR #222 review: the shim keyed Max_seqlen off tensor presence, so a THD side
@@ -394,9 +486,9 @@ test_bits_validation() {
   check(!varlen_valid(varlen_from_wire(0x0020u),
                              side_of(0x0020u, true,  1, 0, 0, 0),
                              side_of(0x0020u, false, 1, 0, 0, 0)), "reserved bit 5 set");
-  check(!varlen_valid(varlen_from_wire(0x00040000u),
-                             side_of(0x00040000u, true,  1, 0, 0, 0),
-                             side_of(0x00040000u, false, 1, 0, 0, 0)), "reserved bit 18 set");
+  check(!varlen_valid(varlen_from_wire(0x00080000u),
+                             side_of(0x00080000u, true,  1, 0, 0, 0),
+                             side_of(0x00080000u, false, 1, 0, 0, 0)), "reserved bit 19 set (bit 18 is principal_diagonal_choice)");
 
   // LSE_LAYOUT is not addressing and must not be rejected.
   check(varlen_valid(varlen_from_wire(0x10000u),
@@ -641,6 +733,7 @@ main() {
   test_legacy_table();
   test_legacy_quirks();
   test_version_translation();
+  test_principal_diagonal();
   test_max_seqlen_source();
   test_bits_validation();
   test_extent_validation();

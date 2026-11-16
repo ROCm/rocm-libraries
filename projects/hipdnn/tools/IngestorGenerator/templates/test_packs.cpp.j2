@@ -264,10 +264,15 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
 {% if ('    EXPECT_NE(' ~ find_knob ~ ',') | length <= column_limit %}
     EXPECT_NE({{ find_knob }},
               _set->engine.knobs.end());
-{% else %}
+{% elif ('        ' ~ find_knob ~ ',') | length <= column_limit %}
     EXPECT_NE(
         {{ find_knob }},
         _set->engine.knobs.end());
+{% else %}
+    EXPECT_NE(std::find(_set->engine.knobs.begin(),
+                        _set->engine.knobs.end(),
+                        "{{ knob | cpp_escape }}"),
+              _set->engine.knobs.end());
 {% endif %}
 {% endfor %}
 }
