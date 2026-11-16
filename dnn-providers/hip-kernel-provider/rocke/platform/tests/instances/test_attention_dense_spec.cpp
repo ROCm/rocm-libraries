@@ -376,7 +376,8 @@ bool json_traits(const jd_val_t* h,
     return (t->type_name = rocke_jstr(rocke_jget(h, "type_name"))) != nullptr
            && json_bool(rocke_jget(h, "supports_noncausal_window"), &t->supports_noncausal_window)
            && json_bool(rocke_jget(h, "supports_noncausal_cross_length_ragged"),
-                        &t->supports_noncausal_cross_length_ragged);
+                        &t->supports_noncausal_cross_length_ragged)
+           && json_bool(rocke_jget(h, "supports_any_window_size"), &t->supports_any_window_size);
 }
 
 void check_vectors()

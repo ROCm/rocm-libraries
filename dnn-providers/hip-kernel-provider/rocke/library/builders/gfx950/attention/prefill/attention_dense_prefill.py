@@ -363,7 +363,7 @@ def main():
         choices=sorted(Gfx950AttentionDenseSpec.supported_nonpersist_decodes()),
     )
     ap.add_argument(
-        "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
+        "--sw", type=int, default=0, help="sliding_window (0=off; any width)"
     )
     ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
     ap.add_argument(

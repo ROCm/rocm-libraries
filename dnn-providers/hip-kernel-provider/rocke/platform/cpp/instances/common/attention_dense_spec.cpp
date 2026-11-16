@@ -443,6 +443,7 @@ rocke_attention_dense_traits_t rocke_attention_dense_traits_base(void)
     t.num_persist_decodes = base_persist_names().size();
     t.nonpersist_decodes = base_nonpersist_names().data();
     t.num_nonpersist_decodes = base_nonpersist_names().size();
+    t.supports_any_window_size = false;
     return t;
 }
 
@@ -569,7 +570,7 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
     {
         if(!s->causal && !t->supports_noncausal_window)
             ROCKE_SPEC_FAIL(reason, cap, "sliding_window>0 requires causal=True");
-        if(s->sliding_window % s->block_n != 0)
+        if(s->sliding_window % s->block_n != 0 && !t->supports_any_window_size)
             ROCKE_SPEC_FAIL(reason,
                             cap,
                             "sliding_window (%d) must be a multiple of block_n=%d",
