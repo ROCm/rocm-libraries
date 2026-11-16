@@ -45,6 +45,15 @@ MIOPEN_INTERNALS_EXPORT std::vector<std::string> PickConfig(const std::string& s
 // best->worst (same order PickConfig produces). Lets gtest validate the scoring +
 // ranking path against exported test vectors without a GPU or a
 // ProblemDescription. Returns an empty vector if the solver model is unavailable.
+// Test hook: the ranking PickConfig would return for `solver_name`'s bucket `bucket_key`
+// (arch|direction|dtype) and the feature prefix `prob_feature_prefix`, through the per-process
+// memo (`cached`) or computed directly. Empty when the solver or the bucket is unknown.
+MIOPEN_INTERNALS_EXPORT std::vector<std::string>
+RankBucketForTest(const std::string& solver_name,
+                  const std::string& bucket_key,
+                  const std::vector<double>& prob_feature_prefix,
+                  bool cached);
+
 MIOPEN_INTERNALS_EXPORT std::vector<std::string>
 ScorePickForTest(const std::string& solver_name,
                  const std::vector<double>& prob_feature_prefix,

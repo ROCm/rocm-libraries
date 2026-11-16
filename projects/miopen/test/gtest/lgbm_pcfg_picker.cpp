@@ -26,6 +26,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <string>
@@ -37,6 +38,7 @@ namespace {
 using miopen::ai::lgbm::LgbmForest;
 using miopen::ai::lgbm::pcfg::kNumBaseProbFeatures;
 using miopen::ai::lgbm::pcfg::LgbmPcfgMetadata;
+using miopen::ai::lgbm::pcfg::RankBucketForTest;
 using miopen::ai::lgbm::pcfg::ScorePickForTest;
 
 class CPU_LgbmPcfgPicker_NONE : public ::testing::Test
@@ -122,6 +124,44 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
     }
 
     ASSERT_GT(solvers_checked, 0) << "no loaded pcfg solver model";
+    ASSERT_GT(buckets_checked, 0) << "no non-empty buckets scored";
+}
+
+// PickConfig memoizes each bucket's ranking per feature prefix. For every solver (first non-empty
+// bucket), take a base prefix and one variant per prefix element; rank them all through the memo
+// first, so a key that dropped any input would serve one prefix's ranking for another, then check
+// that each memoized ranking equals the one computed without the memo.
+TEST_F(CPU_LgbmPcfgPicker_NONE, MemoizedRankingMatchesComputed)
+{
+    int buckets_checked = 0;
+    for(const auto& solver : meta.SolverNames())
+    {
+        const auto* model = meta.Find(solver);
+        ASSERT_NE(model, nullptr);
+        const auto bucket = std::find_if(model->buckets.begin(),
+                                         model->buckets.end(),
+                                         [](const auto& b) { return !b.second.empty(); });
+        if(bucket == model->buckets.end())
+            continue;
+
+        const auto n = static_cast<std::size_t>(model->prob_feat_count);
+        std::vector<std::vector<double>> prefixes{std::vector<double>(n, 1.0)};
+        for(std::size_t i = 0; i < n; ++i)
+        {
+            auto p = prefixes.front();
+            p[i]   = 3.0;
+            prefixes.push_back(std::move(p));
+        }
+
+        for(const auto& p : prefixes)
+            ASSERT_FALSE(RankBucketForTest(solver, bucket->first, p, true).empty())
+                << solver << " bucket " << bucket->first;
+        for(std::size_t i = 0; i < prefixes.size(); ++i)
+            EXPECT_EQ(RankBucketForTest(solver, bucket->first, prefixes[i], true),
+                      RankBucketForTest(solver, bucket->first, prefixes[i], false))
+                << solver << " bucket " << bucket->first << " prefix variant " << i;
+        ++buckets_checked;
+    }
     ASSERT_GT(buckets_checked, 0) << "no non-empty buckets scored";
 }
 
