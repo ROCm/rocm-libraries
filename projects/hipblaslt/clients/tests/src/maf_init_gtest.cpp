@@ -162,6 +162,37 @@ namespace
         EXPECT_EQ(static_cast<float>(h[11446]), -0.92578125f);
     }
 
+    // maf2_0 rounds each double draw once to BF16. The FP64 fill of the same shape draws the same
+    // values, so every BF16 cell must equal its FP64 cell rounded to nearest even, computed here
+    // without going through float. About one draw in 2^17 lands where rounding to float first
+    // changes the result; 4M draws hit a few dozen, and must hit one or the check proves nothing.
+    TEST(MafInitDevice_pre_checkin, maf2_0_rounds_once_to_bf16)
+    {
+        const size_t M = 2048, N = 2048, total = M * N;
+        const auto   d = fill<double>(
+            ABC_dims::A, hipblaslt_initialization::maf2_0, HIP_R_64F, M, N, M, 0, 1, total);
+        const auto h = fill<hip_bfloat16>(
+            ABC_dims::A, hipblaslt_initialization::maf2_0, HIP_R_16BF, M, N, M, 0, 1, total);
+        // Nearest even with 8 significant bits; dividing by a power of two is exact.
+        auto bf16 = [](double v) {
+            if(v == 0)
+                return v;
+            const double ulp = std::ldexp(1.0, std::ilogb(v) - 7);
+            return std::nearbyint(v / ulp) * ulp;
+        };
+        size_t wrong = 0, viaFloatDiffers = 0;
+        for(size_t k = 0; k < total; k++)
+        {
+            const double once = bf16(d[k]);
+            if(static_cast<double>(static_cast<float>(h[k])) != once)
+                wrong++;
+            if(bf16(static_cast<float>(d[k])) != once)
+                viaFloatDiffers++;
+        }
+        EXPECT_EQ(wrong, 0u);
+        EXPECT_GT(viaFloatDiffers, 0u);
+    }
+
     // maf2_0 draws N(0, 1) from seeded streams: the same matrix repeats exactly, while A, B, C,
     // the batches of one call and pointer-array batches all get different data. Non-block-scaled
     // operands get the same fill from maf2_0_unit_scale.
