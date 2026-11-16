@@ -129,7 +129,9 @@ namespace rocalution
         }
 
         // Wait for all threads to finish clearing
-        if(NTHREADS < warpSize)
+        // A map owned by a single wavefront must not use a block barrier: callers may have
+        // returned early with other wavefronts of the block
+        if(NTHREADS <= warpSize)
         {
             __threadfence_block();
         }
@@ -483,7 +485,7 @@ namespace rocalution
         unordered_map<KeyType, ValType, SIZE, NTHREADS, HASHVAL, EMPTY>::sort(void)
     {
         // Sync writes before sorting
-        if(NTHREADS < warpSize)
+        if(NTHREADS <= warpSize)
         {
             __threadfence_block();
         }
@@ -555,7 +557,7 @@ namespace rocalution
         }
 
         // Sync writes after sorting
-        if(NTHREADS < warpSize)
+        if(NTHREADS <= warpSize)
         {
             __threadfence_block();
         }

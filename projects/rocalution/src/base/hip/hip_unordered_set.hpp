@@ -95,7 +95,9 @@ namespace rocalution
         }
 
         // Wait for all threads to finish clearing
-        if(NTHREADS < warpSize)
+        // A set owned by a single wavefront must not use a block barrier: callers may have
+        // returned early with other wavefronts of the block
+        if(NTHREADS <= warpSize)
         {
             __threadfence_block();
         }
