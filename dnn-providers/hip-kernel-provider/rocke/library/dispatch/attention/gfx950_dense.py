@@ -80,8 +80,10 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        # Additive bias is grid-body only, and fp32 only (see _base_spec).
-        features=_FEATURES | {"causal_bottom_right", "attn_bias"},
+        # Additive bias is grid-body only, and fp32 only (see _base_spec). fp8 KV is
+        # grid-only too -- the spec rejects persistent/paged (so the persistent
+        # variants advertise neither).
+        features=_FEATURES | {"causal_bottom_right", "attn_bias", "fp8"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches, so it serves hipDNN's fp32 attn_mask too.
@@ -261,6 +263,16 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
             if not _is_ragged(sq, sk, int(tile["block_m"]), int(tile["block_n"])):
                 bm, bn, ragged = int(tile["block_m"]), int(tile["block_n"]), False
                 break
+    # Both flags are checked as bools by _request_errors before any candidate is
+    # consulted, so they are read here without re-coercing.
+    if req.use_fp8:
+        # gfx950 decodes OCP fp8; reject an FNUZ-encoded request here (it would
+        # otherwise map to the same OCP spec and be decoded ~2x off).
+        from .tuning_specs import validate_explicit_fp8_encoding
+
+        validate_explicit_fp8_encoding(
+            arch="gfx950", use_fp8=True, fp8_fnuz=req.fp8_fnuz
+        )
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -289,6 +301,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         right_bound=right_bound,
         kv_segments=kv_segments,
         use_additive_bias=use_bias,
+        kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )
 
 
