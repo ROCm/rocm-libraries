@@ -385,6 +385,15 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                         const rocke_attention_tiled_2d_spec_t* spec,
                                         const char* arch);
 
+/* The tiled 2D build without the gfx942 spec checks: the body of
+ * rocke_build_unified_attention_2d_tiled_scalar, which runs
+ * rocke_attention_tiled_2d_spec_validate first. Only for a caller that checks
+ * the spec under its own rules first, which is the gfx950 fastKV register-P
+ * build: its spec carries gfx950 knobs the gfx942 checks refuse. Returns the
+ * kernel, or NULL with b's sticky error set. */
+rocke_kernel_def_t* rocke_gfx942_attn2d_build_without_spec_checks(
+    rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch);
+
 /* ===================================================================== *
  *  PHASE FUNCTIONS -- one per Python closure / build section.
  *

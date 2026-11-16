@@ -10,6 +10,8 @@
 #include "rocke/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
+#include "rocke/instance_gfx942_attention_tiled_2d_internal.h" /* rocke_gfx942_attn2d_build_without_spec_checks */
+#include "rocke/instance_gfx950_attention_tiled_2d_internal.h" /* rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
@@ -325,6 +327,13 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
             }
         }
 
+        /* The tiled build below is the gfx942 one without its spec checks
+         * (they refuse this spec's gfx950 knobs), so refuse the direct K/V
+         * reads here: with them the K read would address a paged-KV
+         * descriptor the fast descriptor path never builds. */
+        if(!rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(b, spec))
+            return NULL;
+
         /* if not spec.use_fast_paged_kv_desc: raise ValueError(...) */
         if(!spec->use_fast_paged_kv_desc)
         {
@@ -394,7 +403,7 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_fastkv_register_p(
             }
         }
 
-        return rocke_build_unified_attention_2d_tiled_scalar(
+        return rocke_gfx942_attn2d_build_without_spec_checks(
             b, &built, (arch != NULL) ? arch : "gfx950");
     });
 }

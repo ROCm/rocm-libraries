@@ -425,7 +425,7 @@ bool rocke_gfx942_attention_tiled_2d_supports(
  *  -> SSA constants -> KV-loop bounds + iter-arg carry), then run the phase
  *  functions in Python execution order and return b->kernel from the epilogue.
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
+rocke_kernel_def_t* rocke_gfx942_attn2d_build_without_spec_checks(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
@@ -444,13 +444,6 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
          * per process. (_scalar_new funnels here too.) */
         rocke_attn2d_c32_dist_reset();
         rocke_gfx942_attn2d_reset_softmax_scratch();
-
-        /* A gfx942 build checks the spec the way the Python gfx942 spec's
-         * __post_init__ does when it is constructed. The gfx950 fast-KV builder
-         * reuses this one for a gfx950 spec, which carries its own rules. */
-        if(rocke__arch_in_narrow_set((arch != NULL) ? arch : "gfx942")
-           && !rocke_attention_tiled_2d_spec_validate(b, spec))
-            return NULL;
 
         /* Prologue port: arch/dtype gate, narrow-atom select, config derivation,
          * kernel + params, grid / seq-idx / Q-block geometry, LDS layout +
@@ -511,6 +504,20 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
         kernel = rocke_gfx942_attn2d_emit_epilogue(&ctx);
 
         return rocke_ir_builder_ok(b) ? kernel : NULL;
+    });
+}
+
+rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
+    rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch)
+{
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        if(b == NULL || spec == NULL)
+            return NULL;
+        /* The Python gfx942 spec runs these checks when it is constructed,
+         * whatever target it is later built for, so check every target here. */
+        if(!rocke_attention_tiled_2d_spec_validate(b, spec))
+            return NULL;
+        return rocke_gfx942_attn2d_build_without_spec_checks(b, spec, arch);
     });
 }
 

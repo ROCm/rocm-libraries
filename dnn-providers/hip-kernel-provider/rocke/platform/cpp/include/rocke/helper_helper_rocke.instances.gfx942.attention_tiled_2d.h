@@ -222,6 +222,22 @@ const rocke_type_t*
  * Exported for existing callers; the kernels derive the search at runtime. */
 int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tiled_2d_spec_t* s);
 
+/* Refuses a spec that reads K or V straight from global memory
+ * (use_k_hbm_direct / use_v_hbm_direct) where the kernel being built cannot.
+ * Returns true when both knobs are off. Otherwise records ROCKE_ERR_VALUE on
+ * ``b`` with
+ *   "<message_prefix> use_k_hbm_direct=<K>, use_v_hbm_direct=<V>, expected
+ *    both False: <reason>"
+ * and returns false. ``message_prefix`` is the text before the knob values (for
+ * example "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with");
+ * ``reason`` says why the build cannot take the direct reads. A NULL spec is
+ * refused like rocke_attention_tiled_2d_spec_validate refuses it; a NULL
+ * builder is a false no-op. */
+bool rocke_attention_tiled_2d_spec_check_no_kv_hbm_direct(rocke_ir_builder_t* b,
+                                                          const rocke_attention_tiled_2d_spec_t* s,
+                                                          const char* message_prefix,
+                                                          const char* reason);
+
 /* __post_init__ validator (builder variant). Reproduces the Python validation
  * order and messages; on the first failing check it records the Python
  * ValueError text on ``b`` (ROCKE_ERR_VALUE) and returns false. Returns true when

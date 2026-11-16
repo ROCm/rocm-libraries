@@ -368,6 +368,17 @@ bool rocke_gfx950_attention_tiled_2d_supports(
     return true;
 }
 
+bool rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(
+    rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec)
+{
+    return rocke_attention_tiled_2d_spec_check_no_kv_hbm_direct(
+        b,
+        spec,
+        "gfx950 tiled 2D spec failed -",
+        "the direct K and V reads are gfx942 tiled 2D knobs; the gfx950 spec does "
+        "not carry them");
+}
+
 /* ===================================================================== *
  *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
  *
@@ -390,6 +401,12 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->b = b;
     ctx->spec = spec;
     ctx->arch = arch;
+
+    /* The shared spec struct carries the gfx942 direct K/V read knobs, which
+     * the gfx950 Python spec cannot be constructed with; refuse them before
+     * anything is built. */
+    if(!rocke_gfx950_attention_tiled_2d_spec_check_no_kv_hbm_direct(b, spec))
+        return false;
 
     /* ---- require_tiled_attention_arch(arch) (Py748) ---- */
     if(!rocke_g950_require_tiled_attention_arch(b, arch))
