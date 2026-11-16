@@ -1904,7 +1904,7 @@ BundleDiscoveryResult discoverForFilter(const std::filesystem::path& root,
 
 // Compares what discoverAndSelectBundles() selects, counts and covers with selection after
 // the full discovery, with and without observing. Returns how many sweep roots the
-// filtered discovery did not parse.
+// filtered discovery did not parse. Observing must not change that number.
 size_t expectFilteredSelectionMatchesFull(const std::filesystem::path& root,
                                           const std::vector<DiscoveredBundle>& full,
                                           const std::string& filter)
@@ -1927,7 +1927,12 @@ size_t expectFilteredSelectionMatchesFull(const std::filesystem::path& root,
         actual.selected = describeSelected(discovered->bundles);
         actual.graphsFound = coverage.graphsFound;
         actual.graphsWithClaims = coverage.graphsWithClaims;
-        unparsedSweeps = discovered->unparsedSweeps.size();
+        if(!observing)
+        {
+            unparsedSweeps = discovered->unparsedSweeps.size();
+        }
+        EXPECT_EQ(discovered->unparsedSweeps.size(), unparsedSweeps)
+            << "filter '" << filter << "', observing " << observing;
 
         EXPECT_EQ(actual.selected.size(), expected.selected.size()) << "filter '" << filter << "'";
         EXPECT_TRUE(actual.selected == expected.selected) << "filter '" << filter << "'";
@@ -1958,35 +1963,13 @@ TEST_F(TestBundleDiscoveryFixture, FilteredDiscoverySelectsAndCountsLikeFullDisc
                               HIP_MLOPS_LANE_FILTER,
                               ASM_SDPA_LANE_FILTER,
                               FLYDSL_SDPA_LANE_FILTER,
-                              std::string("*-quick_Matmul_A.*")})
+                              std::string("*-quick_Matmul_A.*"),
+                              std::string("NoSuchSuite.*")})
     {
         filtersWithUnparsedSweeps
             += expectFilteredSelectionMatchesFull(_tempDir, full, filter) != 0 ? 1 : 0;
     }
     EXPECT_GT(filtersWithUnparsedSweeps, 0u);
-}
-
-TEST_F(TestBundleDiscoveryFixture, FilterThatSelectsNothingStillCountsEveryCase)
-{
-    createMixedTierTree(_tempDir);
-    const auto total = discoverBundles(_tempDir).size();
-
-    const std::string filter = "NoSuchSuite.*";
-    const auto filtered = discoverForFilter(_tempDir, filter);
-    ASSERT_EQ(filtered.unparsedSweeps.size(), 7u);
-
-    BundleRegistrationStats stats;
-    SupportClaimCoverage coverage;
-    const auto selected = detail::selectBundlesToLoad(filtered.bundles,
-                                                      filtered.unparsedSweeps,
-                                                      filter,
-                                                      /*writing=*/false,
-                                                      /*observing=*/false,
-                                                      stats,
-                                                      coverage);
-    EXPECT_TRUE(selected.empty());
-    EXPECT_EQ(stats.discovered, total);
-    EXPECT_EQ(stats.excludedByFilter, total);
 }
 
 TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadRejectsUnparsedSweepsWhenWriting)
@@ -2061,18 +2044,6 @@ TEST_F(TestBundleDiscoveryFixture, ZeroCaseSweepsTheFilterSkipsCountAsNoBundles)
     const auto parsed = discoverBundles(_tempDir, [](const std::string&) { return true; });
     EXPECT_TRUE(parsed.unparsedSweeps.empty());
     EXPECT_TRUE(detail::hasNoDiscoveredBundles(parsed));
-}
-
-// discoverAndSelectBundles() is the discovery and selection step behind
-// registerBundleTests(). A filtered run must count, select and cover exactly what a run
-// over the full discovery would.
-TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesMatchesFullDiscoveryUnderAFilter)
-{
-    createMixedTierTree(_tempDir);
-    const auto full = discoverBundles(_tempDir);
-    ASSERT_EQ(full.size(), 16u);
-
-    EXPECT_GT(expectFilteredSelectionMatchesFull(_tempDir, full, "quick_Matmul_*.*"), 0u);
 }
 
 // --write-support-claims needs every sweep manifest parsed, whatever the filter.
