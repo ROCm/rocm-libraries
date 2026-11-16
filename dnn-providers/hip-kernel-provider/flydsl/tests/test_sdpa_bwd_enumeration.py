@@ -49,6 +49,9 @@ def launch_names(op: str, row: dict) -> tuple[str, ...]:
     if op == "sdpa_bwd_dkdv":
         # A dK-only row launches its dV-only partner beside it; every other dK/dV row has a single ``kernel_source``.
         return (gd.LAUNCH_NAME[op], gd.DVONLY_ROLE) if knobs["u2_role"] == "dk" else ()
+    if op == "sdpa_bwd_prep":
+        # A sink-twin row launches the dSink reduce after the twin; every other prep row has a single ``kernel_source``.
+        return (gd.LAUNCH_NAME[op], gd.DSINK_REDUCE_ROLE) if knobs["sink"] == 1 else ()
     if op not in gd.MAIN_LAUNCH:
         return ()
     # A standalone dBias reduce is a companion of a gfx11 row that stores dB; every other row reduces inside its own object.
@@ -294,6 +297,21 @@ def test_the_synthetic_rows_launch_their_own_object_then_tailzero(op: str) -> No
     assert wrong_launch_sets(op, [broken]) == [broken["name"]]
 
 
+def test_a_sink_twin_prep_row_launches_prep_then_dsink_reduce_and_no_other_prep_row_does() -> (
+    None
+):
+    twin = _row("sdpa_bwd_prep", "twin", sink=1)
+    assert tuple(twin["sources"]) == ("prep", gd.DSINK_REDUCE_ROLE)
+    assert wrong_launch_sets("sdpa_bwd_prep", [twin]) == []
+    plain = _row("sdpa_bwd_prep", "plain", sink=-1)
+    assert "sources" not in plain
+    # A twin shipped as one launch, or a plain row launching the reduce, is a wrong launch set.
+    assert wrong_launch_sets("sdpa_bwd_prep", [{**twin, "sources": {}}]) == ["twin"]
+    assert wrong_launch_sets(
+        "sdpa_bwd_prep", [{**plain, "sources": {"prep": {}, gd.DSINK_REDUCE_ROLE: {}}}]
+    ) == ["plain"]
+
+
 @pytest.mark.parametrize("op", ["sdpa_bwd_dkdv", "sdpa_bwd_merged"])
 def test_a_packed_row_without_a_tile_in_range_serves_no_graph(op: str) -> None:
     rows = {r["name"]: r for r in synthetic()[op]}
@@ -399,9 +417,12 @@ def test_every_shipped_row_launches_its_launch_name_set(op: str) -> None:
     rows = _kernel_rows(op)
     assert wrong_launch_sets(op, rows) == []
     if op not in gd.MAIN_LAUNCH:
-        # A dK-only row of the value-head split is the one multi-launch row of dK/dV.
+        # A dK-only row of the value-head split is the one multi-launch row of dK/dV, a sink-twin row that of prep.
         assert not any(
-            "sources" in r and r["knobs"].get("u2_role") != "dk" for r in rows
+            "sources" in r
+            and r["knobs"].get("u2_role") != "dk"
+            and r["knobs"].get("sink") != 1
+            for r in rows
         )
 
 

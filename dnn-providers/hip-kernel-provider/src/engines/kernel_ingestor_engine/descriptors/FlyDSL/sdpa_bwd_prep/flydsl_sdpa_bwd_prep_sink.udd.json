@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "b3a664a5-560d-53b6-8899-268c1bd356d8",
+  "name": "flydsl sdpa_bwd_prep sink dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_bwd_split.prep_sink.dispatch"
+}

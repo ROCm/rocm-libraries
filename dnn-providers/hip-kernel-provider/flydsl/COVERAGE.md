@@ -2306,9 +2306,9 @@ broadcast dBias is summed by the dBias reduce kernel, launched as the `dbias_red
 the row's `sources` (RFC 0017 §15.1). On gfx950 that entry names the row's own object and the
 reduce symbol, a second kernel of the same code object; on gfx11 it names a standalone object
 (the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
-fp32 family has its own); the dSink reduce is the generator op `sdpa_bwd_dsink_reduce` (2
-pins). Neither ships content: the reduce kernels ride inside the objects that launch them. The 16-bit families cover bf16 and f16;
-fp32 is a native f32 MFMA family. The 32 gfx950 prep objects with a sink are for sink support in a future addition; the matcher does not select them today. A graph none of the shipped rows can compute is
+fp32 family has its own). The dSink reduce is the generator op `sdpa_bwd_dsink_reduce` (2
+pins, bf16 and f16); it ships as a companion of the prep op and is the second launch of the prep sink pack. The 16-bit families cover bf16 and f16;
+fp32 is a native f32 MFMA family. A graph none of the shipped rows can compute is
 declined with a named cause (data type, operand layout, mask, workspace overflow), so
 another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
 backward engine). The kernels and how the shipped objects are pinned are in
@@ -2339,6 +2339,10 @@ the decline cause in brackets is the one a refused graph reports.
 | Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); probability 0 is no dropout, both engines serve it with the plain rows and the CPU and GPU references compute it as no dropout, and a seed or offset it names is gated as above and not read (DR-9); padded and packed (ragged) graphs, where the mask follows SEM-015's counter layout (GQA-packed dK/dV objects are dense only); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
 | Stats | the f32 `[B, H, Sq, 1]` stats tensor through its actual strides; padded dense strides are served (SS-1), which AOTriton's dense stats are not; ragged stats packed (H, T) or (T, H) with its own offset when Q is ragged (SS-4, SS-5) | alignment below 16 bytes (SS-3), stricter than the forward's f32 check, so a graph the forward serves with a 4 or 8 byte stats alignment declines [operand]; a negative stride or overlapping elements, or a head's rows beyond 32-bit byte offsets (SS-1) [layout]; ragged stats beside a dense Q or the reverse (SS-4) [varlen]; ragged strides that are neither packed form (SS-5) [layout] |
 | Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
+| Sink and dSink | split engine, f16 or bf16 only: a sink in the I/O dtype, rank 1 `[Hq]` or rank 4 `[1, Hq, 1, 1]`, a device operand with unit head stride and 16-byte alignment (SK-1, SK-2). A sink alone needs no kernel: the caller's LSE already holds it, so the plain prep rows serve the graph. With a dSink of the sink's shape and dtype (SK-3) the prep sink twin and the `dsink_reduce` kernel run, a second launch of the prep sink pack | a sink or dSink on the merged engine (SK-0); a sink of another dtype, a FLOAT sink beside f16 or bf16, or any sink on an f32 graph (SK-1); a sink or dSink that is virtual, pass-by-value, ragged, of another shape, strided or under-aligned (SK-2); a dSink of another dtype or dims than the sink (SK-3); a dSink without a sink (SK-4); a dSink with `head_dim_v` in (192, 224], where the twin has no row (SK-5) [sink] |
+| rng_dump | none | a `rng_dump` tensor on either engine (RN-1): the kernels regenerate the Philox mask and write no dump [rng_dump] |
+| Deterministic algorithm | `is_deterministic_algorithm` true or false on either engine (DE-1): every output has one writer and `dsink_reduce` sums in a fixed order, so the kernels are bitwise run-to-run | none |
+| `max_total_seq_len_q` and `_kv` | accepted and ignored on either engine (MT-1): a workspace-size hint the kernels do not need | none |
 
 Six accepted forms are ones cuDNN's backward node rejects: dropout with a bottom-right
 causal mask (MW-11); bottom-right causal alignment or a window with `Sq > Skv` and no

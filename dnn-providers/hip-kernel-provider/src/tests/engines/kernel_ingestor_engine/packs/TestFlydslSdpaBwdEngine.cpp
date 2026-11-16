@@ -653,6 +653,31 @@ TEST(TestFlydslSdpaBwdMergedGraph, DeclinesAForwardGraphWithoutAnalysingIt)
     EXPECT_FALSE(graphMatch(spec).has_value());
 }
 
+TEST(TestFlydslSdpaBwdMergedGraph, SK0DeclinesASinkGraph)
+{
+    EXPECT_FALSE(graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
+                     addSink(g, DataType::HALF);
+                 })).has_value());
+    EXPECT_FALSE(graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
+                     addSink(g, DataType::HALF);
+                     addDsink(g, DataType::HALF);
+                 })).has_value());
+}
+
+TEST(TestFlydslSdpaBwdMergedGraph, RN1DeclinesAGraphWithAnRngDump)
+{
+    EXPECT_FALSE(graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
+                     g.attributes.rngDumpUid = sdpa_bwd_uid::RNG_DUMP;
+                 })).has_value());
+}
+
+TEST(TestFlydslSdpaBwdMergedGraph, DE1ServesADeterministicGraph)
+{
+    EXPECT_TRUE(graphMatch(baseSpec().withEdit([](SdpaBwdGraph& g) {
+                    g.attributes.isDeterministicAlgorithm = true;
+                })).has_value());
+}
+
 TEST(TestFlydslSdpaBwdMergedGraph, EN1DeclinesAHeadSizeNoMergedObjectCovers)
 {
     const auto atDim = [](int64_t qk, int64_t v) {

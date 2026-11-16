@@ -132,6 +132,8 @@ struct MatchOptions
     /// and the graph has no bias, is not FLOAT and is not ragged. Off, a V whose heads differ
     /// from K's declines [shape] (SH-1).
     bool acceptValueHeads = false;
+    /// Accept sink_token and dsink_token tensors. Off, they decline [sink] (SK-0).
+    bool acceptSink = false;
 };
 
 /// What the split engine opts into: every option.
@@ -140,6 +142,7 @@ inline constexpr MatchOptions SPLIT_MATCH_OPTIONS = [] {
     options.acceptFloat = true;
     options.acceptF32Bias = true;
     options.acceptValueHeads = true;
+    options.acceptSink = true;
     return options;
 }();
 
@@ -233,6 +236,10 @@ struct SdpaBwdProblem
     SeedForm seedForm = SeedForm::NONE;
     int64_t seedUid = NO_UID;
     int64_t offsetUid = NO_UID;
+    /// The sink input and its gradient, NO_UID when absent; dsinkUid is set only on an engine
+    /// that opted into acceptSink.
+    int64_t sinkUid = NO_UID;
+    int64_t dsinkUid = NO_UID;
 };
 
 /// Why the graph is not served: a category and the field and value that put it there.
@@ -456,7 +463,7 @@ public:
 
     std::variant<SdpaBwdProblem, Decline> run()
     {
-        const std::array<Verdict (BackwardMatcher::*)(), 14> steps{
+        const std::array<Verdict (BackwardMatcher::*)(), 15> steps{
             &BackwardMatcher::resolveOperands,
             &BackwardMatcher::checkUidAliasing,
             &BackwardMatcher::checkShapes,
@@ -470,6 +477,7 @@ public:
             &BackwardMatcher::checkVarlen,
             &BackwardMatcher::checkBias,
             &BackwardMatcher::checkDropout,
+            &BackwardMatcher::checkSinkAndExtras,
             &BackwardMatcher::checkScale};
         for(const auto step : steps)
         {
@@ -540,8 +548,8 @@ private:
         return resolveOperand(_context, _stats);
     }
 
-    /// ST-5: an output (dQ, dK, dV, dBias) must not share its uid with any other role; inputs
-    /// may share among themselves.
+    /// ST-5: an output (dQ, dK, dV, dBias, dSink, rng_dump) must not share its uid with any
+    /// other role; inputs may share among themselves.
     Verdict checkUidAliasing()
     {
         const auto& a = _attributes;
@@ -576,6 +584,18 @@ private:
             {
                 roles.push_back({label, uid.value(), false});
             }
+        }
+        if(a.sink_token_tensor_uid().has_value())
+        {
+            roles.push_back({"sink", a.sink_token_tensor_uid().value(), false});
+        }
+        if(a.dsink_token_tensor_uid().has_value())
+        {
+            roles.push_back({"dSink", a.dsink_token_tensor_uid().value(), true});
+        }
+        if(a.rng_dump_tensor_uid().has_value())
+        {
+            roles.push_back({"rng_dump", a.rng_dump_tensor_uid().value(), true});
         }
         if(a.dbias_tensor_uid().has_value())
         {
@@ -1687,6 +1707,142 @@ private:
         return std::nullopt;
     }
 
+    /// A sink or dSink tensor the kernels read or write: a device tensor without a ragged
+    /// offset, [Hq] or [1, Hq, 1, 1], a unit head stride (any when Hq is 1) and a declared
+    /// alignment of 16 bytes. Anything else declines [sink] (SK-2).
+    Verdict checkSinkTensor(Operand& operand) const
+    {
+        if(auto verdict = resolveOperand(_context, operand, "sink"))
+        {
+            return verdict;
+        }
+        if(operand.tensor->ragged_offset_tensor_uid().has_value())
+        {
+            return Decline{"sink", describe(operand) + " has a ragged offset tensor"};
+        }
+        const auto& dims = dimsOf(operand);
+        const auto& strides = stridesOf(operand);
+        const int64_t heads = dim(Q, HEAD_AXIS);
+        const bool perHead = dims.size() == 1 && dims.Get(0) == heads;
+        const bool fourD = dims.size() == SDPA_RANK && dims.Get(BATCH_AXIS) == 1
+                           && dims.Get(HEAD_AXIS) == heads && dims.Get(SEQ_AXIS) == 1
+                           && dims.Get(DIM_AXIS) == 1;
+        if((!perHead && !fourD) || strides.size() != dims.size())
+        {
+            return Decline{"sink",
+                           describe(operand) + " dims " + listOf(dims) + " are not ["
+                               + std::to_string(heads) + "] or [1," + std::to_string(heads)
+                               + ",1,1]"};
+        }
+        const int64_t headStride = strides.Get(perHead ? 0 : HEAD_AXIS);
+        if(heads > 1 && headStride != 1)
+        {
+            return Decline{"sink",
+                           describe(operand) + " head stride " + std::to_string(headStride)
+                               + " is not 1"};
+        }
+        if(!declaresAlignment(*operand.tensor, REQUIRED_ALIGNMENT_BYTES))
+        {
+            return Decline{"sink",
+                           describe(operand) + " declares alignment "
+                               + std::to_string(operand.tensor->alignment()) + " bytes, below "
+                               + std::to_string(REQUIRED_ALIGNMENT_BYTES)};
+        }
+        return std::nullopt;
+    }
+
+    /// The Dv range with no sink twin row: the twin rows' head-dim tiles are 192 and 256.
+    static constexpr int64_t NO_TWIN_DV_FLOOR = 192;
+    static constexpr int64_t NO_TWIN_DV_CEILING = 224;
+
+    /// RN-1: rng_dump_tensor_uid set declines [rng_dump] on every engine; the kernels
+    /// regenerate the Philox mask and write no dump.
+    /// SK-0: sink or dSink on an engine that does not opt in (MatchOptions::acceptSink) declines
+    /// [sink]. SK-1: the sink dtype is Q's 16-bit dtype; a FLOAT sink beside a 16-bit Q, and any
+    /// sink on an fp32 graph, decline [sink]. SK-2: a sink and a dSink are device tensors of
+    /// the shape, stride and alignment checkSinkTensor names. SK-3: dSink has the sink's dims
+    /// and dtype. SK-4: dSink without sink declines [sink]. SK-5: dSink with a V head dim in
+    /// (192, 224] declines [sink]; the prep sink twin has no row there. A sink without dSink
+    /// needs no kernel: it is already in the caller's stats.
+    /// DE-1: is_deterministic_algorithm is accepted and ignored; every output has one writer.
+    /// MT-1: max_total_seq_len_q and max_total_seq_len_kv are accepted and ignored; they size
+    /// a workspace this engine does not use.
+    Verdict checkSinkAndExtras()
+    {
+        const auto& a = _attributes;
+        if(a.rng_dump_tensor_uid().has_value())
+        {
+            return Decline{"rng_dump",
+                           "rng_dump_tensor_uid is set; the kernels regenerate the Philox mask "
+                           "and write no dump"};
+        }
+        const auto sinkUid = optionalLong(a.sink_token_tensor_uid());
+        const auto dsinkUid = optionalLong(a.dsink_token_tensor_uid());
+        if(!sinkUid.has_value() && !dsinkUid.has_value())
+        {
+            return std::nullopt;
+        }
+        if(!_options.acceptSink)
+        {
+            return Decline{"sink",
+                           "sink_token or dsink_token is set; this engine has no sink term"};
+        }
+        if(!sinkUid.has_value())
+        {
+            return Decline{"sink", "dsink_token_tensor_uid is set without a sink_token"};
+        }
+        Operand sink{"sink", *sinkUid};
+        if(auto verdict = checkSinkTensor(sink))
+        {
+            return verdict;
+        }
+        const auto sinkType = sink.tensor->data_type();
+        if(_problem.dtype == data_objects::DataType::FLOAT)
+        {
+            return Decline{"sink",
+                           describe(sink)
+                               + " on an fp32 graph: the fp32 split family has no sink twin"};
+        }
+        if(sinkType != _problem.dtype)
+        {
+            return Decline{"sink",
+                           describe(sink) + " dtype " + typeName(sinkType)
+                               + ": the kernels read the I/O dtype " + typeName(_problem.dtype)};
+        }
+        if(dsinkUid.has_value())
+        {
+            Operand dsink{"dSink", *dsinkUid};
+            if(auto verdict = checkSinkTensor(dsink))
+            {
+                return verdict;
+            }
+            if(dsink.tensor->data_type() != sinkType)
+            {
+                return Decline{"sink",
+                               describe(dsink) + " dtype " + typeName(dsink.tensor->data_type())
+                                   + " differs from the sink's " + typeName(sinkType)};
+            }
+            if(!std::equal(dimsOf(dsink).begin(),
+                           dimsOf(dsink).end(),
+                           dimsOf(sink).begin(),
+                           dimsOf(sink).end()))
+            {
+                return Decline{"sink",
+                               describe(dsink) + " dims " + listOf(dimsOf(dsink))
+                                   + " differ from the sink's " + listOf(dimsOf(sink))};
+            }
+            if(_problem.headDimV > NO_TWIN_DV_FLOOR && _problem.headDimV <= NO_TWIN_DV_CEILING)
+            {
+                return Decline{"sink",
+                               "dSink with head_dim_v " + std::to_string(_problem.headDimV)
+                                   + ": the sink twin has no row in (192, 224]"};
+            }
+            _problem.dsinkUid = *dsinkUid;
+        }
+        _problem.sinkUid = *sinkUid;
+        return std::nullopt;
+    }
+
     static bool isServableScaleValue(double value)
     {
         return std::isfinite(value) && std::fabs(value) <= MAX_SOFTMAX_SCALE;
@@ -1789,7 +1945,8 @@ private:
  *        opts into; the default is the 16-bit match.
  *
  * Decline causes: node, operand, data_type, head_size, gqa, shape, layout, mask, alibi_mask,
- * varlen, attn_mask, dbias, dropout, scale. The detail names the field and its value.
+ * varlen, attn_mask, dbias, dropout, scale, sink, rng_dump. The detail names the field and its
+ * value.
  */
 inline std::variant<SdpaBwdProblem, Decline>
     matchSdpaBackward(const hipdnn_plugin_sdk::ingestor::MatchContext& context,

@@ -124,13 +124,18 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 |---|---|---|
 | `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 1,084 (90 + 63 + 312 + 116 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask sdpa_head_pad` | 719 (90 + 63 + 192 + 116 + 256 + 1 + 1) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,155 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 1,329 + 962 + 325) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dsink_reduce sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,157 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 2 + 1,329 + 962 + 325) |
 | `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 457 (90 + 63 + 278 + 24 + 1 + 1) |
 | `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 465 (90 + 63 + 286 + 24 + 1 + 1) |
 
-`sdpa_bwd_dbias_reduce` and `sdpa_bwd_dsink_reduce` ship no content (both reduce kernels ride
-inside the dQ and merged objects), so no `OPS` list names them; their generators only build the
-standalone reduce pins that the S1 gates compare against.
+`sdpa_bwd_dbias_reduce` ships no content (its kernel rides inside the dQ and merged objects), so no `OPS` list names it; its
+generator only builds the standalone reduce pins that the S1 gates compare against.
+
+`sdpa_bwd_dsink_reduce` (gfx950 only) ships its two objects (bf16, f16) in a content folder of its own, with no descriptors of its
+own: they are the second launch (`dsink_reduce`) of the sink-twin prep rows (`sink=1`), which `gen_descriptors.py` packs as
+`gfx950.sink.kdp.json` (dispatch `hipkernel.flydsl_sdpa_bwd_split.prep_sink.dispatch`). The prep manifest lists no companion for
+them, so prep's objects, manifest and digest do not depend on this op. Its generator takes no reference directory, and its objects
+must be the pins of `tests/data/sdpa_bwd_reference.csv`.
 
 `sdpa_bwd_tailzero` ships no content of its own either: its six objects (gfx950 and gfx11-generic, each f16, bf16, fp32) and its two
 V-head objects (role `tailzero_hv`, one per arch; the f16 and bf16 entries name the same bytes) are
@@ -156,6 +161,7 @@ esac
 # by an earlier run with a different instance list would survive and be compared.
 for op in $OPS; do
   case $op in
+    sdpa_bwd_dsink_reduce) pins=(); op_rocm=$ROCM_PATH_BWD ;;
     sdpa_bwd_prep|sdpa_bwd_dkdv|sdpa_bwd_dq|sdpa_bwd_merged)
       pins=(--reference-dir "$REF_ROOT/$ARCH" --stored-dir "$CONTENT"); op_rocm=$ROCM_PATH_BWD ;;
     *) pins=(); op_rocm=$ROCM_PATH ;;
@@ -337,6 +343,16 @@ for ARCH in gfx950 gfx11-generic; do
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
 done
+```
+
+**The dSink reduce** (gfx950). The two `sdpa_bwd_dsink_reduce` objects are built by their own generator, which takes no reference
+directory and no `--stored-dir`, into a content folder of their own; `gen_descriptors.py` then names them from the prep sink-twin rows.
+Rebuilding them restamps only that op, never `sdpa_bwd_prep`. Run it before `gen_descriptors.py`, which refuses a sink-twin prep row
+whose dtype has no object:
+
+```bash
+mv "$CONTENT/sdpa_bwd_dsink_reduce/gfx950" "$STORED/sdpa_bwd_dsink_reduce-gfx950" 2>/dev/null || true   # the run needs an empty output directory
+ROCM_PATH=$ROCM_PATH_BWD PYTHONDONTWRITEBYTECODE=1 $PY -m generators.gen_sdpa_bwd_dsink_reduce --arch gfx950 --out-dir "$CONTENT"
 ```
 
 **Companions.** A dQ or merged row launches a tail-zero object after its gradient launches when the graph has a
