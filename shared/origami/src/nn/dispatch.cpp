@@ -4,6 +4,10 @@
 #include "origami/nn/detail/recommender.hpp"
 
 #include "origami/nn/nn.hpp"
+#include "origami/nn/detail/param_store.hpp"
+#include "origami/nn/param/param_model.hpp"
+
+#include <cmath>
 
 #include <optional>
 #include <vector>
@@ -25,12 +29,23 @@ std::optional<std::vector<prediction_result_t>> try_rank_with_model(
     const hardware_t& hardware,
     const std::vector<config_t>& configs,
     const inference_options_t& options) {
-  (void)problem;
   (void)hardware;
-  (void)configs;
   (void)options;
-  if (handle < 0 || nn::model_info(handle) == nullptr) return std::nullopt;
-  // No full-ranking backend (an IRecommender for inference_mode_t::nn) is built in yet.
+  const model_info_t* info = handle < 0 ? nullptr : nn::model_info(handle);
+  if (info == nullptr) return std::nullopt;
+  switch (info->backend) {
+    case backend_id_t::param_v1: {
+      auto model = param_payload(handle);
+      if (!model) return std::nullopt;
+      auto ranked = param::rank(*model, problem, configs);
+      // Nothing scored (no candidate's parameters readable): let the caller fall back.
+      if (ranked.empty() || !std::isfinite(ranked.front().latency)) return std::nullopt;
+      return ranked;
+    }
+    case backend_id_t::tilewright_v1:
+    case backend_id_t::embedding_similarity_v1:
+      break;  // not built in
+  }
   return std::nullopt;
 }
 
@@ -46,11 +61,17 @@ model_handle_t resolve_model_handle(const rank_options_t& options) {
                          options.library_models ? options.library_models->embedding_similarity
                                                 : invalid_handle,
                          nn::default_model(backend_id_t::embedding_similarity_v1));
+    case nn_backend_t::param:
+      return first_valid(options.nn_model,
+                         options.library_models ? options.library_models->param : invalid_handle,
+                         nn::default_model(backend_id_t::param_v1));
     case nn_backend_t::auto_select:
       if (options.nn_model >= 0) return options.nn_model;
       if (options.library_models) {
         if (options.library_models->tilewright >= 0) return options.library_models->tilewright;
-        return options.library_models->embedding_similarity;
+        if (options.library_models->embedding_similarity >= 0)
+          return options.library_models->embedding_similarity;
+        return options.library_models->param;
       }
       return nn::default_model(backend_id_t::tilewright_v1);
   }

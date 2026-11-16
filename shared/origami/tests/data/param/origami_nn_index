@@ -1,0 +1,4 @@
+# Test index for test_nn.cpp [nn][param] (written by hand; the fixture by make_param_fixture.py).
+TensileLibrary_param_fixture	param	param_fixture.msgpack
+TensileLibrary_param_not_msgpack	param	param_fixture_rows.txt
+TensileLibrary_param_missing	param	no_such_model.msgpack

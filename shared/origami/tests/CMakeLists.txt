@@ -28,6 +28,15 @@ target_sources(
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+# [nn][param] tests read tests/data/param (a tiny param_v1 model) and need Origami's msgpack support.
+if(_origami_msgpack_target)
+    set(_origami_test_has_msgpack 1)
+else()
+    set(_origami_test_has_msgpack 0)
+endif()
+target_compile_definitions(origami-tests PRIVATE ORIGAMI_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+                                                 ORIGAMI_TEST_HAS_MSGPACK=${_origami_test_has_msgpack})
+
 target_link_libraries(origami-tests PRIVATE roc::origami Catch2::Catch2WithMain)
 
 include(CTest)

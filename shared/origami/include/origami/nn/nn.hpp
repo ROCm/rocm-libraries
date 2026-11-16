@@ -48,4 +48,8 @@ ORIGAMI_EXPORT void set_default_model(model_handle_t handle);
 
 ORIGAMI_EXPORT model_handle_t default_model(backend_id_t backend);
 
+/// param_v1 models: the logic-file key the model was trained for (empty for another handle).
+/// Callers bind a model to a library only when its solutions carry that key.
+ORIGAMI_EXPORT std::string param_problem_key(model_handle_t handle);
+
 }  // namespace origami::nn

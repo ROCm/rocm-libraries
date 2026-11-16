@@ -142,7 +142,39 @@ target_sources(
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/types.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/param/param_model.cpp"
 )
+
+# origami::nn param_v1 (parameter-predictor) models are msgpack files. msgpack-cxx is header-only and
+# optional: without it the param loader refuses every model and ranking stays analytical. A parent
+# project (hipBLASLt) that already found msgpack provides the target.
+option(ORIGAMI_ENABLE_MSGPACK "Read origami::nn param models (needs msgpack-cxx)" ON)
+set(_origami_msgpack_target "")
+if(ORIGAMI_ENABLE_MSGPACK)
+    if(TARGET msgpack-cxx)
+        set(_origami_msgpack_target msgpack-cxx)
+    elseif(TARGET msgpackc-cxx)
+        set(_origami_msgpack_target msgpackc-cxx)
+    else()
+        find_package(msgpack-cxx CONFIG QUIET)
+        if(msgpack-cxx_FOUND)
+            set(_origami_msgpack_target msgpack-cxx)
+        else()
+            find_package(msgpackc-cxx CONFIG QUIET NAMES msgpackc-cxx msgpack)
+            if(msgpackc-cxx_FOUND)
+                set(_origami_msgpack_target msgpackc-cxx)
+            endif()
+        endif()
+    endif()
+endif()
+if(_origami_msgpack_target)
+    target_link_libraries(origami PRIVATE $<BUILD_INTERFACE:${_origami_msgpack_target}>)
+    target_compile_definitions(origami PRIVATE ORIGAMI_HAS_MSGPACK=1)
+    message(STATUS "origami: param models enabled (${_origami_msgpack_target})")
+else()
+    target_compile_definitions(origami PRIVATE ORIGAMI_HAS_MSGPACK=0)
+    message(STATUS "origami: no msgpack-cxx, param models disabled")
+endif()
 
 target_link_libraries(origami PRIVATE hip::host)
 

@@ -164,7 +164,10 @@ NB_MODULE(origami, m) {
       .def_rw("unroll_major_lds_a", &origami::tensile_params_t::unroll_major_lds_a)
       .def_rw("unroll_major_lds_b", &origami::tensile_params_t::unroll_major_lds_b)
       .def_rw("lds_transpose_read_a", &origami::tensile_params_t::lds_transpose_read_a)
-      .def_rw("lds_transpose_read_b", &origami::tensile_params_t::lds_transpose_read_b);
+      .def_rw("lds_transpose_read_b", &origami::tensile_params_t::lds_transpose_read_b)
+      .def_rw("stagger_u", &origami::tensile_params_t::stagger_u)
+      .def_rw("stagger_u_mapping", &origami::tensile_params_t::stagger_u_mapping)
+      .def_rw("stagger_stride_shift", &origami::tensile_params_t::stagger_stride_shift);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())

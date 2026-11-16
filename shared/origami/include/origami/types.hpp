@@ -478,6 +478,12 @@ struct tensile_params_t {
   bool lds_transpose_read_a = false;
   bool lds_transpose_read_b = false;
 
+  /// StaggerU launch settings (TensileLite StaggerU, StaggerUMapping, _staggerStrideShift):
+  /// the K-loop start stagger, which workgroup index it follows, and its stride as a shift code.
+  int stagger_u            = 0;
+  int stagger_u_mapping    = 0;
+  int stagger_stride_shift = 0;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -497,7 +503,9 @@ struct tensile_params_t {
            unroll_major_lds_a == o.unroll_major_lds_a &&
            unroll_major_lds_b == o.unroll_major_lds_b &&
            lds_transpose_read_a == o.lds_transpose_read_a &&
-           lds_transpose_read_b == o.lds_transpose_read_b;
+           lds_transpose_read_b == o.lds_transpose_read_b && stagger_u == o.stagger_u &&
+           stagger_u_mapping == o.stagger_u_mapping &&
+           stagger_stride_shift == o.stagger_stride_shift;
   }
 
   std::size_t hash() const {
@@ -530,7 +538,10 @@ struct tensile_params_t {
                               unroll_major_lds_a,
                               unroll_major_lds_b,
                               lds_transpose_read_a,
-                              lds_transpose_read_b);
+                              lds_transpose_read_b,
+                              stagger_u,
+                              stagger_u_mapping,
+                              stagger_stride_shift);
   }
 };
 
@@ -806,6 +817,7 @@ enum class nn_backend_t : std::uint8_t {
   auto_select,          ///< Resolve from handle, library_models, session default
   tilewright,           ///< Force tilewright_v1
   embedding_similarity, ///< Force embedding_similarity_v1
+  param,                ///< Force param_v1 (parameter-predictor ranking)
 };
 
 /**
