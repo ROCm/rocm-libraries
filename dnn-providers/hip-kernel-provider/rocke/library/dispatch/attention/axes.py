@@ -165,9 +165,9 @@ DENSE_PROBLEM_FIELDS = frozenset(
     }
 )
 # Problem fields only some arches' dense specs declare (the band's right bound, the
-# sink element type).
+# sink element type, and the KV storage format, whose loader only gfx950 has).
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"right_bound", "sink_dtype"}),
+    "gfx950": frozenset({"right_bound", "sink_dtype", "kv_storage_dtype"}),
     "gfx942": frozenset(),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
@@ -330,7 +330,8 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never
 # varies: the head-width buckets, mask class, bias kind, score features, layout
-# and K/V storage all come from the request.
+# (with hipDNN's ``dense_q`` / ``seqused_q`` query-side options) and K/V storage
+# all come from the request.
 WMMA_PROBLEM_FIELDS = frozenset(
     {
         "dtype",
@@ -344,6 +345,8 @@ WMMA_PROBLEM_FIELDS = frozenset(
         "use_qq_bias",
         "layout",
         "page_block_size",
+        "dense_q",
+        "seqused_q",
         "kv_dtype",
         "name",
     }
