@@ -444,15 +444,10 @@ static void check_wmma_arch_gates(void)
     t.lds_capacity_bytes = 1024;
     why[0] = '\0';
     expect_refused("wmma_gate_lds_capacity",
-                   !rocke_dwg::wgrad_wmma_lds_over(2048, 4096, &t, "gfxX", why, sizeof why),
+                   !rocke_dwg::wgrad_wmma_lds_over(2048, &t, "gfxX", why, sizeof why),
                    why,
                    "LDS 2048 B > 1024 on gfxX");
-    why[0] = '\0';
-    expect_refused("wmma_gate_lds_budget",
-                   !rocke_dwg::wgrad_wmma_lds_over(8192, 4096, &t, "gfxX", why, sizeof why),
-                   why,
-                   "LDS 8192 B > 4 KiB");
-    if(rocke_dwg::wgrad_wmma_lds_over(1024, 4096, &t, "gfxX", why, sizeof why))
+    if(rocke_dwg::wgrad_wmma_lds_over(1024, &t, "gfxX", why, sizeof why))
     {
         fprintf(stderr, "FAIL wmma_gate_lds_fits: refused (%s)\n", why);
         ++g_failures;

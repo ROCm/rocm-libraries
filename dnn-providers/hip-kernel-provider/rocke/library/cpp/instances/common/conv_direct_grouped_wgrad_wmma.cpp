@@ -34,9 +34,6 @@ constexpr int kTile = 16; /* channels per wave (WMMA M = N) */
 constexpr int kKStep = 32; /* output columns per WMMA (WMMA K) */
 constexpr int kPadCh = 8; /* LDS row padding (channels) against bank conflicts */
 constexpr int kDummy = 8; /* elements past each buffer: the padding lanes' copy target */
-/* The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
- * was tuned under. The arch's own capacity is checked as well. */
-constexpr long long kLdsBudget = 160 * 1024;
 
 const char* bf16_flag[1] = {"bf16"};
 
@@ -245,8 +242,7 @@ extern "C" bool rocke_grouped_wgrad_wmma_is_valid_spec(const rocke_grouped_wgrad
         = wgrad_wmma_arch_target(arch, problem_is_bf16(p), reason, reason_cap);
     if(target == NULL)
         return false;
-    if(wgrad_wmma_lds_over(
-           rocke_grouped_wgrad_wmma_lds_bytes(s), kLdsBudget, target, arch, reason, reason_cap))
+    if(wgrad_wmma_lds_over(rocke_grouped_wgrad_wmma_lds_bytes(s), target, arch, reason, reason_cap))
         return false;
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;

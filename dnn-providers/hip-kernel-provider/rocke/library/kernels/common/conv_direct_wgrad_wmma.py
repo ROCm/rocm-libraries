@@ -63,10 +63,6 @@ _KSTEP = 32  # output columns per WMMA (WMMA K)
 _PAD_CH = 8  # LDS row padding (channels) against bank conflicts
 _DUMMY = 8  # elements past each buffer: the padding lanes' copy target
 _VGPR_BUDGET = 480  # accumulators + fragments a wave may hold (512-VGPR file)
-# The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
-# was tuned under (stages x rows of staged dY and X rows). The arch's own
-# capacity (ArchTarget.lds_capacity_bytes) is checked as well.
-_LDS_BUDGET = 300 * 1024
 
 
 @dataclass(frozen=True)
@@ -203,11 +199,9 @@ def wgrad_wmma_arch_reason(arch: str, dtype: str):
     return None, target
 
 
-def wgrad_wmma_lds_reason(lds: int, budget: int, target, arch: str) -> str | None:
-    """Why ``lds`` bytes of staging do not fit: over the kernel's ``budget``
-    or over the arch's LDS capacity (None when they fit)."""
-    if lds > budget:
-        return f"LDS {lds} B > {budget // 1024} KiB"
+def wgrad_wmma_lds_reason(lds: int, target, arch: str) -> str | None:
+    """Why ``lds`` bytes of staging do not fit the arch's LDS capacity (None
+    when they fit). Tuning ceilings belong to the AOT grid, not here."""
     if lds > target.lds_capacity_bytes:
         return f"LDS {lds} B > {target.lds_capacity_bytes} on {arch}"
     return None
@@ -255,7 +249,7 @@ def is_valid_direct_wgrad_wmma_spec(spec: DirectWgradWmmaSpec, arch: str = "gfx1
         return False, "target_blocks >= 1"
     if spec.vgprs() > _VGPR_BUDGET:
         return False, f"~{spec.vgprs()} VGPRs of accumulators and fragments"
-    why = wgrad_wmma_lds_reason(spec.lds_bytes(), _LDS_BUDGET, target, arch)
+    why = wgrad_wmma_lds_reason(spec.lds_bytes(), target, arch)
     if why is not None:
         return False, why
     return True, "ok"

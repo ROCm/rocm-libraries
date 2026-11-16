@@ -27,7 +27,7 @@
 #  11  bf16, cpg 8, (2, 3, 8, 512, 3): three WMMA steps, two waves
 #  12  fp16, cpg 4, 1x1 PAD 0 (no dY ring), (1, 4, 4, 64, 2)
 #  13  bf16, cpg 8, 5x3 PAD 1 (KH != KW), (2, 1, 8, 1024, 3)
-#  14  rejected by both engines: (8, 4, 32, 1024, 4) needs more than 160 KiB LDS
+#  14  bf16, cpg 4, (8, 4, 32, 1024, 4): the knobs' largest LDS, under capacity
 #  15  rejected by both engines: gfx950 (no ds_load_tr16_b128 / wmma 16x16x32)
 #  16  rejected by both engines: cpg = kpg = 16
 #  17  rejected by both engines: stride 2

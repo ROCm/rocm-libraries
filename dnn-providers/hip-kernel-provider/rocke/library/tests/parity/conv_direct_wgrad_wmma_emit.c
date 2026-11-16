@@ -213,7 +213,7 @@ static int make_cfg(int idx, rocke_direct_wgrad_wmma_spec_t* s, const char** arc
     case 24: /* rejected: C 36 */
         s->problem = make_problem(3, 3, 1, "bf16", 1, 1, 36, 96, 1);
         return 0;
-    case 25: /* rejected: LDS past 300 KiB */
+    case 25: /* rejected: LDS past the arch's capacity */
         s->problem = base(1, "bf16");
         s->waves_k = 4;
         s->waves_c = 4;

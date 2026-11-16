@@ -37,9 +37,6 @@
 #define WGW_PAD_CH 8 /* default LDS row padding (channels) */
 #define WGW_DUMMY 8 /* elements past each buffer: the padding lanes' copy target */
 #define WGW_VGPR_BUDGET 480 /* accumulators + fragments a wave may hold */
-/* The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
- * was tuned under. The arch's own capacity is checked as well. */
-#define WGW_LDS_BUDGET (300 * 1024)
 
 namespace
 {
@@ -345,12 +342,8 @@ bool rocke_direct_wgrad_wmma_is_valid_spec(const rocke_direct_wgrad_wmma_spec_t*
         rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
-    if(rocke_dwg::wgrad_wmma_lds_over(rocke_direct_wgrad_wmma_lds_bytes(spec),
-                                      WGW_LDS_BUDGET,
-                                      target,
-                                      arch,
-                                      reason,
-                                      reason_cap))
+    if(rocke_dwg::wgrad_wmma_lds_over(
+           rocke_direct_wgrad_wmma_lds_bytes(spec), target, arch, reason, reason_cap))
         return false;
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;

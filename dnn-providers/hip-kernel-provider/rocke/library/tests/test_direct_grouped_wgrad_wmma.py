@@ -118,7 +118,6 @@ _REJECTED = (
     ({}, dict(target_blocks=0), "target_blocks >= 1"),
     ({}, dict(stages=1), "stages in 2..4"),
     ({}, dict(stages=5), "stages in 2..4"),
-    ({}, dict(waves_c=8, q_steps=4, stages=4), "B > 160 KiB"),  # LDS
 )
 
 
@@ -143,8 +142,8 @@ def test_rejects(pkw, knobs, reason):
 
 def test_arch_gate_reads_capabilities():
     """The arch gate reads ArchTarget capabilities (wave32, WMMA 16x16x32;
-    TDM in the next test), not the arch name; the LDS check takes the smaller
-    of the kernel's budget and the arch's capacity."""
+    TDM in the next test), not the arch name; the LDS check is the arch's
+    capacity alone."""
     from types import SimpleNamespace
 
     from kernels.common.conv_direct_wgrad_wmma import wgrad_wmma_lds_reason
@@ -156,11 +155,8 @@ def test_arch_gate_reads_capabilities():
     assert why == "missing wmma 16x16x32 bf16 on gfx1201"
     assert "gfx0" in is_valid_grouped_wgrad_wmma_spec(spec, "gfx0")[1]
     small = SimpleNamespace(lds_capacity_bytes=1024)
-    assert (
-        wgrad_wmma_lds_reason(2048, 4096, small, "gfxX") == "LDS 2048 B > 1024 on gfxX"
-    )
-    assert wgrad_wmma_lds_reason(8192, 4096, small, "gfxX") == "LDS 8192 B > 4 KiB"
-    assert wgrad_wmma_lds_reason(1024, 4096, small, "gfxX") is None
+    assert wgrad_wmma_lds_reason(2048, small, "gfxX") == "LDS 2048 B > 1024 on gfxX"
+    assert wgrad_wmma_lds_reason(1024, small, "gfxX") is None
 
 
 def test_arch_gate_refuses_a_target_without_tdm(monkeypatch):
@@ -191,6 +187,16 @@ def test_arch_gate_refuses_a_target_without_tdm(monkeypatch):
 def test_one_padding_accepts_a_matching_column_padding():
     """An explicit column padding equal to PAD is the same problem."""
     spec = GroupedWgradWmmaSpec(problem=_problem(pad_w=1))
+    assert is_valid_grouped_wgrad_wmma_spec(spec, "gfx1250") == (True, "ok")
+
+
+def test_largest_lds_knobs_fit_gfx1250():
+    """The validator checks LDS against the arch's capacity only: the knobs'
+    largest footprint fits gfx1250's 320 KiB."""
+    from rocke.core.arch import ArchTarget
+
+    spec = GroupedWgradWmmaSpec(problem=_problem(), waves_c=8, q_steps=4, stages=4)
+    assert spec.lds_bytes() <= ArchTarget.from_gfx("gfx1250").lds_capacity_bytes
     assert is_valid_grouped_wgrad_wmma_spec(spec, "gfx1250") == (True, "ok")
 
 

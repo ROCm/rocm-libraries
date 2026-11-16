@@ -462,20 +462,14 @@ inline const rocke_archtarget_t*
 }
 
 /* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_lds_reason: true (with
- * `reason` set) when `lds` bytes exceed the kernel's `budget` or the arch's
- * LDS capacity. */
+ * `reason` set) when `lds` bytes exceed the arch's LDS capacity. Tuning
+ * ceilings belong to the AOT grid, not here. */
 inline bool wgrad_wmma_lds_over(long long lds,
-                                long long budget,
                                 const rocke_archtarget_t* target,
                                 const char* arch,
                                 char* reason,
                                 size_t reason_cap)
 {
-    if(lds > budget)
-    {
-        rocke_spec_set_reasonf(reason, reason_cap, "LDS %lld B > %lld KiB", lds, budget / 1024);
-        return true;
-    }
     if(lds > target->lds_capacity_bytes)
     {
         rocke_spec_set_reasonf(

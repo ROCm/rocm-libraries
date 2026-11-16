@@ -61,10 +61,6 @@ _TILE = 16  # channels per wave (WMMA M = N)
 _KSTEP = 32  # output columns per WMMA (WMMA K)
 _PAD_CH = 8  # LDS row padding (channels) against bank conflicts
 _DUMMY = 8  # elements past each buffer: the padding lanes' copy target
-# The kernel's LDS budget, not the arch capacity: the ceiling its knob grid
-# was tuned under (stages x one staged dY and X row). The arch's own capacity
-# (ArchTarget.lds_capacity_bytes) is checked as well.
-_LDS_BUDGET = 160 * 1024
 
 
 @dataclass(frozen=True)
@@ -182,7 +178,7 @@ def is_valid_grouped_wgrad_wmma_spec(spec: GroupedWgradWmmaSpec, arch: str = "gf
         return False, "stages in 2..4"
     why, target = wgrad_wmma_arch_reason(arch, p.dtype)
     if why is None:
-        why = wgrad_wmma_lds_reason(spec.lds_bytes(), _LDS_BUDGET, target, arch)
+        why = wgrad_wmma_lds_reason(spec.lds_bytes(), target, arch)
     if why is not None:
         return False, why
     return True, "ok"

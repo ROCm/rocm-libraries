@@ -90,7 +90,8 @@ class TestWgradWmmaSpec(unittest.TestCase):
             ({}, dict(stages=9), "stages in 2..8"),
             ({}, dict(target_blocks=0), "target_blocks >= 1"),
             ({}, dict(tiles_k=4, tiles_c=4), "VGPRs"),
-            ({}, dict(waves_k=4, waves_c=4, rows=4, stages=8), "300 KiB"),
+            # Past the arch's LDS capacity (gfx1250: 320 KiB).
+            ({}, dict(waves_k=4, waves_c=4, rows=4, stages=8), "B > 327680 on gfx1250"),
         )
         for pkw, knobs, needle in cases:
             with self.subTest(pkw=pkw, knobs=knobs):
