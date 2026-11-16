@@ -41,8 +41,8 @@ using ClusterDisable = std::false_type;
 
 // Staged TdmEpilogue rows: block warps, MIterPerStage, NumStageBuffers.
 using TdmWarps    = ck_tile::sequence<2, 2, 1>;
-using TdmStage1x1 = ck_tile::sequence<1, 1>;
-using TdmStage1x2 = ck_tile::sequence<1, 2>;
+using TdmStage1x1 = TdmStage<1, 1>;
+using TdmStage1x2 = TdmStage<1, 2>;
 
 using I8   = ck_tile::number<8>;
 using I16  = ck_tile::number<16>;
