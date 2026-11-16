@@ -83,7 +83,8 @@ TEST_P(FmhaFwdSplitKvGfx1100, CpuValidated)
     const auto [seqlen_q, num_splits, page_block_size] = shape;
     // num_splits == 0 asks the runner's heuristic, which must resolve to one split.
     if(num_splits == 0)
-        ASSERT_EQ(override_num_splits_if_necessary(1, 8, seqlen_q, 128, 0.0f, num_splits), 1);
+        ASSERT_EQ(override_num_splits_if_necessary(1, 8, seqlen_q, 128, 128, 128, 0.0f, num_splits),
+                  1);
 
     const auto result = dtype == "bf16"
                             ? run_paged_splitkv<FmhaFwdBf16>(seqlen_q, num_splits, page_block_size)
