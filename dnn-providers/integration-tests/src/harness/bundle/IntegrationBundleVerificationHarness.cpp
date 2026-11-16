@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <set>
@@ -119,8 +120,20 @@ void dumpComparisonTensors(const std::string& testName,
         {
             name = found->second->name()->str();
         }
+        std::string dtype;
+        std::string raggedOff = "null";
+        if(found != tensorMap.end() && std::string(role) != "philox_mask")
+        {
+            dtype = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(
+                found->second->data_type());
+            if(const auto ragged = found->second->ragged_offset_tensor_uid(); ragged.has_value())
+            {
+                raggedOff = std::to_string(ragged.value());
+            }
+        }
         manifest << (first ? "" : ",") << "{\"role\":\"" << role << "\",\"uid\":" << uid
-                 << ",\"name\":\"" << name << "\",\"elem\":" << t.elementSize()
+                 << ",\"name\":\"" << name << "\",\"dtype\":\"" << dtype
+                 << "\",\"ragged_off\":" << raggedOff << ",\"elem\":" << t.elementSize()
                  << ",\"space\":" << t.elementSpace() << ",\"file\":\"" << file << "\",\"dims\":[";
         first = false;
         for(size_t i = 0; i < t.dims().size(); ++i)
@@ -148,7 +161,63 @@ void dumpComparisonTensors(const std::string& testName,
         write("engine", uid, *engineOutputs.at(uid));
         write("ref", uid, expectedFor(uid));
     }
-    manifest << "]}";
+    manifest << "]";
+    // The SDPA backward node: tensor uids and parameters, so the offline tool needs no other copy of the graph.
+    for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
+    {
+        const auto* bwd = wrapper.getNode(i).attributes_as_SdpaBackwardAttributes();
+        if(bwd == nullptr)
+        {
+            continue;
+        }
+        const std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributesT> n(
+            bwd->UnPack());
+        const auto opt = [](const ::flatbuffers::Optional<int64_t>& v) {
+            return v.has_value() ? std::to_string(v.value()) : std::string("null");
+        };
+        // 9 significant digits round-trip a float, which std::to_string (6 decimals) does not.
+        const auto optf = [](const ::flatbuffers::Optional<float>& v) {
+            std::ostringstream out;
+            out.precision(9);
+            if(v.has_value())
+            {
+                out << v.value();
+            }
+            else
+            {
+                out << "null";
+            }
+            return out.str();
+        };
+        manifest << ",\"node\":{\"q\":" << n->q_tensor_uid << ",\"k\":" << n->k_tensor_uid
+                 << ",\"v\":" << n->v_tensor_uid << ",\"o\":" << n->o_tensor_uid
+                 << ",\"do\":" << n->do_tensor_uid << ",\"stats\":" << n->stats_tensor_uid
+                 << ",\"dq\":" << n->dq_tensor_uid << ",\"dk\":" << n->dk_tensor_uid
+                 << ",\"dv\":" << n->dv_tensor_uid
+                 << ",\"scale_tensor\":" << opt(n->scale_tensor_uid)
+                 << ",\"attn_mask\":" << opt(n->attn_mask_tensor_uid)
+                 << ",\"seq_len_q\":" << opt(n->seq_len_q_tensor_uid)
+                 << ",\"seq_len_kv\":" << opt(n->seq_len_kv_tensor_uid)
+                 << ",\"seed\":" << opt(n->seed_tensor_uid)
+                 << ",\"offset\":" << opt(n->offset_tensor_uid)
+                 << ",\"dropout_mask\":" << opt(n->dropout_mask_tensor_uid)
+                 << ",\"dbias\":" << opt(n->dbias_tensor_uid)
+                 << ",\"alibi\":" << (n->alibi_mask ? "true" : "false")
+                 << ",\"padding\":" << (n->padding_mask ? "true" : "false")
+                 << ",\"causal\":" << (n->causal_mask ? "true" : "false")
+                 << ",\"causal_bottom_right\":" << (n->causal_mask_bottom_right ? "true" : "false")
+                 << ",\"dropout_p\":" << optf(n->dropout_probability)
+                 << ",\"scale\":" << optf(n->attn_scale_value)
+                 << ",\"left_bound\":" << opt(n->left_bound)
+                 << ",\"right_bound\":" << opt(n->right_bound) << ",\"top_left\":"
+                 << (n->diagonal_alignment
+                             == hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT
+                         ? "true"
+                         : "false")
+                 << "}";
+        break;
+    }
+    manifest << "}";
     std::ofstream(dir / "manifest.json") << manifest.str();
 }
 
