@@ -400,9 +400,23 @@ namespace hipblaslt_ext
 
         // Slices along the split dimension: the first N-1 take size/N, the last takes the rest.
         const int64_t total = dim == SplitDim::M ? m : dim == SplitDim::N ? n : batch_count;
-        const int64_t base  = total / static_cast<int64_t>(parts);
+        int64_t       base  = total / static_cast<int64_t>(parts);
         if(base == 0)
             return HIPBLAS_STATUS_INVALID_VALUE;
+        // An M slice starts `base` elements into the columns of C, D and (op N) A. Round it up
+        // to a multiple of 256 bytes of the narrowest of them, so every slice starts aligned
+        // and the last (smaller) one takes the rest. N and Batch offsets are whole columns or
+        // matrices already. Keep the plain split when rounding would leave the last slice empty.
+        if(dim == SplitDim::M)
+        {
+            size_t narrowest = std::min(bytes[2], bytes[3]);
+            if(s.opA == HIPBLAS_OP_N)
+                narrowest = std::min(narrowest, bytes[0]);
+            const int64_t unit    = static_cast<int64_t>(256 / narrowest);
+            const int64_t aligned = (base + unit - 1) / unit * unit;
+            if(aligned * static_cast<int64_t>(parts - 1) < total)
+                base = aligned;
+        }
         std::vector<int64_t> offset(parts), size(parts);
         for(size_t i = 0; i < parts; i++)
         {

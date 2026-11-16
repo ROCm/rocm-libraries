@@ -325,6 +325,36 @@ TEST(pre_checkin_partitioned_gemm_ext, PartitionCountAndSliceRule)
     EXPECT_EQ(gemm.getSlice(3, offset, size), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
+TEST(pre_checkin_partitioned_gemm_ext, MSlicesStartOn256ByteBoundaries)
+{
+    // fp16: 128 elements are 256 bytes. The first slices round up and the last is smaller.
+    struct Case
+    {
+        size_t  parts;
+        int64_t m;
+        int64_t wantOffset[3], wantSize[3];
+    };
+    const Case cases[]
+        = {{2, 1000, {0, 512, 0}, {512, 488, 0}}, {3, 1000, {0, 384, 768}, {384, 384, 232}}};
+    for(auto const& c : cases)
+    {
+        auto              parts = onDeviceZero(c.parts);
+        auto              gemm  = makeGemm(parts);
+        Operands          op;
+        ReplicatedBuffers buffers(parts, op);
+        ASSERT_EQ(setReplicated(gemm, SplitDim::M, buffers.inputs(), c.m, kN),
+                  HIPBLAS_STATUS_SUCCESS);
+        for(size_t i = 0; i < c.parts; i++)
+        {
+            int64_t offset = -1, size = -1;
+            ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(offset, c.wantOffset[i]) << c.parts << " partitions, slice " << i;
+            EXPECT_EQ(size, c.wantSize[i]) << c.parts << " partitions, slice " << i;
+            EXPECT_EQ(offset * 2 % 256, 0);
+        }
+    }
+}
+
 TEST(pre_checkin_partitioned_gemm_ext, GetSliceNeedsAProblem)
 {
     auto    parts = onDeviceZero(2);

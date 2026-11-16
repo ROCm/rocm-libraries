@@ -1105,7 +1105,9 @@ namespace hipblaslt_ext
      * operand (B) is split. With ``Batch``, every partition computes whole ``m x n x k``
      * matrices for a range of the batches, and every matrix with a nonzero batch stride is
      * split. The first ``N - 1`` partitions take ``size / N`` and the last partition takes
-     * the remainder.
+     * the remainder. With ``M``, ``size / N`` is first rounded up so that every slice starts
+     * at a multiple of 256 bytes of C, D and A (op N), so the last partition is the smaller
+     * one; the plain split is kept when that would leave the last partition empty.
      */
     enum class SplitDim
     {
