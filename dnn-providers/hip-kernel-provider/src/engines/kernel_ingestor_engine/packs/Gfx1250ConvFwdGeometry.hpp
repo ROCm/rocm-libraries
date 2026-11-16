@@ -24,7 +24,8 @@
  * A catalog kernel is parsed once from its KMD fields (InstanceGeometry) into its
  * family's kernel; refuse() and plan() then port rocKE's dispatcher
  * for it -- an instance's `_admits` / `launch_plan_for` -- and servedPlan() adds the
- * packaged contract's bounds. Pure: no hipDNN includes, so the port is unit-tested
+ * packaged contract's bounds. The grid caps in the scalar depthwise and small-C WMMA
+ * refuse() are additions beyond rocKE's validators; servedPlan() checks the same grid. Pure: no hipDNN includes, so the port is unit-tested
  * against the adapter's golden vectors.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd

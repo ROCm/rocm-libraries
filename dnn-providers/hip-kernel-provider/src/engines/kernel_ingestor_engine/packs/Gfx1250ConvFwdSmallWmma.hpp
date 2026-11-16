@@ -245,6 +245,7 @@ inline Refusal refuse(const SmallcWmmaKernel& kernel, const Problem& problem)
                + std::to_string(p.kpg) + " output channels";
     }
     // Grid Y = ceil(totalK / blockK) must not exceed the hardware cap.
+    // Not a rule of rocKE's validator: servedPlan() bounds the same grid.
     if(s.grid()[1] > MAX_GRID_DIM)
     {
         return "grid Y exceeds the hardware cap";
