@@ -42,7 +42,7 @@ extern "C" {
  *  \f]
  *  or \f$Y := X^T\f$ when \p alpha is null. The number of rows of \f$Y\f$ must be the number of
  *  columns of \f$X\f$, and the number of columns of \f$Y\f$ must be the number of rows of
- *  \f$X\f$. For complex data types the values are not conjugated.
+ *  \f$X\f$. For complex data types, the transpose does not conjugate the values.
  *
  *  \f$X\f$ and \f$Y\f$ can be in row or column order (\ref rocsparse_order), and can have
  *  different orders and leading dimensions.
@@ -82,7 +82,7 @@ extern "C" {
  *  </table>
  *
  *  A null \p alpha behaves like a factor of one in every batch. When \p alpha is in host memory
- *  (\ref rocsparse_pointer_mode_host), its first value is used for every batch, whatever its batch
+ *  (\ref rocsparse_pointer_mode_host), its first value is used for every batch, regardless of its batch
  *  count, so only the last two modes are available; per-batch factors need \p alpha in device
  *  memory.
  *
@@ -105,13 +105,13 @@ extern "C" {
  *  </table>
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
  *  It may return before the actual computation has finished.
  *
  *  @param[in]
  *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
- *  alpha       optional dense vector holding the scaling factor, or one factor per batch.
+ *  alpha       optional dense vector containing the scaling factor, or one factor per batch.
  *              Pass null to transpose without scaling.
  *  @param[in]
  *  X           source \f$m \times n\f$ dense matrix.
