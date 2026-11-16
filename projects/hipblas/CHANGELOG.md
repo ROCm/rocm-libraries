@@ -65,7 +65,7 @@ Documentation for hipBLAS is available at
 
 ### Added
 
-* 1250 and 90c support to clients.
+* gfx1250 and gfx90c support to clients.
 * Version and other properties to Windows `hipblas.dll`.
 * Support for `OpenBLAS` ILP64-based API usage in clients.
 
@@ -92,7 +92,7 @@ Documentation for hipBLAS is available at
 ### Added
 
 * `--clients-only` build option to only build clients against a prebuilt library.
-* 1103, 1150, 1151, gfx1200, and gfx1201 support to clients.
+* gfx1103, gfx1150, gfx1151, gfx1200, and gfx1201 support to clients.
 * FORTRAN enabled for the Microsoft Windows build and tests.
 * Additional reference library fallback options added.
 
