@@ -166,6 +166,8 @@ def test_an_exclude_drops_its_instance(tmp_path, catalog, catalog_flavor):
         str(out),
         "--excludes",
         str(excludes),
+        "--jobs",
+        str(_JOBS),
     ]
     assert tool.main(argv) == 0
     written = json.loads(

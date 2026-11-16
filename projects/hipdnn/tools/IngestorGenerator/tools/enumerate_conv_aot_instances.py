@@ -247,7 +247,12 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--jobs",
         type=int,
-        default=os.cpu_count() or 1,
+        # Windows' ProcessPoolExecutor refuses more than 61 workers.
+        default=(
+            min(os.cpu_count() or 1, 61)
+            if sys.platform == "win32"
+            else os.cpu_count() or 1
+        ),
         help="Worker processes (default: %(default)s).",
     )
     args = parser.parse_args(argv)
