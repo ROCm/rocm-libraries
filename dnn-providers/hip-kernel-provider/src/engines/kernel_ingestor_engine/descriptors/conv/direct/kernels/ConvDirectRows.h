@@ -58,10 +58,12 @@
 // 16-byte LDS DMA (buffer_load_dwordx4 ... lds) is a CDNA4 feature; gfx950 is CDNA4's only
 // member, so its chip macro is the family test. The other MFMA families (gfx90a, gfx94x, and a
 // gfx9-4-generic build) have dword LDS DMA only and take the K2R_DMA_SUB = 4 fill.
+#ifndef K2R_DMA16
 #if defined(__gfx950__)
 #define K2R_DMA16 1
 #else
 #define K2R_DMA16 0
+#endif
 #endif
 #define K2R_DMA_SUB (K2R_DMA16 ? 1 : 4) // DMA instructions per 64-granule run
 
@@ -1821,8 +1823,8 @@ __device__ __attribute__((always_inline)) void k2ConvRowsCf(const K2Args& a CONV
     // Raw [h][c][x'] to the channels-last stage: task (h, granule g, 16-column block xb); lane j of
     // the group gets channels 8 g .. 8 g + 7 of column x' = 16 xb + j, written to stage column
     // x = x' - x_off when that is in the halo.
-#if !defined(__gfx950__)
-    // Gather form: task (h, granule g, halo column x), lanes over x first; the lane reads the 8
+#if !K2R_DMA16
+    // Gather form (gfx950 runs it too when built with K2R_DMA16 0, for testing): task (h, granule g, halo column x), lanes over x first; the lane reads the 8
     // channels 8 g .. 8 g + 7 of raw column x + x_off and writes them as granule g of column x.
     auto transpose = [&]() __attribute__((always_inline))
     {
