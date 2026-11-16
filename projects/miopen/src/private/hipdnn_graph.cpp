@@ -150,13 +150,22 @@ std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle
     auto& slot = HandleMap()[handle];
     if(slot == nullptr)
     {
-        auto [created, error] = fe::createHipdnnHandle(stream);
+        // Created without the stream: given one, the frontend destroys the handle
+        // itself when setting it fails, which would happen under this lock.
+        auto [created, error] = fe::createHipdnnHandle();
         unused                = std::move(created);
         if(!error.is_good() || unused == nullptr)
         {
             HandleMap().erase(handle);
             return {nullptr,
                     RecordFailure(miopenStatusInternalError, "could not create a hipDNN handle")};
+        }
+        if(stream != nullptr && !fe::setHipdnnHandleStream(unused, stream).is_good())
+        {
+            HandleMap().erase(handle);
+            return {nullptr,
+                    RecordFailure(miopenStatusInternalError,
+                                  "could not set the MIOpen handle's stream on the hipDNN handle")};
         }
         auto state = std::make_unique<HandleState>();
         if(hipEventCreateWithFlags(&state->lastWork, hipEventDisableTiming) != hipSuccess)
