@@ -50,6 +50,7 @@ The following table lists all operations currently supported in hipDNN:
     - Data type: FP32 or the input data type
 - Bias operand (the ADD operand that is not the convolution output)
     - Dims: `[1, K, 1, ..]`, where K is the convolution output channel count and the rank equals the rank of the convolution output
+    - Channel stride: 1 when K > 1
     - Data type: the input data type
 #### Activation node
 - Compute data type: FP32
@@ -75,7 +76,7 @@ The following table lists all operations currently supported in hipDNN:
 > - **Packing, forward:** all three tensors must be packed (the strides address exactly the element count).
 > - **Packing, backward data and backward weights:** a channels-first non-packed tensor is accepted; a channels-last non-packed tensor is declined.
 > - **Size, backward data:** `dy` and `dx` must each have at most 2^31 - 1 elements.
-> - **Fused Convolution Forward + (Bias) + Activation:** the bias operand must have dims `[1, K, 1, ..]` (K = convolution output channels, same rank as the output) and the data type of `x`. An ADD with any other operand, for example a residual of the output's shape, is not treated as a bias and the graph is declined.
+> - **Fused Convolution Forward + (Bias) + Activation:** the bias operand must meet the requirements under Detailed Requirements. An ADD with any other operand, for example a residual of the output's shape, is not treated as a bias and the graph is declined. The final activation output must have the data type of `x` and the dims of the convolution output, packed in the same layout as `x`.
 
 > [!NOTE]
 > **Fused Operations:**
