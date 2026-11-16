@@ -279,14 +279,16 @@ std::optional<Tile>
     const int pixels = config.blockPixels();
     const int run = config.fma ? config.tm : 1;
     // Channels-first tiles: K2_CF_MIN_TW columns wide where the output is (8 at least), within
-    // the larger halo bound (k2CfHaloMax).
+    // the larger halo bound (k2CfHaloMax),
     const int haloMax = config.cf != 0 ? k2CfHaloMax(pixels, config.r, config.s)
                                        : k2HaloMax(pixels, config.r, config.s);
-    const int narrowest = config.cf != 0 ? std::min(K2_CF_MIN_TW, std::max(8, a.wo)) : run;
+    // and in whole 8-column runs, so their channel-first stores are 16-byte runs.
+    const int narrowest = config.cf != 0 ? std::min(K2_CF_MIN_TW, std::max(8, a.wo / 8 * 8)) : run;
+    const int step = config.cf != 0 ? 8 : run;
     Tile best;
     double bestCost = -1.0;
-    const int widest = std::min(pixels, static_cast<int>(divUp(a.wo, run) * run));
-    for(int tw = narrowest; tw <= widest; tw += run)
+    const int widest = std::min(pixels, static_cast<int>(divUp(a.wo, step) * step));
+    for(int tw = narrowest; tw <= widest; tw += step)
     {
         int th = std::min(pixels / tw, a.ho);
         while(th > 0 && (th + config.r - 1) * (tw + config.s - 1) > haloMax)

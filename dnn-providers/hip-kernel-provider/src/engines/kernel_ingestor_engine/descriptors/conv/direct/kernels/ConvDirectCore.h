@@ -783,7 +783,9 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         typename K1If<SPLIT != 0, float, TO>::type TS; // epilogue element: fp32 partials or output
     constexpr int VO = 16 / static_cast<int>(sizeof(TS));
     constexpr int OLD = WTN + VO;
-    constexpr int STRIP = DIM * OLD; // in TS
+    // CF 1: the strip is column-major (a channel's DIM pixels contiguous), OLDC per column.
+    constexpr int OLDC = DIM + VO;
+    constexpr int STRIP = CF != 0 ? WTN * OLDC : DIM * OLD; // in TS
     constexpr int SETS = RING ? KD : 1;
     static_assert(WTM % DIM == 0 && WTN % DIM == 0 && BC % KA == 0 && WTN % VO == 0, "tile");
     // CF 1: packed channels-first activations in place (K2HaloLoadCf in, channel-major stores out).
@@ -1140,35 +1142,64 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
                     float v = acc[set][i][j][e];
                     if constexpr(SPLIT == 0)
                         v = epi(v, chans[j], 0, true);
-                    strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM] = K1Elem<TS>::store(v);
+                    if constexpr(CF != 0)
+                        strip[(j * DIM + lane % DIM) * OLDC + Atom::dRow(lane, e)]
+                            = K1Elem<TS>::store(v);
+                    else
+                        strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
+                            = K1Elem<TS>::store(v);
                 }
 #else
-                    strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
-                        = K1Elem<TS>::store(acc[set][i][j][e]);
+                {
+                    if constexpr(CF != 0)
+                        strip[(j * DIM + lane % DIM) * OLDC + Atom::dRow(lane, e)]
+                            = K1Elem<TS>::store(acc[set][i][j][e]);
+                    else
+                        strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
+                            = K1Elem<TS>::store(acc[set][i][j][e]);
+                }
 #endif
             __builtin_amdgcn_wave_barrier();
             __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
             if constexpr(CF != 0)
             {
-                // Channel-major: DIM consecutive lanes store the slab's DIM pixels of one channel
-                // (runs of the tile's columns along an output row).
-                for(int v = lane; v < DIM * WTN; v += WAVE)
+                // Channel-major: runs of VO pixels of one channel (consecutive output columns of
+                // one row) as one 16-byte store where they are whole and aligned, else elements.
+                constexpr int RUNS = DIM / VO;
+                for(int v = lane; v < WTN * RUNS; v += WAVE)
                 {
-                    const int rr = v % DIM;
-                    const int col = v / DIM;
+                    const int col = v / RUNS;
+                    const int rr = (v - col * RUNS) * VO;
                     const int m = wm * WTM + i * DIM + rr;
                     const int nn = n0 + wn * WTN + col;
                     if(m >= tilePix || nn >= a.k)
                         continue;
+                    const TS* src = strip + col * OLDC + rr;
                     const int ohl = m / a.tw, owl = m - ohl * a.tw;
                     const int oh = b.oh0 + ohl, ow = b.ow0 + owl;
-                    if(oh >= a.ho || ow >= a.wo)
+                    const long long o
+                        = (((static_cast<long long>(b.img) * a.k + nn) * a.dout + od) * a.ho + oh)
+                              * a.wo
+                          + ow;
+                    if(owl + VO <= a.tw && ow + VO <= a.wo && m + VO <= tilePix && oh < a.ho
+                       && o % VO == 0)
+                    {
+                        *reinterpret_cast<Raw*>(out + o) = *reinterpret_cast<const Raw*>(src);
                         continue;
-                    out[(((static_cast<long long>(b.img) * a.k + nn) * a.dout + od) * a.ho + oh)
-                            * a.wo
-                        + ow]
-                        = strip[rr * OLD + col];
+                    }
+                    for(int e = 0; e < VO && m + e < tilePix; ++e)
+                    {
+                        const int me = m + e;
+                        const int ohe = me / a.tw, owe = me - ohe * a.tw;
+                        const int oh2 = b.oh0 + ohe, ow2 = b.ow0 + owe;
+                        if(oh2 < a.ho && ow2 < a.wo)
+                            out[(((static_cast<long long>(b.img) * a.k + nn) * a.dout + od) * a.ho
+                                 + oh2)
+                                    * a.wo
+                                + ow2]
+                                = src[e];
+                    }
                 }
             }
             else
