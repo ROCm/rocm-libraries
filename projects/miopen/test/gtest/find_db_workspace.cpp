@@ -402,6 +402,10 @@ std::vector<FlagProblem> FlagProblems()
             {direction, miopenTensorNDHWC, {4, {2, 64, 8, 14, 14}, {64, 16, 3, 3, 3}}});
         problems.push_back(
             {direction, miopenTensorNCDHW, {1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}}});
+        // ConvHipConv's smoke shape (4 channels per group), in both layouts it serves, so its flag
+        // is checked where it applies (gfx950, gfx1250; FP16 and BF16).
+        problems.push_back({direction, miopenTensorNHWC, {16, {4, 64, 8, 1}, {64, 4, 3, 3}}});
+        problems.push_back({direction, miopenTensorNCHW, {16, {4, 64, 8, 1}, {64, 4, 3, 3}}});
     }
     return problems;
 }
