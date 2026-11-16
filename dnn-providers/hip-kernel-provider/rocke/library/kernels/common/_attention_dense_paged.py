@@ -34,10 +34,15 @@ def paged_cache_bytes(spec) -> int:
 
     The whole cache, not one sequence's logical length: any page id the table can
     name must be in range, and loads past ``num_records`` silently return 0. The
-    spec's 2 GiB check uses it too. Paged K/V is fp16/bf16 only; fp8 paged K/V
-    needs the storage element size here.
+    spec's 2 GiB check uses it too.
     """
-    return spec.num_kv_blocks * spec.block_size * spec.num_kv_heads * spec.head_size * 2
+    return (
+        spec.num_kv_blocks
+        * spec.block_size
+        * spec.num_kv_heads
+        * spec.head_size
+        * spec.kv_elem_bytes
+    )
 
 
 def paged_tile_check(block_size: int, block_m: int, block_n: int) -> tuple[bool, str]:

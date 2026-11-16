@@ -14,17 +14,20 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx942_attention_dense/` | `hipkernel:Gfx942AttentionDense` | `packs/Gfx942AttentionDenseNative.cpp` (shares `packs/AttentionDenseNative.cpp` with gfx950) |
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
+| `rocKE/gfx950_conv_fwd_aot/` | `hipkernel:Gfx950ConvFwdAot` | `packs/Gfx950ConvFwdNative.cpp` |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
-`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
-`gfx1250_conv_dgrad_aot` KDPs are stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
-and declare gfx950, gfx942 or gfx1250 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
+`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_fwd_aot`,
+`gfx950_conv_dgrad_aot` and `gfx1250_conv_dgrad_aot` KDPs are stored in DVC (see
+[Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below) and declare gfx950,
+gfx942 or gfx1250 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
 git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
 rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
 walk) and whose GPU targets include an arch its KDP declares; for gfx950, gfx942 and
-gfx1250 the DVC KDPs must also have been pulled.
+gfx1250 the DVC KDPs must also have been pulled. `gfx950_conv_fwd_aot`'s heuristic model is
+described in `docs/gfx950_conv_fwd/aot_instances.md`.
 
 The two gfx1151 engines declare engine knobs in their UEDs (set in the IngestorGenerator
 configs, not by hand): the prefill bundle `rocKE/gfx1151_wmma_attention/` declares
@@ -129,8 +132,10 @@ rocKE/<bundle>/
 ```
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
-updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`
-and `gfx942_attention_unified_3d` use this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
+updates atomically. Files are stored uncompressed, one blob each. `gfx950_attention_dense`,
+`gfx942_attention_unified_3d`, `gfx950_conv_fwd_aot` and `gfx950_conv_dgrad_aot` (the last
+two with `heuristics.dvc`) use this layout. A single large file with its own
+`<name>.kdp.json.dvc` pointer is also
 accepted.
 
 **Heuristic models.** A heuristic model file is binary and does not belong in git. Each
@@ -139,7 +144,9 @@ one is its own DVC output: `heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin
 `heuristic.uhd.json`, the layout FlyDSL uses. `uhd_gen promote` copies the model there;
 add the pointer with `dvc add model.bin` in that folder, then append `remote: ingestor`
 to it as for any new pointer (below). A model file that nothing refers to by path can
-instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at configure.
+instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at configure,
+here and under the integration test root (`test_descriptors/integration/rocKE/`, whose
+`gfx950_conv_fwd_aot_seed` keeps its KDPs in `artifacts/` the same way).
 
 A KDP in `artifacts/` packs correctly: the packer walks the root recursively and computes
 each packed kernel's archive path from the descriptor's depth (`../../../kpack/...` here).

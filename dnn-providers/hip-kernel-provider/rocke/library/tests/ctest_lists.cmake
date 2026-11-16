@@ -51,6 +51,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_direct_fwd_gstream_wmma.py"
     "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
     "tests/library/tests/test_direct_dgrad_wmma.py"
+    "tests/library/tests/test_direct_dgrad_pp_mfma.py"
     "tests/library/tests/test_direct_fwd_wmma.py"
     "tests/library/tests/test_conv_fwd_split_k.py"
     "tests/library/tests/test_conv_winograd_fwd_cpu.py"
@@ -94,6 +95,21 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT 180)\n")
+
+# The forward AOT-packaging cross-check gets its own entry: it samples far more of
+# the sweep's identity space than the other conv files above, so its slowest cases
+# (building and comparing IR for a sampled instance) exceed both the shared entry's
+# per-test pytest-timeout and its cumulative CTest TIMEOUT, the dgrad twin above gets
+# the same shared budget only because its own sample is smaller.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest "
+       "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
+       "-v -rs --timeout=600)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv_fwd_aot_packaging_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+        "  TIMEOUT 900)\n")
 
 # Library conv IR golden, platform-regression, split-K planner, ceil_div and
 # conv doc-example (the conv part of dsl_docs' verify_dsl_docs.py) CPU tests
@@ -193,7 +209,9 @@ endif()
 # fallback's cache key and block-table stride kernarg, the unified attention running-max carry and keyless
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
+# LDS alignment claims of the backward kernel with the slices dK / dV sink, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
+# gfx1250 3D kernel's paged reads staying bounded to the sequence's last page, the
 # host-side SDPA sequence-length and padding-mask adapters/specs, the
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
 # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
@@ -209,6 +227,7 @@ endif()
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_bwd_gemm.py"
     "tests/library/tests/test_attention_bwd_body.py"
+    "tests/library/tests/test_attention_bwd_lds_alignment.py"
     "tests/library/tests/test_gfx1250_attention_operand_roles.py"
     "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
     "tests/library/tests/test_attention_dense_decode.py"
@@ -236,18 +255,22 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_unified_2d_lse_ir.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
     "tests/library/tests/test_d256_gfx942_fast_routing.py"
+    "tests/library/tests/test_gfx1250_tiled_3d_bounds.py"
     "tests/library/tests/test_sdpa_seqlen.py"
     "tests/library/tests/test_sdpa_padding_mask.py"
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
-    "tests/library/tests/oracle_free/test_contracts.py")
-# gfx942 dense prefill host tests. Not on Windows: its shard runs close to the
-# time limit and tests no gfx942.
-if(NOT WIN32)
-  list(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
-       "tests/library/tests/test_attention_dense_gfx942.py")
-endif()
+    "tests/library/tests/oracle_free/test_contracts.py"
+    "tests/library/tests/test_attention_dense_gfx942.py"
+    "tests/library/tests/test_attention_combo_sweep_fp8.py"
+    "tests/library/tests/test_dense_prefill_emit_shapes.py"
+    "tests/library/tests/dispatch/attention/test_review_followups.py"
+    # One node id, not the file: the rest of test_attention_builds.py
+    # disassembles HSACO, so it needs the compiler tools this lane does not
+    # inject, and its budget sentinel turns a missing-tool skip into a
+    # failure. This test is pure host-side signature/params mirroring.
+    "tests/library/tests/test_attention_builds.py::TestAttentionHelpers::test_gfx950_signature_matches_the_built_kernels_params")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS

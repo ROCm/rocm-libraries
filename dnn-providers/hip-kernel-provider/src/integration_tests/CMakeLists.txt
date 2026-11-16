@@ -115,6 +115,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             )
         endif()
     endwhile()
+    # The packaged convolution suites follow the same rule as the knobs suite above, one
+    # define per engine: the AOT-instance engine is its own product bundle. The AOT seed
+    # is test content of this build's own integration root, so its gate is arch-aware
+    # instead.
+    hkp_product_offers_engine(_hkp_conv_fwd_aot_bundle "hipkernel:Gfx950ConvFwdAot")
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_conv_fwd_aot_seed_bundle)
+    if(_hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
+        )
+    endif()
+    foreach(_hkp_conv_suite IN ITEMS conv_fwd_aot conv_fwd_aot_seed)
+        if(_hkp_${_hkp_conv_suite}_bundle)
+            string(TOUPPER "HKP_TEST_GFX950_${_hkp_conv_suite}" _hkp_conv_define)
+            target_compile_definitions(hip_kernel_provider_integration_tests
+                PRIVATE ${_hkp_conv_define}=1
+            )
+        endif()
+    endforeach()
     # The dgrad AOT-instance engine is a product bundle of its own, gated like the knob
     # suites; it needs no SDPA.
     hkp_product_offers_engine(_hkp_conv_dgrad_aot_bundle "hipkernel:Gfx950ConvDgradAot")
