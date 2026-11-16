@@ -297,12 +297,18 @@ Laplacian) across backends and both precisions; the emulation tiers shrink param
 running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
 **Overlap with the unit tests:** the `local_matrix*`, `local_vector`, `local_stencil` and `backend`
-suites skip in every TheRock tier, and they test operations that the unit tests now check against
-independent references. They are kept until a review of each suite confirms that the unit tests
-cover all of its checks. A suite that is covered is then deleted, not maintained next to the unit
-tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
+suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
+`backend_omp_parallel_region` and `backend_omp_restore_state`, which run in every category. They
+test operations that the unit tests now check against independent references. They are kept until
+a review of each suite confirms that the unit tests cover all of its checks, on every platform and
+in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
+the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
 `local_matrix_multicoloring` suites and the ItLUSolve case of `local_matrix_itsolve` have been
-deleted on that basis. The solver, preconditioner and AMG suites stay as the integration layer.
+deleted on that basis; the Jenkins test command runs both unit-test binaries after
+`rocalution-test`, so its lanes keep these checks. A clients-only build (`install.sh
+--clients-only`) does not build the unit tests, and the `rtest.xml` sets run only
+`rocalution-test`, so neither runs these checks any more. The solver, preconditioner and AMG suites
+stay as the integration layer.
 
 ---
 
@@ -371,7 +377,8 @@ Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GP
 HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 
 > **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those legacy
-> lanes run the **full** `rocalution-test` suite (no emulation subset). The intended
+> lanes run the **full** `rocalution-test` suite (no emulation subset), followed by
+> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`. The intended
 > `*checkin*` / `*nightly*` filters match no current test names. The modern TheRock gate, by
 > contrast, selects the subset through the `ROCALUTION_EMULATION_*` env var of the CTest category.
 
@@ -391,7 +398,9 @@ HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 
 **Jenkins build variants:** default `./install.sh -c` (HIP + OpenMP); host `./install.sh -c --host`;
 MPI `./install.sh -c --host --mpi=on --no-openmp`. Test path:
-`build/release/clients/staging/rocalution-test`. On gfx90a, HMM tests run with `HSA_XNACK=0/1`.
+`build/release/clients/staging/`, which holds `rocalution-test`, `rocalution-unit-test` and
+`rocalution-unit-test-lifecycle`. On gfx90a, all three also run with `HSA_XNACK=0` and
+`HSA_XNACK=1`.
 
 ### PR Test Classification
 
