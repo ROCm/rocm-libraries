@@ -390,9 +390,15 @@ void runFused(const EpilogueCase& convCase,
             }
             if(specials == Specials::NAN_INF && !isScale && c >= 1 && c <= 3)
             {
-                v = c == 1   ? std::numeric_limits<double>::quiet_NaN()
-                    : c == 2 ? std::numeric_limits<double>::infinity()
-                             : -std::numeric_limits<double>::infinity();
+                if(c == 1)
+                {
+                    v = std::numeric_limits<double>::quiet_NaN();
+                }
+                else
+                {
+                    v = c == 2 ? std::numeric_limits<double>::infinity()
+                               : -std::numeric_limits<double>::infinity();
+                }
             }
             operand.values.push_back(v);
         }
@@ -461,7 +467,8 @@ void runFused(const EpilogueCase& convCase,
     {
         taps *= f;
     }
-    const double convBound = 1e-6 * static_cast<double>((shape.c / shape.groups) * taps);
+    const int64_t reduction = (shape.c / shape.groups) * taps;
+    const double convBound = 1e-6 * static_cast<double>(reduction);
     double gain = 1.0;
     for(size_t i = 0; i < steps.size(); ++i)
     {
@@ -479,7 +486,7 @@ void runFused(const EpilogueCase& convCase,
             offset += index[a] * yStrides[a];
         }
         const int64_t channel = index[1];
-        double v = static_cast<double>(static_cast<const float*>(conv.rawHostData())[offset]);
+        auto v = static_cast<double>(static_cast<const float*>(conv.rawHostData())[offset]);
         double magnitude = std::fabs(v);
         for(size_t i = 0; i < steps.size(); ++i)
         {
@@ -492,9 +499,9 @@ void runFused(const EpilogueCase& convCase,
             v = applyStep(steps[i], v, input);
             magnitude = std::max(magnitude, std::fabs(v));
         }
-        const double want
+        const auto want
             = static_cast<double>(static_cast<float>(static_cast<T>(static_cast<float>(v))));
-        const double got = static_cast<double>(
+        const auto got = static_cast<double>(
             static_cast<float>(static_cast<const T*>(y.rawHostData())[offset]));
         const double tolerance = convBound * gain + 4e-6 * magnitude
                                  + 2.0 * unitRoundoff<T>() * (std::fabs(want) + 1e-3);
@@ -927,7 +934,7 @@ int solutionCount(const HipdnnEnginePluginHandle& handle,
                   int64_t k,
                   std::optional<hipblasLtEpilogue_t> epilogue)
 {
-    HipblasltMatmulDesc desc(HIPBLAS_OP_T, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+    const HipblasltMatmulDesc desc(HIPBLAS_OP_T, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
     if(epilogue.has_value())
     {
         THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
@@ -936,7 +943,7 @@ int solutionCount(const HipdnnEnginePluginHandle& handle,
         THROW_ON_HIPBLASLT_FAILURE(
             hipblasLtMatmulDescSetAttribute(desc.matmulDesc(),
                                             HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
-                                            &placeholder,
+                                            static_cast<const void*>(&placeholder),
                                             sizeof(placeholder)));
         THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
             desc.matmulDesc(), HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &type, sizeof(type)));
@@ -975,11 +982,12 @@ TEST(TestGpuConvEpilogueHipblaslt, SolutionCountWithNativeEpilogue)
     // ResNet-50 conv2_x 1x1 64 -> 256 at N 32: m = K, n = N H W, k = C.
     for(const auto type : {HIP_R_16F, HIP_R_16BF, HIP_R_32F})
     {
-        const int plain = solutionCount(*handle, type, 256, 32 * 56 * 56, 64, std::nullopt);
+        const int plain
+            = solutionCount(*handle, type, 256, int64_t{32} * 56 * 56, 64, std::nullopt);
         const int withBias
-            = solutionCount(*handle, type, 256, 32 * 56 * 56, 64, HIPBLASLT_EPILOGUE_BIAS);
-        const int biasRelu
-            = solutionCount(*handle, type, 256, 32 * 56 * 56, 64, HIPBLASLT_EPILOGUE_RELU_BIAS);
+            = solutionCount(*handle, type, 256, int64_t{32} * 56 * 56, 64, HIPBLASLT_EPILOGUE_BIAS);
+        const int biasRelu = solutionCount(
+            *handle, type, 256, int64_t{32} * 56 * 56, 64, HIPBLASLT_EPILOGUE_RELU_BIAS);
         std::cout << "hipBLASLt solutions, type " << static_cast<int>(type) << ": plain " << plain
                   << ", bias " << withBias << ", bias+relu " << biasRelu << "\n";
         ::testing::Test::RecordProperty("solutions_" + std::to_string(static_cast<int>(type)),

@@ -314,7 +314,7 @@ TEST(TestConvEpilogueFormulation, ExtraPassAddsYsFp32Copy)
     const size_t before = calls->workspaceBytes;
     const auto after = fuseEpilogue(*problem, std::move(*calls), false);
     ASSERT_TRUE(after.has_value());
-    const size_t yBytes = 2 * 24 * 5 * 7 * sizeof(float);
+    const size_t yBytes = size_t{2} * 24 * 5 * 7 * sizeof(float);
     EXPECT_GE(after->workspaceBytes, before + yBytes);
 }
 

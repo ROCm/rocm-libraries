@@ -70,7 +70,7 @@ void setNativeEpilogue(const HipblasltMatmulDesc& desc, const NativeEpilogue& ep
         THROW_ON_HIPBLASLT_FAILURE(
             hipblasLtMatmulDescSetAttribute(desc.matmulDesc(),
                                             HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
-                                            &placeholder,
+                                            static_cast<const void*>(&placeholder),
                                             sizeof(placeholder)));
     }
 }
@@ -114,7 +114,7 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
     for(auto& call : fitLibraryLimits(calls))
     {
         // A fused epilogue applies once, to the whole result: never to a part of a split call.
-        PLUGIN_THROW_IF_FALSE(!call.epilogue.has_value() || !call.accumulate,
+        PLUGIN_THROW_IF_FALSE(!(call.epilogue.has_value() && call.accumulate),
                               HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                               "a native epilogue on an accumulating GEMM");
         // Stored shapes: op(a) is m x k, op(b) is k x n.
@@ -211,7 +211,7 @@ void HipblasltGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
             THROW_ON_HIPBLASLT_FAILURE(
                 hipblasLtMatmulDescSetAttribute(prepared.desc.matmulDesc(),
                                                 HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
-                                                &bias,
+                                                static_cast<const void*>(&bias),
                                                 sizeof(bias)));
         }
 
