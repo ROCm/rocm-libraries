@@ -183,6 +183,16 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::buildableCalls(
             return other;
         }
     }
+    // No layout's long fp32-output GEMM runs: the same sum in shorter reductions, each adding
+    // to the fp32 result in order (hipBLASLt without a workspace has algorithms for those).
+    for(const int64_t chunks : {2, 4, 8, 16})
+    {
+        auto split = splitFp32OutputReductions(*calls, chunks);
+        if(runs(split))
+        {
+            return split;
+        }
+    }
     return calls;
 }
 
