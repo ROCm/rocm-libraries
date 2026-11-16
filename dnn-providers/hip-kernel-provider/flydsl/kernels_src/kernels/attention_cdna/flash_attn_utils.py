@@ -6774,11 +6774,15 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
         l_row = l_row * corr + sink_w
         return m_new, l_row
 
-    def _lazy_rescale_o_rescale(self, v_o, m_row, l_row, m_tile_max, v_p):
+    def _lazy_rescale_o_rescale(self, v_o, m_row, l_row, m_tile_max, v_p, keep):
         # Lanes below their running max are dragged into this wave-uniform branch and
         # m_tile_max alone would overflow them. nnan, not the ambient: -inf is live here.
         m_new = fx.maxnumf(m_row, m_tile_max, fastmath=arith.FastMathFlags.nnan)
-        corr = self._corr(m_row, m_new)
+        # Each row decides for itself (modification 48): a row within the threshold
+        # (`keep`) keeps its max and a factor of exactly 1, as on the skip path, so its
+        # bits never depend on another row of the wave moving its max.
+        m_new = fx.Boolean(keep).select(m_row, m_new)
+        corr = fx.Boolean(keep).select(fx.Float32(1.0), self._corr(m_row, m_new))
         scaled_accs = list(v_o)
         self.scale_o(scaled_accs, corr)
         out = [as_mlir_value(scaled_accs[dc]) for dc in range(self.traits.D_CHUNKS)]
@@ -6819,7 +6823,9 @@ class DualwaveSoftmaxHelper(DualwaveKernelContext):
             if fx.Boolean(all_below):
                 pass
             else:
-                _res = self._lazy_rescale_o_rescale(v_o, m_row, l_row, m_tile_max, v_p)
+                _res = self._lazy_rescale_o_rescale(
+                    v_o, m_row, l_row, m_tile_max, v_p, below
+                )
 
             o_out = list(_res[0 : traits.D_CHUNKS])
             vp_out = _res[traits.D_CHUNKS]
