@@ -76,6 +76,13 @@ bool limits_reason(const rocke_fwd_flex_mfma_spec_t* s, char* msg, size_t cap)
             return true;
         }
     }
+    /* the whole workspace's size is an i32 kernarg of the conv and the fold */
+    if(s->split_c > 1 && mul_sat(mul_sat(mul_sat(4, s->split_c), nx), tk) > kOob)
+    {
+        ROCKE_ERR_SNPRINTF(
+            msg, cap, "workspace exceeds %lld B, the i32 byte-count kernarg", (long long)kOob);
+        return true;
+    }
     return false;
 }
 

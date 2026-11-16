@@ -183,9 +183,37 @@ def test_reasons():
     )
     reason = fwd_flex_mfma_reason(ws_spec)
     assert reason is not None and "workspace" in reason, reason
+    # The whole workspace's size is an i32 kernarg: four 1 GiB slabs (each
+    # within the buffer range) are refused.
+    big_ws = FwdFlexMfmaSpec(
+        problem=_problem(N=32, H=255, W=255, C=256, K=512, stride=2), split_c=4
+    )
+    assert big_ws.workspace_bytes == 4 << 30
+    assert fwd_flex_mfma_reason(big_ws) == (
+        "workspace exceeds 2147483647 B, the i32 byte-count kernarg"
+    )
     # build raises when spec is invalid
     with pytest.raises(ValueError, match="bk must be 128 or 256"):
         build_fwd_flex_mfma(replace(ok, bk=64))
+
+
+def test_multi_round_cases_overflow_the_persistent_grid():
+    """The two GPU cases above that run more items than the persistent grid
+    leave a partial last round."""
+    from kernels.common.conv_direct_fwd_flex_mfma import PERSIST
+
+    for kw, bk, items in (
+        (
+            dict(N=1, H=257, W=257, C=64, K=64, PAD=2, stride=1, dil_h=2, dil_w=2),
+            128,
+            259,
+        ),
+        (dict(N=2, H=91, W=91, C=128, K=512, PAD=1, stride=1), 128, 260),
+    ):
+        spec = FwdFlexMfmaSpec(problem=_problem(**kw), bk=bk)
+        assert fwd_flex_mfma_reason(spec) is None
+        assert spec.items() == items and spec.grid() == (PERSIST, 1, 1)
+        assert items % PERSIST
 
 
 def test_grid_and_items():
@@ -553,6 +581,11 @@ def _launch_split_reduce(split_c, dtype, p, ws, y):
         (3, 3, 1, 1, 2, 1, 1, 256, 2, 2, 19, 21, 320, 128),
         # pixel tail: N * Ho * Wo = 9, far below one 256-pixel tile
         (3, 3, 1, 1, 2, 1, 1, 256, 1, 1, 5, 5, 192, 128),
+        # More items than the persistent grid, with a partial last round:
+        # 259 dilated pixel tiles (tap ranges change between tiles), and
+        # 65 pixel tiles x 4 K tiles = 260 items.
+        (3, 3, 2, 2, 1, 2, 2, 128, 1, 1, 257, 257, 64, 64),
+        (3, 3, 1, 1, 1, 1, 1, 128, 1, 2, 91, 91, 128, 512),
     ],
 )
 def test_forward_matches_torch(

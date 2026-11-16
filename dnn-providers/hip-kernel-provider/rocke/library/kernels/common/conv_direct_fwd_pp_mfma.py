@@ -210,7 +210,9 @@ def _fwd_pp_mfma_limits_reason(spec: FwdPpMfmaSpec) -> "str | None":
     """The i32 limits: the buffer descriptors span one input image, one
     output image and the whole filter, and a masked lane reads at byte offset
     ``I32_MAX``, which is out of range only while each of them is
-    at most ``I32_MAX`` bytes; the flat block id is an i32 too."""
+    at most ``I32_MAX`` bytes; the whole input and output sizes are i32
+    kernargs. The flat block id is an i32 too, but at most ``N * Ho * Wo * K``
+    blocks fit in it once the output does."""
     p = spec.problem
     for what, nbytes in (
         ("input image", 2 * p.H * p.W * p.total_c),
@@ -219,9 +221,12 @@ def _fwd_pp_mfma_limits_reason(spec: FwdPpMfmaSpec) -> "str | None":
     ):
         if nbytes > I32_MAX:
             return f"{what} exceeds {I32_MAX} B, the i32 buffer range"
-    blocks = spec.grid()[0]
-    if blocks > I32_MAX:
-        return f"{blocks} workgroups exceed the i32 block id"
+    for what, nbytes in (
+        ("input", 2 * p.N * p.H * p.W * p.total_c),
+        ("output", 2 * p.N * p.Ho * p.Wo * p.total_k),
+    ):
+        if nbytes > I32_MAX:
+            return f"{what} exceeds {I32_MAX} B, the i32 byte-count kernarg"
     return None
 
 

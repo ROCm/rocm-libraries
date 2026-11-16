@@ -180,6 +180,9 @@ def fwd_flex_mfma_reason(spec: FwdFlexMfmaSpec, arch: str = "gfx950") -> "str | 
     ):
         if nbytes > I32_MAX:
             return f"{what} exceeds {I32_MAX} B, the i32 buffer range"
+    # the whole workspace's size is an i32 kernarg of the conv and the fold
+    if spec.workspace_bytes > I32_MAX:
+        return f"workspace exceeds {I32_MAX} B, the i32 byte-count kernarg"
     return None
 
 

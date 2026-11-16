@@ -117,9 +117,10 @@ long long mul_sat(long long a, long long b)
 /* _fwd_pp_mfma_limits_reason(spec): the buffer descriptors span one input
  * image, one output image and the whole filter, and a masked lane reads at
  * byte offset kOob (INT32_MAX), which is out of range only while each of them
- * is at most INT32_MAX bytes; the flat block id is an i32 too. Sizes
- * saturate in 64 bits; the extents are validated >= 1 before this runs, and
- * once the tensors fit, the block count cannot overflow. */
+ * is at most INT32_MAX bytes; the whole input and output sizes are i32
+ * kernargs. The flat block id is an i32 too, but at most N * Ho * Wo * K
+ * blocks fit in it once the output does. Sizes saturate in 64 bits; the
+ * extents are validated >= 1 before this runs. */
 bool limits_reason(const rocke_fwd_pp_mfma_spec_t* s, char* msg, size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &s->problem;
@@ -145,12 +146,22 @@ bool limits_reason(const rocke_fwd_pp_mfma_spec_t* s, char* msg, size_t cap)
             return true;
         }
     }
-    const long long blocks = (long long)p->N * rocke_ceil_div(ho, kTH) * rocke_ceil_div(wo, kTW)
-                             * rocke_ceil_div(tk, s->block_k);
-    if(blocks > kOob)
+    const struct
     {
-        ROCKE_ERR_SNPRINTF(msg, cap, "%lld workgroups exceed the i32 block id", blocks);
-        return true;
+        const char* what;
+        long long bytes;
+    } whole[] = {
+        {"input", mul_sat(mul_sat(mul_sat(mul_sat(2, p->N), p->H), p->W), tc)},
+        {"output", mul_sat(mul_sat(mul_sat(mul_sat(2, p->N), ho), wo), tk)},
+    };
+    for(const auto& t : whole)
+    {
+        if(t.bytes > kOob)
+        {
+            ROCKE_ERR_SNPRINTF(
+                msg, cap, "%s exceeds %lld B, the i32 byte-count kernarg", t.what, (long long)kOob);
+            return true;
+        }
     }
     return false;
 }

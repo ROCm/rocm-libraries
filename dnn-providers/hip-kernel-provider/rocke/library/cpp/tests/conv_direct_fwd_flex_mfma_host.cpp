@@ -11,7 +11,7 @@
  * of Python's fwd_flex_mfma_reason: the wave64 gate and the 16-byte LDS DMA
  * capability gate, the dtype, the extents, groups, stride-and-dilation, the
  * channel granules, the bk and split_c knobs, the tap-count limit, the i32
- * limits of the buffer descriptors and the workspace slab.
+ * limits of the buffer descriptors, the workspace slab and the workspace size.
  */
 #include <stdio.h>
 #include <string.h>
@@ -210,6 +210,18 @@ static void test_knob_refusals(void)
     s = base_spec();
     s.split_c = 0;
     expect_refused("split_c 0", &s, "gfx950", "split_c 0 must be in [1, C / 64]");
+    // four 1 GiB slabs: each within the buffer range, 4 GiB in all
+    s = base_spec();
+    s.problem.N = 32;
+    s.problem.H = s.problem.W = 255;
+    s.problem.cpg = 256;
+    s.problem.kpg = 512;
+    s.problem.stride = 2;
+    s.split_c = 4;
+    expect_refused("workspace 4 GiB",
+                   &s,
+                   "gfx950",
+                   "workspace exceeds 2147483647 B, the i32 byte-count kernarg");
 }
 
 int main(void)
