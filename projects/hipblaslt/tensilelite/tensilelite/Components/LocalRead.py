@@ -105,7 +105,8 @@ class LocalReadVALU(LocalRead):
                 if numOffsets == 2:
                     ds = DSModifiers(na=2, offset0=paramList[0], offset1=paramList[1])
                     srcAddr=vgpr("LocalReadAddr%s"%tc)
-                highBits = (kernel["ISA"][0] == 10
+                # Second BF16 of a register; gfx1030 only, like the FMA_BF16_HPA selector.
+                highBits = (kernel["ISA"] == (10, 3, 0)
                             and not writer.states.archCaps["DSLow16NotPreserve"]
                             and kernel["ProblemType"]["DataType"].isBFloat16()
                             and not kernel["UseDotInstruction"]

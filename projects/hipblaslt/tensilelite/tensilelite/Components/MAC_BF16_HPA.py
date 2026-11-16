@@ -26,15 +26,19 @@ from rocisa.container import vgpr
 from rocisa.instruction import SSetPrior, VDot2F32BF16, VDot2CF32BF16, VAndB32, VFmaF32, VLShiftLeftB32
 
 from rocisa.enum import DataTypeEnum
+from ..Common import IsaVersion
 from ..Common.DataType import DataType
 from ..Component import Component, MAC
 
 class FMA_BF16_HPA(MAC):
     asmCaps = {"v_fma_f32": True}
+    # gfx1030 only: the packed BF16 LDS reads this unpack pairs with (LocalReadVALU's
+    # ds_read_u16_d16_hi) are verified there alone. Other ISAs fail codegen instead.
     kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.BFloat16),
                               "MacDataTypeB": DataType(DataTypeEnum.BFloat16),
                               "HighPrecisionAccumulate": True},
               "UseDotInstruction": False,
+              "ISA": IsaVersion(10, 3, 0),
               }
 
     def __call__(self, writer, tPA, tPB, m, innerUnroll):
@@ -43,14 +47,20 @@ class FMA_BF16_HPA(MAC):
         module.addComment(self.commentHeader())
         priority = Component.Priority.find(writer)
 
+        # A ValuX_X<m>_I<iui> block holds ThreadTile / 2 VGPRs (two BF16 each) and
+        # the next block follows it directly. The allocator reserves the other
+        # ThreadTile / 2 of every block as its ValuPack slot ..._D1, so the high
+        # halves go there. Expanding in place to ThreadTile VGPRs would overwrite
+        # the neighbouring block: the buffer prefetched by PrefetchLocalRead, or
+        # the next InnerUnroll.
         for iui in range(innerUnroll):
             for tensor in ("A", "B"):
-                for block in range(kernel[f"ThreadTile{tensor}"] // 2 - 1, -1, -1):
+                for block in range(kernel[f"ThreadTile{tensor}"] // 2):
                     base = f"Valu{tensor}_X{m}_I{iui}"
                     src = vgpr(f"{base}+{block}")
-                    module.add(VAndB32(dst=vgpr(f"{base}+{block * 2 + 1}"),
+                    module.add(VAndB32(dst=vgpr(f"{base}_D1+{block}"),
                                        src0="0xffff0000", src1=src))
-                    module.add(VLShiftLeftB32(dst=vgpr(f"{base}+{block * 2}"),
+                    module.add(VLShiftLeftB32(dst=vgpr(f"{base}+{block}"),
                                               shiftHex=hex(16), src=src))
 
         tt0 = kernel["ThreadTile0"]
@@ -60,8 +70,8 @@ class FMA_BF16_HPA(MAC):
                     first_dim_a = bool(tPB["tile01Idx"])
                     block_a = block0 if first_dim_a else block1
                     block_b = block1 if first_dim_a else block0
-                    a = [vgpr(f"ValuA_X{m}_I{iui}+{block_a * 2 + j}") for j in range(2)]
-                    b = [vgpr(f"ValuB_X{m}_I{iui}+{block_b * 2 + j}") for j in range(2)]
+                    a = [vgpr(f"ValuA_X{m}_I{iui}{slot}+{block_a}") for slot in ("", "_D1")]
+                    b = [vgpr(f"ValuB_X{m}_I{iui}{slot}+{block_b}") for slot in ("", "_D1")]
                     pairs = ((a[0], b[0]),
                              (a[1], b[0]) if first_dim_a else (a[0], b[1]),
                              (a[0], b[1]) if first_dim_a else (a[1], b[0]),
