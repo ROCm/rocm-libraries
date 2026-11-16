@@ -98,9 +98,10 @@ TILES_MMA = {
     F1: {"pass": [(4, 4, 8, 2), (8, 8, 4, 2), (8, 8, 8, 2), (8, 16, 4, 2)]},
     F5: {"pass": [(1, 4, 4, 2)]},
 }
-# Depthwise (one input and one output channel a group, cb = kb = 1), channels-first, every
-# architecture: a wave owns one channel's filter, its lanes along the output row. At least two
-# output columns a lane (the kernel's 16-bit windows are whole dwords).
+# Depthwise (one input and one output channel a group, cb = kb = 1), every architecture, both
+# layouts (the ring form channels-first): a wave owns one channel's filter, its lanes along the
+# output row. At least two output columns a lane (the kernel's channels-first 16-bit windows are
+# whole dwords).
 F5S2 = (5, 5, 2, 1, 2)
 F7 = (7, 7, 1, 1, 3)
 DW_TILES = {
@@ -183,7 +184,7 @@ for tiles_of in (TILES, TILES_MMA, DW_TILES):
 
 for group, (archs, tiles_of, layouts) in PACKS.items():
     kernels = []
-    sets = [(tiles_of, layouts), (DW_TILES, ("nchw",))]
+    sets = [(tiles_of, layouts), (DW_TILES, ("nchw", "nhwc"))]
     for fil, forms, set_layouts in (
         (f, fo, ls) for t, ls in sets for f, fo in t.items()
     ):

@@ -16,7 +16,7 @@ SPDX-License-Identifier:  MIT
 - **Wins when:** a per-group GEMM would leave the matrix tile mostly empty: ResNeXt / RegNet groups of 4 to 56 channels, ResNeXt3D 3-D grouped layers, few-channel dense and pointwise wrw, 3-D depthwise wrw, and most wrw on gfx906 (no matrix cores).
 - **Loses when:** channels per group are wide (FWD/BWD at 56 or more go to Winograd; WRW to K3 / BLAS), on large pointwise wrw (a GEMM), on dense 3x3 wrw on gfx906 (MIOpen's asm is about 1.3x faster), on channels-last layers on the matrix-core arches (on MI325X another engine is faster on every grouped NHWC graph of the corpus; see Strengths), and on rows too wide for a wave.
 - **Precision:** fp32 accumulation and one rounding at the store. 16-bit products are exact in fp32, and the fp16 `dot2` path adds two exact products to the fp32 sum. Fixed-order reductions with no atomics give bitwise-repeatable results, so the engine carries no numerical notes.
-- **Instances:** FWD 180 `valu` + 30 `mma`, BWD 168 + 30, WRW 254 `valu` + 173 `mma` (835 in all). Every config is admitted on correctness alone and autotune picks among them.
+- **Instances:** FWD 180 `valu` + 30 `mma`, BWD 168 + 30, WRW 293 `valu` + 212 `mma` (913 in all). Every config is admitted on correctness alone and autotune picks among them.
 - **vs MIOpen:** WRW replaces `ConvAsmBwdWrW3x3`, which is limited to gfx8/gfx90x, 2-D NCHW 3x3 pad 1, fp32/fp16, even N for fp16, and one code object per shape. On gfx906 it is 5.5x faster on ResNeXt-50 g32 56² n128 fp16 wrw and 17.6x on its stride-2 layer. On ResNeXt3D grouped wrw it is about 33x faster than MIOpen's best solver.
 
 ## Why it exists
@@ -88,10 +88,10 @@ end: butterfly-reduce acc over the lanes -> LDS sum over the waves in wave order
 - **Two packs:**
   - `valu` targets gfx906, which has no matrix core for these types, and gfx908, whose vector unit is fast enough to matter. It ships both layouts and all tiles.
   - On gfx90a, gfx942, gfx950, gfx11 and gfx12 the matrix-core engines serve most layers. This engine won only narrow ones there (groups of 4 to 8, few-channel dense and pointwise wrw), by 1.1-2.7x in channels-first sweeps. So `mma` ships fewer tiles, in both layouts, and autotune decides where they win.
-  - In both packs every FWD/BWD tile and every WRW `pass` tile ships in both layouts. The WRW `ring` form is channels-first by construction (its register ring walks the packed width of consecutive rows). The depthwise set below is channels-first in both packs.
+  - In both packs every FWD/BWD tile and every WRW `pass` tile ships in both layouts. The WRW `ring` form is channels-first by construction (its register ring walks the packed width of consecutive rows). The depthwise set below follows the same rule.
 - **Depthwise tiles (WRW):**
-  - Both packs carry 67 `cb = kb = 1` NCHW configs on every arch: one channel's filter per wave, lanes along the row.
-  - Filter classes: 3x3 s1/s2, 5x5 s1/s2, 7x7; `pass` and `ring`; `p` of at least 2, because 16-bit windows are whole dwords.
+  - Both packs carry 106 `cb = kb = 1` configs on every arch, 67 NCHW and 39 NHWC: one channel's filter per wave, lanes along the row.
+  - Filter classes: 3x3 s1/s2, 5x5 s1/s2, 7x7; `pass` in both layouts and `ring` channels-first; `p` of at least 2, because channels-first 16-bit windows are whole dwords. NHWC uses the same tiles.
   - They compete under autotune with `CONV_DEPTHWISE_VALU_WRW`.
   - FWD/BWD have no dedicated depthwise set. Their `kb = cb = 1` fallback tiles also match depthwise (gfx906/gfx908 only), so autotune can also pick them for depthwise.
 
@@ -188,7 +188,7 @@ All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen i
   - the planner (lanes, load widths, splits and workspace, alignment narrowing, NHWC accesses, BWD role swap, padding mirror and upsampling, large tensors with small images served, images past 32-bit offsets declined, grid limits, ring items covering each row once, 3-D tiles per depth tap).
 - `TestGpuConvGroupValuWrw.cpp` and `TestGpuConvGroupValu.cpp`, on the device:
   - every shipped config for the device's arch that serves each case, fp32/fp16/bf16, against the double CPU reference;
-  - cases: groups of 4 and 8 with odd batch, both layouts, ragged widths, width stride 2, 1x1 (2-D and 1-D), 5x5, 3x3x3 stride 1 and 2, true convolution, height stride/dilation/padding, multi-split fold;
+  - cases: groups of 4 and 8 with odd batch, both layouts, ragged widths, width stride 2, 1x1 (2-D and 1-D), 5x5, 3x3x3 stride 1 and 2, true convolution, height stride/dilation/padding, multi-split fold, depthwise WRW in both layouts (every depthwise filter class, 3-D);
   - the inf-at-row-end parity cases;
   - a bitwise relaunch check per config;
   - a sampled fp16 case past 2 GiB.
