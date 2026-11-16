@@ -186,6 +186,8 @@ static int runCase(hipblasLtHandle_t           handle,
     CHECK_HIP(hipMalloc(&dWs, wsSize));
     CHECK_HIP(hipMalloc(&dUA, G * sizeof(hipblaslt_ext::UserArguments)));
     CHECK_HIP(hipMalloc(&dN, G * sizeof(int32_t)));
+    // Split-K solutions need workspace; initialize() checks against this bound.
+    gg.setMaxWorkspaceBytes(wsSize);
     CHECK_LT(gg.initialize(heur[0].algo, dWs));
 
     std::vector<hipblaslt_ext::UserArguments> ua(G);
@@ -202,6 +204,26 @@ static int runCase(hipblasLtHandle_t           handle,
     };
     launch();
     CHECK_HIP(hipStreamSynchronize(stream));
+
+    // Time first, then validate the last run: split-K kernels must leave their
+    // synchronizer counters ready for the next call.
+    double us = 0;
+    if(iters > 0)
+    {
+        hipEvent_t t0, t1;
+        CHECK_HIP(hipEventCreate(&t0));
+        CHECK_HIP(hipEventCreate(&t1));
+        for(int i = 0; i < 10; i++)
+            launch();
+        CHECK_HIP(hipEventRecord(t0, stream));
+        for(int i = 0; i < iters; i++)
+            launch();
+        CHECK_HIP(hipEventRecord(t1, stream));
+        CHECK_HIP(hipEventSynchronize(t1));
+        float ms;
+        CHECK_HIP(hipEventElapsedTime(&ms, t0, t1));
+        us = 1000.0 * ms / iters;
+    }
 
     // Validate the first n_g columns; the rest must keep the sentinel.
     double maxErr = 0, maxRef = 0;
@@ -243,23 +265,6 @@ static int runCase(hipblasLtHandle_t           handle,
     // A few bf16 ulps of the largest output.
     const bool ok = untouched && maxErr <= std::ldexp(maxRef, -6);
 
-    double us = 0;
-    if(iters > 0)
-    {
-        hipEvent_t t0, t1;
-        CHECK_HIP(hipEventCreate(&t0));
-        CHECK_HIP(hipEventCreate(&t1));
-        for(int i = 0; i < 10; i++)
-            launch();
-        CHECK_HIP(hipEventRecord(t0, stream));
-        for(int i = 0; i < iters; i++)
-            launch();
-        CHECK_HIP(hipEventRecord(t1, stream));
-        CHECK_HIP(hipEventSynchronize(t1));
-        float ms;
-        CHECK_HIP(hipEventElapsedTime(&ms, t0, t1));
-        us = 1000.0 * ms / iters;
-    }
 
     std::cout << "grouped w4a16 m=" << m << " k=" << k << " G=" << G << " maxN=" << maxN
               << " n={";
@@ -294,6 +299,8 @@ int main(int argc, char** argv)
     // All eight at n = 1 (the decode step).
     fails += runCase(handle, 1024, 2048, 1, std::vector<int32_t>(8, 1), iters);
     fails += runCase(handle, 2048, 512, 1, std::vector<int32_t>(8, 1), iters);
+    // More groups than the 16 synchronizer slots that grouped split-K kernels need.
+    fails += runCase(handle, 1024, 2048, 1, std::vector<int32_t>(20, 1), iters);
     // Uneven groups below the host bound, including empty ones.
     fails += runCase(handle, 1024, 2048, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);
     fails += runCase(handle, 2048, 512, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);
