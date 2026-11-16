@@ -42,6 +42,7 @@ from rocke.instances.gfx1250.mx_gemm import (
     K_READS,
     LDS_BUFFERS,
     OUT_DTYPES,
+    READ_BASES,
     READ_ISSUES,
     SCALE_SWAPS,
     SCALES,
@@ -493,6 +494,48 @@ class MxGemmSpecTest(unittest.TestCase):
             ),
             "edge": (_spec6(3000, 4096, 65536, **base), "multiples of 256"),
             "k": (_spec6(3072, 4096, 65536 + 512, **base), "multiple of 1024"),
+        }
+        for label, (spec, reason) in bad.items():
+            with self.subTest(label):
+                self.assertIn(reason, validate(spec) or "")
+
+    def test_read_bases_validate_and_name(self):
+        """Fixed read bases take the 16x16 WMMA and scales without LDS pad;
+        they tag the name."""
+        self.assertEqual(READ_BASES, ("loop", "fixed"))
+        ahead = {"local_prefetch": 1, "half_plr": "none"}
+        for spec in (
+            _spec6(tile_m=128, tile_n=128, tile_k=512, lds_buffers=3, **ahead),
+            _spec6(512, 512, 2048, cluster_dim=(2, 2, 1), **_PANELS, half_plr="none"),
+            _spec6(
+                1024,
+                16,
+                2048,
+                tile_m=128,
+                tile_n=16,
+                tile_k=512,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                **_DIRECT,
+            ),
+            _spec6(
+                256, 512, 2048, tile_m=64, tile_n=64, tile_k=512, cluster_dim=(4, 2, 1)
+            ),
+            _spec8(tile_m=128, tile_n=128, **ahead),
+        ):
+            fixed = replace(spec, read_bases="fixed")
+            with self.subTest(fixed.kernel_name()):
+                self.assertIsNone(validate(fixed))
+                self.assertTrue(fixed.kernel_name().endswith("_rbf"))
+                self.assertNotIn("_rbf", spec.kernel_name())
+        bad = {
+            "value": (_spec6(read_bases="vgpr"), "read_bases must be one of"),
+            "atom": (_spec(read_bases="fixed"), "is for the 16x16 WMMA"),
+            # The 256x256x256 tile's derived scale pads.
+            "scale_pad": (
+                _spec6(read_bases="fixed"),
+                "needs the scales without LDS pad",
+            ),
         }
         for label, (spec, reason) in bad.items():
             with self.subTest(label):
@@ -1265,6 +1308,67 @@ class MxGemmIrTest(unittest.TestCase):
                 self.assertEqual(len(re.findall(tdm, llvm)), (4 + 2 * 4) * 2)
                 waited = [int(w) for w in re.findall(tile_wait, llvm)]
                 self.assertEqual(waited, expected + [0])
+
+    def test_fixed_read_bases_ir(self):
+        """Fixed read bases: one opaque register per buffer (pass slot) and A
+        row, B fragment and scale group, made before the K loop (a
+        v_perm_b32 through an identity selector from asm); the default
+        makes none."""
+        selector = re.compile(
+            r'(%\w+) = call i32 asm sideeffect "s_mov_b32 \$0, 0x3020100"'
+        )
+        ahead = {"local_prefetch": 1, "half_plr": "none"}
+        cases = (
+            # (spec, buffers or slots of A and B, A rows, B fragments)
+            (
+                _spec6(
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=512,
+                    lds_buffers=3,
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    read_issue="interleave",
+                    **ahead,
+                ),
+                (3, 3),
+                4,
+                4,
+            ),
+            (
+                _spec6(
+                    512, 512, 2048, cluster_dim=(2, 2, 1), **_PANELS, half_plr="none"
+                ),
+                (2, 2),
+                4,
+                4,
+            ),
+            (
+                _spec6(
+                    1024,
+                    16,
+                    2048,
+                    tile_m=128,
+                    tile_n=16,
+                    tile_k=512,
+                    wave_group=(4, 1),
+                    cluster_dim=(1, 2, 1),
+                    **_DIRECT,
+                ),
+                (2, 2),
+                2,
+                1,
+            ),
+        )
+        for spec, (a_units, b_units), rm, rn in cases:
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(selector.search(_llvm(spec)))
+                text = _llvm(replace(spec, read_bases="fixed"))
+                (name,) = selector.findall(text)
+                kept = re.findall(
+                    rf"@llvm\.amdgcn\.perm\((i32 %\w+), \1, i32 {name}\)", text
+                )
+                self.assertEqual(len(kept), a_units * (rm + 1) + b_units * (rn + 1))
 
     def test_three_buffers_issue_wait_and_peel(self):
         """With three buffers the prologue loads three tiles and every tile
@@ -2270,6 +2374,57 @@ class MxGemmHostBuildTest(unittest.TestCase):
                 half_plr="none",
                 read_issue="interleave",
             ),
+            # Fixed read bases at the MED, MAF (panel walk), MAB and SM tilings.
+            _spec6(
+                *_MAF_MED[1],
+                tile_m=128,
+                tile_n=128,
+                tile_k=512,
+                cluster_dim=(2, 4, 1),
+                lds_buffers=3,
+                k_reads="contiguous",
+                scale_swap="wait",
+                local_prefetch=1,
+                half_plr="none",
+                read_issue="interleave",
+                read_bases="fixed",
+            ),
+            _spec6(
+                *_MAF_MED[0],
+                cluster_dim=(4, 4, 1),
+                k_reads="contiguous",
+                scale_swap="wait",
+                **_PANELS,
+                half_plr="none",
+                read_issue="interleave",
+                read_bases="fixed",
+            ),
+            _spec6(
+                49152,
+                16,
+                32768,
+                tile_m=256,
+                tile_n=16,
+                tile_k=512,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                k_reads="contiguous",
+                read_bases="fixed",
+                **_DIRECT,
+            ),
+            _spec6(
+                256,
+                2048,
+                2048,
+                tile_m=64,
+                tile_n=64,
+                tile_k=512,
+                cluster_dim=(4, 2, 1),
+                k_reads="contiguous",
+                scale_swap="wait",
+                half_b_order="late",
+                read_bases="fixed",
+            ),
             # Register scales at the MAF/MED, MAB and SM tilings.
             *(
                 _spec6(
@@ -2537,6 +2692,82 @@ class MxGemmDeviceTest(unittest.TestCase):
                         {"half_b_order": "late", "cluster_dim": (1, 1, 1)},
                     ),
                 )
+            ]
+            # Fixed read bases: three buffers with interleaved reads and a K
+            # tail, edge tiles with half-B, a panel walk, one N-repeat, FP8.
+            + [
+                _spec6(
+                    1024,
+                    1024,
+                    2048 + 128,
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=512,
+                    lds_buffers=3,
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    local_prefetch=1,
+                    half_plr="none",
+                    read_issue="interleave",
+                    read_bases="fixed",
+                ),
+                _spec6(
+                    1000,
+                    1000,
+                    2048,
+                    tile_m=128,
+                    tile_n=128,
+                    tile_k=512,
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    read_bases="fixed",
+                ),
+                _spec6(
+                    512,
+                    512,
+                    2048,
+                    **_PANELS,
+                    half_plr="none",
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    read_issue="interleave",
+                    cluster_dim=(2, 2, 1),
+                    read_bases="fixed",
+                ),
+                _spec6(
+                    1024,
+                    16,
+                    2048,
+                    tile_m=128,
+                    tile_n=16,
+                    tile_k=512,
+                    wave_group=(4, 1),
+                    cluster_dim=(1, 2, 1),
+                    k_reads="contiguous",
+                    read_bases="fixed",
+                    **_DIRECT,
+                ),
+                _spec6(
+                    256,
+                    512,
+                    2048,
+                    tile_m=64,
+                    tile_n=64,
+                    tile_k=512,
+                    cluster_dim=(4, 2, 1),
+                    half_b_order="late",
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    read_bases="fixed",
+                ),
+                _spec8(
+                    tile_m=128,
+                    tile_n=128,
+                    local_prefetch=1,
+                    half_plr="none",
+                    read_issue="interleave",
+                    read_bases="fixed",
+                ),
             ]
             # Register scales: every half packing, the reuse orders, edge
             # tiles and K tails.

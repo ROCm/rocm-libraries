@@ -133,6 +133,7 @@ SCALES = ("lds", "registers")
 SCALE_SWAPS = ("read", "wait")
 READ_ISSUES = ("block", "interleave")
 WALKS = ("tile", "panels")
+READ_BASES = ("loop", "fixed")
 # walk "panels": a workgroup's 256x256 output in four 128x128 passes over
 # 128-row panels of A and B, one panel per LDS slot, each panel split over
 # the four waves (one component of 32 rows each).
@@ -259,6 +260,14 @@ class MxGemmSpec:
     of four (:class:`PanelWalk`). Each pass is the 128x128 tile's compute
     (``pass_spec``); each wave keeps the accumulators of all four passes.
 
+    ``read_bases`` is where the LDS read addresses come from: ``"loop"``
+    computes each fragment's address next to its reads; ``"fixed"`` (the
+    16x16 WMMA, scales without LDS pad) computes one address per buffer and
+    A row, B fragment and scale group before the K loop and keeps it in a
+    register, so each read is that register plus an immediate. In expert
+    scheduling an LDS read that takes a VALU result waits for every WMMA in
+    flight; with ``"fixed"`` the loop computes no read addresses.
+
     ``wmma_reuse`` (``local_prefetch`` 0, the 16x16 WMMA) orders each
     K-step's WMMAs and flags every WMMA whose next WMMA takes the same
     operand, so the hardware may keep that operand instead of reading it
@@ -311,6 +320,7 @@ class MxGemmSpec:
     scale_swap: str = "read"
     read_issue: str = "block"
     walk: str = "tile"
+    read_bases: str = "loop"
     block_k: int = field(default=32, init=False)
 
     @property
@@ -490,6 +500,10 @@ class MxGemmSpec:
         return self.contiguous_k and self.scale_swap == "wait"
 
     @property
+    def fixed_bases(self) -> bool:
+        return self.read_bases == "fixed"
+
+    @property
     def panels(self) -> bool:
         return self.walk == "panels"
 
@@ -633,6 +647,7 @@ class MxGemmSpec:
                 "swait": self.scale_swap == "wait",
                 "ril": self.read_issue == "interleave",
                 "pw": self.panels,
+                "rbf": self.fixed_bases,
             },
         )
 
@@ -946,6 +961,15 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         reason = _panel_reason(spec, arch)
         if reason:
             return reason
+    if spec.read_bases not in READ_BASES:
+        return f"read_bases must be one of {READ_BASES}"
+    if spec.fixed_bases:
+        if spec.atom.a_rows != 1:
+            return "read_bases 'fixed' is for the 16x16 WMMA"
+        layout = spec.lds_layout
+        if layout.a_scale.pad.on or layout.b_scale.pad.on:
+            # A K-step's scales are then not one stride from the last.
+            return "read_bases 'fixed' needs the scales without LDS pad"
     row = spec.k_bytes(spec.tile_k)
     if spec.lds_buffers != 2 and row < _GL2_LINE_BYTES and _GL2_LINE_BYTES % row == 0:
         # The GL2 prefetch of such rows follows the tile index's parity,
@@ -1716,6 +1740,8 @@ class LdsReader:
     # v_perm_b32 selector swapping bytes 1 and 2 of a word (``k_reads``
     # "contiguous": the WMMA's K groups 1 and 2 hold the K-step's groups 2, 1).
     _SWAP_GROUPS_1_2 = 0x03010200
+    # v_perm_b32 selector returning its second source unchanged.
+    _IDENTITY = 0x03020100
 
     def __init__(self, k: _Kernel, rows: RowMaps):
         self.k = k
@@ -1724,6 +1750,8 @@ class LdsReader:
         self._parts = {}
         # The reads of the last scales() call.
         self.scale_reads = []
+        # read_bases "fixed": (operand, buffer offset, index) -> address.
+        self.fixed = None
 
     def parts(self, frag):
         """The reads a :meth:`fragment_pair` fragment was made of (the
@@ -1749,10 +1777,66 @@ class LdsReader:
             step * k.spec.step_bytes, k.ops.mul(k.lane_half, k.spec.lane_half_bytes)
         )
 
+    def fix_bases(self, buffers) -> None:
+        """``read_bases`` "fixed", before the K loop: for each buffer (or
+        pass's slots) one register per A row, B fragment and scale group,
+        holding the buffer offset plus the lane's row and lane-half offsets.
+        A read adds its K-step and chunk, which it takes as an immediate."""
+        k = self.k
+        b, ops, spec = k.b, k.ops, k.spec
+        half = ops.mul(k.lane_half, spec.lane_half_bytes)
+        self.fixed = {}
+        identity = b.inline_asm(
+            f"s_mov_b32 $0, {self._IDENTITY:#x}", "=s", result_type=I32
+        )
+
+        def keep(value):
+            # Opaque to LLVM (the selector is), so it stays in a register
+            # instead of being computed again next to the reads. An asm VGPR
+            # operand would hold it in v0-v255 for the whole loop.
+            value = ops.v(value)
+            return b.perm_b32(value, value, identity)
+
+        for buffer in buffers:
+            for operand, count, row_of in (
+                ("a", spec.wave_repeat_m, self.rows.m_row),
+                ("b", spec.wave_repeat_n, self.rows.n_row),
+            ):
+                offset = self._operand_buffer(buffer, operand)
+                for index in range(count):
+                    if (operand, offset, index) not in self.fixed:
+                        row = k.layout.row_offset(
+                            ops, operand, row_of(index, k.lane_col)
+                        )
+                        self.fixed[operand, offset, index] = keep(
+                            ops.add(ops.add(offset, row), half)
+                        )
+                name = f"{operand}_scale"
+                if not spec.scale_regs and (name, offset) not in self.fixed:
+                    row = row_of(0, k.lane_col)
+                    self.fixed[name, offset] = keep(
+                        ops.add(offset, k.layout.scale_offset(ops, name, 0, row))
+                    )
+
+    def _fixed_base(self, buffer, operand: str, index, step):
+        offset = self._operand_buffer(buffer, operand)
+        return self.k.ops.add(
+            self.fixed[operand, offset, index], step * self.k.spec.step_bytes
+        )
+
+    def _fixed_scale_base(self, buffer, name: str, step):
+        layout = self.k.layout.operand(name)
+        offset = self._operand_buffer(buffer, name)
+        return self.k.ops.add(self.fixed[name, offset], step * layout.rows * 4)
+
     def _row_fragment(self, buffer, operand: str, row, lane_k):
         k, ops = self.k, self.k.ops
         buffer = self._operand_buffer(buffer, operand)
         base = ops.add(ops.add(buffer, k.layout.row_offset(ops, operand, row)), lane_k)
+        return self._read_fragment(base)
+
+    def _read_fragment(self, base):
+        k, ops = self.k, self.k.ops
         (first, words), *rest = k.spec.lane_reads
         frag = self.load_i32(ops.add(base, first), words)
         for offset, words in rest:
@@ -1780,13 +1864,16 @@ class LdsReader:
         may be ``None``), their reads alternating: A's first, B's first,
         A's second, ..."""
         k, ops = self.k, self.k.ops
-        lane_k = self._lane_k(step)
+        lane_k = None if self.fixed is not None else self._lane_k(step)
         bases = []
         for index, operand, row_of in (
             (rm, "a", self.rows.m_row),
             (rn, "b", self.rows.n_row),
         ):
             if index is None:
+                continue
+            if self.fixed is not None:
+                bases.append(self._fixed_base(buffer, operand, index, step))
                 continue
             buffer_op = self._operand_buffer(buffer, operand)
             row = row_of(index, k.lane_col)
@@ -1811,6 +1898,8 @@ class LdsReader:
 
     def a_fragment(self, buffer, rm, step):
         k = self.k
+        if self.fixed is not None:
+            return self._read_fragment(self._fixed_base(buffer, "a", rm, step))
         lane_k = self._lane_k(step)
         if k.spec.atom.a_rows == 1:
             return self._row_fragment(
@@ -1823,6 +1912,8 @@ class LdsReader:
         return k.b.vec_concat(frags[0], frags[1])
 
     def b_fragment(self, buffer, rn, step):
+        if self.fixed is not None:
+            return self._read_fragment(self._fixed_base(buffer, "b", rn, step))
         lane_k = self._lane_k(step)
         row = self.rows.n_row(rn, self.k.lane_col)
         return self._row_fragment(buffer, "b", row, lane_k)
@@ -1833,11 +1924,14 @@ class LdsReader:
         b, ops, spec = k.b, k.ops, k.spec
         rm_count, rn_count = spec.wave_repeat_m, spec.wave_repeat_n
         self.scale_reads = []
-        a_lane = k.lane if spec.atom.a_rows == 2 else k.lane_col
-        a_base = ops.add(
-            self._operand_buffer(buffer, "a"),
-            k.layout.scale_offset(ops, "a_scale", step, self.rows.m_row(0, a_lane)),
-        )
+        if self.fixed is not None:
+            a_base = self._fixed_scale_base(buffer, "a_scale", step)
+        else:
+            a_lane = k.lane if spec.atom.a_rows == 2 else k.lane_col
+            a_base = ops.add(
+                self._operand_buffer(buffer, "a"),
+                k.layout.scale_offset(ops, "a_scale", step, self.rows.m_row(0, a_lane)),
+            )
         a_scales = []
         if rm_count >= 4:
             for chunk in range(rm_count // 4):
@@ -1851,10 +1945,15 @@ class LdsReader:
                 # one-element vector).
                 self.scale_reads.append(words)
             a_scales = [b.vec_extract(words, i) for i in range(rm_count)]
-        b_base = ops.add(
-            self._operand_buffer(buffer, "b"),
-            k.layout.scale_offset(ops, "b_scale", step, self.rows.n_row(0, k.lane_col)),
-        )
+        if self.fixed is not None:
+            b_base = self._fixed_scale_base(buffer, "b_scale", step)
+        else:
+            b_base = ops.add(
+                self._operand_buffer(buffer, "b"),
+                k.layout.scale_offset(
+                    ops, "b_scale", step, self.rows.n_row(0, k.lane_col)
+                ),
+            )
         b_scales = []
         if rn_count >= 4:
             for chunk in range(rn_count // 4):
@@ -2478,8 +2577,12 @@ class Pipeline:
             self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
         if read_ahead:
             self.wait_next_tile()
+        first = c0
+        if spec.fixed_bases:
+            tile.reader.fix_bases([k.buffer_base(p) for p in range(buffers)])
+            first = 0
         accumulators = [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
-        head_values = tile.flatten(tile.first_head(c0)) if read_ahead else []
+        head_values = tile.flatten(tile.first_head(first)) if read_ahead else []
         regs = self.scales
         # Register scales: tile 0's here, each tile loads the next one's.
         scale_values = regs.load(c0) if regs else []
@@ -2737,6 +2840,8 @@ class PanelPipeline:
             self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
         self._wait(self.counts["prologue"])
         b.inline_asm("", "~{memory}")
+        if spec.fixed_bases:
+            tile.reader.fix_bases([self.bases(pair) for pair in PanelWalk.ORDERS[0]])
         acc = [
             [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
             for _ in range(4)
