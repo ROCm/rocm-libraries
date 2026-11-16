@@ -1704,6 +1704,10 @@ class ScaleRegisters:
     def __init__(self, k: _Kernel, rows: RowMaps):
         self.k = k
         self.rows = rows
+        # Per operand: (byte offset, word groups) of each of a K-step's
+        # loads, made at the first load (before the K loop).
+        self._offsets = {}
+        self._identity = None
 
     @staticmethod
     def half(repeats: int) -> int:
@@ -1715,7 +1719,13 @@ class ScaleRegisters:
         h = cls.half(repeats)
         return index % h, index // h
 
-    def _operand(self, name: str, k_step):
+    def _row_offsets(self, name: str) -> list:
+        """The lane's byte offsets into a K-step's row of scales and the
+        words each load takes: one load per group of up to four of the
+        lane's words, or per word when M (N) is not a multiple of ``h``.
+        Made at the first load, before the K loop."""
+        if name in self._offsets:
+            return self._offsets[name]
         k = self.k
         b, ops, spec, p = k.b, k.ops, k.spec, k.params
         a = name == "a"
@@ -1729,43 +1739,80 @@ class ScaleRegisters:
             )
         )
         extent = p["M"] if a else p["N"]
-        ptr = p["A_scale"] if a else p["B_scale"]
-        step_base = ops.mul(k_step, extent)
+        if self._identity is None:
+            self._identity = b.inline_asm(
+                f"s_mov_b32 $0, {LdsReader._IDENTITY:#x}", "=s", result_type=I32
+            )
         if (spec.M if a else spec.N) % h:
             last = b.sub(extent, k.c1)
-            return [
-                b.global_load(
-                    ptr,
-                    ops.v(ops.add(step_base, b.smin(ops.v(ops.add(row, j)), last))),
-                    I32,
-                    align=4,
-                )
+            offsets = [
+                (ops.v(ops.mul(b.smin(ops.v(ops.add(row, j)), last), 4)), [(0, 1)])
                 for j in range(h)
             ]
-        # Groups of h rows are whole: one past the end reads the last group.
-        row = b.smin(row, b.sub(extent, b.const_i32(h)))
-        index = ops.v(ops.add(step_base, row))
+        else:
+            # Groups of h rows are whole: one past the end reads the last
+            # group.
+            row = b.smin(row, b.sub(extent, b.const_i32(h)))
+            groups = [(j, min(4, h - j)) for j in range(0, h, 4)]
+            offsets = [(ops.v(ops.mul(row, 4)), groups)]
+        self._offsets[name] = offsets
+        return offsets
+
+    def _words(self, base, offsets) -> list:
+        """The lane's words of one operand and K-step: each load takes
+        ``base`` (SGPR) and a lane offset (VGPR) of ``offsets``."""
+        k = self.k
+        b, ops = k.b, k.ops
         words = []
-        for j in range(0, h, 4):
-            n = min(4, h - j)
-            at = ops.v(ops.add(index, j))
-            if n == 1:
-                words.append(b.global_load(ptr, at, I32, align=4))
-                continue
-            loaded = b.global_load_vN(ptr, at, I32, n, align=4 * n)
-            words += [b.vec_extract(loaded, i) for i in range(n)]
+        for offset, groups in offsets:
+            at = b.global_ptr_add(base, offset)
+            for j, n in groups:
+                if n == 1:
+                    words.append(b.global_load(at, ops.v(j), I32, align=4))
+                    continue
+                loaded = b.global_load_vN(at, ops.v(j), I32, n, align=4 * n)
+                words += [b.vec_extract(loaded, i) for i in range(n)]
         return words
 
     def load(self, k0) -> list:
         """Every K-step's A then B words of the tile at ``k0``."""
         k = self.k
-        b, ops = k.b, k.ops
+        b, ops, p = k.b, k.ops, k.params
         first = ops.div(k0, _ATOM_K)
         last = b.sub(ops.v(k.k_atoms()), k.c1)
-        out = []
+        # The tile's copy of each lane offset: a v_perm_b32 that returns it
+        # through an identity selector LLVM cannot see into and also takes
+        # the tile's first K-step, so it is made next to the tile's loads,
+        # which take it as a 32-bit offset, rather than once before the K
+        # loop as a 64-bit one; all the tile's loads read that register.
+        offsets = {}
+        for name in ("a", "b"):
+            offsets[name] = [
+                (b.perm_b32(ops.v(first), offset, self._identity), groups)
+                for offset, groups in self._row_offsets(name)
+            ]
+        bases = []
         for step in range(k.spec.k_steps):
             k_step = b.smin(ops.v(ops.add(first, step)), last)
-            out += self._operand("a", k_step) + self._operand("b", k_step)
+            for ptr, extent in ((p["A_scale"], p["M"]), (p["B_scale"], p["N"])):
+                step_bytes = ops.mul(ops.mul(k_step, extent), 4)
+                bases.append(b.global_ptr_add(ptr, ops.v(step_bytes)))
+        # Each K-step's rows of scales as SGPR bases from one asm LLVM cannot
+        # see into: they stay out of the lane offsets, and live together, so
+        # no load computes its address into registers an earlier load may
+        # still be reading.
+        count = len(bases)
+        bases = b.inline_asm_multi(
+            "",
+            ",".join(["=s"] * count + [str(i) for i in range(count)]),
+            bases,
+            result_types=[base.type for base in bases],
+            sideeffect=False,
+        )
+        out = []
+        for step in range(k.spec.k_steps):
+            out += self._words(bases[2 * step], offsets["a"])
+            out += self._words(bases[2 * step + 1], offsets["b"])
         return out
 
 

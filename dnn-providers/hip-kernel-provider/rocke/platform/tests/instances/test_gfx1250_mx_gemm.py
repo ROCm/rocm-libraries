@@ -1695,6 +1695,67 @@ class MxGemmIrTest(unittest.TestCase):
                             == ScaleRegisters.place(rn, jy)[0],
                         )
 
+    def test_register_scale_loads_take_sgpr_bases(self):
+        """Register scales: a tile's K-step bases (A then B per K-step) come
+        from one asm with an SGPR output each, and each load adds to one of
+        them the lane's offset, copied once per tile through v_perm_b32 with
+        the identity selector."""
+        bases = re.compile(r'(%[\w.]+) = call \{[^}\n]*\} asm "", "((?:=s,)*=s),')
+        selector = re.compile(
+            r'(%\w+) = call i32 asm sideeffect "s_mov_b32 \$0, 0x3020100"'
+        )
+        direct = {**_DIRECT, "scales": "registers"}
+        for spec in (
+            _spec6(k_reads="contiguous", tile_m=128, tile_n=128, **direct),
+            _spec8(wmma_reuse="b", **direct),
+            _spec6(
+                1024,
+                16,
+                2048,
+                tile_m=256,
+                tile_n=16,
+                wave_group=(4, 1),
+                cluster_dim=(1, 2, 1),
+                k_reads="contiguous",
+                **direct,
+            ),
+            _spec6(1001, 1024, 2048, tile_m=128, cluster_dim=(1, 1, 1), **direct),
+        ):
+            llvm = _llvm(spec)
+            rm, rn = spec.wave_repeat_m, spec.wave_repeat_n
+            ha, hb = ScaleRegisters.half(rm), ScaleRegisters.half(rn)
+            with self.subTest(spec.kernel_name()):
+                bodies = len(re.findall(_WMMA, llvm)) // (spec.k_steps * rm * rn)
+                asms = dict(bases.findall(llvm))
+                outputs = [constraints.count("=s") for constraints in asms.values()]
+                self.assertEqual(outputs, [2 * spec.k_steps] * (bodies + 1))
+                (identity,) = selector.findall(llvm)
+                copies = re.findall(
+                    rf"@llvm\.amdgcn\.perm\(i32 %[\w.]+, i32 %[\w.]+, i32 {identity}\)",
+                    llvm,
+                )
+                offsets = (1 if spec.M % ha == 0 else ha) + (
+                    1 if spec.N % hb == 0 else hb
+                )
+                self.assertEqual(len(copies), offsets * (bodies + 1))
+                base_values = {
+                    value
+                    for value, asm in re.findall(
+                        r"(%[\w.]+) = extractvalue [^\n]* (%[\w.]+), \d+$",
+                        llvm,
+                        re.M,
+                    )
+                    if asm in asms
+                }
+                lane_ptrs = re.findall(
+                    r"= getelementptr inbounds i8, ptr addrspace\(1\) (%[\w.]+), i64",
+                    llvm,
+                )
+                self.assertEqual(
+                    sum(ptr in base_values for ptr in lane_ptrs),
+                    offsets * spec.k_steps * (bodies + 1),
+                )
+
     def test_fp6_k_tail_and_edge_tiles_build(self):
         """FP6 at tile_k 384 always has a K tail at these K: its GL2 line
         prefetch is clamped to the row's end (smin); without a tail or edge
