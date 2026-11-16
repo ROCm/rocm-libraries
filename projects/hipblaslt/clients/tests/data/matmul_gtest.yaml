@@ -209,8 +209,8 @@ Tests:
   transB: N
   matrix_size:
     - { M: 25600, N: 1, K: 6144 }
-  alpha: 1.5
-  beta: 0.5
+  alpha: 0.001
+  beta: 1
   batch_count: 1
   initialization: trig_float
   unit_check: 0
@@ -293,7 +293,8 @@ Tests:
   gpu_arch: '950'
 
 # A padded ldc with beta != 0: the kernels only require C to be contiguous along the leading
-# dimension (AssertStrideCEqual {0: 1}). Routing ignores the leading dimensions and both shapes
+# dimension (AssertStrideCEqual {0: 1}). Alpha is small so C dominates D and a wrong ldc is visible
+# to norm_check. Routing ignores the leading dimensions and both shapes
 # (5120x2x8192 and 4x10240x5120) are ExactLogic keys, so both still route to the skinny kernels.
 # Padded lda/ldb is not exercised: the client requires lda and ldb equal to the stored rows for MX
 # scales; the stride-multiple predicates are covered by the Predicates and Python unit tests.
@@ -309,8 +310,8 @@ Tests:
     - { M: 5120, N: 2, K: 8192, lda: 8192, ldb: 8192, ldc: 5248, ldd: 5120 }
     # Medium, skinny m.
     - { M: 4, N: 10240, K: 5120, lda: 5120, ldb: 5120, ldc: 8, ldd: 4 }
-  alpha: 1.5
-  beta: 0.5
+  alpha: 0.001
+  beta: 1
   batch_count: 1
   initialization: trig_float
   unit_check: 0
@@ -363,6 +364,7 @@ Tests:
 # Bias problems do reach the shard's library (its ProblemType has bias), but each skinny solution carries
 # its own ProblemType, built from its custom.config Features (SupportsBias false), that rejects them, so they
 # run the existing kernels even for sizes whose no-bias form is in the ExactLogic ({4,5120,5120} and {1152,2,5120}).
+# Alpha is small so the bias dominates D and a kernel that ignored the bias would be caught.
 - name: matmul_skinny_mxfp8_tn_fallback_bias
   category: pre_checkin
   function:
@@ -373,7 +375,7 @@ Tests:
   matrix_size:
     - { M: 4, N: 5120, K: 5120 }
     - { M: 1152, N: 2, K: 5120 }
-  alpha: 1
+  alpha: 0.001
   beta: 0
   batch_count: 1
   bias_vector: 1

@@ -113,7 +113,7 @@ set to false make that solution reject bias, activation and scale-alpha-vector p
 - Predicates (each is a `custom.config` key; `custom.config` wins for every key it declares, and a logic file can
   only add predicates the config does not declare, which narrows what the solution accepts):
   - `AssertStrideAMultiple`, `AssertStrideBMultiple`: `{index: value}`, stride in elements.
-  - `AssertTensorBytesLessThan`: every non-empty A, B, C and D must have `totalAllocatedBytes()` below the value, for
+  - `AssertTensorBytesLessThan`: for every non-empty A, B, C and D, both `totalAllocatedBytes()` and the leading stride in bytes must be below the value, for
     kernels whose 32-bit buffer sizes or out-of-range offsets would overflow.
   - `AssertAnySizeLessThan`: `{index: value}`, an `Or` of C++ `SizeLessThan` predicates; at least one listed size is
     below its value.

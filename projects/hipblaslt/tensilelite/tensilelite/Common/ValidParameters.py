@@ -729,8 +729,9 @@ validParameters = { # we need to make sure this matches develop
     # First byte extent of any one tensor (A, B, C or D) that a kernel cannot
     # address. Handwritten kernels that reach a whole tensor through a single buffer
     # resource declare the first extent they cannot address here (2^31 = 2147483648 for
-    # the shipped skinny MXFP8 kernels); a problem with a tensor of at least this many
-    # bytes does not match. -1 skips. Fork YAML: AssertTensorBytesLessThan: [2147483648]
+    # the shipped skinny MXFP8 kernels); a problem with a tensor whose total allocated
+    # bytes or leading stride in bytes is at least this many does not match. -1 skips.
+    # Fork YAML: AssertTensorBytesLessThan: [2147483648]
     "AssertTensorBytesLessThan": -1,
     # True requires the problem's MX scales to be in the pre-swizzled (padded HostPreSwizzle)
     # layout, for handwritten kernels that read that layout only: a caller that hands over

@@ -4,7 +4,7 @@
 // Constraints (custom.config keys): AssertSizeEqual (batch 1), AssertSizeGreaterThan (m > 4, n and K non-empty),
 // AssertSizeLessThan (n < 5, m and K <= 2^20), AssertSummationElementMultiple (K % 32 == 0), AssertStrideAEqual,
 // AssertStrideBEqual, AssertStrideCEqual, AssertStrideDEqual (unit strides), AssertStrideAMultiple,
-// AssertStrideBMultiple, AssertTensorBytesLessThan (tensors < 2^31 bytes), AssertMXScalesPreSwizzled. No bias,
+// AssertStrideBMultiple, AssertTensorBytesLessThan (tensor allocation and leading stride in bytes < 2^31), AssertMXScalesPreSwizzled. No bias,
 // activation or scale-alpha vector.
 // Rule: n < 5 and m > 4, so m is the wide extent: one workgroup per tile and no grid guard.
 // Invariant: SRD num_records is built from the tensor extent in this file and must never be enlarged (for example to

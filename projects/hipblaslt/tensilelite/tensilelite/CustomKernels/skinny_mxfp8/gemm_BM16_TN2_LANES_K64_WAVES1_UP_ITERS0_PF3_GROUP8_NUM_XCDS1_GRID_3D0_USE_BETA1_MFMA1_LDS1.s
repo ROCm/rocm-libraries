@@ -4,7 +4,7 @@
 // Constraints (custom.config keys): AssertSizeEqual (batch 1), AssertSizeGreaterThan and AssertSizeLessThan (m, n and K
 // in [1, 2^20]), AssertSummationElementMultiple (K % 32 == 0), AssertStrideAEqual, AssertStrideBEqual,
 // AssertStrideCEqual, AssertStrideDEqual (unit strides), AssertStrideAMultiple, AssertStrideBMultiple,
-// AssertTensorBytesLessThan (tensors < 2^31 bytes), AssertMXScalesPreSwizzled. No bias, activation or scale-alpha.
+// AssertTensorBytesLessThan (tensor allocation and leading stride in bytes < 2^31), AssertMXScalesPreSwizzled. No bias, activation or scale-alpha.
 // Rule: AssertAnySizeLessThan, min(m, n) <= 4.
 // Invariant: SRD num_records is built from the tensor extent in this file and must never be enlarged (for example to
 // 0x7fffffff): loads past K in the prologue and tail are safe only because soffset is range-checked against it.

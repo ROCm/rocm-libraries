@@ -6,7 +6,7 @@ SPDX-License-Identifier: MIT
 # Skinny MXFP8 custom kernels
 
 Skinny GEMM kernels for MXFP8 (FP8 E4M3 A and B, E8M0 scales per 32 elements, BF16 D), hipBLASLt TN, with one
-small ("skinny") extent and the other wide. They serve LLM decode and wider skinny batches up to the kernel `bm`.
+small ("skinny") extent and the other wide. They serve LLM decode and small skinny batches, min(m, n) <= 4.
 gfx950 only. Each kernel computes `D = alpha * (A^T B) + beta * C` with f32 alpha and beta.
 
 Each of the five kernels is one `.s` file with its own `custom.config` and one Tensile test YAML under
@@ -55,7 +55,7 @@ The host does not parse the kernel symbol; everything it needs is in `custom.con
 - The scaled MFMA needs 12 wait states before its result is read; the generator emits `s_nop 11` (12) after the last
   tail MFMA and the four MFMA `.s` files keep it.
 - `AssertSummationElementMultiple: 32` (the MX scale block, as in the generic MXFP8 kernels, so other K has no MXFP8
-  kernel at all) and `AssertSizeGreaterThan: {3: 0}` (K = 0 has no path).
+  kernel at all) and `AssertSizeGreaterThan` (K = 0 has no path; `{0: 0, 1: 0, 3: 0}` on the MFMA kernels, `{0: 4, 1: 0, 3: 0}` on the VALU kernel).
 - `SupportsBias`, `SupportsActivation` and `SupportsScaleAlpha` are false, so each solution gets its own
   `ProblemType` that rejects such problems; they fall through to the generic kernels.
 - `MXScaleFormat: HostPreSwizzle` tells the client which scale layout to generate.
@@ -98,10 +98,10 @@ integers by `generateCustomCall`; the solution predicates (`AssertStride*`) use 
   were generated for; `AssertSizeGreaterThan` rejects empty problems.
 - The MFMA kernels declare `AssertAnySizeLessThan: {0: 5, 1: 5}` (min(m, n) <= 4), so a forced solution index or a
   tuning run cannot put a larger problem on them. The VALU kernel keeps `n < 5` and `m > 4`.
-- `AssertTensorBytesLessThan: 2147483648` requires every non-empty A, B, C and D to be below 2^31 bytes. `num_records`
+- `AssertTensorBytesLessThan: 2147483648` requires, for every non-empty A, B, C and D, both the total allocated bytes and the leading stride in bytes to be below 2^31. `num_records`
   and byte offsets are 32-bit, and the MFMA kernels send the A and B row offset of a row outside the tensor to
   0x80000000 (`v_mov_b32 v, -2147483648` before the `v_cndmask_b32`), which must stay beyond those buffers. The VALU
-  kernel has no sentinel. Leading dimensions need no bound of their own.
+  kernel has no sentinel.
 
 **`num_records` invariant.** Each kernel builds `num_records` for every SRD from the tensor extent; it must never come
 from the host or be enlarged (for example to `0x7fffffff`). The prologue and tail load past the end of K when K is
