@@ -563,6 +563,7 @@ FEATURE_KEYS = {
     "SdpaBackward/FlydslBwdSplitBias": {"add_tensors", "node_patches"},
     "SdpaBackward/FlydslBwdSplitPadded": {"add_tensors", "node_patches"},
     "SdpaBackward/FlydslBwdSplitDropout": {"add_tensors", "node_patches"},
+    "SdpaBackward/FlydslBwdSplitRagged": {"node_patches"},
     "SdpaFwd/Default": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151Decode": {"add_tensors", "node_patches"},
@@ -648,8 +649,9 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaBackward/Default",
         "SdpaBackward/FlydslBwdSplit",
         "SdpaBackward/FlydslBwdSplitBias",
-        "SdpaBackward/FlydslBwdSplitPadded",
         "SdpaBackward/FlydslBwdSplitDropout",
+        "SdpaBackward/FlydslBwdSplitPadded",
+        "SdpaBackward/FlydslBwdSplitRagged",
         "SdpaBackward/FlydslBwdSplitStride",
         "SdpaFwd/AsmStride",
         "SdpaFwd/Default",
@@ -748,17 +750,24 @@ def expanded_graph(template, row):
     return graph
 
 
+def _copy_topology_files(src_dir, topology):
+    """Copies a topology's template, sweep and support files into ``topology``. A template with no
+    sweep (the gauntlet-only SdpaBackward/GauntletRagged) gets an empty one, so the same tests
+    read every space's topology alike."""
+    for name in ("graph.template.json", "sweep.json", "support.json"):
+        if (src_dir / name).is_file():  # SdpaBackward ships no support.json
+            shutil.copyfile(src_dir / name, topology / name)
+    if not (topology / "sweep.json").exists():
+        (topology / "sweep.json").write_text('{"version": 1, "cases": []}')
+
+
 # probe-library cases are never frozen into a bundle, so only the shape spaces need to expand back
 @pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
 def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, space_id):
     sp = space_by_id(space_id)
     topology = tmp_path / "quick" / sp.operation / sp.template_path.parent.name
     topology.mkdir(parents=True)
-    for name in ("graph.template.json", "sweep.json", "support.json"):
-        if (
-            sp.template_path.parent / name
-        ).is_file():  # SdpaBackward ships no support.json
-            shutil.copyfile(sp.template_path.parent / name, topology / name)
+    _copy_topology_files(sp.template_path.parent, topology)
     sweep = json.loads((topology / "sweep.json").read_text())
     existing = len(sweep["cases"])
     samples = [sampler.sample(sp, seed) for seed in range(200, 240)]
@@ -1477,6 +1486,7 @@ LARGE_SCALE = {
     "SdpaBackward/FlydslBwdSplitBias": 8,
     "SdpaBackward/FlydslBwdSplitPadded": 8,
     "SdpaBackward/FlydslBwdSplitDropout": 8,
+    "SdpaBackward/FlydslBwdSplitRagged": 8,
     "SdpaFwd/Gfx950Dense": 8,
     "SdpaFwd/Flash2Region": 8,
     "SdpaFwd/Gfx1151": 8,
@@ -1531,6 +1541,7 @@ OPERAND_DOMAIN = {
             "SdpaBackward/FlydslBwdSplitBias",
             "SdpaBackward/FlydslBwdSplitPadded",
             "SdpaBackward/FlydslBwdSplitDropout",
+            "SdpaBackward/FlydslBwdSplitRagged",
         )
         for name in ("V", "dO")
     },
@@ -1570,6 +1581,7 @@ PRIMARY_OPERANDS = {
     "SdpaBackward/FlydslBwdSplitBias": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitPadded": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitDropout": ["Q", "K", "V", "dO"],
+    "SdpaBackward/FlydslBwdSplitRagged": ["Q", "K", "V", "dO"],
 }
 # The operands that carry the `special` fill in the nan and inf domains, per space. The other
 # primary operands keep the default range there. Each choice keeps the non-finite positions
@@ -1589,6 +1601,7 @@ POISONED_OPERANDS = {
     "SdpaBackward/FlydslBwdSplitBias": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitPadded": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitDropout": [],  # as SdpaBackward/Default
+    "SdpaBackward/FlydslBwdSplitRagged": [],  # as SdpaBackward/Default
     "SdpaFwd/Gfx950Dense": ["V"],
     "SdpaFwd/FlydslCdna": ["V"],
     "SdpaFwd/FlydslCdnaDecode": ["V"],
@@ -1639,6 +1652,7 @@ PLACEMENT_OPERAND = {
     "SdpaBackward/FlydslBwdSplitBias": "Q",
     "SdpaBackward/FlydslBwdSplitPadded": "Q",
     "SdpaBackward/FlydslBwdSplitDropout": "Q",
+    "SdpaBackward/FlydslBwdSplitRagged": "Q",
     "SdpaBackward/FlydslBwdSplitStride": "Q",
     "SdpaFwd/AsmStride": "Q",
     "SdpaFwd/Default": "Q",
@@ -1666,6 +1680,7 @@ NONFINITE_EXCLUDED = {
     "SdpaBackward/FlydslBwdSplitBias",
     "SdpaBackward/FlydslBwdSplitPadded",
     "SdpaBackward/FlydslBwdSplitDropout",
+    "SdpaBackward/FlydslBwdSplitRagged",
 }
 # the spaces that draw half only: an infinity never poisons there (P underflows), see
 # test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree
@@ -1880,7 +1895,8 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     name_of = {v: k for k, v in uid_of.items()}
     primary = [uid_of[name] for name in PRIMARY_OPERANDS[space_id]]
     poisoned = [uid_of[name] for name in POISONED_OPERANDS[space_id]]
-    quick = json.loads((sp.template_path.parent / "sweep.json").read_text())["cases"]
+    quick_path = sp.template_path.parent / "sweep.json"
+    quick = json.loads(quick_path.read_text())["cases"] if quick_path.exists() else []
     metas = _rendered_by_domain(sp, seed=POISONABLE_SEED.get(space_id, 11))
     assert set(metas) == set(domains_of(space_id))
     default = metas["default"]["inputs"]
@@ -2744,8 +2760,7 @@ def test_import_graph_keeps_a_declared_alignment_as_tensor_patches(tmp_path, ali
     tree = tmp_path / "tree"
     topology = tree / "quick" / "SdpaFwd" / sp.template_path.parent.name
     topology.mkdir(parents=True)
-    for name in ("graph.template.json", "sweep.json", "support.json"):
-        shutil.copyfile(sp.template_path.parent / name, topology / name)
+    _copy_topology_files(sp.template_path.parent, topology)
     before = len(json.loads((topology / "sweep.json").read_text())["cases"])
 
     def import_it(path=graph_path):
@@ -2784,8 +2799,7 @@ def test_import_graph_gives_two_alignments_of_one_graph_two_case_ids(tmp_path):
     tree = tmp_path / "tree"
     topology = tree / "quick" / "SdpaFwd" / sp.template_path.parent.name
     topology.mkdir(parents=True)
-    for name in ("graph.template.json", "sweep.json", "support.json"):
-        shutil.copyfile(sp.template_path.parent / name, topology / name)
+    _copy_topology_files(sp.template_path.parent, topology)
     for alignment in (2, 4):
         row = sp.render(sp.derive_env(dict(sample.axis_values, alignment=alignment)))
         path = tmp_path / f"case{alignment}.json"
@@ -4586,6 +4600,11 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     run, tmp_path, space_id
 ):
     sp = space_by_id(space_id)
+    if not (sp.template_path.parent / "sweep.json").exists():
+        pytest.skip(
+            "a template-only topology (the gauntlet-only SdpaBackward/GauntletRagged) has no sweep "
+            "to append a frozen case to: the import would create a new bundle"
+        )
     run.control(default="wrong")
     assert run.run("--samples", "1", "--seed", "4242", space=space_id) == 1
     folder = run.failure_dir("s4242", f"{sp.operation}_{sp.name}")
@@ -4596,11 +4615,7 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     tree = tmp_path / "tree"
     topology = tree / "quick" / sp.operation / sp.template_path.parent.name
     topology.mkdir(parents=True)
-    for name in ("graph.template.json", "sweep.json", "support.json"):
-        if (
-            sp.template_path.parent / name
-        ).is_file():  # SdpaBackward ships no support.json
-            shutil.copyfile(sp.template_path.parent / name, topology / name)
+    _copy_topology_files(sp.template_path.parent, topology)
     before = json.loads((topology / "sweep.json").read_text())["cases"]
 
     def import_it():
