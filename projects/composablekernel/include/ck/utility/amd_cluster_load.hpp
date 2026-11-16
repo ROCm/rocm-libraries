@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck/ck.hpp"
+#include "ck/utility/synchronization.hpp"
 
 namespace ck {
 
@@ -130,7 +131,7 @@ __device__ void cluster_load_async(__attribute__((address_space(3))) void* lds_p
             mask);
     }
 #if CK_HAS_ASYNCMARK
-    __builtin_amdgcn_asyncmark();
+    asyncmark();
 #endif
 }
 
@@ -142,7 +143,7 @@ __device__ inline void cluster_load_async_wait()
 {
 #if CK_HAS_ASYNCMARK
     // Force marked async loads to drain.
-    __builtin_amdgcn_wait_asyncmark(0);
+    wait_asyncmark();
 #else
     __builtin_amdgcn_s_wait_asynccnt(0);
     // This acquire fence keeps subsequent LDS reads from being hoisted above the s_wait_asynccnt,

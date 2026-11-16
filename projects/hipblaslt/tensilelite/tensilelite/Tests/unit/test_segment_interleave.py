@@ -1044,7 +1044,7 @@ def test_paired_mx_alignment_counts_gaps_but_not_unused_final_tail():
 @pytest.fixture
 def _gfx1250_read_swap():
     from rocisa import rocIsa
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from rocisa_test_state import preserve_rocisa_kernel_state
     from tensilelite.Toolchain.Validators import validateToolchain
 
     with preserve_rocisa_kernel_state():

@@ -289,7 +289,7 @@ std::ostream& operator<<(std::ostream& out, const Declined& declined)
                << declined.cause << "]: ";
 }
 
-using Unified3dProblem = sdpa_graph::UnifiedAttentionProblem;
+using Unified3dProblem = sdpa_graph::SdpaShape;
 using sdpa_graph::problemFor;
 
 /// The kernel's dtype spelling (the KMD `dtype` field) for a graph dtype, or nullopt.
@@ -379,13 +379,6 @@ bool maskAccepted(const data_objects::SdpaAttributes& attributes)
                                                 << " is not supported");
         return false;
     }
-}
-
-/// The GQA ratios this engine ships. rocKE's strided decode admits every ratio from 1 to 16
-/// (it masks the unused rows of the 16-row query tile); v1 builds kernels for these five.
-bool isSupportedGqaRatio(int64_t ratio)
-{
-    return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
 }
 
 /**
@@ -514,8 +507,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
                                << " is not served; this engine ships head sizes 64, 128 and 256");
         return std::nullopt;
     }
-    if(problem.numQueryHeads % problem.numKvHeads != 0
-       || !isSupportedGqaRatio(problem.numQueryHeads / problem.numKvHeads))
+    if(!gfx942Unified3dServesGqaGroup(problem.numQueryHeads, problem.numKvHeads))
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"gqa"}
                                << "query heads " << problem.numQueryHeads
@@ -752,7 +744,7 @@ struct Unified3dTraits
  *        launch.
  *
  * Every KMD field must be present. num_queries_per_kv is a supported GQA ratio
- * (isSupportedGqaRatio); block_size is one of the candidate's `kv_block_size` values
+ * (gfx942Unified3dServesGqaRatio); block_size is one of the candidate's `kv_block_size` values
  * {16, 32, 64}; num_segments is positive (the grid's z extent and the workspace's segment
  * axis); tile_size_override is the tile rocKE resolves from (head_size, block_size) on
  * gfx942 (gfx942ResolvedTileSize), so a record whose recorded tile disagrees -- a binary
@@ -773,7 +765,7 @@ std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    if(*headSize <= 0 || !isSupportedGqaRatio(*numQueriesPerKv) || *numSegments <= 0
+    if(*headSize <= 0 || !gfx942Unified3dServesGqaRatio(*numQueriesPerKv) || *numSegments <= 0
        || (*blockSize != 16 && *blockSize != 32 && *blockSize != 64)
        || *tileSize != gfx942ResolvedTileSize(*headSize, *blockSize))
     {

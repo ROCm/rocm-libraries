@@ -2434,7 +2434,7 @@ namespace
         if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
            && fusedInfo.hasA2APrefix)
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }
@@ -2784,7 +2784,7 @@ namespace
         if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
            && fusedInfo.hasA2APrefix)
         {
-            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2A(TensileLite::FusedA2A::GemmA2A);
             tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
             tensileProblem.setWorld(prob.fused_a2a_world);
         }
@@ -3802,6 +3802,20 @@ namespace
         if(mxScaleLayoutFits(need, solution))
             return rocblaslt_status_success;
         log_error(caller, rocblaslt_mx_scale_mismatch_message(need));
+        return rocblaslt_status_invalid_value;
+    }
+
+    // An algo index can name a solution of the other kind, grouped or not, whose
+    // kernel takes different arguments.
+    rocblaslt_status checkGroupedGemmMatch(const char*                             caller,
+                                           bool                                    grouped,
+                                           const TensileLite::ContractionSolution& solution)
+    {
+        if(solution.problemType.groupedGemm == grouped)
+            return rocblaslt_status_success;
+        log_error(caller,
+                  grouped ? "the algo's solution is not a grouped GEMM solution"
+                          : "the algo's solution is a grouped GEMM solution");
         return rocblaslt_status_invalid_value;
     }
 
@@ -6447,6 +6461,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         auto solution = solutionAt(*solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
+        if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+           st != rocblaslt_status_success)
+            return st;
         if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
@@ -6805,6 +6822,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
+               st != rocblaslt_status_success)
+                return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
@@ -6886,6 +6906,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "No solution for index", *solutionIndex);
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkGroupedGemmMatch(__func__, true, *solution);
+               st != rocblaslt_status_success)
+                return st;
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;

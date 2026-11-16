@@ -16,6 +16,23 @@ each.
 
 from __future__ import annotations
 
+# The split ops build gfx950 objects from the CDNA backward kernels and gfx11-generic objects from the RDNA ones, which import
+# the RDNA forward's Philox.
+_SDPA_BWD_SPLIT_DIRS = (
+    "attention_bwd_cdna",
+    "attention_cdna",
+    "attention_bwd_rdna",
+    "attention_rdna4",
+)
+
+# The gfx950-only ops build from the CDNA backward kernels, which import the aiw directory's Philox
+# and its null-safe u64 loader (``fmha_common_gfx1201``, whose own imports reach the rest of the directory).
+_SDPA_BWD_CDNA_DIRS = (
+    "attention_bwd_cdna",
+    "attention_cdna",
+    "attention_rdna4",
+)
+
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "rmsnorm_bwd": ("norm",),
@@ -33,4 +50,11 @@ OP_KERNEL_DIRS = {
     "sdpa_dropout_mask": ("dropout_mask", "attention_rdna4/philox.py"),
     # The head-dim padding copy around an SDPA launch at a head dim off 8 (FlydslSdpaHeadPad.hpp).
     "sdpa_head_pad": ("head_pad",),
+    "sdpa_bwd_prep": _SDPA_BWD_SPLIT_DIRS,
+    "sdpa_bwd_dkdv": _SDPA_BWD_SPLIT_DIRS,
+    "sdpa_bwd_dq": _SDPA_BWD_SPLIT_DIRS,
+    "sdpa_bwd_merged": _SDPA_BWD_CDNA_DIRS,
+    "sdpa_bwd_dbias_reduce": _SDPA_BWD_CDNA_DIRS,
+    "sdpa_bwd_dsink_reduce": _SDPA_BWD_CDNA_DIRS,
+    "sdpa_bwd_tailzero": _SDPA_BWD_SPLIT_DIRS,
 }
