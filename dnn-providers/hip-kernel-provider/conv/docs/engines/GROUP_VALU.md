@@ -12,11 +12,11 @@ SPDX-License-Identifier:  MIT
 - **Covers:** fwd, bwd-data, wrw · fp32/fp16/bf16 (compute type unset or fp32, no TF32 sibling) · NCHW (width packed) and NHWC (channels packed) · 1-D/2-D/3-D · any group count (the tile must divide the channels a group) · padding, stride and dilation on height and depth are runtime and unrestricted; the config fixes the width's · tensors over 2 GiB if the images one pass spans stay under 2 GiB.
 - **Filter classes:** FWD/BWD 3x3 and 3x3x3, width stride 1 or 2. WRW 3x3 (width stride 1 or 2), 1x1 and 5x5, plus depthwise-only 5x5 at stride 2 and 7x7. 3-D WRW reuses the 2-D configs, one tile per depth tap.
 - **Row width:** a whole row must fit in one wave (lanes x `p` output columns). That is at most 512 columns on wave64 and 256 on wave32 with the widest shipped `p`. Wider rows are declined.
-- **Arches:** every arch, VALU only. The `valu` pack (gfx906, gfx908) ships both layouts and every tile. The `mma` pack (gfx90a, gfx942, gfx950, gfx11, gfx12) ships channels-first only, with the few tiles that won there.
+- **Arches:** every arch, VALU only. Both packs ship both layouts. The `valu` pack (gfx906, gfx908) ships every tile. The `mma` pack (gfx90a, gfx942, gfx950, gfx11, gfx12) ships the few tiles that won there.
 - **Wins when:** a per-group GEMM would leave the matrix tile mostly empty: ResNeXt / RegNet groups of 4 to 56 channels, ResNeXt3D 3-D grouped layers, few-channel dense and pointwise wrw, 3-D depthwise wrw, and most wrw on gfx906 (no matrix cores).
 - **Loses when:** channels per group are wide (FWD/BWD at 56 or more go to Winograd; WRW to K3 / BLAS), on large pointwise wrw (a GEMM), on dense 3x3 wrw on gfx906 (MIOpen's asm is about 1.3x faster), and on rows too wide for a wave.
 - **Precision:** fp32 accumulation and one rounding at the store. 16-bit products are exact in fp32, and the fp16 `dot2` path adds two exact products to the fp32 sum. Fixed-order reductions with no atomics give bitwise-repeatable results, so the engine carries no numerical notes.
-- **Instances:** FWD 180 `valu` + 15 `mma`, BWD 168 + 15, WRW 254 `valu` + 137 `mma` (769 in all). Every config is admitted on correctness alone and autotune picks among them.
+- **Instances:** FWD 180 `valu` + 30 `mma`, BWD 168 + 30, WRW 254 `valu` + 173 `mma` (835 in all). Every config is admitted on correctness alone and autotune picks among them.
 - **vs MIOpen:** WRW replaces `ConvAsmBwdWrW3x3`, which is limited to gfx8/gfx90x, 2-D NCHW 3x3 pad 1, fp32/fp16, even N for fp16, and one code object per shape. On gfx906 it is 5.5x faster on ResNeXt-50 g32 56² n128 fp16 wrw and 17.6x on its stride-2 layer. On ResNeXt3D grouped wrw it is about 33x faster than MIOpen's best solver.
 
 ## Why it exists
@@ -87,7 +87,8 @@ end: butterfly-reduce acc over the lanes -> LDS sum over the waves in wave order
   - The FWD/BWD `valu` tiles cover each sweep graph's best config within 5%, plus one `kb = cb = 1` tile per class for channel counts no wider tile divides.
 - **Two packs:**
   - `valu` targets gfx906, which has no matrix core for these types, and gfx908, whose vector unit is fast enough to matter. It ships both layouts and all tiles.
-  - On gfx90a, gfx942, gfx950, gfx11 and gfx12 the matrix-core engines serve most layers. This engine won only narrow ones there (groups of 4 to 8, few-channel dense and pointwise wrw), by 1.1-2.7x, and no channels-last config won on any of those arches. So `mma` ships channels-first only and fewer tiles.
+  - On gfx90a, gfx942, gfx950, gfx11 and gfx12 the matrix-core engines serve most layers. This engine won only narrow ones there (groups of 4 to 8, few-channel dense and pointwise wrw), by 1.1-2.7x in channels-first sweeps. So `mma` ships fewer tiles, in both layouts, and autotune decides where they win.
+  - In both packs every FWD/BWD tile and every WRW `pass` tile ships in both layouts. The WRW `ring` form is channels-first by construction (its register ring walks the packed width of consecutive rows). The depthwise set below is channels-first in both packs.
 - **Depthwise tiles (WRW):**
   - Both packs carry 67 `cb = kb = 1` NCHW configs on every arch: one channel's filter per wave, lanes along the row.
   - Filter classes: 3x3 s1/s2, 5x5 s1/s2, 7x7; `pass` and `ring`; `p` of at least 2, because 16-bit windows are whole dwords.
