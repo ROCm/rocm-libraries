@@ -3517,4 +3517,5 @@ amdhsa.kernels:
     .vgpr_count: 336
     .agpr_count: 256
     .wavefront_size: 64
+...
 .end_amdgpu_metadata
