@@ -102,8 +102,8 @@ struct GraphSpec
     Wiring wiring = Wiring::NONE; ///< more nodes, after the multiply
     PointwiseMode biasMode = PointwiseMode::ADD; ///< the mode of the node that reads the bias
     PointwiseMode reluMode = PointwiseMode::RELU_FWD; ///< the mode of the activation node
-    std::optional<float> reluSlope; ///< the lower-clip slope of the activation node
-    std::optional<float> eluAlpha; ///< the alpha of the activation node
+    flatbuffers::Optional<float> reluSlope; ///< the lower-clip slope of the activation node
+    flatbuffers::Optional<float> eluAlpha; ///< the alpha of the activation node
     bool otherNode = false; ///< a node that is neither the convolution nor pointwise
 };
 
@@ -191,9 +191,6 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     addTensor(CYCLE_B_UID, "cycle_b", yDims, true, spec.intermediateType);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
-    const auto optionalFloat = [](const std::optional<float>& value) {
-        return value.has_value() ? flatbuffers::Optional<float>(*value) : flatbuffers::nullopt;
-    };
     const auto addPointwise = [&](PointwiseMode mode,
                                   int64_t in0,
                                   flatbuffers::Optional<int64_t> in1,
@@ -328,8 +325,8 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
                          OUT_UID,
                          std::nullopt,
                          flatbuffers::nullopt,
-                         optionalFloat(spec.reluSlope),
-                         optionalFloat(spec.eluAlpha));
+                         spec.reluSlope,
+                         spec.eluAlpha);
         }
     }
     if(spec.otherNode)
