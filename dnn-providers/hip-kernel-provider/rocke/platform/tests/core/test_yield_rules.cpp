@@ -10,7 +10,8 @@
  * its iter_args metadata names each carried value and its type (which the
  * loop's result shares), and its body yields only at its end, one value per
  * carried value, of its type, ending in that yield whenever the loop carries
- * any; a carried value or result with no type is refused rather than read.
+ * any; a carried value or result with no type is refused (a TypeError, as in
+ * an if/else) rather than read.
  *
  * Only the scf.yield that ends a branch of an if/else with results has its
  * values taken: a branch of an if/else without results holds no scf.yield, and
@@ -782,12 +783,16 @@ void a_loop_whose_iter_args_metadata_is_malformed_is_refused()
 /* A raw value (rocke_i_value_named given no type) has no type, and a raw op
  * given no result types leaves its results so. A loop whose init operand,
  * result or closing yield has no type is refused by the verifier and both
- * lowerings, with the Python engine's ValueError and text, before the missing
- * type is read. A raw value has no defining op either, so the verifier also
- * reports it out of scope; the lowerings meet the loop rule first. */
+ * lowerings, with the Python engine's TypeError (as an if/else value with no
+ * type is) and text, before the missing type is read; a closing yield with no
+ * type is refused in the body of an unrolled loop of zero trips too, which the
+ * LLVM lowering does not lower. A raw value has no defining op either, so the
+ * verifier also reports it out of scope; the lowerings meet the loop rule
+ * first. */
 void a_loop_value_with_no_type_is_refused()
 {
     const std::string out_of_scope = "operand '%untyped' used before definition / out of scope\n";
+    const std::string untyped_yield = "scf.for body yield 0 failed - type=None, expected i32";
     {
         Kernel k("loop_untyped_init");
         rocke_op_t* loop_op = nullptr;
@@ -804,7 +809,7 @@ void a_loop_value_with_no_type_is_refused()
         const std::string message
             = "scf.for init operand 0 failed - type=None, expected an IR type";
         check_refused_reporting(k,
-                                ROCKE_ERR_VALUE,
+                                ROCKE_ERR_TYPE,
                                 message,
                                 out_of_scope + message + "\n",
                                 "loop with an init operand with no type");
@@ -816,7 +821,7 @@ void a_loop_value_with_no_type_is_refused()
         rocke_b_ret(&k.b);
         loop_op->results[0]->type = nullptr;
         check_refused(k,
-                      ROCKE_ERR_VALUE,
+                      ROCKE_ERR_TYPE,
                       "scf.for result 0 failed - type=None, expected i32",
                       "loop with a result with no type");
     }
@@ -831,12 +836,37 @@ void a_loop_value_with_no_type_is_refused()
             },
             false);
         rocke_b_ret(&k.b);
-        const std::string message = "scf.for body yield 0 failed - type=None, expected i32";
         check_refused_reporting(k,
-                                ROCKE_ERR_VALUE,
-                                message,
-                                message + "\n" + out_of_scope,
+                                ROCKE_ERR_TYPE,
+                                untyped_yield,
+                                untyped_yield + "\n" + out_of_scope,
                                 "loop yield of a value with no type");
+    }
+    {
+        Kernel k("zero_trip_loop_untyped_yield");
+        k.build_carrying_loop(0, true, [&k](const rocke_for_t&) {
+            /* Names of its own: a nested loop cannot reuse the outer loop's. */
+            const rocke_iter_arg_t carry = {"x", k.lane};
+            const rocke_for_t inner = rocke_b_scf_for_iter(&k.b,
+                                                           rocke_b_const_i32(&k.b, 0),
+                                                           rocke_b_const_i32(&k.b, 2),
+                                                           rocke_b_const_i32(&k.b, 1),
+                                                           &carry,
+                                                           1,
+                                                           "j",
+                                                           false,
+                                                           true);
+            rocke_b_region_enter(&k.b, inner.body);
+            rocke_value_t* untyped = rocke_i_value_named(&k.b, "%untyped", nullptr);
+            rocke_b_scf_yield(&k.b, &untyped, 1);
+            rocke_b_region_leave(&k.b);
+        });
+        rocke_b_ret(&k.b);
+        check_refused_reporting(k,
+                                ROCKE_ERR_TYPE,
+                                untyped_yield,
+                                untyped_yield + "\n" + out_of_scope,
+                                "zero-trip loop, loop yield of a value with no type");
     }
 }
 

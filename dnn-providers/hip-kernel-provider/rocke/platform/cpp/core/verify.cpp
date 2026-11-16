@@ -771,7 +771,7 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
      * body's yields: one rule for the verifier and every lowering. */
     {
         char loop_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
+        if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error) != ROCKE_OK)
         {
             v_errf(v, op, "%s", loop_error);
         }

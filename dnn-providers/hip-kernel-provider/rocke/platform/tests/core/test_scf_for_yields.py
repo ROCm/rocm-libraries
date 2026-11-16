@@ -17,8 +17,9 @@ nested in a body keeps its own yields. A metadata entry that is not a map is
 the exception: the C++ engine's parser refuses it before the loop rule runs,
 with its own text. An entry with no type name is refused by the C++ parser
 first too, with the text the loop rule shares. A carried value or result with
-no type is refused before its type is read, in the Python engine only, as
-serialized IR cannot carry one to the C++ engine. Each other refusal runs the
+no type is refused with a ``TypeError``, as the if/else rule refuses one,
+before its type is read, in the Python engine only, as serialized IR cannot
+carry one to the C++ engine. Each other refusal runs the
 Python verifier and the Python lowerings everywhere, and the C++ lowerings
 where the ``rocke_engine`` binding is built.
 ``tests/core/test_yield_rules.cpp`` covers the same rules in the C++ engine,
@@ -448,6 +449,9 @@ def _untype_the_yield(loop):
     loop.regions[0].ops[-1].operands = [Value("%untyped", None)]
 
 
+UNTYPED_YIELD_MESSAGE = "scf.for body yield 0 failed - type=None, expected i32"
+
+
 @pytest.mark.parametrize(
     "edit,message",
     [
@@ -461,23 +465,46 @@ def _untype_the_yield(loop):
             "scf.for result 0 failed - type=None, expected i32",
             id="result",
         ),
-        pytest.param(
-            _untype_the_yield,
-            "scf.for body yield 0 failed - type=None, expected i32",
-            id="yield",
-        ),
+        pytest.param(_untype_the_yield, UNTYPED_YIELD_MESSAGE, id="yield"),
     ],
 )
 def test_a_loop_value_with_no_type_is_refused_before_it_is_read(edit, message):
     """A loop whose init operand, result or closing yield has no type, edited
-    past the builder, is refused by the verifier and every lowering before the
-    missing type is read. Only the Python engine runs: serialized IR, which
-    carries a kernel to the C++ engine, has no spelling for a value with no
-    type; ``test_yield_rules.cpp`` holds the C++ engine to the same texts."""
+    past the builder, is refused by the verifier and every lowering with a
+    ``TypeError``, as an if/else value with no type is, before the missing
+    type is read. Only the Python engine runs: serialized IR, which carries a
+    kernel to the C++ engine, has no spelling for a value with no type;
+    ``test_yield_rules.cpp`` holds the C++ engine to the same types and texts."""
     kernel, loop = _loop_kernel_yielding_its_init("loop_untyped")
     edit(loop)
     assert_refused_everywhere(
-        kernel, ARCH, ValueError, message, HOST_FLAVOR, engines=("python",)
+        kernel, ARCH, TypeError, message, HOST_FLAVOR, engines=("python",)
+    )
+
+
+def _loop_yielding_a_value_with_no_type(b, k, acc):
+    """A loop on ``k`` whose closing yield has no type, then the closing
+    yield of ``acc``."""
+    inner = b.scf_for_iter(
+        b.const_i32(0), b.const_i32(2), b.const_i32(1), [("x", k)], iv_name="j"
+    )
+    with inner:
+        b.scf_yield(Value("%untyped", None))
+    b.scf_yield(acc)
+
+
+def test_an_unrolled_loop_of_zero_trips_refuses_a_loop_yield_with_no_type():
+    """The LLVM lowering does not lower the body of an unrolled loop of zero
+    trips, yet it refuses a loop there whose closing yield has no type with a
+    ``TypeError``, as the HIP lowering does; the verifier reports the same text."""
+    kernel = _loop_kernel_with_body(
+        "zero_trip_untyped_yield",
+        _loop_yielding_a_value_with_no_type,
+        trips=0,
+        unroll=True,
+    )
+    assert_refused_everywhere(
+        kernel, ARCH, TypeError, UNTYPED_YIELD_MESSAGE, HOST_FLAVOR, engines=("python",)
     )
 
 

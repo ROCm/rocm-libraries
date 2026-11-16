@@ -457,10 +457,13 @@ const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops
  * reads the body; rocke_i_scf_for_error checks it first. */
 const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap);
 
-/* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
- * is sound (Python core/ir.py::_scf_for_error, same text): it holds exactly
- * one region, its body (rocke_i_scf_for_region_error); its num_iter_args,
- * init operands, iter_args metadata list and results agree in count; each
+/* Whether the scf.for `op` is sound (Python core/ir.py::_scf_for_error, which
+ * returns the exception whose status this returns, same text): ROCKE_OK, or
+ * the refusal's status with its text written into `buf`. A value with no type
+ * is ROCKE_ERR_TYPE, as in an if/else; every other refusal is ROCKE_ERR_VALUE.
+ * A sound loop holds exactly one region, its body
+ * (rocke_i_scf_for_region_error); its num_iter_args, init operands, iter_args
+ * metadata list and results agree in count; each
  * metadata entry names its carried value and that value's type, which its
  * result shares; it carries no buffer descriptor
  * (rocke_i_scf_for_carried_descriptor_error); its body yields only at its end,
@@ -469,7 +472,7 @@ const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t
  * in its body, so the body nests none in a region that takes no yields
  * (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand count. The verifier and
  * both lowerings use it. */
-const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
+rocke_status_t rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else
  * (rocke_i_if_else_yields) in `region` and nested in it (Python

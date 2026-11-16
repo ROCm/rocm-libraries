@@ -3025,9 +3025,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
-        error = _scf_for_error(op)
-        if error is not None:
-            raise ValueError(error)
+        refusal = _scf_for_error(op)
+        if refusal is not None:
+            raise refusal
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]

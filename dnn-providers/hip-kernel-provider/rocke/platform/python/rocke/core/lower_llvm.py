@@ -7091,9 +7091,9 @@ class _Lowerer:
         unrolled (straight-line) or normal (loop) lowering. Both first refuse
         a loop the loop rule (:func:`_scf_for_error`) refuses.
         """
-        error = _scf_for_error(op)
-        if error is not None:
-            raise ValueError(error)
+        refusal = _scf_for_error(op)
+        if refusal is not None:
+            raise refusal
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 

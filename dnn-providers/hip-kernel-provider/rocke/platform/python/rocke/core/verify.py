@@ -570,9 +570,9 @@ class _Verifier:
         iter_meta = op.attrs.get("iter_args", []) or []
         # The carried values (their counts, metadata and result types) and the
         # body's yields: one rule for the verifier and every lowering.
-        loop_error = _scf_for_error(op)
-        if loop_error is not None:
-            self.err(loop_error, op)
+        loop_refusal = _scf_for_error(op)
+        if loop_refusal is not None:
+            self.err(str(loop_refusal), op)
 
         # body scope: copy + iv + iter-arg block values
         body_scope = dict(scope)

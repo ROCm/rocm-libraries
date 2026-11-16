@@ -1734,47 +1734,49 @@ def _untyped_value_message(
     The builders and the IR parser type every value, but a value built or
     edited by hand can lack a type. The loop rule (:func:`_scf_for_error`) and
     the if/else rule (:func:`_if_else_yields`) check each value with it before
-    they read its type's name; the loop rule reports it as a ``ValueError``,
-    as every loop refusal is, and the if/else rule as a ``TypeError``, as its
-    builder refuses a result type. The C++ engine (``untyped_value_message``
-    in ``cpp/core/ir/ir_flow.cpp``) writes the same text, spelling its missing
-    type ``None``.
+    they read its type's name, and both report it as a ``TypeError`` (a missing
+    type is the wrong kind of object), as the if/else builder refuses a result
+    type. The C++ engine (``untyped_value_message`` in
+    ``cpp/core/ir/ir_flow.cpp``) writes the same text, spelling its missing
+    type ``None``, with ``ROCKE_ERR_TYPE``.
     """
     if isinstance(value_type, Type):
         return None
     return f"{what} {index} failed - type={value_type!r}, expected {expected}"
 
 
-def _scf_for_metadata_entry_error(op: Op) -> str | None:
-    """The refusal for the ``scf.for`` ``op`` when an ``iter_args`` metadata
-    entry does not describe its carried value, or None when every entry does.
+def _scf_for_metadata_entry_error(op: Op) -> ValueError | TypeError | None:
+    """The refusal for the ``scf.for`` ``op``, for its caller to raise, when an
+    ``iter_args`` metadata entry does not describe its carried value, or None
+    when every entry does.
 
     The counts of carried values agree (:func:`_scf_for_carried_count_error`).
     Entry ``i`` is a map whose ``name`` is a non-empty string and whose
     ``type`` names the type of init operand ``i``; result ``i`` has that type
     too. An entry with no type name gets the IR parser's refusal
     (:func:`_untyped_loop_value_message`), so a loop gets one text whichever
-    of the two meets it first. An init operand or result with no type is
-    refused (:func:`_untyped_value_message`) before its type is read.
+    of the two meets it first. An init operand or result with no type is a
+    ``TypeError`` (:func:`_untyped_value_message`), returned before its type is
+    read; every other refusal is a ``ValueError``.
     """
     for index, (entry, init, result) in enumerate(
         zip(op.attrs.get("iter_args", []), op.operands[3:], op.results)
     ):
         if not isinstance(entry, dict):
-            return f"scf.for iter_arg {index} metadata must be a map"
+            return ValueError(f"scf.for iter_arg {index} metadata must be a map")
         name = entry.get("name")
         if not isinstance(name, str) or not name:
-            return f"scf.for iter_arg {index} metadata has no name"
+            return ValueError(f"scf.for iter_arg {index} metadata has no name")
         type_name = entry.get("type")
         if not isinstance(type_name, str):
-            return _untyped_loop_value_message(name)
+            return ValueError(_untyped_loop_value_message(name))
         error = _untyped_value_message(
             init.type, "scf.for init operand", index, "an IR type"
         )
         if error is not None:
-            return error
+            return TypeError(error)
         if type_name != init.type.name:
-            return (
+            return ValueError(
                 f"scf.for iter_arg {name} metadata type '{type_name}' "
                 f"does not match init type '{init.type.name}'"
             )
@@ -1782,42 +1784,43 @@ def _scf_for_metadata_entry_error(op: Op) -> str | None:
             result.type, "scf.for result", index, init.type.name
         )
         if error is not None:
-            return error
+            return TypeError(error)
         if result.type != init.type:
-            return (
+            return ValueError(
                 f"scf.for result type '{result.type.name}' does not match "
                 f"iter_arg {name} type '{init.type.name}'"
             )
     return None
 
 
-def _scf_for_yield_error(op: Op) -> str | None:
+def _scf_for_yield_error(op: Op) -> ValueError | TypeError | None:
     """The refusal for the ``scf.yield`` ops directly in the body of the
-    ``scf.for`` ``op``, whose carried-value counts agree
-    (:func:`_scf_for_carried_count_error`), or None when they are sound.
+    ``scf.for`` ``op``, for its caller to raise, whose carried-value counts
+    agree (:func:`_scf_for_carried_count_error`), or None when they are sound.
 
     The loop takes its carried values from the one ``scf.yield`` that ends its
     body, so the body yields only at its end; it ends in a yield of one value
     per init operand, of that operand's type, whenever the loop carries any. A
     loop that carries none may end in an empty yield or in none. A yielded
-    value with no type is refused (:func:`_untyped_value_message`) before its
-    type is read. The loop holds one body region (:func:`_scf_for_region_error`).
+    value with no type is a ``TypeError`` (:func:`_untyped_value_message`),
+    returned before its type is read; every other refusal is a ``ValueError``.
+    The loop holds one body region (:func:`_scf_for_region_error`).
     """
     body_ops = op.regions[0].ops
     carried = op.operands[3:]
     count = len(carried)
     if any(body_op.name == "scf.yield" for body_op in body_ops[:-1]):
-        return _LOOP_EARLY_YIELD_ERROR
+        return ValueError(_LOOP_EARLY_YIELD_ERROR)
     if not body_ops or body_ops[-1].name != "scf.yield":
         if not count:
             return None
-        return (
+        return ValueError(
             f"scf.for carries {count} values, so its body must end in scf.yield "
             f"of {count} values"
         )
     yielded = body_ops[-1].operands
     if len(yielded) != count:
-        return (
+        return ValueError(
             f"scf.for carries {count} values, but its body yields {len(yielded)} values"
         )
     for index, (init, value) in enumerate(zip(carried, yielded)):
@@ -1825,17 +1828,18 @@ def _scf_for_yield_error(op: Op) -> str | None:
             value.type, "scf.for body yield", index, init.type.name
         )
         if error is not None:
-            return error
+            return TypeError(error)
         if value.type != init.type:
-            return (
+            return ValueError(
                 f"scf.for iter_arg {index} is {init.type.name}, but its body "
                 f"yields {value.type.name}"
             )
     return None
 
 
-def _scf_for_error(op: Op) -> str | None:
-    """The refusal for the ``scf.for`` ``op``, or None when the loop is sound.
+def _scf_for_error(op: Op) -> ValueError | TypeError | None:
+    """The refusal for the ``scf.for`` ``op``, for its caller to raise, or None
+    when the loop is sound.
 
     A loop holds exactly one region, its body
     (:func:`_scf_for_region_error`); its counts of carried values agree
@@ -1847,27 +1851,31 @@ def _scf_for_error(op: Op) -> str | None:
     region that takes no yields (an ``scf.if`` in the body, say;
     :data:`_ORPHAN_YIELD_ERROR`). It accepts any operand count and refuses any
     region count but one, as serialized IR reaches the verifier and the
-    lowerings without passing the builder. The verifier and every lowering of
-    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``).
+    lowerings without passing the builder. A value with no type is a
+    ``TypeError``, as in an if/else (:func:`_untyped_value_message`); every
+    other refusal is a ``ValueError``, so the sub-rules that cannot meet a
+    missing type return only its text. The verifier and every lowering of
+    ``scf.for`` use it, in both engines (``rocke_i_scf_for_error``, which
+    returns the matching status).
     """
     error = _scf_for_region_error(op)
     if error is not None:
-        return error
+        return ValueError(error)
     error = _scf_for_carried_count_error(op)
     if error is not None:
-        return error
-    error = _scf_for_metadata_entry_error(op)
-    if error is not None:
-        return error
+        return ValueError(error)
+    refusal = _scf_for_metadata_entry_error(op)
+    if refusal is not None:
+        return refusal
     error = _scf_for_carried_descriptor_error(op)
     if error is not None:
-        return error
-    error = _scf_for_yield_error(op)
-    if error is not None:
-        return error
+        return ValueError(error)
+    refusal = _scf_for_yield_error(op)
+    if refusal is not None:
+        return refusal
     body = op.regions[0]
     if any(_nested_orphan_yield(body_op) is not None for body_op in body.ops):
-        return _ORPHAN_YIELD_ERROR
+        return ValueError(_ORPHAN_YIELD_ERROR)
     return None
 
 
@@ -1882,9 +1890,9 @@ def _refuse_malformed_control_flow(ops: Sequence[Op]) -> None:
     """
     for op in ops:
         if op.name == "scf.for":
-            error = _scf_for_error(op)
-            if error is not None:
-                raise ValueError(error)
+            refusal = _scf_for_error(op)
+            if refusal is not None:
+                raise refusal
         elif op.name == "scf.if_else":
             _if_else_yields(op)
         for region in op.regions:
