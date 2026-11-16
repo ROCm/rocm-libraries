@@ -84,6 +84,12 @@ long long divUp(long long a, long long b)
 
 } // namespace
 
+long long groupRowsLdsBytes(int elementBytes, int s, int stride, int tw, int cb)
+{
+    const long long vec = 16 / elementBytes;
+    return (2LL * ((tw - 1LL) * stride + s) * (16LL * cb + vec) + vec) * elementBytes;
+}
+
 long long groupLdsBytes(int elementBytes, int r, int s, int stride, int th, int tw, int cb)
 {
     const long long vec = 16 / elementBytes;
@@ -737,6 +743,10 @@ struct Tile
     int64_t bpu = 0;
     /// 1: the three-bf16 form (a TF32 config) of a bf16 matrix-core config, for fp32 graphs.
     int64_t math = 0;
+    /// Row streaming (k4ConvMmaRows) with rs (1 to 4) input rows in flight: cb waves of one
+    /// 16-channel block each, 16 wp output columns (wp 1, 2 or 4), a band of th output rows, unit
+    /// gather stride, channels-last. 0: the other kernels.
+    int64_t rs = 0;
 };
 
 /// The 16x16 atoms the wrw kernel runs (its chunks flatten the tile's positions, so the k-step
@@ -786,6 +796,28 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
     const int64_t tw = kernel.getIntMetadata("tw");
     tile.bpu = kernel.getIntMetadata("bpu");
     tile.math = kernel.getIntMetadata("math");
+    tile.rs = kernel.getIntMetadata("rs");
+    // Row streaming: 1 to 4 rows in flight, a matrix-core small-group config of cb waves (at most
+    // 1024 threads), one
+    // 16-column fragment, channels-last, not phase-fused; no other direction's knobs.
+    // Wide groups (nbi 2 to 4): whole groups a workgroup (cb a multiple of nbi), no output-block
+    // knob.
+    if(tile.rs != 0
+       && (tile.rs < 0 || tile.rs > 4 || direction == ConvDirection::BACKWARD_WEIGHTS || tile.fma
+           || info->wave == 0 || tile.nbi < 0 || tile.nbi == 1 || tile.nbi > 4 || tile.nbo != 0
+           || (tile.wp != 1 && tile.wp != 2 && tile.wp != 4) || tile.pf != 0 || tile.cf != 0
+           || tile.math != 0 || tile.cb < 1 || tile.cb * info->wave > 1024
+           || (tile.nbi != 0 && tile.cb % tile.nbi != 0) || tile.th < 1 || tile.t < 1 || tile.r < 1
+           || tile.s < 1 || tile.stride < 1 || tile.cg != 0 || tile.oc != 0 || tile.px != 0
+           || tw != 0 || tile.bpu != 0))
+    {
+        return std::nullopt;
+    }
+    if(tile.rs != 0)
+    {
+        tile.tw = 16 * tile.wp;
+        return tile;
+    }
     // Three-bf16: a bf16 wide-group config, forward or backward data, not phase-fused.
     if(tile.math < 0 || tile.math > 1
        || (tile.math == 1
@@ -894,6 +926,10 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
 /// A config's threads per workgroup.
 long long blockThreads(const Tile& tile)
 {
+    if(tile.rs != 0)
+    {
+        return tile.cb * tile.info.wave;
+    }
     return tile.fma ? FMA_THREADS : 4LL * tile.info.wave;
 }
 
@@ -903,9 +939,10 @@ std::optional<unsigned int> blocksFor(const K4Args& args, const Tile& tile)
     const auto th = static_cast<int>(tile.th);
     const auto tw = static_cast<int>(tile.tw);
     const auto blocks
-        = tile.nbi != 0 ? conv_group::phaseBlocksWide(
-                              args, th, tw, static_cast<int>(tile.nbi), static_cast<int>(tile.nbo))
-                        : conv_group::phaseBlocks(args, th, tw, static_cast<int>(tile.cb));
+        = tile.nbi != 0 && tile.rs == 0
+              ? conv_group::phaseBlocksWide(
+                    args, th, tw, static_cast<int>(tile.nbi), static_cast<int>(tile.nbo))
+              : conv_group::phaseBlocks(args, th, tw, static_cast<int>(tile.cb));
     if(blocks.has_value() && !conv_group::fitsOneDispatch(*blocks, blockThreads(tile)))
     {
         return std::nullopt;
@@ -1037,6 +1074,15 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // Row streaming gathers at unit stride (forward at stride 1, backward data's phases).
+    // Row streaming gathers at stride 1 or 2 (backward data: its unit-stride phases); wide groups
+    // of exactly nbi blocks (no padded channels).
+    if(tile->rs != 0
+       && (problem->kernelStride > 2
+           || (tile->nbi != 0 && problem->phases.front().args.cg != 16 * tile->nbi)))
+    {
+        return false;
+    }
     // A phase-fused config: backward data at row and column stride 2 with all four phases.
     const auto launches = conv_group::groupLaunches(*problem, tile->pf != 0);
     if(!launches.has_value())
@@ -1053,18 +1099,26 @@ bool kernelMatches(const MatchContext& context,
     const auto tw = static_cast<int>(tile->tw);
     // Wide groups stage nbi blocks of a group's channels (cb's role).
     const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
-    const long long lds
-        = tile->pf != 0
-              ? conv_group::groupPhasedLdsBytes(bytes,
-                                                problem->kernelR,
-                                                problem->kernelS,
-                                                th,
-                                                tw,
-                                                cb,
-                                                tile->cf != 0,
-                                                static_cast<int>(tile->nbo))
-              : conv_group::groupLdsBytes(
-                    bytes, problem->kernelR, problem->kernelS, problem->kernelStride, th, tw, cb);
+    const long long lds = [&] {
+        if(tile->rs != 0)
+        {
+            return conv_group::groupRowsLdsBytes(
+                bytes, problem->kernelS, problem->kernelStride, tw, static_cast<int>(tile->cb));
+        }
+        if(tile->pf != 0)
+        {
+            return conv_group::groupPhasedLdsBytes(bytes,
+                                                   problem->kernelR,
+                                                   problem->kernelS,
+                                                   th,
+                                                   tw,
+                                                   cb,
+                                                   tile->cf != 0,
+                                                   static_cast<int>(tile->nbo));
+        }
+        return conv_group::groupLdsBytes(
+            bytes, problem->kernelR, problem->kernelS, problem->kernelStride, th, tw, cb);
+    }();
     if(lds > LDS_LIMIT)
     {
         return false;
@@ -1092,8 +1146,15 @@ bool kernelMatches(const MatchContext& context,
             }
         }
     }
+    // Row streaming addresses one input row and one output row through a buffer record each.
+    const auto rowsFit = [&](const K4Args& args) {
+        constexpr long long LIMIT = std::numeric_limits<int>::max();
+        return tile->rs == 0
+               || (static_cast<long long>(args.wi) * args.c * bytes < LIMIT
+                   && static_cast<long long>(args.outW) * args.c * outBytes < LIMIT);
+    };
     return std::all_of(launches->begin(), launches->end(), [&](const auto& launch) {
-        return blocksFor(launch.args, *tile).has_value();
+        return blocksFor(launch.args, *tile).has_value() && rowsFit(launch.args);
     });
 }
 
@@ -1368,7 +1429,7 @@ public:
             options.add("CONV_GROUP_OC", std::to_string(tile->oc));
             options.add("CONV_GROUP_PX", std::to_string(tile->px));
         }
-        else if(tile->nbi != 0)
+        else if(tile->nbi != 0 && tile->rs == 0)
         {
             options.add("CONV_GROUP_WIDE", std::string("1"));
             options.add("CONV_GROUP_ATOM", std::string(tile->info.kernelType));
@@ -1391,6 +1452,11 @@ public:
         options.add("CONV_GROUP_CB", std::to_string(tile->cb));
         options.add("CONV_GROUP_CF", std::to_string(tile->cf));
 
+        if(tile->rs != 0)
+        {
+            options.add("CONV_GROUP_RS", std::to_string(tile->rs));
+            options.add("CONV_GROUP_NBI", std::to_string(tile->nbi));
+        }
         // The fused epilogue: in the convolution only, which writes y (the expansion, staging
         // copies and three-bf16 split take none). Fusion off adds no option.
         const bool fused = !problem->igemm.base.epilogue.empty();
@@ -1398,10 +1464,7 @@ public:
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused));
         conv_epilogue::removeEpilogueDefines(options);
-        conv.setBlockSize(
-            static_cast<unsigned int>(tile->fma ? FMA_THREADS : int64_t{4} * tile->info.wave),
-            1,
-            1);
+        conv.setBlockSize(static_cast<unsigned int>(blockThreads(*tile)), 1, 1);
         conv.setGridSize(blocks.front(), 1, 1);
 
         KernelDefinition expandKernel = kernel;

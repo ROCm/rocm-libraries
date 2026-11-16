@@ -24,7 +24,8 @@
     "nbo",
     "tw",
     "bpu",
-    "math"
+    "math",
+    "rs"
   ],
   "behavior_notes": [
     "runtime_compilation"

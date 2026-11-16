@@ -283,7 +283,8 @@ inline ::flatbuffers::Offset<data_objects::TensorAttributes>
 template <typename T>
 ::flatbuffers::Optional<T> fbOptional(const std::optional<T>& value)
 {
-    return value.has_value() ? ::flatbuffers::Optional<T>(*value) : ::flatbuffers::nullopt;
+    return value.has_value() ? ::flatbuffers::Optional<T>(value.value_or(T{}))
+                             : ::flatbuffers::nullopt;
 }
 
 inline flatbuffers::FlatBufferBuilder buildFusedGraph(const FusedGraphSpec& spec)

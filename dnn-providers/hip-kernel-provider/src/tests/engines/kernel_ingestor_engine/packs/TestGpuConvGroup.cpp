@@ -470,14 +470,16 @@ enum class Math
 
 /// Runs every admitted config of the case against the CPU reference. @p units, when positive,
 /// replaces the device's dispatch units in the planners (1: backward weights at one split, where
-/// the kernel writes dw itself); @p directRuns counts the configs that ran without workspace.
+/// the kernel writes dw itself); @p directRuns counts the configs that ran without workspace;
+/// @p rowsOnly runs only the row-streaming configs (rs > 0).
 template <typename T>
 void runCase(ConvShape shape,
              ConvDirection direction,
              Math math = Math::NATIVE,
              bool infinities = false,
              int units = 0,
-             int* directRuns = nullptr)
+             int* directRuns = nullptr,
+             bool rowsOnly = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -585,7 +587,8 @@ void runCase(ConvShape shape,
     for(const auto& kernel : catalog(direction))
     {
         if(!matchesKernel(pack, fixture.context(), kernel, *bound)
-           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
+           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16)
+           || (rowsOnly && kernel.getIntMetadata("rs") == 0))
         {
             continue;
         }
@@ -649,12 +652,13 @@ void runCase(ConvShape shape,
         });
         EXPECT_EQ(mismatches, 0);
     }
-    if(math == Math::THREE_BF16)
+    if(math == Math::THREE_BF16 || rowsOnly)
     {
-        // The three-bf16 subset need not cover every case (the catalog test checks it serves).
+        // The three-bf16 and row-streaming subsets need not cover every case (the catalog tests
+        // check they serve).
         if(ran == 0)
         {
-            GTEST_SKIP() << "no three-bf16 config serves this case";
+            GTEST_SKIP() << "no config of the subset serves this case";
         }
         return;
     }
@@ -763,6 +767,78 @@ TEST_P(TestGpuConvGroupThreeBf16, FloatInfinities)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGroupThreeBf16,
                          ::testing::Combine(::testing::ValuesIn(deviceCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// The row-streaming configs with +inf and -inf in the kernel's input (x forward, dy backward
+/// data): each must reach exactly the outputs of its own group (the same infinity, or NaN where
+/// both meet), never another group's through the block-diagonal filter's zeros. Groups of 2, 4,
+/// 8, 16 and 32 channels, channels-last, unit stride and backward data at stride 2.
+class TestGpuConvGroupRowsInfinities
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+std::vector<DeviceCase> rowsInfinityCases()
+{
+    std::vector<DeviceCase> cases;
+    for(const int64_t cg : {2, 4, 8, 16, 32})
+    {
+        auto shape = dense(64, 64, {7, 37}, {3, 3}, {1, 1}, true);
+        shape.groups = 64 / cg;
+        cases.push_back({"Nhwc" + std::string("Groups") + std::to_string(cg), shape});
+    }
+    auto strided = dense(64, 64, {9, 21}, {3, 3}, {1, 1}, true);
+    strided.groups = 16;
+    strided.stride = {2, 2};
+    cases.push_back({"NhwcGroups4Stride2", strided});
+    return cases;
+}
+
+TEST_P(TestGpuConvGroupRowsInfinities, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(std::get<0>(GetParam()).shape,
+                  std::get<1>(GetParam()),
+                  Math::NATIVE,
+                  true,
+                  0,
+                  nullptr,
+                  true);
+}
+
+TEST_P(TestGpuConvGroupRowsInfinities, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(std::get<0>(GetParam()).shape,
+                      std::get<1>(GetParam()),
+                      Math::NATIVE,
+                      true,
+                      0,
+                      nullptr,
+                      true);
+}
+
+TEST_P(TestGpuConvGroupRowsInfinities, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()).shape,
+                   std::get<1>(GetParam()),
+                   Math::NATIVE,
+                   true,
+                   0,
+                   nullptr,
+                   true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupRowsInfinities,
+                         ::testing::Combine(::testing::ValuesIn(rowsInfinityCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {
@@ -1124,7 +1200,7 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
             return kernel.getStringMetadata("atom") == "mfma16_f16"
                    && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
-                   && kernel.getIntMetadata("cb") == 2;
+                   && kernel.getIntMetadata("cb") == 2 && kernel.getIntMetadata("rs") == 0;
         });
         ASSERT_NE(base, kernels.end());
         EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
@@ -1173,6 +1249,106 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         const auto& handler = dispatchHandler(pack);
         EXPECT_LT(handler.workspaceBytes(firstFixture.context(), *firstBound, inPlace),
                   handler.workspaceBytes(firstFixture.context(), *firstBound, *base));
+    }
+}
+
+TEST(TestConvGroupCatalog, RowsKernelGatesEveryField)
+{
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx942:sramecc+:xnack-";
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto shape = resnext(); // 64 channels, 4 a group
+        shape.dataType = DataType::HALF;
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)), properties);
+        const auto pack = packFor(direction);
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto& kernels = catalog(direction);
+        const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+            return kernel.getStringMetadata("atom") == "mfma16_f16"
+                   && kernel.getIntMetadata("rs") != 0 && kernel.getIntMetadata("t") == 1
+                   && kernel.getIntMetadata("stride") == 1 && kernel.getIntMetadata("cb") == 4
+                   && kernel.getIntMetadata("wp") == 2;
+        });
+        ASSERT_NE(base, kernels.end());
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+        const auto declines = [&](const char* field, const auto& value) {
+            auto kernel = *base;
+            kernel.metadata[field] = value;
+            return !matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
+        EXPECT_TRUE(declines("rs", int64_t{5})); // 1 to 4 rows in flight
+        EXPECT_TRUE(declines("rs", int64_t{-1}));
+        EXPECT_TRUE(declines("cf", int64_t{1})); // channels-last only
+        EXPECT_TRUE(declines("pf", int64_t{1}));
+        EXPECT_TRUE(declines("math", int64_t{1}));
+        EXPECT_TRUE(declines("nbi", int64_t{2})); // small groups
+        EXPECT_TRUE(declines("nbi", int64_t{1}));
+        EXPECT_TRUE(declines("nbo", int64_t{1}));
+        EXPECT_TRUE(declines("wp", int64_t{3})); // 1, 2 or 4 fragments
+        EXPECT_TRUE(declines("wp", int64_t{0}));
+        EXPECT_TRUE(declines("cb", int64_t{32})); // past 1024 threads
+        EXPECT_TRUE(declines("cb", int64_t{8})); // 64 channels are not 8 blocks
+        EXPECT_TRUE(declines("th", int64_t{0}));
+        EXPECT_TRUE(declines("cg", int64_t{4}));
+        EXPECT_TRUE(declines("oc", int64_t{4}));
+        EXPECT_TRUE(declines("px", int64_t{2}));
+        EXPECT_TRUE(declines("tw", int64_t{16}));
+        EXPECT_TRUE(declines("bpu", int64_t{4}));
+        EXPECT_TRUE(declines("stride", int64_t{2}));
+        EXPECT_TRUE(declines("s", int64_t{5}));
+        EXPECT_TRUE(declines("atom", std::string("fma")));
+        EXPECT_TRUE(declines("atom", std::string("wmma12_f16"))); // not on gfx942
+        EXPECT_TRUE(declines("dtype", std::string("BFLOAT16")));
+        // Wide groups of 32 channels: a 2-block config with whole groups a workgroup; groups of
+        // 24 (padded blocks) and other block counts are declined.
+        auto wideShape = dense(128, 128, {12, 13}, {3, 3}, {1, 1}, true);
+        wideShape.groups = 4;
+        wideShape.dataType = DataType::HALF;
+        const GraphFixture wideGroups(buildGraph(specFor(wideShape, direction)), properties);
+        const auto wideGroupsBound = matchesGraph(pack, wideGroups.context());
+        ASSERT_TRUE(wideGroupsBound.has_value());
+        auto wide2 = *base;
+        wide2.metadata["nbi"] = int64_t{2};
+        EXPECT_TRUE(matchesKernel(pack, wideGroups.context(), wide2, *wideGroupsBound));
+        EXPECT_FALSE(matchesKernel(pack, wideGroups.context(), *base, *wideGroupsBound));
+        auto wide4 = *base;
+        wide4.metadata["nbi"] = int64_t{4};
+        EXPECT_FALSE(matchesKernel(pack, wideGroups.context(), wide4, *wideGroupsBound));
+        auto wideOdd = wide2;
+        wideOdd.metadata["cb"] = int64_t{3}; // not whole groups
+        EXPECT_FALSE(matchesKernel(pack, wideGroups.context(), wideOdd, *wideGroupsBound));
+        auto padded = dense(96, 96, {12, 13}, {3, 3}, {1, 1}, true);
+        padded.groups = 4; // 24 channels a group: 2 blocks, the second padded
+        padded.dataType = DataType::HALF;
+        const GraphFixture paddedFixture(buildGraph(specFor(padded, direction)), properties);
+        const auto paddedBound = matchesGraph(pack, paddedFixture.context());
+        ASSERT_TRUE(paddedBound.has_value());
+        auto padded2 = wide2;
+        padded2.metadata["cb"] = int64_t{2};
+        EXPECT_FALSE(matchesKernel(pack, paddedFixture.context(), padded2, *paddedBound));
+        // Stride 2: forward gathers at stride 2, backward data runs unit-stride phases; both are
+        // admitted for a stride-2 config.
+        auto strided = resnext();
+        strided.dataType = DataType::HALF;
+        strided.stride = {2, 2};
+        const GraphFixture stridedFixture(buildGraph(specFor(strided, direction)), properties);
+        const auto stridedBound = matchesGraph(pack, stridedFixture.context());
+        ASSERT_TRUE(stridedBound.has_value());
+        auto stride2 = *base;
+        stride2.metadata["stride"] = int64_t{2};
+        EXPECT_TRUE(matchesKernel(pack, stridedFixture.context(), stride2, *stridedBound));
+        // An input or output row of 2 GiB or more: one buffer record per row cannot hold it.
+        auto wideRow = dense(1024, 1024, {1, int64_t{1} << 20}, {3, 3}, {1, 1}, true);
+        wideRow.groups = 64;
+        wideRow.dataType = DataType::HALF;
+        const GraphFixture wideFixture(buildGraph(specFor(wideRow, direction)), properties);
+        const auto wideBound = matchesGraph(pack, wideFixture.context());
+        ASSERT_TRUE(wideBound.has_value());
+        auto wide = *base;
+        wide.metadata["cb"] = int64_t{4};
+        EXPECT_FALSE(matchesKernel(pack, wideFixture.context(), wide, *wideBound));
     }
 }
 
@@ -1278,7 +1454,7 @@ TEST(TestConvGroupCatalog, WideKernelGatesBlocksTileAndForm)
 
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 18> KNOBS{"atom",
+    static constexpr std::array<const char*, 19> KNOBS{"atom",
                                                        "t",
                                                        "r",
                                                        "s",
@@ -1295,7 +1471,8 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                                                        "nbo",
                                                        "tw",
                                                        "bpu",
-                                                       "math"};
+                                                       "math",
+                                                       "rs"};
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
     {
@@ -1375,10 +1552,12 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
             // Output columns a workgroup: 16 wp (matrix core), or the FMA kernel's 256 threads
             // in chunks of oc channels, th rows of px-column threads.
             const int th = static_cast<int>(kernel.getIntMetadata("th"));
-            // Wide-group configs stage nbi blocks of a group (no channel blocks).
+            // Wide-group configs stage nbi blocks of a group (no channel blocks); row-streaming
+            // ones stage cb blocks, whole groups of them.
             const int nbi = static_cast<int>(kernel.getIntMetadata("nbi"));
-            const int cb = nbi != 0 ? nbi : static_cast<int>(kernel.getIntMetadata("cb"));
-            if(nbi != 0)
+            const bool rows = kernel.getIntMetadata("rs") != 0;
+            const int cb = nbi != 0 && !rows ? nbi : static_cast<int>(kernel.getIntMetadata("cb"));
+            if(nbi != 0 && !rows)
             {
                 EXPECT_EQ(kernel.getIntMetadata("cb"), 0);
                 EXPECT_EQ(nbi % kernel.getIntMetadata("nbo"), 0);
@@ -1388,7 +1567,24 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 = fma ? static_cast<int>(256 * kernel.getIntMetadata("oc") / (int64_t{16} * cb) / th
                                          * kernel.getIntMetadata("px"))
                       : static_cast<int>(16 * kernel.getIntMetadata("wp"));
-            if(kernel.getIntMetadata("pf") != 0)
+            if(kernel.getIntMetadata("rs") != 0)
+            {
+                // Row streaming: channels-last, small groups or wide groups of 2 or 4 blocks (whole
+                // groups a workgroup), unit gather stride (forward at stride 1), 1 to 4 rows in
+                // flight, at most 1024 threads, two row segments in LDS.
+                EXPECT_LE(stride, 2);
+                EXPECT_LE(kernel.getIntMetadata("rs"), 4);
+                EXPECT_EQ(kernel.getIntMetadata("cf"), 0);
+                EXPECT_EQ(kernel.getIntMetadata("pf"), 0);
+                EXPECT_EQ(kernel.getIntMetadata("nbo"), 0);
+                EXPECT_TRUE(nbi == 0 || nbi == 2 || nbi == 4);
+                EXPECT_EQ(cb % std::max(nbi, 1), 0);
+                EXPECT_LE(cb * 64, 1024);
+                EXPECT_LE(
+                    conv_group::groupRowsLdsBytes(bytes, taps("s"), forward ? stride : 1, tw, cb),
+                    64 * 1024);
+            }
+            else if(kernel.getIntMetadata("pf") != 0)
             {
                 // Phase-fused: backward data at stride 2 only, its output tile in LDS too.
                 EXPECT_FALSE(forward);
@@ -1841,7 +2037,8 @@ TEST(TestConvGroupComputeType, ServesCudnnsComputeTypesPerElementType)
 // ---------------------------------------------------------------------------
 // Fused pointwise epilogues (forward): every store path -- small groups on matrix cores and on
 // FMA, wide groups (padded channels never written), channels-last and channels-first (staged and
-// in place), the three-bf16 form -- once per distinct path among the configs the kernel match
+// in place), the three-bf16 form, row streaming (small and wide groups, stride 1 and 2) -- once
+// per distinct path among the configs the kernel match
 // admits, against the CPU convolution followed by the chain in double (one rounding).
 // ---------------------------------------------------------------------------
 
@@ -1851,7 +2048,8 @@ using FusedChain = std::pair<std::string, std::vector<Step>>;
 
 const std::vector<std::string>& fusedPathFields()
 {
-    static const std::vector<std::string> s_fields{"atom", "math", "cf", "nbi", "nbo", "stride"};
+    static const std::vector<std::string> s_fields{
+        "atom", "math", "cf", "nbi", "nbo", "stride", "rs"};
     return s_fields;
 }
 

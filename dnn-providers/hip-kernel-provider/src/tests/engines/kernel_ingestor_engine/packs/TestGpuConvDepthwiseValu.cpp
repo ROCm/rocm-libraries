@@ -24,6 +24,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuWrwNative.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -2290,8 +2291,7 @@ void run(const ConvShape& shape, const std::vector<Step>& steps, Specials specia
         kernels.push_back(
             kernelFor(config, conv_epilogue_test::elementTypeOf<T>(), ConvDirection::FORWARD));
     }
-    const auto runner
-        = conv_epilogue_test::catalogRunner(packFor(ConvDirection::FORWARD), std::move(kernels));
+    const auto runner = conv_epilogue_test::catalogRunner(packFor(ConvDirection::FORWARD), kernels);
     EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials), 1)
         << "no config serves this fused case";
 }
@@ -2374,6 +2374,23 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const auto& info) { return info.param.name; });
 
 } // namespace fused_valu
+
+// Opt-in: each forward config's time with and without a fused epilogue, every dtype (shapes in
+// $DW_VALU_EPI_TIMING).
+TEST(TestGpuConvDepthwiseValuFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
+    for(const auto& config : catalog())
+    {
+        for(const auto dataType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+        {
+            kernels.push_back(kernelFor(config, dataType, ConvDirection::FORWARD));
+        }
+    }
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), kernels, "DW_VALU_EPI_TIMING");
+}
 
 } // namespace
 
