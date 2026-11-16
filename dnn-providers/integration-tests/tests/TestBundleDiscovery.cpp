@@ -1966,8 +1966,12 @@ TEST_F(TestBundleDiscoveryFixture, FilteredDiscoverySelectsAndCountsLikeFullDisc
                               std::string("*-quick_Matmul_A.*"),
                               std::string("NoSuchSuite.*")})
     {
-        filtersWithUnparsedSweeps
-            += expectFilteredSelectionMatchesFull(_tempDir, full, filter) != 0 ? 1 : 0;
+        const size_t unparsedSweeps = expectFilteredSelectionMatchesFull(_tempDir, full, filter);
+        filtersWithUnparsedSweeps += unparsedSweeps != 0 ? 1 : 0;
+        if(filter == "quick_Matmul_*.*")
+        {
+            EXPECT_GT(unparsedSweeps, 0u);
+        }
     }
     EXPECT_GT(filtersWithUnparsedSweeps, 0u);
 }
