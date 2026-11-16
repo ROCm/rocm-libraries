@@ -70,7 +70,7 @@ gives the reason.
 
 | RFC 0022 element | What this plan does | Deviation and why |
 |---|---|---|
-| §8.2 level budgets: ~5 min, ~30 min, ≤ 60 min, none, for the whole suite | `levels` in `model.yaml` sets 5, 30, 120 min and none, and measures only this plan's cases against them (section 7). | The RFC budget is for the whole suite, not one plan. For `comprehensive` the plan uses TheRock's tier policy, < 2 h, which `projects/hipdnn/docs/TESTING.md` repeats, instead of the RFC's 60 min. |
+| §8.2 level budgets: ~5 min, ~30 min, ≤ 60 min, none, for the whole suite | `levels` in `model.yaml` sets 5, 30, 120 min and none, and measures only this plan's cases against them (section 7). | The RFC budget is for the whole suite, not one plan. For `comprehensive` the plan uses 120 min, from TheRock's tier policy (< 2 h), which `projects/hipdnn/docs/TESTING.md` repeats. That policy is also for a whole tier. The plan uses 120 min as the ceiling for its own cases in one engine run. Each SDPA lane's tier YAML gives its comprehensive tier a 60-minute budget for all of its cases, so the share of this plan must stay well below 60 min. |
 | §7 per-case ceilings in FLOP and in MB | `ceiling_mflop` only: 20, 200, 8,000, none (section 7). | No memory ceiling. Why: not recorded. |
 | §4, §15 (I1): a generator writes the bundles from the declarations | `model.yaml` and `rules.yaml` are in the repository. The case generator, the graph exporter, the row selection and the case list are not (section 1). | The bundles cannot be made again from the repository. Why: the programs are a PoC still being developed. |
 | §4, §9: each case has a `purpose` and maps to a plan item | Case metadata has no `purpose` and no `plan_items`. Each case links to its case-list row by `case_key` (section 9.4). | No purpose tag, and the trace runs through a file that is not in the repository. Why: not recorded. |
@@ -535,11 +535,13 @@ Rules that keep a tier small:
 - **Fill.** If a tier has spare time, the case generator pulls cases down from
   higher tiers until the tier uses 50 % of its budget. A pulled case must fit
   the tier's shapes, ceiling, labels and change limit.
-- **Cost.** The time of a case was measured on one gfx942 node and one gfx950
-  node by a **case runner**, a PoC program that runs one case on one engine and
-  on a reference. A case that was not measured gets a fitted estimate:
-  a + b × MFLOP + c × tensor-MB. Each tier run adds 10 s of overhead. gfx942 is
-  the budget basis.
+- **Cost.** A **case runner**, a PoC program that runs one case on one engine
+  and on a reference, measured the time of earlier cases on one gfx942 node and
+  one gfx950 node. A model fitted to these times gives the cost of a case:
+  a + b × MFLOP + c × tensor-MB. No case of this case list has a measured time.
+  The model gives the time of every case: 26,885 cases are `modelled` and 364
+  are `UNMEASURED`, outside the range of the measurements. Each tier run adds
+  10 s of overhead. gfx942 is the budget basis.
 - **Over budget.** The case generator only reports; it does not move cases.
 
 Result for the case list (section 8; times are the summed `est_seconds`
@@ -552,8 +554,8 @@ columns plus the overhead):
 | comprehensive | 4,643 | 15,704 | 2,333.2 | 1,685.0 | 32.4 % |
 | full | 11,545 | 27,249 | 7,043.4 | 5,052.0 | — |
 
-These times are the case runner's times for one engine run plus one reference
-run. The suite does more work per case, so its times are larger.
+These times are the model's estimates of the case runner's time for one engine
+run plus one reference run. The suite does more work per case, so its times are larger.
 
 **Seeds.** The case generator completes each of the 15 seeds with the fewest
 changes under the rules and the answer-key rules. A seed whose row the
@@ -679,8 +681,8 @@ scalar tensor (passed by value at build time, or supplied at run time) and
 whether Stats is ragged.
 
 The topology name lists the optional tensors (every tensor except Q, K, V and
-O), one token each, in the order of the table. A cell with two or more tokens
-lists them in name order.
+O), one token each, in the order of the table. For a cell with two or more
+tokens, the name uses them in the order that the cell lists them.
 
 | Token | Tensor |
 |---|---|
@@ -816,9 +818,15 @@ run the case. The case stays in its tier. This section tells how the skips for
 these cases were made, and how to remove them.
 
 The skips are in the TOML file of each engine's lane (the file that the lane
-passes as `--test-config`). Only
+passes as `--test-config`). Engines that share a TOML file share its skips: a
+skip in
+[`hipkernel_Gfx950Attention.toml`](../../../hip-kernel-provider/config/hipkernel_Gfx950Attention.toml)
+applies to all three gfx950 rocKE attention engines, and a skip in
+[`hipkernel_flydsl_sdpa.toml`](../../../hip-kernel-provider/config/hipkernel_flydsl_sdpa.toml)
+applies to all six FlyDSL SDPA forward engines. Only
 [`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml)
-holds any, after the comment line `-- SdpaFwdPlan known engine defects --`.
+holds defect skips, after the comment line
+`-- SdpaFwdPlan known engine defects --`.
 Read the TOML files for the current list. This document does not copy it.
 
 A refusal at run time is not a defect, but the suite cannot yet accept a
