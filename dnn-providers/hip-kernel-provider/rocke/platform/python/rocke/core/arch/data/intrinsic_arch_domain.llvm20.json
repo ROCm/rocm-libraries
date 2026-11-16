@@ -47,6 +47,7 @@
     "global.load.tr.b128.v8f16": "llvm.amdgcn.global.load.tr.b128.v8f16",
     "global.load.tr.b128.v8i16": "llvm.amdgcn.global.load.tr.b128.v8i16",
     "iglp.opt": "llvm.amdgcn.iglp.opt",
+    "ldexp.f32.i32": "llvm.ldexp.f32.i32",
     "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8": "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8",
     "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8": "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8",
     "llvm.amdgcn.mfma.f32.16x16x8bf16": "llvm.amdgcn.mfma.f32.16x16x8bf16",
@@ -7008,6 +7009,82 @@
       }
     },
     "iglp.opt": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1154": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx1250": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm20"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm20"
+      }
+    },
+    "ldexp.f32.i32": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm20"

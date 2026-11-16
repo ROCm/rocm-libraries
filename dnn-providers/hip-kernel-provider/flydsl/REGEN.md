@@ -41,7 +41,8 @@ Everything below runs from the provider's `flydsl/` directory.
 | Python | 3.12 | — |
 | `flydsl` | **0.3.4** (pip wheel) | `generators/_flydsl_env.py` `FLYDSL_VERSION` |
 | FlyDSL kernel sources | commit `89ad52fbbb9e…` (`v0.3.4.1-19-g89ad52f`) | `_flydsl_env.py` `FLYDSL_KERNELS_*`, and vendored under `kernels_src/` |
-| ROCm | 7.13.0 | read at runtime from `$ROCM_PATH/.info/version` |
+| ROCm | 7.13.0; the `sdpa_bwd_*` ops are built with 10.2.0, so they need a separate `ROCM_PATH`. FlyDSL generates code with its own LLVM and takes only `ld.lld` from ROCm, which writes its version into each object's `.comment` section: another ROCm release changes every `sdpa_bwd_*` object's sha256, and the pin gate refuses it. The objects run on newer ROCm runtimes unchanged | read at runtime from `$ROCM_PATH/.info/version` |
+| LLVM tools (`llvm-objdump`) | the `sdpa_bwd_*` gate and `tools/analyze.py` take them from `$LLVM_BIN`, else `$ROCM_PATH/llvm/bin` | `tools/analyze.py` `llvm_bin()` |
 | `torch` | any ROCm build | imported by the vendored kernel sources |
 | `msgpack` | any (the tree was built with 1.2.2) | reads the AMDGPU metadata note out of each object |
 
@@ -66,17 +67,25 @@ procedure you paste runs against your toolchain rather than someone else's:
 ```bash
 PY=${PY:?the interpreter holding the pinned flydsl wheel}
 CONTENT=../src/engines/kernel_ingestor_engine/descriptors/FlyDSL
-export ROCM_PATH=${ROCM_PATH:-/opt/rocm}
+export ROCM_PATH=${ROCM_PATH:-/opt/rocm}   # 7.13.0 install, for every op but sdpa_bwd_*
+export ROCM_PATH_BWD=${ROCM_PATH_BWD:-$ROCM_PATH}   # 10.2.0 install, for the sdpa_bwd_* ops
 export REGEN_OUT=${REGEN_OUT:-/tmp/flydsl-regen}
+export REF_ROOT=${REF_ROOT:-/tmp/flydsl-regen-pins}   # the pinned objects, one directory per arch
 ```
+
+The `sdpa_bwd_{prep,dkdv,dq,merged}` generators also take the pinned objects, one directory
+per arch (`$REF_ROOT/<arch>`). `tools/sdpa_bwd_s1.py --from-content` builds it from the pulled
+content and the tree's data, with no other input (§2).
 
 `PY` has no default on purpose: the generators need the pinned `flydsl` wheel,
 and a bare `python3` without it would fail later, at the first import, rather
 than here. `assert_flydsl_version()` then refuses any wheel but the pinned one.
 
-The tree as committed was produced with Python 3.12.3, `flydsl` 0.3.4,
-`torch` 2.10.0+rocm7.13.0a20260513 and ROCm 7.13.0. Those versions are the
-contract; where they live on disk is not.
+The tree as committed was produced with Python 3.12.3, `flydsl` 0.3.4 and
+`torch` 2.10.0+rocm7.13.0a20260513, with ROCm 7.13.0 for every op except the
+`sdpa_bwd_*` ones, which were built with ROCm 10.2.0 (their manifests record it). Those
+versions are the contract; where they live on disk is not. A `sdpa_bwd_*` command below
+therefore runs with `ROCM_PATH` naming a 10.2.0 install, and every other op with a 7.13.0 one.
 
 `ROCM_PATH` matters beyond finding the compiler: `rocm_version()` reads
 `$ROCM_PATH/.info/version` and writes it into `manifest.json` and `<arch>.SOURCE.md`.
@@ -113,23 +122,92 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad` | 583 (90 + 63 + 312 + 116 + 1 + 1) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 1,084 (90 + 63 + 312 + 116 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask sdpa_head_pad` | 719 (90 + 63 + 192 + 116 + 256 + 1 + 1) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 453 (90 + 63 + 248 + 26 + 24 + 1 + 1) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,155 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 1,329 + 962 + 325) |
 | `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 457 (90 + 63 + 278 + 24 + 1 + 1) |
 | `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 465 (90 + 63 + 286 + 24 + 1 + 1) |
 
+`sdpa_bwd_dbias_reduce` and `sdpa_bwd_dsink_reduce` ship no content (both reduce kernels ride
+inside the dQ and merged objects), so no `OPS` list names them; their generators only build the
+standalone reduce pins that the S1 gates compare against.
+
+`sdpa_bwd_tailzero` ships no content of its own either: its six objects (gfx950 and gfx11-generic, each f16, bf16, fp32) and its two
+V-head objects (role `tailzero_hv`, one per arch; the f16 and bf16 entries name the same bytes) are
+companions built by the dQ generator and listed by the merged one (§3, *Companions*).
+
+The f32-bias, 16-bit direct-bias dQ and split K/V head rows (79 on gfx950, 72 on gfx11-generic) are ordinary rows of these ops: each is a sweep pin or ships under the
+nondeterminism policy below. The rows with separate V heads (`u2`) are their own packs, `<arch>.u2.kdp.json` (dK-only and dV-only dK/dV) and
+`<arch>.dq_u2.kdp.json` (V-head dQ), and the rows that store dB through a reduce are `<arch>.reduce.kdp.json` of dQ and merged, written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
+
 ```bash
-ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad"
+ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
+
+# The pins of the backward ops: the shipped objects the arch's reference CSV names, copied out of
+# $CONTENT. The directory must not exist (the tool refuses to replace one), so a repeated run removes it first;
+# the tool fails on a pin it can neither copy nor name by digest.
+case "$OPS" in *sdpa_bwd_*)
+  rm -rf "$REF_ROOT/$ARCH"
+  $PY tools/sdpa_bwd_s1.py --from-content "$CONTENT" --arch $ARCH --reference-dir "$REF_ROOT/$ARCH" ;;
+esac
 
 # Compile into a scratch directory -- must be empty or nonexistent, since the
 # generator writes files rather than clearing the directory, so an object left
 # by an earlier run with a different instance list would survive and be compared.
 for op in $OPS; do
-  PYTHONDONTWRITEBYTECODE=1 \
-    $PY -m generators.gen_$op --arch $ARCH --out-dir "$REGEN_OUT"
+  case $op in
+    sdpa_bwd_prep|sdpa_bwd_dkdv|sdpa_bwd_dq|sdpa_bwd_merged)
+      pins=(--reference-dir "$REF_ROOT/$ARCH" --stored-dir "$CONTENT"); op_rocm=$ROCM_PATH_BWD ;;
+    *) pins=(); op_rocm=$ROCM_PATH ;;
+  esac
+  ROCM_PATH=$op_rocm PYTHONDONTWRITEBYTECODE=1 \
+    $PY -m generators.gen_$op --arch $ARCH --out-dir "$REGEN_OUT" "${pins[@]}"
 done
 ```
+
+The four `sdpa_bwd_{prep,dkdv,dq,merged}` generators exit 1 without `--reference-dir`, the
+directory of the pinned `<hash>.hsaco` objects. They ship their own build, which
+matches the pin byte for byte on every row but the rows of the nondeterministic list
+(`tests/data/sdpa_bwd_nondeterministic.csv`, below) and the rows of `tests/data/sdpa_bwd_pinned_exceptions.csv`
+(known-bad rebuilds, append-only): those ship a stored pin (for a combined row the combined object of the shipped content,
+read through `--stored-dir`, the content root, below), and their `manifest.json` entry and the `Pinned objects`
+table of `<arch>.SOURCE.md` say so. A row outside both lists that does not build, whose build is not its pin, or
+whose build spills (R-MIR) or was not scanned, stops the run. The R-MIR policy on gfx950: a freshly built object is always
+scanned and `not scanned` fails; `tools/rmir_known.csv` exempts no merged spec; a stored pin is recorded `not scanned` and ships only
+when its row of `tests/data/sdpa_bwd_reference.csv` records the pin's own scan in `rmir_scan` (`clean`: a sweep scan whose dump build
+is the pinned object, with no finding; `exception`: a row of `sdpa_bwd_pinned_exceptions.csv`), else the run stops; a nondeterministic pin that
+is its own red rebuild stops the run; a pinned exception is covered by a device screen of the pin, cited in its `evidence`. The S1 tool
+(`--from-content`, and the sweep mode that writes the column) takes a gfx950 pin only with that record. The detector reads gfx950 MIR, so gfx11 is out of scope: a gfx11
+object has no R-MIR scan and is held to its pin byte for byte. The backward generators refuse an unrecorded ROCm
+version, so `ROCM_PATH` must be set. Every other `OPS` entry takes no reference dir.
+
+**The pins come from the tree.** A pin is a row of the arch's reference CSV (`tests/data/sdpa_bwd_reference.csv` for gfx950,
+`tests/data/sdpa_bwd_gfx11_reference.csv` for gfx11-generic): Spec hash, Spec key, the sha256 of the pinned object and its resource row.
+The shipped content holds the object of every pin but two kinds, because a shipped pin row *is* its pin: the main kernel of a combined
+object (a dB-storing bias row; the shipped object also carries the dBias reduce) and gfx950's standalone reduce kernels. `tools/sdpa_bwd_s1.py
+--from-content "$CONTENT" --arch $ARCH --reference-dir <new dir>` copies each pin's object out of the content by sha256 and verifies it. For
+the two exceptions, `tests/data/sdpa_bwd_pin_functions.csv` records the sha256 of the pin's function bytes, which the per-kernel gate and
+`tools/sdpa_bwd_compare.py` read in place of the object. The tool fails on any other pin without an object. The same S1 tool also has a
+sweep mode (`--sweep-repo`, `--selection`) for authoring a new catalogue. That step needs an AMD-internal sweep repository that this
+repository does not include and is not publicly reproducible; it writes the `_instances.py` tables, the reference CSVs and the digest file this tree holds.
+Regenerating the shipped pins is the public path above and needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
+
+`tools/sdpa_bwd_tables_from_sweep.py` installs a pruned catalogue: a pin whose object another pin of the same arch and op also pins, with a Spec equal apart from `floor` and a served head-dim range that contains its own, is not installed (equal ranges keep the smaller hash). The tables and the reference CSV hold the pins that remain, and the tool prints the dropped rows. The tool installs no nondeterministic list.
+
+**Tree-built pins.** A row added in this tree, with no sweep object, is pinned by its own build: build it in N = 8 fresh processes at the regeneration conditions
+(`FLYDSL_GEN_JOBS=28`; all builds must agree on the object, the main-function digest, the resource row and a clean R-MIR scan), write one row per object (`hash`, `spec`, the object's `sha256`, the main kernel's resource row,
+`rmir_scan` `clean` and, for a combined object, its main-function `function_sha256`) and run `python tools/sdpa_bwd_tables_from_sweep.py --tree-pins <file>`. The tool adds the rows to the installed pins and writes the table block, the reference CSV and
+`tests/data/sdpa_bwd_pin_functions.csv` together; none is edited by hand. The reference `sha256` of a tree-built combined row is the combined object's, and `sdpa_bwd_s1.py --from-content` names such a pin by its function digest rather than copying the object.
+A row that builds differently across the sample is a nondeterministic row: list it by the policy above before it ships.
+
+**Nondeterministic builds.** LLVM's IR optimisation is nondeterministic for some kernels, and the 16-bit dQ and dK/dV modules are compiled for a second fast-math target, so the same bug shows as a different object or as `dual_object`. One list, `tests/data/sdpa_bwd_nondeterministic.csv` (both arches; columns in `generators/_sdpa_bwd_nondet.py`), and one policy, the "Nondeterministic builds" section of the `generators/_sdpa_bwd_cdna_build.py` docstring:
+
+- every listed row ships its stored pin; a recorded variant is a build-gate tolerance and is never shipped (no variant needs device validation);
+- a listed standalone row ships the sweep's pin; it is built once, for the manifest, never retried, and a `dual_object` build is no error, but a rebuild that exists must be the pin or a recorded variant (whole object, or main function), else the run stops;
+- a listed combined row (a dB-storing bias row) ships the combined object its shipped `manifest.json` records (`--stored-dir <content root>`: the content as it was before the run; a missing object, or one whose sha256 disagrees with the manifest, stops the run). Its rebuild must still pass the per-kernel gate on the pin's main function or any of its `variant_function_sha256s` (resources unchanged), and a `dual_object` build is retried up to `_ATTEMPTS`;
+- an unlisted row whose build differs from its pin, a listed row whose rebuild is neither its pin nor a recorded variant, or a row that is still `dual_object` after `_ATTEMPTS`, stops the run: the list is incomplete. Sample the row (N = 6 fresh-process builds under the regeneration conditions) and list it; never retry harder.
+
+Merge a sampling run into the list (union of variants, evidence appended): `cd flydsl && $PY -m generators._sdpa_bwd_nondet merge <nondeterministic-sampled.csv>`.
 
 Then compare every object against the manifests the tree ships:
 
@@ -231,6 +309,70 @@ done
 #     a finding is an inline-asm hazard (CDNA kernel modification 46). Exit 1 on one.
 $PY tools/check_trans_hazards.py --content-dir $CONTENT
 ```
+
+The SDPA backward ops (prep, dK/dV, dQ and, on gfx950, merged) build with ROCm 10.2.0 (`ROCM_PATH` naming it)
+and take the arch's pinned-object dir (built from the content before it moves, as §2 does). A generator writes
+`<op>/<arch>/` under `--out-dir` and requires that directory to be empty, so move the old content aside to `$STORED` (`dvc checkout`
+restores it): every listed combined row ships the combined object that content records (`--stored-dir "$STORED"`), and the run stops if it is
+missing or altered. Run dQ with `FLYDSL_GEN_JOBS=8`: at wider settings rows
+outside `tests/data/sdpa_bwd_nondeterministic.csv` flip too, and an unlisted flipped row fails the run.
+
+A catalogue change (a new or repinned row) has no shipped object to copy: the maintainers compose it with the S1 tool's sweep mode (§2), whose `--reference-dir` then replaces the `$REFERENCE_DIR` below.
+
+```bash
+STORED=$(mktemp -d)   # keep it until the regenerated content is committed
+for ARCH in gfx950 gfx11-generic; do
+  case $ARCH in
+    gfx950)        OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged" ;;
+    gfx11-generic) OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq" ;;
+  esac
+  REFERENCE_DIR=$(mktemp -d)/$ARCH   # a fresh path: the S1 tool refuses an existing directory, and §2 already built $REF_ROOT/$ARCH
+  $PY tools/sdpa_bwd_s1.py --from-content "$CONTENT" --arch $ARCH --reference-dir "$REFERENCE_DIR"   # before the content moves
+  for op in $OPS; do
+    mkdir -p "$STORED/$op"; mv "$CONTENT/$op/$ARCH" "$STORED/$op/$ARCH"   # the run needs an empty output directory; the old content is the stored pins' source
+    jobs=${FLYDSL_GEN_JOBS:-28}; [ $op = sdpa_bwd_dq ] && jobs=8
+    ROCM_PATH=$ROCM_PATH_BWD FLYDSL_GEN_JOBS=$jobs PYTHONDONTWRITEBYTECODE=1 \
+      $PY -m generators.gen_$op --arch $ARCH --out-dir "$CONTENT" --reference-dir "$REFERENCE_DIR" --stored-dir "$STORED"
+  done
+  $PY gen_descriptors.py --arch $ARCH
+  $PY gen_descriptors.py --arch $ARCH --check
+done
+```
+
+**Companions.** A dQ or merged row launches a tail-zero object after its gradient launches when the graph has a
+`padding_mask` (`generators/gen_sdpa_bwd_tailzero.py`; the kernels are `fmha_bwd_tailzero_gfx950.py` and
+`fmha_bwd_tailzero_gfx11.py`). The dQ generator builds the objects through
+`gen_sdpa_bwd_tailzero.companion_entries(arch, folder)` and lists them under `companions` in the dQ manifest; the merged
+generator builds nothing and lists the dQ manifest's entries (it stops if they or their objects are missing or altered), so
+**generate `sdpa_bwd_dq` before `sdpa_bwd_merged`** into the same content root (the `OPS` order above does); the
+`spec` of an entry is `<role>,<dtype>` (`tailzero,f16`, with `;arch=gfx11-generic` on gfx11), and
+`gen_descriptors.py` keys companions by `(dtype, role)`. Each tail-zero object is kept once, in the dQ arch folder (gfx11
+dQ holds `dbias_reduce` and `tailzero` companions, gfx950 dQ holds `tailzero`); the merged manifest's `tailzero.file`
+points to `../../sdpa_bwd_dq/gfx950/<file>` and the packer deduplicates by resolved path. A gfx950 row that names a
+`reduce_symbol` has no reduce companion: its `dbias_reduce` entry names the row's own object and that symbol. The
+launch-name sets of the rows follow: dQ `{dq, tailzero}`, dB-storing dQ `{dq, dbias_reduce, tailzero}` (the `reduce`
+pack), merged `{merged, tailzero}`, dB-storing merged `{merged, dbias_reduce, tailzero}` (its `reduce` pack);
+`gen_descriptors.py` refuses a dQ or merged row whose dtype has no tail-zero companion.
+
+A V-head tail-zero object (`tailzero_hv,<dtype>`, built by the same call) launches after a V-head dQ row (`u2=dq`) instead of the standard one.
+
+A tail-zero object has no pin. Its provenance is the generator: each object is built twice in fresh processes and the two
+builds must be byte-identical, the kernarg layout must be `PARAMS`, and on gfx950 the R-MIR scan must be clean; the gfx950
+resource row is recorded in the companion entry. The pin steps above (reference rows, pin
+exceptions) apply to every other object and are skipped for tail-zero rows. To build the tail-zero objects alone, for inspection:
+
+```bash
+ROCM_PATH=$ROCM_PATH_BWD PYTHONDONTWRITEBYTECODE=1 \
+  $PY -m generators.gen_sdpa_bwd_tailzero --arch gfx950 --out-dir "$SCRATCH"   # also gfx11-generic
+```
+
+The gfx950 dQ op builds at `FLYDSL_GEN_JOBS=8` (wider worker counts flip nondeterministic dQ rows); the tail-zero objects
+build in the same run, so they inherit the dQ worker count.
+
+**Packed tile.** `gen_descriptors.py` writes the resolved `block_q` of every packed (`gqa_pack` 1) dK/dV and merged row into
+its KMD and KDP and refuses a row whose value is missing or above `PACK_MAX_BLOCK_Q`, which it reads from
+`FlydslSdpaBwdNativeShared.hpp`. The generators write the resolved tile into the row knobs; a tile above the bound is a
+change of the bound and of the engines' packed-span proof, not of a table.
 
 The CDNA kernels take FlyDSL's `fx.Tensor` arguments, so the CDNA generators trace
 each from torch `meta` tensors -- shapes and strides with no storage. No GPU is
@@ -352,10 +494,12 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of twenty kernel modules from three upstreams.
-Thirteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
-FlyDSL kernels upstream FlyDSL does not; and the RDNA4 attention package
-(`attention_rdna4/`, six modules) comes from AOTriton. Deliberate modifications are
+`kernels_src/` is a vendored copy of 27 kernel modules from three upstreams.
+Eighteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
+FlyDSL kernels upstream FlyDSL does not; and eight come from AOTriton: the RDNA4 attention package
+(`attention_rdna4/`, six modules) and two SDPA backward modules
+(`attention_bwd_cdna/fmha_{common,abi}_gfx1201.py`; the gfx11 kernels import the first). The other files of
+`attention_bwd_cdna/` are written for this provider and say `Not vendored` in their headers. Deliberate modifications are
 recorded beside the code: `kernels_src/kernels/norm/rmsnorm_kernel.py` (four),
 `kernels_src/kernels/norm/rmsnorm_bwd_kernel.py` (two) and
 `kernels_src/kernels/attention_rdna/flash_attn_func_rdna.py` (sixteen — the gfx11
@@ -365,7 +509,8 @@ CDNA attention files' in `kernels_src/kernels/attention_cdna/README.md`.
 A modified file's header also names the upstream and path it came from -- the renamed
 `attention_rdna/` and `attention_cdna/` packages both map back to upstream's
 `kernels/attention/`; the modules of `attention_rdna4/` carry none and inherit their
-package's, which names AOTriton's flat `modules/flash/flyc/` directory -- and the tool
+package's, which names AOTriton's flat `modules/flash/flyc/` directory, while the
+two `attention_bwd_cdna/` modules carry their own block naming that directory's file -- and the tool
 reads that header to decide what to diff it against. A file with no provenance header
 (the unmodified FlyDSL modules carry only FlyDSL's SPDX and copyright lines) is diffed
 against the same relative path in the FlyDSL checkout. The FlyDSL and AITER commits are
@@ -382,6 +527,10 @@ Expected against the pinned checkouts, and the state of the tree as committed:
 FlyDSL (v0.3.4.1-19-g89ad52f) at the pinned commit 89ad52fbbb9e
 AITER at the pinned commit 8253efc40595
 AOTriton at the pinned commit b5e8cfb909e5
+=== kernels/attention_bwd_cdna/fmha_abi_gfx1201.py
+  …
+=== kernels/attention_bwd_cdna/fmha_common_gfx1201.py
+  …
 === kernels/attention_cdna/__init__.py
   …
 === kernels/attention_cdna/flash_attn_generic.py
@@ -408,7 +557,7 @@ AOTriton at the pinned commit b5e8cfb909e5
   …
 === kernels/norm/rmsnorm_kernel.py
   …
-7/20 vendored files identical to upstream after normalization; 13 differ, 0 absent upstream, 0 not compared
+12/27 vendored files identical to upstream after normalization; 15 differ, 0 absent upstream, 0 not compared
 ```
 
 Without `--aiter` or `--aotriton`, that upstream's files are reported as not compared
