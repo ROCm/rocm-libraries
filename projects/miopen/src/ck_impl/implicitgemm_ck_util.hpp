@@ -11,7 +11,6 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <shared_mutex>
 #include <string>
 #include <typeindex>
 #include <string_view>
@@ -224,19 +223,11 @@ inline bool IsLargeTensorTypeString(std::string_view type_string)
 template <typename ConvPtr>
 inline bool IsLargeTensorCKInstance(const ConvPtr& ptr)
 {
-    static std::shared_mutex mutex;
-    static std::unordered_map<std::type_index, bool> by_class;
+    static CKProblemCache<std::unordered_map<std::type_index, bool>> by_class;
     const auto& op = *ptr;
-    const std::type_index cls{typeid(op)};
-    {
-        std::shared_lock lock{mutex};
-        if(const auto it = by_class.find(cls); it != by_class.end())
-            return it->second;
-    }
-    const bool large = IsLargeTensorTypeString(op.GetTypeString());
-    std::unique_lock lock{mutex};
-    by_class.emplace(cls, large);
-    return large;
+    return *by_class.GetOrCompute(std::type_index{typeid(op)}, [&] {
+        return std::optional<bool>{IsLargeTensorTypeString(op.GetTypeString())};
+    });
 }
 
 /// The instances of a CK DeviceOp factory and their type strings, built once per process.
@@ -267,7 +258,11 @@ public:
     std::size_t Size() const { return ops.size(); }
     const std::shared_ptr<Op>& operator[](std::size_t i) const { return ops[i]; }
     const std::string& TypeString(std::size_t i) const { return type_strings[i]; }
-    bool IsLargeTensor(std::size_t i) const { return large_tensor[i]; }
+    /// Whether instance i may run a problem that does (or does not) need a large-tensor instance.
+    bool Serves(std::size_t i, bool require_large_tensor) const
+    {
+        return !require_large_tensor || large_tensor[i];
+    }
 
     /// Index of the first instance with the type string, or Size() if there is none.
     std::size_t Find(std::string_view type_string) const
@@ -301,6 +296,22 @@ private:
     std::unordered_map<std::string_view, std::size_t> index;
 };
 
+/// The type strings of every instance of the given CK DeviceOp factories, in order.
+template <typename... DeviceOpTypes>
+std::vector<std::string> CKTypeStrings()
+{
+    std::vector<std::string> type_strings;
+    type_strings.reserve((CKInstances<DeviceOpTypes>::Get().Size() + ...));
+    (
+        [&] {
+            const auto& instances = CKInstances<DeviceOpTypes>::Get();
+            for(std::size_t i = 0; i < instances.Size(); ++i)
+                type_strings.push_back(instances.TypeString(i));
+        }(),
+        ...);
+    return type_strings;
+}
+
 template <typename CKArgsType, typename = void>
 struct HasSupportKey : std::false_type
 {
@@ -319,9 +330,7 @@ bool AnyCKInstanceSupports(const CKArgsType& args, bool require_large_tensor)
     const auto& instances = CKInstances<DeviceOpType>::Get();
     for(std::size_t idx = 0; idx < instances.Size(); ++idx)
     {
-        if(require_large_tensor && !instances.IsLargeTensor(idx))
-            continue;
-        if(args.IsSupportedBy(instances[idx]))
+        if(instances.Serves(idx, require_large_tensor) && args.IsSupportedBy(instances[idx]))
             return true;
     }
     return false;
@@ -342,9 +351,7 @@ std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& probl
     valid_kernels.reserve(instances.Size());
     for(size_t idx = 0; idx < instances.Size(); ++idx)
     {
-        if(require_large_tensor && !instances.IsLargeTensor(idx))
-            continue;
-        if(args.IsSupportedBy(instances[idx]))
+        if(instances.Serves(idx, require_large_tensor) && args.IsSupportedBy(instances[idx]))
             valid_kernels.push_back(instances.TypeString(idx));
     }
     // When require_large_tensor is true and no large-tensor instances are
@@ -577,6 +584,13 @@ inline constexpr bool IsSplitKNeeded()
 
 template <typename DeviceOpType,
           typename CKArgsType,
+          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
+                         const std::string& kernel_id,
+                         int split_k);
+
+template <typename DeviceOpType,
+          typename CKArgsType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription,
           bool CheckSplitK                = false>
 bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string& kernel_id)
@@ -584,8 +598,6 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
     {
-        const auto& instances           = CKInstances<DeviceOpType>::Get();
-        const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
         if constexpr(IsSplitKNeeded<DeviceOpType>() || CheckSplitK)
         {
             auto pos = kernel_id.find_last_of('+');
@@ -607,16 +619,15 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
                 return false;
             }
 
-            const auto idx = instances.Find(kernel_id.substr(0, pos));
-            return (idx != instances.Size()) &&
-                   (!require_large_tensor || instances.IsLargeTensor(idx)) &&
-                   CKArgsType{problem}.IsSupportedBySplitK(instances[idx], split_k);
+            return IsCKSplitKSupported<DeviceOpType, CKArgsType, ProblemDescriptionType>(
+                problem, kernel_id.substr(0, pos), split_k);
         }
         else
         {
-            const auto idx = instances.Find(kernel_id);
+            const auto& instances = CKInstances<DeviceOpType>::Get();
+            const auto idx        = instances.Find(kernel_id);
             return (idx != instances.Size()) &&
-                   (!require_large_tensor || instances.IsLargeTensor(idx)) &&
+                   instances.Serves(idx, RequiresLargeTensorCKInstance(problem)) &&
                    CKArgsType{problem}.IsSupportedBy(instances[idx]);
         }
     }
@@ -690,9 +701,7 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
  *     problem, "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<...>", 4);
  * ```
  */
-template <typename DeviceOpType,
-          typename CKArgsType,
-          typename ProblemDescriptionType = miopen::conv::ProblemDescription>
+template <typename DeviceOpType, typename CKArgsType, typename ProblemDescriptionType>
 bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
                          const std::string& kernel_id,
                          int split_k)
@@ -701,12 +710,7 @@ bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
     const auto& instances = CKInstances<DeviceOpType>::Get();
     const auto idx        = instances.Find(kernel_id);
 
-    if(idx == instances.Size())
-    {
-        return false;
-    }
-
-    if(RequiresLargeTensorCKInstance(problem) && !instances.IsLargeTensor(idx))
+    if(idx == instances.Size() || !instances.Serves(idx, RequiresLargeTensorCKInstance(problem)))
         return false;
 
     const auto args = CKArgsType{problem};
@@ -788,7 +792,7 @@ size_t GetCKSplitkMaxWorkspaceSize(const ProblemDescriptionType& problem)
     const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
     for(std::size_t idx = 0; idx < instances.Size(); ++idx)
     {
-        if(require_large_tensor && !instances.IsLargeTensor(idx))
+        if(!instances.Serves(idx, require_large_tensor))
             continue;
         const auto& ptr = instances[idx];
         // Cycle `split_k` over {1,2,4,...,128} then `CkSplitkAutoDeduce`.

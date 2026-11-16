@@ -249,12 +249,8 @@ extern "C" ck_impl_status_t ck_impl_bwd_get_all_kernel_type_strings(CKKernelList
 {
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_handle, CK_IMPL_STATUS_BAD_PARAM, "Null out_handle");
-        auto result = std::make_unique<CKKernelListHandle>();
-
-        auto ptrs = DeviceOpGBwdPtrs<float>::GetInstances();
-        result->kernels.reserve(ptrs.size());
-        for(const auto& ptr : ptrs)
-            result->kernels.push_back(ptr->GetTypeString());
+        auto result     = std::make_unique<CKKernelListHandle>();
+        result->kernels = miopen::solver::CKTypeStrings<DeviceOpGBwdPtrs<float>>();
 
         *out_handle = result.release();
     });

@@ -253,23 +253,25 @@ protected:
     }
 };
 
-struct CkWrwProblem
+/// A grouped convolution's shape; the lengths are in NCHW or NCDHW order, whatever the layout.
+struct ConvShape
 {
-    std::vector<std::size_t> x_lens; // NCHW order; the tensors are NHWC
-    std::vector<std::size_t> w_lens;
     int group_count;
+    std::vector<std::size_t> x_lens;
+    std::vector<std::size_t> w_lens;
 };
 
-std::ostream& operator<<(std::ostream& os, const CkWrwProblem& p)
+std::ostream& operator<<(std::ostream& os, const ConvShape& p)
 {
+    os << 'g' << p.group_count;
     const auto lens = [&](const char* name, const std::vector<std::size_t>& v) {
         os << name;
         for(const auto n : v)
             os << '_' << n;
     };
-    lens("x", p.x_lens);
+    lens(" x", p.x_lens);
     lens(" w", p.w_lens);
-    return os << " g" << p.group_count;
+    return os;
 }
 
 /// NHWC bf16 backward-weights problems for the CK grouped solver, whose workspace depends on the
@@ -277,7 +279,7 @@ std::ostream& operator<<(std::ostream& os, const CkWrwProblem& p)
 /// system perf-db) needs less than the maximum over configurations; it skips elsewhere. The list
 /// covers gfx942 and gfx950.
 class GPU_FindDbWorkspaceCkWrw_BFP16 : public FindDbWorkspaceTest,
-                                       public ::testing::TestWithParam<CkWrwProblem>
+                                       public ::testing::TestWithParam<ConvShape>
 {
 protected:
     void SetUp() override
@@ -325,22 +327,12 @@ struct FlagProblem
 {
     miopen::conv::Direction direction;
     miopenTensorLayout_t layout;
-    int group_count;
-    std::vector<std::size_t> x_lens; // NCHW or NCDHW order, whatever the layout
-    std::vector<std::size_t> w_lens;
+    ConvShape shape;
 };
 
 std::ostream& operator<<(std::ostream& os, const FlagProblem& p)
 {
-    os << static_cast<int>(p.direction) << ' ' << LayoutName(p.layout) << " g" << p.group_count;
-    const auto lens = [&](const char* name, const std::vector<std::size_t>& v) {
-        os << name;
-        for(const auto n : v)
-            os << '_' << n;
-    };
-    lens(" x", p.x_lens);
-    lens(" w", p.w_lens);
-    return os;
+    return os << static_cast<int>(p.direction) << ' ' << LayoutName(p.layout) << ' ' << p.shape;
 }
 
 /// GetSolutions() resolves the configuration only for solvers whose WorkspaceDependsOnConfig()
@@ -355,7 +347,8 @@ protected:
     void Check(miopenDataType_t type)
     {
         const auto& p = GetParam();
-        SetUpProblem(p.direction, type, p.layout, p.group_count, p.x_lens, p.w_lens);
+        SetUpProblem(
+            p.direction, type, p.layout, p.shape.group_count, p.shape.x_lens, p.shape.w_lens);
         auto n_checked = 0;
         for(const auto& id :
             miopen::solver::GetSolversByPrimitive(miopen::solver::Primitive::Convolution))
@@ -397,47 +390,27 @@ std::vector<FlagProblem> FlagProblems()
                                 miopen::conv::Direction::BackwardData,
                                 miopen::conv::Direction::BackwardWeights})
     {
-        problems.push_back({direction, miopenTensorNCHW, 1, {2, 32, 28, 28}, {64, 32, 3, 3}});
-        problems.push_back({direction, miopenTensorNCHW, 1, {2, 64, 14, 14}, {128, 64, 1, 1}});
-        problems.push_back({direction, miopenTensorNHWC, 1, {2, 32, 28, 28}, {64, 32, 3, 3}});
-        problems.push_back({direction, miopenTensorNHWC, 4, {2, 64, 28, 28}, {64, 16, 3, 3}});
+        problems.push_back({direction, miopenTensorNCHW, {1, {2, 32, 28, 28}, {64, 32, 3, 3}}});
+        problems.push_back({direction, miopenTensorNCHW, {1, {2, 64, 14, 14}, {128, 64, 1, 1}}});
+        problems.push_back({direction, miopenTensorNHWC, {1, {2, 32, 28, 28}, {64, 32, 3, 3}}});
+        problems.push_back({direction, miopenTensorNHWC, {4, {2, 64, 28, 28}, {64, 16, 3, 3}}});
         // 3D, so the flags of the 3D solvers (the CK grouped backward-weights one sets it) are
         // checked too; FP16 and BF16 reach the CK 3D solvers on gfx11 as well as on CDNA.
         problems.push_back(
-            {direction, miopenTensorNDHWC, 1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}});
+            {direction, miopenTensorNDHWC, {1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}}});
         problems.push_back(
-            {direction, miopenTensorNDHWC, 4, {2, 64, 8, 14, 14}, {64, 16, 3, 3, 3}});
+            {direction, miopenTensorNDHWC, {4, {2, 64, 8, 14, 14}, {64, 16, 3, 3, 3}}});
         problems.push_back(
-            {direction, miopenTensorNCDHW, 1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}});
+            {direction, miopenTensorNCDHW, {1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}}});
     }
     return problems;
-}
-
-struct DefaultCacheProblem
-{
-    int group_count;
-    std::vector<std::size_t> x_lens; // NCHW or NCDHW order; the layout is NHWC or NDHWC
-    std::vector<std::size_t> w_lens;
-};
-
-std::ostream& operator<<(std::ostream& os, const DefaultCacheProblem& p)
-{
-    os << 'g' << p.group_count;
-    const auto lens = [&](const char* name, const std::vector<std::size_t>& v) {
-        os << name;
-        for(const auto n : v)
-            os << '_' << n;
-    };
-    lens(" x", p.x_lens);
-    lens(" w", p.w_lens);
-    return os;
 }
 
 /// The CK backward-weights solvers take their default configuration from DefaultConfigCache on
 /// every query after the first for a problem. The configuration a cache hit returns must be the
 /// one computed without the cache, and must run with the same workspace.
 class FindDbWorkspaceDefaultCacheTest : public FindDbWorkspaceTest,
-                                        public ::testing::TestWithParam<DefaultCacheProblem>
+                                        public ::testing::TestWithParam<ConvShape>
 {
 protected:
     void Check(miopenDataType_t type)
@@ -493,7 +466,7 @@ class GPU_FindDbWorkspaceDefaultCache_FP16 : public FindDbWorkspaceDefaultCacheT
 {
 };
 
-std::vector<DefaultCacheProblem> DefaultCacheProblems()
+std::vector<ConvShape> DefaultCacheProblems()
 {
     return {{1, {2, 64, 28, 28}, {64, 64, 3, 3}},
             {4, {2, 64, 28, 28}, {64, 16, 3, 3}},
@@ -640,8 +613,8 @@ TEST_P(GPU_FindDbWorkspaceCkWrw_BFP16, WorkSpaceSizeReportsMaximumOnFindDbHit)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_FindDbWorkspaceCkWrw_BFP16,
-                         testing::Values(CkWrwProblem{{2, 64, 56, 56}, {64, 64, 3, 3}, 1},
-                                         CkWrwProblem{{2, 128, 28, 28}, {128, 128, 3, 3}, 1}));
+                         testing::Values(ConvShape{1, {2, 64, 56, 56}, {64, 64, 3, 3}},
+                                         ConvShape{1, {2, 128, 28, 28}, {128, 128, 3, 3}}));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_FindDbWorkspace_FP32,
