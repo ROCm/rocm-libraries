@@ -86,26 +86,40 @@ template <typename Fn>
 
 } // namespace
 
-// Plan construction, execution, workspace and device-buffer handling. SetUp builds the plan for
-// an fp32 ADD of x [2, 4, 4, 5] into y [2, 4, 1, 1]. Both spans are multiples of 16 bytes, so
-// placing one tensor directly after the other keeps the default 16-byte tensor alignment.
-class TestGpuMiopenReductionPlan : public ::testing::Test
+// A MIOpen handle and one device allocation that the plan tests place x and y in.
+class GpuReductionPlanBuffers : public ::testing::Test
 {
 protected:
-    void SetUp() override
+    // Creates the handle and `bytes` of device memory with every byte set to `fill`.
+    void allocate(size_t bytes, unsigned char fill)
     {
-        SKIP_IF_NO_DEVICES();
         _handle = std::make_unique<HipdnnMiopenHandle>();
-        _underTest = std::make_unique<ReductionPlanUnderTest>(*_handle, _spec);
-        _workspace = std::make_unique<Workspace<>>(_underTest->plan().getWorkspaceSize(*_handle));
-        // One allocation that every x/y placement below fits in.
-        _buffers = std::make_unique<Workspace<>>(X_SPAN_BYTES + Y_SPAN_BYTES);
-        ASSERT_EQ(hipMemset(_buffers->get(), FILL_BYTE, X_SPAN_BYTES + Y_SPAN_BYTES), hipSuccess);
+        _buffers = std::make_unique<Workspace<>>(bytes);
+        ASSERT_EQ(hipMemset(_buffers->get(), fill, bytes), hipSuccess);
     }
 
     void* bufferAt(size_t offsetBytes) const
     {
         return static_cast<char*>(_buffers->get()) + offsetBytes;
+    }
+
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
+    std::unique_ptr<Workspace<>> _buffers;
+};
+
+// Plan construction, execution, workspace and device-buffer handling. SetUp builds the plan for
+// an fp32 ADD of x [2, 4, 4, 5] into y [2, 4, 1, 1]. Both spans are multiples of 16 bytes, so
+// placing one tensor directly after the other keeps the default 16-byte tensor alignment.
+class TestGpuMiopenReductionPlan : public GpuReductionPlanBuffers
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        // One allocation that every x/y placement below fits in.
+        ASSERT_NO_FATAL_FAILURE(allocate(X_SPAN_BYTES + Y_SPAN_BYTES, FILL_BYTE));
+        _underTest = std::make_unique<ReductionPlanUnderTest>(*_handle, _spec);
+        _workspace = std::make_unique<Workspace<>>(_underTest->plan().getWorkspaceSize(*_handle));
     }
 
     void execute(const std::vector<hipdnnPluginDeviceBuffer_t>& deviceBuffers,
@@ -130,10 +144,8 @@ protected:
 
     const ReductionGraphSpec _spec
         = ReductionGraphSpec::packed(ReductionMode::ADD, {2, 4, 4, 5}, {2, 4, 1, 1});
-    std::unique_ptr<HipdnnMiopenHandle> _handle;
     std::unique_ptr<ReductionPlanUnderTest> _underTest;
     std::unique_ptr<Workspace<>> _workspace;
-    std::unique_ptr<Workspace<>> _buffers;
 };
 
 // The gate declines modes with no miopenReduceTensorOp_t, so reaching the plan with one is a
@@ -246,20 +258,13 @@ TEST_F(TestGpuMiopenReductionPlan, ExecuteAcceptsInputDirectlyAfterOutput)
 // The overlap guard sizes each buffer by its strides, not by its element count. Both placements
 // put the other tensor where a dense span ends and the strided span does not, so a guard that
 // sized either tensor as dense would launch MIOpen on overlapping buffers.
-class TestGpuMiopenReductionPlanStridedSpans : public ::testing::Test
+class TestGpuMiopenReductionPlanStridedSpans : public GpuReductionPlanBuffers
 {
 protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        _handle = std::make_unique<HipdnnMiopenHandle>();
-        _buffers = std::make_unique<Workspace<>>(BUFFER_BYTES);
-        ASSERT_EQ(hipMemset(_buffers->get(), 0, BUFFER_BYTES), hipSuccess);
-    }
-
-    void* bufferAt(size_t offsetBytes) const
-    {
-        return static_cast<char*>(_buffers->get()) + offsetBytes;
+        ASSERT_NO_FATAL_FAILURE(allocate(BUFFER_BYTES, 0));
     }
 
     void execute(const ReductionGraphSpec& spec, void* xPtr, void* yPtr) const
@@ -295,9 +300,6 @@ protected:
     }
 
     static constexpr size_t BUFFER_BYTES = 64;
-
-    std::unique_ptr<HipdnnMiopenHandle> _handle;
-    std::unique_ptr<Workspace<>> _buffers;
 };
 
 TEST_F(TestGpuMiopenReductionPlanStridedSpans, ThrowsWhenInputStartsInsidePaddedOutputSpan)

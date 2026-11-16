@@ -22,7 +22,9 @@
 using namespace miopen_plugin;
 
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType;
 using hipdnn_flatbuffers_sdk::data_objects::EnumNameReductionMode;
+using hipdnn_flatbuffers_sdk::data_objects::EnumValuesDataType;
 using hipdnn_flatbuffers_sdk::data_objects::EnumValuesReductionMode;
 using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
 using hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
@@ -313,12 +315,22 @@ TEST(TestMiopenReductionChecks, DeclinesOverrideShapeEnabled)
     EXPECT_TRUE(isDeclinedWith(spec, "does not support override shapes"));
 }
 
-TEST(TestMiopenReductionChecks, DeclinesNonFloatComputeType)
+TEST(TestMiopenReductionChecks, DeclinesEveryComputeTypeButFloat)
 {
-    ReductionGraphSpec spec;
-    spec.computeDataType = DataType::HALF;
+    // The plan always passes miopenFloat as the compute type, so accepting any other value would
+    // silently compute in FP32.
+    for(const auto computeType : EnumValuesDataType())
+    {
+        if(computeType == DataType::FLOAT)
+        {
+            continue;
+        }
+        ReductionGraphSpec spec;
+        spec.computeDataType = computeType;
 
-    EXPECT_TRUE(isDeclinedWith(spec, "only supports nodes with an fp32 compute_data_type"));
+        EXPECT_TRUE(isDeclinedWith(spec, "only supports nodes with an fp32 compute_data_type"))
+            << EnumNameDataType(computeType);
+    }
 }
 
 TEST(TestMiopenReductionChecks, DeclinesDeterministicReduction)
@@ -395,6 +407,16 @@ TEST(TestMiopenReductionChecks, DeclinesPassByValueTensor)
     EXPECT_TRUE(isDeclinedWith(spec, "input tensor must not be pass-by-value"));
 }
 
+// The rule covers both kinds of pass-by-value tensor: a runtime host scalar (above) and a value
+// baked into the graph, which the backend accepts on a tensor of any shape.
+TEST(TestMiopenReductionChecks, DeclinesBakedValueTensor)
+{
+    ReductionGraphSpec spec;
+    spec.x.bakedValue = 1.0f;
+
+    EXPECT_TRUE(isDeclinedWith(spec, "input tensor must not be pass-by-value"));
+}
+
 TEST(TestMiopenReductionChecks, DeclinesRaggedTensor)
 {
     ReductionGraphSpec spec;
@@ -403,13 +425,25 @@ TEST(TestMiopenReductionChecks, DeclinesRaggedTensor)
     EXPECT_TRUE(isDeclinedWith(spec, "input tensor must not be ragged"));
 }
 
-TEST(TestMiopenReductionChecks, DeclinesBfloat16Tensor)
+TEST(TestMiopenReductionChecks, DeclinesEveryDataTypeButFloatAndHalf)
 {
-    ReductionGraphSpec spec;
-    spec.dataType = DataType::BFLOAT16;
-    spec.yDataType = DataType::FLOAT;
+    // The plan and the byte-span rule assume a 4- or 2-byte element, and the legacy CK reduce
+    // kernels have no BFLOAT16 entry.
+    for(const auto dataType : EnumValuesDataType())
+    {
+        if(dataType == DataType::FLOAT || dataType == DataType::HALF)
+        {
+            continue;
+        }
+        ReductionGraphSpec spec;
+        spec.dataType = dataType;
+        spec.yDataType = DataType::FLOAT;
 
-    EXPECT_TRUE(isDeclinedWith(spec, "input tensor data type BFLOAT16 is not supported"));
+        EXPECT_TRUE(isDeclinedWith(spec,
+                                   std::string("input tensor data type ")
+                                       + EnumNameDataType(dataType) + " is not supported"))
+            << EnumNameDataType(dataType);
+    }
 }
 
 TEST(TestMiopenReductionChecks, DeclinesNullStrides)

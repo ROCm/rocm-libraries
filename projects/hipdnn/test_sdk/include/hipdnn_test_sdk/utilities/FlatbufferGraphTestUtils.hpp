@@ -3433,6 +3433,8 @@ struct ReductionTensorSpec
     std::optional<std::vector<int64_t>> strides;
     bool isVirtual = false;
     bool isRuntimePassByValue = false;
+    // A value baked into the graph (TensorValue::Float32Value); nullopt writes no value.
+    std::optional<float> bakedValue;
     std::optional<int64_t> raggedOffsetTensorUid;
     // false leaves the tensor out of the graph, so the node's reference to `uid` dangles.
     bool inGraph = true;
@@ -3498,6 +3500,7 @@ inline flatbuffers::FlatBufferBuilder createReductionGraph(const ReductionGraphS
               {
                   return;
               }
+              const data_objects::Float32Value bakedValue(tensor.bakedValue.value_or(0.0f));
               tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
                   builder,
                   tensor.uid,
@@ -3506,8 +3509,10 @@ inline flatbuffers::FlatBufferBuilder createReductionGraph(const ReductionGraphS
                   tensor.strides.has_value() ? &tensor.strides.value() : nullptr,
                   &tensor.dims,
                   tensor.isVirtual,
-                  data_objects::TensorValue::NONE,
-                  0,
+                  tensor.bakedValue.has_value() ? data_objects::TensorValue::Float32Value
+                                                : data_objects::TensorValue::NONE,
+                  tensor.bakedValue.has_value() ? builder.CreateStruct(bakedValue).Union()
+                                                : flatbuffers::Offset<void>(),
                   tensor.isRuntimePassByValue,
                   tensor.raggedOffsetTensorUid));
           };
