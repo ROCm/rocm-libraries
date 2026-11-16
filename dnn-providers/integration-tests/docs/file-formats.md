@@ -313,7 +313,7 @@ parses it.
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
-| `inputs` | object | Per-input fill specs keyed by tensor uid as a string (`"3"`). See [Input fill specs](#input-fill-specs). A key that is not a tensor uid rejects the metadata, and so does an entry that is not a valid fill spec. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, under its scale, diagonal band and additive mask, so an override for them has no effect. A node whose forward the fill cannot derive (ALiBi, padding, sequence lengths, dropout, ragged tensors, mixed or unsupported data types, a scale tensor that is not a pass-by-value scalar, a Q, K, V or mask computed by the graph) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Shapes the CPU reference rejects, such as stats not shaped `[B, H, Sq, 1]`, keep the override, and the CPU reference then fails the bundle. Likewise, the index input of a MAXPOOL ResampleBwd node is recomputed by `deriveResampleBackwardIndex()` when it is a graph input, so its override has no effect; an index produced by another graph node is not overridden. Non-INT32 indices make the bundle unverifiable. If the CPU forward rejects the ranks, the index keeps its fill and the backward reference then fails the bundle. |
+| `inputs` | object | Per-input fill specs keyed by tensor uid as a string (`"3"`). See [Input fill specs](#input-fill-specs). A key that is not a tensor uid rejects the metadata, and so does an entry that is not a valid fill spec. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, so an override for them has no effect. The forward is an SDPA forward graph built from the node (its scale, diagonal band, additive mask, ALiBi, padding with sequence lengths, explicit dropout mask and ragged offsets; rank-3 stats as `[B, H, Sq, 1]`) and run by the harness's reference graph executors. When the fill runs on the device the GPU one runs it; when the GPU one declines the forward graph or rejects it before it launches, and when the fill runs on the host, the CPU one runs it. A device failure after the GPU one accepted the graph fails the case (`DeviceInputError`) rather than falling back. A node whose forward cannot be derived (Philox dropout, a forward operand or ragged offsets computed by the graph, or a forward graph the references decline or reject) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Likewise, the index input of a MAXPOOL ResampleBwd node is recomputed by `deriveResampleBackwardIndex()` when it is a graph input, so its override has no effect; an index produced by another graph node is not overridden. Non-INT32 indices make the bundle unverifiable. If the CPU forward rejects the ranks, the index keeps its fill and the backward reference then fails the bundle. |
 | `aliases` | array of objects | Inputs that read the memory of another input and have no allocation of their own. See [Tensors that share memory](#tensors-that-share-memory--aliases). Needs `format_version` 2. |
 | `start_offsets` | array of objects | Tensors whose data starts a number of bytes past an aligned address when the engine under test runs. See [Tensors that start past an aligned address](#tensors-that-start-past-an-aligned-address--start_offsets). Needs `format_version` 2. |
 | `live_rows` | array of objects | Dense outputs whose positions past a live length per batch hold no defined value and are not compared. See [Outputs with rows past a live length](#outputs-with-rows-past-a-live-length--live_rows). Needs `format_version` 2. |
@@ -882,9 +882,8 @@ Rules:
   this rule. The run treats a missing sidecar as "no claims", and
   `verify_support_claims.py` checks the sidecars that exist, not the missing
   ones. Older bundles break the rule: most SDPA single-graph bundles and a few
-  sweeps (`quick/SdpaBackward/Default`, `quick/Reduction/Default`,
-  `quick/Pointwise/Binary`, `{quick,full}/BlockScaleDequantizeMatmul/Default`)
-  have none.
+  sweeps (`BlockScaleDequantizeMatmul/Default`, `Reduction/Default`,
+  `Pointwise/Binary` and `Pointwise/Activation`, in every tier that has them) have none.
 - Sidecars are **machine-written** by `--write-support-claims`. The form is
   stricter than valid JSON: sorted keys, 2-space indent, one array element per
   line, trailing newline, LF line endings, sorted platforms and case ids, and
@@ -928,7 +927,7 @@ harness tests *that engine*. You do not recompile or change the bundles.
 |---|---|
 | miopen-provider | `config/MIOPEN_ENGINE.toml` |
 | hipblaslt-provider | `config/HIPBLASLT_ENGINE.toml` |
-| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml` |
+| hip-kernel-provider | `config/HIP_MLOPS_ENGINE.toml`, `config/ASM_SDPA_ENGINE.toml`, `config/hipkernel_Gfx950Attention.toml`, `config/hipkernel_Gfx942AttentionUnified3d.toml`, `config/hipkernel_Gfx942AttentionDense.toml`, `config/hipkernel_flydsl_sdpa_bwd.toml` |
 
 ```toml
 [meta]
@@ -1014,7 +1013,7 @@ Do not confuse them:
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries `hipdnn_integration_tests_unit_tests` and `hipdnn_golden_data_tests` |
 | `dnn-providers/integration-tests/test_categories_gpu_ref.yaml` | `hipdnn_gpu_ref_tests`. Quick is an fp32 smoke run; reduced-precision and mixed-type cases are in standard |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.
