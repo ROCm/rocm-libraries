@@ -1,6 +1,6 @@
 {
   "version": "1.1",
-  "id": "7f34ffad-0541-5f70-bd1e-6cbffb1c35cf",
+  "id": "efffe3ab-fd40-56a9-ab3d-dc62e6ac94a4",
   "name": "hipkernel:flydsl_sdpa_bwd_split",
   "sdk_version": "1.4.0",
   "graph_match": {
@@ -18,7 +18,8 @@
         "head_dim",
         "padded",
         "hints",
-        "floor"
+        "floor",
+        "vec_tail"
       ]
     },
     {

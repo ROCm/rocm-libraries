@@ -205,8 +205,8 @@ these kernels through the whole path -- generation, packing, selection and
 launch -- and is verified on all three arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
-**SDPA backward** (**gfx950**: split and merged, 2,707 object files; **gfx11-generic**: split
-only, 509 object files): two engines over one graph
+**SDPA backward** (**gfx950**: split and merged, 2,707 object files; **gfx942**, **gfx90a** and
+**gfx11-generic**: split only, 509 object files each): two engines over one graph
 matcher (`FlydslSdpaBwdCommon.hpp`). `hipkernel:flydsl_sdpa_bwd_merged` is a single launch
 computing dK, dV, dQ and, on a bias graph, dBias; its plans are not serializable (no plan
 saving in its dispatch handler). `hipkernel:flydsl_sdpa_bwd_split` is
@@ -215,8 +215,8 @@ split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
 `sdpa_bwd_split` is descriptor-only (no objects): its UED, and its engine estimate, which is
 engine-level (it models the whole program); trained estimates install under
 `sdpa_bwd_split/heuristics/`, and the slots have no rankers. The dBias and dSink reduce kernels have no
-op of their own: on gfx950 they ride inside the objects that launch them, on gfx11-generic
-the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
+op of their own: on gfx950 they ride inside the objects that launch them (and in the fp32 combined bias rows of gfx942 and gfx90a); on
+gfx11-generic, gfx942 and gfx90a the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
 tail-zero object (`sdpa_bwd_tailzero`, one per arch family and dtype) after the gradient launches: it
 zeroes the rows past `seq_len` of every dense gradient output, which the backward kernels leave unwritten.
 It is a companion of the dQ rows, shared with the merged rows (REGEN.md, *Companions*). bf16, f16 and f32 data;
@@ -406,7 +406,7 @@ upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
    │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 1,084/1,084 gfx11-generic, 719/719 gfx12-generic, 3,155/3,155 gfx950,
-   │                                    457/457 gfx942, 465/465 gfx90a (SDPA backward rows that ship a pin: REGEN.md)
+   │                                    958/958 gfx942, 966/966 gfx90a (SDPA backward rows that ship a pin: REGEN.md)
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)

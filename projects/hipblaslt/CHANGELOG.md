@@ -14,6 +14,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
 * `HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT` scale mode (`1018`, `--scaleA`/`--scaleB` in `hipblaslt-bench`) and `HIPBLASLT_ORDER_COL256_R128_EXT` matrix order (`104`) for MXFP6 (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`) GEMMs whose A, and optionally B, is pre-tiled and whose E8M0 scales are shuffled in tiles of 128 rows by 4 K blocks. Both scale modes are set together with the order on A, with `opA = T` and `opB = N`; B uses the same order or `HIPBLASLT_ORDER_COL`.
 * rocKE MXFP6 GEMM kernels for that scale mode and order, registered for gfx950 PCI chip IDs `0x75a0` and `0x75a3`: E2M3 and E3M2, TN, `m = n = 4096` with `K = 65536` or `131584`, bf16 C and D, alpha `1` and beta `0`; with B in `HIPBLASLT_ORDER_COL`, E2M3 at `K = 65536` only. `hipblasLtMatmulAlgoGetHeuristic` does not return them; the extension API's heuristic does, and `hipblasLtMatmul` runs the algo it returns.
+* `A2AGemm` mode for the `FusedA2A` TensileLite problem-type parameter (TensileLite only, bf16 B): gathers B's K shards from the peers inside the GEMM kernel, and the `A2ASubRounds` solution parameter (`1`, `2` or `4`) splits each shard into sub-rounds. Validated on gfx950 only.
+
+### Changed
+
+* The `FusedGemmA2A` TensileLite problem-type parameter and solution predicate are now `FusedA2A` (`Disabled`, `GemmA2A` or `A2AGemm`), and the `tensilelite-client` option `--fused-gemm-a2a=1` is now `--fused-a2a=GemmA2A`. Device libraries and client configuration files from before this change must be regenerated.
+* `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 
 ### Resolved issues
 

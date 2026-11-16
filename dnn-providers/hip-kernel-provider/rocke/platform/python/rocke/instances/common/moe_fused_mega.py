@@ -49,7 +49,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Tuple
 
-from ...core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import (
+    F32,
+    I32,
+    I64,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Value,
+    type_bytes,
+)
 from ...helpers.tensor_view import (
     TensorDescriptor,
     TensorView,
@@ -57,7 +66,6 @@ from ...helpers.tensor_view import (
 )
 from ._moe_fused_mega_lds import (
     LdsAlloc,
-    lds_elem_bytes,
     validate_mega_lds_budget,
 )
 from .gemm_universal import (
@@ -460,7 +468,7 @@ def _lds_allocs(spec: FusedMegaKernelSpec) -> Tuple[LdsAlloc, ...]:
     """
     t = spec.gate_up_tile()
     td = spec.down_tile()
-    eb = lds_elem_bytes(_storage_dtype(spec.gate_up_universal_spec()))
+    eb = type_bytes(_storage_dtype(spec.gate_up_universal_spec()))
     return (
         LdsAlloc("A_smem", eb, t.tile_m * t.tile_k),
         LdsAlloc("Bg_smem", eb, t.tile_n * t.tile_k),

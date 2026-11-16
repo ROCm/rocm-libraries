@@ -281,7 +281,7 @@ def test_a_slots_knobs_are_its_own_tuning_fields() -> None:
     # head_dim is a graph fact but also an alternative of every slot, whose tiles overlap,
     # and every slot's schedule fields are knobs.
     assert by_slot == {
-        "prep": ["head_dim", "block_m", "waves_per_eu"],
+        "prep": ["head_dim", "block_m", "waves_per_eu", "vec_tail"],
         "dkdv": ["head_dim", "block_m", "waves_per_eu"],
         "dq": ["head_dim", "block_m", "waves_per_eu"],
     }
