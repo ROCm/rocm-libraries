@@ -9,7 +9,9 @@ Every output tensor of a bundle is compared element by element with its oracle
 
 One element outside the band fails the tensor. This document says where
 `atol` and `rtol` come from, and explains the dynamic tolerance that grades
-half, bfloat16 and float convolution-forward outputs.
+half, bfloat16 and float convolution-forward outputs. That tolerance is a
+statistical acceptance band, not a bound: see "What kind of tolerance this
+is".
 
 ## Where the numbers come from
 
@@ -43,13 +45,42 @@ The per-op default for half and bfloat16 convolution forward is 0.1 for both
 and about 10 % from `K` of about 1,000 on: 10 to 25 bfloat16 rounding steps,
 and over 100 half steps.
 
-The worst-case bound in the test SDK, `calculateConvFpropTolerance()`, scales
-with the problem, but assumes an output can be as large as
-`K * max|x| * max|w|`. Its callers use the one number as both `atol` and
-`rtol`. With inputs of both signs a real output grows only as `sqrt(K)`, so
+The bound in the test SDK, `calculateConvFpropTolerance()`, scales with the
+problem. Write `eps_c` for the epsilon of its compute type (2^-23 for float)
+and `eps_out` for that of the output type. It multiplies the scale
+`S = K * max|x| * max|w|`, the largest an output can be, by `gamma`, and when
+the output type is coarser than the compute type it adds the output-cast term
+`eps_out * S`. On its deterministic branch, which float compute takes up to
+`K` of about 42,000, `gamma = 2 * K * eps_c / (1 - 2 * K * eps_c)`, used while
+`2 * K * eps_c` is below 0.01: Higham's `gamma_K` with a factor 4 to spare
+(`eps_c` = 2u). There it is a guarantee under its hypothesis, float
+accumulation of the `K` products and one final rounding. It holds for any
+data and any order of summing the products (Higham, Accuracy and Stability of
+Numerical Algorithms, ch. 4; trees and blocks only shorten the chain), and it
+needs no random inputs, no cancellation and no zero-mean rounding errors.
+Beyond that, and for half and bfloat16 compute types at every practical `K`,
+`gamma` is the 6-sigma statistical estimate `6 * sqrt(2K) * eps_c`, modelled on
+the probabilistic analysis of Higham and Mary (2019; see "Where the summation
+term comes from"). Winograd and intermediates kept below float are outside the
+hypothesis: they are a different algorithm or a different arithmetic, not a
+different order.
+
+Its callers use the one number as both `atol` and `rtol`. Its growth with `K`
+does not come from `gamma`: both terms multiply `S`, and for
+`calculateConvFpropTolerance<T, T, float>()` the output-cast term
+`eps_out * S` is 97 % of the bfloat16 number at `K` = 1,152 and 78 % of the
+half one. With inputs of both signs a real output grows only as `sqrt(K)`, so
 the band the bound makes, which grows as `K` relative to a typical output, is
 wider than that output from `K` of about 100 on for bfloat16 (about 800 for
 half), and passes almost anything.
+
+The dynamic tolerance changes two things relative to that bound. The
+magnitude is `sigma`, which grows as `sqrt(K)` because partial sums cancel,
+instead of `S`; and the final rounding is priced relative to `|ref|` instead
+of the largest possible output. The rounding statistics are not new. What is
+new is the magnitude they are applied to, and with it an assumption about the
+data: this is why the result is a statistical acceptance band and not a
+bound (see "What kind of tolerance this is").
 
 For float the per-op default is 1e-5 for both, not 0.1, and the comparison
 goes the other way at long reductions: see "Float against the fixed 1e-5".
@@ -58,7 +89,8 @@ goes the other way at long reductions: see "Float against the fixed 1e-5".
 
 For an output stored as half or bfloat16, computed with float accumulation,
 and graded against a float-accumulating reference (float adds a summation term
-to `rtol` and takes a coefficient: see "Float outputs"):
+to `rtol` and takes a coefficient: see "Float outputs"), the statistical
+acceptance band (see "What kind of tolerance this is") is:
 
 ```text
 |impl_i - ref_i| <= 2 * eps * |ref_i|                      rtol
@@ -70,7 +102,7 @@ to `rtol` and takes a coefficient: see "Float outputs"):
 | Symbol | Meaning |
 |---|---|
 | `K` | Products summed per output: the weight tensor's channel dimension (C / groups) times the filter volume. |
-| `sigma` | The typical output magnitude, `sqrt(K * mean(x^2) * mean(w^2))`, times the product, over the fused multiplies, of the largest magnitude of the tensor each one applies. The mean squares come from how the inputs were filled (see below). |
+| `sigma` | The typical output magnitude, `sqrt(K * mean(x^2) * mean(w^2))`, times the factor by which the graded output carries the convolution's result: the product of the largest magnitudes of the tensors the fused multiplies apply, and the sum over paths where they meet again (see "What the harness feeds it"). The mean squares come from how the inputs were filled (see below). |
 | `eps` | Machine epsilon of the output type: 2^-7 for bfloat16, 2^-10 for half. |
 | `u32` | Unit roundoff of float, 2^-24. |
 | `lambda` | 0 for bfloat16, 12 for half (calibrated, see below). |
@@ -87,7 +119,7 @@ Each term is one way two correct implementations differ:
 - **Summation order** (`sqrt(K) * u32 * sigma`). Two float sums of the same `K`
   products in a different order differ by a random walk of rounding errors,
   about `u32 * sqrt(K) * sigma`. This is what decides an output near zero,
-  where the relative term is small.
+  where the relative term is small. See "Where the summation term comes from".
 - **Intermediates in the io type** (`lambda * eps * sigma`). Some half kernels
   keep partial results in half (for example Winograd transforms). bfloat16
   showed none.
@@ -108,9 +140,9 @@ shapes, not a rounding law, so the tolerance does not model it.
 fraction of the output at every reduction length. At a typical output
 (`|ref|` = `sigma`) the band, divided by `sigma`, is `atol / sigma + rtol`.
 For inputs uniform in [-1, 1] it is, for each way of setting the tolerance
-(the worst-case bound is used as both `atol` and `rtol`, as its callers do):
+(the SDK bound is used as both `atol` and `rtol`, as its callers do):
 
-| Output | K | fixed 0.1 | worst-case bound | dynamic |
+| Output | K | fixed 0.1 | SDK bound | dynamic |
 |---|---|---|---|---|
 | bfloat16 | 16 | 0.175 | 0.22 | 0.016 |
 | bfloat16 | 1,152 | 0.109 | 10.1 | 0.016 |
@@ -119,11 +151,11 @@ For inputs uniform in [-1, 1] it is, for each way of setting the tolerance
 | half | 1,152 | 0.109 | 1.6 | 0.014 |
 | half | 65,536 | 0.101 | 82 | 0.014 |
 
-The worst-case column prices `calculateConvFpropTolerance<T, T, float>()`, as
+The SDK bound column prices `calculateConvFpropTolerance<T, T, float>()`, as
 the sample passes it. With `double` compute, as the GPU reference tests pass
 it, bfloat16 is 9.8 and 518 and half 1.2 and 65 at the two larger `K`.
 
-The worst-case bound is tighter than the dynamic tolerance only for half at
+The SDK bound is tighter than the dynamic tolerance only for half at
 `K` of 6 or less. In the calibration data it also failed 22 of the 10,434
 correct half and bfloat16 outputs graded (12 distinct cases): 2 of the 5,091
 of the fit seeds and 2 of the 3,394 of the held-out seeds on gfx942 (one half
@@ -131,6 +163,138 @@ and one bfloat16 each), and 18 of the 1,949 on gfx90a.
 
 The function is `calculateConvFpropOutputTolerance<T>()` in
 `projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp`.
+
+### What kind of tolerance this is
+
+The dynamic tolerance is a statistical acceptance band, not a bound. A bound
+asks whether an error is compatible with what the arithmetic permits, for any
+data: the SDK function of "Why a fixed number does not work" is one on its
+deterministic branch. The band asks whether an error is typical for an assumed
+workload. An output outside it is a reason to look at the kernel; an output
+inside it is not a proof that the kernel is right. It rests on:
+
+- **The arithmetic.** The `K` products are accumulated in float, in some
+  order, and the result is converted once to the output type. Roundings of
+  intermediates below float are separate terms (`lambda`, the rounding points).
+- **The rounding errors** (step 1 of "Where the summation term comes from").
+  The relative error of each addition is independent of the others, has zero
+  mean and a mean square of at most `u32^2 / 3`.
+- **The products** (step 2 of the same section). They are independent, with
+  variance `sigma^2 / K` and mean `ref / K`, so the partial sums are a random
+  walk around a drift: where a product sits in the sum tells nothing about its
+  sign or size. This is a separate assumption from the one on the rounding
+  errors, and each fails on cases of its own (below).
+- **Derived and fitted constants.** Derived: the factor 2 on `eps * |ref|` (a
+  margin over two units in the last place), the form `sqrt(K) * u32` of the
+  summation term with its split over `sigma` and `|ref|`, and the coefficient 1
+  of the rounding points. Fitted to MIOpen: `lambda` = 12 and the float
+  coefficient `c` (the value 1 of half and bfloat16 is a margin over a
+  measured bfloat16 need of at most 0.4).
+- **The probability it stands for.** A fixed `c` is a fixed number of standard
+  deviations of the error at each element: at least `c / 0.41`, since 0.41 is
+  the largest factor of the standard deviation (step 2), which is 9.8 for the
+  base `c` = 4 and 22 for MIOpen's 9. The same number applies to every element,
+  so the chance that some element of a correct output fails grows with the
+  element count of the output. For a normal error the largest of 10^5 to 10^9
+  elements reaches 4.5 to 6 standard deviations.
+
+Each of the two assumptions has a case where it fails, and there the
+classical bound holds and this band does not. A nonzero
+mean alone is not one of them: the `|ref|` term covers it (with both inputs
+uniform on [0, 1] the `c` needed is about 1, in emulation). The figures below
+are from emulation on the host, not measured on an engine, and are not part of
+the calibration tables.
+
+- **Rounding errors that are not independent: constant fills.** With `x` and
+  `w` both constant, every step of a sequential sum rounds the same way, and
+  the error grows like `K * u32 / 4` instead of `sqrt(K)`. In float32
+  emulation at `K` = 18,432 a sequential sum is off by up to 2.7e-4 relative,
+  and a correct blocked or pairwise engine graded against the sequential
+  reference needs `c` up to 34 (median 14). Even the step 1 estimate computed
+  from the actual partial sums is too small here, by a factor 13 at `K` = 1,152
+  and 52 at `K` = 18,432. Short repeating value lists show a milder version:
+  8 % of them need more than 4.
+- **Products whose sign follows the summation order.** With `x` nonnegative
+  and the sign of `w` following the order (positive in the first half of the
+  reduction, negative in the second), the partial sums reach about `K / 8`
+  while `sigma` and `|ref|` are both of order `sqrt(K)`. The rounding errors
+  behave as modelled but the magnitude of the band is wrong: in emulation a
+  pairwise or blocked engine against the sequential reference needs `c` = 10
+  at `K` = 1,152 and 36 to 41 at `K` = 18,432. Recipe fills cannot produce
+  this. Golden inputs behind a ReLU, with a filter whose sign varies along the
+  summation order, can.
+
+When `x` and `w` are both filled with a constant, the per-op default is used.
+Golden inputs and value lists are not detected, so the band applies to them.
+Neither case is a regression: the fixed 1e-5 fails them too, and half and
+bfloat16 are covered by `2 * eps`.
+
+What supports using constants fitted to MIOpen for another engine: the
+derivation puts `c` at about 1.3 to 2.5 for two orderings of ideal float
+arithmetic, so the base 4 is a margin over theory and does not depend on the
+engine, as long as the engine accumulates in float and sums in some order.
+MIOpen's measured non-Winograd solver families (1.77 to 2.46) sit there.
+Winograd's 5.68 is the one number the derivation does not explain. An engine
+whose kernels differ sets its own float constant in its TOML (`summation_order`,
+see "The base coefficient and the engine's"). `lambda` has no such support: it
+is fitted to MIOpen's half kernels, and an engine whose half kernels leave
+more needs a `[[tolerance_overrides]]` entry (see "When an engine needs
+more").
+
+### Where the summation term comes from
+
+The float summation term has the form `sqrt(K) * u32 * (sigma + |ref|)`. It
+comes from two steps that rest on different assumptions. `u32` is 2^-24.
+
+Step 1, the rounding errors. A sequential float sum of the products `p_i`
+satisfies `s_i = (s_(i-1) + p_i) * (1 + d_i)` with `|d_i| <= u32`, so to first
+order the error is `sum_i d_i * s_i`, with `s_i` the exact partial sums
+(Higham, ch. 4). If the `d_i` are independent with zero mean and
+`E[d^2] <= u32^2 / 3`, then for any data:
+
+```text
+std(error | data) <= (u32 / sqrt(3)) * sqrt(sum_i s_i^2)
+```
+
+Step 2, the data. If the products are also independent, with variance
+`sigma^2 / K` and mean `ref / K` (`sigma` is the quantity of the model: `sqrt(K)`
+times the standard deviation of one product):
+
+```text
+E[s_i^2]    = i * sigma^2 / K + i^2 * ref^2 / K^2
+std(error) <= u32 * sqrt(K) * sqrt(sigma^2 / 6 + ref^2 / 9)
+           <= 0.41 * u32 * sqrt(K) * (sigma + |ref|)
+```
+
+The `sigma` part is the zero-mean case and the `|ref|` part is the mean, so a
+nonzero mean is covered by construction. Each step has its own failure:
+step 1 for constant fills, step 2 for products whose sign follows the
+summation order (see "What kind of tolerance this is").
+
+So `c` is about 0.41 times the number of standard deviations that the largest
+of all elements reaches (4.5 to 6 for 10^5 to 10^9 elements, for a normal
+error). That predicts a need of about 1.3 to 2.5 for two summation orderings
+of ideal float arithmetic. The non-Winograd measurements (1.77 to 2.46, see
+"Float outputs") sit there; `c` = 4 is a margin over the theory, and
+Winograd's 5.68 is the one number it does not explain. The half and
+bfloat16 bands keep `c` = 1 on the `sigma` term, and the bfloat16 data needs
+at most 0.4 of it (see "Calibration"): below the figure the derivation gives
+for ideal float arithmetic, and not explained by it.
+
+References:
+
+- Higham, Accuracy and Stability of Numerical Algorithms, 2nd ed., SIAM, 2002,
+  ch. 4: `gamma_K` and the first-order expression of the error of a sum.
+- Higham and Mary, A New Approach to Probabilistic Rounding Error Analysis,
+  SIAM J. Sci. Comput. 41(5), A2815-A2835, 2019. It randomises only the
+  rounding errors and keeps the scale `sum|p_i|`, so it supports the statistical
+  branch of the SDK function and not `sigma`.
+- Higham and Mary, Sharper Probabilistic Backward Error Analysis for Basic
+  Linear Algebra Kernels with Random Data, SIAM J. Sci. Comput. 42(5),
+  A3427-A3446, 2020. It takes both the rounding errors and the data as random.
+  For data of zero mean the backward error is of order `u` whatever `n` is,
+  which in forward terms is the `sqrt(K) * u * sigma` term; for a nonzero mean
+  it returns to `sqrt(n) * u`, the `sqrt(K) * u * |ref|` term.
 
 ### Rounding points: intermediates below float
 
@@ -146,6 +310,18 @@ reference matched the emulation without them at 99.96 % or more of the
 elements of each output. A rounded value that a later node cancels leaves a
 difference no relative term of the output sees: bfloat16 results 1 and
 1.0078125 differ by one step, and after adding -1 they are 0 and 0.0078125.
+
+The CPU reference used to ignore the node's compute type: its pointwise nodes
+added in double and rounded once, whatever `compute_data_type` said, while
+the GPU reference and the engine honour it. That is fixed (e766aebc760c and
+60837ab26fa7: the plan passes the compute type to the reference), and the
+two figures above were measured before it. The terms of the rounding points
+that cover a node's own compute-type roundings (the operand conversions and
+the result, below) were written to cover that difference; they are kept
+until the Variant2 outputs are re-measured against the fixed reference. The
+points at stored tensors stay in any case: a one-step difference in the
+convolution's float sum can flip a stored half or bfloat16 value, and no
+reference fix removes that.
 
 Every place between the convolution and the output where a value is rounded
 to half or bfloat16 is a rounding point:
@@ -164,15 +340,19 @@ first, and that rounding is a point whether or not a node reads the result.
 Float and double intermediates add no point.
 
 A value `v` rounded to a type with epsilon `eps_p` moves by at most half a unit
-in the last place, `eps_p / 2 * |v|` at most. The elements of a tensor reach
-about twice their root mean square `m`, so one point contributes `eps_p * m`
-at its own place, and the error reaches the output multiplied by the slope
+in the last place, `eps_p / 2 * |v|`. The elements of a tensor reach about
+twice their root mean square `m` at a typical extreme (a 2-sigma level, not
+the largest value), and there the rounding error is `eps_p / 2 * 2m`, that
+is `eps_p * m`. One point contributes that level at its own place. It is not a
+bound: an element beyond `2m` has a larger error. The error reaches the output
+multiplied by the slope
 `s` of the nodes in between: 1 through `ADD`, `SUBTRACT` and the modes assumed
 to have a slope of about 1, and the largest magnitude of the scale through
 a `MUL`. The error in the scale operand of a `MUL` that is itself rounded
 reaches the output multiplied by the size `m` of the convolution's side of
-the multiply. Where several nodes read a tensor and their results go to
-different outputs, the slope is the largest of them. Where the results meet
+the multiply. The slope is the one to the output being graded: a tensor with
+no path to it is no point of it, and a graph with several outputs has its own
+points and scale for each. Where the results meet
 again, one error travels both paths and the contributions add: for
 `ADD(MUL(y, s), y)` with `max|s|` = 3 the slope of `y` is 3 + 1 = 4.
 The points add (they do not combine as a root of squares: with five points
@@ -181,6 +361,10 @@ the sum is at most 2.2 times larger, and the data does not tell the two apart):
 ```text
 atol += sum over the points of  s * eps_p * m
 ```
+
+The sum of the points is a statistical band like the rest of the tolerance: it
+adds the typical-extreme levels of the roundings, and is not a bound on the
+largest error they can make together.
 
 The magnitude `m` follows the graph from the convolution's `sigma` (without
 the scales). A value is a factor times the convolution's result plus a
@@ -194,38 +378,56 @@ the convolution's side and an independent one. A mode with one operand leaves
 the value as it is. The magnitude of an operand is worked out only when a
 point needs it, so no input is looked up, or scanned on the host, for a graph
 without one.
-The coefficient 1 comes from that bound and is not fitted: the data needs at
+The coefficient 1 comes from that level and is not fitted: the data needs at
 most 0.115 of the term (see "Calibration of the rounding points").
 
 ### What the harness feeds it
 
-`convFwdErrorScale()` applies the model only when the graph has exactly one
-`ConvolutionFwd` node, with float compute type, and its `x` and `w` are graph
-inputs: not virtual, and not written by another node. Every pointwise node
+`convFwdErrorScale()` is asked for one output of the graph, the one being
+graded, and applies the model only when the graph has exactly one
+`ConvolutionFwd` node, with float compute type, whose `x` and `w` are graph
+inputs (not virtual, and not written by another node), and nothing else but
+pointwise nodes: a node of another kind leaves the model. Every pointwise node
 must compute in half, bfloat16, float or double, and every intermediate must
 be stored as one of these: a tensor that one node writes and another reads
 (the convolution's result, the pointwise results), virtual or not; an unset
 type is none of them. A result that no node reads is a graph output and is
 rounded once, as the model assumes, unless a node computing below float
-stored it in another type (see "Rounding points"). A value stored or computed in half or
-bfloat16 is a rounding point (see "Rounding points"); float and double add
-none. A `MUL` node with one
-operand from the convolution and the other a graph input (in either operand
-order) scales `sigma` by that input's largest magnitude, and the scales of
-several multiplies multiply; a `MUL` of anything else (the result with itself,
-two inputs) leaves the model. The other pointwise modes are not examined: each
-is assumed to change an error by at most its slope, about 1, so it leaves
-`sigma` unchanged. The conv-fwd test-plan bundles the calibration used have
-`ADD` and `MUL`, and as activations
-`RELU_FWD` (plain, with an upper or a lower clip, or leaky), `IDENTITY`,
-`SIGMOID_FWD`, `TANH_FWD`, `SOFTPLUS_FWD`, `ELU_FWD`, `SWISH_FWD`, `GELU_FWD`
-and `GELU_APPROX_TANH_FWD`: 506 of their 1,132 half and bfloat16
-`ConvolutionFwdPointwise` cases use an activation other than `RELU_FWD`. At the
-parameters those bundles set (softplus and swish beta 1, elu alpha 1) the largest
-slope among them is about 1.13 (gelu). A mode with another gain, such as `DIV`
-or `RECIPROCAL`, would be graded as if it had none. Nodes that are neither the
-convolution nor pointwise are ignored. The scale is one value for the whole
-graph, not one per output; those graphs have at most one multiply.
+stored it in another type (see "Rounding points"). A value stored or computed
+in half or bfloat16 is a rounding point (see "Rounding points"); float and
+double add none.
+
+The scale of an output is the factor by which it carries the convolution's
+result. A `MUL` node with one operand from the convolution and the other a
+graph input (in either operand order) multiplies the factor by that input's
+largest magnitude; an `ADD`, a `SUBTRACT` and every other mode with several
+operands add the factors, so `ADD(MUL(y, 0.5), y)` is `1.5 y`; a mode with one
+operand leaves it as it is. A `MUL` on the branch of another output does not
+enter it. A `MUL` of anything else (the result with itself, two inputs) leaves
+the model, and so does an output that no node writes or that does not depend
+on the convolution.
+
+A pointwise node is modeled only for the modes whose slope is about 1: `ADD`,
+`SUBTRACT`, `BINARY_SELECT` (which passes one operand on), `MUL` and the
+activations `RELU_FWD` (plain, with an upper or a lower clip, or leaky with a
+slope of at most 1), `IDENTITY`, `SIGMOID_FWD`, `TANH_FWD`, `SOFTPLUS_FWD`,
+`ELU_FWD` (alpha at most 1), `SWISH_FWD`, `GELU_FWD` and
+`GELU_APPROX_TANH_FWD`. Any other mode (`DIV`, `RECIPROCAL`, `SQRT`, ...) and
+a parameter that steepens an activation (a leaky slope or an elu alpha above
+1) leave the model: the graph uses the per-op default. The conv-fwd test-plan
+bundles the calibration used have `ADD` and `MUL`, and the activations above:
+506 of their 1,132 half and bfloat16 `ConvolutionFwdPointwise` cases use an
+activation other than `RELU_FWD`. At the parameters those bundles set
+(softplus and swish beta 1, elu alpha 1) the largest slope among them is about
+1.13 (gelu).
+
+A graph whose `x` and `w` are both filled with one value (a `FIXED` recipe, or a
+value baked into the graph) also uses the per-op default: see "What kind of
+tolerance this is". In the test-plan bundles 12 of the 1,546 float
+`ConvolutionFwd*` cases (the float32 `F21const` cases of `ConvolutionFwd`: 9 at
+the full level, 2 comprehensive, 1 standard) fill both inputs with a constant,
+read from the fill recipes of their sweeps. 28 float cases have a `FIXED` fill
+on at least one input, none uses a value list, and none declares golden data.
 A graph outside what is described here, an input whose statistics are not
 available (a NaN or an infinity in golden data or in a fill recipe, an
 unreadable baked value) use the per-op default.
@@ -243,8 +445,8 @@ A graph input's statistics come from, in this order:
   already there.
 
 `sigma` is the typical output only for inputs with a zero mean. Then partial
-sums cancel and the output grows as `sqrt(K)`. For a nonzero mean (a constant
-fill, or uniform on `[0, a]`) the output is larger than `sigma` (the root mean
+sums cancel and the output grows as `sqrt(K)`. For a nonzero mean (uniform on
+`[0, a]`, say; a constant fill is a different case) the output is larger than `sigma` (the root mean
 square is 3, 25 and 190 times `sigma` for uniform on `[0, 1]` at `K` = 16,
 1,152 and 65,536), so `atol` is a smaller fraction of it and the `rtol` term,
 which scales with the output, carries the tolerance. The calibration covered
@@ -299,6 +501,9 @@ where that ratio is smallest: the factor by which the error could grow before
 the output fails. It is 1 at the point of failure. It was taken over the 48
 largest-error elements (by absolute error and by rounding steps) and 48
 random elements of each output; the failure counts use every element.
+The sample is a part of the elements, and the element with the smallest ratio
+need not be among them, so a headroom here is an upper bound on the smallest
+headroom of its output. The headrooms will be re-measured over all elements.
 
 The C++ implementation was then run through the harness, on every half and
 bfloat16 conv-fwd case MIOpen runs, at all four levels. The MI325X runs and the
@@ -484,6 +689,11 @@ maxima):
 | Implicit GEMM, xdlops | 3,779 | gfx942 2.31, gfx90a 2.31 |
 | Naive direct | 2,023 | gfx942 1.77, gfx90a 1.77 |
 
+The `c` an output needs is taken over the six worst-error elements kept for
+it, and the element that needs most need not be one of them, so these maxima
+are lower bounds on what the outputs need (5.68 and 2.46 included). They will
+be re-measured over all elements.
+
 ### Float against the fixed 1e-5
 
 The default that a float convolution-forward output had was `atol = rtol =
@@ -582,6 +792,9 @@ MIOpen's file sets 9. Its worst solver family, Winograd, needs 5.68 on gfx942
 and 5.40 on gfx90a, so 9 leaves it a headroom of 1.58 and 1.67: at least 1.5,
 a little above the 1.44 of half and bfloat16. The same 9 makes the other
 families' bands wider than they need: their headroom is 3.6 or more.
+The headrooms in this section come from sampled elements (see "Calibration"):
+they are upper bounds on the smallest headroom of an output, and will be
+re-measured over all elements.
 
 
 ### When an engine needs more
