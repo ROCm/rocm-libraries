@@ -271,8 +271,7 @@ test_categories:
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
-      # Its 92 host tests take about 4.5 minutes unsharded, too long for the
-      # single-shard quick tier.
+      # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
     labels:
       - "standard"

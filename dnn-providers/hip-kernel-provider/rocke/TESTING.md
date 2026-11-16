@@ -677,9 +677,12 @@ the items about evenly by count. The split does not use the run time.
 `python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`.
 Every installed rocKE pytest entry starts its command with this variable,
 except the explicit gates. Use it for each new installed pytest entry. The
-configure stops with an error when an installed entry that runs `-m pytest`
-does not start with the variable, or when an explicit gate loads the plugin.
-Without the variable, the entry would run all its items on every CI shard.
+configure stops with an error when an installed entry that runs pytest (its
+command runs `-m pytest`, or its program is `pytest`) does not start with the
+variable, or when an explicit gate loads the plugin. Without the variable, the
+entry would run all its items on every CI shard. The explicit gates are listed
+in `_ROCKE_EXPLICIT_PYTEST_GATES` in `library/tests/ctest_lists.cmake`; a new
+gate goes there too.
 The plugin takes the shard from the first source that applies:
 
 1. A non-blank `ROCKE_TEST_SHARD` (`i/n` or `i,j,.../n`, 0-based).

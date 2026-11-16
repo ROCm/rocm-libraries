@@ -878,16 +878,19 @@ if(ROCKE_INSTALL_TESTS)
   # TheRock starts every installed entry on every hipkernelprovider CI shard. A
   # pytest entry runs only its shard's share when its command starts with
   # ${_ROCKE_INSTALLED_PYTEST}; otherwise it runs whole on every shard. Stop the
-  # configure for such an entry. The explicit gates stop on a partial run, so
-  # they must not load the shard plugin.
-  set(_rocke_unsharded_gates
-      rocke_library_counted_structural_gate rocke_library_counted_compiler_gate)
-  string(REGEX MATCHALL "add_test\\([A-Za-z0-9_]+ [^\n]*-m pytest[^\n]*"
-         _rocke_pytest_adds "${_ROCKE_INSTALLED_CTEST_ENTRIES}")
+  # configure for such an entry. An entry runs pytest when its command runs
+  # "-m pytest" or its program is pytest (or py.test). The explicit gates,
+  # _ROCKE_EXPLICIT_PYTEST_GATES in library/tests/ctest_lists.cmake, stop on a
+  # partial run, so they must not load the shard plugin.
+  string(REGEX MATCHALL "add_test\\([^\n]*" _rocke_adds "${_ROCKE_INSTALLED_CTEST_ENTRIES}")
   set(_rocke_bad_pytest_entries "")
-  foreach(_rocke_add IN LISTS _rocke_pytest_adds)
+  foreach(_rocke_add IN LISTS _rocke_adds)
+    if(NOT _rocke_add MATCHES
+       "^add_test\\([A-Za-z0-9_]+ (\"?([^ \"]*[/\\\\])?(pytest|py\\.test)(\\.exe)?\"?[ )]|[^\n]* -m pytest[ )])")
+      continue()
+    endif()
     string(REGEX REPLACE "^add_test\\(([A-Za-z0-9_]+) .*" "\\1" _rocke_name "${_rocke_add}")
-    if(_rocke_name IN_LIST _rocke_unsharded_gates)
+    if(_rocke_name IN_LIST _ROCKE_EXPLICIT_PYTEST_GATES)
       if(_rocke_add MATCHES "rocke\\.tests\\.ctest_shard")
         list(APPEND _rocke_bad_pytest_entries
              "${_rocke_name} (an explicit gate must not load the shard plugin)")

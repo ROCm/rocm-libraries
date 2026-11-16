@@ -256,6 +256,70 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
 
 
 @requires_cmake
+@pytest.mark.skipif(
+    not (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file(),
+    reason="needs the rocKE library test lists",
+)
+@pytest.mark.parametrize(
+    ("before", "after", "reported"),
+    [
+        pytest.param(
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest ",
+            "rocke_library_conv_fwd_aot_packaging_pytest",
+            id="python-m-pytest",
+        ),
+        pytest.param(
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} ",
+            "add_test(rocke_library_conv_fwd_aot_packaging_pytest pytest ",
+            "rocke_library_conv_fwd_aot_packaging_pytest",
+            id="pytest-program",
+        ),
+        pytest.param(
+            "add_test(rocke_library_counted_structural_gate python -m pytest ",
+            "add_test(rocke_library_counted_structural_gate ${_ROCKE_INSTALLED_PYTEST} ",
+            "rocke_library_counted_structural_gate (an explicit gate must not load",
+            id="gate-with-plugin",
+        ),
+    ],
+)
+def test_configure_stops_on_an_installed_pytest_entry_that_breaks_the_shard_rule(
+    tmp_path, before, after, reported
+):
+    """platform/CMakeLists.txt stops the configure when an installed pytest entry
+    does not start with ${_ROCKE_INSTALLED_PYTEST}, so that the entry would run
+    whole on every CI shard, or when an explicit gate loads the shard plugin.
+    The check runs in the build job's configure; CI does not run this file."""
+    rocke = tmp_path / "rocke"
+    skip = shutil.ignore_patterns("__pycache__", ".pytest_cache")
+    shutil.copytree(PLATFORM, rocke / "platform", ignore=skip)
+    shutil.copytree(PLATFORM.parent / "library", rocke / "library", ignore=skip)
+    lists = rocke / "library" / "tests" / "ctest_lists.cmake"
+    text = lists.read_text()
+    assert text.count(before) == 1, before
+    lists.write_text(text.replace(before, after))
+
+    configured = subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(rocke / "platform"),
+            "-B",
+            str(tmp_path / "build"),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert configured.returncode != 0, configured.stdout
+    message = " ".join(configured.stderr.split())
+    assert "must start its command with ${_ROCKE_INSTALLED_PYTEST}" in message
+    assert reported in message
+
+
+@requires_cmake
 @pytest.mark.parametrize(
     "provider_subdir",
     ["", "hip_kernel_provider"],
