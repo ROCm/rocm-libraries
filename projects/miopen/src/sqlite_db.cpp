@@ -273,6 +273,19 @@ int SQLite::Retry(std::function<int()> f) const
 
 int SQLite::Changes() const { return sqlite3_changes(pImpl->ptrDb.get()); }
 
+std::vector<SQLite::StatementInfo> SQLite::LiveStatements() const
+{
+    std::vector<StatementInfo> statements;
+    for(auto* stmt = sqlite3_next_stmt(pImpl->ptrDb.get(), nullptr); stmt != nullptr;
+        stmt       = sqlite3_next_stmt(pImpl->ptrDb.get(), stmt))
+    {
+        const auto* text = sqlite3_sql(stmt);
+        statements.push_back(
+            {text == nullptr ? "" : text, sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_RUN, 0)});
+    }
+    return statements;
+}
+
 std::string SQLite::ErrorMessage() const
 {
     std::string errMsg = "Internal error while accessing SQLite database: ";
@@ -311,6 +324,15 @@ public:
                 MIOPEN_THROW(miopenStatusInternalError, sql.ErrorMessage());
         }
         MIOPEN_LOG_I2("[" << JoinStrings(vals, ",") << "]");
+    }
+
+    /// Binding fails, for example, on a statement that was stepped but not reset; with reused
+    /// statements that must not go unnoticed, or the next step would run with stale values.
+    void CheckBind(int rc) const
+    {
+        if(rc != SQLITE_OK)
+            MIOPEN_THROW(miopenStatusInternalError,
+                         std::string{"SQLite bind error: "} + sqlite3_errstr(rc));
     }
 
     sqlite3_stmt_ptr ptrStmt = nullptr;
@@ -360,8 +382,8 @@ int64_t SQLite::Statement::ColumnInt64(int idx)
 
 int SQLite::Statement::BindText(int idx, const std::string& txt)
 {
-    sqlite3_bind_text(
-        pImpl->ptrStmt.get(), idx, txt.data(), txt.size(), SQLITE_TRANSIENT); // NOLINT
+    pImpl->CheckBind(sqlite3_bind_text(
+        pImpl->ptrStmt.get(), idx, txt.data(), txt.size(), SQLITE_TRANSIENT)); // NOLINT
     return 0;
 }
 
@@ -372,15 +394,22 @@ int SQLite::Statement::BindPath(int idx, const fs::path& path)
 
 int SQLite::Statement::BindBlob(int idx, const std::vector<char>& blob)
 {
-    sqlite3_bind_blob(
-        pImpl->ptrStmt.get(), idx, blob.data(), blob.size(), SQLITE_TRANSIENT); // NOLINT
+    pImpl->CheckBind(sqlite3_bind_blob(
+        pImpl->ptrStmt.get(), idx, blob.data(), blob.size(), SQLITE_TRANSIENT)); // NOLINT
     return 0;
 }
 
 int SQLite::Statement::BindInt64(int idx, const int64_t num)
 {
-    sqlite3_bind_int64(pImpl->ptrStmt.get(), idx, num);
+    pImpl->CheckBind(sqlite3_bind_int64(pImpl->ptrStmt.get(), idx, num));
     return 0;
+}
+
+void SQLite::Statement::Reset()
+{
+    // sqlite3_reset() repeats the error of the last step, which the caller has already handled.
+    sqlite3_reset(pImpl->ptrStmt.get());
+    sqlite3_clear_bindings(pImpl->ptrStmt.get());
 }
 
 SQLitePerfDb::SQLitePerfDb(DbKinds db_kind, const fs::path& filename_, bool is_system_)
