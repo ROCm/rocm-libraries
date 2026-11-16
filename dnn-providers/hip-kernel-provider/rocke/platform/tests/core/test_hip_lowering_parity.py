@@ -5,8 +5,9 @@
 The family-wide HIP source identity test compares whatever the kernel families
 build. The cases here pin the ops those families may not reach on every
 target: every native MFMA and WMMA atom in each target's MMA catalog, the inline asm
-template and constraints refusals, and the s_waitcnt refusal on a target
-without the monolithic instruction. Each case lowers one small kernel through the
+template and constraints refusals, the s_waitcnt refusal on a target
+without the monolithic instruction, and both forms of the LDS destination of
+tile.async_buffer_load_lds. Each case lowers one small kernel through the
 Python lowerer and, through the rocke_engine binding, the C++ one, and compares
 the text or the error. The last cases test the rocke.tests.engines HIP helpers
 themselves: given a C++ outcome that disagrees with the Python one, each helper
@@ -15,6 +16,8 @@ lowering can run before anything else, so they skip where every other case does.
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 from rocke.core.arch import ArchTarget, MmaOp, arches_with_own_facts
@@ -124,6 +127,34 @@ def test_ir_lower_cli_reports_what_the_binding_reports():
 def test_waitcnt_still_lowers_where_the_target_has_it(op, gfx):
     hip = lower_hip_with_both_engines(_waitcnt_kernel(op).kernel, gfx)
     assert "__builtin_amdgcn_s_waitcnt(" in hip
+
+
+def test_async_buffer_load_lds_takes_an_lds_allocation_or_an_lds_address():
+    """tile.async_buffer_load_lds names its LDS destination by the allocation
+    itself or by an i64 LDS address (smem_addr_of, smem_ptr_add), as the LLVM
+    lowering accepts. Both engines lower each form to the same source: the
+    allocation's storage, or the address cast to an LDS pointer."""
+    builder = IRBuilder("async_buffer_load_lds_kernel")
+    src = builder.param("src", PtrType(F32, "global"))
+    rsrc = builder.buffer_rsrc(src, builder.const_i32(4096))
+    lds = builder.smem_alloc(F32, [1, 256], name_hint="tile")
+    address = builder.smem_ptr_add(builder.smem_addr_of(lds), builder.const_i64(512))
+    zero = builder.const_i32(0)
+    builder.async_buffer_load_lds(rsrc, lds, zero, zero, 4)
+    builder.async_buffer_load_lds(rsrc, address, zero, zero, 4)
+    builder.ret()
+    hip = lower_hip_with_both_engines(builder.kernel, "gfx950")
+    calls = re.findall(
+        r"_llvm_amdgcn_raw_ptr_buffer_load_lds\(\w+, "
+        r"\(__attribute__\(\(address_space\(3\)\)\) void\*\)(\S+), 16,",
+        hip,
+    )
+    assert len(calls) == 2, hip
+    allocation_pointer, address_pointer = calls
+    assert re.fullmatch(r"&\w+\[0\]", allocation_pointer), allocation_pointer
+    address_name = re.fullmatch(r"\((\w+)\)", address_pointer)
+    assert address_name, address_pointer
+    assert f"int64_t {address_name.group(1)} = " in hip
 
 
 # WMMA atoms take 8- and 4-bit A and B operands packed into 32-bit words, and
