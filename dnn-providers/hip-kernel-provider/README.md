@@ -120,6 +120,17 @@ Kernels the provider compiles at run time with HIPRTC (every `hipkernel:CONV_*` 
 - **Size.** Nothing is evicted: entries for earlier toolchains or kernel edits stay until removed.
 - **Clearing.** Delete the directory at any time; a missing entry is compiled again on next use. On Linux: `rm -rf "${HIPDNN_CACHE_DIR:-$HOME/.cache/hipdnn}/hip-kernel-provider/hiprtc"`. On Windows (PowerShell, default root): `Remove-Item -Recurse "$env:USERPROFILE\.hipdnn\cache\hip-kernel-provider\hiprtc"`. When developing kernels, a per-worktree `HIPDNN_CACHE_DIR` keeps each tree's entries (and its autotune winners, under `ingestor-winners/`) apart.
 
+### Seeing what ran
+
+With `HIPDNN_LOG_LEVEL=info`:
+
+- **Each plan build** logs one line: the engine, the config it chose (the kernel descriptor's name), and each program it needed with where its code object came from (`in-process`, `disk-cache`, `compiled`, or `store` for a precompiled store) and how long that took, then the total compile time:
+
+  ```
+  plan build: engine 'hipkernel:CONV_IGEMM_FWD', config 'conv_igemm_fwd.<config>', 2 program(s): kernels/ConvIgemm.cpp compiled 812.4 ms, kernels/ConvIgemm.cpp in-process 0.0 ms; compile 812.4 ms
+  ```
+
+  An engine without named configs logs `config -`.
 ## Saving and Loading Execution Plans
 
 You can save a built execution plan to bytes and load it later, in the same process or in another one. A loaded plan runs without the plan build: the provider does not search descriptors, read a kpack archive, or compile a kernel.

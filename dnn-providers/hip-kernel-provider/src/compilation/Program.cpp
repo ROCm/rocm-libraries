@@ -3,8 +3,10 @@
 
 #include "Program.hpp"
 #include "HiprtcDiskCache.hpp"
+#include "ProgramFetchRecording.hpp"
 #include "Utils.hpp"
 
+#include <chrono>
 #include <string_view>
 
 #include "kernel_includes.hpp"
@@ -32,6 +34,12 @@ std::string cacheKey(const std::string& programName,
         hiprtc_cache::compilerIdentity(), programName, source, includeTexts, includeNames, options);
 }
 
+double millisecondsSince(std::chrono::steady_clock::time_point start)
+{
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+        .count();
+}
+
 } // namespace
 
 std::string Program::codeObjectKey(const std::string& kernelFileName,
@@ -47,6 +55,8 @@ std::string Program::codeObjectKey(const std::string& kernelFileName,
 Program::Program(std::string kernelFileName, const std::vector<std::string>& options)
     : _programName(std::move(kernelFileName))
 {
+    const auto started = std::chrono::steady_clock::now();
+
     // Load source/includes
     auto kernelSrc = hip_plugin::getKernelSrc(_programName.c_str());
     std::vector<std::string_view> includeTexts;
@@ -63,6 +73,8 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
            && hipModuleLoadData(&_module, cached.codeObject.data()) == hipSuccess)
         {
             _binary = std::move(cached.codeObject);
+            ProgramFetchRecording::record(
+                {_programName, CodeSource::DISK_CACHE, millisecondsSince(started)});
             return;
         }
         // Absent, damaged or not loadable on this device: compile and replace it below. A
@@ -147,6 +159,7 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
     {
         hiprtc_cache::writeCodeObject(cachePath, _binary);
     }
+    ProgramFetchRecording::record({_programName, CodeSource::COMPILED, millisecondsSince(started)});
 }
 
 hipFunction_t Program::getKernel(const std::string& kernelName) const

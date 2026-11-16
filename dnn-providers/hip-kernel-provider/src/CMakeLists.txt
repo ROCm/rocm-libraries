@@ -11,11 +11,13 @@ add_library(
     core/ApplicabilityPool.cpp
     core/Handle.cpp
     core/Container.cpp
+    core/PlanDescription.cpp
     core/PluginPublic.cpp
     core/Utils.cpp
     compilation/HiprtcDiskCache.cpp
     compilation/Kernel.cpp
     compilation/Program.cpp
+    compilation/ProgramFetchRecording.cpp
     utilities/Digest.cpp
     utilities/sha256.cpp
 )

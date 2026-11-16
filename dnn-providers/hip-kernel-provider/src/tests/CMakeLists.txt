@@ -25,6 +25,7 @@ add_executable(
     core/TestPluginPublic.cpp
     compilation/TestHiprtcDiskCache.cpp
     compilation/TestHiprtcCacheStress.cpp
+    compilation/TestProgramFetchRecording.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
