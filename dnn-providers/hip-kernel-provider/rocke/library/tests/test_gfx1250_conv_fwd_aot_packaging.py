@@ -315,7 +315,7 @@ def test_serves_is_the_dispatchers_admission_and_the_launch_its_plan(specs):
             if ours != theirs:
                 # Only the packaged bounds decline what the dispatcher admits.
                 assert theirs and not ours, (spec.identity().label(), problem)
-                assert "exceeds" in why or "2**23" in why, why
+                assert any(s in why for s in ("exceeds", "2**23", "one dispatch")), why
                 declined += 1
                 continue
             if not ours:

@@ -1,8 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for tools/make_gfx1250_conv_fwd_aot_config.py and the shipped
-hipkernel:Gfx1250ConvFwdAot bundle."""
+"""Tests for tools/make_conv_aot_config.py ``--arch gfx1250`` and the shipped
+hipkernel:Gfx1250ConvFwdAot bundle; test_make_conv_aot_config.py covers gfx950."""
 
 import collections
 import copy
@@ -22,8 +22,10 @@ _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
 
 import launch_surface  # noqa: E402
-import make_conv_aot_config as fwd_tool  # noqa: E402
-import make_gfx1250_conv_fwd_aot_config as tool  # noqa: E402
+import make_conv_aot_config as tool  # noqa: E402
+
+_ARCH = "gfx1250"
+_PRODUCT = "hipkernel:Gfx1250ConvFwdAot"
 
 _REPO = launch_surface.find_repo_root(_TOOLS)
 _ROCKE = _REPO / "dnn-providers" / "hip-kernel-provider" / "rocke"
@@ -33,7 +35,14 @@ _PROVIDER = (
 )
 _SLUG = "gfx1250_conv_fwd_aot"
 _SHIPPED_DIR = _PROVIDER / f"descriptors/rocKE/{_SLUG}"
-_OTHER_CONV_AOT_DIRS = (_PROVIDER / "descriptors/rocKE/gfx950_conv_dgrad_aot",)
+_OTHER_CONV_AOT_DIRS = tuple(
+    _PROVIDER / f"descriptors/rocKE/{slug}"
+    for slug in (
+        "gfx950_conv_fwd_aot",
+        "gfx950_conv_dgrad_aot",
+        "gfx1250_conv_dgrad_aot",
+    )
+)
 _CENSUS = (
     _REPO / "dnn-providers/hip-kernel-provider/src/tests/engines"
     "/kernel_ingestor_engine/packs/TestGfx1250ConvFwdAotPacks.cpp"
@@ -58,10 +67,26 @@ def identities():
 
 
 @pytest.fixture(scope="module")
-def specs():
-    out, rejected = tool.read_catalog(_INSTANCES)
-    assert not rejected, rejected
+def specs(identities):
+    """The catalog in list order, as the tool reads it."""
+    out = []
+    for spec, reason in tool.instance_specs(identities, 1, _ARCH):
+        assert spec is not None, reason
+        out.append(spec)
     return out
+
+
+def _variant_name(spec) -> str:
+    layout = tool.ARCHES[_ARCH]
+    if not spec.is_direct:
+        name = layout.merged_name if spec.is_merged else layout.implicit_name
+    else:
+        name = layout.direct_names[spec.direct_variant]
+    return name.format(dtype=spec.dtype, instance_id=spec.instance_id)
+
+
+def _kmd_fields() -> list:
+    return tool.build_config([], arch=_ARCH)["kmd_fields"]
 
 
 @pytest.fixture(scope="module")
@@ -107,10 +132,10 @@ def test_instance_id_is_the_identity_stable_hash(identities):
     from kernels.conv.kernel_identity import KernelIdentity
 
     for identity in identities:
-        spec, _ = tool.instance_spec(identity)
+        spec, _ = tool.instance_spec(identity, _ARCH)
         assert spec.instance_id == KernelIdentity.from_dict(identity).stable_hash()
         # The spec restores the identity it was built from.
-        assert spec.to_identity() == KernelIdentity.from_dict(identity)
+        assert spec.identity() == KernelIdentity.from_dict(identity)
 
 
 def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(specs, shipped):
@@ -121,21 +146,20 @@ def test_the_shipped_bundle_is_its_catalog_with_instance_derived_ids(specs, ship
     priority = tool.priorities(specs)
     for spec in specs:
         shard, kernel = shipped[spec.instance_id]
-        assert shard == tool.shard_name(spec)
-        expected = {
-            name: getattr(spec, name) for name in tool.spec_order(spec.algorithm)
-        }
+        assert shard == tool.shard_name(spec, "k-loop")
+        expected = {name: getattr(spec, name) for name in tool.spec_order(spec)}
         assert kernel["kernel_source"]["spec"] == expected
         assert kernel["metadata"] == expected
-        assert kernel["kernel_source"]["source"] == tool.ADAPTER_SOURCE
-        assert kernel["kernel_source"]["builder"] == tool.ADAPTER_BUILDER
+        assert (
+            kernel["kernel_source"]["source"]
+            == "builders/common/convolution_forward.py"
+        )
+        assert kernel["kernel_source"]["builder"] == "build_gfx1250_conv_fwd_aot"
         assert kernel["id"] == str(
             uuid.uuid5(tool.INSTANCE_UUID_NAMESPACE, spec.instance_id)
         )
-        assert kernel["id"] == tool.kernel_uuid(spec.instance_id)
-        assert kernel["name"] == tool._VARIANT_NAMES[spec.algorithm].format(
-            dtype=spec.dtype, instance_id=spec.instance_id
-        )
+        assert kernel["id"] == tool.kernel_uuid(spec.instance_id, _PRODUCT, _PRODUCT)
+        assert kernel["name"] == _variant_name(spec)
         assert kernel["priority"] == priority[spec.instance_id]
 
 
@@ -156,10 +180,10 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
         for path in _SHIPPED_DIR.iterdir()
         if path.name not in ("artifacts", "heuristics")
     )
-    assert {tool.shard_name(spec) for spec in specs} == {
+    assert {tool.shard_name(spec, "k-loop") for spec in specs} == {
         f"{dtype}_{group}"
         for dtype in ("fp16", "bf16")
-        for group in ("implicit", "direct")
+        for group in ("mem_plain", "wavelet_plain", "direct")
     }
     assert names == sorted(
         [f"{_SLUG}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
@@ -186,7 +210,7 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(specs):
 def test_the_bundle_names_its_own_native_symbols():
     ued, udd, uhd, kmd = (_document(k) for k in ("ued", "udd", "uhd", "kmd"))
     umd = json.loads((_SHIPPED_DIR / "kernel_dtype_matches_graph.umd.json").read_text())
-    assert ued["name"] == tool.PRODUCT_ENGINE
+    assert ued["name"] == _PRODUCT
     assert ued["graph_match"] == {"native": f"hipkernel.{_SLUG}.graph_match"}
     assert udd["dispatch_symbol"] == f"hipkernel.{_SLUG}.dispatch"
     assert uhd["native"] == {"symbol": f"hipkernel.{_SLUG}.score"}
@@ -197,38 +221,33 @@ def test_the_bundle_names_its_own_native_symbols():
     assert list(ued["sort_kernel_catalog"]) == ["default"]
     default = ued["sort_kernel_catalog"]["default"]
     assert isinstance(default, list) and default[0] == uhd["id"]
-    assert ued["knobs"] == list(tool.engine_knobs())
+    assert ued["knobs"] == list(tool.engine_knobs(_ARCH))
     kmd_names = [f["name"] for f in kmd["fields"]]
-    assert kmd_names == [f["name"] for f in tool.kmd_fields()]
+    assert kmd_names == [f["name"] for f in _kmd_fields()]
     assert set(ued["knobs"]) <= set(kmd_names)
     for restated in ("instance_id", "dtype", "filter_h", "stride_h", "pad_h", "cpg"):
         assert restated not in ued["knobs"]
 
 
 def test_the_config_borrows_no_native_symbols(specs):
-    config = tool.build_config(specs)
+    config = tool.build_config(specs, arch=_ARCH)
     assert "native_symbols_from" not in config["engine"]
     assert config["workspace_policy"] == "none"
-    other = tool.build_config(specs[:3], "hipkernel:Gfx1250ConvFwdAotSeed")
-    assert other["engine"]["native_symbols_from"] == tool.PRODUCT_ENGINE
-    assert "native_symbols_from_slug" not in other["engine"]
-    slugged = tool.build_config(
-        specs[:3], "hipkernel:Gfx1250ConvFwdAotSeed", native_symbols_from_slug="fwd"
-    )
-    assert slugged["engine"]["native_symbols_from_slug"] == "fwd"
+    other = tool.build_config(specs[:3], "hipkernel:Gfx1250ConvFwdAotSeed", arch=_ARCH)
+    assert other["engine"]["native_symbols_from"] == f"hipkernel.{_SLUG}"
     # The envelope: one native-heuristic engine, no workspace, one shared-shape graph
     # match, every KMD field a metadata field bound to the spec field of its name.
-    metadata = [f["name"] for f in tool.kmd_fields()]
+    metadata = [f["name"] for f in _kmd_fields()]
     assert {k: v for k, v in config.items() if k != "packs"} == {
         "dialect": "packaged",
         "authored_subpath": f"rocKE/{_SLUG}",
         "engine": {
-            "name": tool.PRODUCT_ENGINE,
+            "name": _PRODUCT,
             "sdk_version": "1.0.0",
-            "knobs": list(tool.engine_knobs()),
+            "knobs": list(tool.engine_knobs(_ARCH)),
             "heuristic": "native",
         },
-        "kmd_fields": tool.kmd_fields(),
+        "kmd_fields": _kmd_fields(),
         "kernel_source_kind": "rocke",
         "workspace_policy": "none",
         "graph_match": {"shape": "shared_shape", "discriminator": "none"},
@@ -238,16 +257,16 @@ def test_the_config_borrows_no_native_symbols(specs):
             "bindings": {name: {"field": name} for name in metadata},
         },
     }
-    assert tool.kernel_uuid(specs[0].instance_id, "hipkernel:X") != tool.kernel_uuid(
-        specs[0].instance_id
-    )
+    assert tool.kernel_uuid(
+        specs[0].instance_id, "hipkernel:X", _PRODUCT
+    ) != tool.kernel_uuid(specs[0].instance_id, _PRODUCT, _PRODUCT)
 
 
 def test_generated_config_expands_to_one_kernel_per_instance(tmp_path, specs):
     path = tmp_path / "fwd.yaml"
-    path.write_text(tool.dump_config(tool.build_config(specs)))
+    path.write_text(tool.dump_config(tool.build_config(specs, arch=_ARCH)))
     config = load_config(path)
-    assert config.engine.name == tool.PRODUCT_ENGINE
+    assert config.engine.name == _PRODUCT
     assert config.is_multi_pack and not config.has_operation_matchers
     kernels = [k for pack in config.packs for k in pack.kernels]
     assert len(kernels) == len(specs)
@@ -271,7 +290,7 @@ def test_bundle_ids_are_unique_across_the_conv_aot_bundles():
 
 _CAPABILITY = (
     "dtype",
-    "algorithm",
+    "kernel_family",
     "filter_h",
     "filter_w",
     "stride_h",
@@ -293,7 +312,7 @@ def _baked(values: dict, field: str):
     """The value ``values`` admits for ``field``, or None for any (read at run time). A
     direct kernel bakes its filter, stride, padding and dilation exactly (0 padding is a
     value); every other capability, and all of an implicit GEMM's, is runtime when 0."""
-    if values["algorithm"] != "implicit_gemm" and field in _EXACT_WHEN_DIRECT:
+    if values["kernel_family"] != 0 and field in _EXACT_WHEN_DIRECT:
         return values[field]
     return values[field] or None
 
@@ -318,7 +337,7 @@ def test_two_kernels_one_graph_can_meet_differ_in_their_knobs(shipped):
     by_tuple = collections.defaultdict(list)
     for _, kernel in shipped.values():
         values = dict(defaults, **kernel["metadata"])
-        by_tuple[tuple(values[k] for k in tool.engine_knobs())].append(values)
+        by_tuple[tuple(values[k] for k in tool.engine_knobs(_ARCH))].append(values)
     shared = 0
     for kernels in by_tuple.values():
         for i, left in enumerate(kernels):
@@ -387,35 +406,38 @@ def test_the_census_names_every_pack_and_kernel(shipped):
         assert f'"{kernel["name"]}"' in text
     for kdp in (_SHIPPED_DIR / "artifacts").glob("*.kdp.json"):
         assert f'"{json.loads(kdp.read_text())["name"]}"' in text
-    assert f'"{tool.PRODUCT_ENGINE}"' in text
+    assert f'"{_PRODUCT}"' in text
     assert f"hipkernel.{_SLUG}.score" in text
-    assert f"knobs.size(), {len(tool.engine_knobs())}U" in text
+    assert f"knobs.size(), {len(tool.engine_knobs(_ARCH))}U" in text
 
 
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
-        ({"arch": "gfx950"}, "arch="),
-        ({"direction": "dgrad"}, "is not a dgrad algorithm"),
+        ({"arch": "gfx950"}, "not a gfx1250 forward"),
+        ({"direction": "dgrad"}, "not a gfx1250 forward implicit-GEMM or direct"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
-        ({"split_k": 2}, "split_k"),
-        ({"llvm_flavor": "llvm22"}, "llvm_flavor"),
         ({"algorithm": "winograd"}, "no packaged launch"),
-        ({"knobs": '{"unknown": 1}'}, "knob unknown"),
+        ({"knobs": '{"unknown": 1}'}, "knobs ['unknown']"),
     ],
 )
 def test_unsupported_identities_are_named_with_their_reason(identities, change, reason):
-    identity = copy.deepcopy(identities[0])
+    direct = next(i for i in identities if i["algorithm"] == "direct_fwd_wmma")
+    identity = copy.deepcopy(direct)
     identity.update(change)
-    spec, why = tool.instance_spec(identity)
+    spec, why = tool.instance_spec(identity, _ARCH)
     assert spec is None and reason in why, why
+
+
+def test_an_implicit_gemm_field_the_launch_does_not_model_is_refused(identities):
+    implicit = next(i for i in identities if i["algorithm"] == "implicit_gemm")
+    spec, why = tool.instance_spec(dict(implicit, split_k=2), _ARCH)
+    assert spec is None and "split_k" in why, why
 
 
 def test_a_bool_knob_stated_false_keeps_its_identity(identities):
     """An instance may state a bool knob false; the spec keeps that apart from unset, so
     the restored identity (and its stable_hash) is the listed one."""
-    from builders.gfx1250.conv_fwd_aot import BOOL_FALSE
-
     stated_false = [
         i
         for i in identities
@@ -423,9 +445,9 @@ def test_a_bool_knob_stated_false_keeps_its_identity(identities):
     ]
     assert stated_false
     for identity in stated_false:
-        spec, why = tool.instance_spec(identity)
+        spec, why = tool.instance_spec(identity, _ARCH)
         assert spec is not None, why
-        assert spec.unroll_rows == BOOL_FALSE
+        assert spec.unroll_rows == 0
 
 
 def test_main_dedups_and_refuses_unsupported_unless_asked(tmp_path, identities, capsys):
@@ -435,6 +457,8 @@ def test_main_dedups_and_refuses_unsupported_unless_asked(tmp_path, identities, 
     instances.write_text(json.dumps(entries))
     out = tmp_path / "out.yaml"
     argv = [
+        "--arch",
+        _ARCH,
         "--rocke-root",
         str(_ROCKE),
         "--instances",
@@ -456,15 +480,15 @@ def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(tmp_path)
         kernel["id"] = str(uuid.uuid4())
     kdp = tmp_path / "x.kdp.json"
     kdp.write_text(json.dumps(document, indent=2) + "\n")
-    assert tool.stabilize_ids(kdp) == len(document["kernelDescriptors"])
+    assert tool.main(["--arch", _ARCH, "--stabilize-ids", str(kdp)]) == 0
     assert json.loads(kdp.read_text()) == json.loads(shipped.read_text())
-    # The forward tool's default product engine would derive other ids.
+    # The gfx950 engine's product name would derive other ids.
     for kernel in document["kernelDescriptors"]:
-        assert fwd_tool.kernel_uuid(
-            kernel["metadata"]["instance_id"], tool.PRODUCT_ENGINE
-        ) != tool.kernel_uuid(kernel["metadata"]["instance_id"])
+        assert tool.kernel_uuid(
+            kernel["metadata"]["instance_id"], _PRODUCT
+        ) != tool.kernel_uuid(kernel["metadata"]["instance_id"], _PRODUCT, _PRODUCT)
 
 
 def test_dumped_config_loads_back(specs):
-    text = tool.dump_config(tool.build_config(specs))
-    assert yaml.safe_load(text) == tool.build_config(specs)
+    config = tool.build_config(specs, arch=_ARCH)
+    assert yaml.safe_load(tool.dump_config(config)) == config

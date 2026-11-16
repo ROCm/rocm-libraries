@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Golden launch plans of hipkernel:Gfx1250ConvFwdAot, from rocKE's dispatcher.
+"""Golden launch plans of hipkernel:Gfx1250ConvFwdAot, from rocKE's packaging adapter.
 
 The engine's C++ port of admission and launch geometry is proven against the
-dispatcher it ports, through the packaging adapter's
-``gfx1250_conv_fwd_aot_serves`` / ``gfx1250_conv_fwd_aot_plan``
-(``builders/gfx1250/conv_fwd_aot.py``): for every catalog instance (the
-``--instances`` lists, ``configs/gfx1250_conv_fwd_aot_<dtype>.instances.json``) and a
-problem set, whether the instance admits the problem and, if it does, the launch plan
-it runs: per step the binary (its ``instance_id``), grid, block and every kernarg, and
+adapter it ports (``builders/common/convolution_forward.py``):
+``conv_fwd_aot_serves`` (rocKE's dispatcher admission within the packaged contract
+and launch bounds) and ``ConvFwdAotSpec.launch_plan`` (the dispatcher's plan). For
+every catalog instance (the ``--instances`` lists,
+``configs/gfx1250_conv_fwd_aot_<dtype>.instances.json``) and a problem set: whether
+the instance serves the problem and, if it does, the launch plan it runs: per step the binary (its ``instance_id``), grid, block and every kernarg, and
 the workspaces. Pointers and buffer sizes are symbolic (``{"buf": name, "offset": n}``,
 ``{"bytes": name}``), so the record is what the engine must compute, not an address.
 
+``--arch`` names the engine; only gfx1250 has a golden header (gfx950's geometry is
+tested by hand-written cases, ``TestGfx950ConvFwdGeometry.cpp``).
+
 ``--header`` writes the C++ golden header the engine's unit test reads: the KMD fields
-of every instance (as the catalog carries them), one shared problem set (``--shapes``
+of every instance (as the catalog carries them, each off its KMD default), one shared problem set (``--shapes``
 plus ``--synthetic`` problems around each instance's baked fields), and per instance
 the number of problems it admits and a 64-bit FNV-1a digest folded over every admitted
 problem's canonical plan (:func:`canonical_plan`, which the test restates). The header
@@ -23,16 +26,17 @@ byte without the original shapes file; a new problem set needs ``--shapes``. ``-
 writes every record as JSON lines instead, for a wider offline comparison.
 
 Usage:
-  python make_gfx1250_conv_fwd_aot_test_vectors.py --rocke-root <rocke> \\
+  python make_conv_aot_test_vectors.py --arch gfx1250 --rocke-root <rocke> \\
       --instances configs/gfx1250_conv_fwd_aot_{fp16,bf16}.instances.json \\
       --header TestVectors.hpp --problems-from-header TestVectors.hpp
-  python make_gfx1250_conv_fwd_aot_test_vectors.py --rocke-root <rocke> \\
+  python make_conv_aot_test_vectors.py --arch gfx1250 --rocke-root <rocke> \\
       --instances ... --out vectors.jsonl [--shapes shapes.txt] [--per-kernel 24]
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import random
 import re
@@ -57,6 +61,29 @@ def _symbolic(value: int, names, ptrs, sizes):
         i = (value >> _PTR_SHIFT) - 1
         return {"buf": names[i], "offset": value - ptrs[names[i]]}
     return value
+
+
+#: The engines with a golden header.
+ARCHES = ("gfx1250",)
+
+
+def _problem(cf, p: dict):
+    """A problem record as the adapter's problem (``Gfx950ConvFwdSpec``)."""
+    return cf.Gfx950ConvFwdSpec(
+        N=p["N"], Hi=p["H"], Wi=p["W"], C=p["C"], K=p["K"], Y=p["Y"], X=p["X"],
+        sH=p["sh"], sW=p["sw"], pH=p["ph"], pW=p["pw"], dH=p["dh"], dW=p["dw"],
+        groups=p["G"], dtype=p["dtype"],
+    )  # fmt: skip
+
+
+def serves(cf, spec, p: dict) -> tuple:
+    """``conv_fwd_aot_serves`` of ``spec`` on the problem record ``p``."""
+    return cf.conv_fwd_aot_serves(spec, _problem(cf, p))
+
+
+def plan(cf, spec, p: dict):
+    """The packaged launch plan of ``spec`` on ``p``, which it must serve."""
+    return spec.launch_plan(_problem(cf, p))
 
 
 def _problem_dict(p: dict) -> dict:
@@ -184,39 +211,38 @@ def problems_from_header(path: Path) -> list[dict]:
 
 
 def _metadata(spec) -> str:
-    """``spec``'s KMD fields as ``name=value;``, those at 0 or empty left out."""
+    """``spec``'s KMD fields as ``name=value;``, those at their KMD default (the
+    dataclass default) left out."""
     out = []
-    for name in type(spec).__dataclass_fields__:
-        value = getattr(spec, name)
-        if value not in (0, ""):
-            out.append(f"{name}={value};")
+    for field in dataclasses.fields(spec):
+        value = getattr(spec, field.name)
+        if field.default is dataclasses.MISSING or value != field.default:
+            out.append(f"{field.name}={value};")
     return "".join(out)
 
 
-def _header(args, A, specs, rng) -> None:
+def _header(args, cf, specs, rng) -> None:
     """The unit test's golden header (see the module docstring)."""
     if args.problems_from_header:
         unique = problems_from_header(args.problems_from_header)
     else:
         problems = _parse_shapes(args.shapes) if args.shapes else []
         for spec in specs:
-            problems += _synthetic(spec.to_identity(), rng, args.synthetic)
+            problems += _synthetic(spec.identity(), rng, args.synthetic)
         unique = list(
             {tuple(p[f] for f in _FIELDS) + (p["dtype"],): p for p in problems}.values()
         )
-    int_fields = [f for f in A.SPEC_FIELDS if f not in A.STRING_FIELDS]
-    string_fields = [f for f in A.SPEC_FIELDS if f in A.STRING_FIELDS]
+    fields = dataclasses.fields(type(specs[0]))
+    int_fields = [f.name for f in fields if f.type in (int, "int")]
+    string_fields = [f.name for f in fields if f.type in (str, "str")]
     kernels = []
     for spec in specs:
         digest, admitted = _FNV_OFFSET, 0
         for index, p in enumerate(unique):
-            if (
-                p["dtype"] != spec.dtype
-                or not A.gfx1250_conv_fwd_aot_serves(spec, p)[0]
-            ):
+            if p["dtype"] != spec.dtype or not serves(cf, spec, p)[0]:
                 continue
-            plan = A.gfx1250_conv_fwd_aot_plan(spec, p)
-            record = _plan_record(plan, ["x", "w", "y", *sorted(plan.workspaces)])
+            launch = plan(cf, spec, p)
+            record = _plan_record(launch, ["x", "w", "y", *sorted(launch.workspaces)])
             digest = fnv1a(digest, f"{index}:{canonical_plan(record)};")
             admitted += 1
         kernels.append((spec, admitted, digest))
@@ -225,8 +251,8 @@ def _header(args, A, specs, rng) -> None:
         "// SPDX-License-Identifier:  MIT",
         "",
         "// GENERATED by projects/hipdnn/tools/IngestorGenerator/tools/"
-        "make_gfx1250_conv_fwd_aot_test_vectors.py; do not edit.",
-        "// Re-check against the in-tree dispatcher: --instances "
+        "make_conv_aot_test_vectors.py; do not edit.",
+        "// Re-check against the in-tree adapter: --arch gfx1250 --instances "
         "configs/gfx1250_conv_fwd_aot_{fp16,bf16}.instances.json",
         "// --header <this file> --problems-from-header <this file>.",
         "",
@@ -250,7 +276,7 @@ def _header(args, A, specs, rng) -> None:
         "}};",
         "",
         "/// The KMD fields every instance carries; a row states those it does not leave",
-        "/// at 0 (an int) or empty (a string).",
+        "/// at their KMD default.",
         f"inline constexpr std::array<const char*, {len(int_fields)}> INT_FIELDS = {{{{",
         *[f'    "{name}",' for name in int_fields],
         "}};",
@@ -287,6 +313,9 @@ def _header(args, A, specs, rng) -> None:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--rocke-root", required=True, type=Path)
+    ap.add_argument(
+        "--arch", default="gfx1250", choices=ARCHES, help="the engine (%(default)s)"
+    )
     ap.add_argument(
         "--instances",
         type=Path,
@@ -329,35 +358,46 @@ def main(argv=None) -> None:
         str(args.rocke_root / "platform" / "python"),
         str(Path(__file__).resolve().parent),
     ]
-    from builders.gfx1250 import conv_fwd_aot as A
+    import builders.common.convolution_forward as cf
 
-    import make_gfx1250_conv_fwd_aot_config as config_tool
+    import make_conv_aot_config as config_tool
 
-    specs, rejected = config_tool.read_catalog(args.instances)
+    identities = [
+        entry.get("identity", entry)
+        for path in args.instances
+        for entry in json.loads(path.read_text())
+    ]
+    specs, rejected, seen = [], [], set()
+    for spec, reason in config_tool.instance_specs(identities, 1, args.arch):
+        if spec is None:
+            rejected.append(reason)
+        elif spec.instance_id not in seen:
+            seen.add(spec.instance_id)
+            specs.append(spec)
     if rejected:
-        ap.error(f"{len(rejected)} unsupported instance(s), e.g. {rejected[0][1]}")
+        ap.error(f"{len(rejected)} unsupported instance(s), e.g. {rejected[0]}")
     rng = random.Random(args.seed)
     if args.header:
-        _header(args, A, specs, rng)
+        _header(args, cf, specs, rng)
         return
     shared = _parse_shapes(args.shapes) if args.shapes else []
     n_rec = n_adm = 0
     with args.out.open("w", encoding="utf-8", newline="\n") as f:
         for spec in specs:
-            problems = _synthetic(spec.to_identity(), rng, args.per_kernel) + [
+            problems = _synthetic(spec.identity(), rng, args.per_kernel) + [
                 p for p in shared if p["dtype"] == spec.dtype
             ]
             for p in problems:
-                ok, why = A.gfx1250_conv_fwd_aot_serves(spec, p)
+                ok, why = serves(cf, spec, p)
                 rec = {
                     "kernel": spec.instance_id,
                     "problem": _problem_dict(p),
                     "admit": ok,
                 }
                 if ok:
-                    plan = A.gfx1250_conv_fwd_aot_plan(spec, p)
-                    names = ["x", "w", "y", *sorted(plan.workspaces)]
-                    rec["plan"] = _plan_record(plan, names)
+                    launch = plan(cf, spec, p)
+                    names = ["x", "w", "y", *sorted(launch.workspaces)]
+                    rec["plan"] = _plan_record(launch, names)
                     n_adm += 1
                 else:
                     rec["why"] = why

@@ -1598,6 +1598,17 @@ class ConvFwdAotSpec:
             step = replace(step, buffers=(step.buffers[0], step.buffers[1], "ws_split"))
         return step
 
+    def launch_plan(self, problem: Gfx950ConvFwdSpec):
+        """The dispatcher's launch plan of this instance on ``problem`` with the
+        packaged launch's steps: :meth:`launch_step`, and a split-C instance's
+        fold (:meth:`split_reduce_step`). The plan's workspaces are the
+        dispatcher's (none for a single-step instance)."""
+        plan = launch_plan_for(self.request(problem), _aot_instance(self))
+        steps = (self.launch_step(problem),)
+        if self.is_split_c:
+            steps += (self.split_reduce_step(problem),)
+        return replace(plan, steps=steps)
+
     def split_reduce_spec(self):
         """The ``direct_split_reduce`` spec a split-C instance launches second:
         rocKE's fold of ``split_c`` fp32 slabs, as the direct sweep builds it for
@@ -2312,15 +2323,23 @@ def _aot_direct_serves(
     of a split-C instance's fold) a 32-bit dispatch.
 
     On gfx1250 the admission alone decides what the problem must have (the WMMA
-    pipelines bake per-axis geometry and some channel counts), then every grid
-    axis must fit 65535.
+    pipelines bake per-axis geometry and some channel counts), then the launch
+    has to fit: grid y and z 65535, grid x a 32-bit dispatch (its WMMA kernels
+    walk output columns or tiles along x).
     """
     variant = spec.direct_variant
     if not spec.TARGET.gfx950_direct_contract:
         ok, why = _aot_admits(spec, problem)
         if not ok:
             return False, why
-        for axis, extent in zip("xyz", spec.launch_step(problem).grid):
+        step = spec.launch_step(problem)
+        grid = step.grid
+        if (
+            grid[0] > _AOT_NONGROUPED_MAX_GRID_X
+            or grid[0] * step.block[0] > _AOT_MAX_DISPATCH_ITEMS
+        ):
+            return False, f"direct grid x = {grid[0]} does not fit one dispatch"
+        for axis, extent in zip("yz", grid[1:]):
             if extent > _MAX_GRID_DIM:
                 return False, f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
         return True, "ok"

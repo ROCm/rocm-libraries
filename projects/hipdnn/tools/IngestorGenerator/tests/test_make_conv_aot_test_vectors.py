@@ -1,15 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for tools/make_gfx1250_conv_fwd_aot_test_vectors.py: the committed golden header
+"""Tests for tools/make_conv_aot_test_vectors.py (``--arch gfx1250``): the committed golden header
 regenerates from the in-tree rocKE.
 
 hipkernel:Gfx1250ConvFwdAot's C++ port of admission and launch is unit-tested against
 Gfx1250ConvFwdAotTestVectors.hpp (TestGfx1250ConvFwdAotGeometry). The header is written
-from the catalog's instance lists through the packaging adapter's plan, which is the
-dispatcher's. A change to the lists, the dispatcher's admission or launch plan, or the
-tool that is not regenerated fails here, rather than leaving the committed header to vouch
-for a port of a dispatcher that no longer exists.
+from the catalog's instance lists through the packaging adapter's serves and launch plan,
+which are the dispatcher's admission and plan within the packaged bounds. A change to the
+lists, the adapter, the dispatcher or the tool that is not regenerated fails here, rather
+than leaving the committed header to vouch for a port of code that no longer exists.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ _TOOLS = _ROOT / "tools"
 sys.path.insert(0, str(_TOOLS))
 
 import launch_surface  # noqa: E402
-import make_gfx1250_conv_fwd_aot_test_vectors as vectors  # noqa: E402
+import make_conv_aot_test_vectors as vectors  # noqa: E402
 
 _REPO = launch_surface.find_repo_root(_TOOLS)
 _ROCKE = _REPO / "dnn-providers" / "hip-kernel-provider" / "rocke"
@@ -45,7 +45,7 @@ _INSTANCES = [
 def _run(*args: str, cwd: Path = _ROOT) -> subprocess.CompletedProcess:
     # Nothing here needs a GPU.
     env = dict(os.environ, HIP_VISIBLE_DEVICES="-1")
-    tool = _TOOLS / "make_gfx1250_conv_fwd_aot_test_vectors.py"
+    tool = _TOOLS / "make_conv_aot_test_vectors.py"
     return subprocess.run(
         [sys.executable, str(tool), "--rocke-root", str(_ROCKE), *args],
         env=env,
@@ -60,7 +60,7 @@ def _text(path: Path) -> str:
     return path.read_bytes().decode("utf-8").replace("\r\n", "\n")
 
 
-def test_the_golden_header_regenerates_from_the_in_tree_dispatcher(tmp_path):
+def test_the_golden_header_regenerates_from_the_in_tree_adapter(tmp_path):
     out = tmp_path / _HEADER.name
     result = _run(
         "--instances",
@@ -72,8 +72,8 @@ def test_the_golden_header_regenerates_from_the_in_tree_dispatcher(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert _text(out) == _text(_HEADER), (
-        f"{_HEADER.name} no longer matches rocKE's dispatcher: regenerate it with "
-        "make_gfx1250_conv_fwd_aot_test_vectors.py --instances <lists> --header <it> "
+        f"{_HEADER.name} no longer matches rocKE's adapter: regenerate it with "
+        "make_conv_aot_test_vectors.py --arch gfx1250 --instances <lists> --header <it> "
         "--problems-from-header <it>"
     )
 

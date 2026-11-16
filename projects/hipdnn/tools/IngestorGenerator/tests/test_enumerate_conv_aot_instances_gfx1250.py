@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tests for tools/enumerate_gfx1250_conv_fwd_aot_instances.py (no compile, no GPU)."""
+"""Tests for tools/enumerate_conv_aot_instances.py ``--arch gfx1250`` (no compile, no
+GPU); test_enumerate_conv_aot_instances.py covers gfx950."""
 
 import json
 import os
@@ -15,8 +16,11 @@ pytest.importorskip("numpy", reason="the rocKE builders need numpy")
 _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
 
-import enumerate_gfx1250_conv_fwd_aot_instances as tool  # noqa: E402
+import enumerate_conv_aot_instances as tool  # noqa: E402
 import launch_surface  # noqa: E402
+
+_ARCH = "gfx1250"
+_INSTANCE_LIST = tool.instance_list(_ARCH)
 
 _REPO = launch_surface.find_repo_root(_TOOLS)
 _ROCKE = _REPO / "dnn-providers" / "hip-kernel-provider" / "rocke"
@@ -36,7 +40,7 @@ def _rocke_on_path():
 @pytest.fixture(scope="module")
 def catalog():
     """rocKE's registered gfx1250 forward catalog, in registration order."""
-    return tool.read_rocke_catalog()
+    return tool.read_rocke_catalog("fwd", _ARCH)
 
 
 @pytest.fixture
@@ -52,8 +56,7 @@ def catalog_flavor(catalog, monkeypatch):
 def committed():
     """The committed per-dtype instance lists."""
     paths = {
-        dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
-        for dtype in tool.DTYPES
+        dtype: _CONFIGS / _INSTANCE_LIST.format(dtype=dtype) for dtype in tool.DTYPES
     }
     missing = sorted(str(p) for p in paths.values() if not p.exists())
     if missing:
@@ -68,7 +71,7 @@ def test_the_lists_are_rockes_catalog_in_registration_order(catalog, committed):
     """The lists hold exactly rocKE's registered instances (no excludes are declared),
     each dtype's in the order rocKE registers them: that order is the catalog's
     priority order."""
-    assert not tool.EXCLUDES.exists()
+    assert not tool.excludes_path(_ARCH).exists()
     for dtype, entries in committed.items():
         expected = [i for i in catalog if i["dtype_a"] == dtype]
         assert [tool.stable_hash(e) for e in entries] == [
@@ -94,7 +97,7 @@ def test_every_list_entry_is_a_forward_sweep_identity(committed, monkeypatch):
     for dtype, entries in committed.items():
         (flavor,) = {entry["llvm_flavor"] for entry in entries}
         monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
-        swept = tool.sweep_hashes(dtype, _JOBS)
+        swept = tool.sweep_hashes(dtype, _JOBS, _ARCH)
         missing = [
             tool.identity_label(e) for e in entries if tool.stable_hash(e) not in swept
         ]
@@ -103,7 +106,7 @@ def test_every_list_entry_is_a_forward_sweep_identity(committed, monkeypatch):
 
 def test_every_list_entry_converts(committed):
     entries = [e for dtype in tool.DTYPES for e in committed[dtype]]
-    assert tool.validate(entries) == []
+    assert tool.validate(entries, 1, _ARCH) == []
 
 
 def test_main_writes_the_lists_and_refuses_a_stale_exclude(
@@ -113,6 +116,8 @@ def test_main_writes_the_lists_and_refuses_a_stale_exclude(
     assert (
         tool.main(
             [
+                "--arch",
+                _ARCH,
                 "--rocke-root",
                 str(_ROCKE),
                 "--output-dir",
@@ -124,13 +129,15 @@ def test_main_writes_the_lists_and_refuses_a_stale_exclude(
         == 0
     )
     for dtype in tool.DTYPES:
-        written = json.loads((out / tool.INSTANCE_LIST.format(dtype=dtype)).read_text())
+        written = json.loads((out / _INSTANCE_LIST.format(dtype=dtype)).read_text())
         assert len(written) == sum(1 for i in catalog if i["dtype_a"] == dtype)
     excludes = tmp_path / "excludes.json"
     excludes.write_text(
         json.dumps([{"label": "fwd-no-such-instance", "reason": "test"}])
     )
     argv = [
+        "--arch",
+        _ARCH,
         "--rocke-root",
         str(_ROCKE),
         "--output-dir",
@@ -139,7 +146,7 @@ def test_main_writes_the_lists_and_refuses_a_stale_exclude(
         str(excludes),
     ]
     assert tool.main(argv) == 1
-    assert "exclude not in rocKE's gfx1250 fwd catalog" in capsys.readouterr().err
+    assert "exclude(s) not in rocKE's gfx1250 fwd dispatcher" in capsys.readouterr().err
     assert not (tmp_path / "x").exists()
 
 
@@ -151,6 +158,8 @@ def test_an_exclude_drops_its_instance(tmp_path, catalog, catalog_flavor):
     )
     out = tmp_path / "configs"
     argv = [
+        "--arch",
+        _ARCH,
         "--rocke-root",
         str(_ROCKE),
         "--output-dir",
@@ -160,7 +169,7 @@ def test_an_exclude_drops_its_instance(tmp_path, catalog, catalog_flavor):
     ]
     assert tool.main(argv) == 0
     written = json.loads(
-        (out / tool.INSTANCE_LIST.format(dtype=victim["dtype_a"])).read_text()
+        (out / _INSTANCE_LIST.format(dtype=victim["dtype_a"])).read_text()
     )
     assert tool.stable_hash(victim) not in {tool.stable_hash(e) for e in written}
 
@@ -172,7 +181,8 @@ def test_main_names_the_flavor_it_needs(tmp_path, catalog_flavor, monkeypatch, c
         "ROCKE_LLVM_FLAVOR", "llvm22" if catalog_flavor != "llvm22" else "llvm24"
     )
     out = tmp_path / "configs"
-    assert tool.main(["--rocke-root", str(_ROCKE), "--output-dir", str(out)]) == 1
+    argv = ["--arch", _ARCH, "--rocke-root", str(_ROCKE), "--output-dir", str(out)]
+    assert tool.main(argv) == 1
     err = capsys.readouterr().err
     assert f"ROCKE_LLVM_FLAVOR={catalog_flavor}" in err
     assert "not a gfx1250 forward sweep identity" not in err
@@ -207,4 +217,4 @@ def test_sweep_hashes_names_identities_for_this_processs_flavor(
     )
     assert any(i.is_direct for i in identities)
     assert any(not i.is_direct for i in identities)
-    assert tool.sweep_hashes(dtype, 1) == {i.stable_hash() for i in identities}
+    assert tool.sweep_hashes(dtype, 1, _ARCH) == {i.stable_hash() for i in identities}
