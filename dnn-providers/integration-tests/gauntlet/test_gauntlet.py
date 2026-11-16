@@ -555,6 +555,11 @@ def test_data_seed_can_be_fixed_and_is_validated():
     )
 
 
+# spaces over a bundle template whose tensor uids are not their rank by sorted name (the
+# canonical numbering the bundle tooling imports and compresses with): the SdpaBackward ragged
+# graph of the golden bundles
+NONCANONICAL_UID_SPACES = {"SdpaBackward/FlydslBwdSplitRagged"}
+
 # the sweep-case keys a space declares to switch a feature per sample (add_tensors adds the
 # tensor of an optional input or output, node_patches edits the node)
 FEATURE_KEYS = {
@@ -751,14 +756,10 @@ def expanded_graph(template, row):
 
 
 def _copy_topology_files(src_dir, topology):
-    """Copies a topology's template, sweep and support files into ``topology``. A template with no
-    sweep (the gauntlet-only SdpaBackward/GauntletRagged) gets an empty one, so the same tests
-    read every space's topology alike."""
+    """Copies a topology's template, sweep and support files into ``topology``."""
     for name in ("graph.template.json", "sweep.json", "support.json"):
         if (src_dir / name).is_file():  # SdpaBackward ships no support.json
             shutil.copyfile(src_dir / name, topology / name)
-    if not (topology / "sweep.json").exists():
-        (topology / "sweep.json").write_text('{"version": 1, "cases": []}')
 
 
 # probe-library cases are never frozen into a bundle, so only the shape spaces need to expand back
@@ -780,9 +781,10 @@ def test_shipped_space_row_appended_to_the_template_sweep_expands(tmp_path, spac
     for s in samples:
         graph = expanded_graph(template, s.row)
         assert "${" not in json.dumps(graph), "an unresolved placeholder is left"
-        assert bu.canonical_uid_map_by_name(graph) == {
-            t["uid"]: t["uid"] for t in graph["tensors"]
-        }
+        if space_id not in NONCANONICAL_UID_SPACES:
+            assert bu.canonical_uid_map_by_name(graph) == {
+                t["uid"]: t["uid"] for t in graph["tensors"]
+            }
         for tensor in graph["tensors"]:
             if tensor.get("value") is None:
                 if space_id in STRIDE_SPACES:
@@ -1895,8 +1897,7 @@ def test_domain_renders_the_fill_recipe_of_every_primary_operand(space_id):
     name_of = {v: k for k, v in uid_of.items()}
     primary = [uid_of[name] for name in PRIMARY_OPERANDS[space_id]]
     poisoned = [uid_of[name] for name in POISONED_OPERANDS[space_id]]
-    quick_path = sp.template_path.parent / "sweep.json"
-    quick = json.loads(quick_path.read_text())["cases"] if quick_path.exists() else []
+    quick = json.loads((sp.template_path.parent / "sweep.json").read_text())["cases"]
     metas = _rendered_by_domain(sp, seed=POISONABLE_SEED.get(space_id, 11))
     assert set(metas) == set(domains_of(space_id))
     default = metas["default"]["inputs"]
@@ -4600,10 +4601,10 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
     run, tmp_path, space_id
 ):
     sp = space_by_id(space_id)
-    if not (sp.template_path.parent / "sweep.json").exists():
+    if space_id in NONCANONICAL_UID_SPACES:
         pytest.skip(
-            "a template-only topology (the gauntlet-only SdpaBackward/GauntletRagged) has no sweep "
-            "to append a frozen case to: the import would create a new bundle"
+            "the space reuses a bundle template whose tensors are not numbered by sorted name, "
+            "which import_graph.py requires"
         )
     run.control(default="wrong")
     assert run.run("--samples", "1", "--seed", "4242", space=space_id) == 1

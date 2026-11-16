@@ -1,9 +1,9 @@
 {
   "version": 1,
   "operation": "SdpaBackward",
-  "description": "SDPA backward on packed (THD) ragged tensors over hipkernel:flydsl_sdpa_bwd_split (COVERAGE.md 9.1 PV-3, SS-4, SS-5; 9.3 gap rows): Q, K, V, O, dO, dQ, dK, dV and the LSE are ragged, each with its own INT32 [B + 1, 1, 1, 1] element-offset tensor and the seq_len_q / seq_len_kv tensors, as the SdpaBackward/Golden/Ragged bundles declare them (the same graph, with its tensors renumbered so that the canonical uids by sorted name are the uids: SdpaBackward/GauntletRagged/graph.template.json; BSHD strides, LSE packed (T, H)). Batch entry i has valid lengths max(1, Sq - i * pad_q) and max(1, Skv - i * pad_kv); `gaps` packs the sequences back to back (compact) or leaves each in its padded slot (gapped, so gap rows exist between sequences). All offsets and lengths are exact `values` fills (metadata format 2). O and the LSE come from the harness's ragged forward derivation; the references run the dense padded rewrite. Masks none and causal; no bias, dropout or window with ragged (declined by the matcher or not modelled).",
+  "description": "SDPA backward on packed (THD) ragged tensors over hipkernel:flydsl_sdpa_bwd_split (COVERAGE.md 9.1 PV-3, SS-4, SS-5; 9.3 gap rows): Q, K, V, O, dO, dQ, dK, dV and the LSE are ragged, each with its own INT32 [B + 1, 1, 1, 1] element-offset tensor and the seq_len_q / seq_len_kv tensors, as the SdpaBackward/Golden/Ragged bundles declare them (the template is theirs: its tensors are not numbered canonically, so a failure of this space cannot be frozen into a regression bundle by import_graph.py; BSHD strides, LSE packed (T, H)). Batch entry i has valid lengths max(1, Sq - i * pad_q) and max(1, Skv - i * pad_kv); `gaps` packs the sequences back to back (compact) or leaves each in its padded slot (gapped, so gap rows exist between sequences). All offsets and lengths are exact `values` fills (metadata format 2). O and the LSE come from the harness's ragged forward derivation; the references run the dense padded rewrite. Masks none and causal; no bias, dropout or window with ragged (declined by the matcher or not modelled).",
   "engine": "hipkernel:flydsl_sdpa_bwd_split",
-  "template": "../../integration-test-bundles/quick/SdpaBackward/GauntletRagged/graph.template.json",
+  "template": "../../integration-test-bundles/quick/SdpaBackward/Golden/Ragged/graph.template.json",
   "axes": {
     "dtype": {
       "values": [
@@ -335,41 +335,8 @@
           "ragged_offset_multiplier": 1
         },
         {
-          "uid": 18,
-          "dims": "${[b, 1, 1, 1]}",
-          "strides": [
-            1,
-            1,
-            1,
-            1
-          ],
-          "data_type": "int32"
-        },
-        {
-          "uid": 19,
-          "dims": "${[b, 1, 1, 1]}",
-          "strides": [
-            1,
-            1,
-            1,
-            1
-          ],
-          "data_type": "int32"
-        },
-        {
-          "uid": 9,
-          "dims": "${[b + 1, 1, 1, 1]}",
-          "strides": [
-            1,
-            1,
-            1,
-            1
-          ],
-          "data_type": "int32"
-        },
-        {
           "uid": 10,
-          "dims": "${[b + 1, 1, 1, 1]}",
+          "dims": "${[b, 1, 1, 1]}",
           "strides": [
             1,
             1,
@@ -380,51 +347,7 @@
         },
         {
           "uid": 11,
-          "dims": "${[b + 1, 1, 1, 1]}",
-          "strides": [
-            1,
-            1,
-            1,
-            1
-          ],
-          "data_type": "int32"
-        },
-        {
-          "uid": 12,
-          "dims": "${[b + 1, 1, 1, 1]}",
-          "strides": [
-            1,
-            1,
-            1,
-            1
-          ],
-          "data_type": "int32"
-        },
-        {
-          "uid": 13,
-          "dims": "${[b + 1, 1, 1, 1]}",
-          "strides": [
-            1,
-            1,
-            1,
-            1
-          ],
-          "data_type": "int32"
-        },
-        {
-          "uid": 14,
-          "dims": "${[b + 1, 1, 1, 1]}",
-          "strides": [
-            1,
-            1,
-            1,
-            1
-          ],
-          "data_type": "int32"
-        },
-        {
-          "uid": 15,
-          "dims": "${[b + 1, 1, 1, 1]}",
+          "dims": "${[b, 1, 1, 1]}",
           "strides": [
             1,
             1,
@@ -446,6 +369,83 @@
         },
         {
           "uid": 17,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 18,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 19,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 20,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 21,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 22,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 23,
+          "dims": "${[b + 1, 1, 1, 1]}",
+          "strides": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "data_type": "int32"
+        },
+        {
+          "uid": 24,
           "dims": "${[b + 1, 1, 1, 1]}",
           "strides": [
             1,
@@ -494,57 +494,57 @@
           "value": "${dom_value}",
           "scale": 1
         },
-        "19": {
+        "10": {
           "kind": "values",
           "values": "${lens_q}",
           "repeat": false
         },
-        "18": {
+        "11": {
           "kind": "values",
           "values": "${lens_kv}",
           "repeat": false
         },
-        "15": {
+        "16": {
           "kind": "values",
           "values": "${off_q}",
           "repeat": false
         },
-        "13": {
+        "17": {
           "kind": "values",
           "values": "${off_k}",
           "repeat": false
         },
-        "17": {
+        "18": {
           "kind": "values",
           "values": "${off_v}",
           "repeat": false
         },
-        "14": {
+        "19": {
           "kind": "values",
           "values": "${off_o}",
           "repeat": false
         },
-        "10": {
+        "20": {
           "kind": "values",
           "values": "${off_do}",
           "repeat": false
         },
-        "11": {
+        "21": {
           "kind": "values",
           "values": "${off_dq}",
           "repeat": false
         },
-        "9": {
+        "22": {
           "kind": "values",
           "values": "${off_dk}",
           "repeat": false
         },
-        "12": {
+        "23": {
           "kind": "values",
           "values": "${off_dv}",
           "repeat": false
         },
-        "16": {
+        "24": {
           "kind": "values",
           "values": "${off_s}",
           "repeat": false
@@ -618,12 +618,6 @@
         }
       },
       {
-        "uid": 9,
-        "set": {
-          "alignment": "${alignment}"
-        }
-      },
-      {
         "uid": 10,
         "set": {
           "alignment": "${alignment}"
@@ -631,30 +625,6 @@
       },
       {
         "uid": 11,
-        "set": {
-          "alignment": "${alignment}"
-        }
-      },
-      {
-        "uid": 12,
-        "set": {
-          "alignment": "${alignment}"
-        }
-      },
-      {
-        "uid": 13,
-        "set": {
-          "alignment": "${alignment}"
-        }
-      },
-      {
-        "uid": 14,
-        "set": {
-          "alignment": "${alignment}"
-        }
-      },
-      {
-        "uid": 15,
         "set": {
           "alignment": "${alignment}"
         }
@@ -679,6 +649,36 @@
       },
       {
         "uid": 19,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 20,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 21,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 22,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 23,
+        "set": {
+          "alignment": "${alignment}"
+        }
+      },
+      {
+        "uid": 24,
         "set": {
           "alignment": "${alignment}"
         }
