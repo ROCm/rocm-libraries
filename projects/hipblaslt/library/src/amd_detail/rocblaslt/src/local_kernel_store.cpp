@@ -168,12 +168,24 @@ namespace rocblaslt
             bool syncDirectory(fs::path const& dir, std::string* error)
             {
                 Fd fd(::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
-                if(fd.get() < 0 || ::fsync(fd.get()) != 0)
+                // EINVAL: the filesystem cannot sync a directory at all.
+                if(fd.get() < 0 || (::fsync(fd.get()) != 0 && errno != EINVAL))
                 {
                     setError(error, errnoText("cannot sync directory", dir.string()));
                     return false;
                 }
                 return true;
+            }
+
+            /**
+             * Syncs a directory outside the library if it can. Such a directory
+             * may deny the read permission a sync needs, as a shared /scratch
+             * often does, and losing an entry there loses the whole library
+             * rather than leaving records that name missing files.
+             */
+            void trySyncDirectory(fs::path const& dir)
+            {
+                static_cast<void>(syncDirectory(dir, nullptr));
             }
 
             bool writeAll(int fd, char const* data, size_t size)
@@ -328,9 +340,13 @@ namespace rocblaslt
             /**
              * Creates `dir` if needed. A directory created here drops the group
              * and other write bits, so a umask such as 0002 does not make it
-             * fail checkPrivate. An existing directory is not modified.
+             * fail checkPrivate. An existing directory is not modified. Its
+             * entry is synced, and a failure to sync fails the call unless the
+             * parent is outside the library.
              */
-            bool makePrivateDirectory(fs::path const& dir, std::string* error)
+            bool makePrivateDirectory(fs::path const& dir,
+                                      std::string*    error,
+                                      bool            parentInLibrary = true)
             {
                 if(::mkdir(dir.c_str(), 0755) == 0)
                 {
@@ -346,9 +362,16 @@ namespace rocblaslt
                     setError(error, errnoText("cannot create", dir.string()));
                     return false;
                 }
+                if(!checkPrivate(dir, error))
+                    return false;
                 // An existing directory may have been left by an interrupted
                 // creation or another writer whose sync has not completed.
-                return checkPrivate(dir, error) && syncDirectory(dir.parent_path(), error);
+                if(!parentInLibrary)
+                {
+                    trySyncDirectory(dir.parent_path());
+                    return true;
+                }
+                return syncDirectory(dir.parent_path(), error);
             }
 
             /**
@@ -744,9 +767,8 @@ namespace rocblaslt
             // Persist parent directories too, including any left by a failed
             // earlier attempt to create the library path.
             for(auto dir = rootPath.parent_path(); dir != dir.root_path(); dir = dir.parent_path())
-                if(!syncDirectory(dir.parent_path(), error))
-                    return nullptr;
-            if(!makePrivateDirectory(rootPath, error)
+                trySyncDirectory(dir.parent_path());
+            if(!makePrivateDirectory(rootPath, error, false)
                || !makePrivateDirectory(rootPath / kObjectsDir, error))
                 return nullptr;
             removeStaleTemps(rootPath / kObjectsDir);

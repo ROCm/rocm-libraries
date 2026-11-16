@@ -1183,6 +1183,28 @@ TEST(LocalKernelPersist, DirectorySyncFailureIsNotPublished)
     EXPECT_EQ(runWorker(LOAD_WORKER, {libraryEnv(library)}), 0);
 }
 
+// Directories outside the library may be unreadable, as a shared /scratch often
+// is, so they cannot be synced. The library under them is still used.
+TEST(LocalKernelPersist, LibraryUnderUnreadableDirectoryIsUsed)
+{
+    if(::geteuid() == 0)
+        GTEST_SKIP() << "root ignores file permissions";
+
+    TempDir tmp;
+    ASSERT_FALSE(tmp.path.empty());
+    const fs::path shared  = tmp.path / "shared";
+    const fs::path library = shared / "user" / "lib";
+    ASSERT_TRUE(fs::create_directory(shared));
+    ASSERT_EQ(::chmod(shared.c_str(), 0311), 0);
+
+    const int saved  = runWorker(SAVE_WORKER, {libraryEnv(library)});
+    const int loaded = runWorker(LOAD_WORKER, {libraryEnv(library)});
+    ASSERT_EQ(::chmod(shared.c_str(), 0755), 0);
+    EXPECT_EQ(saved, 0);
+    EXPECT_EQ(loaded, 0);
+    EXPECT_GE(countObjects(library, ".co"), 1u);
+}
+
 // A mapping whose write fails partway is truncated away, so nothing of a
 // mapping reported as not saved stays for the next append to complete.
 TEST(LocalKernelPersist, DISABLED_FailedWriteWorker)
