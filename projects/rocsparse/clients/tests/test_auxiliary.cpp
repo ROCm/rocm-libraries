@@ -2062,10 +2062,10 @@ TEST(auxiliary_pre_checkin, SpmatGetNnzBell)
                                           rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
-    // Get nnz - should be ell_cols * rows * block_dim * block_dim
+    // The values array has ell_cols * rows elements.
     int64_t nnz_out;
     ASSERT_EQ(rocsparse_spmat_get_nnz(descr, &nnz_out), rocsparse_status_success);
-    int64_t expected_nnz = ell_block_width * rows * block_dim * block_dim;
+    int64_t expected_nnz = ell_block_width * rows;
     EXPECT_EQ(nnz_out, expected_nnz);
 
     ASSERT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);

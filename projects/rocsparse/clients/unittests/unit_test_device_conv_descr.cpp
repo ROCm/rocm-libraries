@@ -1324,8 +1324,8 @@ namespace
         });
     }
 
-    // rows * ell_cols must fit in int64_t. The block-row count must not be computed as
-    // rows + ell_block_dim - 1, which overflows for rows near the int64_t maximum.
+    // rows * ell_cols must fit in int64_t. Only the rocsparse_bell_set_pointers
+    // lines catch the old rows + ell_block_dim - 1 expression.
     TEST_F(ConvDescr, BellSizeOverflow)
     {
         in_both_debug_modes([] {
@@ -1358,26 +1358,17 @@ namespace
                   st_ok);
         int64_t nnz = -1;
         EXPECT_EQ(rocsparse_spmat_get_nnz(small, &nnz), st_ok);
-        EXPECT_EQ(nnz, 2 * 4 * 2 * 2);
+        EXPECT_EQ(nnz, 2 * 4);
 
-        // rows * ell_cols fits, but the count get_nnz reports also multiplies by
-        // block_dim squared and does not. nnz is left unchanged.
-        Spmat wide;
-        ASSERT_EQ(rocsparse_create_bell_descr(&wide,
-                                              int64_t(1) << 40,
-                                              int64_t(1) << 10,
-                                              dir_r,
-                                              int64_t(1) << 10,
-                                              int64_t(1) << 10,
-                                              g_dummy,
-                                              g_dummy,
-                                              i32,
-                                              base0,
-                                              f32),
+        // One block. The values array has rows * ell_cols entries.
+        const int64_t n = int64_t(1) << 16;
+        Spmat         wide;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &wide, n, n, dir_r, n, n, g_dummy, g_dummy, i32, base0, f32),
                   st_ok);
-        nnz = 717;
-        EXPECT_EQ(rocsparse_spmat_get_nnz(wide, &nnz), st_size);
-        EXPECT_EQ(nnz, 717);
+        nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(wide, &nnz), st_ok);
+        EXPECT_EQ(nnz, n * n);
 
         const int64_t fit = k_max / 4;
         ConstSpmat    c;

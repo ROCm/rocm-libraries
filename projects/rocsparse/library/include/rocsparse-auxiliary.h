@@ -3018,7 +3018,8 @@ rocsparse_status rocsparse_spmat_set_values(rocsparse_spmat_descr descr, void* v
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p nnz is invalid.
- *  \retval rocsparse_status_invalid_size if the number of non-zeros does not fit in int64_t.
+ *  \retval rocsparse_status_invalid_size if the ELL value-array length,
+ *          rows times ell_width, does not fit in int64_t.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmat_get_nnz(rocsparse_const_spmat_descr descr, int64_t* nnz);

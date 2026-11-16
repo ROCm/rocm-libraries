@@ -1662,10 +1662,10 @@ TEST(AuxiliaryBranchBell, const_get_and_nnz)
     EXPECT_EQ(dir, rocsparse_direction_row);
     EXPECT_EQ(bdim, block_dim);
 
-    // get_nnz hits the rocsparse_format_bell branch: ell_cols*rows*block_dim*block_dim
+    // get_nnz is the values-array length, ell_cols * rows.
     int64_t nnz = 0;
     EXPECT_EQ(rocsparse_spmat_get_nnz(A, &nnz), rocsparse_status_success);
-    EXPECT_EQ(nnz, ell_cols * 4 * block_dim * block_dim);
+    EXPECT_EQ(nnz, ell_cols * 4);
 
     EXPECT_EQ(rocsparse_destroy_spmat_descr(A), rocsparse_status_success);
 }

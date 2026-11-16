@@ -4476,24 +4476,9 @@ try
     {
     case rocsparse_format_bell:
     {
-        const int64_t rows      = descr->rows;
-        const int64_t ell_cols  = descr->ell_cols;
-        const int64_t block_dim = descr->block_dim;
-        ROCSPARSE_CHECKARG(0,
-                           descr,
-                           rocsparse::size_product_overflows(rows, ell_cols),
-                           rocsparse_status_invalid_size);
-        const int64_t values = rows * ell_cols;
-        ROCSPARSE_CHECKARG(0,
-                           descr,
-                           rocsparse::size_product_overflows(values, block_dim),
-                           rocsparse_status_invalid_size);
-        const int64_t scaled = values * block_dim;
-        ROCSPARSE_CHECKARG(0,
-                           descr,
-                           rocsparse::size_product_overflows(scaled, block_dim),
-                           rocsparse_status_invalid_size);
-        nnz[0] = scaled * block_dim;
+        // rows and ell_cols are set only by the constructors, which reject a product
+        // that does not fit in int64_t. ell_cols counts scalar columns.
+        nnz[0] = descr->rows * descr->ell_cols;
         break;
     }
 
