@@ -15,7 +15,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Optimized
 
-* Improved gfx950 performance of skinny FP8 TN GEMMs with one to four tokens, scalar A and B scales and BF16 or FP16 output (`torch._scaled_mm` with per-tensor scales) by routing them to vLLM's wave-split-K FP8 custom kernels.
+* Improved gfx950 performance of skinny FP8 TN GEMMs with one to four tokens, scalar A and B scales, BF16 or FP16 output and no bias or a bias of the output type (`torch._scaled_mm` with per-tensor scales) by routing them to vLLM's wave-split-K FP8 custom kernels.
 
 ### Resolved issues
 

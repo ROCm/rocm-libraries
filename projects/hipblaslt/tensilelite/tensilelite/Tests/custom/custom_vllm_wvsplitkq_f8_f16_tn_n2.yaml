@@ -14,6 +14,7 @@ GlobalParameters:
   DataInitTypeB: 3
   DataInitTypeScaleA: 2
   DataInitTypeScaleB: 3
+  DataInitTypeBias: 3
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0
@@ -59,7 +60,8 @@ BenchmarkProblems:
                     { type: int32, semantic: StrideC0 },
                     { type: int32, semantic: StrideD0 },
                     { type: address, semantic: AddressScaleA },
-                    { type: address, semantic: AddressScaleB } ]
+                    { type: address, semantic: AddressScaleB },
+                    { type: address, semantic: AddressBias } ]
             macrotile: [64, 16, 16]
             threads: [64, 16, 1]
             grid: [ComputeUnits, One, One]
