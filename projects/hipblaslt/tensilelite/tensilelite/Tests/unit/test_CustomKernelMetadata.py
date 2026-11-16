@@ -283,6 +283,30 @@ def test_get_custom_kernel_config_preserves_size_multiple_predicate(tmp_path):
     assert config["AssertFree1ElementMultiple"] == 256
 
 
+@pytest.mark.parametrize("layout", [None, "Auto"])
+def test_get_custom_kernel_config_requires_mx_scale_layout(tmp_path, layout):
+    lines = ["InternalSupportParams:", "  KernArgsVersion: 0"]
+    if layout:
+        lines.append(f"MXScaleFormat: {layout}")
+    lines += ["ProblemType: {MXBlockA: 32, MXBlockB: 32}", "MatrixInstruction: [16, 16, 16, 1]"]
+    write_kernel(tmp_path / "mx_kernel.s", "\n".join(lines))
+
+    with pytest.raises(RuntimeError, match="MXScaleFormat"):
+        getCustomKernelConfig("mx_kernel", {}, str(tmp_path))
+
+
+def test_get_custom_kernel_config_keeps_declared_mx_scale_layout(tmp_path):
+    write_kernel(tmp_path / "mx_kernel.s", """\
+          InternalSupportParams:
+            KernArgsVersion: 0
+          MXScaleFormat: HostPreSwizzle
+          ProblemType: {MXBlockA: 32, MXBlockB: 32}
+          MatrixInstruction: [16, 16, 16, 1]
+        """)
+
+    assert getCustomKernelConfig("mx_kernel", {}, str(tmp_path))["MXScaleFormat"] == "HostPreSwizzle"
+
+
 def test_get_custom_kernel_config_rejects_bad_predicate_value(tmp_path):
     write_kernel(tmp_path / "bad_predicate.s", """\
           InternalSupportParams:

@@ -3,7 +3,7 @@
 - Contributors: TBD
 - **Status**: In progress
 - **Status notes**: The UED loads and registers a generic engine, with only the `native` arm of `graph_match` (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The `nodes` pattern, the op-schema registry, the root-opcode index, and the JSON Schema file are not built.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
 - **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
 ## Table of Contents
@@ -191,7 +191,7 @@ this file. The role maps (§ 4.6) in it are built.
   },
   "knobs":           ["split_k", "tile_m"],        // optional: KMD field names to expose (§ 8)
   "behavior_notes":  ["runtime_compilation"],      // optional (§ 9)
-  "numerical_notes": ["tensor_core", "reduced_precision_reduction"]  // optional (§ 9)
+  "numerical_notes": ["nondeterministic"]  // optional (§ 9); any of the ten cuDNN note names; omit = NONDETERMINISTIC, [] claims determinism
 }
 ```
 
@@ -231,8 +231,8 @@ structure, and it holds whichever of the two arms (§ 4.3, § 4.5) this engine m
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
 | `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3** (not yet built; the loader rejects it as an unknown key), or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
 | `knobs` | no | array of string | Each element is a field name declared in the referenced KMD (§ 8). No duplicates. Absent or `[]` => engine exposes no descriptor knobs. Every element must match a KMD field or it is a load error (§ 13.2). |
-| `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)), each mapped to a `hipdnnBackendBehaviorNote_t` value. The loader accepts `runtime_compilation` and rejects any other tag. No duplicates. Absent => none. |
-| `numerical_notes` | no | array of string | hipDNN numerical-note tags (§ 9). No duplicates. Absent => none. |
+| `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)), each mapped to a `hipdnnBackendBehaviorNote_t` value. The loader accepts `runtime_compilation` and `supports_graph_capture` and rejects any other tag. No duplicates. Absent => none. |
+| `numerical_notes` | no | array of string | hipDNN numerical-note tags ([RFC 0025](0025_NumericalNotes.md), § 9). Any of the ten cuDNN note names, lowercase: `tensor_core`, `down_convert_inputs`, `reduced_precision_reduction`, `fft`, `nondeterministic`, `winograd`, `winograd_tile_4x4`, `winograd_tile_6x6`, `winograd_tile_13x13`, `strict_nan_prop`. The loader rejects an unknown name and a duplicate. Absent => `NONDETERMINISTIC`: results are not guaranteed bitwise reproducible. `[]` => the engine claims determinism, which a provider does only when a test proves bitwise-reproducible results. |
 
 Every field but `version`, `id`, `name`, and `metadata` may be omitted; a valid engine can expose
 no knobs, carry no notes, default its graph-schema floor, and ship no heuristic. `graph_match` is
@@ -417,7 +417,7 @@ provider's native registry (is this symbol registered) is semantic and runs in �
     },
     "numerical_notes": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": { "type": "string", "enum": ["tensor_core", "down_convert_inputs", "reduced_precision_reduction", "fft", "nondeterministic", "winograd", "winograd_tile_4x4", "winograd_tile_6x6", "winograd_tile_13x13", "strict_nan_prop"] },
       "uniqueItems": true,
       "addedInVersion": "1.0"
     }
@@ -980,8 +980,14 @@ already declares the field's type and default (RFC 0017 § 4). The UED's contrac
 `behavior_notes` and `numerical_notes` are hipDNN's per-engine annotations carried on the UED.
 They are optional string lists. `behavior_notes` holds behavior-note tags
 ([RFC 0010](0010_BehaviorNotes.md)), each mapped to a `hipdnnBackendBehaviorNote_t` value.
-`numerical_notes` holds tags that describe the engine's numerical behavior. This RFC adds no new
-note vocabulary; it specifies only that the UED is where a descriptor-backed engine declares them.
+`numerical_notes` holds tags that describe the engine's numerical behavior
+([RFC 0025](0025_NumericalNotes.md)). The vocabulary is closed: the loader accepts the ten cuDNN note names (`tensor_core`, `down_convert_inputs`, `reduced_precision_reduction`, `fft`, `nondeterministic`, `winograd`, `winograd_tile_4x4`, `winograd_tile_6x6`, `winograd_tile_13x13`, `strict_nan_prop`),
+and an unknown name or a repeated one is a load error. hipDNN acts only on `NONDETERMINISTIC` today. The two lists differ in
+what absence means. An absent `behavior_notes` is an empty list. An absent `numerical_notes` means
+the engine is `NONDETERMINISTIC`: its results are not guaranteed bitwise reproducible. An authored
+`[]` is the engine's claim that no numerical note applies, that is, that it is deterministic; author it only when a test proves bitwise-reproducible results. Any authored list without
+`nondeterministic` makes the same claim, so an engine not proven deterministic lists `nondeterministic` beside its other notes. A UED
+engine states a claim only by authoring the field.
 
 ## 10. Engine Membership
 
@@ -1544,7 +1550,7 @@ declares (§ A.1); the notes are RFC 0010 annotations.
   },
   "knobs":           ["block_n", "waves_per_eu", "num_persistent"],  // all are KMD field names
   "behavior_notes":  ["runtime_compilation"],
-  "numerical_notes": ["tensor_core", "reduced_precision_reduction"]
+  "numerical_notes": ["nondeterministic"]
 }
 ```
 

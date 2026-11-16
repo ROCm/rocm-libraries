@@ -88,7 +88,8 @@ is returned. To change the gate configuration, create a new algorithm selection 
     CHECK_HIPSPARSELT_ERROR(hipsparseLtDenseDescriptorInit(
         &handle, &matGate, row_d, col_d, ldg, 16, HIP_R_16F, HIPSPARSE_ORDER_COL));
 
-    // Batched operations only. Set these before attaching the descriptor, because it is copied when attached.
+    // Batched operations only. The descriptor is referenced, not copied;
+    // keep it valid until hipsparseLtMatmulPlanInit() is called.
     // By default each batch uses its own gate matrix; a batch stride of 0 shares one gate matrix.
     CHECK_HIPSPARSELT_ERROR(hipsparseLtMatDescSetAttribute(
         &handle, &matGate, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches, sizeof(num_batches)));
