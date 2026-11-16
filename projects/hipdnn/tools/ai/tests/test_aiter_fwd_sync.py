@@ -11,6 +11,7 @@ No test touches the network or the real checkout.
 import dataclasses
 import importlib.util
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -199,12 +200,16 @@ def sync() -> ModuleType:
     return module
 
 
-def git(repo: Path, *args: str) -> str:
+def git(repo: Path, *args: str, date: str | None = None) -> str:
+    env = None
+    if date is not None:
+        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
     return subprocess.run(
         ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     ).stdout
 
 
@@ -236,9 +241,10 @@ class Aiter:
                 data = elf(knl, "_ZN7ck_tile6kentryE") if knl in ck else kernel(row)
                 self.write(f"{base}/{root}/{co}".replace("//", "/"), data)
 
-    def commit(self, tag: str) -> str:
+    def commit(self, tag: str, date: str | None = None) -> str:
+        """Commit everything and tag it; date sets the author and committer date."""
         git(self.root, "add", "-A")
-        git(self.root, "commit", "-q", "-m", tag)
+        git(self.root, "commit", "-q", "-m", tag, date=date)
         git(self.root, "tag", tag)
         return git(self.root, "rev-parse", "HEAD").strip()
 
@@ -754,11 +760,12 @@ def test_new_arch_diffs_the_host_code_the_vendored_archs_share(sync, env, capsys
 
 def test_new_arch_diffs_from_the_oldest_host_code_commit_of_the_others(sync, env):
     """When the vendored archs record different host-code commits, a new arch is
-    diffed from the oldest, so a change after it is not missed."""
+    diffed from the oldest in history, so a change after it is not missed. The
+    older commit carries the later date, so ordering by date would pick wrong."""
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
     aiter.module("gfx950", [ROW_HD128])
-    first = aiter.commit("v0.1.1")
+    first = aiter.commit("v0.1.1", date="2030-01-02T00:00:00")
     plan(sync, env, "v0.1.1", arch="gfx942,gfx950")
     apply(sync, env)
     assert run(sync, env, "mark-ported", "--module", KEY) == 0
@@ -766,7 +773,7 @@ def test_new_arch_diffs_from_the_oldest_host_code_commit_of_the_others(sync, env
         "csrc/include/mha_fwd.h",
         MHA_FWD_H.replace("p2 _p0;", "p2 _p0;\n    int nsplit;"),
     )
-    second = aiter.commit("v0.2.0")
+    second = aiter.commit("v0.2.0", date="2030-01-01T00:00:00")
     pins_path = kernels / "aiter_fwd_pins.json"
     pins = json.loads(pins_path.read_text())
     assert pins["modules"][KEY]["abi_commit"] == first
@@ -782,6 +789,43 @@ def test_new_arch_diffs_from_the_oldest_host_code_commit_of_the_others(sync, env
         "+    int nsplit;"
         in of_kind(report, "reference_changed", "gfx1100/fmha_v3_fwd")[0]["diff"]
     )
+
+
+def test_host_code_baseline_precedence(sync, env):
+    """A pinned module without a host-code commit takes the one the other archs of
+    its module record, else --baseline. Archs of another module do not count."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    aiter.module("gfx950", [ROW_HD128])
+    shipped = aiter.commit("v0.1.1")
+    plan(sync, env, "v0.1.1", arch="gfx942,gfx950")
+    apply(sync, env)
+    pins_path = kernels / "aiter_fwd_pins.json"
+    pins = json.loads(pins_path.read_text())
+    assert pins["modules"][KEY]["abi_commit"] is None
+    # Another module, pinned at another commit, shares no host code with these.
+    (kernels / "gfx1250" / "fmha_fwd_bf16").mkdir(parents=True)
+    pins["modules"]["gfx1250/fmha_fwd_bf16"] = {
+        **pins["modules"][KEY],
+        "commit": base,
+        "abi_commit": base,
+    }
+    pins_path.write_text(json.dumps(pins))
+
+    plan(sync, env, "v0.1.1")
+    assert module_plan(report)["abi_baseline"] is None
+    assert "baseline_unknown" in kinds(report)
+
+    plan(sync, env, "v0.1.1", "--baseline", base)
+    assert module_plan(report)["abi_baseline"] == base
+
+    assert run(sync, env, "mark-ported", "--module", KEY) == 0
+    assert pin(kernels, "gfx950/fmha_v3_fwd")["abi_commit"] == shipped
+    pins = json.loads(pins_path.read_text())
+    pins["modules"][KEY]["abi_commit"] = None
+    pins_path.write_text(json.dumps(pins))
+    plan(sync, env, "v0.1.1", "--baseline", base)
+    assert module_plan(report)["abi_baseline"] == shipped
 
 
 def test_renamed_reference_keeps_the_host_code_baseline(sync, env, monkeypatch):

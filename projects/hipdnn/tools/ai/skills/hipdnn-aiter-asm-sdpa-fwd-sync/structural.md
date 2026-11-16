@@ -39,7 +39,7 @@ AITER also decides in Python whether a call reaches the ASM forward kernels: `ca
 
 - The engine mirrors the hd192x128 K/V row-extent decline (2^32 bytes) on gfx942 and gfx950. Both gate copies compute the extent in `_fmha_kv_byte_extent_ge_u32`.
 - The engine does not port the fp8 rule that `nhead_q / nhead_k` be a power of two. The gfx950 fp8 rows are excluded, and the gfx942 fp8 objects divide by the GQA ratio in full. Port the rule before enabling the gfx950 fp8 rows.
-- The region does not hold the conditions at the gate's call site, such as `elif can_impl_fmha_v3_fwd() and seqlen_q > 128` in the batch caller, or the branches before it. At `v0.1.28.post1` those state routing preferences ("prefer CK for decode cases"), not kernel limits. When a release changes the dispatch, read the caller's branch chain by hand for a new kernel limit.
+- The region does not hold the conditions at the gate's call site, such as `elif can_impl_fmha_v3_fwd() and seqlen_q > 128` in the batch caller, or the branches before it. At `v0.1.28.post1` those state routing preferences ("prefer CK for decode cases"), not kernel limits. A change there plans as tier 0, so on every update read the diff of both callers' branch chains in `aiter/ops/mha.py` by hand for a new kernel limit (SKILL.md workflow step 6).
 
 ## New arch (`new_arch`, `cmake_arch_missing`)
 
@@ -69,7 +69,7 @@ A new module name, such as gfx1250's `fmha_fwd_bf16` and `fmha_fwd_bf16_varlen`,
 - **`csv_removed_upstream`**: AITER dropped a CSV, and every row in it is lost. Treat it as a removal of all its kernels ([new-values.md](new-values.md)).
 - **`layout_changed`**: the object directories changed. The gfx942 forward objects live in `MI300/` and `MI308/`, chosen at runtime by `isMi308Device` and `getKernelTocKey`. Mirror the new split in both, and in the archive-key tests.
 - **`reference_missing`**: a mirrored upstream function or struct is gone or renamed. Find where its logic now lives upstream. If it moved, record the new name in `REFERENCES` in the helper script, in a change to this skill. `apply` keeps the older host-code commit while a reference is missing, so once the new name is recorded, later plans report the moved code until it is ported. The older commit has no region under the new name, so that diff shows the whole moved function as added lines: compare it with the old function by hand.
-- **`baseline_unknown`**: no arch of the module records a host-code commit. For a module that is vendored but not pinned, re-run `plan` with `--baseline <commit>`. Otherwise, read the reference sources in full, compare them with the engine by hand, then run `mark-ported`.
+- **`baseline_unknown`**: no arch of the module records a host-code commit, and no `--baseline` was given. If the AITER commit the module's host code was mirrored from is known, re-run `plan` with `--baseline <commit>`. Otherwise, read the reference sources in full, compare them with the engine by hand, then run `mark-ported`.
 
 ## Forward modules not ported
 

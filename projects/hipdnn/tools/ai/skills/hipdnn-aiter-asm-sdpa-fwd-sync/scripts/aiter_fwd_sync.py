@@ -1250,28 +1250,30 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         entry = pins["modules"].get(key)
         if entry:
             baseline_commit[key], baseline_source[key] = entry["commit"], "pin"
-            if entry.get("abi_commit"):
-                abi_commit[key] = entry["abi_commit"]
-            elif explicit_baseline:
-                abi_commit[key] = explicit_baseline
         elif explicit_baseline and (kernels / arch / module).is_dir():
             baseline_commit[key], baseline_source[key] = explicit_baseline, "--baseline"
+        # The engine launches every arch of a module with one copy of the host
+        # code, so a module without its own host-code commit takes the one the
+        # other vendored archs of the module record. When they differ, their merge
+        # base, so that no change since any of them is missed. --baseline is the
+        # last resort.
+        shared = {
+            pins["modules"][other]["abi_commit"]
+            for other in host_code_sharers(kernels, module)
+            if other != key and pins["modules"].get(other, {}).get("abi_commit")
+        }
+        if entry and entry.get("abi_commit"):
+            abi_commit[key] = entry["abi_commit"]
+        elif shared:
+            abi_commit[key] = (
+                next(iter(shared))
+                if len(shared) == 1
+                else run_git(
+                    upstream.repo, "merge-base", "--octopus", *sorted(shared)
+                ).strip()
+            )
+        elif explicit_baseline and key in baseline_commit:
             abi_commit[key] = explicit_baseline
-        if key not in abi_commit:
-            # The engine launches every arch of a module with one copy of the host
-            # code, so a module without its own host-code commit takes the one
-            # already vendored archs record; the oldest in AITER's history, if they
-            # differ, so that no change since any of them is missed.
-            shared = {
-                pins["modules"][other]["abi_commit"]
-                for other in host_code_sharers(kernels, module)
-                if pins["modules"].get(other, {}).get("abi_commit")
-            }
-            if shared:
-                abi_commit[key] = min(
-                    shared,
-                    key=lambda c: int(run_git(upstream.repo, "rev-list", "--count", c)),
-                )
     baseline_files: dict[str, dict[str, bytes]] = {}
     for base in sorted(set(baseline_commit.values()) | set(abi_commit.values())):
         baseline_files[base] = upstream.materialize(base, module_dirs, refs)
@@ -1779,7 +1781,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--arch", required=True, help="comma-separated GPU archs, e.g. gfx942,gfx950"
     )
     plan.add_argument(
-        "--baseline", help="AITER commit the unpinned vendored modules came from"
+        "--baseline",
+        help="AITER commit an unpinned vendored module came from; also the host-code "
+        "baseline of a module no arch records one for",
     )
     plan.add_argument(
         "--report",
