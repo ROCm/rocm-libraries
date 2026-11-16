@@ -34,7 +34,9 @@ using namespace hipdnn_frontend::graph;
 /**
  * @file IntegrationGpuConvRobustness.cpp
  * @brief The conv engines' failure paths through the public API:
- *        - a HIPRTC compile failure costs only its engine: the graph is served by the next one.
+ *        - a HIPRTC compile failure costs only its engine: the graph is served by the next one;
+ *        - with HIPRTC disabled, a program the disk cache holds still serves and any other plan
+ *          declines at plan build.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -297,6 +299,43 @@ TEST_F(IntegrationGpuConvRobustness, ACompileFailureFallsToTheNextEngine)
 
     EXPECT_TRUE(capture.recorder().hasLogContaining(HIPDNN_SEV_WARN, "kernels/ConvNaive.cpp"))
         << capture.recorder().getRecordedLogsAsString();
+    verify(*graph, conv);
+    ASSERT_EQ(detail::resetProviderHiprtcModules(), "");
+}
+
+// With HIPRTC disabled, a plan whose program is not cached declines at plan build, never at
+// execute; once the disk cache holds it, the plan builds and runs without HIPRTC.
+TEST_F(IntegrationGpuConvRobustness, WithHiprtcDisabledCachedProgramsServeAndMissesDecline)
+{
+    ASSERT_EQ(detail::resetProviderHiprtcModules(), "");
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "conv-no-hiprtc", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+    const auto conv = spec(Direction::FWD, 8, 8, 1, 8, 3, 1, 1, false);
+    const auto naive = engineId("hipkernel:CONV_NAIVE_FWD");
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+            "HIP_KERNEL_PROVIDER_DISABLE_HIPRTC", "1");
+        auto graph = buildGraph(conv);
+        const auto result = buildPreferring(*graph, naive);
+        // Every conv engine this binary loads compiles from source, so none can serve.
+        EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED) << result.err_msg;
+    }
+
+    // Compile once, with HIPRTC available, into the disk cache.
+    {
+        auto graph = buildGraph(conv);
+        const auto result = buildPreferring(*graph, naive);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(servingEngine(*graph), naive);
+    }
+    ASSERT_EQ(detail::resetProviderHiprtcModules(), "");
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+        "HIP_KERNEL_PROVIDER_DISABLE_HIPRTC", "1");
+    auto graph = buildGraph(conv);
+    const auto result = buildPreferring(*graph, naive);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    EXPECT_EQ(servingEngine(*graph), naive);
     verify(*graph, conv);
     ASSERT_EQ(detail::resetProviderHiprtcModules(), "");
 }

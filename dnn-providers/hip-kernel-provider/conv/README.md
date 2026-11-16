@@ -223,6 +223,11 @@ unit binary also enables it when the variable is unset), and
 `hip_kernel_provider_conv_opt_in_off` checks that none of its engines is offered when it is
 not.
 
+## Plan build: compilation, failures and workspace
+
+- **Compilation.** Every conv config compiles its programs through HIPRTC when its plan is built, never at execution. Code objects are cached on disk and in the process ([HIPRTC code-object cache](../README.md#hiprtc-code-object-cache)); [Seeing what ran](../README.md#seeing-what-ran) shows the config each plan chose and where each program came from.
+- **Failures.** A config whose program fails to compile, or cannot be compiled because HIPRTC is unavailable or disabled (`HIP_KERNEL_PROVIDER_DISABLE_HIPRTC`), costs only that config: the engine logs a warning naming the program and tries its next candidate. An engine none of whose candidates builds declines at plan build, and hipDNN finalizes the next engine.
+
 ## Building
 
 Off by default. Enable with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_CONV=ON`,

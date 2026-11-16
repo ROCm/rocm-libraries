@@ -14,6 +14,7 @@
 #include "kernel_sources.hpp"
 #include <hip/hiprtc.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -41,6 +42,14 @@ bool compileFailureInjected(const std::string& program)
 {
     const auto pattern = hipdnn_data_sdk::utilities::getEnv(TEST_FAIL_COMPILE_ENV);
     return !pattern.empty() && program.find(pattern) != std::string::npos;
+}
+
+/// DISABLE_HIPRTC_ENV is set to a true value.
+bool hiprtcDisabled()
+{
+    const auto raw = hipdnn_data_sdk::utilities::toLower(
+        hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv(DISABLE_HIPRTC_ENV)));
+    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
 }
 
 double millisecondsSince(std::chrono::steady_clock::time_point start)
@@ -107,6 +116,15 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
             static_cast<void>(hipGetLastError());
         }
         _module = nullptr;
+    }
+
+    // Past here the program needs a compile.
+    if(hiprtcDisabled())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+            "HIPRTC compilation is disabled (" + std::string(DISABLE_HIPRTC_ENV) + ") and "
+                + _programName + " has no disk-cache entry for these options");
     }
 
     // Convert includes

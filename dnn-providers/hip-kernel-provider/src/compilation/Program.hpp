@@ -15,6 +15,11 @@ namespace hip_kernel_provider::compilation
 /// compile. Unset in production.
 inline constexpr const char* TEST_FAIL_COMPILE_ENV = "HIP_KERNEL_PROVIDER_TEST_FAIL_COMPILE";
 
+/// Set to 1/true/on/yes: the provider never compiles with HIPRTC. A program the disk cache
+/// holds still loads; any other fails to build, so a plan that needs it declines at plan build.
+/// Read at every compile.
+inline constexpr const char* DISABLE_HIPRTC_ENV = "HIP_KERNEL_PROVIDER_DISABLE_HIPRTC";
+
 class Program
 {
 public:

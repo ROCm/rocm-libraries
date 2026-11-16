@@ -192,6 +192,39 @@ TEST(TestGpuProgramCache, InjectedCompileFailureBypassesTheCache)
     EXPECT_EQ(cachedCodeObjects().size(), 1u);
 }
 
+// With HIPRTC disabled a program the disk cache holds still loads, and any other fails with
+// NOT_APPLICABLE rather than compiling.
+TEST(TestGpuProgramCache, WithHiprtcDisabledACachedProgramLoadsAndAMissDeclines)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "program-cache-no-hiprtc", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+            DISABLE_HIPRTC_ENV, "1");
+        try
+        {
+            const Program missing("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+            ADD_FAILURE() << "a program with no cache entry was built with HIPRTC disabled";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+            EXPECT_NE(std::string(error.what()).find(DISABLE_HIPRTC_ENV), std::string::npos)
+                << error.what();
+        }
+        EXPECT_TRUE(cachedCodeObjects().empty());
+    }
+    {
+        const Program compiled("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    }
+    ASSERT_EQ(cachedCodeObjects().size(), 1u);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(DISABLE_HIPRTC_ENV,
+                                                                               "1");
+    const Program cached("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    EXPECT_NE(cached.getKernel("vector_add"), nullptr);
+}
+
 TEST(TestKernel, LaunchesVectorAdd)
 {
     SKIP_IF_NO_DEVICES();
