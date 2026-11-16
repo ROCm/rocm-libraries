@@ -53,17 +53,19 @@ void _rocsparse_lrb_info::clear()
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    THROW_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
+    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
+    // Each pointer is reset once it is freed: if a later free throws, the
+    // destructor must not free it again.
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
+    this->wg_flags = nullptr;
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->rows_offsets_scratch));
-    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->rows_bins));
-    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->n_rows_bins));
-
-    this->wg_flags             = nullptr;
     this->rows_offsets_scratch = nullptr;
-    this->rows_bins            = nullptr;
-    this->n_rows_bins          = nullptr;
-    this->size                 = 0;
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->rows_bins));
+    this->rows_bins = nullptr;
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->n_rows_bins));
+    this->n_rows_bins = nullptr;
+
+    this->size = 0;
     memset(this->nRowsBins, 0, sizeof(int64_t) * 32);
 }

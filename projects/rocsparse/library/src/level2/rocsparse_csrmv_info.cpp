@@ -30,7 +30,17 @@ _rocsparse_csrmv_info::_rocsparse_csrmv_info() = default;
 
 _rocsparse_csrmv_info::~_rocsparse_csrmv_info()
 {
-    this->clear();
+    // clear() throws when a HIP call fails, for instance while a stream is being
+    // captured, and an exception leaving a destructor terminates the process.
+    // The buffers that clear() could not free are left to the member destructors,
+    // which only warn.
+    try
+    {
+        this->clear();
+    }
+    catch(...)
+    {
+    }
 }
 
 void _rocsparse_csrmv_info::clear()
