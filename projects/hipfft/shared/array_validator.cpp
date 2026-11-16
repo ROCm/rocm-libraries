@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,13 +18,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <algorithm> // std::permutation
+#include <algorithm> // std::sort, std::max, std::min
+#include <cassert>
+#include <cstddef> // ptrdiff_t, size_t
 #include <iostream>
-#include <memory> // std::unique_ptr
-#include <numeric> // std::lcm, std:gcd
+#include <limits> // std::numeric_limits
+#include <numeric> // std:gcd
 #include <sstream> // std::stringstream
 #include <stdexcept> // runtime_error, logic_error
-#include <utility> // std::pair
+#include <utility> // std::swap
 #include <vector>
 
 #include "array_validator.h"
@@ -118,139 +120,66 @@ namespace
             std::sort(dimensions.begin(), dimensions.end());
             // dimensions contains only the non-trivial array dimensions (lengths > 1 and
             // non-zero strides), sorted by increasing stride values.
-        }
 
-        using collision_t = std::pair<std::vector<size_t>, std::vector<size_t>>;
+            // The search below uses signed arithmetic on values bounded by twice the array's
+            // span (largest flattened index), i.e., reach.back(), which may not exceed max_span.
+            for(const auto& dim : dimensions)
+            {
+                const size_t previous_reach = reach.empty() ? 0 : static_cast<size_t>(reach.back());
+                if(dim.stride() > (max_span - previous_reach) / (dim.length() - 1))
+                {
+                    std::stringstream info;
+                    info << "Array span too large (supported maximum: " << max_span << ")";
+                    throw array_construction_exception(info.str());
+                }
+                reach.push_back(
+                    static_cast<ptrdiff_t>(previous_reach + (dim.length() - 1) * dim.stride()));
+                stride_gcd.push_back(std::gcd(stride_gcd.empty() ? ptrdiff_t(0) : stride_gcd.back(),
+                                              static_cast<ptrdiff_t>(dim.stride())));
+            }
+        }
 
         /**
          * @brief checks if the array is self-aliasing, i.e., if there exist two different
          * multi-indices (x_0, x_1, ..., x_n) and (y_0, y_1, ..., y_n) such that
          * x_0*s_0 + x_1*s_1 + ... + x_n*s_n == y_0*s_0 + y_1*s_1 + ... + y_n*s_n
          * wherein s_i = dimensions[j].stride() for j s.t. dimensions[j].index() == i.
-         * 
-         * @tparam is_seed_call boolean template parameter distinguishing between the parent object's
-         * function call (true specialization) and function calls by child objects generated herein
-         * (false specialization).
-         * IMPORTANT NOTE: the false-specialization is meant to be used internally only, as it may
-         * produce incorrect results otherwise.
-         * @param[out] eqn_counters pointer to a vector of size_t values of capacity >= size() - 1
-         * (ignored if nullptr). If not ignored, (*eqn_counters)[i] contains the number of nontrivial
-         * linear diophantine equations of (i + 1) unknowns that have been considered by this function
-         * upon its return.
-         * @param[out] collision pointer to a pair of vectors of size_t values of capacity equal to
-         * those of the lengths and strides used at construction of this object (ignored if nullptr).
-         * If not ignored, this pair contains an example of two multi-indices that result in a
-         * collision upon return when a collision exists (its content is undefined upon return
-         * otherwise).
+         *
+         * Writing d_i = x_i - y_i, the array is self-aliasing iff
+         *
+         *        d_0*s_0 + d_1*s_1 + ... + d_n*s_n == 0                          (E)
+         *
+         * has a solution with -l_i < d_i < l_i for all i and d_i != 0 for some i, wherein
+         * l_i is the length associated with s_i. This is decided as follows (dimensions
+         * being sorted by increasing strides):
+         *
+         * 1. The coefficients d_i are enumerated by decreasing strides, except for the two
+         *    smallest-stride dimensions (see solve). Each d_i is restricted to the values
+         *    leaving a target reachable by the dimensions of smaller strides, and branches
+         *    are cut when the target is not a multiple of the gcd of their strides. The
+         *    first nonzero coefficient is kept positive, since d and -d describe the same
+         *    collision. For "nested" arrays (each stride at least the previous dimension's
+         *    length times its stride), only zero coefficients remain at every level, so
+         *    they are decided without branching.
+         *
+         * 2. The two smallest-stride dimensions are not enumerated: all integer solutions
+         *    of d_0*s_0 + d_1*s_1 == target follow from the extended Euclidean algorithm,
+         *    so checking whether one of them is in range takes O(log) operations (see
+         *    solve_two_dimensions).
+         *
          * @return true if the array is self-aliasing, false if not.
          */
-        template <bool is_seed_call = true>
-        bool is_self_aliasing(std::vector<size_t>* eqn_counters, collision_t* collision) const
+        bool is_self_aliasing() const
         {
-            if(dimensions.size() < 2)
+            if(size() < 2)
             {
                 // nontrivial lengths associated with a zero stride are excluded by construction
                 // --> no conflict can exist
                 return false;
             }
 
-            bool happy_path = true;
-            for(auto it = dimensions.begin(); (it + 1) != dimensions.end(); it++)
-            {
-                happy_path &= (it + 1)->stride() >= it->length() * it->stride();
-            }
-            if(happy_path)
-                return false;
-
-            // There exist two different multi-indices (x_0, x_1, ..., x_n) and (y_0, y_1, ..., y_n)
-            // such that x_0*s_0 + x_1*s_1 + ... + x_n*s_n == y_0*s_0 + y_1*s_1 + ... + y_n*s_n
-            // <=>
-            // sum_{i : x_i >= y_i } [ (x_i - y_i) * s_i] == sum_{i : x_i < y_i} [ (y_i - x_i) * s_i]
-            // <=>
-            // there exists u_0, u_1, ..., u_n, s.t.
-            // sum_{i : Si_lhs } u_i * s_i == sum_{i : Si_rhs} u_i * s_i
-            // wherein
-            // - Si_lhs : set of dimension indices i such that x_i >= y_i
-            // - Si_rhs : set of dimension indices i such that x_i <  y_i
-            // - u_i = |x_i - y_i|, therefore 0 <= u_i < l_i
-            // Note: Si_lhs and Si_rhs are disjoint sets by definition.
-
-            // Find all ways to split the current array's set of dimension
-            // indices in two disjoint sub-sets
-            std::vector<size_t>  mask(size());
-            std::vector<size_t>* lhs_solution = collision ? &collision->first : nullptr;
-            std::vector<size_t>* rhs_solution = collision ? &collision->second : nullptr;
-            for(size_t lhs_array_sz = size() / 2; lhs_array_sz > 0; lhs_array_sz--)
-            {
-                std::fill(mask.begin(), mask.begin() + lhs_array_sz, 0);
-                std::fill(mask.begin() + lhs_array_sz, mask.end(), 1);
-                do
-                {
-                    if(2 * lhs_array_sz == size() && mask[0] == 1)
-                    {
-                        // avoid redundant splits that would be swapped
-                        // copies of some other
-                        continue;
-                    }
-                    array_t lhs_subarray, rhs_subarray;
-                    for(size_t idx = 0; idx < size(); ++idx)
-                    {
-                        if(mask[idx])
-                            rhs_subarray.push_back(dimensions[idx]);
-                        else
-                            lhs_subarray.push_back(dimensions[idx]);
-                    }
-                    // check if any sub-array is self-aliasing itself
-                    // (lower-dimensional, much cheaper verification check)
-                    // NOTE: seed-call only to avoid redundancy. Sub-arrays of sub-arrays of
-                    // a parent object are (other) sub-arrays of that object (therefore already
-                    // considered in another iteration herein, in the seed call).
-                    if constexpr(is_seed_call)
-                    {
-                        if(lhs_subarray.is_self_aliasing<!is_seed_call>(eqn_counters, collision)
-                           || rhs_subarray.is_self_aliasing<!is_seed_call>(eqn_counters, collision))
-                        {
-                            return true;
-                        }
-                    }
-                    // if a conflict exists, it must be at
-                    // - a common multiple of either side's stride_gcd
-                    // - within non-degenerate range for either side (and not 0)
-                    // Indeed, given the verification for self-aliazing sub-arrays done
-                    // above, degenerate solutions (i.e., solution with x[i] = 0 for any i)
-                    // may be ruled out below as they'd be found in another lower-dimensional
-                    // sub-array verification. This significantly increases the minimum value
-                    // of the range of relevance for possible matches, below.
-                    const size_t lcm
-                        = std::lcm(lhs_subarray.strides_gcd(), rhs_subarray.strides_gcd());
-                    const size_t possible_match_min
-                        = lcm
-                          * divUp(std::max(lhs_subarray.first_nondegenerate_entry(),
-                                           rhs_subarray.first_nondegenerate_entry()),
-                                  lcm);
-                    const size_t possible_match_max
-                        = std::min(lhs_subarray.last_entry(), rhs_subarray.last_entry());
-                    if(possible_match_max < possible_match_min)
-                        continue;
-                    if(lhs_solution && rhs_solution)
-                    {
-                        // reset solutions
-                        std::fill(lhs_solution->begin(), lhs_solution->end(), 0);
-                        std::fill(rhs_solution->begin(), rhs_solution->end(), 0);
-                    }
-                    for(size_t possible_match = possible_match_min;
-                        possible_match <= possible_match_max;
-                        possible_match += lcm)
-                    {
-                        if(lhs_subarray.reaches(possible_match, eqn_counters, lhs_solution)
-                           && rhs_subarray.reaches(possible_match, eqn_counters, rhs_solution))
-                        {
-                            return true;
-                        }
-                    }
-                } while(std::next_permutation(mask.begin(), mask.end()));
-            }
-            return false;
+            constexpr bool nontrivial_required = true;
+            return solve(size() - 1, 0, nontrivial_required);
         }
 
         inline size_t size() const
@@ -259,172 +188,114 @@ namespace
         }
 
     private:
+        // largest supported span: the search computes signed values up to twice the span
+        static constexpr size_t max_span = std::numeric_limits<ptrdiff_t>::max() / 2;
+
         std::vector<array_dimension> dimensions;
+        // reach[k]: largest |d_0*s_0 + ... + d_k*s_k| with -l_i < d_i < l_i, i.e., span of the
+        // sub-array made of the first k + 1 dimensions
+        std::vector<ptrdiff_t> reach;
+        // stride_gcd[k]: greatest common divisor of s_0, ..., s_k
+        std::vector<ptrdiff_t> stride_gcd;
 
-        // computes the greatest common divisor of all strides
-        size_t strides_gcd() const
+        /**
+         * @brief searches for a solution of d_0*s_0 + ... + d_k*s_k == target with
+         * lo_i <= d_i <= hi_i, wherein hi_i = l_i - 1 and lo_i = -hi_i, by enumerating d_k,
+         * d_{k-1}, ..., d_2 (decreasing strides).
+         *
+         * @param[in] k index of the dimension of largest stride involved (k >= 1)
+         * @param[in] target right-hand side of the equation
+         * @param[in] nontrivial_required true iff a nontrivial solution of the homogeneous
+         * equation is required (target == 0), i.e., when searching for a nonzero solution of (E)
+         * with all coefficients of the larger-stride dimensions being 0. d and -d being both
+         * solutions then, the first nonzero coefficient (by decreasing strides) is kept positive
+         * @return true if a solution was found, false otherwise
+         */
+        bool solve(size_t k, ptrdiff_t target, bool nontrivial_required) const
         {
-#ifndef NDEBUG
-            if(size() < 1)
-                throw array_debug_exception("array_t::strides_gcd() invoked by an empty array");
-#endif
-            return std::accumulate(
-                dimensions.begin() + 1,
-                dimensions.end(),
-                dimensions[0].stride(),
-                [](size_t ret, const array_dimension& dim) { return std::gcd(ret, dim.stride()); });
-        }
+            assert(0 < k && k < size());
+            assert(!nontrivial_required || target == 0);
+            // range of d_0*s_0 + ... + d_k*s_k
+            const ptrdiff_t sum_min = -reach[k];
+            const ptrdiff_t sum_max = reach[k];
+            if(target < sum_min || target > sum_max || target % stride_gcd[k] != 0)
+                return false;
+            if(k == 1)
+                return solve_two_dimensions(target, nontrivial_required);
 
-        // calculates index of array element (1,1,...,1)
-        size_t first_nondegenerate_entry() const
-        {
-            return std::accumulate(
-                dimensions.begin(),
-                dimensions.end(),
-                0ULL,
-                [](size_t acc, const array_dimension& dim) { return acc + dim.stride(); });
-        }
-
-        // calculates index of array element (l0-1,l1-1,...,ln-1)
-        size_t last_entry() const
-        {
-            return std::accumulate(dimensions.begin(),
-                                   dimensions.end(),
-                                   0ULL,
-                                   [](size_t acc, const array_dimension& dim) {
-                                       return acc + dim.stride() * (dim.length() - 1);
-                                   });
+            // d_k is restricted to values leaving a target that the dimensions of smaller
+            // strides can reach: rest_min <= target - d_k*s_k <= rest_max
+            const auto      s_k      = static_cast<ptrdiff_t>(dimensions[k].stride());
+            const ptrdiff_t hi_k     = static_cast<ptrdiff_t>(dimensions[k].length()) - 1;
+            const ptrdiff_t lo_k     = -hi_k;
+            const ptrdiff_t rest_min = -reach[k - 1];
+            const ptrdiff_t rest_max = reach[k - 1];
+            ptrdiff_t       d_min    = std::max(lo_k, divUp(target - rest_max, s_k));
+            const ptrdiff_t d_max    = std::min(hi_k, divDown(target - rest_min, s_k));
+            if(nontrivial_required)
+                d_min = std::max<ptrdiff_t>(d_min, 0);
+            for(ptrdiff_t d_k = d_min; d_k <= d_max; d_k++)
+            {
+                if(solve(k - 1, target - d_k * s_k, nontrivial_required && d_k == 0))
+                    return true;
+            }
+            return false;
         }
 
         /**
-         * @brief verifies if an array element is located at `address`, i.e., if
-         * 
-         *        sum_i (x[i] * dimensions[i].stride()) == address
-         * 
-         * has a solution in valid range, i.e., a solution such that
-         * 0 <= x[i] < dimensions[i].length() for all 0 <= i < size().
-         * 
-         * @param[in] address flattened index value where the presence of an array
-         * element is enquired
-         * @param[inout] eqn_counters pointer to a vector of size_t counters of
-         * diophantine equations being considered by this object (ignored if nullptr)
-         * @param[out] solution pointer to a vector of size_t values capturing the
-         * multi-index identification of the array element present at the queried
-         * location upon return (if found). If not ignored, solution[dimensions[i].index()]
-         * is set to the found x_i for all 0 <= i < size() if an array element is found.
-         * @return true if an array element is located at `address`, false if not.
+         * @brief decides if d_0*s_0 + d_1*s_1 == target has a solution with lo_0 <= d_0 <= hi_0
+         * and lo_1 <= d_1 <= hi_1 (see solve), excluding d_0 == d_1 == 0 if nontrivial_required,
+         * without enumeration.
+         *
+         * With g = gcd(s_0, s_1) dividing target (checked by the caller) and Bezout's
+         * coefficients p, q such that p*s_0 + q*s_1 == g, the integer solutions are
+         *
+         *        d_0 = c + j*(s_1/g),   d_1 = (target - d_0*s_0)/s_1 = d_1(0) - j*(s_0/g)
+         *
+         * for any integer j, wherein c = p*(target/g) mod (s_1/g). The values of j keeping
+         * either coefficient in range form two intervals, which only need to intersect.
+         *
+         * @param[in] target right-hand side of the equation
+         * @param[in] nontrivial_required see solve
+         * @return true if a solution was found, false otherwise
          */
-        bool reaches(size_t               address,
-                     std::vector<size_t>* eqn_counters,
-                     std::vector<size_t>* solution) const
+        bool solve_two_dimensions(ptrdiff_t target, bool nontrivial_required) const
         {
-            if(size() == 0)
-            {
-                // should never happen
-#ifndef NDEBUG
-                throw array_debug_exception("array_t::reaches() invoked by an empty array");
-#endif
+            const size_t    s0  = dimensions[0].stride();
+            const size_t    s1  = dimensions[1].stride();
+            const ptrdiff_t hi0 = static_cast<ptrdiff_t>(dimensions[0].length()) - 1;
+            const ptrdiff_t hi1 = static_cast<ptrdiff_t>(dimensions[1].length()) - 1;
+            const ptrdiff_t lo0 = -hi0;
+            const ptrdiff_t lo1 = -hi1;
+            ptrdiff_t       p, q; // Bezout's coefficients
+            const auto      g = static_cast<ptrdiff_t>(ext_euclide_gcd(s0, s1, p, q));
+            // period of d_0 (resp. d_1) along the family of solutions
+            const ptrdiff_t period0 = static_cast<ptrdiff_t>(s1) / g;
+            const ptrdiff_t period1 = static_cast<ptrdiff_t>(s0) / g;
+            // residue of all valid d_0 modulo period0; both factors are reduced first so that
+            // the product cannot overflow
+            const auto c = static_cast<ptrdiff_t>(mulmod(non_negative_mod(p, period0),
+                                                         non_negative_mod(target / g, period0),
+                                                         static_cast<size_t>(period0)));
+            // smallest d_0 >= lo0 in that residue class, and the matching d_1
+            const ptrdiff_t d0_first = c + divUp(lo0 - c, period0) * period0;
+            if(d0_first > hi0)
                 return false;
-            }
-            if(address == 0)
-            {
-                // trivial homogeneous solution
-                if(solution)
-                    std::fill(solution->begin(), solution->end(), 0);
-                return true;
-            }
-            if(address > last_entry())
-                return false; // beyond range
-            if(address % strides_gcd() != 0)
+            const ptrdiff_t d1_first
+                = (target - d0_first * static_cast<ptrdiff_t>(s0)) / static_cast<ptrdiff_t>(s1);
+            // d_0 = d0_first + j*period0 and d_1 = d1_first - j*period1 are both in range iff
+            // j_min <= j <= j_max
+            const ptrdiff_t j_min = std::max<ptrdiff_t>(0, divUp(d1_first - hi1, period1));
+            const ptrdiff_t j_max
+                = std::min(divDown(hi0 - d0_first, period0), divDown(d1_first - lo1, period1));
+            if(j_min > j_max)
                 return false;
-            if(eqn_counters && size() > 1)
-            {
-                // nontrivial case, add it to counter if counting
-                (*eqn_counters)[size() - 1]++;
-            }
-            switch(size())
-            {
-            case 1:
-            {
-                if(solution)
-                {
-                    (*solution)[dimensions[0].index()] = address / dimensions[0].stride();
-                }
-                return true;
-            }
-            case 2:
-            {
-                const size_t& s0 = dimensions[0].stride();
-                const size_t& s1 = dimensions[1].stride();
-                // we need to find solutions to p*s0 + q*s1 = address;
-                ptrdiff_t  p, q; // Bezout's coefficients
-                const auto gcd = ext_euclide_gcd(s0, s1, p, q);
-                // --> p*s0 + q*s1 = gcd
-                const ptrdiff_t scale = static_cast<ptrdiff_t>(address / gcd);
-                p *= scale;
-                q *= scale;
-                // --> p*s0 + q*s1 = address, now (particular solution)
-#ifndef NDEBUG
-                // check the particular solution
-                if(p * static_cast<ptrdiff_t>(s0) + q * static_cast<ptrdiff_t>(s1)
-                   != static_cast<ptrdiff_t>(address))
-                {
-                    std::stringstream info;
-                    info << "Incorrect particular solution detected in array_t::reaches\n"
-                         << "\t(p, q) = (" << p << ", " << q << ")\n"
-                         << "\tp*s0 + q*s1 = "
-                         << p * static_cast<ptrdiff_t>(s0) + q * static_cast<ptrdiff_t>(s1)
-                         << " != " << address << "\n";
-                    throw array_debug_exception(info.str());
-                }
-#endif
-                const ptrdiff_t l0     = static_cast<ptrdiff_t>(dimensions[0].length());
-                const ptrdiff_t l1     = static_cast<ptrdiff_t>(dimensions[1].length());
-                const size_t    s0_gcd = s0 / gcd;
-                const size_t    s1_gcd = s1 / gcd;
-                // check if a solution exists in range, i.e., if there is
-                // an integer k such that
-                // 0 <= p + k * s1_gcd <= dimensions[0].length() - 1;
-                // and
-                // 0 <= q - k * s0_gcd <= dimensions[1].length() - 1;
-                // then a solution exists and address can be reached.
-                const ptrdiff_t min_k = std::max(divUp(-p, s1_gcd), divUp(q - l1 + 1, s0_gcd));
-                const ptrdiff_t max_k = std::min(divDown(l0 - 1 - p, s1_gcd), divDown(q, s0_gcd));
-                auto            ret   = min_k <= max_k;
-                if(ret && solution)
-                {
-                    (*solution)[dimensions[0].index()] = p + min_k * s1_gcd;
-                    (*solution)[dimensions[1].index()] = q - min_k * s0_gcd;
-                }
-                return ret;
-            }
-            default:
-            {
-                // TODO: find something smarter for this (responsible
-                // for a complexity explosion in case of nontrivially-valid
-                // high-dimensional cases, e.g., size() > 6)
-
-                // linear diophantine equation with n > 2 unknowns
-                // reduce to (n-1) unknowns by scoping the range of valid
-                // values for one of the unknowns: remove dimensions.back()
-                // (being the dimension of largest stride, it results in the
-                //  smallest range)
-                array_t      sub_array(dimensions.begin(), dimensions.end() - 1);
-                const auto&  last_dim = dimensions.back();
-                const size_t max_k = std::min(last_dim.length() - 1, address / last_dim.stride());
-                for(size_t k = 0; k <= max_k; k++)
-                {
-                    if(sub_array.reaches(address - k * last_dim.stride(), eqn_counters, solution))
-                    {
-                        if(solution)
-                            (*solution)[last_dim.index()] = k;
-                        return true;
-                    }
-                }
-                return false;
-            }
-            }
+            // target being 0 when nontrivial_required, d_0 == 0 forces d_1 == 0: the solution at
+            // j_min is either nontrivial or, d_0 increasing with j, followed by nontrivial ones if
+            // j_min < j_max
+            return !nontrivial_required || d0_first + j_min * period0 != 0 || j_min < j_max;
         }
+
         /**
          * @brief computes the greatest common divisor between two (strictly positive) integers
          * via the extended Euclid algorithm, with Bezout's coefficients p and q such that
@@ -501,56 +372,27 @@ namespace
         {
             return a / b - (a % b < 0 ? 1 : 0);
         }
-
-        // private constructors (for subarrays)
-        array_t(decltype(dimensions)::const_iterator first,
-                decltype(dimensions)::const_iterator last)
+        // returns a mod m in [0, m) regardless of the sign of a (needs m > 0)
+        static inline size_t non_negative_mod(ptrdiff_t a, ptrdiff_t m)
         {
-            dimensions.assign(first, last);
+            const ptrdiff_t r = a % m;
+            return static_cast<size_t>(r < 0 ? r + m : r);
         }
-        array_t()
+        // returns (a * b) mod m for a, b < m <= max_span, without overflow: a * b is computed
+        // directly unless it overflows (only possible for strides of several billion), in which
+        // case double-and-add is used, with intermediate values below 2 * m
+        static size_t mulmod(size_t a, size_t b, size_t m)
         {
-            dimensions.clear();
-        }
-        void push_back(const decltype(dimensions)::value_type& dim_to_add)
-        {
-            dimensions.push_back(dim_to_add);
+            if(b == 0 || a <= std::numeric_limits<size_t>::max() / b)
+                return (a * b) % m;
+            size_t ret = 0;
+            for(; b > 0; b >>= 1, a = (a + a) % m)
+                if(b & 1)
+                    ret = (ret + a) % m;
+            return ret;
         }
     };
 
-    void report_equation_counts(const std::vector<size_t>& eqn_counts)
-    {
-        if(eqn_counts.empty() || std::all_of(eqn_counts.begin(), eqn_counts.end(), [](size_t val) {
-               return val == 0;
-           }))
-        {
-            std::cout << "No linear diophantine equation was considered." << std::endl;
-            return;
-        }
-        for(size_t idx = 0; idx < eqn_counts.size(); idx++)
-        {
-            if(eqn_counts[idx] == 0)
-                continue;
-            std::cout << eqn_counts[idx] << " linear diophantine equation"
-                      << (eqn_counts[idx] > 1 ? "s" : "") << " with " << idx + 1 << " unknown"
-                      << (idx > 0 ? "s " : " ") << (eqn_counts[idx] > 1 ? "were " : "was ")
-                      << "considered." << std::endl;
-        }
-    }
-    void report_collision_example(const array_t::collision_t& collision_example)
-    {
-        std::cout << "Example of colliding multi-indices:\n";
-        for(const auto& tmp : {collision_example.first, collision_example.second})
-        {
-            std::cout << "\t(" << tmp[0];
-            for(size_t i = 1; i < tmp.size(); i++)
-            {
-                std::cout << ", " << tmp[i];
-            }
-            std::cout << ")\n";
-        }
-        std::cout << std::endl;
-    }
 }
 
 bool array_valid(const std::vector<size_t>& length,
@@ -559,25 +401,7 @@ bool array_valid(const std::vector<size_t>& length,
 {
     try
     {
-        array_t                               array(length, stride);
-        std::unique_ptr<std::vector<size_t>>  eqn_counters;
-        std::unique_ptr<array_t::collision_t> collision_example;
-        if(verbose > 3 && array.size() > 1)
-            eqn_counters = std::make_unique<std::vector<size_t>>(array.size() - 1, 0);
-        if(verbose > 1 && array.size() > 1)
-        {
-            // note: length.size() may be larger than array.size()
-            collision_example = std::make_unique<array_t::collision_t>();
-            collision_example->first.resize(length.size());
-            collision_example->second.resize(length.size());
-        }
-        const auto ret = !array.is_self_aliasing(eqn_counters.get(), collision_example.get());
-        if(eqn_counters)
-            report_equation_counts(*eqn_counters);
-
-        if(!ret && collision_example)
-            report_collision_example(*collision_example);
-        return ret;
+        return !array_t(length, stride).is_self_aliasing();
     }
     catch(const array_construction_exception& e)
     {
@@ -593,8 +417,4 @@ bool array_valid(const std::vector<size_t>& length,
         throw e;
     }
 #endif
-    catch(...)
-    {
-        throw;
-    }
 }
