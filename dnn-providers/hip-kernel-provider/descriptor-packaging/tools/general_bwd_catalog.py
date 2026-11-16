@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import filecmp
 import os
 import shutil
 import subprocess
@@ -510,6 +509,11 @@ def install(generated: Path, bundle: Path) -> None:
         shutil.copyfile(generated / name, _install_path(bundle, name))
 
 
+def _text(path: Path) -> str:
+    # Universal newlines: a Windows checkout holds CRLF where the generator writes LF.
+    return path.read_text(encoding="utf-8")
+
+
 def stale_files(generated: Path, bundle: Path) -> list[str]:
     fresh = {p.name: p for p in generated.glob("*.json")}
     installed = _installed(bundle)
@@ -518,13 +522,13 @@ def stale_files(generated: Path, bundle: Path) -> list[str]:
         for n in set(fresh) | set(installed)
         if n not in fresh
         or n not in installed
-        or not filecmp.cmp(fresh[n], installed[n], shallow=False)
+        or _text(fresh[n]) != _text(installed[n])
     )
 
 
 def first_difference(generated: Path, installed: Path) -> str:
     """Where the two files first differ, for a stale-descriptor report."""
-    a, b = generated.read_bytes(), installed.read_bytes()
+    a, b = _text(generated).encode(), _text(installed).encode()
     at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
     return (
         f"first difference at byte {at} (generated {len(a)} bytes, installed {len(b)}): "

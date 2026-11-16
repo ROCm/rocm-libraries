@@ -234,6 +234,23 @@ def test_catalog_config_and_descriptors_are_current(generator_deps):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_descriptor_compare_ignores_line_endings(tmp_path):
+    """A CRLF checkout of the bundle is current; a changed value is still stale."""
+    sys.path.insert(0, str(TOOLS))
+    try:
+        from general_bwd_catalog import stale_files
+    finally:
+        sys.path.remove(str(TOOLS))
+    generated, bundle = tmp_path / "generated", tmp_path / "bundle"
+    generated.mkdir()
+    bundle.mkdir()
+    (generated / "a.json").write_bytes(b'{\n  "x": 1\n}\n')
+    (bundle / "a.json").write_bytes(b'{\r\n  "x": 1\r\n}\r\n')
+    assert stale_files(generated, bundle) == []
+    (bundle / "a.json").write_bytes(b'{\r\n  "x": 2\r\n}\r\n')
+    assert stale_files(generated, bundle) == ["a.json"]
+
+
 def test_launch_surface_profile_checks():
     """Every surface of the launch-surface profile names real files, symbols and KMD
     fields."""
