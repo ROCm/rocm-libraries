@@ -782,6 +782,16 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== gfx942 / gfx950 tiled-2d ======================== */
 
+/* gfx950 lse_layout: absent or "token_major" keeps the default. */
+static bool t2d_lse_head_major(const py::dict& d)
+{
+    std::string layout = "token_major";
+    a_str(d, "lse_layout", layout);
+    if(layout != "token_major" && layout != "head_major")
+        throw py::value_error("lse_layout must be 'token_major' or 'head_major'");
+    return layout == "head_major";
+}
+
 rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
 {
     rocke_attention_tiled_2d_spec_t s = rocke_attention_tiled_2d_spec_default();
@@ -824,6 +834,7 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
     s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.lse_head_major = t2d_lse_head_major(d);
     /* Every other field the C struct shares with the Python spec. A field left
      * out here silently keeps its C default, so the native builder would build
      * a different kernel (e.g. gfx942 x8 transposed specs fail validation
@@ -1030,6 +1041,7 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.lse_head_major = t2d_lse_head_major(d);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1136,6 +1148,7 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.use_decode_grid = a_bool(d, "use_decode_grid", s.use_decode_grid);
     s.use_kv_lds_swizzle = a_bool(d, "use_kv_lds_swizzle", s.use_kv_lds_swizzle);
     s.use_wave_page_id_load = a_bool(d, "use_wave_page_id_load", s.use_wave_page_id_load);
+    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1203,7 +1216,8 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
     r.num_segments = s.num_segments;
     r.has_waves_per_eu = s.has_waves_per_eu;
     r.waves_per_eu = s.waves_per_eu;
-    r.emit_lse = a_bool(d, "emit_lse", r.emit_lse);
+    /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+    r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
@@ -1303,7 +1317,8 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         r.num_segments = s.num_segments;
         r.has_waves_per_eu = s.has_waves_per_eu;
         r.waves_per_eu = s.waves_per_eu;
-        r.emit_lse = a_bool(d, "emit_lse", r.emit_lse);
+        /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+        r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "attention_tiled_3d_reduce");
         rocke_kernel_def_t* k = rocke_build_unified_attention_reduce_tiled_gfx950(&b, &r, a);
@@ -1455,6 +1470,8 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["use_k_single_buffer"] = s.use_k_single_buffer;
     d["use_fp8_mfma_qk"] = s.use_fp8_mfma_qk;
     d["emit_lse"] = s.emit_lse;
+    if(s.lse_head_major)
+        d["lse_layout"] = "head_major";
     return d;
 }
 

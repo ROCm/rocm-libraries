@@ -105,6 +105,16 @@ using sdpa_graph::SEQ_AXIS;
 // signed overflow. Every factor here is an extent isWellFormedOperand already held positive.
 using pack_features::checkedProduct;
 
+/// The base alignment every dense operand must declare. Both arches' builders declare the
+/// q/k/v/o kernel parameters `align=16` (rocke/library/kernels/gfx9{42,50}/attention_dense.py),
+/// which lowers to a literal `align 16` LLVM parameter attribute, so the promise is made about
+/// the base pointer itself and does not depend on which kernel variant dispatch picks. The
+/// backend enforces only the alignment a graph declares, so a graph declaring less would hand
+/// the kernel a pointer it has already told LLVM cannot arrive: that is UB, not a fault, so it
+/// has to be refused here rather than left to misbehave. 16 is also the schema default, so only
+/// a graph that explicitly under-declares is turned away.
+constexpr int64_t OPERAND_ALIGNMENT_BYTES = 16;
+
 /// sdpa_graph::isWellFormedOperand, and no ragged offset tensor: a ragged tensor packs the
 /// sequences back to back, and the dense kernels index the buffer as (B, S, H, D), so they
 /// would read and write past each sequence. The dense packs' own check.
@@ -526,6 +536,15 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                       "extents, not virtual, not ragged and not pass-by-value");
             return std::nullopt;
         }
+        if(!sdpa_graph::declaresAlignment(*tensor, OPERAND_ALIGNMENT_BYTES))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(
+                declined(arch, "alignment")
+                << describeOperand(role, *tensor) << " declares " << tensor->alignment()
+                << "-byte alignment, which does not guarantee the " << OPERAND_ALIGNMENT_BYTES
+                << " these kernels declare on their pointer parameters");
+            return std::nullopt;
+        }
     }
 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
@@ -660,13 +679,16 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                   "as a host value (attn_scale_value)");
         return std::nullopt;
     }
-    // varlen, both spellings.
+    // varlen: per-batch lengths (seq_len_*) and cumulative lengths (cu_seq_len_*).
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "varlen")
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not implemented in the kernel");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not implemented in the "
+                                  "kernel");
         return std::nullopt;
     }
     // Dropout.

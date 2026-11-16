@@ -81,6 +81,8 @@ void EngineDescriptor::ensureDetailsLoaded() const
             resourceManager, _engineId, _graph.get());
         std::optional<std::string> detailsName;
         std::vector<hipdnnBackendBehaviorNote_t> behaviorNotes;
+        std::vector<hipdnnBackendNumericalNote_t> numericalNotes{
+            HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
         std::vector<flatbuffers::DetachedBuffer> knobBuffers;
         std::vector<std::shared_ptr<KnobDescriptor>> knobDescriptors;
         if(const auto* engineDetails = details->get())
@@ -96,6 +98,22 @@ void EngineDescriptor::ensureDetailsLoaded() const
                               HIPDNN_STATUS_BAD_PARAM,
                               "EngineDescriptor received an invalid behavior note value");
                 behaviorNotes.push_back(note);
+            }
+
+            // An absent field means the provider did not state its numerical
+            // behavior; the conservative default stands. An explicit list, even
+            // empty, is the provider's claim.
+            if(const auto rawNumericalNotes = wrapper.numericalNotes())
+            {
+                numericalNotes.clear();
+                numericalNotes.reserve(rawNumericalNotes->size());
+                for(auto note : *rawNumericalNotes)
+                {
+                    THROW_IF_TRUE(note < 0,
+                                  HIPDNN_STATUS_BAD_PARAM,
+                                  "EngineDescriptor received an invalid numerical note value");
+                    numericalNotes.push_back(note);
+                }
             }
 
             const auto knobCount = wrapper.knobCount();
@@ -121,6 +139,7 @@ void EngineDescriptor::ensureDetailsLoaded() const
         // without exposing partial vectors or duplicating entries on the next query.
         _engineDetails = std::move(details);
         _behaviorNotes = std::move(behaviorNotes);
+        _numericalNotes = std::move(numericalNotes);
         _knobSerializedBuffers = std::move(knobBuffers);
         _knobDescriptors = std::move(knobDescriptors);
         _engineName = std::move(name);
@@ -180,6 +199,8 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "EngineDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
+        getNumericalNotes(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
@@ -473,6 +494,42 @@ void EngineDescriptor::getBehaviorNotes(hipdnnBackendAttributeType_t attributeTy
     std::copy(_behaviorNotes.begin(),
               _behaviorNotes.end(),
               static_cast<hipdnnBackendBehaviorNote_t*>(arrayOfElements));
+}
+
+void EngineDescriptor::getNumericalNotes(hipdnnBackendAttributeType_t attributeType,
+                                         int64_t requestedElementCount,
+                                         int64_t* elementCount,
+                                         void* arrayOfElements) const
+{
+    THROW_IF_NE(attributeType,
+                HIPDNN_TYPE_NUMERICAL_NOTE,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineDescriptor failed to get numerical notes: Invalid attribute type.");
+    ensureDetailsLoaded();
+
+    auto count = static_cast<int64_t>(_numericalNotes.size());
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "EngineDescriptor failed to get numerical notes: elementCount is null.");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= count,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   "EngineDescriptor failed to get numerical notes: requested element count is "
+                   "too small.");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    std::copy(_numericalNotes.begin(),
+              _numericalNotes.end(),
+              static_cast<hipdnnBackendNumericalNote_t*>(arrayOfElements));
 }
 
 void EngineDescriptor::setInspectionScalar(hipdnnBackendAttributeName_t attributeName,

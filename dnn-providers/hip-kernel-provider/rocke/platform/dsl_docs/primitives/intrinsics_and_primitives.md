@@ -459,12 +459,14 @@ dequant_i4_byte_to_bf8_pair(b, packed_byte, *, inv_scale)
 # (code 0 is the f32 subnormal ``2^-127``) and code 255 gives NaN.
 decode_mx_scale_e8m0(b, e8m0)
 apply_mx_scale(b, value_f32, scale_f32)
-# addend + value * 2^(ea + eb) for an A and a B scale byte, rounded once,
-# without forming the product of the two scales (it can leave f32 range).
-# The split comes from the element formats of the group's A and B values:
-# exact_mx_scale_split(a_format, b_format, group_size) -> MxScaleSplit,
-# with the formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ.
-fma_with_mx_scale_pair(b, value_f32xN, a_e8m0, b_e8m0, addend_f32xN, *, split)
+# acc + dot * 2^(ea + eb) element by element, from each element's A and B
+# scale byte, as ldexp(dot, ea + eb): never forms the product of the two
+# scales (it can leave f32 range); a NaN code gives NaN.
+add_mx_scaled_dot(b, acc_f32xN, dot_f32xN, a_codes, b_codes)
+# The largest code an A and a B scale may both have before a sum of
+# `products` scaled products (a scaled MFMA) can overflow f32, from the
+# element formats FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ.
+largest_safe_mx_scale_code(a_format, b_format, products)
 load_and_decode_mx_scale_byte(b, scale_ptr, scale_idx)
 
 # Preshuffled-B tile-major layout helper. The launcher uses

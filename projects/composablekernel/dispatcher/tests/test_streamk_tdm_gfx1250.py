@@ -245,12 +245,17 @@ class TestStreamKTdmGate(unittest.TestCase):
 
         for pipeline in SK_TDM_PIPELINES + ("comp_tdm_pc",):
             epi = tdm_pipeline_epilogue(pipeline)
-            other = "tdm" if epi == "cshuffle" else "cshuffle"
             self.assertEqual(reason(pipeline, epi), "")
-            self.assertIn(f"requires epilogue={epi}", reason(pipeline, other))
             self.assertIn("persistent", reason(pipeline, epi, persistent=True))
             for variant in ("multi_d", "grouped", "multi_abd"):
                 self.assertIn("not supported", reason(pipeline, epi, variant=variant))
+        for pipeline in ("comp_tdm", "comp_tdm_v2"):
+            self.assertIn("requires epilogue=tdm", reason(pipeline, "cshuffle"))
+        self.assertIn("requires epilogue=cshuffle", reason("comp_tdm_v3", "tdm"))
+        # Plain comp_tdm_pc GEMM also takes cshuffle (GEMM_TDM_CSHUFFLE_PIPELINES),
+        # still without the persistent kernel.
+        self.assertEqual(reason("comp_tdm_pc", "cshuffle"), "")
+        self.assertIn("persistent", reason("comp_tdm_pc", "cshuffle", persistent=True))
 
     def test_legacy_pipelines_unchanged(self):
         for arch, pipeline, reduction, pads in itertools.product(

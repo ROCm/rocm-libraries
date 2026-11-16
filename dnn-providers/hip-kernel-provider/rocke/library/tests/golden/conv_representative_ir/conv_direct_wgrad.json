@@ -8,7 +8,7 @@
           "bytes": 879423,
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_1250_dw_valu_7x7_c128_N2H14W14_g128_c1k1_f7x7s1p3_cpl4_wv8_rpw4_woc8_w32_rs2_wsr16_pf_cy_bf16",
-          "sha256": "c028e2c3b95b46271fa9bd82edde2bc3badafd5a7a400aebd895c7f5f23328b3",
+          "sha256": "cdd2257ab88998380555ff142275b7a91f4c3f180c8d7705782786e76f328a58",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx1250/image_rps3_rb2_ws8": {
@@ -99,6 +99,14 @@
           "sha256": "0ed2fe34f4ab088705940ca12bc4ae4b5030e6912bfafdc4b9baecdb01a7bf8d",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 134971,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "3f6c17638b040ee96661404d12ac20f200e25b6c4cf5e4cadf1ea38b05dc4112",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
           "arch": "gfx950",
           "bytes": 193857,
@@ -113,6 +121,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_tiled_fp16_unfold4_f3x3p1_wt32x32_w4x2_rps15_pf2_tb256_u3_un4",
           "sha256": "b12a6615a8b98ede61d291b8506bdcca374b13037a71d6e89ee43c665bb79828",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/tiled_pingpong_halves": {
+          "arch": "gfx950",
+          "bytes": 219139,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_pingpong_halves_f3x3p1_wt32x32_w4x2_rps12_pf2_tb256_bf16_u4_pp",
+          "sha256": "f9ad428e85903dab01d94ee7b19171ea2edb24f12827691c83eaa7c8cef6fe84",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/tiled_qg2_pingpong": {
@@ -138,7 +154,7 @@
           "bytes": 879562,
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_1250_dw_valu_7x7_c128_N2H14W14_g128_c1k1_f7x7s1p3_cpl4_wv8_rpw4_woc8_w32_rs2_wsr16_pf_cy_bf16",
-          "sha256": "614b73382c4200e689a43fd09df708e3efed615561ad9b5740ff9ac356f176d1",
+          "sha256": "625c45fa5f952a7be4779114985fcb618074e3aa403559dfadfe84402369e55a",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx1250/image_rps3_rb2_ws8": {
@@ -229,6 +245,14 @@
           "sha256": "3a831e710e5914181aa2cf7b571c948aedd79485e3ce7130c8562bb0cd26b801",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 135070,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "3fc173e3c3b0af8ca6a4289fa48cf00032ca8ff814cb5993a77fe4ddccd6a119",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
           "arch": "gfx950",
           "bytes": 193953,
@@ -243,6 +267,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_tiled_fp16_unfold4_f3x3p1_wt32x32_w4x2_rps15_pf2_tb256_u3_un4",
           "sha256": "ed19d39776f25ba1979a26173b65c7fb793d268600a60536f2dc10d792f26bd2",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/tiled_pingpong_halves": {
+          "arch": "gfx950",
+          "bytes": 219235,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_pingpong_halves_f3x3p1_wt32x32_w4x2_rps12_pf2_tb256_bf16_u4_pp",
+          "sha256": "0f1592ecdff7e2c61600039089eeb11548ec8f3241be48acd4124a7470d4a439",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/tiled_qg2_pingpong": {
@@ -268,7 +300,7 @@
           "bytes": 879626,
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_1250_dw_valu_7x7_c128_N2H14W14_g128_c1k1_f7x7s1p3_cpl4_wv8_rpw4_woc8_w32_rs2_wsr16_pf_cy_bf16",
-          "sha256": "8cb3e1369ebbd7148d3fffb764cb33580e6a651e84b00a34f85a35236c0cc47e",
+          "sha256": "0c8811072b8d5fabec2849f93f733ae5df25cf1b9464be019f1ca9c166012976",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx1250/image_rps3_rb2_ws8": {
@@ -367,6 +399,14 @@
           "sha256": "b7f365f4cfe09352e15c8a614a4448cfb890fec9bfe2e859547de90d2c97bf4a",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 135134,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "4cc229a339f64b8f2a34f5d37a95ea94f9669162e41e02762b1a63cbef92393c",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
           "arch": "gfx950",
           "bytes": 194017,
@@ -381,6 +421,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_tiled_fp16_unfold4_f3x3p1_wt32x32_w4x2_rps15_pf2_tb256_u3_un4",
           "sha256": "3543328889743364b097d2d9d47a5e0dc6cbd1f7a5967821786a74f967528a1c",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/tiled_pingpong_halves": {
+          "arch": "gfx950",
+          "bytes": 219299,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_pingpong_halves_f3x3p1_wt32x32_w4x2_rps12_pf2_tb256_bf16_u4_pp",
+          "sha256": "236848f9e283c74a5b5c3fe179c962a114ce680a61a05a251c71bf667d6031ad",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/tiled_qg2_pingpong": {
@@ -401,7 +449,7 @@
           "bytes": 879626,
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_1250_dw_valu_7x7_c128_N2H14W14_g128_c1k1_f7x7s1p3_cpl4_wv8_rpw4_woc8_w32_rs2_wsr16_pf_cy_bf16",
-          "sha256": "8cb3e1369ebbd7148d3fffb764cb33580e6a651e84b00a34f85a35236c0cc47e",
+          "sha256": "0c8811072b8d5fabec2849f93f733ae5df25cf1b9464be019f1ca9c166012976",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx1250/image_rps3_rb2_ws8": {
@@ -500,6 +548,14 @@
           "sha256": "b7f365f4cfe09352e15c8a614a4448cfb890fec9bfe2e859547de90d2c97bf4a",
           "status": "ok"
         },
+        "conv_direct_wgrad/gfx950/tiled_auto_launch": {
+          "arch": "gfx950",
+          "bytes": 135134,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_auto_launch_f3x3p1_wt32x16_w2x2_rpsH_pf3_tb512_bf16_u4",
+          "sha256": "4cc229a339f64b8f2a34f5d37a95ea94f9669162e41e02762b1a63cbef92393c",
+          "status": "ok"
+        },
         "conv_direct_wgrad/gfx950/tiled_bf16_c128": {
           "arch": "gfx950",
           "bytes": 194017,
@@ -514,6 +570,14 @@
           "family": "conv_direct_wgrad",
           "kernel_name": "irhash_direct_wgrad_tiled_fp16_unfold4_f3x3p1_wt32x32_w4x2_rps15_pf2_tb256_u3_un4",
           "sha256": "3543328889743364b097d2d9d47a5e0dc6cbd1f7a5967821786a74f967528a1c",
+          "status": "ok"
+        },
+        "conv_direct_wgrad/gfx950/tiled_pingpong_halves": {
+          "arch": "gfx950",
+          "bytes": 219299,
+          "family": "conv_direct_wgrad",
+          "kernel_name": "irhash_direct_wgrad_tiled_pingpong_halves_f3x3p1_wt32x32_w4x2_rps12_pf2_tb256_bf16_u4_pp",
+          "sha256": "236848f9e283c74a5b5c3fe179c962a114ce680a61a05a251c71bf667d6031ad",
           "status": "ok"
         },
         "conv_direct_wgrad/gfx950/tiled_qg2_pingpong": {
