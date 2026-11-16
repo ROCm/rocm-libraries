@@ -12,6 +12,35 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "clms2_b1h1k1v1_128x256_d128_bfp16_brcausal_srt0p5_tolp",
+          "clms3_b1h1k1v1_128x128_d128_bfp16_none_sconst0p5_tolp"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "clms2_b1h1k1v1_128x256_d128_bfp16_brcausal_srt0p5_tolp",
+          "clms3_b1h1k1v1_128x128_d128_bfp16_none_sconst0p5_tolp"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

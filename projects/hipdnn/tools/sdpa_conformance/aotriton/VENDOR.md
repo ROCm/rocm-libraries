@@ -7,22 +7,24 @@ collection counts are a manual `sync.py --check` (about 5 minutes), and runs com
 
 | | |
 |---|---|
-| Source | [ROCm/aotriton](https://github.com/ROCm/aotriton) `main`, `0.14b-16` |
-| Pin | `619f3636a23d94d6f258c89ff4ca7005afc019bb` |
+| Source | [ROCm/aotriton](https://github.com/ROCm/aotriton) `main`, `0.15b-8` |
+| Pin | `a09a19361408e25ac515d4fd59970cd249a1b4a6` |
 | Licence | MIT, Copyright (C) 2024-2025 Advanced Micro Devices, Inc. (`vendor/LICENSE`) |
 
 ## Contents
 
 | Vendored path | From AOTriton |
 |---|---|
-| `vendor/modules/flash/tests/**` (27 files, including `adiffs/`) | `modules/flash/tests/**`, except `aotriton_flash.py` |
+| `vendor/modules/flash/tests/**` (28 files, including `adiffs/`) | `modules/flash/tests/**`, except `aotriton_flash.py` |
 | `vendor/python/pytest-gpu-lease/pytest_gpu_lease/` (3 files) | same path; defines the `gpu_id` fixture |
 | `vendor/LICENSE` | `LICENSE` |
 
 `aotriton_flash.py` is **replaced**: `vendor/` must not contain it, so the shim on `PYTHONPATH`
 cannot be shadowed. `shim/pyaotriton/` stubs the remaining `pyaotriton` imports. Vendored files are
 never edited; `adiffs/`, `performance_*`, `triton_*`, `pytest2entry.py` and `test_varlen_translation.cc` (C++,
-not a pytest module) are present but unused.
+not a pytest module) are present but unused. The suite's own knobs that change what it measures
+(calibration, backend pins, `AOTRITON_UT_ARCH`, which narrows head dimensions and sequence lengths
+for some architectures) are listed in `aotriton_layout.REFUSED_KNOBS`; the plugin refuses them.
 
 `aotriton/.gitattributes` marks `vendor/**` as `-text`, so a checkout keeps the committed LF bytes
 and `sync.py --check` hashes the same bytes on every platform (it hashes working-tree bytes; a
@@ -36,10 +38,10 @@ CRLF conversion makes it report `sha256 differs`). The rule lives outside `vendo
 
 | `FOR_RELEASE` | default collection | `test_forward.py` |
 |---|---|---|
-| 0 | 3,917 | 497,088 |
-| 1 | 183,161 | 177,408 |
-| 2 | 413,561 | 177,408 |
-| 3 | 499,409 | 177,408 |
+| 0 | 4,658 | 497,264 |
+| 1 | 185,252 | 177,584 |
+| 2 | 415,652 | 177,584 |
+| 3 | 501,500 | 177,584 |
 
 ## Refresh
 
