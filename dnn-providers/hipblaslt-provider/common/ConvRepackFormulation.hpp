@@ -44,6 +44,9 @@ enum class ColumnLayout
     /// in the workspace, so one GEMM covers every image of a slice instead of a batch of
     /// per-image GEMMs (MIOpen's 1x1 stride-2 form); otherwise CHANNELS_LAST.
     STAGED_CHANNELS_LAST,
+    /// As FOLLOW_Y, but a 16-bit backward weights over the cap slices its images into an fp32
+    /// accumulator rather than running blocks of w's columns over every image (convGemmCalls).
+    IMAGE_SLICES,
 };
 
 /**
@@ -70,7 +73,10 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
 
 /// The plan for @p problem: a direct row (directGemmCalls) when one applies; for a 1x1
 /// channels-first backward weights of several images, batched partials or a channels-last
-/// staging (@p layout); IM2COL otherwise; or nullopt when none does. A long reduction into a
+/// staging (@p layout); for a 16-bit backward weights whose column matrix over every image
+/// exceeds the cap, blocks of w's columns, each one GEMM over every image writing its block
+/// once (16-bit output; not with @p layout IMAGE_SLICES); IM2COL otherwise; or nullopt when none
+/// does. A long reduction into a
 /// small backward-weights output -- and with @p narrowPartials, a forward or backward data one
 /// straight into a 16-bit y or dx -- runs as chunks with fp32 partials summed in order and
 /// rounded once. @p splitReduction: such

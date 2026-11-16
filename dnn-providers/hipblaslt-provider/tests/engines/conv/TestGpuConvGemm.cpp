@@ -89,6 +89,8 @@ ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend, bool deterministic 
     {
         return [deterministic](const HipdnnEnginePluginHandle& /*handle*/,
                                const std::vector<GemmCall>& calls) {
+            // As the engines' factory (HipblasltContainer).
+            requireTunedRocblasKernels(calls);
             auto plan = std::make_unique<RocblasGemmPlan>(calls);
             if(deterministic)
             {
@@ -537,19 +539,29 @@ void runCase(ConvCase convCase,
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
         if(backend == Backend::ROCBLAS)
         {
-            // rocBLAS declines only a call it would round more than once on this device.
+            // rocBLAS declines only a call it would round more than once on this device, or
+            // one it has only untuned kernels for (16-bit into fp32 on gfx11).
             const auto arch = rocblas_backend::currentGcnArchName();
             bool roundsTwice = false;
+            bool untuned = false;
             for(const auto& stage : calls->stages)
             {
+                untuned = untuned
+                          || std::any_of(stage.calls.begin(),
+                                         stage.calls.end(),
+                                         [&arch](const GemmCall& call) {
+                                             return rocblasFp32OutputIsUntuned(call, arch);
+                                         });
                 for(const auto& call : fitLibraryLimits(stage.calls))
                 {
                     roundsTwice = roundsTwice || rocblasRoundsReductionChunks(call)
                                   || rocblasGemvRoundsBf16Products(call, arch);
                 }
             }
-            ASSERT_TRUE(roundsTwice) << "rocBLAS declined a call it can run";
-            GTEST_SKIP() << "rocBLAS would round a narrow result more than once on " << arch;
+            ASSERT_TRUE(roundsTwice || untuned) << "rocBLAS declined a call it can run";
+            GTEST_SKIP() << "rocBLAS would round a narrow result more than once, or has only "
+                            "untuned kernels for a call, on "
+                         << arch;
         }
 #endif
         ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
@@ -797,6 +809,7 @@ std::vector<ConvCase> slicedCases()
                                 "Padded3x3Nhwc",
                                 "Grouped3x3Nchw",
                                 "StridedDilatedAsymmetricNchw",
+                                "StridedDilatedAsymmetricNhwc",
                                 "ConvolutionModeNhwc",
                                 "Conv3dNcdhw",
                                 "Padded3x3NhwcGappedImages"})
@@ -831,6 +844,32 @@ TEST_P(TestGpuConvGemmSliced, Bfp16)
 {
     SKIP_IF_NO_DEVICES();
     runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::IMAGES);
+}
+
+// 16-bit backward weights over the cap runs blocks of w's columns by default (the cases above);
+// the image-sliced plan, summed through an fp32 accumulator, stays a benchmarking candidate.
+TEST_P(TestGpuConvGemmSliced, ImageSlicesFp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(std::get<0>(GetParam()),
+                  std::get<1>(GetParam()),
+                  Slicing::IMAGES,
+                  false,
+                  false,
+                  false,
+                  ColumnLayout::IMAGE_SLICES);
+}
+
+TEST_P(TestGpuConvGemmSliced, ImageSlicesBfp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(std::get<0>(GetParam()),
+                      std::get<1>(GetParam()),
+                      Slicing::IMAGES,
+                      false,
+                      false,
+                      false,
+                      ColumnLayout::IMAGE_SLICES);
 }
 
 INSTANTIATE_TEST_SUITE_P(,

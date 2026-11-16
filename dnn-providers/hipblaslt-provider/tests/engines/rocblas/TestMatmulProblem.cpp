@@ -5,6 +5,7 @@
 #include <limits>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -320,6 +321,46 @@ TEST(TestMatmulProblem, RocblasChunkedReductionsIntoNarrowOutputsAreFlagged)
     EXPECT_FALSE(rocblasRoundsReductionChunks(half));
     half.k = 2;
     EXPECT_TRUE(rocblasRoundsReductionChunks(half));
+}
+
+TEST(TestMatmulProblem, RocblasUntunedFp32OutputIsGfx11SixteenBitNt)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    // A channels-last backward weights GEMM: columns (m) by output channels (n) over positions,
+    // a not transposed and b transposed, into an fp32 accumulator.
+    GemmCall call;
+    call.m = 4608;
+    call.n = 512;
+    call.k = 114688;
+    call.transposeB = true;
+    call.a.dataType = call.b.dataType = data_objects::DataType::HALF;
+    call.d.dataType = data_objects::DataType::FLOAT;
+    for(const char* arch : {"gfx1100", "gfx1101", "gfx1151:xnack-"})
+    {
+        EXPECT_TRUE(rocblasFp32OutputIsUntuned(call, arch)) << arch;
+    }
+    for(const char* arch : {"gfx1201", "gfx942", "gfx950", "gfx90a", "gfx906"})
+    {
+        EXPECT_FALSE(rocblasFp32OutputIsUntuned(call, arch)) << arch;
+    }
+    GemmCall bf16 = call;
+    bf16.a.dataType = bf16.b.dataType = data_objects::DataType::BFLOAT16;
+    EXPECT_TRUE(rocblasFp32OutputIsUntuned(bf16, "gfx1100"));
+    // A 16-bit output, fp32 operands, and the other transpose forms (3-7x, not 25-180x) run.
+    GemmCall narrow = call;
+    narrow.d.dataType = data_objects::DataType::HALF;
+    EXPECT_FALSE(rocblasFp32OutputIsUntuned(narrow, "gfx1100"));
+    GemmCall fp32 = call;
+    fp32.a.dataType = fp32.b.dataType = data_objects::DataType::FLOAT;
+    EXPECT_FALSE(rocblasFp32OutputIsUntuned(fp32, "gfx1100"));
+    for(const auto& [ta, tb] :
+        {std::pair{false, false}, std::pair{true, false}, std::pair{true, true}})
+    {
+        GemmCall form = call;
+        form.transposeA = ta;
+        form.transposeB = tb;
+        EXPECT_FALSE(rocblasFp32OutputIsUntuned(form, "gfx1100"));
+    }
 }
 
 TEST(TestMatmulProblem, RocblasBf16GemvRuleFollowsRocblasRouting)

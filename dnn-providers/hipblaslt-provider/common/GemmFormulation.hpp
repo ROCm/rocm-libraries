@@ -92,4 +92,17 @@ bool rocblasRoundsReductionChunks(const GemmCall& call);
  */
 bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArchName);
 
+/**
+ * @brief Whether rocBLAS on @p gcnArchName has only untuned kernels for @p call: 16-bit a and b
+ *        into an fp32 d, with a not transposed and b transposed, on gfx11.
+ *
+ * rocBLAS ships gfx11 Tensile libraries for 16-bit inputs with a 16-bit output, but only
+ * fallback libraries for an fp32 output. Measured on gfx1101 (fp16 and bf16): the fallback
+ * kernels run that form at 0.2-1 TFLOP/s, 25-180x behind the 16-bit-output kernels of the same
+ * shape (4608 x 512 x 114688: 2.2 s against 15 ms); the other forms run 3-7x behind. The
+ * explicit-GEMM convolution plans for rocBLAS decline such a call; their backward weights
+ * write a 16-bit w directly where the workspace allows (convGemmCalls).
+ */
+bool rocblasFp32OutputIsUntuned(const GemmCall& call, std::string_view gcnArchName);
+
 } // namespace hipblaslt_plugin

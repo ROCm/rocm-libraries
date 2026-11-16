@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -279,7 +280,7 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     auto geometry = geometryFor(problem, form.channelsInner);
     geometry.n = count;
     geometry.columnsFirst = form.columnsFirst ? 1 : 0;
-    int64_t xByteOffset = first * problem.x.strides[0] * bytes;
+    int64_t xByteOffset = (problem.x.offset + first * problem.x.strides[0]) * bytes;
     if(band.has_value())
     {
         // A band is the image's convolution with its first output row at outFirst: padding
@@ -431,7 +432,14 @@ std::optional<ConvGemmPlanCalls>
     }
     channelsInner.push_back(1);
     auto filterColumns = collapseAxes(problem.w, channelsOuter);
-    if(!filterColumns.has_value())
+    // One tap orders its columns the same both ways: a backward weights from channels-contiguous
+    // x takes channels innermost, which the im2col rows kernels read in vectors (a tap block of
+    // columnBlockWeights).
+    const auto oneTap = product(problem.filter);
+    const bool preferInner = problem.direction == ConvDirection::BACKWARD_WEIGHTS
+                             && oneTap.has_value() && *oneTap == 1 && problem.x.strides[1] == 1
+                             && collapseAxes(problem.w, channelsInner).has_value();
+    if(!filterColumns.has_value() || preferInner)
     {
         form.channelsInner = true;
         filterColumns = collapseAxes(problem.w, channelsInner);
@@ -489,7 +497,7 @@ std::optional<ConvGemmPlanCalls>
                        {problem.k, problem.cPerGroup() * form.taps},
                        {problem.w.strides[0], form.filterUnitStride},
                        std::nullopt,
-                       0};
+                       problem.w.offset};
     filter.dims.resize(2 + spatialRank, 1);
     filter.strides.resize(2 + spatialRank, 1);
 
@@ -566,7 +574,9 @@ std::optional<ConvGemmPlanCalls>
         slice = imagesWithin(*colImageBytes + (stageY ? *yImageBytes : 0),
                              *accumulatorBytes + (stageY ? 2 : 1) * pad);
     }
-    if(slice == 0)
+    // A block of w (columnBlockWeights) is written once, never summed through an accumulator,
+    // whose final cast addresses the whole filter.
+    if(slice == 0 || (accumulator && problem.w.offset != 0))
     {
         return std::nullopt;
     }
@@ -1210,6 +1220,195 @@ std::optional<ConvGemmPlanCalls> sumLongReductionsInFp32(const ConvProblem& prob
     return plan;
 }
 
+/// A block of a filter's columns: input channels [c0, c1) and, per spatial axis, filter taps
+/// [lo, hi). Its columns are contiguous in the filter's own column order.
+struct ColumnBlock
+{
+    int64_t c0 = 0;
+    int64_t c1 = 0;
+    std::vector<int64_t> lo;
+    std::vector<int64_t> hi;
+};
+
+/// @p problem restricted to @p block: x's channels and w's channels and taps, the padding
+/// shifted so the block's taps read the same input positions and y keeps its extents.
+ConvProblem blockProblem(const ConvProblem& problem, const ColumnBlock& block)
+{
+    ConvProblem sub = problem;
+    const int64_t channels = block.c1 - block.c0;
+    sub.c = channels;
+    sub.x.dims[1] = channels;
+    sub.x.offset = problem.x.offset + block.c0 * problem.x.strides[1];
+    sub.w.dims[1] = channels;
+    sub.w.offset = problem.w.offset + block.c0 * problem.w.strides[1];
+    const bool flip = problem.mode == data_objects::ConvMode::CONVOLUTION;
+    for(size_t axis = 0; axis < problem.filter.size(); ++axis)
+    {
+        const int64_t taps = block.hi[axis] - block.lo[axis];
+        sub.filter[axis] = taps;
+        sub.w.dims[2 + axis] = taps;
+        sub.w.offset += block.lo[axis] * problem.w.strides[2 + axis];
+        // Cross-correlation reads tap lo first; true convolution reflects the filter, so the
+        // block's first input row is that of tap hi - 1.
+        const int64_t skipped = flip ? problem.filter[axis] - block.hi[axis] : block.lo[axis];
+        sub.prePadding[axis] = problem.prePadding[axis] - skipped * problem.dilation[axis];
+        sub.postPadding[axis] = (problem.output[axis] - 1) * problem.stride[axis]
+                                + (taps - 1) * problem.dilation[axis] + 1 - problem.input[axis]
+                                - sub.prePadding[axis];
+    }
+    return sub;
+}
+
+/**
+ * @brief Backward weights into a 16-bit w whose column matrix over every image exceeds
+ *        @p maxWorkspaceBytes, as blocks of w's columns: each block's column matrix over every
+ *        image fits, and one GEMM over every image writes the block of w once.
+ *
+ * The image-sliced plan (im2colGemmCalls) sums its slices into an fp32 accumulator, so every
+ * GEMM takes 16-bit operands into an fp32 output. On gfx11 the libraries run those 4-6x
+ * (hipBLASLt) and up to 180x (rocBLAS, untuned kernels) behind their 16-bit-output kernels; a
+ * block's GEMM reduces over every image itself and writes the 16-bit w directly, rounded once.
+ * Blocks follow the filter's column order: whole taps of channel ranges for K C R S, whole
+ * input channels of tap ranges along the outermost filter axis (then the next) for K R S C.
+ * nullopt for fp32, groups, a column matrix that fits, or a y the GEMM cannot read in place
+ * (channels-first y over several images: the image-sliced plan stages or loops it).
+ */
+std::optional<ConvGemmPlanCalls> columnBlockWeights(const ConvProblem& problem,
+                                                    size_t maxWorkspaceBytes)
+{
+    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS
+       || problem.dataType == data_objects::DataType::FLOAT || problem.groups != 1 || problem.n < 1)
+    {
+        return std::nullopt;
+    }
+    const size_t spatialRank = problem.filter.size();
+    const auto outputs = product(problem.output);
+    const auto taps = product(problem.filter);
+    int64_t columnBytes = 0;
+    int64_t allBytes = 0;
+    if(!outputs.has_value() || !taps.has_value()
+       || __builtin_mul_overflow(problem.n * elementBytes(problem.dataType), *outputs, &columnBytes)
+       || __builtin_mul_overflow(columnBytes, problem.c * *taps, &allBytes))
+    {
+        return std::nullopt;
+    }
+    const auto cap = static_cast<int64_t>(
+        std::min(maxWorkspaceBytes, static_cast<size_t>(std::numeric_limits<int64_t>::max())));
+    if(allBytes <= cap)
+    {
+        return std::nullopt;
+    }
+    // The filter's column order, outermost first: -1 the channels, else a spatial axis.
+    std::vector<int> order;
+    std::vector<size_t> channelsOuter{1};
+    for(size_t axis = 2; axis < problem.w.dims.size(); ++axis)
+    {
+        channelsOuter.push_back(axis);
+    }
+    const bool channelsInner = !collapseAxes(problem.w, channelsOuter).has_value();
+    if(!channelsInner)
+    {
+        order.push_back(-1);
+    }
+    for(size_t axis = 0; axis < spatialRank; ++axis)
+    {
+        order.push_back(static_cast<int>(axis));
+    }
+    if(channelsInner)
+    {
+        order.push_back(-1);
+    }
+    const auto extentOf = [&](int which) {
+        return which < 0 ? problem.c : problem.filter[static_cast<size_t>(which)];
+    };
+    // Blocks: along order[i] in even ranges as long as the cap allows, every axis before it at
+    // one index, every axis after it whole; an index that alone exceeds the cap is split along
+    // the next axis.
+    ColumnBlock whole{0, problem.c, std::vector<int64_t>(spatialRank, 0), problem.filter};
+    std::vector<ColumnBlock> blocks;
+    const auto set = [&](ColumnBlock& block, int which, int64_t from, int64_t to) {
+        if(which < 0)
+        {
+            block.c0 = from;
+            block.c1 = to;
+        }
+        else
+        {
+            block.lo[static_cast<size_t>(which)] = from;
+            block.hi[static_cast<size_t>(which)] = to;
+        }
+    };
+    const std::function<bool(size_t, const ColumnBlock&)> split
+        = [&](size_t i, const ColumnBlock& outer) {
+              if(i == order.size())
+              {
+                  return false;
+              }
+              int64_t inner = 1;
+              for(size_t j = i + 1; j < order.size(); ++j)
+              {
+                  inner *= extentOf(order[j]);
+              }
+              const int64_t extent = extentOf(order[i]);
+              const int64_t fit = cap / std::max<int64_t>(1, columnBytes * inner);
+              if(fit < 1)
+              {
+                  for(int64_t index = 0; index < extent; ++index)
+                  {
+                      ColumnBlock one = outer;
+                      set(one, order[i], index, index + 1);
+                      if(!split(i + 1, one))
+                      {
+                          return false;
+                      }
+                  }
+                  return true;
+              }
+              const int64_t count = (extent + fit - 1) / fit;
+              const int64_t step = (extent + count - 1) / count;
+              for(int64_t from = 0; from < extent; from += step)
+              {
+                  ColumnBlock block = outer;
+                  set(block, order[i], from, std::min(extent, from + step));
+                  blocks.push_back(block);
+              }
+              return true;
+          };
+    if(!split(0, whole))
+    {
+        return std::nullopt;
+    }
+    ConvGemmPlanCalls plan;
+    plan.row = ConvGemmRow::IM2COL;
+    for(const auto& block : blocks)
+    {
+        // Each block unsliced, channels-last columns: one stage, the column matrix its only
+        // workspace (no staged y, no accumulator), one GEMM writing w's block.
+        auto blockPlan = im2colGemmCalls(
+            blockProblem(problem, block), maxWorkspaceBytes, ColumnLayout::CHANNELS_LAST);
+        if(!blockPlan.has_value() || blockPlan->stages.size() != 1
+           || blockPlan->workspace.size() != 1)
+        {
+            return std::nullopt;
+        }
+        for(const auto& call : blockPlan->stages[0].calls)
+        {
+            if(call.accumulate || call.d.uid != problem.w.uid)
+            {
+                return std::nullopt;
+            }
+        }
+        plan.stages.push_back(std::move(blockPlan->stages[0]));
+        // The blocks share one column matrix region, sized for the largest.
+        if(blockPlan->workspaceBytes > plan.workspaceBytes)
+        {
+            plan.workspace = blockPlan->workspace;
+            plan.workspaceBytes = blockPlan->workspaceBytes;
+        }
+    }
+    return plan;
+}
+
 } // namespace
 
 std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
@@ -1222,6 +1421,10 @@ std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
     if(!plan.has_value())
     {
         plan = oneByOneWeights(problem, maxWorkspaceBytes, layout);
+    }
+    if(!plan.has_value() && layout != ColumnLayout::IMAGE_SLICES)
+    {
+        plan = columnBlockWeights(problem, maxWorkspaceBytes);
     }
     if(!plan.has_value())
     {
