@@ -450,10 +450,6 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
-    if(pred == NULL)
-    {
-        pred = "lt";
-    }
     const char* llvm_pred = rocke_ll_icmp_predicate(L, "arith.cmp", pred, a->type);
     rocke_ll_emitf(L,
                    "  %s = icmp %s %s %s, %s",

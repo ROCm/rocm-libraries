@@ -44,6 +44,7 @@ from rocke.core.ir import (
 from rocke.core.verify import verify
 from rocke.tests.engines import (
     ENGINES,
+    assert_engine_rejects,
     assert_engine_rejects_hip,
     lower_hip_with_engine,
 )
@@ -173,24 +174,6 @@ def _f32_kernel(op_name):
     return _kernel_past_the_builder(op_name, f32_type, f32_type)
 
 
-@pytest.mark.parametrize("engine", ENGINES)
-@pytest.mark.parametrize("op_name", ["arith.lshr", "vector.lshr"])
-def test_hip_refuses_a_shift_of_a_non_integer(op_name, engine):
-    """An f32 shift, scalar or lane by lane, has no unsigned type of its width
-    to be read through: both engines refuse it with a ``TypeError`` naming
-    the op and the element type."""
-    assert_engine_rejects_hip(
-        _f32_kernel(op_name),
-        "gfx942",
-        engine=engine,
-        error_type=TypeError,
-        message=(
-            f"HIP lowering of {op_name} failed - element type='f32', expected an "
-            "integer type, one of ('i1', 'i8', 'u8', 'i16', 'i32', 'i64')"
-        ),
-    )
-
-
 @pytest.mark.parametrize("op_name", sorted(_INTEGER_ELEMENT_BUILDERS))
 def test_builder_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
     """LLVM's bitwise ops and shifts have no float form: IRBuilder refuses an
@@ -240,6 +223,23 @@ def test_verifier_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
     assert messages == [
         f"{op_name} failed - element type='f32', expected an integer or i1 type"
     ]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("op_name", sorted(_INTEGER_ELEMENT_BUILDERS))
+def test_lowerings_refuse_a_bitwise_op_or_shift_of_a_non_integer(op_name, engine):
+    """IR written past the builder reaches the lowerings without the verifier:
+    each engine's LLVM and HIP lowerings refuse an f32 bitwise op or shift,
+    scalar or lane by lane, with the builder's ``TypeError`` and text, instead
+    of emitting IR or source the compiler rejects."""
+    for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
+        assert_rejects(
+            _f32_kernel(op_name),
+            "gfx942",
+            engine=engine,
+            error_type=TypeError,
+            message=f"{op_name} failed - element type='f32', expected an integer or i1 type",
+        )
 
 
 @pytest.mark.parametrize(

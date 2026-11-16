@@ -341,65 +341,81 @@ def _smem_store_lanes_error(
     return None
 
 
-def _smem_store_vN_op_error(op: Op) -> str | None:
-    """:func:`_smem_store_lanes_error` for a built ``tile.smem_store_vN`` or
-    ``tile.smem_store_vN_f32`` op, whose last operand is the stored value and
-    whose ``vec`` attribute is its width: serialized IR reaches the verifier
-    and the lowerings without passing the builder, so they all use this rule.
-    An op without operands or without an integer ``vec`` has no width to
-    compare here (C++ engine: ``rocke_i_smem_store_vN_op_error``)."""
+def _vec_width(op: Op) -> int | None:
+    """The ``vec`` attribute of the built LDS vector op ``op``, its width in
+    elements, or None when it has none or it is not a plain integer."""
     width = op.attrs.get("vec")
-    if not op.operands or not isinstance(width, int) or isinstance(width, bool):
+    if not isinstance(width, int) or isinstance(width, bool):
+        return None
+    return width
+
+
+def _smem_store_vN_op_error(op: Op) -> str | None:
+    """:func:`_smem_store_lanes_error` for a built ``tile.smem_store_vN`` op,
+    whose last operand is the stored value and whose ``vec`` attribute is its
+    width: serialized IR reaches the verifier and the lowerings without passing
+    the builder, so they all use this rule. An op without operands or without
+    an integer ``vec`` has no width to compare here (C++ engine:
+    ``rocke_i_smem_store_vN_op_error``)."""
+    width = _vec_width(op)
+    if not op.operands or width is None:
         return None
     return _smem_store_lanes_error(op.name, op.operands[-1].type, width, "vec")
 
 
 def _type_name_message(what: str, param: str, type_name: str, expected: str) -> str:
-    """The text of every refusal of an operand by its type: ``what`` failed
-    because its ``param`` is ``type_name`` where ``expected`` (prose) is
-    required. Each such refusal is a ``TypeError`` (``ROCKE_ERR_TYPE``); the
-    C++ engine's ``rocke_i_type_name_message`` writes the same text."""
+    """The text of every refusal of an operand by its type that the IR rules
+    make: ``what`` failed because its ``param`` is ``type_name`` where
+    ``expected`` (prose) is required. Each such refusal is a ``TypeError``
+    (``ROCKE_ERR_TYPE``); the C++ engine's ``rocke_i_type_name_message``
+    writes the same text."""
     return f"{what} failed - {param}={type_name!r}, expected {expected}"
 
 
-def _smem_f32_access_error(
-    access: str, tile_type: Type, value_type: Type | None
-) -> str | None:
-    """The error for an f32 epilogue LDS ``access`` (``smem_load_vN_f32`` or
-    ``smem_store_vN_f32``) of a tile of type ``tile_type`` whose elements are
-    not f32, or, for a store, whose stored value (``value_type``; None for a
-    load) is not f32; None when both are f32. Both lowerings emit, and the
-    alignment rule sizes, an f32 access whatever the operand types are, so the
-    callers raise it as a ``TypeError``. The C++ engine
-    (``rocke_i_smem_f32_access_error``) reports the same texts."""
-    tile_element = tile_type.elem if isinstance(tile_type, SmemType) else tile_type
-    if tile_element.name != "f32":
-        return _type_name_message(access, "tile element type", tile_element.name, "f32")
-    if value_type is not None and element_type(value_type).name != "f32":
-        return _type_name_message(
-            access, "value element type", element_type(value_type).name, "f32"
-        )
-    return None
-
-
-def _smem_vN_f32_op_error(op: Op) -> TypeError | ValueError | None:
-    """The refusal, for its caller to raise, of a built
-    ``tile.smem_load_vN_f32`` or ``tile.smem_store_vN_f32`` op, or None when it
-    is sound: :func:`_smem_f32_access_error` for its tile (the first operand)
-    and, for the store, its value (the last operand), a ``TypeError``; then
-    the store's :func:`_smem_store_vN_op_error`, a ``ValueError``. Serialized
-    IR reaches the verifier and the lowerings without passing the builder, so
-    they all use this rule (C++ engine: ``rocke_i_smem_vN_f32_op_error``, which
-    returns the matching status)."""
-    if not op.operands:
+def _value_element_error(access: str, value_type: Type, expected: str) -> str | None:
+    """The error for an LDS store ``access`` whose value (a scalar or a vector
+    of type ``value_type``) does not hold ``expected`` elements, or None when
+    it does. The store records, and its lowerings emit, an access of
+    ``expected`` elements, so the callers raise it as a ``TypeError``. The C++
+    engine (``rocke_i_value_element_error``) reports the same texts."""
+    element = element_type(value_type).name
+    if element == expected:
         return None
-    is_store = op.name == "tile.smem_store_vN_f32"
-    value_type = op.operands[-1].type if is_store else None
-    error = _smem_f32_access_error(op.name, op.operands[0].type, value_type)
+    return _type_name_message(access, "value element type", element, expected)
+
+
+def _smem_store_vN_f32_error(
+    store: str, value_type: Type, width: int | None, width_param: str
+) -> TypeError | ValueError | None:
+    """The refusal, for its caller to raise, of an f32 epilogue LDS ``store``
+    (``smem_store_vN_f32``) of a value of type ``value_type`` and ``width``
+    lanes, or None when it is sound: the value holds f32
+    (:func:`_value_element_error`, a ``TypeError``) and has ``width`` lanes
+    (:func:`_smem_store_lanes_error`, a ``ValueError``; not checked when
+    ``width`` is None). The builder names the width ``n`` and serialized IR
+    ``vec`` (``width_param``). The C++ engine
+    (``rocke_i_smem_store_vN_f32_error``) returns the matching status and text.
+    """
+    error = _value_element_error(store, value_type, "f32")
     if error:
         return TypeError(error)
-    error = _smem_store_vN_op_error(op) if is_store else None
+    if width is None:
+        return None
+    error = _smem_store_lanes_error(store, value_type, width, width_param)
     return ValueError(error) if error else None
+
+
+def _smem_store_vN_f32_op_error(op: Op) -> TypeError | ValueError | None:
+    """:func:`_smem_store_vN_f32_error` for a built ``tile.smem_store_vN_f32``
+    op, whose last operand is the stored value and whose ``vec`` attribute is
+    its width. Serialized IR reaches the verifier and the lowerings without
+    passing the builder, so they all use this rule (C++ engine:
+    ``rocke_i_smem_store_vN_f32_op_error``)."""
+    if not op.operands:
+        return None
+    return _smem_store_vN_f32_error(
+        op.name, op.operands[-1].type, _vec_width(op), "vec"
+    )
 
 
 def _is_flag_ptr(t: "Type") -> bool:
@@ -571,8 +587,9 @@ def _integer_element_error(op_name: str, operand_type: Type) -> str | None:
     or ``i1``.
 
     A float operand would lower to IR the compiler rejects. IRBuilder refuses
-    it when the op is built (:func:`_refuse_non_integer`) and the verifier
-    reports it for IR that did not come through IRBuilder; the C++ engine's
+    it when the op is built (:func:`_refuse_non_integer`); for IR that did not
+    come through IRBuilder, the verifier reports it and every lowering refuses
+    it (:func:`_refuse_non_integer_op`). The C++ engine's
     ``rocke_i_integer_element_error`` reports the same text.
     """
     element = element_type(operand_type)
@@ -589,6 +606,16 @@ def _refuse_non_integer(op_name: str, operand_type: Type) -> None:
     error = _integer_element_error(op_name, operand_type)
     if error:
         raise TypeError(error)
+
+
+def _refuse_non_integer_op(op: Op) -> None:
+    """:func:`_refuse_non_integer` for a built op that is one of
+    :data:`_INTEGER_ELEMENT_OPS`, on its first operand. IRBuilder refuses such
+    an op when it is built; every lowering calls this before it lowers an op,
+    for IR that did not come through it (C++ engine:
+    ``rocke_i_integer_element_op_error``)."""
+    if op.name in _INTEGER_ELEMENT_OPS and op.operands:
+        _refuse_non_integer(op.name, op.operands[0].type)
 
 
 def _vector_cmp_error(
@@ -1314,12 +1341,15 @@ def smem_vector_access_align(smem_type: Type, lanes: int, elem: Type) -> int:
     into LDS tile type ``smem_type``: :func:`vector_access_align`, bounded by
     what every row start of the tile guarantees.
 
-    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
-    ``lanes``, so the address advances by the innermost dimension per row.
-    When that dimension is not a multiple of ``lanes`` -- which is exactly what
-    a bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
-    the natural boundary. ``gcd(lanes, innermost)`` elements is what every row
-    start guarantees; outer strides are products that include the innermost
+    An LDS tile is indexed ``(..., row, col)`` with ``col`` at a byte offset
+    that is a multiple of the access width (``lanes`` ``elem`` values), so the
+    address advances by one row of the tile's own elements per row. When that
+    row is not a multiple of the access width -- which is exactly what a
+    bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
+    the natural boundary. The gcd of the access width and the row, in bytes, is
+    what every row start guarantees: ``gcd(lanes, innermost)`` elements when
+    the tile holds ``elem`` (the f32 epilogue ops also access tiles of other
+    elements). Outer strides are products that include the innermost
     dimension, so they never bind tighter. A type with no shape (or a
     non-positive innermost dimension) gives no row bound.
 
@@ -1333,7 +1363,8 @@ def smem_vector_access_align(smem_type: Type, lanes: int, elem: Type) -> int:
     innermost = int(shape[-1]) if shape else 0
     if innermost <= 0:
         return natural
-    return min(natural, _gcd(int(lanes), innermost) * type_bytes(elem))
+    row_bytes = innermost * type_bytes(smem_type.elem)
+    return min(natural, _gcd(int(lanes) * type_bytes(elem), row_bytes))
 
 
 def _checked_align(op_name: str, value: object) -> int:
@@ -4700,6 +4731,9 @@ class IRBuilder:
         ).result
 
     def vector_cmp(self, pred: str, a: Value, b: Value) -> Value:
+        """A lane-by-lane compare of ``a`` and ``b`` by ``pred``; refuses what
+        ``_vector_cmp_error`` refuses (an unknown pred: ValueError; lanes that
+        are not integers or i1: TypeError)."""
         if not isinstance(a.type, VectorType) or a.type != b.type:
             raise ValueError("vector_cmp expects matching vector operands")
         attrs = {"pred": pred}
@@ -4749,13 +4783,9 @@ class IRBuilder:
         A value of any other element type is refused with TypeError: the op
         records ``elem_type`` f16.
         """
-        value_element = element_type(value.type).name
-        if value_element != "f16":
-            raise TypeError(
-                _type_name_message(
-                    "smem_store_f16", "value element type", value_element, "f16"
-                )
-            )
+        element_error = _value_element_error("smem_store_f16", value.type, "f16")
+        if element_error:
+            raise TypeError(element_error)
         self._op(
             "tile.smem_store",
             [smem, *indices, value],
@@ -7815,19 +7845,16 @@ class IRBuilder:
         self, smem: Value, indices: Sequence[Value], value: Value, n: int
     ) -> None:
         """Store ``value``, ``n`` f32 lanes (n in {1, 2, 4}; a scalar for
-        ``n=1``), at ``indices`` of ``smem``, an f32 tile. A tile or value that
-        does not hold f32 is refused with TypeError, a value of another lane
-        count with ValueError."""
+        ``n=1``), at ``indices`` of ``smem``. The tile may hold any element type:
+        ``indices`` address it in its own elements, and the alignment claim is
+        bounded by its row starts in bytes. A value that does not hold f32 is
+        refused with TypeError, a value of another lane count with
+        ValueError."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_store_vN_f32 n must be 1, 2, or 4 (got {n})")
-        element_error = _smem_f32_access_error(
-            "smem_store_vN_f32", smem.type, value.type
-        )
-        if element_error:
-            raise TypeError(element_error)
-        lanes_error = _smem_store_lanes_error("smem_store_vN_f32", value.type, n, "n")
-        if lanes_error:
-            raise ValueError(lanes_error)
+        refusal = _smem_store_vN_f32_error("smem_store_vN_f32", value.type, n, "n")
+        if refusal:
+            raise refusal
         self._op(
             "tile.smem_store_vN_f32",
             [smem, *indices, value],
@@ -7835,15 +7862,12 @@ class IRBuilder:
         )
 
     def smem_load_vN_f32(self, smem: Value, *indices, n: int = 0) -> Value:
-        """Load ``n`` f32 lanes (n in {1, 2, 4}) at ``indices`` of ``smem``, an
-        f32 tile; a tile that does not hold f32 is refused with TypeError."""
+        """Load ``n`` f32 lanes (n in {1, 2, 4}) at ``indices`` of ``smem``.
+        The tile may hold any element type, as for :meth:`smem_store_vN_f32`."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_load_vN_f32 n must be 1, 2, or 4 (got {n})")
         if not indices:
             raise ValueError("smem_load_vN_f32 needs at least one index")
-        tile_error = _smem_f32_access_error("smem_load_vN_f32", smem.type, None)
-        if tile_error:
-            raise TypeError(tile_error)
         return self._op(
             "tile.smem_load_vN_f32",
             [smem, *indices],

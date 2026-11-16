@@ -92,6 +92,10 @@ static int64_t ll_lds_natural_align(const rocke_op_t* op)
                                                 rocke_i_elem_of(op->results[0]->type));
     case ROCKE_OP_TILE_SMEM_STORE_VN_F32:
     case ROCKE_OP_TILE_SMEM_LOAD_VN_F32:
+        if(op->num_operands == 0)
+        {
+            return 0;
+        }
         return rocke_i_smem_vector_access_align(
             op->operands[0]->type, ll_attr_int(op, "vec", 0), rocke_f32());
     case ROCKE_OP_TILE_SMEM_LOAD_V4:
@@ -861,7 +865,7 @@ static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     char contract_error[ROCKE_ERR_MSG_CAP];
     const rocke_status_t contract_status
-        = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error);
+        = rocke_i_smem_store_vN_f32_op_error(op, contract_error, sizeof contract_error);
     if(contract_status != ROCKE_OK)
     {
         rocke_ll_fail(L, contract_status, "%s", contract_error);
@@ -918,14 +922,6 @@ static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 
 static void op_tile_smem_load_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
-    char contract_error[ROCKE_ERR_MSG_CAP];
-    const rocke_status_t contract_status
-        = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error);
-    if(contract_status != ROCKE_OK)
-    {
-        rocke_ll_fail(L, contract_status, "%s", contract_error);
-        return;
-    }
     const rocke_value_t* smem = op->operands[0];
     int64_t vec = ll_attr_int(op, "vec", 0);
     const rocke_type_t* stype = NULL;

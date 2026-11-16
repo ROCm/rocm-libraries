@@ -215,10 +215,11 @@ int64_t rocke_i_vector_access_align(int64_t lanes, const rocke_type_t* elem);
 /* The alignment, in bytes, of one access of `lanes` `elem` values into LDS
  * tile type `smem_type` (Python core/ir.py::smem_vector_access_align):
  * rocke_i_vector_access_align, bounded by what every row start of the tile
- * guarantees: gcd(lanes, innermost dimension) elements, since a pad such as
- * lds_k_pad that leaves the innermost dimension a non-multiple of `lanes`
- * starts alternate rows off the natural boundary. A type with no shape gives
- * no row bound. */
+ * guarantees: the gcd of the access width and one row of the tile's own
+ * elements, in bytes (gcd(lanes, innermost dimension) elements when the tile
+ * holds `elem`), since a pad such as lds_k_pad that leaves the row a
+ * non-multiple of the access width starts alternate rows off the natural
+ * boundary. A type with no shape gives no row bound. */
 int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
                                          int64_t lanes,
                                          const rocke_type_t* elem);
@@ -338,16 +339,16 @@ const char* rocke_i_smem_store_lanes_error(const char* store,
                                            char* buf,
                                            size_t cap);
 
-/* rocke_i_smem_store_lanes_error for a built tile.smem_store_vN or
- * tile.smem_store_vN_f32 op, whose last operand is the stored value and whose
- * `vec` attribute is its width (Python core/ir.py::_smem_store_vN_op_error). An
- * op without operands or without an integer `vec` has no width to compare
- * here. The verifier and both lowerings use it. */
+/* rocke_i_smem_store_lanes_error for a built tile.smem_store_vN op, whose last
+ * operand is the stored value and whose `vec` attribute is its width (Python
+ * core/ir.py::_smem_store_vN_op_error). An op without operands or without an
+ * integer `vec` has no width to compare here. The verifier and both lowerings
+ * use it. */
 const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
-/* The text of every refusal of an operand by its type, written into `buf`,
- * which the result then points to: `what` failed because its `param` is
- * `type_name` where `expected` (prose) is required (Python
+/* The text of every refusal of an operand by its type that the IR rules make,
+ * written into `buf`, which the result then points to: `what` failed because
+ * its `param` is `type_name` where `expected` (prose) is required (Python
  * core/ir.py::_type_name_message, same text). Each such refusal is
  * ROCKE_ERR_TYPE. */
 const char* rocke_i_type_name_message(const char* what,
@@ -357,27 +358,37 @@ const char* rocke_i_type_name_message(const char* what,
                                       char* buf,
                                       size_t cap);
 
-/* The error for an f32 epilogue LDS `access` (smem_load_vN_f32 or
- * smem_store_vN_f32) of a tile of type `tile_type` whose elements are not f32
- * or, for a store, whose value (`value_type`; NULL for a load) is not f32;
- * NULL when both are f32 (Python core/ir.py::_smem_f32_access_error, same
- * texts). Both lowerings emit, and the alignment rule sizes, an f32 access
- * whatever the operand types are, so the callers refuse it as ROCKE_ERR_TYPE.
- * A returned error is written to `buf`. */
-const char* rocke_i_smem_f32_access_error(const char* access,
-                                          const rocke_type_t* tile_type,
-                                          const rocke_type_t* value_type,
-                                          char* buf,
-                                          size_t cap);
+/* The error for an LDS store `access` whose value (a scalar or a vector of type
+ * `value_type`) does not hold `expected` elements, or NULL when it does
+ * (Python core/ir.py::_value_element_error, same texts). The store records, and
+ * its lowerings emit, an access of `expected` elements, so the callers refuse
+ * it as ROCKE_ERR_TYPE. A returned error is written to `buf`. */
+const char* rocke_i_value_element_error(const char* access,
+                                        const rocke_type_t* value_type,
+                                        const char* expected,
+                                        char* buf,
+                                        size_t cap);
 
-/* Whether the built tile.smem_load_vN_f32 or tile.smem_store_vN_f32 `op` is
- * sound (Python core/ir.py::_smem_vN_f32_op_error, which returns the exception
- * whose status this returns, same text): ROCKE_OK, or the refusal's status
- * with its text written into `buf`. rocke_i_smem_f32_access_error for its tile
- * (the first operand) and, for the store, its value (the last operand) is
- * ROCKE_ERR_TYPE; the store's rocke_i_smem_store_vN_op_error is
- * ROCKE_ERR_VALUE. The verifier and both lowerings use it. */
-rocke_status_t rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap);
+/* Whether an f32 epilogue LDS `store` (smem_store_vN_f32) of a value of type
+ * `value_type` and `*width` lanes is sound (Python
+ * core/ir.py::_smem_store_vN_f32_error, which returns the exception whose
+ * status this returns, same text): ROCKE_OK, or the refusal's status with its
+ * text written into `buf`. A value that does not hold f32
+ * (rocke_i_value_element_error) is ROCKE_ERR_TYPE; one without `*width` lanes
+ * (rocke_i_smem_store_lanes_error, not checked when `width` is NULL) is
+ * ROCKE_ERR_VALUE. `width_param` names the width as the caller spells it. */
+rocke_status_t rocke_i_smem_store_vN_f32_error(const char* store,
+                                               const rocke_type_t* value_type,
+                                               const int64_t* width,
+                                               const char* width_param,
+                                               char* buf,
+                                               size_t cap);
+
+/* rocke_i_smem_store_vN_f32_error for a built tile.smem_store_vN_f32 op, whose
+ * last operand is the stored value and whose `vec` attribute is its width
+ * (Python core/ir.py::_smem_store_vN_f32_op_error). The verifier and both
+ * lowerings use it. */
+rocke_status_t rocke_i_smem_store_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* The code-object symbol of `kernel_name`'s GPU-check word, allocated in
  * `arena` (Python core/ir.py::gpu_check_word_symbol, same spelling). A wave
@@ -660,6 +671,13 @@ const char* rocke_i_integer_element_error(const char* op_name,
                                           const rocke_type_t* operand_type,
                                           char* buf,
                                           size_t cap);
+
+/* Mirrors ir._refuse_non_integer_op: rocke_i_integer_element_error for a built
+ * op that is one of the ops rocke_i_is_integer_element_op admits, on its first
+ * operand, or NULL. Every lowering checks it before it lowers an op, for IR
+ * that did not come through the builders; the callers refuse it as
+ * ROCKE_ERR_TYPE. */
+const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Mirrors ir._refuse_non_integer: throw ckc::TypeError with
  * rocke_i_integer_element_error's text when `operand_type`'s element is not an

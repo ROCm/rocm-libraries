@@ -348,15 +348,16 @@ int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
     {
         return natural;
     }
-    int64_t row_start_elems = lanes; /* gcd(lanes, innermost), as Python math.gcd */
-    int64_t remainder = innermost;
+    /* gcd(access width, row), in bytes, as Python math.gcd. */
+    const rocke_type_t* tile_elem = smem_type->elem ? smem_type->elem : elem;
+    int64_t row_bound = lanes * rocke_i_type_bytes(elem);
+    int64_t remainder = innermost * rocke_i_type_bytes(tile_elem);
     while(remainder != 0)
     {
-        const int64_t next = row_start_elems % remainder;
-        row_start_elems = remainder;
+        const int64_t next = row_bound % remainder;
+        row_bound = remainder;
         remainder = next;
     }
-    const int64_t row_bound = row_start_elems * rocke_i_type_bytes(elem);
     return natural < row_bound ? natural : row_bound;
 }
 
@@ -658,11 +659,18 @@ const char* rocke_i_smem_store_lanes_error(const char* store,
     return NULL;
 }
 
+/* Python core/ir.py::_vec_width: the integer `vec` attribute of `op`, its
+ * width in elements, written to `width`; false when it has none. */
+static bool vec_width(const rocke_op_t* op, int64_t* width)
+{
+    return rocke_attr_get_int(&op->attrs, "vec", width);
+}
+
 /* Python core/ir.py::_smem_store_vN_op_error; the texts are the Python engine's. */
 const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     int64_t width = 0;
-    if(op->num_operands == 0 || !rocke_attr_get_int(&op->attrs, "vec", &width))
+    if(op->num_operands == 0 || !vec_width(op, &width))
     {
         return NULL;
     }
@@ -674,6 +682,7 @@ const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size
                                           cap);
 }
 
+/* Python core/ir.py::_type_name_message; the text is the Python engine's. */
 const char* rocke_i_type_name_message(const char* what,
                                       const char* param,
                                       const char* type_name,
@@ -685,47 +694,52 @@ const char* rocke_i_type_name_message(const char* what,
     return buf;
 }
 
-/* Python core/ir.py::_smem_f32_access_error; the texts are the Python engine's. */
-const char* rocke_i_smem_f32_access_error(const char* access,
-                                          const rocke_type_t* tile_type,
-                                          const rocke_type_t* value_type,
-                                          char* buf,
-                                          size_t cap)
+/* Python core/ir.py::_value_element_error; the texts are the Python engine's. */
+const char* rocke_i_value_element_error(
+    const char* access, const rocke_type_t* value_type, const char* expected, char* buf, size_t cap)
 {
-    const rocke_type_t* tile_element
-        = tile_type->kind == ROCKE_TYPE_SMEM ? tile_type->elem : tile_type;
-    if(strcmp(tile_element->name, "f32") != 0)
+    const char* element = rocke_i_elem_of(value_type)->name;
+    if(strcmp(element, expected) == 0)
     {
-        return rocke_i_type_name_message(
-            access, "tile element type", tile_element->name, "f32", buf, cap);
+        return NULL;
     }
-    if(value_type && strcmp(rocke_i_elem_of(value_type)->name, "f32") != 0)
-    {
-        return rocke_i_type_name_message(
-            access, "value element type", rocke_i_elem_of(value_type)->name, "f32", buf, cap);
-    }
-    return NULL;
+    return rocke_i_type_name_message(access, "value element type", element, expected, buf, cap);
 }
 
-/* Python core/ir.py::_smem_vN_f32_op_error; the texts are the Python engine's. */
-rocke_status_t rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap)
+/* Python core/ir.py::_smem_store_vN_f32_error; the texts are the Python engine's. */
+rocke_status_t rocke_i_smem_store_vN_f32_error(const char* store,
+                                               const rocke_type_t* value_type,
+                                               const int64_t* width,
+                                               const char* width_param,
+                                               char* buf,
+                                               size_t cap)
+{
+    if(rocke_i_value_element_error(store, value_type, "f32", buf, cap))
+    {
+        return ROCKE_ERR_TYPE;
+    }
+    if(width && rocke_i_smem_store_lanes_error(store, value_type, *width, width_param, buf, cap))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    return ROCKE_OK;
+}
+
+/* Python core/ir.py::_smem_store_vN_f32_op_error; the texts are the Python engine's. */
+rocke_status_t rocke_i_smem_store_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     if(op->num_operands == 0)
     {
         return ROCKE_OK;
     }
-    const bool is_store = op->opcode == ROCKE_OP_TILE_SMEM_STORE_VN_F32;
-    const rocke_type_t* value_type = is_store ? op->operands[op->num_operands - 1]->type : NULL;
-    if(rocke_i_smem_f32_access_error(
-           rocke_opcode_name(op->opcode), op->operands[0]->type, value_type, buf, cap))
-    {
-        return ROCKE_ERR_TYPE;
-    }
-    if(is_store && rocke_i_smem_store_vN_op_error(op, buf, cap))
-    {
-        return ROCKE_ERR_VALUE;
-    }
-    return ROCKE_OK;
+    int64_t width = 0;
+    const bool has_width = vec_width(op, &width);
+    return rocke_i_smem_store_vN_f32_error(rocke_opcode_name(op->opcode),
+                                           op->operands[op->num_operands - 1]->type,
+                                           has_width ? &width : NULL,
+                                           "vec",
+                                           buf,
+                                           cap);
 }
 
 const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)
@@ -1182,12 +1196,16 @@ rocke_status_t rocke_i_fcmp_error(const rocke_attr_map_t* attrs,
             return ROCKE_OK;
         }
     }
-    rocke_i_type_name_message("arith.fcmp",
-                              "operand type",
-                              type_name,
-                              "f16, bf16, f32 or f64 (compare integers with cmp)",
-                              buf,
-                              cap);
+    /* ir._fcmp_error's prose: the types joined as "a, b, c or d". */
+    char expected[128];
+    size_t used = 0;
+    for(const char* const* name = k_fcmp_operand_types; *name; ++name)
+    {
+        const char* separator = name == k_fcmp_operand_types ? "" : name[1] ? ", " : " or ";
+        used += (size_t)snprintf(expected + used, sizeof expected - used, "%s%s", separator, *name);
+    }
+    snprintf(expected + used, sizeof expected - used, " (compare integers with cmp)");
+    rocke_i_type_name_message("arith.fcmp", "operand type", type_name, expected, buf, cap);
     return ROCKE_ERR_TYPE;
 }
 
@@ -1221,6 +1239,16 @@ const char* rocke_i_integer_element_error(const char* op_name,
         return NULL;
     return rocke_i_type_name_message(
         op_name, "element type", element_name, "an integer or i1 type", buf, cap);
+}
+
+const char* rocke_i_integer_element_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(!rocke_i_is_integer_element_op(op->opcode) || op->num_operands == 0)
+    {
+        return NULL;
+    }
+    return rocke_i_integer_element_error(
+        rocke_opcode_name(op->opcode), op->operands[0]->type, buf, cap);
 }
 
 void rocke_i_refuse_non_integer(const char* op_name, const rocke_type_t* operand_type)

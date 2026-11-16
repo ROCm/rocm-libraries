@@ -289,9 +289,10 @@ static rocke_status_t rocke_h_op_arith_mod(rocke_h_lowerer_t* lw, const rocke_op
 /* ----------------------------- arith: cmp / select ------------------------- */
 
 /* def _op_arith_cmp(self, op): the op is checked by the IR rule first
- * (_int_cmp_error, a ValueError: "ult" takes i32 or i64 operands, and the
- * operands are integers or i1); "ult" compares as unsigned at the operand's
- * width, the others with
+ * (_int_cmp_error: a pred refusal is a ValueError -- the pred is required and
+ * "ult" takes i32 or i64 operands; an operand that is not an integer or i1 is
+ * a TypeError); "ult" compares as unsigned at the operand's width, the others
+ * with
  * {"lt":"<","le":"<=","gt":">","ge":">=","eq":"==","ne":"!="}[pred]. */
 static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -307,10 +308,6 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
         return rocke_h_fail(lw, cmp_status, "%s", cmp_buf);
     }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
-    if(!pred)
-    {
-        pred = "lt";
-    }
     if(strcmp(pred, "ult") == 0)
     {
         const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "arith.cmp", a->type->name);
@@ -735,9 +732,9 @@ static rocke_status_t rocke_h_op_arith_fmin(rocke_h_lowerer_t* lw, const rocke_o
 }
 
 /* def _op_arith_fcmp(self, op):
- *     pred_error = _fcmp_pred_error(op.attrs)   # a ValueError
- *     pred = op.attrs["pred"]
  *     a, b = op.operands
+ *     refusal = _fcmp_error(op.attrs, a.type)   # a ValueError or TypeError
+ *     pred = op.attrs["pred"]
  *     op_map = {"olt":"<","ole":"<=","ogt":">","oge":">=","oeq":"==","one":"!="}
  *     if pred in op_map:
  *         self._emit(f"bool {_name(op.result)} = "
@@ -753,14 +750,8 @@ static rocke_status_t rocke_h_op_arith_fmin(rocke_h_lowerer_t* lw, const rocke_o
  *         raise NotImplementedError(f"unknown fcmp predicate {pred!r}") */
 static rocke_status_t rocke_h_op_arith_fcmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
-    const rocke_value_t* r = h_res(op);
-    const char* rn = rocke_h_name(lw, r);
-    const char* an = rocke_h_name(lw, a);
-    const char* bn = rocke_h_name(lw, b);
-    const char* cop = NULL;
     char fcmp_buf[ROCKE_ERR_MSG_CAP];
     const rocke_status_t fcmp_status
         = rocke_i_fcmp_error(&op->attrs, a->type, fcmp_buf, sizeof fcmp_buf);
@@ -768,6 +759,12 @@ static rocke_status_t rocke_h_op_arith_fcmp(rocke_h_lowerer_t* lw, const rocke_o
     {
         return rocke_h_fail(lw, fcmp_status, "%s", fcmp_buf);
     }
+    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
+    const rocke_value_t* r = h_res(op);
+    const char* rn = rocke_h_name(lw, r);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
+    const char* cop = NULL;
     if(strcmp(pred, "olt") == 0)
     {
         cop = "<";

@@ -1776,6 +1776,9 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
     const char* tf32_error = rocke_tf32_op_error(op);
     if(tf32_error)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
+    char integer_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_integer_element_op_error(op, integer_error, sizeof integer_error))
+        rocke_ll_fail(L, ROCKE_ERR_TYPE, "%s", integer_error);
     rocke_opcode_t oc = op->opcode;
     rocke_ll_op_fn fn = NULL;
     if(oc > ROCKE_OP_INVALID && oc < ROCKE_OP__COUNT)
