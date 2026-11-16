@@ -578,10 +578,11 @@ TEST_F(TestConvFwdToleranceGradingFixture, ConvolutionComputingInHalfKeepsTheDef
     Spec spec;
     spec.convCompute = "half";
     const auto bundle = loadBundle(spec);
-    const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
-        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
+    const auto fixedDefault = tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
-                   AbsRelTolerance{fixedDefault, fixedDefault});
+                   AbsRelTolerance{static_cast<double>(fixedDefault.atol),
+                                   static_cast<double>(fixedDefault.rtol)});
 }
 
 // The Variant3 graph with every intermediate stored in the output type: the convolution's
@@ -662,10 +663,11 @@ TEST_F(TestConvFwdToleranceGradingFixture, IntermediateOfAnUnknownTypeKeepsTheDe
     spec.topology = Topology::VARIANT3;
     spec.intermediateType = "int32";
     const auto bundle = loadBundle(spec);
-    const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
-        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
+    const auto fixedDefault = tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
-                   AbsRelTolerance{fixedDefault, fixedDefault});
+                   AbsRelTolerance{static_cast<double>(fixedDefault.atol),
+                                   static_cast<double>(fixedDefault.rtol)});
 }
 
 // ── Where the input statistics come from ────────────────────────────────────
