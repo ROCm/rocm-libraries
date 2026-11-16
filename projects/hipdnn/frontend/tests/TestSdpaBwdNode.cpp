@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <functional>
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <functional>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
@@ -930,6 +930,27 @@ std::shared_ptr<TensorAttributes> makeBroadcastBias()
     return makeTensor4D(1, 8, 16, 32);
 }
 
+enum class Gradient
+{
+    DQ,
+    DK,
+    DV
+};
+
+std::shared_ptr<TensorAttributes> pickGradient(const SdpaBackwardAttributes& attrs,
+                                               Gradient gradient)
+{
+    if(gradient == Gradient::DQ)
+    {
+        return attrs.get_dq();
+    }
+    if(gradient == Gradient::DK)
+    {
+        return attrs.get_dk();
+    }
+    return attrs.get_dv();
+}
+
 Error preValidate(SdpaBackwardAttributes&& attrs)
 {
     const GraphAttributes graphAttrs;
@@ -984,18 +1005,9 @@ TEST(TestSdpaBwdNode, PreValidateAcceptsGradientDimsThatMatchTheirSource)
 
 TEST(TestSdpaBwdNode, PreValidateRejectsGradientDimsThatDifferFromTheirSource)
 {
-    enum class Gradient
-    {
-        DQ,
-        DK,
-        DV
-    };
     const auto validate = [](Gradient gradient, const std::vector<int64_t>& dims) {
         auto attrs = makeGqaAttrs();
-        const auto tensor = gradient == Gradient::DQ   ? attrs.get_dq()
-                            : gradient == Gradient::DK ? attrs.get_dk()
-                                                       : attrs.get_dv();
-        tensor->set_dim(dims);
+        pickGradient(attrs, gradient)->set_dim(dims);
         return preValidate(std::move(attrs));
     };
 
@@ -1015,23 +1027,132 @@ TEST(TestSdpaBwdNode, PreValidateRejectsGradientDimsThatDifferFromTheirSource)
     EXPECT_NE(err.err_msg.find("dK dim[1]"), std::string::npos) << err.err_msg;
 }
 
-TEST(TestSdpaBwdNode, PreValidateChecksGradientStrides)
+TEST(TestSdpaBwdNode, PreValidateGradientsFollowSourcesWithDifferentKeyAndValueHeads)
 {
-    const auto validate = [](const std::vector<int64_t>& strides) {
-        auto attrs = makeGqaAttrs();
-        attrs.get_dq()->set_stride(strides);
-        return preValidate(std::move(attrs)).code;
+    // K and V need not share a head count: 8 query heads are divisible by 4 and by 2.
+    const auto makeAttrs = [] {
+        return makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 4, 32, 64), makeTensor4D(2, 2, 32, 32));
     };
 
-    // Packed, and sequence-major (BSHD order): any layout with a contiguous head dim.
-    EXPECT_EQ(validate({8192, 1024, 64, 1}), error_code_t::OK);
-    EXPECT_EQ(validate({8192, 64, 512, 1}), error_code_t::OK);
+    auto attrs = makeAttrs();
+    const auto dk = attrs.get_dk();
+    const auto dv = attrs.get_dv();
+    const GraphAttributes graphAttrs;
+    SdpaBwdNode node(std::move(attrs), graphAttrs);
+    ASSERT_EQ(node.pre_validate_node().code, error_code_t::OK);
+    ASSERT_EQ(node.infer_properties_node().code, error_code_t::OK);
+    EXPECT_EQ(dk->get_dim(), (std::vector<int64_t>{2, 4, 32, 64}));
+    EXPECT_EQ(dv->get_dim(), (std::vector<int64_t>{2, 2, 32, 32}));
 
-    EXPECT_EQ(validate({1024, 64, 1}), error_code_t::INVALID_VALUE) << "one stride per dim";
-    EXPECT_EQ(validate({8192, 1024, 0, 1}), error_code_t::INVALID_VALUE) << "zero stride";
-    EXPECT_EQ(validate({8192, -1024, 64, 1}), error_code_t::INVALID_VALUE) << "negative stride";
-    EXPECT_EQ(validate({16384, 2048, 128, 2}), error_code_t::GRAPH_NOT_SUPPORTED)
-        << "head dim not contiguous";
+    const auto validate = [&makeAttrs](Gradient gradient, const std::vector<int64_t>& dims) {
+        auto explicitAttrs = makeAttrs();
+        pickGradient(explicitAttrs, gradient)->set_dim(dims);
+        return preValidate(std::move(explicitAttrs)).code;
+    };
+    EXPECT_EQ(validate(Gradient::DK, {2, 4, 32, 64}), error_code_t::OK);
+    EXPECT_EQ(validate(Gradient::DV, {2, 2, 32, 32}), error_code_t::OK);
+    EXPECT_EQ(validate(Gradient::DV, {2, 4, 32, 32}), error_code_t::INVALID_VALUE)
+        << "dV with the key head count";
+    EXPECT_EQ(validate(Gradient::DK, {2, 2, 32, 64}), error_code_t::INVALID_VALUE)
+        << "dK with the value head count";
+}
+
+TEST(TestSdpaBwdNode, PreValidateChecksGradientStrides)
+{
+    // makeGqaAttrs() shapes: dQ [2, 8, 16, 64], dK [2, 4, 32, 64], dV [2, 4, 32, 32].
+    struct Case
+    {
+        Gradient gradient;
+        const char* name;
+        std::vector<int64_t> packed;
+        std::vector<int64_t> sequenceMajor; // BSHD order, head dim still contiguous
+    };
+    const std::vector<Case> cases = {
+        {Gradient::DQ, "dQ", {8192, 1024, 64, 1}, {8192, 64, 512, 1}},
+        {Gradient::DK, "dK", {8192, 2048, 64, 1}, {8192, 64, 256, 1}},
+        {Gradient::DV, "dV", {4096, 1024, 32, 1}, {4096, 32, 128, 1}},
+    };
+
+    for(const auto& c : cases)
+    {
+        const auto validate = [&c](const std::vector<int64_t>& strides) {
+            auto attrs = makeGqaAttrs();
+            pickGradient(attrs, c.gradient)->set_stride(strides);
+            return preValidate(std::move(attrs)).code;
+        };
+        const auto with = [&c](size_t index, int64_t value) {
+            auto strides = c.packed;
+            strides[index] = value;
+            return strides;
+        };
+
+        EXPECT_EQ(validate(c.packed), error_code_t::OK) << c.name;
+        EXPECT_EQ(validate(c.sequenceMajor), error_code_t::OK) << c.name;
+
+        EXPECT_EQ(validate({c.packed[1], c.packed[2], 1}), error_code_t::INVALID_VALUE)
+            << c.name << ": one stride per dim";
+        EXPECT_EQ(validate(with(2, 0)), error_code_t::INVALID_VALUE) << c.name << ": zero stride";
+        EXPECT_EQ(validate(with(1, -c.packed[1])), error_code_t::INVALID_VALUE)
+            << c.name << ": negative stride";
+        EXPECT_EQ(validate(with(3, 2)), error_code_t::GRAPH_NOT_SUPPORTED)
+            << c.name << ": head dim not contiguous";
+    }
+}
+
+TEST(TestSdpaBwdNode, PreValidateRequiresContiguousLastDimOnInputs)
+{
+    using Getter = std::function<std::shared_ptr<TensorAttributes>(const SdpaBackwardAttributes&)>;
+    struct Case
+    {
+        const char* name;
+        Getter get;
+        std::vector<int64_t> packed;
+    };
+    // Packed strides for the makeGqaAttrs() shapes, with O and dO [2, 8, 16, 32], a
+    // [1, 8, 16, 32] bias and rank-4 Stats [2, 8, 16, 1].
+    const std::vector<Case> cases = {
+        {"Q", [](const auto& attrs) { return attrs.get_q(); }, {8192, 1024, 64, 1}},
+        {"K", [](const auto& attrs) { return attrs.get_k(); }, {8192, 2048, 64, 1}},
+        {"V", [](const auto& attrs) { return attrs.get_v(); }, {4096, 1024, 32, 1}},
+        {"O", [](const auto& attrs) { return attrs.get_o(); }, {4096, 512, 32, 1}},
+        {"dO", [](const auto& attrs) { return attrs.get_do(); }, {4096, 512, 32, 1}},
+        {"Bias", [](const auto& attrs) { return attrs.get_bias(); }, {4096, 512, 32, 1}},
+        {"Stats", [](const auto& attrs) { return attrs.get_stats(); }, {128, 16, 1, 1}},
+    };
+
+    for(const auto& c : cases)
+    {
+        const auto validate = [&c](const std::vector<int64_t>& strides) {
+            auto attrs = makeGqaAttrs();
+            attrs.get_o()->set_dim({2, 8, 16, 32});
+            attrs.get_do()->set_dim({2, 8, 16, 32});
+            attrs.get_stats()->set_dim({2, 8, 16, 1});
+            attrs.set_bias(makeBroadcastBias());
+            c.get(attrs)->set_stride(strides);
+            return preValidate(std::move(attrs)).code;
+        };
+
+        EXPECT_EQ(validate(c.packed), error_code_t::OK) << c.name;
+
+        auto notContiguous = c.packed;
+        notContiguous.back() = 2;
+        EXPECT_EQ(validate(notContiguous), error_code_t::GRAPH_NOT_SUPPORTED) << c.name;
+
+        // Only the last stride is checked on an input: a zero stride is a broadcast.
+        auto broadcast = c.packed;
+        broadcast.front() = 0;
+        EXPECT_EQ(validate(broadcast), error_code_t::OK) << c.name << ": zero stride";
+    }
+}
+
+TEST(TestSdpaBwdNode, PreValidateLeavesRank3StatsStridesUnchecked)
+{
+    auto attrs = makeGqaAttrs();
+    attrs.get_stats()->set_dim({2, 8, 16}).set_stride({256, 32, 2});
+
+    const auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }
 
 TEST(TestSdpaBwdNode, PreValidateRejectsDBiasWithoutBias)
@@ -1083,6 +1204,66 @@ TEST(TestSdpaBwdNode, InferPropertiesSetsDBiasFromBias)
     // The bias's broadcast shape, not [B, H_q, S_q, S_kv] from Q, K and V.
     EXPECT_EQ(dBias->get_dim(), (std::vector<int64_t>{1, 8, 16, 32}));
     EXPECT_EQ(dBias->get_stride(), (std::vector<int64_t>{4096, 512, 32, 1}));
+}
+
+TEST(TestSdpaBwdNode, PreValidateRejectsDBiasDataTypeUnlikeBias)
+{
+    const auto validate = [](DataType biasType, DataType dBiasType) {
+        auto attrs = makeGqaAttrs();
+        auto bias = makeBroadcastBias();
+        bias->set_data_type(biasType);
+        attrs.set_bias(bias);
+        auto dBias = std::make_shared<TensorAttributes>();
+        dBias->set_data_type(dBiasType);
+        attrs.set_dbias(dBias);
+        return preValidate(std::move(attrs));
+    };
+
+    EXPECT_EQ(validate(DataType::FLOAT, DataType::FLOAT).code, error_code_t::OK);
+    // An unset dtype on either side is left to inference.
+    EXPECT_EQ(validate(DataType::FLOAT, DataType::NOT_SET).code, error_code_t::OK);
+    EXPECT_EQ(validate(DataType::NOT_SET, DataType::HALF).code, error_code_t::OK);
+
+    const auto err = validate(DataType::FLOAT, DataType::HALF);
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("dBias data type"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaBwdNode, InferPropertiesSetsDBiasDataTypeFromBias)
+{
+    // The graph IO type is HALF, the bias FLOAT: dBias follows the bias.
+    auto attrs = makeGqaAttrs();
+    auto bias = makeBroadcastBias();
+    bias->set_data_type(DataType::FLOAT);
+    attrs.set_bias(bias);
+    auto dBias = std::make_shared<TensorAttributes>();
+    attrs.set_dbias(dBias);
+    const auto dq = attrs.get_dq();
+
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(DataType::HALF);
+    SdpaBwdNode node(std::move(attrs), graphAttrs);
+    ASSERT_EQ(node.pre_validate_node().code, error_code_t::OK);
+    ASSERT_EQ(node.infer_properties_node().code, error_code_t::OK);
+
+    EXPECT_EQ(dBias->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(dq->get_data_type(), DataType::HALF);
+}
+
+TEST(TestSdpaBwdNode, InferPropertiesKeepsExplicitDBiasDataType)
+{
+    auto attrs = makeGqaAttrs();
+    attrs.set_bias(makeBroadcastBias());
+    auto dBias = std::make_shared<TensorAttributes>();
+    dBias->set_data_type(DataType::FLOAT);
+    attrs.set_dbias(dBias);
+
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(DataType::HALF);
+    SdpaBwdNode node(std::move(attrs), graphAttrs);
+    ASSERT_EQ(node.infer_properties_node().code, error_code_t::OK);
+
+    EXPECT_EQ(dBias->get_data_type(), DataType::FLOAT);
 }
 
 TEST(TestSdpaBwdNode, GetNodeTypeReturnsSdpaBwd)
