@@ -423,6 +423,12 @@ kind a data type cannot hold is reported by the host as unsupported. Device-fill
 differ from the host fill's, so a failure that you saw with them reproduces bit for bit only
 on the same path, which the run's report and its `replay.sh` name.
 Set `HIPDNN_TEST_HOST_INPUT_FILL=1` to force the host fill for every input.
+
+Set `HIPDNN_TEST_DUMP_DIR=<dir>` to keep the tensors of a bundle comparison for grading them offline with another
+tolerance rule. The harness writes every input, the engine's output and the reference's output of the case to
+`<dir>/<test name>/` as raw element-space bytes, with a `manifest.json` (role `input`, `engine` or `ref`; tensor uid
+and name; element size; dims; strides; file), plus the keep mask it drew for a Philox dropout graph (role
+`philox_mask`). Nothing is written when it is unset. Replay one failing row solo with it set to get that case's tensors.
 A build without rocRAND always uses the host fill.
 
 ## `hipdnn_golden_data_tests`
