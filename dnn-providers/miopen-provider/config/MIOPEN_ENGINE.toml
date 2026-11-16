@@ -210,15 +210,23 @@ filters = [
 reason  = "conv on non-packed strides (padded rows, channel or plane stride) is accepted; MIOpen output disagrees with the GPU and CPU references for these cases (grouped, depthwise and 3D shapes); tracked in ALMIOPEN-3013 (MIOpen) and ALMIOPEN-3018 (provider)"
 
 # Order-dependent MIOpen defect: MIOpen's invoker cache key leaves out tensor strides,
-# so a padded-stride problem run after its packed sibling of the same shape, data type
-# and layout (s3_3d_i16x16x16_n2c16k32_f3x3x3_<dtype>_cl) in one process reuses the
-# packed invoker and computes wrong results. Run alone, these cases pass. Applies on
-# every arch (the cache key is not arch-specific). Temporary: remove when ALMIOPEN-3356
+# so a padded-stride 3-D channels-last problem run after its packed sibling of the same
+# shape, data type and layout (the same case id without the f16fast / f16chan item) in
+# one process reuses the packed invoker and computes wrong results. Run alone, these
+# cases pass. The full cases' siblings are comprehensive cases; the full suite runs
+# every level in one process. Applies on every arch (the cache key is not
+# arch-specific). Also reported as ALMIOPEN-3241. Temporary: remove when ALMIOPEN-3356
 # is fixed.
 [[test_skips]]
 filters = [
     "*_ConvolutionFwd_Default.s3_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
     "*_ConvolutionFwd_Default.s3_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl",
     "*_ConvolutionFwd_Default.s3_f16fast_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s1_f16fast_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cl",
+    "*_ConvolutionFwd_Default.s5_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s7_f16fast_3d_i16x16x16_n2c16k32g2_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s11_f16chan_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl",
+    "*_ConvolutionFwd_Default.s16_f16chan_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s22_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
 ]
-reason  = "3-D channels-last conv with a padded channel stride returns wrong results (76-85% of elements) when its packed same-shape sibling ran earlier in the same process: MIOpen's invoker cache key leaves out strides; tracked in ALMIOPEN-3356"
+reason  = "3-D channels-last conv with a padded channel stride returns wrong results (66-85% of elements) when its packed same-shape sibling ran earlier in the same process: MIOpen's invoker cache key leaves out strides; tracked in ALMIOPEN-3356 (also reported as ALMIOPEN-3241)"
