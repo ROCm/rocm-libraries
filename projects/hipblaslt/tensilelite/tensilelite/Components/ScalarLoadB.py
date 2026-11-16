@@ -177,11 +177,14 @@ def prefetchAfterGlobalRead(kernel) -> bool:
 
     A local write that waits for its global reads must not also wait for the warming load, whose
     data is only needed blocks later: the load has to be the newest vector load at that wait. That
-    is known when the reads all sit at the top of the block (PrefetchGlobalRead=1, unscheduled);
-    for PrefetchGlobalRead=2 the reads follow the local writes, so the top of the block works.
+    is known when the reads all sit at the top of the block (unscheduled PrefetchGlobalRead=1,
+    or PrefetchGlobalRead=2 with two G2L sets). Otherwise PrefetchGlobalRead=2 issues each read
+    after its local write, and the load goes to the top of the block.
     """
-    return bool(kernel.get("ScalarLoadBPrefetch")) and kernel["PrefetchGlobalRead"] == 1 \
-        and not kernel["ScheduleGlobalRead"] and not kernel["ScheduleLocalWrite"]
+    if not kernel.get("ScalarLoadBPrefetch"):
+        return False
+    return bool(kernel.get("PGR2DoubleG2L")) or (
+        kernel["PrefetchGlobalRead"] == 1 and not kernel["ScheduleGlobalRead"] and not kernel["ScheduleLocalWrite"])
 
 
 def prefetchInit(writer, kernel, stride) -> Module:

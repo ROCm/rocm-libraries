@@ -18,7 +18,8 @@ pytestmark = pytest.mark.unit
 _CONFIG = Path(__file__).resolve().parents[1] / "common/sgemm_scalar_load_b_asm.yaml"
 _ARCH = "gfx1151"
 # Problem groups of _CONFIG: (index, number of forked solutions)
-_GROUPS = {"TN": (0, 12), "TN prefetch": (1, 2), "TT": (2, 12), "TT prefetch": (3, 1), "NN": (4, 4), "NT": (5, 4)}
+_GROUPS = {"TN": (0, 12), "TN prefetch": (1, 2), "TT": (2, 12), "TT prefetch": (3, 1), "NN": (4, 4), "NT": (5, 4),
+           "TN two G2L sets": (6, 2)}
 
 
 def _emit(group):
@@ -153,7 +154,7 @@ def test_every_fma_reads_its_b_element(kernels):
 
 def test_every_block_issues_one_warming_load():
     # Waits count the warming load, so no block may skip it.
-    for group in ("TN prefetch", "TT prefetch"):
+    for group in ("TN prefetch", "TT prefetch", "TN two G2L sets"):
         for name, source, _ in _emit(group):
             if "flat_load_b32" not in source:
                 continue

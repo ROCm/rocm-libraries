@@ -548,7 +548,15 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     localWriteEndIter = kernel["LoopIters"] - writer.states.numItersPLR - 1
     tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
 
-    if kernel["PrefetchGlobalRead"] == 2:
+    if kernel.get("PGR2DoubleG2L"):
+        # The reads go to the G2L set the local writes of this block do not use, so they can
+        # all be issued at the top of the block, ahead of any wait.
+        writer.codes.unrollLoopHeader.add(globalReadIncACode)
+        writer.codes.unrollLoopHeader.add(globalReadIncBCode)
+        for _name, grCode, dtls in _globalReadFamilySlots(writer, kernel):
+            writer.codes.unrollLoopHeader.add(dtls)
+            writer.codes.unrollLoopHeader.add(grCode)
+    elif kernel["PrefetchGlobalRead"] == 2:
         # SIA0 does not schedule GR/LW instruction-by-instruction. If global reads
         # are emitted at iter 0, they clobber vgprG2L* before the later local-write
         # iteration stores the previous prefetch to LDS. Place non-TDM reads in the
@@ -815,7 +823,7 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
         # do we need a module here? That would prevent these from being scheduled
         imod = writer.codes.perIterLocalWrite[localWriteEndIter][1].add(Module())
         if writer.states.vmemLoadsAfterGlobalRead:
-            # the cache-warming load issued after the reads stays in flight
+            # newer vector loads (reads into the other G2L set, cache-warming load) stay in flight
             imod.add(writer._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, -1,
                                   "wait for the global reads being written",
                                   skipGlobalReadInst=writer.states.vmemLoadsAfterGlobalRead))
