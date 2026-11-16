@@ -765,11 +765,12 @@ def parseLibraryLogicData(
             if not companion:
                 printExit(f"No companion CSV found for {srcFile} and "
                           f"ExactLogic is empty")
-            data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
-            data["ExactLogic"] = data["Library"]["table"]
-            _validateTableSolutionIndices(
-                data["Library"]["table"], data.get("Solutions", []), companion
-            )
+            else:
+                data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
+                data["ExactLogic"] = data["Library"]["table"]
+                _validateTableSolutionIndices(
+                    data["Library"]["table"], data.get("Solutions", []), companion
+                )
 
 
     if "CUCount" not in data:

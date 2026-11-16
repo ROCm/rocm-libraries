@@ -594,10 +594,8 @@ def test_parse_meshbased_loads_companion_csv(tmp_path: Any) -> None:
     assert data["Library"]["distance"] == "MeshBased"
     assert not data["Library"]["table"]
 
-    LibraryIO._companionCsvXzPath.__module__  # ensure it's accessible
     with patch.object(LibraryIO, "_companionCsvXzPath", return_value=str(csv_path)):
-        # Only test the companion CSV block — mock everything after line 784
-        with pytest.raises((KeyError, SystemExit, Exception)):
+        with pytest.raises(KeyError):
             LibraryIO.parseLibraryLogicData(
                 data, str(yaml_path), None, False, False, False, {}, False,
             )
@@ -616,7 +614,7 @@ def test_parse_meshbased_warns_when_table_present(tmp_path: Any) -> None:
 
     with patch.object(LibraryIO, "_companionCsvXzPath", return_value="/fake.csv.xz"), \
          patch.object(LibraryIO, "printWarning") as mock_warn:
-        with pytest.raises((KeyError, SystemExit, Exception)):
+        with pytest.raises(KeyError):
             LibraryIO.parseLibraryLogicData(
                 data, str(yaml_path), None, False, False, False, {}, False,
             )
@@ -634,7 +632,7 @@ def test_parse_meshbased_exits_when_no_companion(tmp_path: Any) -> None:
 
     with patch.object(LibraryIO, "_companionCsvXzPath", return_value=None), \
          patch.object(LibraryIO, "printExit") as mock_exit:
-        with pytest.raises((KeyError, SystemExit, Exception)):
+        with pytest.raises(KeyError):
             LibraryIO.parseLibraryLogicData(
                 data, str(yaml_path), None, False, False, False, {}, False,
             )
