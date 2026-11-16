@@ -2291,8 +2291,7 @@ void run(const ConvShape& shape, const std::vector<Step>& steps, Specials specia
         kernels.push_back(
             kernelFor(config, conv_epilogue_test::elementTypeOf<T>(), ConvDirection::FORWARD));
     }
-    const auto runner
-        = conv_epilogue_test::catalogRunner(packFor(ConvDirection::FORWARD), std::move(kernels));
+    const auto runner = conv_epilogue_test::catalogRunner(packFor(ConvDirection::FORWARD), kernels);
     EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials), 1)
         << "no config serves this fused case";
 }

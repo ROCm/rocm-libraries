@@ -74,9 +74,15 @@ inline std::vector<std::pair<std::string, ConvShape>> shapesOf(const std::string
             continue;
         }
         ConvShape shape;
-        shape.dataType = f[1] == "half"       ? data_objects::DataType::HALF
-                         : f[1] == "bfloat16" ? data_objects::DataType::BFLOAT16
-                                              : data_objects::DataType::FLOAT;
+        shape.dataType = data_objects::DataType::FLOAT;
+        if(f[1] == "half")
+        {
+            shape.dataType = data_objects::DataType::HALF;
+        }
+        else if(f[1] == "bfloat16")
+        {
+            shape.dataType = data_objects::DataType::BFLOAT16;
+        }
         shape.n = std::stoll(f[2]);
         shape.c = std::stoll(f[3]);
         shape.k = std::stoll(f[4]);
