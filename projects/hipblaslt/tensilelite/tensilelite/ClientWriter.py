@@ -22,11 +22,11 @@
 #
 ################################################################################
 
-import inspect
 import os
 import subprocess
-import shlex
 import shutil
+import sys
+import time
 
 from pathlib import Path
 from enum import Enum
@@ -37,17 +37,14 @@ from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTy
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
 from .Toolchain.Component import Assembler
 
-import rocisa
-
-from . import ROOT_PATH
 from . import LibraryIO
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchName,
                                    capOverrideKeyOf, isaToGfx)
-from .Common.GlobalParameters import globalParameters
-from .Common.TimingInstrumentation import timing_context
-from .create_library import copyStaticFiles, libraryDir
+from .Common.GlobalParameters import globalParameters, preserveGlobalParameters
+from .Common.TimingInstrumentation import record_timing, timing_context
+from .create_library import copyStaticFiles, libraryDir, main as createLibrary
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -117,6 +114,7 @@ def clientLibraryFiles(clientLibraryPath, archs):
 
 def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str, archNames=None):
 
+  libraryClientStartNs = time.perf_counter_ns()
   libraryLogicPath = ensurePath(outputPath / LIBRARY_LOGIC_DIR)
   clientLibraryPath = ensurePath(outputPath / LIBRARY_CLIENT_DIR)
   sourcePath = ensurePath(clientLibraryPath / "source")
@@ -133,28 +131,23 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   functions = []
   functionNames = []
 
-  # Get rocIsa path, remove this when subprocess is removed
-  module_path = os.path.dirname(inspect.getfile(rocisa))
-  env = os.environ.copy()
-  if 'PYTHONPATH' in env:
-    if not module_path in env['PYTHONPATH']:
-        env["PYTHONPATH"] = module_path + ":" + env["PYTHONPATH"]
-  else:
-    env["PYTHONPATH"] = module_path
-
-  createLibraryScript = getBuildClientLibraryScript(
+  record_timing("python_library_client_setup", (time.perf_counter_ns() - libraryClientStartNs) / 1e6)
+  createLibraryArgs = getBuildClientLibraryArguments(
       clientLibraryPath, libraryLogicPath, str(assembler.path),
       rebuildTargetGfx(gfxName, archNames))
-  subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
-  # The re-spawned build wrote its code objects into the subtree named for the
+  with preserveGlobalParameters():
+    with timing_context("python_library_client_create_library"):
+      createLibrary(createLibraryArgs)
+  # The rebuild wrote its code objects into the subtree named for the
   # architecture it was asked for -- the same name just passed to it -- so they
-  # have to be read back under that name. An ISA-derived name would
-  # look in library/gfx1250/ for a build that filled library/gfx1250-strict/ and
-  # come back with nothing, leaving the client with no code objects at all.
+  # have to be read back under that name. An ISA-derived name would look in
+  # library/gfx1250/ for a build that filled library/gfx1250-strict/ and come
+  # back with nothing, leaving the client with no code objects at all.
   buildArchNames = archNamesByIsa(archNames or [])
   archs = [buildArchNames.get(isa) or isaToGfx(isa) for isa in isaInfoMap.keys()]
   coList, libraryList = clientLibraryFiles(clientLibraryPath, archs)
 
+  writeConfigsStartNs = time.perf_counter_ns()
   clientParametersPaths = []
   splitGSU = False
   printSolutionRejectionReason = True
@@ -225,6 +218,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                   libraryFile=libraryList[0],
                                   gateTypeArgs=gateTypeArgs))
 
+  record_timing("python_library_client_write_configs", (time.perf_counter_ns() - writeConfigsStartNs) / 1e6)
   forBenchmark = False
   problemSizes = None
 
@@ -313,7 +307,11 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
   else:
     numGpus = parallelGpus
 
-  with timing_context("python_client_execution"):
+  # The library-client launch (forBenchmark=False) is a different phase from the benchmark
+  # launches and runs without --timing-instrumentation, so it gets its own timer names instead of
+  # being counted as benchmark client execution with no C++ timers.
+  timerPrefix = "python_client" if forBenchmark else "python_library_client"
+  with timing_context(f"{timerPrefix}_execution"):
     # Use parallel execution only for benchmarking with multiple GPUs
     if numGpus > 1 and forBenchmark:
       return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
@@ -330,11 +328,19 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
       return 0
 
     # Original single-GPU path
-    runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
+    with timing_context(f"{timerPrefix}_write_run_script"):
+      runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
     with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
-      process = subprocess.Popen(runScriptName, cwd=buildPath)
-      process.communicate()
+      with timing_context(f"{timerPrefix}_subprocess"):
+        if timingEnabled and forBenchmark:
+          # Wall-clock stamps (ns since epoch) so analyze_timing.py can split the
+          # subprocess time into process startup / client main() / teardown.
+          print(f"TIMING_TS:py_popen_start:{time.time_ns()}", file=sys.stderr, flush=True)
+        process = subprocess.Popen(runScriptName, cwd=buildPath)
+        process.communicate()
+        if timingEnabled and forBenchmark:
+          print(f"TIMING_TS:py_communicate_end:{time.time_ns()}", file=sys.stderr, flush=True)
 
   if process.returncode:
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
@@ -343,13 +349,13 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
 
 
 def rebuildTargetGfx(gfxName, archNames):
-  """What to put after ``--architecture=`` when re-spawning TensileCreateLibrary.
+  """What to put after ``--architecture=`` when rebuilding the client library.
 
-  That rebuild is a fresh process whose only statement of what to build is this
-  string, so it must carry every distinction the ISA cannot express. ``gfxName``
-  carries one of them, the stepping, but it is a bare name and the xnack mode is
+  That rebuild's only statement of what to build is this string, so it must
+  carry every distinction the ISA cannot express. ``gfxName`` carries one of
+  them, the stepping, but it is a bare name and the xnack mode is
   the other: a qualifier reaches a build only by selecting ARCH_CAP_OVERRIDES,
-  which the subprocess does from this string alone. Handed the bare name, it
+  which the rebuild does from this string alone. Handed the bare name, it
   benchmarks xnack--tuned kernels and then rebuilds the shipped library with
   replay on -- with the drains the benchmarked kernels did not have.
 
@@ -376,40 +382,35 @@ def rebuildTargetGfx(gfxName, archNames):
   )
 
 
-def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
-  import io
-  runScriptFile = io.StringIO()
-
-  callCreateLibraryCmd = ROOT_PATH + "/bin/TensileCreateLibrary"
+def getBuildClientLibraryArguments(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
+  args = []
 
   if not globalParameters["LazyLibraryLoading"]:
-    callCreateLibraryCmd += " --no-lazy-library-loading"
+    args.append("--no-lazy-library-loading")
 
   if globalParameters.get("AsmDebug", False):
-    callCreateLibraryCmd += " --asm-debug"
+    args.append("--asm-debug")
 
   if globalParameters["KeepBuildTmp"]:
-    callCreateLibraryCmd += " --keep-build-tmp"
+    args.append("--keep-build-tmp")
 
   if globalParameters["DisableAsmComments"]:
-    callCreateLibraryCmd += " --disable-asm-comments"
+    args.append("--disable-asm-comments")
 
   if any(isFusedA2A(LibraryIO.rawLibraryLogic(LibraryIO.readYAML(f))[4])
          for f in glob(os.path.join(libraryLogicPath, "*.yaml"))):
-    callCreateLibraryCmd += " --enable-gemm-a2a-fusion"
+    args.append("--enable-gemm-a2a-fusion")
 
-  callCreateLibraryCmd += " --architecture=" + targetGfx
-  callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
-  callCreateLibraryCmd += " --cxx-compiler=" + cxxCompiler
-  callCreateLibraryCmd += " --library-format=" + globalParameters["LibraryFormat"]
-
-  callCreateLibraryCmd += " %s" % libraryLogicPath
-  callCreateLibraryCmd += " %s" % buildPath #" ../source"
-  callCreateLibraryCmd += " %s\n" % globalParameters["RuntimeLanguage"]
-
-  runScriptFile.write(callCreateLibraryCmd)
-
-  return runScriptFile.getvalue()
+  args.extend([
+      "--architecture=" + targetGfx,
+      "--code-object-version=" + globalParameters["CodeObjectVersion"],
+      "--cxx-compiler=" + cxxCompiler,
+      "--library-format=" + globalParameters["LibraryFormat"],
+      os.path.abspath(os.fspath(libraryLogicPath)),
+      os.path.abspath(os.fspath(buildPath)),
+      globalParameters["RuntimeLanguage"],
+  ])
+  return args
 
 
 def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, buildDir, configPaths=None):
@@ -637,7 +638,7 @@ def problemSizeParams(problemType, problem, factorDim):
         gatestrides[index.d] = sc[1]
       rv.append(('gate-strides', ",".join(map(str, gatestrides))))
 
-    if problemType.fusedGemmA2A:
+    if problemType.fusedA2A != 'Disabled':
       rv.append(('world', problem.world))
       rv.append(('fused-a2a-extent', problem.a2aExtent))
 
@@ -749,7 +750,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('device-scalar-alpha', scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
-        param('fused-gemm-a2a', problemType.fusedGemmA2A)
+        param('fused-a2a', problemType.fusedA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
             param('mx-a-free-block', problemType.mxBlockFreeA)
@@ -885,7 +886,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
         param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
-        if problemType.fusedGemmA2A:
+        if problemType.fusedA2A != 'Disabled':
             for world in globalParameters["WorldFilter"]:
                 param("world-filter", world)
         if globalParameters["RocProfCounter"]:

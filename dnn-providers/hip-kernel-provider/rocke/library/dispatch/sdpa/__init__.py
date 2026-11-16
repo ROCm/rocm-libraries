@@ -3,8 +3,10 @@
 
 """SDPA dispatcher family: the hipDNN-facing request contract.
 
-:class:`SdpaRequest` represents every field of a hipDNN SDPA forward node;
-:func:`from_hipdnn` builds one from the node's flatbuffer JSON. Candidates gate
+:class:`SdpaRequest` represents every field of a hipDNN SDPA forward node but
+the cumulative sequence lengths (``cu_seq_len_q/kv``, declined with
+``NotImplementedError``); :func:`from_hipdnn` builds one from the node's
+flatbuffer JSON. Candidates gate
 on :meth:`SdpaRequest.features` through the shared ``Capability`` contract.
 
 SDPA registers no kernel of its own, so :data:`SDPA_REGISTRY` is an empty

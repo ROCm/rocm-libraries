@@ -31,13 +31,13 @@
 
 /**
  * @file UnifiedAttentionTestGraphs.hpp
- * @brief The SDPA graphs the hipkernel:Gfx950AttentionUnified2D and
- *        hipkernel:Gfx950AttentionUnified3D suites build, shared by both engines' test
- *        headers.
+ * @brief The SDPA graphs the unified-attention engines' suites build (the gfx950 Unified2D
+ *        and Unified3D engines and the gfx942 Unified2D engine), shared by every engine's
+ *        test header.
  *
- * Both engines match the same single dense SDPA-forward node, so the graph builder, the
+ * The engines match the same single dense SDPA-forward node, so the graph builder, the
  * uids and the mask spellings live here once. Symbols, tokens, candidate records and ABIs
- * are each engine's contract and stay in Gfx950AttentionUnified{2D,3D}TestGraphs.hpp.
+ * are each engine's contract and stay in that engine's own TestGraphs header.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::unified_attention
 {
@@ -65,7 +65,7 @@ inline constexpr int64_t BOTTOM_RIGHT_CAUSAL = 2;
 
 inline constexpr float SCALE = 0.08838834764831843F;
 
-/// An SDPA graph, defaulting to one both engines' tests start from: bf16, D128, B2, Hq 8
+/// An SDPA graph, defaulting to one every engine's tests start from: bf16, D128, B2, Hq 8
 /// over Hkv 2, Sq @p DefaultSeqLenQ over Skv 256, top-left causal. Fields perturb one rule
 /// at a time. Each engine's header names its own default (prefill or decode) as GraphSpec.
 template <int64_t DefaultSeqLenQ>
@@ -85,7 +85,9 @@ struct BasicGraphSpec
     SdpaLayout vLayout = SdpaLayout::BSHD;
     SdpaLayout oLayout = SdpaLayout::BSHD;
 
-    /// Dims of V and O, when they should disagree with the shared values.
+    /// Dims of K, V and O, when they should disagree with the shared values.
+    std::optional<int64_t> kBatch;
+    std::optional<int64_t> kHeadSize;
     std::optional<int64_t> vSeqLen;
     std::optional<int64_t> oHeads;
 
@@ -149,8 +151,10 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
 
+    const int64_t kBatch = spec.kBatch.value_or(spec.batch);
+    const int64_t kHeadSize = spec.kHeadSize.value_or(spec.headSize);
     const std::vector<int64_t> qDims{spec.batch, spec.numQueryHeads, spec.seqLenQ, spec.headSize};
-    const std::vector<int64_t> kDims{spec.batch, spec.numKvHeads, spec.seqLenKv, spec.headSize};
+    const std::vector<int64_t> kDims{kBatch, spec.numKvHeads, spec.seqLenKv, kHeadSize};
     const std::vector<int64_t> vDims{
         spec.batch, spec.numKvHeads, spec.vSeqLen.value_or(spec.seqLenKv), spec.headSize};
     const int64_t oHeads = spec.oHeads.value_or(spec.numQueryHeads);
@@ -158,7 +162,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const Spec& spec)
 
     const auto qStrides
         = sdpaStrides(spec.qLayout, spec.numQueryHeads, spec.seqLenQ, spec.headSize);
-    const auto kStrides = sdpaStrides(spec.kLayout, spec.numKvHeads, spec.seqLenKv, spec.headSize);
+    const auto kStrides = sdpaStrides(spec.kLayout, spec.numKvHeads, spec.seqLenKv, kHeadSize);
     const auto vStrides = sdpaStrides(
         spec.vLayout, spec.numKvHeads, spec.vSeqLen.value_or(spec.seqLenKv), spec.headSize);
     const auto oStrides = sdpaStrides(spec.oLayout, oHeads, spec.seqLenQ, spec.headSize);
@@ -299,11 +303,12 @@ template <typename Spec>
 class BasicGraph
 {
 public:
-    explicit BasicGraph(const Spec& spec = Spec{})
+    /// @p gcnArchName is the device the MatchContext reports.
+    explicit BasicGraph(const Spec& spec = Spec{}, const char* gcnArchName = "gfx950")
         : _builder(buildSdpaGraph(spec))
         , _graph(_builder.GetBufferPointer(), _builder.GetSize())
     {
-        _properties.gcnArchName = "gfx950";
+        _properties.gcnArchName = gcnArchName;
         _properties.warpSize = 64;
     }
 

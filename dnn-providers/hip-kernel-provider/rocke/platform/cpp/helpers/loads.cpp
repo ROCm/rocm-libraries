@@ -94,7 +94,156 @@ rocke_status_t rocke_coalesced_tile_loader_from_tile(int tile_rows,
         out->vector_axis_row = false; /* vector_axis="col" default */
         out->has_inner_dim = false; /* inner_dim default None */
         out->inner_dim = 0;
+        out->has_col_xor = false; /* col_xor default None */
+        memset(out->col_xor, 0, sizeof(out->col_xor));
         out->elem_dtype = NULL; /* elem_dtype default F16 */
+    }
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4])
+{
+    int c;
+    int rows_per_cycle;
+    int row_shift;
+    int chunk_log2;
+
+    /* Python:
+     *   c = tile_cols // chunk
+     *   if chunk < 1 or chunk & (chunk - 1): raise ValueError
+     *   if c < 2 or tile_cols % chunk or c & (c - 1) or c > 16: raise ValueError
+     *   rows_per_cycle = max(1, 8 // c)
+     *   return rows_per_cycle.bit_length() - 1, c - 1, chunk.bit_length() - 1, 3
+     */
+    if(out == NULL || chunk < 1 || (chunk & (chunk - 1)) != 0 || tile_cols < 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    c = tile_cols / chunk;
+    if(c < 2 || tile_cols % chunk != 0 || (c & (c - 1)) != 0 || c > 16)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    rows_per_cycle = 8 / c > 1 ? 8 / c : 1;
+    row_shift = 0;
+    while((1 << (row_shift + 1)) <= rows_per_cycle)
+    {
+        ++row_shift;
+    }
+    chunk_log2 = 0;
+    while((1 << (chunk_log2 + 1)) <= chunk)
+    {
+        ++chunk_log2;
+    }
+    out[0] = row_shift;
+    out[1] = c - 1;
+    out[2] = chunk_log2;
+    out[3] = 3;
+    return ROCKE_OK;
+}
+
+rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
+                                     rocke_value_t* row,
+                                     rocke_value_t* col,
+                                     const int col_xor[4])
+{
+    rocke_value_t* r;
+    rocke_value_t* sel;
+    rocke_value_t* flip;
+    rocke_value_t* shifted;
+
+    if(b != NULL && b->status != ROCKE_OK)
+    {
+        return NULL;
+    }
+    if(col_xor == NULL)
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "swizzle_lds_col: NULL col_xor");
+    }
+    /* Python (each const_i32 is created right before the op that takes it):
+     *   r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
+     *   sel = b.land(r, b.const_i32(chunk_mask))
+     *   flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
+     *   sel = b.xor(sel, flip)
+     *   return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
+     */
+    r = row;
+    if(col_xor[0] != 0)
+    {
+        rocke_value_t* c_shift = rocke_b_const_i32(b, col_xor[0]);
+        r = rocke_b_lshr(b, row, c_shift);
+    }
+    {
+        rocke_value_t* c_mask = rocke_b_const_i32(b, col_xor[1]);
+        sel = rocke_b_land(b, r, c_mask);
+    }
+    {
+        rocke_value_t* c_flip = rocke_b_const_i32(b, col_xor[3]);
+        rocke_value_t* hi = rocke_b_lshr(b, row, c_flip);
+        rocke_value_t* c_one = rocke_b_const_i32(b, 1);
+        flip = rocke_b_land(b, hi, c_one);
+    }
+    sel = rocke_b_xor(b, sel, flip);
+    {
+        rocke_value_t* c_log2 = rocke_b_const_i32(b, col_xor[2]);
+        shifted = rocke_b_shl(b, sel, c_log2);
+    }
+    return rocke_b_xor(b, col, shifted);
+}
+
+rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_loader_t* self,
+                                                       const int col_xor[4])
+{
+    int i;
+    int chunk;
+    int chunks;
+    long long group;
+
+    if(self == NULL || col_xor == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* Python __post_init__:
+     *   four non-negative ints;
+     *   row_shift <= 31, flip_shift <= 31, chunk_log2 <= 30 (i32 shifts);
+     *   chunk = 1 << chunk_log2; chunks = tile_cols // chunk
+     *   group = 1 << (chunk_mask | 1).bit_length()
+     *   tile_cols % chunk == 0, chunks >= group, chunks % group == 0;
+     *   vector_axis == "col" -> chunk % load_vec == 0. */
+    for(i = 0; i < 4; ++i)
+    {
+        if(col_xor[i] < 0)
+        {
+            return ROCKE_ERR_VALUE;
+        }
+    }
+    /* rocke_swizzle_lds_col shifts i32 values by these: 32 or more is poison. */
+    if(col_xor[0] > 31 || col_xor[3] > 31 || col_xor[2] > 30)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* The chunk index is XORed with values below `group` (chunk_mask and the
+     * flip bit), which permutes aligned groups of `group` chunks: each row must
+     * hold whole groups, or a store leaves its row. */
+    chunk = 1 << col_xor[2];
+    chunks = self->tile_cols / chunk;
+    group = 2;
+    while(group <= (long long)(col_xor[1] | 1))
+    {
+        group <<= 1;
+    }
+    if(self->tile_cols % chunk != 0 || chunks < group || chunks % group != 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(!self->vector_axis_row && (self->load_vec <= 0 || chunk % self->load_vec != 0))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    self->has_col_xor = true;
+    for(i = 0; i < 4; ++i)
+    {
+        self->col_xor[i] = col_xor[i];
     }
     return ROCKE_OK;
 }
@@ -247,7 +396,9 @@ static void ctl_decode_row_col(rocke_ir_builder_t* b,
 
 /* Python CoalescedTileLoader._store_tile: write a loaded chunk to LDS.
  *   row mode + load_vec>1: scatter load_vec f16 elements to [row+i, col].
- *   otherwise: one smem_store (f16 scalar for load_vec==1, else vN). */
+ *   otherwise: one smem_store (f16 scalar for load_vec==1, else vN).
+ * With col_xor the LDS column goes through rocke_swizzle_lds_col first (per
+ * scattered element in row mode). */
 static void ctl_store_tile(rocke_ir_builder_t* b,
                            const rocke_coalesced_tile_loader_t* self,
                            rocke_value_t* smem_dst,
@@ -261,10 +412,13 @@ static void ctl_store_tile(rocke_ir_builder_t* b,
         for(i = 0; i < self->load_vec; ++i)
         {
             rocke_value_t* r = (i != 0) ? rocke_b_add(b, row, rocke_b_const_i32(b, i)) : row;
+            /* col_xor: each scattered element takes its own row's XOR. */
+            rocke_value_t* c
+                = self->has_col_xor ? rocke_swizzle_lds_col(b, r, col, self->col_xor) : col;
             rocke_value_t* el = rocke_b_vec_extract(b, v, i);
             rocke_value_t* indices[2];
             indices[0] = r;
-            indices[1] = col;
+            indices[1] = c;
             if(ctl_is_f16(self))
                 rocke_b_smem_store_f16(b, smem_dst, indices, 2, el);
             else
@@ -274,6 +428,10 @@ static void ctl_store_tile(rocke_ir_builder_t* b,
     else
     {
         rocke_value_t* indices[2];
+        if(self->has_col_xor)
+        {
+            col = rocke_swizzle_lds_col(b, row, col, self->col_xor);
+        }
         indices[0] = row;
         indices[1] = col;
         if(!ctl_is_f16(self))
@@ -711,6 +869,12 @@ void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
                         ROCKE_ERR_VALUE,
                         "CoalescedTileLoader.load_async_to_lds supports only vector_axis='col' "
                         "(the copy cannot transpose on store)");
+        return;
+    }
+    if(self->has_col_xor)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader.load_async_to_lds does not support col_xor");
         return;
     }
     /* This port loads 16-bit elements (see slot_offsets). */

@@ -27,6 +27,7 @@
 
 #include "identity_iterator.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_memory_check.hpp"
 
 template<class Key, class Value, class CompareFunction = test_utils::less, bool UseGraphs = false>
 struct params
@@ -499,24 +500,27 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
         // compare function
         compare_function compare_op;
 
+        // The largest size needs an 8 GiB device buffer, which can exceed the memory of
+        // APUs where host and device share system memory. Stop at the first size that
+        // doesn't fit.
+        test_utils::MemCheck memcheck;
+
         // Generate data
+        // input1 is [0, size1) and input2 is [size1, size1 + size2), so the merged
+        // output is [0, output_size) and the expected values don't need to be stored.
         const auto input1 = test_utils::counting_iterator<key_type>(key_type{0});
         const auto input2
             = test_utils::counting_iterator<key_type>(key_type{static_cast<key_type>(size1)});
-        std::vector<key_type> vec_input1(size1);
-        std::vector<key_type> vec_input2(size2);
-        std::iota(vec_input1.begin(), vec_input1.end(), 0);
-        std::iota(vec_input2.begin(), vec_input2.end(), size1);
 
-        // Calculate expected results on host
-        std::vector<key_type> expected(output_size);
-        std::merge(vec_input1.begin(),
-                   vec_input1.end(),
-                   vec_input2.begin(),
-                   vec_input2.end(),
-                   expected.begin(),
-                   compare_op);
+        // The output is copied back and checked in chunks to keep host memory usage low.
+        // Host and device memory are shared on APUs, so each buffer is allocated right
+        // after its check so that the next check sees it as used.
+        const size_t chunk_size = std::min(output_size, size_t{1} << 24);
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, 2 * chunk_size)
+        std::vector<key_type> keys_output(chunk_size);
+        std::vector<key_type> expected(chunk_size);
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, output_size)
         key_type* d_keys_output;
         HIP_CHECK(
             test_common_utils::hipMallocHelper(&d_keys_output, output_size * sizeof(key_type)));
@@ -537,6 +541,11 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
 
+        if(!memcheck.alloc_device_bytes(temp_storage_size_bytes))
+        {
+            HIP_CHECK(hipFree(d_keys_output));
+            break;
+        }
         void* d_temporary_storage;
         // allocate temporary storage
         HIP_CHECK(
@@ -556,14 +565,21 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        std::vector<key_type> keys_output(output_size, (key_type)0);
-        HIP_CHECK(hipMemcpy(keys_output.data(),
-                            d_keys_output,
-                            keys_output.size() * sizeof(key_type),
-                            hipMemcpyDeviceToHost));
 
         // Check if keys_output values are as expected
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+        for(size_t offset = 0; offset < output_size; offset += chunk_size)
+        {
+            SCOPED_TRACE(testing::Message() << "with chunk offset = " << offset);
+            const size_t count = std::min(chunk_size, output_size - offset);
+            keys_output.resize(count);
+            expected.resize(count);
+            HIP_CHECK(hipMemcpy(keys_output.data(),
+                                d_keys_output + offset,
+                                count * sizeof(key_type),
+                                hipMemcpyDeviceToHost));
+            std::iota(expected.begin(), expected.end(), static_cast<key_type>(offset));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+        }
 
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_temporary_storage));
