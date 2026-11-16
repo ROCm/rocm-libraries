@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -187,9 +187,60 @@ void testing_check_matrix_ell(const Arguments& arg)
                                                                 dbuffer));
             EXPECT_ROCSPARSE_DATA_STATUS(data_status, rocsparse_data_status_invalid_sorting);
 
+            // Check duplicate column indices. The third slot is -1 or greater than 1
+            hA.ind[row]     = 0 + base;
+            hA.ind[m + row] = 0 + base;
+            dA.transfer_from(hA);
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_check_matrix_ell<T>(handle,
+                                                                m,
+                                                                n,
+                                                                dA.width,
+                                                                dA.val,
+                                                                dA.ind,
+                                                                base,
+                                                                matrix_type,
+                                                                uplo,
+                                                                storage,
+                                                                &data_status,
+                                                                dbuffer));
+            EXPECT_ROCSPARSE_DATA_STATUS(data_status, rocsparse_data_status_duplicate_entry);
+
             // Restore indices
             hA.ind[row]     = temp1;
             hA.ind[m + row] = temp2;
+            dA.transfer_from(hA);
+        }
+        else
+        {
+            // Columns 0, 1, 0 are not adjacent duplicates and are not ordered.
+            // Unsorted storage still has to report the repeated coordinate.
+            row                 = random_generator_exact<rocsparse_int>(0, m - 1);
+            temp1               = hA.ind[row];
+            temp2               = hA.ind[m + row];
+            rocsparse_int temp3 = hA.ind[2 * static_cast<int64_t>(m) + row];
+            hA.ind[row]         = 0 + base;
+            hA.ind[m + row]     = 1 + base;
+            hA.ind[2 * static_cast<int64_t>(m) + row] = 0 + base;
+            dA.transfer_from(hA);
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_check_matrix_ell<T>(handle,
+                                                                m,
+                                                                n,
+                                                                dA.width,
+                                                                dA.val,
+                                                                dA.ind,
+                                                                base,
+                                                                matrix_type,
+                                                                uplo,
+                                                                storage,
+                                                                &data_status,
+                                                                dbuffer));
+            EXPECT_ROCSPARSE_DATA_STATUS(data_status, rocsparse_data_status_duplicate_entry);
+
+            hA.ind[row]                               = temp1;
+            hA.ind[m + row]                           = temp2;
+            hA.ind[2 * static_cast<int64_t>(m) + row] = temp3;
             dA.transfer_from(hA);
         }
     }

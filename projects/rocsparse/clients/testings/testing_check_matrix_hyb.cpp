@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -107,6 +107,57 @@ void testing_check_matrix_hyb(const Arguments& arg)
         handle, hyb, base, matrix_type, uplo, storage, &data_status, dbuffer));
 
     CHECK_ROCSPARSE_DATA_ERROR(data_status);
+
+    {
+        rocsparse_hyb_mat ptr  = hyb;
+        test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
+
+        rocsparse_int col0 = -1;
+        if(m > 0 && dhyb->ell_width > 0)
+        {
+            CHECK_HIP_ERROR(
+                hipMemcpy(&col0, dhyb->ell_col_ind, sizeof(rocsparse_int), hipMemcpyDeviceToHost));
+        }
+
+        // Check passing matrix with nan value in the ELL part and a valid COO part
+        if(col0 != -1 && dhyb->coo_nnz > 0)
+        {
+            T* ell_val = static_cast<T*>(dhyb->ell_val);
+            T  temp_val;
+            CHECK_HIP_ERROR(hipMemcpy(&temp_val, ell_val, sizeof(T), hipMemcpyDeviceToHost));
+
+            const T nan_val = rocsparse_nan<T>();
+            CHECK_HIP_ERROR(hipMemcpy(ell_val, &nan_val, sizeof(T), hipMemcpyHostToDevice));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_check_matrix_hyb(
+                handle, hyb, base, matrix_type, uplo, storage, &data_status, dbuffer));
+            EXPECT_ROCSPARSE_DATA_STATUS(data_status, rocsparse_data_status_nan);
+
+            // Restore value
+            CHECK_HIP_ERROR(hipMemcpy(ell_val, &temp_val, sizeof(T), hipMemcpyHostToDevice));
+        }
+
+        // Check passing matrix with duplicate entry in the first row of the ELL part
+        if(col0 != -1 && dhyb->ell_width > 1)
+        {
+            rocsparse_int* slot1 = dhyb->ell_col_ind + m;
+            rocsparse_int  col1;
+            CHECK_HIP_ERROR(hipMemcpy(&col1, slot1, sizeof(rocsparse_int), hipMemcpyDeviceToHost));
+            if(col1 != -1)
+            {
+                CHECK_HIP_ERROR(
+                    hipMemcpy(slot1, &col0, sizeof(rocsparse_int), hipMemcpyHostToDevice));
+
+                CHECK_ROCSPARSE_ERROR(rocsparse_check_matrix_hyb(
+                    handle, hyb, base, matrix_type, uplo, storage, &data_status, dbuffer));
+                EXPECT_ROCSPARSE_DATA_STATUS(data_status, rocsparse_data_status_duplicate_entry);
+
+                // Restore index
+                CHECK_HIP_ERROR(
+                    hipMemcpy(slot1, &col1, sizeof(rocsparse_int), hipMemcpyHostToDevice));
+            }
+        }
+    }
 
     if(arg.timing)
     {

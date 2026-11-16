@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -285,6 +285,69 @@ void testing_check_matrix_coo(const Arguments& arg)
         // Restore indices
         hcoo_val[rng] = temp_val;
         dcoo_val.transfer_from(hcoo_val);
+
+        // Check passing matrix with a duplicate entry. Entry rng + 1 takes the coordinate
+        // of entry rng, so a sorted matrix stays sorted
+        rng                          = random_generator_exact<rocsparse_int>(0, nnz - 2);
+        const rocsparse_int temp_row = hcoo_row_ind[rng + 1];
+        temp                         = hcoo_col_ind[rng + 1];
+        hcoo_row_ind[rng + 1]        = hcoo_row_ind[rng];
+        hcoo_col_ind[rng + 1]        = hcoo_col_ind[rng];
+        dcoo_row_ind.transfer_from(hcoo_row_ind);
+        dcoo_col_ind.transfer_from(hcoo_col_ind);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_check_matrix_coo<T>(handle,
+                                                            m,
+                                                            n,
+                                                            nnz,
+                                                            dcoo_val,
+                                                            dcoo_row_ind,
+                                                            dcoo_col_ind,
+                                                            base,
+                                                            matrix_type,
+                                                            uplo,
+                                                            storage,
+                                                            &data_status,
+                                                            dbuffer));
+        EXPECT_ROCSPARSE_DATA_STATUS(data_status, rocsparse_data_status_duplicate_entry);
+
+        // Restore indices
+        hcoo_row_ind[rng + 1] = temp_row;
+        hcoo_col_ind[rng + 1] = temp;
+        dcoo_row_ind.transfer_from(hcoo_row_ind);
+        dcoo_col_ind.transfer_from(hcoo_col_ind);
+
+        // Check passing unsorted matrix with a duplicate entry that is not next to its twin
+        if(storage == rocsparse_storage_mode_unsorted && nnz > 2)
+        {
+            const rocsparse_int last_row = hcoo_row_ind[nnz - 1];
+            const rocsparse_int last_col = hcoo_col_ind[nnz - 1];
+            hcoo_row_ind[nnz - 1]        = hcoo_row_ind[0];
+            hcoo_col_ind[nnz - 1]        = hcoo_col_ind[0];
+            dcoo_row_ind.transfer_from(hcoo_row_ind);
+            dcoo_col_ind.transfer_from(hcoo_col_ind);
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_check_matrix_coo<T>(handle,
+                                                                m,
+                                                                n,
+                                                                nnz,
+                                                                dcoo_val,
+                                                                dcoo_row_ind,
+                                                                dcoo_col_ind,
+                                                                base,
+                                                                matrix_type,
+                                                                uplo,
+                                                                storage,
+                                                                &data_status,
+                                                                dbuffer));
+            EXPECT_ROCSPARSE_DATA_STATUS(data_status, rocsparse_data_status_duplicate_entry);
+
+            // Restore indices
+            hcoo_row_ind[nnz - 1] = last_row;
+            hcoo_col_ind[nnz - 1] = last_col;
+            dcoo_row_ind.transfer_from(hcoo_row_ind);
+            dcoo_col_ind.transfer_from(hcoo_col_ind);
+        }
     }
 
     if(arg.timing)
