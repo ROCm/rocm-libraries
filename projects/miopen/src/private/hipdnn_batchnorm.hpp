@@ -95,9 +95,9 @@ namespace hipdnn {
 //
 // Some entry points have no separate previous and next running statistics.
 // They update the statistics in place, so the wrapper binds the same buffer to
-// both. Under miopenTuningPolicySearch the provider's search re-runs the kernel
-// on that buffer, so the update is applied more than once, as when MIOpen serves
-// the call.
+// both. That is safe on both paths: MIOpen's search, which the provider also
+// runs under miopenTuningPolicySearch, builds its candidate kernels without the
+// running update, so the statistics are updated once, by the final run.
 miopenStatus_t
 BatchNormalizationForwardTraining(miopenHandle_t handle,
                                   miopenBatchNormMode_t bn_mode,

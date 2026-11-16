@@ -840,8 +840,8 @@ miopenStatus_t ForwardTraining(miopenHandle_t handle,
         variantPack[kUidSavedInvVar] = saveInvVariance;
     }
     // An in-place update binds one buffer as both input and output. That holds
-    // because the graph runs once. Under Search, MIOpen's own search re-runs the
-    // kernel on these buffers, as it does when MIOpen serves the call.
+    // because the update runs once: MIOpen's search, here and natively, leaves the
+    // running statistics alone.
     if(problem.hasRunningStats)
     {
         variantPack[kUidPrevRunMean] = const_cast<void*>(prevRunningMean);

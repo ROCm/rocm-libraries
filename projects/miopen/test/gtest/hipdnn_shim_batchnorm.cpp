@@ -1443,8 +1443,9 @@ const BN2DTestCase& TuningCase()
     return tuning_case;
 }
 
-// Used only under Search: MIOpen searches only for a shape the handle holds no
-// tuned invoker for, so no other test may run this shape.
+// Run only on handles under Search, apart from ForgetTuning, which drops its
+// perf-db records on handles of its own. MIOpen searches only for a shape the
+// handle holds no tuned invoker for, so no other test may run this shape.
 const BN2DTestCase& SearchCase()
 {
     static const BN2DTestCase search_case{
@@ -1605,9 +1606,10 @@ const BN2DTestCase& NoSearchCase()
 }
 
 // Under None MIOpen loads a perf-db record or runs the default config, and never
-// searches, so the hipDNN path must not search either. Both perf dbs are off and
-// MIOPEN_FIND_ENFORCE is empty, which MIOpen reads as no enforcement, so the policy
-// alone decides.
+// searches, so the hipDNN path must not search either. The system db is off and
+// the user db stays on, so a stored record is loaded rather than searched under
+// None. MIOPEN_FIND_ENFORCE is empty, which MIOpen reads as no enforcement, so the
+// policy alone decides.
 TEST(GPU_HipdnnShimBNTuning_FP32, NonePolicyDoesNotSearch)
 {
     auto&& handle = get_handle();
@@ -1831,9 +1833,10 @@ TEST(GPU_HipdnnShimBNGaps_FP32, WriteOrCleanPoliciesAreDeclined)
 // MIOpen lets a Search handle win over MIOPEN_FIND_ENFORCE, but the provider sets
 // None on its handle whenever the variable is set, so the variable would win
 // there. Under DB_CLEAN the forwarded call would drop the perf-db entry MIOpen
-// tunes, so the shim declines it. DB_UPDATE and SEARCH_DB_UPDATE are declined the
-// same way. DB_CLEAN runs every path; the others run training only, in spellings
-// MIOpen also accepts: lower case, and the action's number (5 is DB_CLEAN).
+// would use, or tune and store, so the shim declines it. DB_UPDATE and
+// SEARCH_DB_UPDATE are declined the same way. DB_CLEAN runs every path; the others
+// run training only, in spellings MIOpen also accepts: lower case, and the
+// action's number (5 is DB_CLEAN).
 TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
 {
     auto&& handle = get_handle();
