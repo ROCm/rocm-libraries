@@ -1735,6 +1735,249 @@ struct K1Tiles
     }
 };
 
+// ---------------------------------------------------------------------------------------------
+// Channels-first A tile (CFX 1): the gathered tensor (forward x, backward data dy) is read in
+// place from packed N C D H W, where consecutive GEMM rows are consecutive output positions, so
+// along the width they are consecutive (stride 1) or strided positions of one channel row. B
+// (the filter) is loaded as in K1Tiles; the tap-outer reduction is unchanged.
+//
+// A unit is KV consecutive reduction channels of MV consecutive rows. A thread loads each of its
+// channels' MV positions as one vector (width stride 1 and all MV rows inside one input row) or
+// element by element (a row edge, an image boundary, a width stride above 1), and stores the
+// unit transposed: MV runs of KV channels, one LDS store per row. Units take rows fastest, so a
+// wave's loads of one channel are consecutive positions.
+template <class T, int BM, int BN, int BK, int VEC, int THREADS, int DIR>
+struct K1TilesCf : K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0>
+{
+    typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0> Base;
+    static constexpr int ELEMS = BM * BK / THREADS; // A elements a thread loads per k-step
+    static constexpr int VMAX = 16 / static_cast<int>(sizeof(T));
+    static constexpr int MV = ELEMS / 2 < VMAX ? ELEMS / 2 : VMAX;
+    static constexpr int KV0 = ELEMS / MV;
+    static constexpr int KV = KV0 < VMAX ? KV0 : VMAX;
+    static constexpr int RG = BM / MV; // row groups
+    static constexpr int CPASSES = ELEMS / (MV * KV);
+    static_assert(K1_BUFFER != 0 || sizeof(T) == 0,
+                  "channels-first tiles address the block's images by buffer offsets");
+    static_assert(ELEMS >= 2 && BM * BK == ELEMS * THREADS && BM % MV == 0 && BK % KV == 0
+                      && ELEMS % (MV * KV) == 0,
+                  "channels-first tile units");
+    typedef typename K1Raw<MV * sizeof(T)>::type RawM; // MV positions of one channel
+    typedef typename K1Raw<KV * sizeof(T)>::type RawK; // KV channels of one row
+    typedef typename K1Raw<sizeof(T)>::type One;
+    struct ElemsM
+    {
+        One v[MV];
+    };
+
+    int chanElems; // gathered tensor's elements per channel (one image)
+    int cImg[CPASSES]; // image of the unit's first row, from the block's first image
+    int cD[CPASSES], cH[CPASSES], cW[CPASSES]; // its output position
+    int cRows[CPASSES]; // the unit's rows that exist (MV when all of them do)
+    int cRg[CPASSES], cKg[CPASSES];
+    RawM ca[CPASSES][KV];
+
+    __device__ void init(const K1Args& a,
+                         const K1Gather& gth,
+                         const K1TapMap& mp,
+                         int g,
+                         long long m0,
+                         int n0,
+                         int tid)
+    {
+        Base::init(a, gth, mp, g, m0, n0, tid);
+        const K1Gather& gt = this->gather;
+        chanElems = gt.in[0] * gt.in[1] * gt.in[2];
+        const long long spatial = static_cast<long long>(gt.out[0]) * gt.out[1] * gt.out[2];
+        const long long firstImage = m0 / spatial;
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+        {
+            const int u = tid + p * THREADS;
+            cRg[p] = u % RG;
+            cKg[p] = u / RG;
+            const long long m = m0 + cRg[p] * MV;
+            const long long img = m / spatial;
+            cImg[p] = static_cast<int>(img - firstImage);
+            int rest = static_cast<int>(m - img * spatial);
+            cW[p] = rest % gt.out[2];
+            rest /= gt.out[2];
+            cH[p] = rest % gt.out[1];
+            cD[p] = rest / gt.out[1];
+            const long long left = gt.rows - m;
+            cRows[p] = left >= MV ? MV : (left > 0 ? static_cast<int>(left) : 0);
+        }
+    }
+
+    /// One channel's MV rows of unit @p p at tap offsets (td, th, tw) into ca[p][j] (zeros when
+    /// !cOk).
+    __device__ void loadChannel(int p, int j, int c, int td, int th, int tw, bool cOk)
+    {
+        const K1Gather& gt = this->gather;
+        const int sw = gt.stride[2];
+        const int chan = (cImg[p] * gt.chans + static_cast<int>(gt.chanOffset) + c);
+        const int id = cD[p] * gt.stride[0] - gt.pad[0] + td;
+        const int ih = cH[p] * gt.stride[1] - gt.pad[1] + th;
+        const int iw = cW[p] * sw - gt.pad[2] + tw;
+        const bool rowOk = (static_cast<unsigned>(id) < static_cast<unsigned>(gt.in[0]))
+                           & (static_cast<unsigned>(ih) < static_cast<unsigned>(gt.in[1]));
+        if((sw == 1) & (cRows[p] == MV) & (cW[p] + MV <= gt.out[2]) & (iw >= 0)
+           & (iw + MV <= gt.in[2]))
+        {
+            const int off = (chan * chanElems + (id * gt.in[1] + ih) * gt.in[2] + iw)
+                            * static_cast<int>(sizeof(T));
+            ca[p][j] = k1BufferLoad<RawM>(
+                this->aRsrc, cOk & rowOk ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+            return;
+        }
+        ElemsM e;
+        int img = cImg[p], d = cD[p], h = cH[p], w = cW[p];
+#pragma unroll
+        for(int i = 0; i < MV; ++i)
+        {
+            const int xd = d * gt.stride[0] - gt.pad[0] + td;
+            const int xh = h * gt.stride[1] - gt.pad[1] + th;
+            const int xw = w * sw - gt.pad[2] + tw;
+            const bool ok = cOk & (i < cRows[p])
+                            & (static_cast<unsigned>(xd) < static_cast<unsigned>(gt.in[0]))
+                            & (static_cast<unsigned>(xh) < static_cast<unsigned>(gt.in[1]))
+                            & (static_cast<unsigned>(xw) < static_cast<unsigned>(gt.in[2]));
+            const int off = ((img * gt.chans + static_cast<int>(gt.chanOffset) + c) * chanElems
+                             + (xd * gt.in[1] + xh) * gt.in[2] + xw)
+                            * static_cast<int>(sizeof(T));
+            e.v[i]
+                = k1BufferLoad<One>(this->aRsrc, ok ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+            if(++w == gt.out[2])
+            {
+                w = 0;
+                if(++h == gt.out[1])
+                {
+                    h = 0;
+                    if(++d == gt.out[0])
+                    {
+                        d = 0;
+                        ++img;
+                    }
+                }
+            }
+        }
+        ca[p][j] = __builtin_bit_cast(RawM, e);
+    }
+
+    /// The cursor's iteration into the registers (A in place, B as K1Tiles), the cursor one on.
+    __device__ void load()
+    {
+        const int it = this->curIt;
+        const int c0 = this->curC * BK;
+        const int qs = this->curQs, qr = this->curQr, qt = this->curQt;
+        ++this->curIt;
+        if(++this->curC == this->cChunks)
+        {
+            this->curC = 0;
+            if(++this->curQs == this->gather.taps[2])
+            {
+                this->curQs = 0;
+                if(++this->curQr == this->gather.taps[1])
+                {
+                    this->curQr = 0;
+                    ++this->curQt;
+                }
+            }
+        }
+        const int td = qt * this->gather.step[0], th = qr * this->gather.step[1],
+                  tw = qs * this->gather.step[2];
+        const bool itOk = it < this->endIt;
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+#pragma unroll
+            for(int j = 0; j < KV; ++j)
+            {
+                const int c = c0 + cKg[p] * KV + j;
+                loadChannel(p, j, c, td, th, tw, itOk & (c < this->gather.cgroup));
+            }
+        const int c = c0 + this->kv;
+        this->loadBTap(qt, qr, qs, c0, c, (c < this->gather.cgroup) & itOk, itOk);
+    }
+
+    template <class R>
+    __device__ static unsigned word(const R& r, int i)
+    {
+        if constexpr(sizeof(R) == 4)
+            return r;
+        else
+            return r[i];
+    }
+    template <class R>
+    __device__ static void setWord(R& r, int i, unsigned v)
+    {
+        if constexpr(sizeof(R) == 4)
+            r = v;
+        else
+            r[i] = v;
+    }
+    /// Row @p e of unit @p p: its KV channels as one vector.
+    __device__ RawK rowOf(int p, int e) const
+    {
+        RawK r;
+        if constexpr(sizeof(T) == 2)
+        {
+            // Channel pairs into dwords: the low halves of the two words for an even row, the
+            // high halves for an odd one.
+            const unsigned sel = (e & 1) != 0 ? 0x07060302u : 0x05040100u;
+#pragma unroll
+            for(int j = 0; j < KV; j += 2)
+                setWord(
+                    r,
+                    j / 2,
+                    __builtin_amdgcn_perm(word(ca[p][j + 1], e / 2), word(ca[p][j], e / 2), sel));
+        }
+        else
+        {
+#pragma unroll
+            for(int j = 0; j < KV; ++j)
+                setWord(r, j, word(ca[p][j], e));
+        }
+        return r;
+    }
+
+    // Row-major LDS tiles: As[m][k], Bs[n][k], ld elements per row.
+    __device__ void storeRows(T* As, T* Bs, int ld) const
+    {
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+#pragma unroll
+            for(int e = 0; e < MV; ++e)
+                *reinterpret_cast<RawK*>(As + (cRg[p] * MV + e) * ld + cKg[p] * KV) = rowOf(p, e);
+        this->storeB(Bs, ld, 0);
+    }
+
+    // Swizzled row-major LDS tiles (K1Swz), 16-bit, VEC 8: a unit's KV channels stay within one
+    // 16-byte chunk.
+    __device__ void storeRowsSwz(T* As, T* Bs) const
+    {
+        typedef K1Swz<BK> Swz;
+        static_assert(VEC * sizeof(T) == 16 && 8 % KV == 0, "swizzled tiles");
+#pragma unroll
+        for(int p = 0; p < CPASSES; ++p)
+#pragma unroll
+            for(int e = 0; e < MV; ++e)
+            {
+                const int r = cRg[p] * MV + e;
+                const int k = cKg[p] * KV;
+                *reinterpret_cast<RawK*>(As + Swz::at(r, Swz::key(r), k & ~7) + (k & 7))
+                    = rowOf(p, e);
+            }
+#pragma unroll
+        for(int p = 0; p < Base::B_PASSES; ++p)
+            if(this->bRow(p))
+            {
+                const int r = this->row + p * Base::ROWS_PER_PASS;
+                *reinterpret_cast<typename Base::Raw*>(Bs + Swz::at(r, Swz::key(r), this->kv))
+                    = this->rb[p];
+            }
+    }
+};
+
 // Backward data reads the filter as wT[g][tap][c][k]: per group and tap, w's [kg][cg] slice
 // transposed through 32 x 32 LDS tiles. Grid (ceil(cg / 32), ceil(kg / 32), groups * taps),
 // 256 threads.
@@ -1912,6 +2155,8 @@ __device__ inline void k1LdsBarrier()
 // two k-steps at a time: no LDS bank conflicts on the fragment reads (16-bit, VEC 8, no halo,
 // direct filter or tap packing; the flat reduction, PACK 2, swizzles at the LDS store, so it
 // takes no DMA).
+// CFX 1: the gathered tensor is read in place from packed channels-first activations
+// (K1TilesCf), with the CF output: no activation is staged.
 
 template <class T,
           class Atom,
@@ -1930,7 +2175,8 @@ template <class T,
           int PACK = 0,
           int CF = 0,
           int SWZ = 0,
-          int DMA = 0>
+          int DMA = 0,
+          int CFX = 0>
 __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1976,6 +2222,11 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                   "DMA: swizzled tiles, 2 to 4 LDS stages, no tap packing");
     static_assert(K1_PATCH == 0 || DIR == K1_FORWARD || CF == 0,
                   "patch backward data writes channels-last dx");
+    static_assert(CFX == 0
+                      || (CF != 0 && !SPLIT && HALO == 0 && WD == 0 && PACK == 0 && DMA == 0
+                          && K1_PATCH == 0),
+                  "channels-first input: CF output, native math, no halo, direct filter, tap "
+                  "packing, DMA or patch view");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
 
@@ -2017,7 +2268,9 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     }
 #endif
 
-    K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
+    typename K1If<CFX != 0,
+                  K1TilesCf<T, BM, BN, BK, VEC, THREADS, DIR>,
+                  K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK>>::type tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
     if constexpr(DMA != 0 && PACK == 2)
     {
