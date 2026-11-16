@@ -37,6 +37,10 @@ HipblasltMatmulDesc::HipblasltMatmulDesc(HipblasltMatmulDesc&& other) noexcept
     , _scaleType(other._scaleType)
     , _aScaleMode(other._aScaleMode)
     , _bScaleMode(other._bScaleMode)
+    , _epilogue(other._epilogue)
+    , _epilogueActArg0(other._epilogueActArg0)
+    , _epilogueActArg1(other._epilogueActArg1)
+    , _biasDataType(other._biasDataType)
 {
     other._desc = nullptr;
 }
@@ -57,6 +61,10 @@ HipblasltMatmulDesc& HipblasltMatmulDesc::operator=(HipblasltMatmulDesc&& other)
         _scaleType = other._scaleType;
         _aScaleMode = other._aScaleMode;
         _bScaleMode = other._bScaleMode;
+        _epilogue = other._epilogue;
+        _epilogueActArg0 = other._epilogueActArg0;
+        _epilogueActArg1 = other._epilogueActArg1;
+        _biasDataType = other._biasDataType;
         other._desc = nullptr;
     }
     return *this;
@@ -87,6 +95,22 @@ HipblasltMatmulDesc HipblasltMatmulDesc::clone() const
     if(_bScaleMode.has_value())
     {
         copy.setBScaleMode(_bScaleMode.value());
+    }
+    if(_epilogue.has_value())
+    {
+        copy.setEpilogue(_epilogue.value());
+    }
+    if(_epilogueActArg0.has_value())
+    {
+        copy.setEpilogueActArg0(_epilogueActArg0.value());
+    }
+    if(_epilogueActArg1.has_value())
+    {
+        copy.setEpilogueActArg1(_epilogueActArg1.value());
+    }
+    if(_biasDataType.has_value())
+    {
+        copy.setBiasDataType(_biasDataType.value());
     }
     return copy;
 }
@@ -120,6 +144,40 @@ void HipblasltMatmulDesc::setBScalePointer(const void* ptr)
 {
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
         _desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, static_cast<const void*>(&ptr), sizeof(ptr)));
+}
+
+void HipblasltMatmulDesc::setEpilogue(hipblasLtEpilogue_t epilogue)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
+    _epilogue = epilogue;
+}
+
+void HipblasltMatmulDesc::setEpilogueActArg0(float actArg0)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT, &actArg0, sizeof(actArg0)));
+    _epilogueActArg0 = actArg0;
+}
+
+void HipblasltMatmulDesc::setEpilogueActArg1(float actArg1)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT, &actArg1, sizeof(actArg1)));
+    _epilogueActArg1 = actArg1;
+}
+
+void HipblasltMatmulDesc::setBiasDataType(hipDataType biasDataType)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &biasDataType, sizeof(biasDataType)));
+    _biasDataType = biasDataType;
+}
+
+void HipblasltMatmulDesc::setBiasPointer(const void* ptr)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, static_cast<const void*>(&ptr), sizeof(ptr)));
 }
 
 } // namespace hipblaslt_plugin

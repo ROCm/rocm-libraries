@@ -342,3 +342,43 @@ TEST(TestHipblasltUtils, IsTypeMxOcp)
     EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::BFLOAT16));
     EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::INT8));
 }
+
+// ============================================================================
+// MatrixOrder
+// ============================================================================
+
+TEST(TestHipblasltUtils, MatrixOrderClassifiesLastTwoDims)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+        MatrixOrder expected;
+    };
+
+    const std::vector<Row> rows = {
+        {{4, 8}, {8, 1}, MatrixOrder::ROW_MAJOR},
+        {{4, 8}, {1, 4}, MatrixOrder::COLUMN_MAJOR},
+        {{2, 4, 8}, {32, 8, 1}, MatrixOrder::ROW_MAJOR},
+        {{2, 4, 8}, {32, 1, 4}, MatrixOrder::COLUMN_MAJOR},
+        // A size-1 last dim is row-major whatever its stride says.
+        {{8, 1}, {1, 8}, MatrixOrder::ROW_MAJOR},
+        {{33, 1}, {1, 33}, MatrixOrder::ROW_MAJOR},
+        {{1, 1}, {5, 7}, MatrixOrder::ROW_MAJOR},
+        // A size-1 second-to-last dim is column-major only when the last dim is not 1 and
+        // strides[rank-1] != 1.
+        {{1, 6}, {6, 1}, MatrixOrder::ROW_MAJOR},
+        {{1, 6}, {99, 100}, MatrixOrder::COLUMN_MAJOR},
+        // Neither stride is 1 and no dim is 1.
+        {{4, 8}, {16, 2}, MatrixOrder::UNSUPPORTED},
+        // Rank below 2 and dims/strides size mismatch.
+        {{8}, {1}, MatrixOrder::UNSUPPORTED},
+        {{4, 8}, {1}, MatrixOrder::UNSUPPORTED},
+    };
+
+    for(const auto& row : rows)
+    {
+        EXPECT_EQ(matrixOrder(row.dims, row.strides), row.expected)
+            << "rank " << row.dims.size() << " last dim " << row.dims.back();
+    }
+}

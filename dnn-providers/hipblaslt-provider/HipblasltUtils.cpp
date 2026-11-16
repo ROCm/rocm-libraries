@@ -121,6 +121,24 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
                                                        + std::to_string(uid));
 }
 
+MatrixOrder matrixOrder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    const auto rank = dims.size();
+    if(rank < 2 || strides.size() != rank)
+    {
+        return MatrixOrder::UNSUPPORTED;
+    }
+    if(dims[rank - 1] == 1 || strides[rank - 1] == 1)
+    {
+        return MatrixOrder::ROW_MAJOR;
+    }
+    if(dims[rank - 2] == 1 || strides[rank - 2] == 1)
+    {
+        return MatrixOrder::COLUMN_MAJOR;
+    }
+    return MatrixOrder::UNSUPPORTED;
+}
+
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
 {
     return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3

@@ -307,6 +307,82 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
     }
 }
 
+namespace
+{
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+// Tensor order in createValidMatmulBiasActivGraph: A, B, C_matmul, [bias, C_bias], C.
+void setTensorTypes(flatbuffers::FlatBufferBuilder& builder,
+                    const std::vector<std::pair<flatbuffers::uoffset_t, DataType>>& types)
+{
+    auto* mutableGraph
+        = hipdnn_flatbuffers_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+    for(const auto& [index, type] : types)
+    {
+        ASSERT_TRUE(
+            mutableGraph->mutable_tensors()->GetMutableObject(index)->mutate_data_type(type));
+    }
+}
+
+bool isApplicableWithTypes(const HipblasltMatmulPlanBuilder& planBuilder,
+                           const HipdnnEnginePluginHandle& handle,
+                           bool doBias,
+                           PointwiseMode activMode,
+                           const std::vector<std::pair<flatbuffers::uoffset_t, DataType>>& types)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, doBias, activMode);
+    setTensorTypes(builder, types);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+    return planBuilder.isApplicable(handle, graph);
+}
+} // namespace
+
+// Bias only: A, B, C_matmul, bias, C_bias(final).
+TEST_F(TestHipblasltMatmulPlanBuilder, DeclinesNarrowMatmulOutputBeforeBias)
+{
+    // Mutant: dropping the matmul-output check makes the narrower HALF intermediate applicable.
+    EXPECT_TRUE(isApplicableWithTypes(_planBuilder, _handle, true, PointwiseMode::UNSET, {}));
+    EXPECT_FALSE(isApplicableWithTypes(
+        _planBuilder, _handle, true, PointwiseMode::UNSET, {{2, DataType::HALF}}));
+}
+
+// Bias + activation: A, B, C_matmul, bias, C_bias, C(final).
+TEST_F(TestHipblasltMatmulPlanBuilder, DeclinesNarrowBiasOutputBeforeActivation)
+{
+    // Mutant: dropping the bias-output check makes the HALF bias output applicable.
+    EXPECT_TRUE(isApplicableWithTypes(_planBuilder, _handle, true, PointwiseMode::RELU_FWD, {}));
+    EXPECT_FALSE(isApplicableWithTypes(
+        _planBuilder, _handle, true, PointwiseMode::RELU_FWD, {{4, DataType::HALF}}));
+}
+
+TEST_F(TestHipblasltMatmulPlanBuilder, AcceptsFloatIntermediatesUnderHalfOutput)
+{
+    // Mutant: an equal-to-final-output-only rule declines FLOAT intermediates under HALF output.
+    EXPECT_TRUE(
+        isApplicableWithTypes(_planBuilder,
+                              _handle,
+                              true,
+                              PointwiseMode::RELU_FWD,
+                              {{0, DataType::HALF}, {1, DataType::HALF}, {5, DataType::HALF}}));
+}
+
+TEST_F(TestHipblasltMatmulPlanBuilder, AcceptsHalfIntermediatesEqualToHalfOutput)
+{
+    // Mutant: a FLOAT-only rule declines intermediates equal to the HALF final output.
+    EXPECT_TRUE(isApplicableWithTypes(_planBuilder,
+                                      _handle,
+                                      true,
+                                      PointwiseMode::RELU_FWD,
+                                      {{0, DataType::HALF},
+                                       {1, DataType::HALF},
+                                       {2, DataType::HALF},
+                                       {3, DataType::HALF},
+                                       {4, DataType::HALF},
+                                       {5, DataType::HALF}}));
+}
+
 TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 {
     // Too many nodes (> 3)

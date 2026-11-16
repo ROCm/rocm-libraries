@@ -20,21 +20,19 @@ namespace hipblaslt_plugin
 namespace
 {
 
-// Infer the hipBLASLt transpose op from a tensor's strides: row-major
-// (stride[-1]==1) → HIPBLAS_OP_N; column-major (stride[-2]==1) → HIPBLAS_OP_T.
+// Infer the hipBLASLt transpose op from a tensor's orientation
+// (hipblaslt_utils::matrixOrder): row-major → HIPBLAS_OP_N; column-major →
+// HIPBLAS_OP_T.
 // Mirrors MatmulParams::getTrans for the plain matmul plan.
 hipblasOperation_t getTransFromStrides(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
 {
-    const auto& strides = t.strides();
-    PLUGIN_THROW_IF_FALSE(strides.size() > 1,
-                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                          "Unsupported stride for MX input matrix: " + t.name());
-    if(strides[strides.size() - 1] == 1)
+    const auto order = hipblaslt_utils::matrixOrder(t.dims(), t.strides());
+    if(order == hipblaslt_utils::MatrixOrder::ROW_MAJOR)
     {
         return HIPBLAS_OP_N;
     }
-    if(strides[strides.size() - 2] == 1)
+    if(order == hipblaslt_utils::MatrixOrder::COLUMN_MAJOR)
     {
         return HIPBLAS_OP_T;
     }
@@ -71,6 +69,12 @@ MxMatmulParams::MxMatmulParams(
     // hipBLAS's A operand and our A as its B operand. The swap is applied once,
     // here, so every member is already in hipBLAS's frame and execute() needs no
     // further swapping: a()/aScaleUid() are what hipBLAS receives as A/A_SCALE.
+    PLUGIN_THROW_IF_FALSE(hipblaslt_utils::matrixOrder(tC.dims(), tC.strides())
+                              == hipblaslt_utils::MatrixOrder::ROW_MAJOR,
+                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                          "Unsupported output layout: hipBLASLt engine requires a row-major "
+                          "output matrix: "
+                              + tC.name());
     _matrixLayoutA = HipblasltMatrixLayout(tXB); // hipBLAS A <- our B
     _matrixLayoutB = HipblasltMatrixLayout(tXA); // hipBLAS B <- our A
     _matrixLayoutC = HipblasltMatrixLayout(tC);

@@ -243,6 +243,35 @@ void checkNodeAttrsTensors(
                 "Activation node input must be the matmul node output tensor");
         }
     }
+
+    // hipBLASLt applies the epilogue to the fp32 accumulator and rounds once to the output
+    // type, so a fused intermediate narrower than fp32 and different from the final output
+    // type cannot be honored.
+    if(biasAttr != nullptr || activAttr != nullptr)
+    {
+        const auto finalUid
+            = activAttr != nullptr ? activAttr->out_0_tensor_uid() : biasAttr->out_0_tensor_uid();
+        const auto finalType
+            = hipblaslt_utils::findTensorAttributes(tensorMap, finalUid).dataType();
+
+        const auto checkIntermediate = [&](int64_t uid, const char* role) {
+            const auto type = hipblaslt_utils::findTensorAttributes(tensorMap, uid).dataType();
+            if(type != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT && type != finalType)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string("Fused intermediate data type must be float or the final output "
+                                "data type: ")
+                        + role);
+            }
+        };
+
+        checkIntermediate(matmulAttr.c_tensor_uid(), "matmul output");
+        if(biasAttr != nullptr && activAttr != nullptr)
+        {
+            checkIntermediate(biasAttr->out_0_tensor_uid(), "bias output");
+        }
+    }
 }
 
 void checkComputeTypes(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,

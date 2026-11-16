@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -11,6 +12,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
+#include <vector>
 
 #define LOG_ON_HIPBLASLT_FAILURE(status)                                              \
     do                                                                                \
@@ -98,6 +100,19 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
+
+// Storage order of the matrix formed by the last two dims. A size-1 dim has no
+// meaningful stride, so a matrix is row-major when dims[rank-1] == 1 or
+// strides[rank-1] == 1; otherwise column-major when dims[rank-2] == 1 or
+// strides[rank-2] == 1; otherwise unsupported.
+enum class MatrixOrder
+{
+    ROW_MAJOR,
+    COLUMN_MAJOR,
+    UNSUPPORTED
+};
+
+MatrixOrder matrixOrder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
 
 bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType);
 

@@ -208,6 +208,95 @@ TEST(TestMatmulParams, ColumnMajor)
     EXPECT_NO_THROW(MatmulParams(*attrs, graph.getTensorMap()));
 }
 
+namespace
+{
+// Rewrites the strides of the tensor at `index` in the graph's tensor list to {1, rows}
+// (column-major for a [rows, cols] tensor).
+void makeTensorColumnMajor(flatbuffers::FlatBufferBuilder& builder,
+                           flatbuffers::uoffset_t index,
+                           int64_t rows)
+{
+    auto* graph = flatbuffers::GetMutableRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
+        builder.GetBufferPointer());
+    auto* strides = graph->mutable_tensors()->GetMutableObject(index)->mutable_strides();
+    strides->Mutate(0, 1);
+    strides->Mutate(1, rows);
+}
+} // namespace
+
+TEST(TestMatmulParams, ThrowsOnColumnMajorOutput)
+{
+    std::vector<int64_t> const aDims = {4, 8};
+    std::vector<int64_t> const aStrides = {8, 1};
+    std::vector<int64_t> const bDims = {8, 5};
+    std::vector<int64_t> const bStrides = {5, 1};
+    std::vector<int64_t> const cDims = {4, 5};
+    std::vector<int64_t> const cStrides = {1, 4}; // Column-major output
+
+    auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    EXPECT_THROW(MatmulParams(*attrs, graph.getTensorMap()), HipdnnPluginException);
+}
+
+// The final output of a fused graph supplies C's layout, so its orientation decides.
+TEST(TestMatmulParams, ThrowsOnColumnMajorFusedFinalOutput)
+{
+    auto builder = createValidMatmulBiasActivGraph();
+    // Tensor order: A, B, C_matmul, bias, C_bias, C (final output).
+    makeTensorColumnMajor(builder, 5, 4);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    EXPECT_THROW(MatmulParams(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap()),
+                 HipdnnPluginException);
+}
+
+// An intermediate that never reaches C/D does not constrain the output layout.
+TEST(TestMatmulParams, FusedIntermediateLayoutDoesNotAffectRowMajorOutput)
+{
+    auto builder = createValidMatmulBiasActivGraph();
+    makeTensorColumnMajor(builder, 2, 4); // C_matmul
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    EXPECT_NO_THROW(MatmulParams(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap()));
+}
+
+// A [M, 1] output is row-major whatever stride its size-1 dim carries.
+TEST(TestMatmulParams, AcceptsSingleColumnOutputWithNonCanonicalStride)
+{
+    std::vector<int64_t> const aDims = {4, 8};
+    std::vector<int64_t> const aStrides = {8, 1};
+    std::vector<int64_t> const bDims = {8, 1};
+    std::vector<int64_t> const bStrides = {1, 1};
+    std::vector<int64_t> const cDims = {4, 1};
+    std::vector<int64_t> const cStrides = {1, 4};
+
+    auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    EXPECT_NO_THROW(MatmulParams(*attrs, graph.getTensorMap()));
+}
+
 TEST(TestMatmulParams, BatchBroadcastWithABatchOne)
 {
     // [1, M, K] x [2, K, N] -> [2, M, N]

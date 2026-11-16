@@ -160,6 +160,18 @@ TEST(TestMxMatmulParams, TransposeInferenceColMajorB)
               HIPBLAS_OP_T);
 }
 
+// hipBLASLt writes C row-major only; a column-major C is declined at construction.
+TEST(TestMxMatmulParams, ThrowsOnColumnMajorOutput)
+{
+    auto fb = createValidMxMatmulGraph(
+        {32, 128}, {1, 32}, {128, 32}, {32, 1}, {32, 32}, {1, 32}, {32, 4}, {4, 32});
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    const auto attrs = getMxNodeAttrs(graph);
+
+    EXPECT_THROW(MxMatmulParams(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap()),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
 // ===========================================================================
 // MxMatmulPlan (GPU — requires a device and a live hipblasLt handle)
 // ===========================================================================

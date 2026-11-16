@@ -8,6 +8,10 @@ For general information about hipDNN's operation support, please see the [hipDNN
 
 hipBLASLt is **column-major**; hipDNN's output is **row-major**. To produce `C = A × B` row-major, every plan computes `Cᵀ = Bᵀ × Aᵀ`: `B` and `A` are passed to hipBLASLt swapped (first operand `B`, second `A`), with `transA = getTrans(B)`, `transB = getTrans(A)`. `getTrans` reads each operand's strides (`OP_N` if row-major, `OP_T` if column-major), so both input layouts work.
 
+A matrix (the last two dimensions of a tensor) is row-major when `dims[-1] == 1` or `stride[-1] == 1`; otherwise it is column-major when `dims[-2] == 1` or `stride[-2] == 1`; otherwise it is not supported. A size-1 dimension therefore accepts any stride. The same rule derives the transpose flag and the hipBLASLt matrix layout.
+
+The output must be row-major under this rule. The tensor written to the output (the activation output, else the bias output, else the matmul output) is checked, and the engine declines a column-major output.
+
 ## Current Operation Support
 
 ### Stand-alone Matmul (GEMM)
@@ -18,6 +22,7 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 - Transposed inputs: supported
 - Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1)
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
+- Fused intermediate data types: the matmul output when a bias or activation follows, and the bias output when an activation follows, must be FP32 or the final output's data type. hipBLASLt runs the epilogue on the FP32 accumulator and rounds once to the output type, so a narrower intermediate cannot be honored and the engine declines the graph.
 - ReLU parameters (`RELU_FWD`): an unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope.
     - Standard ReLU: no upper clip and a lower clip of 0 (or unset)
     - Clamp: `relu_upper_clip` set; the lower bound is `relu_lower_clip`, or 0 if unset (so ReLU6 needs only the upper clip)
