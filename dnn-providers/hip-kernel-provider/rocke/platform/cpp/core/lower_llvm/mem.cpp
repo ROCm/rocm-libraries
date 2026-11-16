@@ -92,7 +92,8 @@ static int64_t ll_lds_natural_align(const rocke_op_t* op)
                                                 rocke_i_elem_of(op->results[0]->type));
     case ROCKE_OP_TILE_SMEM_STORE_VN_F32:
     case ROCKE_OP_TILE_SMEM_LOAD_VN_F32:
-        return rocke_i_vector_access_align(ll_attr_int(op, "vec", 0), rocke_f32());
+        return rocke_i_smem_vector_access_align(
+            op->operands[0]->type, ll_attr_int(op, "vec", 0), rocke_f32());
     case ROCKE_OP_TILE_SMEM_LOAD_V4:
         /* One scalar load per element. */
         return rocke_i_type_bytes(rocke_i_elem_of(op->results[0]->type));

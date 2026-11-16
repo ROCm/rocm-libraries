@@ -460,6 +460,40 @@ def test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts(engine, store_a
     assert _alignment_violations(ll) == []
 
 
+def _padded_f32_tile_copy():
+    """An f32 tile whose rows are 6 elements, read and written 4 wide by the
+    f32 epilogue ops.
+
+    Row 1 starts 24 bytes in, so a 4-wide (16-byte) access there is only
+    8-byte aligned: gcd(4, 6) = 2 elements.
+    """
+    b = IRBuilder("lds_align_padded_f32_rows")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F32, [2, 6], name_hint="t")
+    row = b.smem_load_vN_f32(tile, zero, zero, n=4)
+    b.smem_store_vN_f32(tile, [b.const_i32(1), zero], row, 4)
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts(engine):
+    """``smem_load_vN_f32`` / ``smem_store_vN_f32`` into a tile whose
+    innermost dimension is not a multiple of their width claim only what
+    every row start guarantees, as ``smem_load_vN`` / ``smem_store_vN`` do;
+    both engines emit the same IR."""
+    ll = lower_with_engine(
+        _padded_f32_tile_copy(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
+    accesses = re.findall(
+        r"(load|store) <4 x float>.*ptr addrspace\(3\) \S+, align (\d+)$",
+        ll,
+        re.MULTILINE,
+    )
+    assert sorted(accesses) == [("load", "8"), ("store", "8")]
+    assert _alignment_violations(ll) == []
+
+
 @pytest.mark.parametrize("engine", ENGINES)
 def test_a_distributed_store_claims_its_element_width(engine):
     """smem_store_distributed writes one element at a time, so each store

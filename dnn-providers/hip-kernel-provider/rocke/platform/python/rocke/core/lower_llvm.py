@@ -89,7 +89,6 @@ from .ir import (
     smem_vector_access_align,
     split_loc,
     type_bytes,
-    vector_access_align,
 )
 from .mma_operand import (
     MmaOperandRole,
@@ -1415,7 +1414,7 @@ def _lds_natural_align(op: Op) -> int | None:
             op.operands[0].type, int(op.attrs["vec"]), element_type(op.result.type)
         )
     if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32"):
-        return vector_access_align(int(op.attrs["vec"]), F32)
+        return smem_vector_access_align(op.operands[0].type, int(op.attrs["vec"]), F32)
     if name == "tile.smem_load_v4":
         # One scalar load per element.
         return type_bytes(element_type(op.result.type))
