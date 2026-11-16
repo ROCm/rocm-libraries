@@ -18,6 +18,7 @@
 #include <limits>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -29,6 +30,8 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/input-init/FillInputs.hpp"
 
 // The fp8 tensors below are named by the typed suite before any member is used, which
@@ -47,6 +50,24 @@ using namespace hipdnn_integration_tests;
 
 namespace
 {
+
+// The reference executors a fill derives inputs with: these graphs derive none, so a CPU one
+// is all a fill can ask for; a GPU one is refused.
+class CpuOnlyReferences : public IReferenceExecutors
+{
+public:
+    IReferenceGraphExecutor& get(ReferenceExecutorType type) override
+    {
+        if(type != ReferenceExecutorType::CPU)
+        {
+            throw std::runtime_error("this test has no GPU reference executor");
+        }
+        return _cpu;
+    }
+
+private:
+    CpuReferenceGraphExecutorAdapter _cpu;
+};
 
 namespace types = hipdnn_data_sdk::types;
 using hipdnn_data_sdk::utilities::Tensor;
@@ -522,7 +543,8 @@ FillResult fillA(const FillRecipe& recipe,
     inputs[1] = std::make_shared<Tensor<float>>(dims, strides);
     InputFillRecipes recipes;
     recipes.set(1, recipe).setSeed(1, 3);
-    const auto result = fillInputs(*gr.graph, inputs, {1}, recipes, device);
+    CpuOnlyReferences references;
+    const auto result = fillInputs(*gr.graph, inputs, {1}, recipes, references, device);
     if(result.filled)
     {
         const auto* data = static_cast<const float*>(inputs.at(1)->rawHostData());

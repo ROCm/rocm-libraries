@@ -864,7 +864,7 @@ SingleFill<T> fillSingle(const FillRecipe& recipe,
     recipes.set(1, recipe).setSeed(1, seed);
 
     SingleFill<T> out;
-    out.result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    out.result = fillInputs(*gr.graph, inputs, ownedUids, recipes, hostReferences(), nullptr);
     if(out.result.filled)
     {
         const auto* data = static_cast<const T*>(inputs.at(1)->rawHostData());
@@ -957,8 +957,12 @@ void expectPackedMatchesUnpacked(const FillRecipe& recipe, std::size_t bitsPerEl
         unpackedRecipes.set(1, recipe).setSeed(1, 11);
         InputFillRecipes packedRecipes;
         packedRecipes.set(1, recipe).setSeed(1, 11);
-        ASSERT_TRUE(fillInputs(*gr.graph, unpacked, ownedUids, unpackedRecipes, nullptr).filled);
-        ASSERT_TRUE(fillInputs(*gr.graph, packed, ownedUids, packedRecipes, nullptr).filled);
+        ASSERT_TRUE(
+            fillInputs(*gr.graph, unpacked, ownedUids, unpackedRecipes, hostReferences(), nullptr)
+                .filled);
+        ASSERT_TRUE(
+            fillInputs(*gr.graph, packed, ownedUids, packedRecipes, hostReferences(), nullptr)
+                .filled);
 
         const auto* values = static_cast<const T*>(unpacked.at(1)->rawHostData());
         const auto* bytes = static_cast<const std::uint8_t*>(packed.at(1)->rawHostData());
@@ -2721,7 +2725,7 @@ TEST(TestFillInputs, PackedSubByteTensorOfAnUnsupportedKindIsRefused)
     InputFillRecipes recipes;
     recipes.setNonFinite(1, FillRecipe::SpecialValue::QUIET_NAN, 0.25f);
 
-    const auto result = fillInputs(*gr.graph, packed, {1}, recipes, nullptr);
+    const auto result = fillInputs(*gr.graph, packed, {1}, recipes, hostReferences(), nullptr);
 
     EXPECT_FALSE(result.filled);
     EXPECT_NE(result.reason.find("fp4_e2m1"), std::string::npos) << result.reason;
@@ -2761,9 +2765,10 @@ TEST(TestFillInputs, DeviceFillerLeavesATypeWithoutADeviceKernelToTheHost)
         DeviceInputFiller device;
         EXPECT_FALSE(device.tryFill(*deviceInputs.at(1), recipe, 5));
 
-        const auto hostResult = fillInputs(*gr.graph, hostInputs, ownedUids, hostRecipes, nullptr);
-        const auto deviceResult
-            = fillInputs(*gr.graph, deviceInputs, ownedUids, deviceRecipes, &device);
+        const auto hostResult
+            = fillInputs(*gr.graph, hostInputs, ownedUids, hostRecipes, hostReferences(), nullptr);
+        const auto deviceResult = fillInputs(
+            *gr.graph, deviceInputs, ownedUids, deviceRecipes, hostReferences(), &device);
         ASSERT_TRUE(hostResult.filled) << hostResult.reason;
         ASSERT_TRUE(deviceResult.filled) << deviceResult.reason;
         EXPECT_EQ(deviceResult.deviceFilled, 0u);
@@ -2883,7 +2888,7 @@ PaddedFill<T>
 
     InputFillRecipes recipes;
     recipes.set(1, recipe).setSeed(1, seed);
-    out.result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    out.result = fillInputs(*gr.graph, inputs, ownedUids, recipes, hostReferences(), nullptr);
     if(!out.result.filled)
     {
         return out;
@@ -3077,7 +3082,8 @@ TEST(TestFillInputs, PoisonedPaddedInputsHoldTheValuesOfThePackedFillAndSharedSt
         recipes.set(2, FillRecipe::free(-1.0f, 1.0f));
         recipes.setGlobalSeed(11);
         const std::vector<int64_t> ownedUids = {1, 2};
-        const auto result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+        const auto result
+            = fillInputs(*gr.graph, inputs, ownedUids, recipes, hostReferences(), nullptr);
         EXPECT_TRUE(result.filled) << result.reason;
 
         const auto* firstData = static_cast<const float*>(inputs.at(1)->rawHostData());
