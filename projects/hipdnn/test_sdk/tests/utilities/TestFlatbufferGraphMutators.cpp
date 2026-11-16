@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -82,6 +83,39 @@ TEST(TestFlatbufferGraphMutators, MutateGraphAppliesTheMutationAndLeavesTheSourc
 
     EXPECT_EQ(UnPackGraph(mutated.GetBufferPointer())->name, "mutated");
     EXPECT_NE(UnPackGraph(source.GetBufferPointer())->name, "mutated");
+}
+
+TEST(TestFlatbufferGraphMutators, MatmulBiasActivGraphPlacesBiasInRequestedOperand)
+{
+    for(const bool biasInFirstOperand : {false, true})
+    {
+        SCOPED_TRACE(biasInFirstOperand ? "bias in in_0" : "bias in in_1");
+        auto builder = createValidMatmulBiasActivGraph({4, 8},
+                                                       {8, 1},
+                                                       {8, 5},
+                                                       {5, 1},
+                                                       {4, 5},
+                                                       {5, 1},
+                                                       true,
+                                                       PointwiseMode::RELU_FWD,
+                                                       std::nullopt,
+                                                       std::nullopt,
+                                                       std::nullopt,
+                                                       DataType::FLOAT,
+                                                       std::nullopt,
+                                                       biasInFirstOperand);
+        const auto graph = UnPackGraph(builder.GetBufferPointer());
+
+        ASSERT_GE(graph->nodes.size(), 2u);
+        const auto* bias = graph->nodes[1]->attributes.AsPointwiseAttributes();
+        ASSERT_NE(bias, nullptr);
+        const int64_t matmulOut = findTensor(*graph, "C_matmul").uid;
+        const int64_t biasTensor = findTensor(*graph, "bias").uid;
+
+        EXPECT_EQ(bias->in_0_tensor_uid, biasInFirstOperand ? biasTensor : matmulOut);
+        EXPECT_EQ(bias->in_1_tensor_uid, biasInFirstOperand ? matmulOut : biasTensor);
+        EXPECT_EQ(bias->out_0_tensor_uid, findTensor(*graph, "C_bias").uid);
+    }
 }
 
 TEST(TestFlatbufferGraphMutators, RaggedTensorMarksFirstNonVirtualTensor)
