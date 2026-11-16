@@ -296,8 +296,8 @@ struct Graded
     std::optional<AbsRelTolerance> reportedToleranceOf(int64_t uid) const
     {
         const std::regex pattern(
-            "Tensor: [^\\n]*\\(UID " + std::to_string(uid)
-            + ", output\\)\\n[^\\n]*\\n  Tolerance: atol=([^ ]+) rtol=([^\\s]+)");
+            R"(Tensor: [^\n]*\(UID )" + std::to_string(uid)
+            + R"(, output\)\n[^\n]*\n  Tolerance: atol=([^ ]+) rtol=([^\s]+))");
         std::smatch match;
         if(!std::regex_search(messages, match, pattern))
         {
