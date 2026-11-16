@@ -659,7 +659,7 @@ std::string validateCustomEncoding(std::string text, size_t itemIndex) {
     return text;
 }
 
-std::string validateStandaloneComment(std::string text, size_t itemIndex) {
+std::string validateStandaloneComment(const std::string& text, size_t itemIndex) {
     if (text.find_first_of("\r\n") != std::string::npos)
         fail(itemIndex, "field 'text' must be a single line");
     if (text.find('\0') != std::string::npos)
@@ -704,8 +704,12 @@ std::string emitAsm(const std::string& archName, uint32_t waveSize, const nb::li
             const std::string mnemonic = requireString(record, "mnemonic", itemIndex);
             const auto& mnemonicMap = archInfo->getMnemonicToIsaOpcodeMap();
             auto opcodeIt = mnemonicMap.find(mnemonic);
-            if (opcodeIt == mnemonicMap.end())
-                fail(itemIndex, "unknown instruction '" + mnemonic + "' for " + archName);
+            if (opcodeIt == mnemonicMap.end()) {
+                std::string message = "unknown instruction '" + mnemonic;
+                message += "' for ";
+                message += archName;
+                fail(itemIndex, message);
+            }
             if (!isSupportedTypedInstruction(mnemonic))
                 fail(itemIndex, "instruction '" + mnemonic +
                                     "' is unsupported by the T01 typed bridge allowlist");
@@ -845,6 +849,8 @@ std::string emitAsm(const std::string& archName, uint32_t waveSize, const nb::li
 
 }  // namespace
 
+// Called from python_bindings.cpp, which declares it, so it cannot have internal linkage.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void init_asm_bridge(nb::module_& m) {
     m.def("emit_asm", &emitAsm, nb::arg("arch"), nb::arg("wave_size"), nb::arg("items"),
           R"doc(Emit ordered, already-selected assembly records through temporary Asm IR.
