@@ -561,6 +561,7 @@ FEATURE_KEYS = {
     "SdpaBackward/Default": {"node_patches"},
     "SdpaBackward/FlydslBwdSplit": {"node_patches"},
     "SdpaBackward/FlydslBwdSplitBias": {"add_tensors", "node_patches"},
+    "SdpaBackward/FlydslBwdSplitPadded": {"add_tensors", "node_patches"},
     "SdpaFwd/Default": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151Decode": {"add_tensors", "node_patches"},
@@ -568,6 +569,28 @@ FEATURE_KEYS = {
     "SdpaFwd/FlydslCdnaDecode": {"add_tensors", "node_patches"},
     "SdpaFwd/FlydslDualwave": {"add_tensors", "node_patches"},
 }
+
+
+def test_a_values_recipe_renders_the_format_that_has_the_values_kind():
+    # bug caught: a row whose inputs hold a `values` recipe (exact per-element values, here the
+    # seq_len tensors of a padded graph) carried metadata format_version 1, and a harness reads
+    # that as a version without the kind: the tensor is filled with random values, silently
+    sp = space_by_id("SdpaBackward/FlydslBwdSplitPadded")
+    s = sampler.sample(sp, 7)
+    meta = s.row["metadata"]
+    assert meta["format_version"] == 2
+    batch = s.axis_values["b"]
+    for uid in ("9", "10"):  # seq_len_kv, seq_len_q
+        recipe = meta["inputs"][uid]
+        assert recipe["kind"] == "values" and recipe["repeat"] is False
+        assert len(recipe["values"]) == batch and min(recipe["values"]) >= 1
+    # a space with no values recipe stays at format 1
+    assert (
+        sampler.sample(space_by_id("SdpaBackward/Default"), 7).row["metadata"][
+            "format_version"
+        ]
+        == 1
+    )
 
 
 @pytest.mark.parametrize("space_id", LEGACY_SPACE_IDS)
@@ -587,7 +610,13 @@ def test_row_has_sweep_json_format(space_id):
     assert ("tensor_patches" in row) == (space_id in PATCHED_OPERANDS)
     assert row["id"] == "s913377"
     meta = row["metadata"]
-    assert meta["format_version"] == 1 and isinstance(meta["format_version"], int)
+    # the `values` fill kind exists from format 2 (the sampler renders it for such a recipe)
+    has_values = any(
+        isinstance(recipe, dict) and recipe.get("kind") == "values"
+        for recipe in meta.get("inputs", {}).values()
+    )
+    assert meta["format_version"] == (2 if has_values else 1)
+    assert isinstance(meta["format_version"], int)
     assert meta["generator"] == "gauntlet-fuzz"
     assert meta["purpose"] == "probe"
     assert (
@@ -618,6 +647,7 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaBackward/Default",
         "SdpaBackward/FlydslBwdSplit",
         "SdpaBackward/FlydslBwdSplitBias",
+        "SdpaBackward/FlydslBwdSplitPadded",
         "SdpaBackward/FlydslBwdSplitStride",
         "SdpaFwd/AsmStride",
         "SdpaFwd/Default",
@@ -1443,6 +1473,7 @@ LARGE_SCALE = {
     "SdpaBackward/Default": 8,
     "SdpaBackward/FlydslBwdSplit": 8,
     "SdpaBackward/FlydslBwdSplitBias": 8,
+    "SdpaBackward/FlydslBwdSplitPadded": 8,
     "SdpaFwd/Gfx950Dense": 8,
     "SdpaFwd/Flash2Region": 8,
     "SdpaFwd/Gfx1151": 8,
@@ -1495,6 +1526,7 @@ OPERAND_DOMAIN = {
             "SdpaBackward/Default",
             "SdpaBackward/FlydslBwdSplit",
             "SdpaBackward/FlydslBwdSplitBias",
+            "SdpaBackward/FlydslBwdSplitPadded",
         )
         for name in ("V", "dO")
     },
@@ -1532,6 +1564,7 @@ PRIMARY_OPERANDS = {
     "SdpaBackward/Default": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplit": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitBias": ["Q", "K", "V", "dO"],
+    "SdpaBackward/FlydslBwdSplitPadded": ["Q", "K", "V", "dO"],
 }
 # The operands that carry the `special` fill in the nan and inf domains, per space. The other
 # primary operands keep the default range there. Each choice keeps the non-finite positions
@@ -1549,6 +1582,7 @@ POISONED_OPERANDS = {
     "SdpaBackward/Default": [],  # nan and inf are not drawn: see that space's description
     "SdpaBackward/FlydslBwdSplit": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitBias": [],  # as SdpaBackward/Default
+    "SdpaBackward/FlydslBwdSplitPadded": [],  # as SdpaBackward/Default
     "SdpaFwd/Gfx950Dense": ["V"],
     "SdpaFwd/FlydslCdna": ["V"],
     "SdpaFwd/FlydslCdnaDecode": ["V"],
@@ -1597,6 +1631,7 @@ PLACEMENT_OPERAND = {
     "SdpaBackward/Default": "Q",
     "SdpaBackward/FlydslBwdSplit": "Q",
     "SdpaBackward/FlydslBwdSplitBias": "Q",
+    "SdpaBackward/FlydslBwdSplitPadded": "Q",
     "SdpaBackward/FlydslBwdSplitStride": "Q",
     "SdpaFwd/AsmStride": "Q",
     "SdpaFwd/Default": "Q",
@@ -1622,6 +1657,7 @@ NONFINITE_EXCLUDED = {
     "SdpaBackward/Default",
     "SdpaBackward/FlydslBwdSplit",
     "SdpaBackward/FlydslBwdSplitBias",
+    "SdpaBackward/FlydslBwdSplitPadded",
 }
 # the spaces that draw half only: an infinity never poisons there (P underflows), see
 # test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree
@@ -2031,8 +2067,17 @@ def test_rendered_metadata_has_only_what_the_harness_accepts(space_id):
     # (BundleMetadata.hpp validator, InputFillRecipes.hpp parseFill) fails every case of
     # the space at load, and a misspelled leaf value does so for one domain only
     sp = space_by_id(space_id)
-    kinds = {"free", "fixed", "nonzero", "zeros", "large", "subnormal", "special"}
-    entry_keys = set(LEAF_KEYS) | {"seed"}
+    kinds = {
+        "free",
+        "fixed",
+        "nonzero",
+        "zeros",
+        "large",
+        "subnormal",
+        "special",
+        "values",
+    }
+    entry_keys = set(LEAF_KEYS) | {"seed", "values", "repeat"}
 
     def number(x):
         return isinstance(x, (int, float)) and not isinstance(x, bool)
@@ -2050,6 +2095,10 @@ def test_rendered_metadata_has_only_what_the_harness_accepts(space_id):
             assert leaf["kind"] in kinds, (domain, uid, leaf)
             for key in ("lo", "hi", "value", "scale", "fraction"):
                 assert key not in leaf or number(leaf[key]), (domain, uid, key, leaf)
+            if leaf["kind"] == "values":
+                assert leaf["repeat"] is False and all(
+                    isinstance(v, int) for v in leaf["values"]
+                ), (domain, uid, leaf)
             if leaf["kind"] in ("free", "nonzero", "special"):
                 assert leaf["lo"] <= leaf["hi"], (domain, uid, leaf)
             if leaf["kind"] == "large":
