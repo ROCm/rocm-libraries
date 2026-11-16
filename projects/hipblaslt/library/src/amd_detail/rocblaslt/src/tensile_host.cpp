@@ -3808,6 +3808,26 @@ namespace
         return rocblaslt_status_invalid_value;
     }
 
+    // A device library built before OutputPeerD has no PeerDCheck predicate, so its
+    // plain kernels match a problem that asks for a second D and would never write it.
+    // Those libraries also read the flag as false, so it tells them apart.
+    bool peerDKernelFits(bool problemWantsPeerD, const TensileLite::ContractionSolution& solution)
+    {
+        return !problemWantsPeerD || solution.problemType.outputPeerD;
+    }
+
+    rocblaslt_status checkPeerDKernelMatch(const char* caller,
+                                           bool        problemWantsPeerD,
+                                           const TensileLite::ContractionSolution& solution)
+    {
+        if(peerDKernelFits(problemWantsPeerD, solution))
+            return rocblaslt_status_success;
+        log_error(caller,
+                  "the problem has a peer D, but the algo's solution does not store one "
+                  "(device library built without OutputPeerD?)");
+        return rocblaslt_status_invalid_value;
+    }
+
     // An algo index can name a solution of the other kind, grouped or not, whose
     // kernel takes different arguments.
     rocblaslt_status checkGroupedGemmMatch(const char*                             caller,
@@ -6832,6 +6852,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
+            if(auto st = checkPeerDKernelMatch(__func__, data->problem.outputPeerD(), *solution);
+               st != rocblaslt_status_success)
+                return st;
             data->algoIndex = *solutionIndex;
 
             if(data->problem.getParams().uniformSummationOrder() == 1)
@@ -7599,6 +7622,8 @@ inline auto getSolutions(
     auto drop          = [&](auto const& s) {
         if(isCustomKernelForPointerArray(tensile_prob, *s))
             return true;
+        if(!peerDKernelFits(tensile_prob.outputPeerD(), *s))
+            return true;
         if(mxScaleLayoutFits(mxScaleNeed, *s))
             return false;
         layoutDropped = true;
@@ -8010,6 +8035,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
                 }
                 continue;
             }
+            if(!peerDKernelFits(prob.outputPeerD(), *solution))
+                continue;
         }
 
         //workaround: findAllSolutions should get all solutions without duplications.
@@ -8253,6 +8280,9 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
         }
 
         if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
+           st != rocblaslt_status_success)
+            return st;
+        if(auto st = checkPeerDKernelMatch(__func__, tensile_prob.outputPeerD(), *solution);
            st != rocblaslt_status_success)
             return st;
 

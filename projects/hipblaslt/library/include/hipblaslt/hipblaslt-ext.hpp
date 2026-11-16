@@ -1153,7 +1153,10 @@ namespace hipblaslt_ext
         /// It needs exactly 2 partitions and a replicated D (two different pointers, in any
         /// order: the peer of each partition is found by device), and the backend needs
         /// kernels that store a second D; without them setProblem succeeds and algoGetHeuristic
-        /// returns nothing. When it is false, the backend uses the plain kernels.
+        /// returns nothing (also with a device library built before this feature). The peer D
+        /// is written with system-scope stores. Ordering a later kernel that reads D after the
+        /// run (including under graph capture) is up to the caller. When it is false, the
+        /// backend uses the plain kernels.
         bool                     storePeerD = false;
         const void*              alpha = nullptr; //!< Host pointer to alpha.
         const void*              beta  = nullptr; //!< Host pointer to beta.
