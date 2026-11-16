@@ -49,7 +49,7 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
-| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference |  |
+| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference | GEN_INDEX also supports INT32 output |
 | Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference |  |
 | Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
@@ -111,12 +111,17 @@ The following table lists all operations currently supported in the CPU Referenc
 
 | Operation Type | Plan Builder | Signature Key | Supported Operations |
 |----------------|-------------|---------------|---------------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, MAX, MIN, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD |
+| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | IDENTITY, RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD, ELU_FWD, SOFTPLUS_FWD, GEN_INDEX |
+| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, MAX, MIN, CMP_GT, RELU_BWD, SIGMOID_BWD, TANH_BWD, SWISH_BWD, ELU_BWD, SOFTPLUS_BWD |
 | Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
 
 `CMP_GT` outputs must have their tensor data type explicitly set to `BOOLEAN`; generic
 pointwise output inference otherwise uses the graph's intermediate data type.
+
+Pointwise parameters include ReLU lower/upper clipping and lower-clip slope,
+swish beta, ELU alpha and softplus beta. `GEN_INDEX` interprets the axis field as
+an axis number, not a tensor UID, and supports FLOAT or INT32 output. Scalar
+operands may be baked into the graph or supplied by value at execution time.
 
 ## Operation Restrictions
 

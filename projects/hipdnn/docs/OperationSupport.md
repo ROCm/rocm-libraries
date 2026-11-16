@@ -27,9 +27,30 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - MX BlockScaleDequantize + GEMM (FP8 OCP, OCP MX FP6, and OCP MX FP4 inputs, including mixed pairs; gfx950/gfx1250 only; off by default, enable with `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON`)
 
 - **[HIP Kernel Provider Plugin](../../../dnn-providers/hip-kernel-provider/README.md)** - Custom HIP kernels compiled at run time with HIPRTC, plus assembly SDPA kernels. This provider has no separate operation support document.
-  - HIP MLops engine: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward)
+  - HIP MLops engine: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward); supported Batchnorm/RMSNorm plans also fuse direction-appropriate ReLU variants or IDENTITY. Legacy leaky-ReLU fusion and Layernorm fusion are unsupported.
   - ASM SDPA engine: SDPA forward and backward
-  - Optional engines, off by default: HIP Flash2 SDPA forward (`ENABLE_HIP_FLASH2_ENGINE`) and the kernel ingestor engine (`HIPDNN_ENABLE_KERNEL_INGESTOR`, RFC 0017)
+  - Optional engines, off by default: HIP Flash2 SDPA forward (`ENABLE_HIP_FLASH2_ENGINE`) and kernel ingestor engines (`HIPDNN_ENABLE_KERNEL_INGESTOR`, RFC 0017), including standalone pointwise
+
+#### HIP provider pointwise engines
+
+Standalone pointwise and normalization fusion use **different engine IDs**:
+
+| Engine | Pointwise support | Constraints |
+| --- | --- | --- |
+| `HIP_MLOPS_ENGINE` | Legacy Batchnorm/RMSNorm activation fusion | ReLU/clipped ReLU/clamp in the plan's direction and supported IDENTITY graphs; existing packed-layout, rank and virtual-intermediate restrictions apply. No standalone pointwise or leaky-ReLU fusion. |
+| `hipkernel:StandalonePointwise` (`4178892485795623278`) | One pointwise node: 25 unary, binary and select modes, including parameterized/leaky ReLU, ELU, softplus, swish and GEN_INDEX | Optional kernel-ingestor pack. Rank 1-5, right-aligned broadcasting, positive padded/permuted strides, FLOAT compute and supported FLOAT/HALF/BFLOAT16 storage signatures. BOOLEAN masks/comparison outputs and GEN_INDEX INT32 outputs are supported. No normalization fusion. |
+
+See the provider's [pointwise support notes](../../../dnn-providers/hip-kernel-provider/README.md#pointwise-support-by-engine)
+and the [standalone contract](../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/hip/standalone_pointwise/README.md)
+for exact modes, dtype combinations, parameter rules and scalar operands.
+Runtime pass-by-value scalar plans cannot be saved.
+Standalone support does not imply support for 3D, mixed-precision intermediates,
+leaky ReLU or additional activations in legacy normalization fusions.
+
+Bundle claims record exact engine/architecture/platform combinations, not a
+blanket operation guarantee. See the integration tests'
+[support matrix instructions](../../../dnn-providers/integration-tests/docs/support-matrix.md)
+to render current claims; the committed overview can lag merged claims.
 
 ### Reference Implementation
 

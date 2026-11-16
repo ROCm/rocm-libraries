@@ -57,12 +57,23 @@ public:
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope,
-                                 const ParamType swishBeta = ParamType{1})
+                                 const ParamType swishBeta = ParamType{1},
+                                 const ParamType eluAlpha = ParamType{1},
+                                 const ParamType softplusBeta = ParamType{1},
+                                 const int64_t axis = -1)
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
-        executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(
-            operation, output, input, lowerClip, upperClip, lowerSlope, swishBeta);
+        executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(operation,
+                                                                              output,
+                                                                              input,
+                                                                              lowerClip,
+                                                                              upperClip,
+                                                                              lowerSlope,
+                                                                              swishBeta,
+                                                                              eluAlpha,
+                                                                              softplusBeta,
+                                                                              axis);
     }
 
     // Binary operations
@@ -101,12 +112,24 @@ public:
                                  const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
-                                 const ParamType lowerSlope)
+                                 const ParamType lowerSlope,
+                                 const ParamType eluAlpha = ParamType{1},
+                                 const ParamType softplusBeta = ParamType{1},
+                                 const ParamType swishBeta = ParamType{1})
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
         executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType, ComputeType>(
-            operation, output, input1, input2, lowerClip, upperClip, lowerSlope);
+            operation,
+            output,
+            input1,
+            input2,
+            lowerClip,
+            upperClip,
+            lowerSlope,
+            eluAlpha,
+            softplusBeta,
+            swishBeta);
     }
 
 private:
@@ -147,6 +170,12 @@ private:
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD:
             policy.executeUnary(input, output, pointwise::SwishForward<ComputeType>{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD:
+            policy.executeUnary(input, output, pointwise::EluForward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
+            policy.executeUnary(input, output, pointwise::SoftplusForward<ComputeType>{});
+            break;
         default:
             throw std::runtime_error("Unsupported unary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
@@ -163,7 +192,10 @@ private:
         const ParamType lowerClip,
         const ParamType upperClip,
         const ParamType lowerSlope,
-        const ParamType swishBeta)
+        const ParamType swishBeta,
+        const ParamType eluAlpha,
+        const ParamType softplusBeta,
+        const int64_t axis)
     {
         DeviceExecutor policy;
 
@@ -182,6 +214,21 @@ private:
                 input,
                 output,
                 pointwise::SwishForward<ComputeType>{static_cast<ComputeType>(swishBeta)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD:
+            policy.executeUnary(
+                input,
+                output,
+                pointwise::EluForward<ComputeType>{static_cast<ComputeType>(eluAlpha)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
+            policy.executeUnary(
+                input,
+                output,
+                pointwise::SoftplusForward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX:
+            policy.executeGenerateIndex(output, axis);
             break;
         default:
             throw std::runtime_error("Unsupported parameterized pointwise operation: "
@@ -235,6 +282,18 @@ private:
             policy.executeBinaryBroadcast(
                 input1, input2, output, pointwise::TanhBackward<ComputeType>{});
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::EluBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::SoftplusBackward<ComputeType>{});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_BWD:
+            policy.executeBinaryBroadcast(
+                input1, input2, output, pointwise::SwishBackward<ComputeType>{});
+            break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
@@ -275,7 +334,10 @@ private:
         const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
         const ParamType lowerClip,
         const ParamType upperClip,
-        const ParamType lowerSlope)
+        const ParamType lowerSlope,
+        const ParamType eluAlpha,
+        const ParamType softplusBeta,
+        const ParamType swishBeta)
     {
         DeviceExecutor policy;
 
@@ -289,6 +351,27 @@ private:
                                               static_cast<ComputeType>(lowerClip),
                                               static_cast<ComputeType>(upperClip),
                                               static_cast<ComputeType>(lowerSlope)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::EluBackward<ComputeType>{static_cast<ComputeType>(eluAlpha)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::SoftplusBackward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
+            break;
+        case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_BWD:
+            policy.executeBinaryBroadcast(
+                input1,
+                input2,
+                output,
+                pointwise::SwishBackward<ComputeType>{static_cast<ComputeType>(swishBeta)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized binary pointwise operation: "

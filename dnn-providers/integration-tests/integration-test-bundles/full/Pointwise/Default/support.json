@@ -33,6 +33,18 @@
           ]
         }
       }
+    ],
+    "hipkernel:StandalonePointwise": [
+      {
+        "cases": [
+          "4_8_16_16_fp32_nchw"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

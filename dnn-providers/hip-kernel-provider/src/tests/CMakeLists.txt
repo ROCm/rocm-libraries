@@ -150,9 +150,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
     # The production descriptor tree, as the same binary-relative offset the integration
-    # binary uses. Only TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad
-    # catalog's metadata through the real state manager; it skips when this configuration
-    # packs no production tree, so no dependency on hkp_packaging_product is added here.
+    # binary uses. Tests of shipped kernels read it separately from the unit discovery root.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
 
@@ -311,6 +309,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             MatchersCoverBothScopes
             SubtractsInTheRightDirection
     )
+
+    hkp_product_offers_engine(_standalone_pointwise_available "hipkernel:StandalonePointwise")
+    if(_standalone_pointwise_available)
+        add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            SUITES TestStandalonePointwisePacks
+            EXPECTED_CASES
+                ShipsOneShapeDynamicKernelPerArchitecture
+                EveryKernelDeclaresTheDynamicLaunchSignature
+        )
+    endif()
 
     # FlyDSL's kernels ship in the production shard, so their census addresses that
     # pack, narrowed to the architectures FlyDSL ships for: the product pack may be

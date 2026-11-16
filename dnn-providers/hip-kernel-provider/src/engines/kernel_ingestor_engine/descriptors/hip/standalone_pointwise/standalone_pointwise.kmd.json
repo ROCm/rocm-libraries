@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "78b79c44-802f-4f8b-8dd1-d9c20f2f2203",
+  "name": "standalone pointwise contract",
+  "fields": [{"name": "contract_version", "type": "int", "default_value": 2}]
+}

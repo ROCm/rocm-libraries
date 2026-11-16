@@ -25,6 +25,8 @@ bool isNodeActivFwd(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttribu
     // Check if operation is supported for batchnorm fusion
     switch(attr.operation())
     {
+    case PointwiseMode::IDENTITY:
+        return true;
     case PointwiseMode::RELU_FWD:
         break; // Continue to parameter validation
     default:
@@ -364,12 +366,10 @@ void BatchnormFwdTrainingPlanBuilder::buildPlan(
     else if(opGraph.nodeCount() == 2)
     {
         // Batchnorm training + activation fusion
-        const auto& bnAttr
-            = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
-        const auto& activAttr
-            = opGraph.getNodeWrapper(1)
-                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
+        const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
+        const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
+        BatchnormValidator validator(opGraph.getTensorMap());
+        validator.checkFwdTrainingActivationTensorConfigSupported(bnAttr, activAttr);
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));

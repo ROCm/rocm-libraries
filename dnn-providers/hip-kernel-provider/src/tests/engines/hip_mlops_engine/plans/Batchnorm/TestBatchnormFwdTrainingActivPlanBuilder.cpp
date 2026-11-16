@@ -100,6 +100,55 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueForValid
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IdentityIsApplicableAndBuildsPlan)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+    setupMockCompileChain();
+    Context ctx;
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
+}
+
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, BackwardReluIsNotApplicable)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        true, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+    Context ctx;
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, LeakyReluIsNotApplicable)
+{
+    for(const auto slope : {0.0f, 0.1f})
+    {
+        SCOPED_TRACE(slope);
+        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+            true,
+            false,
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+            {588, 196, 14, 1},
+            {1, 3, 14, 14},
+            slope);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            builder.GetBufferPointer(), builder.GetSize());
+
+        EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+        Context ctx;
+        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+    }
+}
+
 TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
        IsApplicableReturnsTrueForFusionWithRunningStatistics)
 {

@@ -885,6 +885,27 @@ TEST(TestCpuFpReferenceValidationMatchingInf, FactorySelectsTheRelaxedComparison
     EXPECT_TRUE(matchingInfValidation->allClose(tensor1, tensor2));
 }
 
+TEST(TestCpuIntReferenceValidationBoolean, FactoryComparesBooleanOutputsExactly)
+{
+    const auto validation = createAllCloseValidator(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN, 1.0f, 1.0f);
+    Tensor<bool> expected({4}, {2});
+    Tensor<bool> actual({4}, {2});
+    expected.fillTensorWithValue(0.0f);
+    actual.fillTensorWithValue(0.0f);
+    expected.setHostValue(true, 1);
+    actual.setHostValue(true, 1);
+    EXPECT_TRUE(validation->allClose(expected, actual));
+    actual.setHostValue(false, 1);
+    EXPECT_FALSE(validation->allClose(expected, actual));
+    actual.setHostValue(true, 1);
+    actual.setHostValue(true, 3);
+    EXPECT_FALSE(validation->allClose(expected, actual));
+    EXPECT_THROW(createAllCloseMatchingInfinitiesValidator(
+                     hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN, 0.0f, 0.0f),
+                 std::runtime_error);
+}
+
 TEST(TestCpuFpReferenceValidationMatchingInf, FactoryRejectsIntegerDataTypes)
 {
     EXPECT_THROW(createAllCloseMatchingInfinitiesValidator(

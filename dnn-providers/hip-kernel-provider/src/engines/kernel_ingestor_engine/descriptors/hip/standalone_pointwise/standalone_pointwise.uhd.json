@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "id": "78b79c44-802f-4f8b-8dd1-d9c20f2f2202",
+  "name": "standalone pointwise selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {"symbol": "hipkernel.standalone_pointwise.score.v2"}
+}

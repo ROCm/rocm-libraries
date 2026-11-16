@@ -1,0 +1,17 @@
+{
+  "claims": {
+    "hipkernel:StandalonePointwise": [
+      {
+        "cases": [
+          "1_3_2_2_fp32_nchw"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

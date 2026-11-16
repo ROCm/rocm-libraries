@@ -1,0 +1,30 @@
+{
+  "claims": {
+    "hipkernel:StandalonePointwise": [
+      {
+        "cases": [
+          "2_4_8_8_2_fp16_ncdhw_mul",
+          "2_4_8_8_2_fp16_ncdhw_sub",
+          "2_4_8_8_2_fp32_ncdhw_add",
+          "2_4_8_8_fp16_nchw_add_bcast",
+          "2_4_8_8_fp16_nchw_max",
+          "2_4_8_8_fp16_nchw_max_bcast",
+          "2_4_8_8_fp16_nchw_min",
+          "2_4_8_8_fp32_nchw_max",
+          "2_4_8_8_fp32_nchw_min",
+          "2_4_8_8_fp32_nchw_min_bcast",
+          "2_4_8_8_fp32_nchw_mul",
+          "2_4_8_8_fp32_nchw_mul_bcast",
+          "2_8_64_fp16_ncl_sub",
+          "2_8_64_fp32_ncl_sub"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

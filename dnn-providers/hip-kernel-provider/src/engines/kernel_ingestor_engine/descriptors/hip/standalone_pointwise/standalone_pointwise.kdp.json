@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "id": "78b79c44-802f-4f8b-8dd1-d9c20f2f2206",
+  "name": "hipkernel:standalone_pointwise",
+  "arch": [],
+  "matchers": ["78b79c44-802f-4f8b-8dd1-d9c20f2f2205"],
+  "engine": "78b79c44-802f-4f8b-8dd1-d9c20f2f2201",
+  "dispatch": "78b79c44-802f-4f8b-8dd1-d9c20f2f2204",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "78b79c44-802f-4f8b-8dd1-d9c20f2f2208",
+      "name": "standalone_pointwise.dynamic.v2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/StandalonePointwiseV2.cpp",
+        "entry": "StandalonePointwiseV2",
+        "build": {"flags": ["-std=c++17"]}
+      },
+      "metadata": {"contract_version": 2},
+      "priority": 0,
+      "provenance": {
+        "specialization_contract": {
+          "schema_version": 1,
+          "consumers": [
+            {
+              "engine_id": "78b79c44-802f-4f8b-8dd1-d9c20f2f2201",
+              "kmd_id": "78b79c44-802f-4f8b-8dd1-d9c20f2f2203",
+              "metadata_fields": [],
+              "matcher_only_fields": ["contract_version"],
+              "bindings": {},
+              "vocabulary": {}
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
