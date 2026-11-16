@@ -169,4 +169,38 @@ struct SwishForward
     }
 };
 
+template <typename ComputeType = double, typename OutputType = ComputeType>
+struct EluForward
+{
+    ComputeType alpha;
+    explicit EluForward(ComputeType value = ComputeType{1})
+        : alpha(value)
+    {
+    }
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        const auto value = static_cast<ComputeType>(x);
+        return static_cast<OutputType>(value > ComputeType{0} ? value : alpha * std::expm1(value));
+    }
+};
+
+template <typename ComputeType = double, typename OutputType = ComputeType>
+struct SoftplusForward
+{
+    ComputeType beta;
+    explicit SoftplusForward(ComputeType value = ComputeType{1})
+        : beta(value)
+    {
+    }
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        const auto value = beta * static_cast<ComputeType>(x);
+        const auto result = value > ComputeType{0} ? value + std::log1p(std::exp(-value))
+                                                   : std::log1p(std::exp(value));
+        return static_cast<OutputType>(result / beta);
+    }
+};
+
 } // namespace hipdnn_test_sdk::utilities::pointwise
