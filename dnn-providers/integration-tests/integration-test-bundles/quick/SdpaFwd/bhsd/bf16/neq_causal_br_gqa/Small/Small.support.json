@@ -1,4 +1,15 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_cdna": {
+      "gfx942": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna_decode": {
+      "gfx942": [
+        "linux"
+      ]
+    }
+  },
   "version": 1
 }

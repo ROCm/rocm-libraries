@@ -165,6 +165,9 @@
         "support": {
           "gfx1151": [
             "linux"
+          ],
+          "gfx942": [
+            "linux"
           ]
         }
       }

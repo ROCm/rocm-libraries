@@ -1,5 +1,20 @@
 {
   "claims": {
+    "ASM_SDPA_ENGINE": {
+      "gfx942": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna": {
+      "gfx942": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna_decode": {
+      "gfx942": [
+        "linux"
+      ]
+    },
     "hipkernel:flydsl_sdpa_rdna": {
       "gfx1151": [
         "linux"

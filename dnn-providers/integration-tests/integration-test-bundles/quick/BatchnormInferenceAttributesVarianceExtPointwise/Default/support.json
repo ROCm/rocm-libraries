@@ -61,6 +61,16 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "runtime_epsilon"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ]
+        }
       }
     ],
     "MIOPEN_ENGINE": [
