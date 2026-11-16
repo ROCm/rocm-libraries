@@ -879,7 +879,7 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
 
-        if state['ProblemType']['FusedA2A'] == 'A2AGemm':
+        if state['ProblemType'].get('FusedA2A') == 'A2AGemm':
             rv += [cls('A2AGemmShape', value=state['DepthU'] * state['A2ASubRounds'])]
 
         return rv
