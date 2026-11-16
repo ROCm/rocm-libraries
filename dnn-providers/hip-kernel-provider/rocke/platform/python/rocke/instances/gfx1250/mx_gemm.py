@@ -132,11 +132,12 @@ WMMA_REUSE = ("none", "a", "b", "ab")
 SCALES = ("lds", "registers")
 SCALE_SWAPS = ("read", "wait")
 READ_ISSUES = ("block", "interleave")
-WALKS = ("tile", "panels")
+WALKS = ("tile", "panels", "halves")
 READ_BASES = ("loop", "fixed")
 # walk "panels": a workgroup's 256x256 output in four 128x128 passes over
 # 128-row panels of A and B, one panel per LDS slot, each panel split over
-# the four waves (one component of 32 rows each).
+# the four waves (one component of 32 rows each). walk "halves": two
+# 128x256 halves, an A panel slot each and B panels in slots of two.
 _PANEL_ROWS = 128
 _PANEL_SLOTS = 4
 LDS_BUFFERS = (2, 3)
@@ -259,6 +260,12 @@ class MxGemmSpec:
     so the LDS needs four panels where a 256x256x512 tile needs two buffers
     of four (:class:`PanelWalk`). Each pass is the 128x128 tile's compute
     (``pass_spec``); each wave keeps the accumulators of all four passes.
+    ``"halves"`` (as ``"panels"``) covers it with two 128x256 halves, A
+    panel 0 then A panel 1, each with both B panels: a wave computes 64x128
+    of a half, four A rows and eight B fragments a K-step, where a pass
+    reads four of each for half the WMMAs. A panels have a slot each; B
+    panels share a slot of two, one per K tile parity, so the next tile's B
+    loads while this tile's is read (:class:`HalfWalk`).
 
     ``read_bases`` is where the LDS read addresses come from: ``"loop"``
     computes each fragment's address next to its reads; ``"fixed"`` (the
@@ -505,11 +512,22 @@ class MxGemmSpec:
 
     @property
     def panels(self) -> bool:
-        return self.walk == "panels"
+        """``walk`` "panels" or "halves": A and B in 128-row panel slots."""
+        return self.walk in ("panels", "halves")
+
+    @property
+    def halves(self) -> bool:
+        return self.walk == "halves"
 
     @property
     def pass_spec(self) -> "MxGemmSpec":
-        """With ``walk`` "panels", one 128x128 pass as a tile of its own."""
+        """With ``walk`` "panels", one 128x128 pass as a tile of its own;
+        with "halves", one 128x256 half, its B padded as A (both are read
+        from panel slots)."""
+        if self.halves:
+            half = replace(self, tile_m=self.tile_m // 2, walk="tile")
+            pads = resolved_lds_pads(half)
+            return replace(half, b_lds_pad=pads["a"], b_scale_lds_pad=pads["a_scale"])
         return replace(
             self, tile_m=self.tile_m // 2, tile_n=self.tile_n // 2, walk="tile"
         )
@@ -603,6 +621,8 @@ class MxGemmSpec:
 
     @property
     def lds_bytes(self) -> int:
+        if self.halves:
+            return HalfWalk.lds_bytes(self.lds_layout)
         buffers = _PANEL_SLOTS if self.panels else self.lds_buffers
         return buffers * self.lds_layout.buffer_bytes
 
@@ -646,7 +666,8 @@ class MxGemmSpec:
                 "lb3": self.lds_buffers == 3,
                 "swait": self.scale_swap == "wait",
                 "ril": self.read_issue == "interleave",
-                "pw": self.panels,
+                "pw": self.walk == "panels",
+                "pwh": self.halves,
                 "rbf": self.fixed_bases,
             },
         )
@@ -845,7 +866,9 @@ def mx_gemm_panel_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
     """``walk`` "panels": one LDS slot, ``[data components][scale
     components]`` of one 128-row panel of A or of B, a component of 32 rows
     per wave, padded as the 128x128 pass tile's operands. A and B read the
-    same offsets, each from its own slot."""
+    same offsets, each from its own slot. With "halves" a B slot holds both
+    B panels, ``[8 data components][8 scale components]``: rows 0..255 of
+    B, read as the 128x256 half tile's B."""
     pass_spec = spec.pass_spec
     pads = resolved_lds_pads(pass_spec)
     row_bytes = spec.k_bytes(spec.tile_k)
@@ -858,13 +881,16 @@ def mx_gemm_panel_layout(spec: MxGemmSpec) -> MxGemmLdsLayout:
     data = _OperandLayout(rows, 0, comp, pads["a"], iterate_rows, iterate_stride)
     scale_base = _WAVES * comp
     scales = _OperandLayout(rows, scale_base, scale_size, scale_pad, 0, 0)
+    b_scales = scales
+    if spec.halves:
+        b_scales = replace(scales, base=2 * _WAVES * comp)
     return MxGemmLdsLayout(
         row_bytes=row_bytes,
         k_steps=spec.k_steps,
         a=data,
         b=data,
         a_scale=scales,
-        b_scale=scales,
+        b_scale=b_scales,
         buffer_bytes=_round_up(scale_base + _WAVES * scale_size, _BANK_CYCLE_BYTES),
     )
 
@@ -1053,28 +1079,30 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
 
 
 def _panel_reason(spec: MxGemmSpec, arch: str) -> str | None:
-    """Why ``walk`` "panels" cannot take ``spec``, else ``None``."""
+    """Why ``walk`` "panels" or "halves" cannot take ``spec``, else ``None``."""
+    walk = f"walk {spec.walk!r}"
     if spec.a_dtype != "fp6" or spec.b_dtype != "fp6":
-        return "walk 'panels' is for FP6"
+        return f"{walk} is for FP6"
     side = 2 * _PANEL_ROWS
     if (spec.tile_m, spec.tile_n, spec.tile_k) != (side, side, 512):
-        return "walk 'panels' needs the 256x256x512 tile"
+        return f"{walk} needs the 256x256x512 tile"
     if tuple(spec.wave_group) != (2, 2) or spec.mma != "16x16":
-        return "walk 'panels' needs wave_group 2x2 and the 16x16 WMMA"
+        return f"{walk} needs wave_group 2x2 and the 16x16 WMMA"
     if spec.local_prefetch != 1:
-        return "walk 'panels' needs local_prefetch 1"
+        return f"{walk} needs local_prefetch 1"
     if spec.lds_buffers != 2 or spec.scale_regs:
         # The slots replace the buffers; scales are staged in the slots.
-        return "walk 'panels' takes no lds_buffers and scales 'lds'"
+        return f"{walk} takes no lds_buffers and scales 'lds'"
     if spec.edge_m or spec.edge_n:
-        return "walk 'panels' needs M and N to be multiples of 256"
+        return f"{walk} needs M and N to be multiples of 256"
     if spec.K % (2 * spec.tile_k):
-        # The loop runs a K tile of each pass order.
-        return f"walk 'panels' needs K to be a multiple of {2 * spec.tile_k}"
+        # The loop runs a K tile of each pass order (each B slot with
+        # "halves").
+        return f"{walk} needs K to be a multiple of {2 * spec.tile_k}"
     if spec.wide_a or spec.wide_b:
-        return "walk 'panels' needs A and B under 2 GiB each"
+        return f"{walk} needs A and B under 2 GiB each"
     reason = validate(spec.pass_spec, arch)
-    return f"walk 'panels' pass tile: {reason}" if reason else None
+    return f"{walk} pass tile: {reason}" if reason else None
 
 
 def is_valid_spec(spec: MxGemmSpec, arch: str = "gfx1250") -> tuple[bool, str]:
@@ -1352,6 +1380,9 @@ class TdmLoader:
             even0, ops.v(ops.mul(p["N"], 4)), ops.v(ops.mul(p["M"], 4))
         )
 
+    def _lds_offset(self, parity):
+        return self.k.buffer_base(parity)
+
     def _patched(self, desc, parity, byte_offset, words):
         """``desc`` with its LDS address moved to buffer ``parity``, its
         global address advanced by ``byte_offset`` and the group-1 words in
@@ -1359,7 +1390,7 @@ class TdmLoader:
         k = self.k
         b, ops = k.b, k.ops
         d0, d1, *rest = desc
-        lds = b.add(b.vec_extract(d0, 1), ops.v(k.buffer_base(parity)))
+        lds = b.add(b.vec_extract(d0, 1), ops.v(self._lds_offset(parity)))
         lo, hi = b.vec_extract(d0, 2), b.vec_extract(d0, 3)
         address = b.lor(
             b.shl(b.zext(b.land(hi, b.const_i32(0x1FFFFFF)), I64), b.const_i64(32)),
@@ -1420,10 +1451,15 @@ class TdmLoader:
 
 
 class PanelTdmLoader(TdmLoader):
-    """``walk`` "panels": panel loads. Wave ``w`` copies component ``w`` (32
-    rows) of a 128-row A or B panel, its data then its scales, into a panel
-    slot; the descriptors of panel 0, slot 0 are built once per operand and
-    each load patches the slot, the K tile and the panel's rows."""
+    """``walk`` "panels" and "halves": panel loads. Wave ``w`` copies
+    component ``w`` (32 rows) of a 128-row A or B panel, its data then its
+    scales, into a panel slot; the descriptors of panel 0 at LDS offset 0
+    are built once per operand and each load patches the LDS offsets, the K
+    tile and the panel's rows."""
+
+    def _lds_offset(self, at):
+        # Panel loads take LDS byte offsets, not buffer parities.
+        return at
 
     def hoist(self) -> None:
         k = self.k
@@ -1440,9 +1476,10 @@ class PanelTdmLoader(TdmLoader):
             "b": ops.v(ops.mul(p["N"], 4)),
         }
 
-    def issue_panel(self, operand: str, panel: int, slot: int, k0) -> None:
+    def issue_panel(self, operand: str, panel: int, at, k0) -> None:
         """This wave's loads of ``operand``'s panel ``panel`` (rows from
-        ``panel * 128``) of the K tile at ``k0`` into slot ``slot``."""
+        ``panel * 128``) of the K tile at ``k0``; ``at`` is the LDS offset
+        of its data and of its scales (``PanelWalk.at``, ``HalfWalk.at``)."""
         k = self.k
         b, ops = k.b, k.ops
         k_byte = k.spec.k_bytes(k0, ops)
@@ -1454,7 +1491,7 @@ class PanelTdmLoader(TdmLoader):
         b.tensor_load_to_lds(
             *self._patched(
                 data,
-                slot,
+                at[0],
                 ops.add(k_byte, rows),
                 {
                     1: b.shl(remaining_k, c16),
@@ -1471,7 +1508,7 @@ class PanelTdmLoader(TdmLoader):
         b.tensor_load_to_lds(
             *self._patched(
                 scale,
-                slot,
+                at[1],
                 ops.add(
                     b.mul(k_step, self.scale_stride[operand]), panel * _PANEL_ROWS * 4
                 ),
@@ -2680,6 +2717,12 @@ class PanelWalk:
         return panel if operand == "a" else 2 + panel
 
     @classmethod
+    def at(cls, layout: MxGemmLdsLayout, operand: str, panel: int) -> tuple[int, int]:
+        """LDS offsets of a panel's data and scales: its slot's."""
+        offset = cls.slot(operand, panel) * layout.buffer_bytes
+        return offset, offset
+
+    @classmethod
     def first_use(cls, parity: int) -> list[tuple[str, int]]:
         """A tile's panels in the order its passes first use them."""
         seen = []
@@ -2819,7 +2862,7 @@ class PanelPipeline:
             k_next = k.clamp_k(ops.v(ops.add(k_tile, spec.tile_k)))
             for operand, panel in refills:
                 self.tdm.issue_panel(
-                    operand, panel, PanelWalk.slot(operand, panel), k_next
+                    operand, panel, PanelWalk.at(self.kp.layout, operand, panel), k_next
                 )
             k.fence()
 
@@ -2835,7 +2878,9 @@ class PanelPipeline:
         n_acc = self.kp.spec.wave_repeat_m * self.kp.spec.wave_repeat_n
         k.cluster_sync()
         for operand, panel in PanelWalk.first_use(0):
-            self.tdm.issue_panel(operand, panel, PanelWalk.slot(operand, panel), c0)
+            self.tdm.issue_panel(
+                operand, panel, PanelWalk.at(self.kp.layout, operand, panel), c0
+            )
         for ahead in range(1, spec.gl2_prefetch_distance):
             self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
         self._wait(self.counts["prologue"])
@@ -2889,6 +2934,225 @@ class PanelPipeline:
         if spec.has_cluster:
             k.cluster_sync()
         return [results[q * n_acc : (q + 1) * n_acc] for q in range(4)]
+
+
+class HalfWalk:
+    """``walk`` "halves": the order of a 256x256 tile's two 128x256 halves
+    and the panel loads around them. Half ``h`` multiplies A panel ``h`` by
+    both B panels. The LDS holds ``[A0][A1][B slot 0][B slot 1]``: a slot
+    per A panel and a slot of both B panels per K tile parity. After half 0
+    the A0 slot is refilled with the next tile's A0; after half 1 the A1
+    slot with the next tile's A1, then the tile's B slot with B two tiles
+    ahead, so the next tile's B loads while this tile's is read. Every wave
+    issues two TDM loads per panel (its component's data and scales)."""
+
+    LOADS_PER_PANEL = 2
+
+    @staticmethod
+    def pair_bytes(layout: MxGemmLdsLayout) -> int:
+        """Bytes of a B slot (both panels and their scales)."""
+        scales = layout.b_scale
+        return _round_up(scales.base + 2 * _WAVES * scales.stride, _BANK_CYCLE_BYTES)
+
+    @classmethod
+    def lds_bytes(cls, layout: MxGemmLdsLayout) -> int:
+        return 2 * layout.buffer_bytes + 2 * cls.pair_bytes(layout)
+
+    @classmethod
+    def bases(cls, layout: MxGemmLdsLayout, half: int, parity: int) -> tuple:
+        """(A slot, B slot) offsets of half ``half`` of a tile of parity
+        ``parity``."""
+        a_slot = half * layout.buffer_bytes
+        return a_slot, 2 * layout.buffer_bytes + parity * cls.pair_bytes(layout)
+
+    @classmethod
+    def at(
+        cls, layout: MxGemmLdsLayout, operand: str, panel: int, parity: int
+    ) -> tuple[int, int]:
+        """LDS offsets of a panel's data and scales: A panel ``panel`` in
+        its slot, B panel ``panel`` in the B slot of ``parity`` (components
+        ``4 * panel`` on)."""
+        a_slot, b_slot = cls.bases(layout, panel, parity)
+        if operand == "a":
+            return a_slot, a_slot
+        first = panel * _WAVES
+        return (
+            b_slot + first * layout.b.stride,
+            b_slot + first * layout.b_scale.stride,
+        )
+
+    @staticmethod
+    def prologue() -> list[tuple[str, int, int]]:
+        """Loads before the loop as ``(operand, panel, K tile)``: tile 0's
+        half-0 panels, then what a tile's end loads (A1 of tile 0, B of
+        tile 1)."""
+        return [("a", 0, 0), ("b", 0, 0), ("b", 1, 0)] + [
+            (operand, panel, ahead - 1) for operand, panel, ahead in HalfWalk.refills(1)
+        ]
+
+    @staticmethod
+    def refills(half: int) -> list[tuple[str, int, int]]:
+        """Loads after half ``half``'s last read, ``(operand, panel, K
+        tiles ahead)``, in issue order."""
+        if half == 0:
+            return [("a", 0, 1)]
+        return [("a", 1, 1), ("b", 0, 2), ("b", 1, 2)]
+
+    @staticmethod
+    def needs(half: int) -> list[tuple[str, int]]:
+        return [("a", 0), ("b", 0), ("b", 1)] if half == 0 else [("a", 1)]
+
+    @classmethod
+    def waits(cls) -> dict:
+        """``s_wait_tensorcnt`` counts: ``"prologue"`` before tile 0's half
+        0, and ``h`` before half ``h`` of a tile. Read-ahead places the wait
+        before a half ahead of the refills after the half before it. The
+        counts repeat from tile 0's half 1 on."""
+        issued = [(tile, operand, panel) for operand, panel, tile in cls.prologue()]
+        pending, counts = [], {}
+        for tile in range(5):
+            for half in (0, 1):
+                last = max(issued.index((tile, *panel)) for panel in cls.needs(half))
+                count = (len(issued) - 1 - last) * cls.LOADS_PER_PANEL
+                key = "prologue" if tile == 0 and half == 0 else half
+                if key in counts:
+                    assert counts[key] == count, (key, counts[key], count)
+                counts[key] = count
+                issued += pending
+                pending = [
+                    (tile + ahead, operand, panel)
+                    for operand, panel, ahead in cls.refills(half)
+                ]
+        return counts
+
+
+class HalfPipeline(PanelPipeline):
+    """``walk`` "halves" (read-ahead): the K loop over pairs of tiles (one
+    per B slot, :class:`HalfWalk`), each tile two halves of the 128x256
+    compute. A half's last K-step reads the next half's K-step 0 after the
+    wait for the panels it uses first; the cluster was signalled in its
+    second-to-last K-step and the late refill loads the panels it frees."""
+
+    def __init__(
+        self,
+        k: _Kernel,
+        kp: _Kernel,
+        tdm: PanelTdmLoader,
+        gl2: Gl2Prefetcher,
+        tile: TileCompute,
+    ):
+        super().__init__(k, kp, tdm, gl2, tile)
+        self.counts = HalfWalk.waits()
+
+    def bases(self, pair):
+        half, parity = pair
+        return HalfWalk.bases(self.kp.layout, half, parity)
+
+    def hooks(self, k_tile, parity: int, half: int) -> _Hooks:
+        k = self.k
+        b, ops, spec = k.b, k.ops, k.spec
+
+        def signal() -> None:
+            k.fence()
+            b.inline_asm(_CLUSTER_SIGNAL_WAVE0_ASM, "s,~{scc},~{memory}", [k.wave])
+            k.fence()
+
+        def refill() -> None:
+            if half == 0 and spec.gl2_prefetch_distance:
+                distance = spec.gl2_prefetch_distance
+                self.gl2.prefetch(
+                    ops.v(ops.add(k_tile, distance * spec.tile_k)),
+                    (parity + distance) % 2,
+                )
+            k.fence()
+            self._wait(self.counts[1 - half])
+            k.fence()
+
+        def late(pending: int | None = None) -> None:
+            k.fence()
+            if spec.has_cluster:
+                b.inline_asm(_CLUSTER_WAIT_ASM, "~{memory}")
+            if pending is None:
+                pending = self.kp.spec.late_pending_reads
+            b.inline_asm(f"s_wait_dscnt {min(pending, _DSCNT_MAX)}", "~{memory}")
+            b.s_barrier_bare()
+            k_next = {}
+            for operand, panel, ahead in HalfWalk.refills(half):
+                if ahead not in k_next:
+                    k_next[ahead] = k.clamp_k(
+                        ops.v(ops.add(k_tile, ahead * spec.tile_k))
+                    )
+                at = HalfWalk.at(self.kp.layout, operand, panel, parity)
+                self.tdm.issue_panel(operand, panel, at, k_next[ahead])
+            k.fence()
+
+        return _Hooks(
+            refill=refill,
+            signal=signal if spec.has_cluster else None,
+            late_refill=late,
+        )
+
+    def run(self) -> list[list]:
+        k, tile = self.k, self.tile
+        b, ops, spec, c0 = k.b, k.ops, k.spec, k.c0
+        layout = self.kp.layout
+        n_acc = self.kp.spec.wave_repeat_m * self.kp.spec.wave_repeat_n
+        k.cluster_sync()
+        for operand, panel, k_tile in HalfWalk.prologue():
+            at = HalfWalk.at(layout, operand, panel, k_tile % 2)
+            k0 = ops.v(k_tile * spec.tile_k) if k_tile else c0
+            self.tdm.issue_panel(operand, panel, at, k0)
+        for ahead in range(1, spec.gl2_prefetch_distance):
+            self.gl2.prefetch(ops.v(ahead * spec.tile_k), ahead % 2)
+        self._wait(self.counts["prologue"])
+        b.inline_asm("", "~{memory}")
+        if spec.fixed_bases:
+            tile.reader.fix_bases(
+                [self.bases((half, parity)) for parity in (0, 1) for half in (0, 1)]
+            )
+        acc = [
+            [b.zero_vec_f32(spec.atom.c_frag_len) for _ in range(n_acc)]
+            for _ in range(2)
+        ]
+        head_values = tile.flatten(tile.first_head(self.bases((0, 0))))
+        n_head = len(head_values)
+        carried = [
+            (f"acc{h}_{i}", v)
+            for h, values in enumerate(acc)
+            for i, v in enumerate(values)
+        ] + [(f"head{i}", v) for i, v in enumerate(head_values)]
+        loop = b.scf_for_iter(
+            c0,
+            k.params["K"],
+            b.const_i32(2 * spec.tile_k),
+            carried,
+            iv_name="k0",
+            elide_trailing_barrier=False,
+        )
+        with loop as (k0, values):
+            acc = [list(values[h * n_acc : (h + 1) * n_acc]) for h in range(2)]
+            head_vals = list(values[2 * n_acc :])
+            for parity in (0, 1):
+                k_tile = ops.add(k0, parity * spec.tile_k)
+                for half in (0, 1):
+                    upcoming = (1, parity) if half == 0 else (0, 1 - parity)
+                    acc[half], head = tile.run(
+                        self.bases((half, parity)),
+                        acc[half],
+                        hooks=self.hooks(k_tile, parity, half),
+                        head=tile.unflatten(head_vals),
+                        next_parity=self.bases(upcoming),
+                    )
+                    head_vals = tile.flatten(head)
+            b.scf_yield(*(v for values in acc for v in values), *head_vals)
+        results = list(loop.results[: 2 * n_acc])
+        assert len(loop.results) == 2 * n_acc + n_head
+        # No workgroup may exit while a TDM load into its LDS is in flight:
+        # with multicast, peers' loads write here too.
+        b.s_wait_tensorcnt(0)
+        if spec.has_cluster:
+            k.cluster_sync()
+        return [results[h * n_acc : (h + 1) * n_acc] for h in range(2)]
 
 
 class Epilogue:
@@ -3089,7 +3353,8 @@ class Epilogue:
 def _build_panels(k: _Kernel) -> None:
     """``walk`` "panels": the passes run on ``kp``, the kernel seen as one
     128x128 pass tile over panel slots; each quadrant's accumulators are
-    stored as that tile's, from its corner of the workgroup's output."""
+    stored as that tile's, from its corner of the workgroup's output. With
+    "halves" ``kp`` is one 128x256 half and each half is stored as such."""
     b, ops, spec = k.b, k.ops, k.spec
     k.shared = b.smem_alloc(I8, [spec.lds_bytes], name_hint="ab_tdm")
     k.shared_addr = b.smem_addr_of(k.shared)
@@ -3097,6 +3362,12 @@ def _build_panels(k: _Kernel) -> None:
     tdm = PanelTdmLoader(kp)
     tdm.hoist()
     tile = TileCompute(kp, LdsReader(kp, RowMaps(kp)))
+    if spec.halves:
+        final = HalfPipeline(k, kp, tdm, Gl2Prefetcher(k), tile).run()
+        for half in (0, 1):
+            kq = replace(kp, block_m=ops.add(k.block_m, half * _PANEL_ROWS))
+            Epilogue(kq, RowMaps(kq)).emit(final[half])
+        return
     final = PanelPipeline(k, kp, tdm, Gl2Prefetcher(k), tile).run()
     for a, b_panel in ((0, 0), (0, 1), (1, 0), (1, 1)):
         kq = replace(

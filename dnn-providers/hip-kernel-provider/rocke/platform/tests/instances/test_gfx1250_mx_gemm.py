@@ -53,6 +53,7 @@ from rocke.instances.gfx1250.mx_gemm import (
     WMMA_REUSE,
     IntOps,
     LdsPad,
+    HalfWalk,
     MxGemmSpec,
     PanelWalk,
     ScaleRegisters,
@@ -105,6 +106,7 @@ _PANELS = {
     "local_prefetch": 1,
     "walk": "panels",
 }
+_HALVES = {**_PANELS, "walk": "halves"}
 
 
 def _spec8(*problem, a_dtype="fp8", b_dtype="fp8", **fields) -> MxGemmSpec:
@@ -457,47 +459,59 @@ class MxGemmSpecTest(unittest.TestCase):
                 self.assertIn(reason, validate(spec) or "")
 
     def test_walk_validate_and_name(self):
-        """Panel walks take FP6 at the 256x256x512 tile with read-ahead, M and
-        N multiples of 256 and K of 1024; they tag the name and take four
-        panel slots of LDS."""
-        self.assertEqual(WALKS, ("tile", "panels"))
-        for fields in (
-            {"half_plr": "none"},
-            {"half_plr": "b"},
-            {"half_plr": "b", "half_b_order": "late"},
-            {
-                "half_plr": "none",
-                "k_reads": "contiguous",
-                "scale_swap": "wait",
-                "read_issue": "interleave",
-            },
-        ):
-            spec = _spec6(*_MAF_MED[0], cluster_dim=(4, 4, 1), **_PANELS, **fields)
-            with self.subTest(spec.kernel_name()):
-                self.assertIsNone(validate(spec))
-                self.assertTrue(spec.kernel_name().endswith("_pw"))
-                self.assertEqual(spec.pass_spec.tile_m, 128)
-                self.assertEqual(spec.pass_spec.walk, "tile")
-                self.assertEqual(spec.lds_bytes, 4 * spec.lds_layout.buffer_bytes)
-        base = {**_PANELS, "half_plr": "none"}
-        bad = {
-            "value": (_spec6(walk="strips"), "walk must be one of"),
-            "fp8": (_spec8(*_MAF_MED[0], **{**base, "tile_k": 256}), "is for FP6"),
-            "tile": (_spec6(*_MAF_MED[0], **{**base, "tile_k": 384}), "256x256x512"),
-            "direct": (
-                _spec6(*_MAF_MED[0], **{**base, "local_prefetch": 0}),
-                "needs local_prefetch 1",
-            ),
-            "buffers": (
-                _spec6(*_MAF_MED[0], **{**base, "lds_buffers": 3}),
-                "takes no lds_buffers",
-            ),
-            "edge": (_spec6(3000, 4096, 65536, **base), "multiples of 256"),
-            "k": (_spec6(3072, 4096, 65536 + 512, **base), "multiple of 1024"),
-        }
-        for label, (spec, reason) in bad.items():
-            with self.subTest(label):
-                self.assertIn(reason, validate(spec) or "")
+        """Panel walks and half walks take FP6 at the 256x256x512 tile with
+        read-ahead, M and N multiples of 256 and K of 1024; they tag the
+        name. Panels take four panel slots of LDS and a 128x128 pass; halves
+        two A slots and two B slots of two panels, and a 128x256 half."""
+        self.assertEqual(WALKS, ("tile", "panels", "halves"))
+        for walk, suffix, pass_n in ((_PANELS, "_pw", 128), (_HALVES, "_pwh", 256)):
+            for fields in (
+                {"half_plr": "none"},
+                {"half_plr": "b"},
+                {"half_plr": "b", "half_b_order": "late"},
+                {
+                    "half_plr": "none",
+                    "k_reads": "contiguous",
+                    "scale_swap": "wait",
+                    "read_issue": "interleave",
+                },
+            ):
+                spec = _spec6(*_MAF_MED[0], cluster_dim=(4, 4, 1), **walk, **fields)
+                with self.subTest(spec.kernel_name()):
+                    self.assertIsNone(validate(spec))
+                    self.assertTrue(spec.kernel_name().endswith(suffix))
+                    self.assertEqual(spec.pass_spec.tile_m, 128)
+                    self.assertEqual(spec.pass_spec.tile_n, pass_n)
+                    self.assertEqual(spec.pass_spec.walk, "tile")
+                    layout = spec.lds_layout
+                    slots = 4 * layout.buffer_bytes
+                    if spec.halves:
+                        slots = 2 * layout.buffer_bytes
+                        slots += 2 * HalfWalk.pair_bytes(layout)
+                    self.assertEqual(spec.lds_bytes, slots)
+            base = {**walk, "half_plr": "none"}
+            name = f"walk {walk['walk']!r}"
+            bad = {
+                "value": (_spec6(walk="strips"), "walk must be one of"),
+                "fp8": (_spec8(*_MAF_MED[0], **{**base, "tile_k": 256}), "is for FP6"),
+                "tile": (
+                    _spec6(*_MAF_MED[0], **{**base, "tile_k": 384}),
+                    "256x256x512",
+                ),
+                "direct": (
+                    _spec6(*_MAF_MED[0], **{**base, "local_prefetch": 0}),
+                    f"{name} needs local_prefetch 1",
+                ),
+                "buffers": (
+                    _spec6(*_MAF_MED[0], **{**base, "lds_buffers": 3}),
+                    "takes no lds_buffers",
+                ),
+                "edge": (_spec6(3000, 4096, 65536, **base), "multiples of 256"),
+                "k": (_spec6(3072, 4096, 65536 + 512, **base), "multiple of 1024"),
+            }
+            for label, (spec, reason) in bad.items():
+                with self.subTest(walk=walk["walk"], case=label):
+                    self.assertIn(reason, validate(spec) or "")
 
     def test_read_bases_validate_and_name(self):
         """Fixed read bases take the 16x16 WMMA and scales without LDS pad;
@@ -507,6 +521,7 @@ class MxGemmSpecTest(unittest.TestCase):
         for spec in (
             _spec6(tile_m=128, tile_n=128, tile_k=512, lds_buffers=3, **ahead),
             _spec6(512, 512, 2048, cluster_dim=(2, 2, 1), **_PANELS, half_plr="none"),
+            _spec6(512, 512, 2048, cluster_dim=(2, 2, 1), **_HALVES, half_plr="none"),
             _spec6(
                 1024,
                 16,
@@ -607,6 +622,95 @@ class MxGemmSpecTest(unittest.TestCase):
                 sorted(p for j in range(4) for p in PanelWalk.refills(parity)[j]),
                 [("a", 0), ("a", 1), ("b", 0), ("b", 1)],
             )
+
+    def test_half_layout(self):
+        """With halves an A slot is a panel slot; a B slot holds both B
+        panels as rows 0..255 (eight 32-row components) and then their
+        scales. Each wave's TDM load of a B panel's component lands where
+        the reader looks for those rows and scales, and the slots fill the
+        LDS without overlapping."""
+        spec = _spec6(*_MAF_MED[0], cluster_dim=(4, 4, 1), **_HALVES, half_plr="none")
+        layout = spec.lds_layout
+        panels = _spec6(*_MAF_MED[0], cluster_dim=(4, 4, 1), **_PANELS, half_plr="none")
+        self.assertEqual(layout.buffer_bytes, panels.lds_layout.buffer_bytes)
+        self.assertEqual(layout.a, layout.b)
+        data_end = 8 * layout.b.stride
+        self.assertEqual(layout.b_scale.base, data_end)
+        pair = HalfWalk.pair_bytes(layout)
+        rows = [layout.row_offset(IntOps, "b", row) for row in range(256)]
+        self.assertEqual(len(set(rows)), 256)
+        self.assertTrue(all(0 <= r and r + 384 <= data_end for r in rows))
+        words = {
+            layout.scale_offset(IntOps, "b_scale", step, row)
+            for step in range(spec.k_steps)
+            for row in range(256)
+        }
+        self.assertEqual(len(words), 256 * spec.k_steps)
+        self.assertTrue(all(data_end <= w < pair for w in words))
+        for parity, panel, wave in itertools.product((0, 1), (0, 1), range(4)):
+            with self.subTest(parity=parity, panel=panel, wave=wave):
+                b_slot = HalfWalk.bases(layout, 0, parity)[1]
+                data_at, scale_at = HalfWalk.at(layout, "b", panel, parity)
+                row = 128 * panel + 32 * wave
+                self.assertEqual(
+                    data_at + layout.component_base(IntOps, layout.b, wave),
+                    b_slot + layout.row_offset(IntOps, "b", row),
+                )
+                self.assertEqual(
+                    scale_at + layout.component_base(IntOps, layout.b_scale, wave),
+                    b_slot + layout.scale_offset(IntOps, "b_scale", 0, row),
+                )
+        spans = sorted(
+            [(HalfWalk.at(layout, "a", h, 0)[0], layout.buffer_bytes) for h in (0, 1)]
+            + [(HalfWalk.bases(layout, 0, p)[1], pair) for p in (0, 1)]
+        )
+        for (start, size), (after, _) in zip(spans, spans[1:]):
+            self.assertLessEqual(start + size, after)
+        self.assertEqual(spans[-1][0] + spans[-1][1], spec.lds_bytes)
+        self.assertLessEqual(spec.lds_bytes, 320 * 1024)
+
+    def test_half_walk_schedule(self):
+        """Over six K tiles, with the TDM waits of :meth:`HalfWalk.waits`
+        (read-ahead: the wait before a half precedes the refills after the
+        half before it), every half finds its tile's A panel and both B
+        panels loaded, and no refill lands in a slot the next half reads."""
+        waits = HalfWalk.waits()
+        self.assertEqual(waits, {"prologue": 6, 1: 4, 0: 0})
+        loads = HalfWalk.LOADS_PER_PANEL
+
+        def slot(tile, operand, panel):
+            return ("a", panel) if operand == "a" else ("b", tile % 2, panel)
+
+        issued = [(tile, op, panel) for op, panel, tile in HalfWalk.prologue()]
+        self.assertEqual(
+            issued,
+            [
+                (0, "a", 0),
+                (0, "b", 0),
+                (0, "b", 1),
+                (0, "a", 1),
+                (1, "b", 0),
+                (1, "b", 1),
+            ],
+        )
+        done, pending, slots = 0, [], {}
+        for tile in range(6):
+            for half in (0, 1):
+                count = waits["prologue" if tile == 0 and half == 0 else half]
+                done = max(done, len(issued) - count // loads)
+                for entry in issued[:done]:
+                    slots[slot(*entry)] = entry[0]
+                reads = [slot(tile, "a", half)] + [slot(tile, "b", p) for p in (0, 1)]
+                for read in reads:
+                    with self.subTest(tile=tile, half=half, slot=read):
+                        self.assertEqual(slots.get(read), tile)
+                for entry in pending:
+                    self.assertNotIn(slot(*entry), reads)
+                issued += pending
+                pending = [
+                    (tile + ahead, op, panel)
+                    for op, panel, ahead in HalfWalk.refills(half)
+                ]
 
     def test_scale_register_halves(self):
         """Lanes 0-15 hold the first half of an operand's repeats, lanes
@@ -1309,6 +1413,34 @@ class MxGemmIrTest(unittest.TestCase):
                 waited = [int(w) for w in re.findall(tile_wait, llvm)]
                 self.assertEqual(waited, expected + [0])
 
+    def test_half_walk_ir(self):
+        """A half walk's loop runs two K tiles of two halves of the 128x256
+        compute (512 WMMAs); the prologue loads tile 0's three half-0 panels,
+        its A1 and tile 1's B, and each tile four panels (data and scales
+        per wave); the TDM waits follow :meth:`HalfWalk.waits`."""
+        tdm = r"call void @llvm\.amdgcn\.tensor\.load\.to\.lds\("
+        tile_wait = r"call void @llvm\.amdgcn\.s\.wait\.tensorcnt\(i16 (\d+)\)"
+        waits = HalfWalk.waits()
+        expected = [waits["prologue"]] + [waits[1], waits[0]] * 2 + [0]
+        for fields in (
+            {"half_plr": "none"},
+            {"half_plr": "b"},
+            {
+                "half_plr": "none",
+                "k_reads": "contiguous",
+                "scale_swap": "wait",
+                "read_issue": "interleave",
+            },
+        ):
+            spec = _spec6(512, 512, 2048, cluster_dim=(2, 2, 1), **_HALVES, **fields)
+            with self.subTest(spec.kernel_name()):
+                self.assertIsNone(validate(spec))
+                llvm = _llvm(spec)
+                self.assertEqual(len(re.findall(_WMMA, llvm)), 2 * 2 * 4 * 32)
+                self.assertEqual(len(re.findall(tdm, llvm)), (6 + 2 * 4) * 2)
+                waited = [int(w) for w in re.findall(tile_wait, llvm)]
+                self.assertEqual(waited, expected)
+
     def test_fixed_read_bases_ir(self):
         """Fixed read bases: one opaque register per buffer (pass slot) and A
         row, B fragment and scale group, made before the K loop (a
@@ -1342,6 +1474,14 @@ class MxGemmIrTest(unittest.TestCase):
                 (2, 2),
                 4,
                 4,
+            ),
+            (
+                _spec6(
+                    512, 512, 2048, cluster_dim=(2, 2, 1), **_HALVES, half_plr="none"
+                ),
+                (2, 2),
+                4,
+                8,
             ),
             (
                 _spec6(
@@ -2357,6 +2497,25 @@ class MxGemmHostBuildTest(unittest.TestCase):
                     {"half_plr": "b"},
                 )
             ),
+            # Half walks at the MAF shape: block reads, half-B ahead and late,
+            # fixed read bases (interleaved reads hold two K-steps of the
+            # half's operands and spill).
+            *(
+                _spec6(
+                    *_MAF_MED[0],
+                    cluster_dim=(4, 4, 1),
+                    k_reads="contiguous",
+                    scale_swap="wait",
+                    **_HALVES,
+                    **f,
+                )
+                for f in (
+                    {"half_plr": "none"},
+                    {"half_plr": "none", "read_bases": "fixed"},
+                    {"half_plr": "b"},
+                    {"half_plr": "b", "half_b_order": "late"},
+                )
+            ),
             # Interleaved reads at the MAB tiling (one N-repeat, one-word B
             # scales).
             _spec6(
@@ -2690,6 +2849,48 @@ class MxGemmDeviceTest(unittest.TestCase):
                     (
                         (512, 256, 2048),
                         {"half_b_order": "late", "cluster_dim": (1, 1, 1)},
+                    ),
+                )
+            ]
+            # Half walks: every read-ahead path, clusters, two and four loop
+            # passes, chunked FP6, fixed read bases.
+            + [
+                _spec6(*problem, **_HALVES, **fields)
+                for problem, fields in (
+                    (
+                        (512, 512, 2048),
+                        {
+                            "half_plr": "none",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "read_issue": "interleave",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                    ((512, 512, 2048), {"half_plr": "none", "cluster_dim": (1, 1, 1)}),
+                    (
+                        (512, 512, 4096),
+                        {
+                            "half_plr": "b",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "cluster_dim": (2, 2, 1),
+                        },
+                    ),
+                    (
+                        (256, 512, 2048),
+                        {"half_b_order": "late", "cluster_dim": (2, 1, 1)},
+                    ),
+                    (
+                        (512, 256, 2048),
+                        {
+                            "half_plr": "none",
+                            "k_reads": "contiguous",
+                            "scale_swap": "wait",
+                            "read_issue": "interleave",
+                            "read_bases": "fixed",
+                            "cluster_dim": (1, 2, 1),
+                        },
                     ),
                 )
             ]
