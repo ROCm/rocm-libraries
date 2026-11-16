@@ -157,6 +157,34 @@ def test_prepared_commit_matches_refresh_after_bank_changes(dtype, iterate, dept
                 assert current.get(f"tdm{a}Group0+3") >> 30 == 2
 
 
+def test_prepared_segmented_mx_addresses_match_ordinary_wave_components():
+    kernel, tensors, writer = _setup()
+    kernel.update(MacroTile0=128, MacroTile1=256, LDSSegmentInterleave=1,
+                  LDSSegInterleaveOffsets={"mxsSplitA": True})
+    prepared = writer.papTdmPrepareAddressPair(
+        kernel, tensors["MXSA"], tensors["MXSB"], _NEXT, _OUTPUT["MXSA"], _SCRATCH)
+    ordinary = writer.tdmGlobalOffsetWaveSeparated(
+        kernel, tensors["MXSA"], tensors["MXSB"])
+    _assert_pure(prepared)
+
+    for wave in range(4):
+        machine = _machine(kernel, tensors, wave)
+        machine.set("SizeI", 512)
+        machine.set("SizeJ", 32768)
+        for index in _NEXT.values():
+            machine.set(index, 0)
+        tc = "MXSA" if wave % 2 == 0 else "MXSB"
+        base = machine.get(f"Address{tc}", 2) | (2 << 62)
+        machine.set("tdmMXSAGroup0+2", base, 2)
+        _run(machine, ordinary)
+        _run(machine, prepared)
+        # Segmented MXSA splits 128 rows into two 64-row pieces with four
+        # scale bytes per row. MXSB retains K-splitting and its N-row pitch.
+        component_offset = (wave // 2) * (256 if tc == "MXSA" else 4 * 32768)
+        assert machine.get("tdmMXSAGroup0+2", 2) == base + component_offset
+        assert machine.get(_OUTPUT["MXSA"], 2) == base + component_offset
+
+
 @pytest.mark.parametrize("cluster", [(1, 1), (2, 4)])
 def test_user_args_direct_mode_matches_refresh_with_packed_wave_bits(cluster):
     kernel, tensors, writer = _setup(cluster=cluster)

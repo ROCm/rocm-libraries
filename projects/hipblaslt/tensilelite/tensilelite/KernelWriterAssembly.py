@@ -26187,13 +26187,16 @@ class KernelWriterAssembly(KernelWriter):
         return round(tile1 // numComp * bpe)
       unit = mxUnit(tP)
       kGroups = kernel["DepthU"] // kernel["MatrixInstK"]
-      return unit * kGroups // numComp if kGroups >= numComp else round(mt // numComp * unit * bpe)
+      # Segmented MXSA partitions M, even when K has enough groups to split.
+      kSplit = kGroups >= numComp and not mxSegmentSplit(kernel, tP["tensorChar"])
+      return unit * kGroups // numComp if kSplit else round(mt // numComp * unit * bpe)
 
     def waveStride(tP):
       if not isMX:
         return self.strideRef(tP["tensorChar"], 3 if tP["tlu"] else tP["idx"])
       kGroups = kernel["DepthU"] // kernel["MatrixInstK"]
-      return sgpr(f"Size{INDEX_CHARS[tP['idx']]}") if kGroups >= numComp else 1
+      kSplit = kGroups >= numComp and not mxSegmentSplit(kernel, tP["tensorChar"])
+      return sgpr(f"Size{INDEX_CHARS[tP['idx']]}") if kSplit else 1
 
     parity()
     select(s0, [waveFactor(tP) for tP in pair], "PAP select component byte factor")
