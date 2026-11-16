@@ -601,6 +601,13 @@ inline std::optional<BoundTokens> flydslSdpaRdnaGraphMatchesFor(const MatchConte
     }
     // Variable sequence lengths (padding, or packed THD Q/K/V/O) and dropout (the probability,
     // seed, offset, mask, scale and RNG dump): each feature's rules live in its own header.
+    // Cumulative lengths (cu_seq_len_*) are a different form from the per-batch lengths the
+    // varlen helpers read; the kernels do not implement them.
+    if(attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
     const auto varlen = hasRaggedOperand(context, attributes)
                             ? servablePackedVarlenWithLengths(context, attributes, problem.batch)
                             : servableVarlenAsReferenceReads(context, attributes, problem.batch);
