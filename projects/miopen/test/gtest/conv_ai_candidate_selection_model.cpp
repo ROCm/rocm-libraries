@@ -213,26 +213,6 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
     }
 }
 
-TEST_P(GPU_CandidateSelection_FP32, KernelStrMappingUnknownKernelThrows_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    EXPECT_THROW(meta.GetKernelStrMapping("unknown_kernel_name"), std::exception);
-}
-
-TEST_P(GPU_CandidateSelection_FP32, OutputConstantRetrieval_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    if(!meta.output_params().empty())
-    {
-        auto known = meta.GetOutputConstant(meta.output_params()[0]);
-        SUCCEED();
-    }
-    auto unknown = meta.GetOutputConstant("nonexistent_param");
-    EXPECT_EQ(unknown, std::nullopt);
-}
-
 TEST_P(GPU_CandidateSelection_FP32, InputOutputParamIndexThrows_Test)
 {
     const auto& params = GetParam();

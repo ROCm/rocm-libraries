@@ -67,18 +67,6 @@ int LayoutStringToCode(const std::string& layout, bool is3d)
     return -1; // Unknown
 }
 
-// Dummy kernels for testing
-const std::vector<std::string> dummy_kernels = {
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,32,64,4,Default,4,1,2,1,2,4,4,1,1,4>",
-    "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,256,128,4,Default,4,4,2,4,4,4,2,1,1,4>",
-};
-
-// Dummy fill_valid_kernels for testing
-static std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-    fill_valid_kernels = [](const miopen::conv::ProblemDescription&) { return dummy_kernels; };
-
 // Helper: reusable 2D problem description
 miopen::conv::ProblemDescription GetReusable2DProblemDescription(
     miopenDataType_t dataType         = miopenFloat,
@@ -275,8 +263,6 @@ ConvNDKernelTuningTestName(const ::testing::TestParamInfo<ConvNDKernelTuningTest
 
 // Helper function for metadata encoding validation
 // Validates that all CK kernel instances can be encoded without errors
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 } // anonymous namespace
 
@@ -598,12 +584,6 @@ TEST_F(CPU_HeuristicInitState_NONE, KernelIdFormatting)
 }
 
 // Non-parameterized utility tests
-class GPU_ConvNDKernelTuningUtils_FP32 : public GPU_ConvNDKernelTuning_Base
-{
-protected:
-    bool RequiresAIModels() const override { return false; }
-};
-
 // Parameterized feature extraction tests
 class GPU_ConvNDKernelTuning_FP32
     : public GPU_ConvNDKernelTuning_Base,
@@ -634,71 +614,6 @@ TEST_P(GPU_ConvNDKernelTuning_FP32, GetFeaturesND_Test)
     size_t expected_feature_count = (spatial_dim == 3) ? 29u : 23u;
     ASSERT_EQ(features.size(), expected_feature_count);
     CheckGetFeaturesND_MapValues(features, problem, param.direction, spatial_dim == 3);
-}
-
-TEST_F(GPU_ConvNDKernelTuningUtils_FP32, GetKernelAsTokens_Test)
-{
-    auto tokens = GetKernelAsTokens("type<param1,param2>");
-    ASSERT_EQ(tokens.size(), 3u);
-    EXPECT_EQ(tokens[0], "type");
-    EXPECT_EQ(tokens[1], "param1");
-    EXPECT_EQ(tokens[2], "param2");
-
-    auto empty = GetKernelAsTokens("");
-    ASSERT_TRUE(empty.empty());
-}
-
-TEST_F(GPU_ConvNDKernelTuningUtils_FP32, ProcessExplicitXdlParams_Test)
-{
-    // Test case matching the Python preprocessing logic
-    std::vector<std::string> input = {"DeviceGroupedConvBwdWeight_Explicit_Xdl",
-                                      "DeviceBatchedGemmXdlUniversal<Default,CRR>",
-                                      "BlkSize:256",
-                                      "BlkTile:256x256x32",
-                                      "WaveTile:32x32",
-                                      "WaveMap:4x4",
-                                      "VmemReadVec:8x8",
-                                      "BlkGemmPipelineScheduler:Intrawave",
-                                      "BlkGemmPipelineVersion:v4",
-                                      "BlkGemmPipelinePrefetchStages:3",
-                                      "1"};
-
-    auto result = ProcessExplicitXdlParams(input);
-
-    std::vector<std::string> expected = {
-        "DeviceGroupedConvBwdWeight_Explicit_Xdl",    // 0: unchanged
-        "DeviceBatchedGemmXdlUniversal<Default,CRR>", // 1: unchanged (no colon)
-        "256",                                        // 2: BlkSize value
-        "256",
-        "256",
-        "32", // 3-5: BlkTile split
-        "32",
-        "32", // 6-7: WaveTile split
-        "4",
-        "4", // 8-9: WaveMap split
-        "8",
-        "8",                                  // 10-11: VmemReadVec split
-        "BlkGemmPipelineScheduler:Intrawave", // 12: BlkGemmPipelineScheduler value
-        "BlkGemmPipelineVersion:v4",          // 13: BlkGemmPipelineVersion value
-        "3",                                  // 14: BlkGemmPipelinePrefetchStages value
-        "1"                                   // 15: split_k value
-    };
-
-    ASSERT_EQ(result.size(), expected.size())
-        << "Expected " << expected.size() << " parameters, got " << result.size();
-
-    for(size_t i = 0; i < expected.size(); ++i)
-    {
-        EXPECT_EQ(result[i], expected[i]) << "Mismatch at index " << i << ": expected '"
-                                          << expected[i] << "', got '" << result[i] << "'";
-    }
-}
-
-TEST_F(GPU_ConvNDKernelTuningUtils_FP32, ProcessExplicitXdlParams_EmptyInput_Test)
-{
-    std::vector<std::string> empty_input;
-    auto result = ProcessExplicitXdlParams(empty_input);
-    ASSERT_TRUE(result.empty());
 }
 
 // ------------------- AI Model Tests (Architecture-Dependent) -------------------
@@ -755,35 +670,7 @@ TEST_P(GPU_ConvNDKernelTuningAI_FP32, CandidateSelectionModel_Test)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 // Helper: get all kernel type strings for a given solver type via CkImplLibLoader
-std::vector<std::string> GetAllKernelTypeStringsFor(miopen::solver::CKSolverType solver,
-                                                    const std::string& device_name)
-{
-    return miopen::solver::CkImplLibLoader::Get(device_name).GetAllKernelTypeStrings(solver);
-}
-
 // Fixed fixture tests for specific directions (non-parameterized)
-class GPU_Conv2DKernelTuningAI_FP32 : public GPU_ConvNDKernelTuningAI_Base
-{
-protected:
-    void SetUp() override
-    {
-        spatial_dim = 2;
-        solver_name = "ConvHipImplicitGemmGroupWrwXdlops";
-        GPU_ConvNDKernelTuningAI_Base::SetUp();
-    }
-};
-
-class GPU_Conv3DKernelTuningAI_FP32 : public GPU_ConvNDKernelTuningAI_Base
-{
-protected:
-    void SetUp() override
-    {
-        spatial_dim = 3;
-        solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
-        GPU_ConvNDKernelTuningAI_Base::SetUp();
-    }
-};
-
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 // ------------------- Full Solver Tests -------------------
@@ -1032,10 +919,6 @@ TEST_F(CPU_RunKTNGeneric_NONE, Documentation_Test)
 // RunAIHeuristics Integration Tests
 // ===============================================================================
 
-class GPU_RunAIHeuristics_Integration_FP32 : public GPU_ConvNDKernelTuningAI_Base
-{
-};
-
 // ===============================================================================
 // CK Validator Integration Tests
 // ===============================================================================
@@ -1048,52 +931,6 @@ class GPU_RunAIHeuristics_Integration_FP32 : public GPU_ConvNDKernelTuningAI_Bas
  * This fixture tests that RunAIHeuristics correctly uses the ck_validator_creator
  * parameter to reject invalid kernel+split_k combinations.
  */
-class GPU_CKValidatorIntegration_FP32 : public GPU_ConvNDKernelTuningAI_Base
-{
-protected:
-    // Shared configuration for WrW solver
-    static constexpr SolverHeuristicConfig kWrwConfig = {
-        "ConvHipImplicitGemmGroupWrwXdlops", // solver_name
-        "ConvHipIgemmGroupXdlops",           // solver_name_ktn
-        2,                                   // spatial_dims
-        true,                                // uses_split_k
-        1,                                   // split_k_min
-        128,                                 // split_k_max
-        false,                               // supports_split_k_autodeduce
-        true                                 // supports_ktn
-    };
-
-    // Shared state variables
-    std::vector<std::string> valid_kernels_;
-    int index_   = 0;
-    int split_k_ = 0;
-    std::string kernel_id_;
-    miopen::conv::ProblemDescription problem_;
-
-    // Shared test kernels
-    std::vector<std::string> test_kernels_ = {
-        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
-        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>",
-        "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256,256,128,4,Default,4,4,2,4,4,4,2,1,1,4>"};
-
-    void SetUp() override
-    {
-        spatial_dim = 2;
-        solver_name = "ConvHipImplicitGemmGroupWrwXdlops";
-        GPU_ConvNDKernelTuningAI_Base::SetUp();
-
-        // Initialize problem description
-        problem_ =
-            GetReusable2DProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
-    }
-
-    // Helper: Create HeuristicInitState with fixture members
-    HeuristicInitState CreateState()
-    {
-        return HeuristicInitState(valid_kernels_, index_, split_k_, kernel_id_);
-    }
-};
-
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 // ===============================================================================

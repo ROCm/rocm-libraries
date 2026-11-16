@@ -49,7 +49,6 @@
 #include <mutex>
 #include <unordered_map>
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 // Disable the precomputed config-tower embedding table. With no table the config vocabulary is
 // empty (the fdeep config encoder is not shipped), so SelectBestVocabCandidate finds nothing and
 // selection falls back to the non-AI heuristic. Default: use the table when a

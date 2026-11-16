@@ -89,8 +89,6 @@ MIOPEN_INTERNALS_EXPORT std::vector<float>
 EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& features_by_name,
                                         const CandidateSelectionMetadata& metadata);
 
-using ValidationFunc = std::function<bool(int, int)>;
-
 class CandidateSelectionMetadata
 {
 public:
@@ -100,12 +98,7 @@ public:
     MIOPEN_INTERNALS_EXPORT size_t GetOutputParamIndex(const std::string& name) const;
     MIOPEN_INTERNALS_EXPORT std::optional<std::string>
     GetInputConstant(const std::string& name) const;
-    MIOPEN_INTERNALS_EXPORT std::optional<std::string>
-    GetOutputConstant(const std::string& name) const;
     MIOPEN_INTERNALS_EXPORT std::vector<size_t> GetConstantInputIndices() const;
-    MIOPEN_INTERNALS_EXPORT std::vector<size_t> GetConstantOutputIndices() const;
-    MIOPEN_INTERNALS_EXPORT std::map<std::string, std::string>
-    GetKernelStrMapping(const std::string& kernel_name) const;
     // Getter functions for private members
     MIOPEN_INTERNALS_EXPORT const std::vector<std::string>& input_params() const
     {
@@ -115,9 +108,6 @@ public:
     {
         return output_params_;
     }
-    MIOPEN_INTERNALS_EXPORT const std::map<std::string, std::map<std::string, int>>&
-    sequence_encodings() const;
-    MIOPEN_INTERNALS_EXPORT float GetMissingValueToken() const;
     // Number of one-hot classes for an input feature (e.g. "precision"), from the metadata's
     // input encodings. Returns 0 when the feature has no encoding (i.e. is not categorical).
     MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingClassCount(const std::string& name) const;
@@ -135,15 +125,10 @@ private:
     // Internal mappings and encodings
     std::vector<std::string> input_params_;
     std::vector<std::string> output_params_;
-    std::map<std::string, std::map<std::string, int>> sequence_encodings_;
     std::map<std::string, size_t> input_param_indices_;
     std::map<std::string, size_t> output_param_indices_;
     std::map<std::string, std::map<std::string, int>> feature_encodings_;
-    std::map<std::string, std::map<std::string, std::string>> sequence_decodings_;
     std::map<std::string, std::string> constants_features_;
-    std::map<std::string, std::string> constants_sequence_;
-    std::map<std::string, std::map<std::string, std::string>> kernel_str_mapping_;
-    float missing_value_token_;
     std::size_t num_cu_ = 0;
 };
 
@@ -169,29 +154,6 @@ private:
 
 MIOPEN_INTERNALS_EXPORT const CandidateSelectionModel&
 GetCandidateSelectionModel(const std::string& arch, const std::string& solver);
-
-struct MIOPEN_INTERNALS_EXPORT CandidateSelectionResult
-{
-    std::vector<int> kernel_indices; // Sorted list of kernel indices (best to worst)
-    std::vector<int> split_k_values; // Corresponding split_k values
-
-    // Helper methods for backward compatibility and convenience
-    int GetBestKernelIndex() const { return kernel_indices.empty() ? -1 : kernel_indices[0]; }
-    int GetBestSplitK() const { return split_k_values.empty() ? 1 : split_k_values[0]; }
-
-    int GetFallbackKernelIndex(size_t fallback_level = 1) const
-    {
-        return (fallback_level < kernel_indices.size()) ? kernel_indices[fallback_level] : -1;
-    }
-
-    int GetFallbackSplitK(size_t fallback_level = 1) const
-    {
-        return (fallback_level < split_k_values.size()) ? split_k_values[fallback_level] : 1;
-    }
-
-    size_t GetNumCandidates() const { return kernel_indices.size(); }
-    bool IsEmpty() const { return kernel_indices.empty(); }
-};
 
 } // namespace candidate_selection
 } // namespace tuning

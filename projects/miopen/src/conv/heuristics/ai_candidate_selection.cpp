@@ -90,8 +90,6 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
     if(metadata.contains("encodings"))
     {
         feature_encodings_ = metadata["encodings"].value("inputs", decltype(feature_encodings_){});
-        sequence_encodings_ =
-            metadata["encodings"].value("outputs", decltype(sequence_encodings_){});
     }
     else
     {
@@ -106,52 +104,19 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
             "CandidateSelectionMetadata: no gpu.num_cu in metadata; hardware-aware derived "
             "features will use num_cu=0 (degraded 2D predictions)");
 
-    if(metadata.contains("decodings") && metadata["decodings"].contains("outputs"))
-    {
-        // Decoding values may be serialized as numbers (e.g. NumGroupsToMerge: {"0": 1, ...}) or
-        // strings. Coerce every value to string so a numeric JSON value does not fail the parse.
-        for(const auto& [param_name, value_map] : metadata["decodings"]["outputs"].items())
-        {
-            std::map<std::string, std::string> decoded;
-            for(const auto& [key, value] : value_map.items())
-                decoded[key] = value.is_string() ? value.get<std::string>() : value.dump();
-            sequence_decodings_[param_name] = std::move(decoded);
-        }
-    }
-    else
-    {
-        MIOPEN_THROW("Metadata file does not contain 'decodings' section for outputs");
-    }
-
+    // Only the input-side constants feed the live two-tower selection. The output-side sections the
+    // removed config encoding used (decodings.outputs, constants.outputs, missing_value_token,
+    // kernel_str_mapping) are no longer read, so do not parse or require them -- requiring them
+    // would make a metadata file regenerated without them throw and drop selection to the non-AI
+    // heuristic.
     if(metadata.contains("constants"))
     {
         constants_features_ =
             metadata["constants"].value("inputs", decltype(constants_features_){});
-        constants_sequence_ =
-            metadata["constants"].value("outputs", decltype(constants_sequence_){});
     }
     else
     {
         MIOPEN_THROW("Metadata file does not contain 'constants' section");
-    }
-
-    if(metadata.contains("missing_value_token"))
-    {
-        missing_value_token_ = metadata["missing_value_token"].get<float>();
-    }
-    else
-    {
-        MIOPEN_THROW("Metadata file does not contain 'missing_value_token' section");
-    }
-
-    if(metadata.contains("kernel_str_mapping"))
-    {
-        kernel_str_mapping_ = metadata["kernel_str_mapping"]
-                                  .get<std::map<std::string, std::map<std::string, std::string>>>();
-    }
-    else
-    {
-        MIOPEN_THROW("Metadata file does not contain 'kernel_str_mapping' section");
     }
 }
 
@@ -184,16 +149,6 @@ CandidateSelectionMetadata::GetInputConstant(const std::string& name) const
 }
 
 MIOPEN_INTERNALS_EXPORT
-std::optional<std::string>
-CandidateSelectionMetadata::GetOutputConstant(const std::string& name) const
-{
-    auto it = constants_sequence_.find(name);
-    if(it != constants_sequence_.end())
-        return it->second;
-    return std::nullopt;
-}
-
-MIOPEN_INTERNALS_EXPORT
 std::vector<size_t> CandidateSelectionMetadata::GetConstantInputIndices() const
 {
     std::vector<size_t> indices;
@@ -206,43 +161,6 @@ std::vector<size_t> CandidateSelectionMetadata::GetConstantInputIndices() const
     std::sort(indices.begin(), indices.end());
     return indices;
 }
-
-MIOPEN_INTERNALS_EXPORT
-std::vector<size_t> CandidateSelectionMetadata::GetConstantOutputIndices() const
-{
-    std::vector<size_t> indices;
-    for(const auto& [name, value] : constants_sequence_)
-    {
-        auto it = output_param_indices_.find(name);
-        if(it != output_param_indices_.end())
-            indices.push_back(it->second);
-    }
-    std::sort(indices.begin(), indices.end());
-    return indices;
-}
-
-MIOPEN_INTERNALS_EXPORT
-std::map<std::string, std::string>
-CandidateSelectionMetadata::GetKernelStrMapping(const std::string& kernel_name) const
-{
-    auto it = kernel_str_mapping_.find(kernel_name);
-    if(it != kernel_str_mapping_.end())
-    {
-        return it->second;
-    }
-    else
-    {
-        MIOPEN_THROW("Kernel string mapping not found for kernel: " + kernel_name);
-    }
-}
-
-MIOPEN_INTERNALS_EXPORT
-const std::map<std::string, std::map<std::string, int>>&
-CandidateSelectionMetadata::sequence_encodings() const
-{
-    return sequence_encodings_;
-}
-float CandidateSelectionMetadata::GetMissingValueToken() const { return missing_value_token_; }
 
 MIOPEN_INTERNALS_EXPORT
 std::size_t CandidateSelectionMetadata::GetInputEncodingClassCount(const std::string& name) const
