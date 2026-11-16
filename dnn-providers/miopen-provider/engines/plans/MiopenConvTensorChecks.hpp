@@ -35,10 +35,10 @@ namespace miopen_plugin::conv_applicability
 // Throws hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason) when the
 // tensors must be declined; `reason` names the operation, the offending tensor and the rule. Also
 // throws when a tensor has null dims() or strides(), differing dims()/strides() lengths, rank
-// below 3, a negative dim, or dims whose element count (saturating product) reaches INT64_MAX, so
-// no check computes strides or extents from dims that could overflow (the size check only needs
-// non-null, non-negative dims()). The tensors are the graph's own (unpadded rank 3, 4 or 5), not
-// the padded MIOpen descriptors.
+// below 3, a negative dim, or dims whose product (a zero dim counted as 1, so a zero extent does
+// not hide dims that overflow) reaches INT64_MAX, so no check computes strides or extents from
+// dims that could overflow (the size check only needs non-null, non-negative dims()). The tensors
+// are the graph's own (unpadded rank 3, 4 or 5), not the padded MIOpen descriptors.
 
 // Forward convolution: data type, layout and packing rules above.
 void validateConvFwdIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x,

@@ -169,10 +169,13 @@ std::string layoutName(unsigned mask)
     return "other";
 }
 
-// Number of elements (product of the dims) of a tensor, saturating at INT64_MAX so that absurd dims
-// cannot overflow. Rejects null and negative dims, which have no element count.
-int64_t
-    saturatingElementCount(const char* operation, const char* name, const TensorAttributes& attr)
+// Product of the dims of a tensor with each dim raised to at least `smallestFactor`, saturating at
+// INT64_MAX so that absurd dims cannot overflow. Rejects null and negative dims, which have no
+// element count.
+int64_t saturatingProduct(const char* operation,
+                          const char* name,
+                          const TensorAttributes& attr,
+                          int64_t smallestFactor)
 {
     const auto* dims = attr.dims();
     const std::string prefix = std::string(operation) + ": tensor " + name;
@@ -190,13 +193,30 @@ int64_t
         {
             decline(prefix + " has a negative dim");
         }
-        if(dim > 0 && count > MAX_COUNT / dim)
+        const int64_t factor = std::max(dim, smallestFactor);
+        if(factor > 0 && count > MAX_COUNT / factor)
         {
             return MAX_COUNT;
         }
-        count *= dim;
+        count *= factor;
     }
     return count;
+}
+
+// Number of elements (product of the dims) of a tensor, saturating at INT64_MAX. A zero dim makes
+// the count zero, whatever the other dims are.
+int64_t
+    saturatingElementCount(const char* operation, const char* name, const TensorAttributes& attr)
+{
+    return saturatingProduct(operation, name, attr, 0);
+}
+
+// Product of the dims with every zero dim counted as 1, saturating at INT64_MAX. It bounds every
+// partial product that strides and packing computations form over the dims, in any order (a zero
+// dim placed first would otherwise hide dims that overflow after it).
+int64_t saturatingExtent(const char* operation, const char* name, const TensorAttributes& attr)
+{
+    return saturatingProduct(operation, name, attr, 1);
 }
 
 // Reads one tensor and rejects shapes the checks cannot judge. `operation` prefixes every reason
@@ -220,10 +240,12 @@ TensorInfo readTensor(const char* operation, const char* name, const TensorAttri
         decline(prefix + " has rank below 3");
     }
 
-    // The packing and layout checks below multiply dims and strides in int64_t; dims whose element
-    // count does not fit would overflow there (signed overflow is undefined behaviour). No real
-    // tensor has that many elements, so decline before computing anything.
-    if(saturatingElementCount(operation, name, attr) == std::numeric_limits<int64_t>::max())
+    // The packing and layout checks below multiply dims and strides in int64_t, in dim order and
+    // in stride order; dims whose zero-as-one product does not fit would overflow there (signed
+    // overflow is undefined behaviour), even when a zero dim makes the element count zero. No real
+    // tensor has that many elements, so decline before computing anything. A zero dim alone is
+    // accepted: an empty tensor is not declined here.
+    if(saturatingExtent(operation, name, attr) == std::numeric_limits<int64_t>::max())
     {
         decline(prefix + " has dims whose element count reaches the 64-bit limit");
     }

@@ -85,8 +85,8 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
     try
     {
         // Reject tensor combinations MIOpen mis-computes before any descriptor or MIOpen call. The
-        // size check reads only dims and runs first: the io check computes strides, which absurd
-        // dims could overflow.
+        // size check reads only dims and runs first: it enforces the 2^31 - 1 element limit, which
+        // the io validators do not.
         const auto& tensorMap = opGraph.getTensorMap();
         const auto& dy = miopen_utils::findTensorAttributes(tensorMap, attr.dy_tensor_uid());
         const auto& w = miopen_utils::findTensorAttributes(tensorMap, attr.w_tensor_uid());
