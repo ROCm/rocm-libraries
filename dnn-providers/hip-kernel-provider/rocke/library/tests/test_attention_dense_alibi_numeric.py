@@ -53,6 +53,14 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
+def _quantize_fp8(t):
+    """Per-tensor fp8 e4m3 storage of ``t``: (fp8 tensor, scale, dequantized t)."""
+    fp8_max = torch.finfo(torch.float8_e4m3fn).max
+    scale = (t.float().abs().max().clamp(min=1e-8) / fp8_max).item()
+    t8 = (t.float() / scale).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+    return t8, scale, (t8.float() * scale).to(t.dtype)
+
+
 def _run_case(
     *,
     dtype="fp16",
@@ -69,12 +77,17 @@ def _run_case(
     slopes=None,
     lse=True,
     seed=0,
+    fp8_kv=False,
     **spec_over,
 ):
     """Run one case; return (out, lse, ref_out, ref_lse) as float64 numpy, with
-    out [B, Sq, Hq, D] and lse [B, Hq, Sq]."""
+    out [B, Sq, Hq, D] and lse [B, Hq, Sq]. ``fp8_kv`` stores K/V as fp8 with
+    per-tensor scales; the reference attends over the same dequantized K/V, so
+    only kernel error is measured."""
     mod, spec_cls = _kernel_module()
     hq, hkv = heads
+    if fp8_kv:
+        spec_over["kv_storage_dtype"] = "fp8e4m3"
     if right_bound:
         spec_over["right_bound"] = right_bound
     if lse:
@@ -101,6 +114,11 @@ def _run_case(
     q = torch.randn(batch, sq, hq, head_size, device="cuda", dtype=tdt, generator=gen)
     k = torch.randn(batch, skv, hkv, head_size, device="cuda", dtype=tdt, generator=gen)
     v = torch.randn(batch, skv, hkv, head_size, device="cuda", dtype=tdt, generator=gen)
+    k_run, v_run, fp8_kwargs = k, v, {}
+    if fp8_kv:
+        k_run, k_scale, k = _quantize_fp8(k)
+        v_run, v_scale, v = _quantize_fp8(v)
+        fp8_kwargs = {"k_scale": k_scale, "v_scale": v_scale}
     out = torch.empty_like(q)
     lse_t = (
         torch.full((batch, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32)
@@ -117,13 +135,14 @@ def _run_case(
     mod.run_attention_dense_torch(
         spec=spec,
         q=q,
-        k=k,
-        v=v,
+        k=k_run,
+        v=v_run,
         out=out,
         scale=scale,
         arch=_ARCH,
         lse=lse_t,
         alibi_slopes=slopes_t,
+        **fp8_kwargs,
     )
     torch.cuda.synchronize()
 
@@ -224,3 +243,12 @@ def test_persistent():
     if _ARCH == "gfx950":
         pytest.skip("gfx950 refuses ALiBi on the persistent grid")
     _check(_run_case(persistent=True, heads=(8, 2)), "bf16")
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("causal", [True, False], ids=["causal", "full"])
+def test_fp8_kv(dtype, causal):
+    # fp8 K/V dequantizes in the loader; the ALiBi bias still rides the QK MFMA.
+    if _ARCH != "gfx950":
+        pytest.skip("fp8 KV dense is gfx950-only")
+    _check(_run_case(dtype=dtype, heads=(12, 4), causal=causal, fp8_kv=True), dtype)
