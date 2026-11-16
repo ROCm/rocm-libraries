@@ -23,10 +23,14 @@ add_executable(
     core/TestContext.cpp
     core/TestUtils.cpp
     core/TestPluginPublic.cpp
+    compilation/TestHiprtcDiskCache.cpp
+    compilation/TestHiprtcCacheStress.cpp
+    compilation/TestProgramFetchRecording.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
     compilation/TestModuleCache.cpp
     device/TestScopedDevice.cpp
+    utilities/TestChecksum.cpp
     utilities/TestDigest.cpp
 )
 
