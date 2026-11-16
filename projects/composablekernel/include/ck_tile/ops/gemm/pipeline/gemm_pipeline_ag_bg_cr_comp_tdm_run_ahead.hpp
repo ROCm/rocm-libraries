@@ -108,6 +108,14 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
     static constexpr auto is_b_load_tr_v = bool_constant<PipelineImplBase::is_b_load_tr>{};
 
     static_assert(NumWaveGroups == 1, "wave groups are not supported");
+    // NumWaves and kBlockSize count every BlockWarps wave, but BlockGemm's A/B/C distributions
+    // map the wave id over MWarps x NWarps only and nothing reduces partial sums across K waves.
+    // A wave id past MWarps x NWarps would get an M warp index of MWarps or more: it would read A
+    // past its LDS slot and own C rows outside the block tile. It would still reach every
+    // StepBarrier, so the result is silent corruption, not a hang.
+    static_assert(BlockGemmShape::BlockWarps::at(number<2>{}) == 1,
+                  "BlockWarps[2] (K waves) must be 1: BlockGemm distributes waves over M and N "
+                  "only and the pipeline has no K-wave reduction");
     static_assert(!Preshuffle, "preshuffled B is not supported");
     static_assert(!kPadM && !kPadN && !kPadK,
                   "padding is not supported: TDM handles ragged extents itself, and padded "

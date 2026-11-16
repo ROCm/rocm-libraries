@@ -343,23 +343,24 @@ struct PipelineDefaultParams<PT, std::enable_if_t<is_tdm_pipeline(PT)>>
     static constexpr bool Preshuffle = false;
 };
 
-// Skips the current test unless the device has hardware named barriers (gfx1250). A skip
-// reports as PASS; CK_TILE_REQUIRE_GFX125=1 turns it into a failure on runners that are meant to
-// be gfx1250. A macro because GTEST_SKIP/FAIL return from the calling test function.
-#define CK_TILE_SKIP_UNLESS_GFX125()                                                    \
-    do                                                                                  \
-    {                                                                                   \
-        if(!ck_tile::is_gfx125_supported())                                             \
-        {                                                                               \
-            const char* ck_tile_required_ = std::getenv("CK_TILE_REQUIRE_GFX125");      \
-            if(ck_tile_required_ != nullptr && ck_tile_required_[0] == '1')             \
-            {                                                                           \
-                FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"           \
-                       << ck_tile::get_device_name() << "'";                            \
-            }                                                                           \
-            GTEST_SKIP() << "hardware named barriers require gfx1250; device reports '" \
-                         << ck_tile::get_device_name() << "'";                          \
-        }                                                                               \
+// Skips the current test unless the device is gfx1250, the only target with TDM and hardware
+// named barriers. A skip reports as PASS; CK_TILE_REQUIRE_GFX125=1 turns it into a failure on
+// runners that are meant to be gfx1250. A macro because GTEST_SKIP/FAIL return from the calling
+// test function.
+#define CK_TILE_SKIP_UNLESS_GFX125()                                                   \
+    do                                                                                 \
+    {                                                                                  \
+        if(!ck_tile::is_gfx125_supported())                                            \
+        {                                                                              \
+            const char* ck_tile_required_ = std::getenv("CK_TILE_REQUIRE_GFX125");     \
+            if(ck_tile_required_ != nullptr && ck_tile_required_[0] == '1')            \
+            {                                                                          \
+                FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"          \
+                       << ck_tile::get_device_name() << "'";                           \
+            }                                                                          \
+            GTEST_SKIP() << "TDM and named barriers require gfx1250; device reports '" \
+                         << ck_tile::get_device_name() << "'";                         \
+        }                                                                              \
     } while(false)
 
 template <typename Tuple, typename Derived>
@@ -657,7 +658,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
         {
             GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test.";
         }
-        if constexpr(is_tdm_producer_consumer(PipelineType))
+        // UniversalGemmKernel::IsSupportedArgument rejects every TDM pipeline off gfx1250, and
+        // these tests build no other target's code object, so both host and device cases skip.
+        if constexpr(is_tdm_pipeline(PipelineType))
         {
             CK_TILE_SKIP_UNLESS_GFX125();
         }

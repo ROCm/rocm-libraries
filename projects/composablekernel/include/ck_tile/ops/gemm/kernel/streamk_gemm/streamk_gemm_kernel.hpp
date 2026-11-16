@@ -357,9 +357,9 @@ struct StreamKKernel
         {
             // Revalidate the actual k_batch (UniversalGemmKernel substitutes 1 for a
             // split-K-capable TDM pipeline with a non-TDM epilogue, but Stream-K splits K itself)
-            // and the device (UniversalGemmKernel checks it only for named-barrier pipelines; off
-            // gfx125 the TDM instructions compile to no-ops). UniversalGemmKernel checks the rest,
-            // including the C tail with a non-TDM epilogue.
+            // and the device (off gfx125 the TDM instructions compile to no-ops;
+            // UniversalGemmKernel also rejects it, but this keeps the Stream-K message).
+            // UniversalGemmKernel checks the rest, including the C tail with a non-TDM epilogue.
             if(!UniversalGemmKernel::IsTdmArgumentSupported("Stream-K GEMM",
                                                             kargs.k_batch,
                                                             kargs.K,

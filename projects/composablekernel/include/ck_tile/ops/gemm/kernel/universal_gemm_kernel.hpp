@@ -592,9 +592,10 @@ struct UniversalGemmKernel
     ///          12-byte 6-bit pack has a 1-byte unit, so its 4 comes from alignof(T) alone.
     ///          IsSupportedArgument ends with this check for TDM pipelines, after its k_batch
     ///          guards and, for a non-TDM epilogue and a pipeline without kSupportsTdmSplitK, its
-    ///          tile-multiple checks, but checks the device only for named-barrier pipelines. The
-    ///          MultiD GEMM, grouped GEMM, batched contraction, MX GEMM and Stream-K kernels
-    ///          therefore call this and IsTdmDeviceSupported themselves.
+    ///          tile-multiple checks, and it rejects every TDM pipeline on a non-gfx125 device
+    ///          first. The MultiD GEMM, grouped GEMM, batched contraction, MX GEMM and Stream-K
+    ///          kernels also call this and IsTdmDeviceSupported themselves, with their own
+    ///          k_batch and operation name.
     CK_TILE_HOST static bool IsTdmArgumentSupported(const char* op_name,
                                                     index_t k_batch,
                                                     index_t K,
