@@ -386,10 +386,12 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
     constexpr int XPI = WAVE / G; // columns per DMA instruction
     constexpr int XG = (HW + XPI - 1) / XPI; // instructions per halo row
     constexpr int NI = HH * XG; // instructions per stage
-    // Column strips (16-byte DMA, UN 1): wave xg < XG owns the halo's xg-th XPI-column strip and
-    // fills all HH rows of it, so a lane's offset within a row is fixed for the chunk and a row
-    // costs one scalar offset. Otherwise the NI instructions are dealt round-robin over the waves.
-    constexpr bool STRIP = K2R_DMA16 != 0 && UN == 1 && XG <= NW;
+    // Column strips (ping-pong, 16-byte DMA, UN 1): wave xg < XG owns the halo's xg-th XPI-column
+    // strip and fills all HH rows of it, so a lane's offset within a row is fixed for the chunk and
+    // a row costs one scalar offset. Without ping-pong the strips leave the DMA on fewer waves, which
+    // measured 1-2% slower; there, and elsewhere, the NI instructions are dealt round-robin over the
+    // waves.
+    constexpr bool STRIP = K2R_DMA16 != 0 && UN == 1 && XG <= NW && PP == 1;
     constexpr int IPW = STRIP ? HH : (NI + NW - 1) / NW; // per wave (the last only for some)
     // DMA per step over steps 0..NQ-2 (step 0 alone when a chunk is one step).
     constexpr int DSTEPS = NQ > 1 ? NQ - 1 : 1;
