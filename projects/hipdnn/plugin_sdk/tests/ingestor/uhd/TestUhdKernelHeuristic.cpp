@@ -2585,6 +2585,166 @@ TEST(TestIngestorUhdKernelHeuristic, TheOutOfRangeReportCountsOnlyFullyScoredCan
     EXPECT_EQ(scored[1].kernelId, testId(0x02));
 }
 
+namespace detail
+{
+
+/// Builds a heuristic around a caller's adapter, which create() never does.
+class UhdKernelHeuristicAccess
+{
+public:
+    static std::shared_ptr<UhdKernelHeuristic>
+        withAdapter(const std::vector<nlohmann::json>& signature,
+                    std::shared_ptr<const uhd::IUhdAdapter> adapter)
+    {
+        uhd::UhdConfig config;
+        config.featuresSignature = signature;
+        config.featuresHash = uhd::FeatureExtractor::computeHash(signature);
+        config.objective = "max";
+        config.scoreTransform = "identity";
+        config.adapterType = "test";
+        auto extractor = std::make_shared<const uhd::FeatureExtractor>(signature);
+        return std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
+            std::move(config), std::move(adapter), std::move(extractor), "miscounting adapter"));
+    }
+};
+
+} // namespace detail
+
+namespace
+{
+
+/// How MiscountingAdapter breaks the one-score-per-row contract.
+enum class Miscount
+{
+    ONE_SCORE_FEWER,
+    ONE_SCORE_MORE,
+    ONE_STAGE_ENTRY_FEWER,
+};
+
+/// Scores a row by its first feature, but returns a BatchScores that does not match the rows it
+/// was given, which no shipped adapter does.
+class MiscountingAdapter : public uhd::IUhdAdapter
+{
+public:
+    MiscountingAdapter(size_t featureCount, std::string featuresHash, Miscount miscount)
+        : _featureCount(featureCount)
+        , _featuresHash(std::move(featuresHash))
+        , _miscount(miscount)
+    {
+    }
+
+    double score(const std::vector<double>& features) const override
+    {
+        return features.at(0);
+    }
+
+    uhd::BatchScores scoreBatch(const uhd::FeatureRows& rows) const override
+    {
+        auto batch = IUhdAdapter::scoreBatch(rows);
+        switch(_miscount)
+        {
+        case Miscount::ONE_SCORE_FEWER:
+            batch.raw.pop_back();
+            break;
+        case Miscount::ONE_SCORE_MORE:
+            // A large extra score would win the ranking if it were ever read.
+            batch.raw.push_back(1.0e6);
+            break;
+        case Miscount::ONE_STAGE_ENTRY_FEWER:
+        default:
+            // Every row claims to have survived the one stage, bar the last, which has no entry.
+            batch.stages = 1;
+            batch.stage.assign(rows.count - 1, batch.stages);
+            break;
+        }
+        return batch;
+    }
+
+    size_t expectedFeatureCount() const override
+    {
+        return _featureCount;
+    }
+
+    const std::string& getFeaturesHash() const override
+    {
+        return _featuresHash;
+    }
+
+private:
+    size_t _featureCount;
+    std::string _featuresHash;
+    Miscount _miscount;
+};
+
+/// Ranks two kernels whose model order is the reverse of declared order with an adapter that
+/// miscounts its scores, and checks the ranking fell back to declared order and said why.
+void expectMiscountedScoresDegradeToDeclaredOrder(Miscount miscount,
+                                                  const std::string& expectedReport)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto heuristic = detail::UhdKernelHeuristicAccess::withAdapter(
+        ENGINE_SIGNATURE,
+        std::make_shared<MiscountingAdapter>(ENGINE_SIGNATURE.size(),
+                                             uhd::FeatureExtractor::computeHash(ENGINE_SIGNATURE),
+                                             miscount));
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_EQ(scored[0].kernelId, testId(0x01)); // priority 100, though the model prefers 0x02
+    EXPECT_EQ(scored[1].kernelId, testId(0x02));
+    for(const auto& candidate : scored)
+    {
+        EXPECT_EQ(candidate.score, 0.0); // no measurement
+    }
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedReport))
+        << recorder.getRecordedLogsAsString();
+}
+
+} // namespace
+
+TEST(TestIngestorUhdKernelHeuristic, AnAdapterReturningTooFewScoresDegradesToDeclaredOrder)
+{
+    expectMiscountedScoresDegradeToDeclaredOrder(Miscount::ONE_SCORE_FEWER,
+                                                 "returned 1 scores and 0 stage entries for 2");
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnAdapterReturningExtraScoresDegradesToDeclaredOrder)
+{
+    expectMiscountedScoresDegradeToDeclaredOrder(Miscount::ONE_SCORE_MORE,
+                                                 "returned 3 scores and 0 stage entries for 2");
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AnAdapterReturningTooFewStageEntriesDegradesToDeclaredOrder)
+{
+    expectMiscountedScoresDegradeToDeclaredOrder(Miscount::ONE_STAGE_ENTRY_FEWER,
+                                                 "returned 2 scores and 1 stage entries for 2");
+}
+
+TEST(TestIngestorUhdKernelHeuristic, ABatchWithAShortStageVectorIsNeverReadPastItsEnd)
+{
+    uhd::BatchScores batch;
+    batch.raw = {1.0, 2.0};
+    batch.stages = 1;
+    // The byte past the two entries still holds a matching stage, as freed storage can.
+    batch.stage.assign(3, batch.stages);
+    batch.stage.resize(2);
+
+    EXPECT_TRUE(batch.fullyScored(1));
+    EXPECT_FALSE(batch.fullyScored(2)) << "a row with no stage entry read one past the vector";
+
+    EXPECT_TRUE(batch.describes(2));
+    EXPECT_FALSE(batch.describes(3));
+    batch.raw.push_back(3.0);
+    EXPECT_FALSE(batch.describes(3)) << "a stage vector shorter than the rows was accepted";
+    batch.stage.clear();
+    EXPECT_TRUE(batch.describes(3)) << "an unstaged batch holds no stage entries to count";
+}
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

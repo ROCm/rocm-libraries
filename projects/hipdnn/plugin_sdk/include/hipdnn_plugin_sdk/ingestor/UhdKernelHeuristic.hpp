@@ -18,6 +18,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -46,6 +47,10 @@ namespace hipdnn_plugin_sdk::ingestor
 
 namespace detail
 {
+
+/// Lets tests build a UhdKernelHeuristic around an adapter of their own; create() builds
+/// adapters only from descriptors. Defined by the tests.
+class UhdKernelHeuristicAccess;
 
 inline uhd::FeatureExtractionContext::ValueMap queryVarsFrom(const BoundTokens& bound)
 {
@@ -650,6 +655,8 @@ public:
     }
 
 private:
+    friend class detail::UhdKernelHeuristicAccess;
+
     using ArtifactStamp = detail::ArtifactStamp;
 
     /// tryCreate() without the ERROR: why the UHD was refused goes to @p failure, so a caller
@@ -970,6 +977,15 @@ private:
             const auto batch = _adapter->scoreBatch(
                 uhd::FeatureRows{rows.data(), catalog.entries.size(), width});
             const auto scoreNs = elapsedNs(scoreStart);
+            if(!batch.describes(catalog.entries.size()))
+            {
+                // Indexing a short result reads out of bounds, and a long one cannot be matched
+                // to the candidates either. The catch below degrades the whole ranking.
+                throw std::runtime_error("the adapter returned " + std::to_string(batch.raw.size())
+                                         + " scores and " + std::to_string(batch.stage.size())
+                                         + " stage entries for "
+                                         + std::to_string(catalog.entries.size()) + " candidates");
+            }
 
             // Read the group from the scored row, not metadata, which derived or categorical
             // features could make disagree.
