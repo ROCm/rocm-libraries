@@ -87,7 +87,7 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   - *Copies:* an LDS 32x32 tiled transpose for channels-first to channels-last.
   - *Cast:* a wide reduction with a fixed tree over many partials.
   - Every sum has one owning thread, so no kernel uses atomics.
-- **Benchmarking:** when `global.benchmarking` is on and a plan has a choice, `BenchmarkedPlan` times each distinct candidate on the first execute and keeps the fastest. Each candidate gets a warm-up, then the best of a few runs. The candidates are the default, channels-first, channels-last, staged channels-last, image slices (a 16-bit wrw over the cap through an fp32 accumulator), split reduction and the wider wrw cap. A candidate the backend declines is skipped. Without benchmarking, the default plan runs.
+- **Benchmarking:** when `global.benchmarking` is on and a plan has a choice, `BenchmarkedPlan` times each distinct candidate on the first execute and keeps the fastest. Each candidate gets a warm-up, then the best of a few runs. The candidates are the default, channels-first, channels-last, staged channels-last, image slices (a 16-bit wrw over the cap through an fp32 accumulator), split reduction, and the wider wrw cap with column blocks and with image slices. A candidate the backend declines is skipped. Without benchmarking, the default plan runs.
 - **Backends:**
   - **hipBLASLt** takes the heuristic's top algorithm per call, with up to 128 MiB of workspace. If hipBLASLt finds no algorithm, the engine is not applicable.
   - **rocBLAS** runs `rocblas_gemm_strided_batched_ex`.
