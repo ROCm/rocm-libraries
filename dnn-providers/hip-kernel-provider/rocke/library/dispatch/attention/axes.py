@@ -137,8 +137,9 @@ _3D_AXES: Tuple[KnobAxis, ...] = (
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
 # from the request; variant fields are fixed by the registered dense candidate
-# (gfx950: the grid or persistent body, and wide DMA under persistent; gfx942
-# registers one candidate and sweeps persistence too); ``waves_per_eu`` is
+# (gfx950: the grid or persistent body, wide DMA under persistent and the
+# qb_minor order under grid; gfx942: its tuned candidate sweeps persistence too,
+# its qbminor candidate scopes the grid axes out); ``waves_per_eu`` is
 # walked by its own loop, as on the unified paths. The tile is swept on both.
 DENSE_PROBLEM_FIELDS = frozenset(
     {
@@ -163,9 +164,10 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "chiplet_num_xcds",
     }
 )
-# Problem fields only some arches' dense specs declare (the band's right bound).
+# Problem fields only some arches' dense specs declare (the band's right bound,
+# and the KV storage format, whose loader only gfx950 has).
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"right_bound"}),
+    "gfx950": frozenset({"right_bound", "kv_storage_dtype"}),
     "gfx942": frozenset(),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
@@ -281,8 +283,8 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
 )
 
-# gfx942 registers one dense candidate, so persistent is a knob here as well
-# as the tile (block_m, block_n). The LDS-saving knobs
+# On gfx942's tuned dense candidate persistent is a knob here as well as the tile
+# (block_m, block_n); the qbminor candidate scopes it out (dense_rules.py). The LDS-saving knobs
 # lead as enablers: they can bring an otherwise over-budget tile under the LDS
 # limit (e.g. D64 block_n=256 fits only with lds_k_group_pad=0). Then
 # prerequisites-first: independent K double buffering and V register prefetch
@@ -328,7 +330,8 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never
 # varies: the head-width buckets, mask class, bias kind, score features, layout
-# and K/V storage all come from the request.
+# (with hipDNN's ``dense_q`` / ``seqused_q`` query-side options) and K/V storage
+# all come from the request.
 WMMA_PROBLEM_FIELDS = frozenset(
     {
         "dtype",
@@ -342,6 +345,8 @@ WMMA_PROBLEM_FIELDS = frozenset(
         "use_qq_bias",
         "layout",
         "page_block_size",
+        "dense_q",
+        "seqused_q",
         "kv_dtype",
         "name",
     }

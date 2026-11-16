@@ -26,6 +26,8 @@
 
 #include "hipsparse-config.h"
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a sparse vector.
  *
@@ -35,11 +37,11 @@
  *  is used in the hipSPARSE generic APIs involving sparse vectors. It should be destroyed at the end using
  *  hipsparseDestroySpVec().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 typedef void* hipsparseSpVecDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
+    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a dense vector.
  *
@@ -49,11 +51,10 @@ typedef void* hipsparseSpVecDescr_t;
  *  is used in the hipSPARSE generic APIs involving dense vectors. It should be destroyed at the end using
  *  hipsparseDestroyDnVec().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
-    || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
 typedef void* hipsparseDnVecDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a sparse matrix.
  *
@@ -65,10 +66,10 @@ typedef void* hipsparseDnVecDescr_t;
  *  (for BSR format). The returned descriptor is used in the hipSPARSE generic APIs involving sparse matrices.
  *  It should be destroyed at the end using hipsparseDestroySpMat().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 typedef struct hipsparseSpMatDescr_st* hipsparseSpMatDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a dense matrix.
  *
@@ -78,10 +79,10 @@ typedef struct hipsparseSpMatDescr_st* hipsparseSpMatDescr_t;
  *  is used in the hipSPARSE generic APIs involving dense matrices. It should be destroyed at the end using
  *  hipsparseDestroyDnMat().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 typedef void* hipsparseDnMatDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a sparse vector.
  *
@@ -91,10 +92,10 @@ typedef void* hipsparseDnMatDescr_t;
  *  is used in the hipSPARSE generic APIs involving sparse vectors. It should be destroyed at the end using
  *  hipsparseDestroySpVec().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 typedef void const* hipsparseConstSpVecDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a dense vector.
  *
@@ -104,10 +105,10 @@ typedef void const* hipsparseConstSpVecDescr_t;
  *  is used in the hipSPARSE generic APIs involving dense vectors. It should be destroyed at the end using
  *  hipsparseDestroyDnVec().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 typedef void const* hipsparseConstDnVecDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a sparse matrix.
  *
@@ -117,10 +118,10 @@ typedef void const* hipsparseConstDnVecDescr_t;
  *  is used in the hipSPARSE generic APIs involving sparse matrices. It should be destroyed at the end using
  *  hipsparseDestroySpMat().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 typedef struct hipsparseSpMatDescr_st const* hipsparseConstSpMatDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a dense matrix.
  *
@@ -130,7 +131,6 @@ typedef struct hipsparseSpMatDescr_st const* hipsparseConstSpMatDescr_t;
  *  is used in the hipSPARSE generic APIs involving dense matrices. It should be destroyed at the end using
  *  hipsparseDestroyDnMat().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 typedef void const* hipsparseConstDnMatDescr_t;
 #endif
 
@@ -141,6 +141,7 @@ struct hipsparseSpSVDescr;
 struct hipsparseSpSMDescr;
 /// \endcond
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a SpGEMM calculation.
  *
@@ -151,10 +152,14 @@ struct hipsparseSpSMDescr;
  *  be initialized using hipsparseSpGEMM_createDescr(). It should be destroyed at the end using
  *  hipsparseSpGEMM_destroyDescr().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 typedef struct hipsparseSpGEMMDescr* hipsparseSpGEMMDescr_t;
 #endif
 
+// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+// clang-format off
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+// clang-format on
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a SpGEAM calculation.
  *
@@ -163,14 +168,10 @@ typedef struct hipsparseSpGEMMDescr* hipsparseSpGEMMDescr_t;
  *  hipsparseSpGEAM_nnz(), and hipsparseSpGEAM(). It must be initialized using hipsparseSpGEAM_createDescr(). It
  *  should be destroyed at the end using hipsparseSpGEAM_destroyDescr().
  */
-// clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
-// 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
-// clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-// clang-format on
 typedef struct hipsparseSpGEAMDescr* hipsparseSpGEAMDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a SpSV calculation.
  *
@@ -179,10 +180,10 @@ typedef struct hipsparseSpGEAMDescr* hipsparseSpGEAMDescr_t;
  *  hipsparseSpSV_analysis(), and hipsparseSpSV_solve(). It must be initialized using hipsparseSpSV_createDescr().
  *  It should be destroyed at the end using hipsparseSpSV_destroyDescr().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 typedef struct hipsparseSpSVDescr* hipsparseSpSVDescr_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a SpSM calculation.
  *
@@ -191,12 +192,12 @@ typedef struct hipsparseSpSVDescr* hipsparseSpSVDescr_t;
  *  hipsparseSpSM_analysis(), and hipsparseSpSM_solve(). It must be initialized using hipsparseSpSM_createDescr().
  *  It should be destroyed at the end using hipsparseSpSM_destroyDescr().
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 typedef struct hipsparseSpSMDescr* hipsparseSpSMDescr_t;
 #endif
 
 /* Generic API types */
 
+#if(!defined(CUDART_VERSION))
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE sparse matrix formats.
  *
@@ -204,7 +205,6 @@ typedef struct hipsparseSpSMDescr* hipsparseSpSMDescr_t;
  *  This is a list of the \ref hipsparseFormat_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION))
 typedef enum
 {
     HIPSPARSE_FORMAT_CSR         = 1, /**< Compressed sparse row */
@@ -252,6 +252,7 @@ typedef enum
 #endif
 #endif
 
+#if(!defined(CUDART_VERSION))
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE dense matrix memory layout ordering.
  *
@@ -259,7 +260,6 @@ typedef enum
  *  This is a list of the \ref hipsparseOrder_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION))
 typedef enum
 {
     HIPSPARSE_ORDER_COLUMN HIPSPARSE_DEPRECATED_MSG("Please use HIPSPARSE_ORDER_COL instead")
@@ -286,6 +286,7 @@ typedef enum
 #endif
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE index type used by sparse matrix indices.
  *
@@ -293,7 +294,6 @@ typedef enum
  *  This is a list of the \ref hipsparseIndexType_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
 typedef enum
 {
     HIPSPARSE_INDEX_16U = 1, /**< 16-bit unsigned integer indices */
@@ -302,6 +302,7 @@ typedef enum
 } hipsparseIndexType_t;
 #endif
 
+#if(!defined(CUDART_VERSION))
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SpMV algorithms.
  *
@@ -309,7 +310,6 @@ typedef enum
  *  This is a list of the \ref hipsparseSpMVAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION))
 typedef enum
 {
     HIPSPARSE_MV_ALG_DEFAULT   = 0,
@@ -380,6 +380,7 @@ typedef enum
 #endif
 #endif
 
+#if(!defined(CUDART_VERSION))
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SpMM algorithms.
  *
@@ -387,7 +388,6 @@ typedef enum
  *  This is a list of the \ref hipsparseSpMMAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION))
 typedef enum
 {
     HIPSPARSE_MM_ALG_DEFAULT        = 0, /**< Default algorithm */
@@ -481,6 +481,7 @@ typedef enum
 #endif
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SparseToDense algorithms.
  *
@@ -488,13 +489,13 @@ typedef enum
  *  This is a list of the \ref hipsparseSparseToDenseAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
 typedef enum
 {
     HIPSPARSE_SPARSETODENSE_ALG_DEFAULT = 0,
 } hipsparseSparseToDenseAlg_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE DenseToSparse algorithms.
  *
@@ -502,13 +503,13 @@ typedef enum
  *  This is a list of the \ref hipsparseDenseToSparseAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
 typedef enum
 {
     HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT = 0,
 } hipsparseDenseToSparseAlg_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SDDMM algorithms.
  *
@@ -516,13 +517,13 @@ typedef enum
  *  This is a list of the \ref hipsparseSDDMMAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
 typedef enum
 {
     HIPSPARSE_SDDMM_ALG_DEFAULT = 0
 } hipsparseSDDMMAlg_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SpSV algorithms.
  *
@@ -530,13 +531,13 @@ typedef enum
  *  This is a list of the \ref hipsparseSpSVAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 typedef enum
 {
     HIPSPARSE_SPSV_ALG_DEFAULT = 0
 } hipsparseSpSVAlg_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SpSM algorithms.
  *
@@ -544,13 +545,13 @@ typedef enum
  *  This is a list of the \ref hipsparseSpSMAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
 typedef enum
 {
     HIPSPARSE_SPSM_ALG_DEFAULT = 0
 } hipsparseSpSMAlg_t;
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE attributes.
  *
@@ -558,7 +559,6 @@ typedef enum
  *  This is a list of the \ref hipsparseSpMatAttribute_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 typedef enum
 {
     HIPSPARSE_SPMAT_FILL_MODE = 0, /**< Fill mode attribute */
@@ -566,6 +566,7 @@ typedef enum
 } hipsparseSpMatAttribute_t;
 #endif
 
+#if(!defined(CUDART_VERSION))
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SpGEMM algorithms.
  *
@@ -573,7 +574,6 @@ typedef enum
  *  This is a list of the \ref hipsparseSpGEMMAlg_t types that are used by the hipSPARSE
  *  library.
  */
-#if(!defined(CUDART_VERSION))
 typedef enum
 {
     HIPSPARSE_SPGEMM_DEFAULT                  = 0,
@@ -609,6 +609,9 @@ typedef enum
 #endif
 #endif
 
+// clang-format off
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
+// clang-format on
 /*! \ingroup generic_module
  *  \brief List of hipSPARSE SpGEAM algorithms.
  *
@@ -616,9 +619,6 @@ typedef enum
  *  This is a list of the \ref hipsparseSpGEAMAlg_t types that are used by the hipSPARSE
  *  library to perform sparse matrix sparse matrix addition.
  */
-// clang-format off
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 13030)
-// clang-format on
 typedef enum
 {
     HIPSPARSE_SPGEAM_ALG1 = 0 /**< Default SpGEAM algorithm. */

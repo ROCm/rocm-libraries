@@ -16,6 +16,7 @@ from rocke.core.arch.target import _load_generic_targets
 from rocke.dispatch import GemmRequest
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 
 _REGISTRIES = (("fp16", GEMM_FP16_REGISTRY), ("bf16", GEMM_BF16_REGISTRY))
 
@@ -120,7 +121,7 @@ class TestDeclaredCoverage(unittest.TestCase):
         by_name = {c["name"]: c for c in manifest["candidates"]}
         self.assertEqual(
             by_name["universal_gemm_fp16_cdna_cshuffle"]["capability"]["arches"],
-            ["gfx942", "gfx950"],
+            list(COVERED_ARCHES),
         )
         self.assertEqual(
             by_name["universal_gemm_fp16_rdna_wmma"]["capability"]["arches"],
@@ -177,6 +178,10 @@ class TestDecodeShapeGateAsData(unittest.TestCase):
         shapes = self._decode().capability.shapes
         self.assertEqual([s.as_dict() for s in shapes], [{"dims": ["M"], "max": 32}])
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the bf16 decode candidate declares gfx950 only (_CDNA_DECODE_BF16)",
+    )
     def test_skinny_m_is_admitted_and_wide_m_is_not(self):
         decode = self._decode()
         skinny = GemmRequest(M=2, N=4096, K=4096, arch="gfx950", dtype="bf16")

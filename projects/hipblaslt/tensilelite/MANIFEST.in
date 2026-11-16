@@ -1,6 +1,6 @@
-recursive-include tensilelite *.py *.h *.hpp *.cpp *.txt *.cmake *.yaml
-recursive-include rocisa *.cpp *.hpp *.txt
-recursive-include tensilelite/CustomKernels *.s
-include tensilelite/bin/Tensile tensilelite/bin/TensileCreateLibrary
-include tensilelite/Ops/gen_assembly.sh
+# Files the sdist needs to build a wheel. Wheel contents come from the
+# packages and package-data in pyproject.toml; setuptools copies those into
+# the sdist on its own, so they are not listed here.
+include release_metadata.py
 include requirements.txt
+global-exclude __pycache__ *.py[cod] CMakeCache.txt install_manifest.txt

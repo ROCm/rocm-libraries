@@ -39,20 +39,20 @@ The build also requires the following compile-time dependencies:
 *  `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.11.0 or later)
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
 
-By default, the CMake build doesn't download ROCm CMake or GoogleTest. If CMake can't find one of them,
-the configuration step stops with an error naming it.
+By default, the CMake build doesn't download ROCm CMake or GoogleTest. If CMake can't find either dependency,
+the configuration step stops with an error identifying the missing dependency.
 Add the install prefix of the dependency to ``CMAKE_PREFIX_PATH`` if it isn't installed in a default location.
 To download ROCm CMake and GoogleTest when they aren't installed, configure with ``-DALLOW_FETCH_DEPS=ON``.
 This requires network access during configuration.
 If GoogleTest isn't installed, you can instead build it from a local source tree without network access
 by setting ``FETCHCONTENT_SOURCE_DIR_GOOGLETEST`` to that directory.
 
-The tests need 19 SuiteSparse matrices, which are stored with `DVC <https://dvc.org/>`_.
+The tests requires 19 SuiteSparse matrices, which are retrieved using `DVC <https://dvc.org/>`_.
 Before building the tests, run ``dvc pull -R projects/hipsparse/clients/matrices`` from the root of the rocm-libraries repository.
-Reading from the DVC storage doesn't require credentials.
+Accessing the DVC storage doesn't require credentials.
 In a sparse checkout, DVC needs the ``.dvc`` directory at the repository root. If your checkout omits it, run
 ``git sparse-checkout add .dvc`` first.
-Alternatively, point ``CMAKE_MATRICES_DIR`` at a directory with the converted ``.bin`` files,
+Alternatively, point ``CMAKE_MATRICES_DIR`` to a directory with the converted ``.bin`` files,
 or configure with ``-DALLOW_FETCH_DEPS=ON`` to download the matrices from SuiteSparse.
 
 Downloading hipSPARSE

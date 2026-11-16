@@ -98,6 +98,16 @@ public:
                                                  miopenDataType_t dtype,
                                                  bool use_tf32) const;
 
+    /// Validate a kernel_id when only kernel_id is trustworthy (e.g. a perf-db-restored config,
+    /// whose use_tf32 was dropped in serialization). Recomputes TF32 from the problem and accepts
+    /// the id if it is supported as TF32 (when requested) or as FP32 -- the same tf32->fp32
+    /// availability fallback GetSolutionTf32Aware applies at build time, so IsValid and GetSolution
+    /// agree on a restored config.
+    MIOPEN_INTERNALS_EXPORT bool
+    IsArgsSupportedTf32Aware(CKSolverType solver,
+                             const miopen::conv::ProblemDescription& problem,
+                             const std::string& kernel_id) const;
+
     MIOPEN_INTERNALS_EXPORT size_t GetWorkspaceSize(CKSolverType solver,
                                                     const miopen::conv::ProblemDescription& problem,
                                                     miopenDataType_t dtype,
@@ -109,6 +119,16 @@ public:
                 const miopen::conv::ProblemDescription& problem,
                 const std::string& kernel_id,
                 bool use_tf32) const;
+
+    /// Build the solution when only kernel_id is trustworthy (e.g. a perf-db-restored config, whose
+    /// use_tf32 was dropped in serialization). Recomputes TF32 from the problem, but uses it only
+    /// if kernel_id is in the TF32 valid set, so a kernel chosen via the FP32 fallback (no TF32
+    /// instance) builds as FP32 -- the same tf32->fp32 availability fallback the config build used.
+    MIOPEN_INTERNALS_EXPORT ConvSolution
+    GetSolutionTf32Aware(CKSolverType solver,
+                         const ExecutionContext& ctx,
+                         const miopen::conv::ProblemDescription& problem,
+                         const std::string& kernel_id) const;
 
     MIOPEN_INTERNALS_EXPORT std::vector<std::string>
     GetAllKernelTypeStrings(CKSolverType solver) const;

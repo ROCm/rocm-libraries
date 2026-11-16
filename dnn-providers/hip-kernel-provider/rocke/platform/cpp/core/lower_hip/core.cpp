@@ -274,24 +274,72 @@ const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v)
     return n;
 }
 
-/* The unsigned HIP spelling of a scalar integer type (Python
- * _HIP_UNSIGNED_INT_TYPE); NULL for any other type. */
+/* Python _HIP_UNSIGNED_INT_TYPE, in its order: scalar integer IR name -> the
+ * unsigned HIP type of its width. */
+static const struct
+{
+    const char* ir_name;
+    const char* hip_unsigned;
+} k_hip_unsigned_int_types[] = {
+    {"i1", "bool"},
+    {"i8", "uint8_t"},
+    {"u8", "uint8_t"},
+    {"i16", "uint16_t"},
+    {"i32", "uint32_t"},
+    {"i64", "uint64_t"},
+};
+static const size_t k_hip_unsigned_int_type_count
+    = sizeof(k_hip_unsigned_int_types) / sizeof(k_hip_unsigned_int_types[0]);
+
+static const char* h_unsigned_int_type_of_name(const char* ir_type_name)
+{
+    size_t i;
+    if(!ir_type_name)
+        return NULL;
+    for(i = 0; i < k_hip_unsigned_int_type_count; ++i)
+    {
+        if(strcmp(ir_type_name, k_hip_unsigned_int_types[i].ir_name) == 0)
+            return k_hip_unsigned_int_types[i].hip_unsigned;
+    }
+    return NULL;
+}
+
 const char* rocke_h_unsigned_int_type(const rocke_type_t* t)
 {
-    const char* name = t ? t->name : NULL;
-    if(!name)
-        return NULL;
-    if(strcmp(name, "i1") == 0)
-        return "bool";
-    if(strcmp(name, "i8") == 0 || strcmp(name, "u8") == 0)
-        return "uint8_t";
-    if(strcmp(name, "i16") == 0)
-        return "uint16_t";
-    if(strcmp(name, "i32") == 0)
-        return "uint32_t";
-    if(strcmp(name, "i64") == 0)
-        return "uint64_t";
-    return NULL;
+    return h_unsigned_int_type_of_name(t ? t->name : NULL);
+}
+
+const char* rocke_h_require_unsigned_int_type(rocke_h_lowerer_t* lw,
+                                              const char* op_name,
+                                              const char* ir_type_name)
+{
+    const char* spelling = h_unsigned_int_type_of_name(ir_type_name);
+    if(!spelling)
+    {
+        /* Python's repr of tuple(_HIP_UNSIGNED_INT_TYPE): ('i1', 'i8', ...). */
+        char names[128];
+        size_t used = 0;
+        size_t i;
+        used += (size_t)snprintf(names, sizeof names, "(");
+        for(i = 0; i < k_hip_unsigned_int_type_count && used < sizeof names; ++i)
+        {
+            used += (size_t)snprintf(names + used,
+                                     sizeof names - used,
+                                     "%s'%s'",
+                                     i ? ", " : "",
+                                     k_hip_unsigned_int_types[i].ir_name);
+        }
+        if(used < sizeof names)
+            snprintf(names + used, sizeof names - used, ")");
+        rocke_h_fail(lw,
+                     ROCKE_ERR_TYPE,
+                     "HIP lowering of %s failed - element type='%s', expected an integer "
+                     "type, one of %s",
+                     op_name,
+                     ir_type_name ? ir_type_name : "(null)",
+                     names);
+    }
+    return spelling;
 }
 
 /* The raw _HIP_TYPE dict: scalar IR name -> HIP scalar spelling. NULL if
@@ -1089,6 +1137,7 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
     rocke_vec_init(&lw.smem_decls);
     lw.indent = 1;
     lw.smem_counter = 0;
+    lw.gpu_check_word = NULL;
     lw.status = ROCKE_OK;
     lw.err[0] = '\0';
 
@@ -1137,6 +1186,10 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
         for(int j = 0; j < kernel->num_params; ++j)
             h_extra_vector_type(&lw, kernel->params[j]->type, out);
         h_extra_vector_region(&lw, kernel->body, out);
+        if(lw.gpu_check_word)
+        {
+            rocke_strbuf_appendf(out, "__device__ int %s;\n", lw.gpu_check_word);
+        }
         /* head */
         rocke_strbuf_appendf(out,
                              "extern \"C\" __global__ __launch_bounds__(%d)\n"

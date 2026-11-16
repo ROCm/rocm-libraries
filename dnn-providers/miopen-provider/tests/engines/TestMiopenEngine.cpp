@@ -9,11 +9,13 @@
 #include <string>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
@@ -214,6 +216,42 @@ TEST(TestMiopenEngine, GetDetailsReturnsSerializedEngineDetails)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
         result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);
+}
+
+TEST(TestMiopenEngine, GetDetailsDeterministicEngineReportsExplicitEmptyNumericalNotes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID);
+    HipdnnMiopenHandle dummyHandle;
+    const MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
+        result.ptr, result.size);
+    const auto notes = engineDetails.numericalNotes();
+    ASSERT_TRUE(notes.has_value());
+    EXPECT_TRUE(notes->empty());
+}
+
+TEST(TestMiopenEngine, GetDetailsDefaultEngineReportsNondeterministicNumericalNotes)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const MiopenEngine engine(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID);
+    HipdnnMiopenHandle dummyHandle;
+    const MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper engineDetails(
+        result.ptr, result.size);
+    const auto notes = engineDetails.numericalNotes();
+    ASSERT_TRUE(notes.has_value());
+    EXPECT_EQ(*notes, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
 }
 
 TEST(TestMiopenEngine, GetDetailsContainsBenchmarkingKnob)

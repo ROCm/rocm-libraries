@@ -19,6 +19,7 @@ from __future__ import annotations
 import struct
 from typing import Any, Tuple
 
+from ...numeric.bf16 import bf16_to_f32, f32_to_bf16
 from ..core import ProblemBinding
 
 # The legacy GEMM manifest runner's corpus, reused verbatim so a binding and
@@ -31,16 +32,6 @@ _SEED = 0xC0FFEE
 # a real miscompute, which shows up as a wrong magnitude rather than a last-bit
 # difference.
 _TOLERANCE = {"fp16": 1e-2, "bf16": 5e-2}
-
-
-def _bf16_from_f32(np, x):
-    """Round-to-nearest-even f32 -> bf16, carried as uint16."""
-    u = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
-    return (((u + 0x7FFF + ((u >> 16) & 1)) >> 16) & 0xFFFF).astype(np.uint16)
-
-
-def _f32_from_bf16(np, u):
-    return (u.astype(np.uint32) << 16).view(np.float32)
 
 
 def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding:
@@ -70,12 +61,12 @@ def gemm_rcr_binding(result: Any, verify: bool, *, dtype: str) -> ProblemBinding
             return buf.astype(np.float32)
 
     else:
-        a_host = _bf16_from_f32(np, a_int.astype(np.float32))
-        b_host = _bf16_from_f32(np, b_int.astype(np.float32))
+        a_host = f32_to_bf16(a_int.astype(np.float32))
+        b_host = f32_to_bf16(b_int.astype(np.float32))
         c_host = np.empty((M, N), dtype=np.uint16)
 
         def decode(buf):
-            return _f32_from_bf16(np, buf)
+            return bf16_to_f32(buf)
 
     def make_args(rt: Any) -> Tuple[bytes, Tuple[int, ...]]:
         a_dev = rt.alloc(nbytes(a_host))

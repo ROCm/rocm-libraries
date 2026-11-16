@@ -518,8 +518,8 @@ suites:
     product: tensilelite
     kind: static_check
     mode: default
-    oracle: "Rules on chip IDs, matrix instructions, work-group shapes, XCC mapping, custom kernels"
-    source: projects/hipblaslt/tensilelite/tensilelite/TensileLogic/
+    oracle: "Rules on chip IDs, matrix instructions, work-group shapes, XCC mapping, custom kernels, and cross-file corpus invariants"
+    source: projects/hipblaslt/tensilelite/tensilelite/logic/
     current:
       - system: build
         lane: "CMake step ahead of TensileCreateLibrary"
@@ -528,9 +528,18 @@ suites:
         notes: "Gates implicitly: a failure stops the build. No check name and no test report."
         evidence: ["doc:tensilelite/TESTING.md#build-time-validation-of-library-logic"]
         action: keep
+      - system: github_actions
+        lane: "Component CI: hipBLASLt Logic Corpus"
+        cadence: presubmit
+        archs: [linux-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "Every architecture whose logic changed, or the whole corpus when a validator or known_bugs.yaml changed, with --strict-known-bugs."
+        evidence: ["repo:.github/workflows/component-ci-logic-corpus.yml", "repo:projects/hipblaslt/tensilelite/tox.ini"]
+        action: keep
     target:
       - {system: build, cadence: every_build}
-      - {system: github_actions, cadence: presubmit, notes: "a separate lane running with --strict-known-bugs"}
+      - {system: github_actions, cadence: presubmit, notes: "a separate lane running with --strict-known-bugs (the logic-corpus lane)"}
     disposition: keep
     rationale: >-
       The cheapest layer that can see a bad logic entry, and it reaches every build. Add the strict
@@ -823,26 +832,37 @@ suites:
     product: tensilelite
     kind: host_unit
     mode: default
-    oracle: "Whole-corpus consistency: chip-ID arch lock and sibling DeviceNames"
-    source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py
+    oracle: "Unit tests that still read the logic corpus (@needs_logic_corpus): the skinny TN Range wiring, gfx1250 device scalar alpha logic, and SolutionUID uniqueness"
+    source: projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py
     current:
       - system: math_ci
         lane: "preliminary (unit stage)"
         cadence: presubmit
         gates: true
         required_check: Math CI Summary
-        notes: "Only when the PR touches tensilelite/; the corpus is not on disk in TheRock, so the checks skip there."
+        notes: "Only when the PR touches tensilelite/; skips in TheRock, where the corpus is not on disk. Every run prints a needs_logic_corpus ran/skipped count."
         evidence: ["doc:tensilelite/TESTING.md#logic-corpus-consistency-regression-tests", "external:math-ci"]
-        action: retire
+        action: keep
+      - system: github_actions
+        lane: "Component CI: hipBLASLt Logic Corpus"
+        cadence: presubmit
+        archs: [linux-cpu]
+        gates: true
+        required_check: Component CI Summary
+        notes: "On any change under Tensile/Logic/, the TensileLogic validators, or the corpus test plumbing. Runs these tests with the corpus required, after TensileLogic --check-all on the changed architectures."
+        evidence: ["repo:.github/workflows/component-ci-logic-corpus.yml", "doc:tensilelite/TESTING.md#logic-corpus-consistency-regression-tests"]
+        action: keep
     target:
       - {system: build, cadence: every_build, notes: "inside TensileLogic --check-all"}
+      - {system: github_actions, cadence: presubmit, notes: "the logic-corpus lane, on logic-only changes"}
     disposition: merge_into
     into: tensilelogic-check-all
     rationale: >-
-      Sibling-DeviceNames already runs in the build gate. Moving the chip-ID arch-lock check there
-      too would make it run everywhere the corpus exists, which is every kernel-generating build,
-      instead of in a pytest copy that can never run in TheRock.
-    tickets: ["#7481"]
+      The cross-file checks (sibling DeviceNames, Range files matching their Equality sibling's
+      placeholder) already run in the build gate, and the chip-ID arch lock walks the architecture
+      registry instead of the corpus. What is left reads one feature's own Range files; a generic
+      Range-file check in the gate would retire it.
+    tickets: ["#7481", "#14887"]
     workstreams: [fill_the_holes]
 
   - id: tensilelite-mutation

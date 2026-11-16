@@ -165,9 +165,9 @@ class TestDgradWmmaSpec(unittest.TestCase):
         groups, the split barrier and the per-wave epilogue included) and a
         set of rejected specs (the byte-identity gate only covers the IR of
         specs both engines build)."""
-        eng = pytest.importorskip("rocke_engine")
+        eng = pytest.importorskip("rocke_library_engine")
         from kernels.conv.direct_aot_jobs import DIRECT_CAPABILITIES, _knob_grid
-        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+        from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         def caps_problem(caps, dtype):
             # A packed cell bakes cpg = kpg; 32 groups cover every pack size.
@@ -260,8 +260,8 @@ class TestDgradWmmaSpec(unittest.TestCase):
         """The C++ refusal of an unknown scheduler quotes the name as Python's
         ``{value!r}`` does: the quote character, the escapes, a printable
         non-ASCII name (the subset rocke_py_str_repr documents)."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for name in ("bogus", "it's", "a\\b", "x'\"y", "tab\there", "caf\u00e9"):
             with self.subTest(name=name):
@@ -279,8 +279,8 @@ class TestDgradWmmaSpec(unittest.TestCase):
     def test_binding_rejects_bad_input(self):
         """A rejected spec returns the rejection (no grid is computed from its
         zero tile extents); a missing, mistyped or partial problem raises."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for knobs in (dict(waves_c=0), dict(tiles_c=0), dict(waves_p=0)):
             sd = conv_direct_dgrad_wmma_spec_to_dict(
@@ -309,8 +309,8 @@ class TestDgradWmmaSpec(unittest.TestCase):
     def test_binding_rejects_nonpositive_filter(self):
         """The C++ engine refuses a zero or negative filter extent with
         Python's reason, before planning its (empty) taps."""
-        eng = pytest.importorskip("rocke_engine")
-        from rocke.core.backend import conv_direct_dgrad_wmma_spec_to_dict
+        eng = pytest.importorskip("rocke_library_engine")
+        from kernels.conv.engine_bridge import conv_direct_dgrad_wmma_spec_to_dict
 
         for KH, KW in ((0, 3), (3, 0), (-1, 3), (3, -2)):
             spec = DirectDgradWmmaSpec(

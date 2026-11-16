@@ -27,6 +27,9 @@ import unittest
 import kernels.common.attention_unified as au
 import kernels.gfx942.attention_tiled_2d as t2d
 
+from ._bounds_check_ir import clamped_to_last_of as _clamped_to_last_of
+from ._bounds_check_ir import global_loads as _global_loads
+
 
 class _PinArch:
     """Context-manager that pins ``_RESOLVED_ATTENTION_ARCH`` to ``arch``."""
@@ -227,76 +230,6 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
             )
             with self.assertRaises(NotImplementedError):
                 t2d._build_gfx942_4warp_gqa_lean(spec, arch="gfx942")
-
-
-def _walk_ops(region):
-    for op in region.ops:
-        yield op
-        for sub in op.regions:
-            yield from _walk_ops(sub)
-
-
-def _global_loads(kernel, param):
-    return [
-        op
-        for op in _walk_ops(kernel.body)
-        if op.name.startswith("memref.global_load")
-        and op.operands[0].name == f"%{param}"
-    ]
-
-
-def _is_last_index_of(value, param):
-    """``value`` is ``load(param, ...) - 1`` (the last valid key / token)."""
-    op = value.op
-    if op is None or op.name != "arith.sub":
-        return False
-    lhs, rhs = op.operands
-    return (
-        lhs.op is not None
-        and lhs.op.name.startswith("memref.global_load")
-        and lhs.op.operands[0].name == f"%{param}"
-        and rhs.op is not None
-        and rhs.op.name == "arith.constant"
-        and rhs.op.attrs.get("value") == 1
-    )
-
-
-def _is_last_page_of(value, param, block_size):
-    """``value`` is ``(load(param, ...) - 1) >> log2(block_size)`` (the last valid
-    page). The shift is pinned: one short would bound to a page past the last."""
-    op = value.op
-    if op is None or op.name != "arith.lshr":
-        return False
-    shift = op.operands[1].op
-    return (
-        _is_last_index_of(op.operands[0], param)
-        and shift is not None
-        and shift.name == "arith.constant"
-        and shift.attrs.get("value") == block_size.bit_length() - 1
-    )
-
-
-def _clamped_to_last_of(value, param, block_size=None):
-    """The index DAG of ``value`` passes through ``select(cmp, x, load(param)-1)``
-    (last key / token) or, given ``block_size``, through
-    ``smin(x, (load(param)-1) >> log2(block_size))`` (last page)."""
-    seen, stack = set(), [value]
-    while stack:
-        v = stack.pop()
-        if id(v) in seen or v.op is None:
-            continue
-        seen.add(id(v))
-        op = v.op
-        if op.name == "arith.select" and _is_last_index_of(op.operands[2], param):
-            return True
-        if (
-            block_size is not None
-            and op.name == "arith.smin"
-            and any(_is_last_page_of(x, param, block_size) for x in op.operands)
-        ):
-            return True
-        stack.extend(op.operands)
-    return False
 
 
 class TestLeanBodyBoundsReads(unittest.TestCase):
