@@ -35,7 +35,6 @@
 namespace hs = hipdnn_shim_test;
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_WARN_SEARCH)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_USER_DB)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_DISABLE_SYSTEM_DB)
 
 namespace {
@@ -1485,18 +1484,13 @@ hs::CallResult InferUnderPolicy(miopen::Handle& handle,
 }
 
 // The environment the search-observing tests run under: MIOPEN_WARN_SEARCH raises
-// MIOpen's "Search Started" line to a warning, and the perf dbs are off, because a
-// record found there, from an earlier run or another test, is loaded in place of a
-// search. Pass user_db to keep the user db on.
+// MIOpen's "Search Started" line to a warning, and the system db is off. The user
+// db stays on: MIOpen reads MIOPEN_DEBUG_DISABLE_USER_DB only when it first opens
+// the db, which an earlier test has usually done, so turning it off here would not
+// keep its records out. ForgetTuning drops them instead.
 struct SearchLogScope
 {
-    explicit SearchLogScope(bool user_db = false)
-        : no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, !user_db)
-    {
-    }
-
     const ScopedEnvironment<bool> warn_search{MIOPEN_WARN_SEARCH, true};
-    const ScopedEnvironment<bool> no_user_db;
     const ScopedEnvironment<bool> no_system_db{MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true};
 };
 
@@ -1507,6 +1501,31 @@ bool Searched(const hs::CallResult& result)
     return result.logged.find("Search Started:") != std::string::npos;
 }
 
+// Drops the user perf-db records for the case's training and backward calls, so
+// the next call under SEARCH searches instead of loading one. They may come from
+// an earlier test or an earlier run, since the db outlives the process. Each pass
+// gets a handle of its own, so neither reuses a cached invoker.
+//
+// NONE runs first because under DB_CLEAN MIOpen removes a record from its
+// in-memory copy of the db without rereading the file, and that copy misses the
+// records a search stored since the last read. A load rereads a stale copy.
+void ForgetTuning(const BN2DTestCase& test_case)
+{
+    for(const char* value : {"NONE", "DB_CLEAN"})
+    {
+        const ScopedFindEnforce find_enforce(value);
+        hs::Owned<miopenHandle_t, miopenDestroy> owned_handle;
+        ASSERT_EQ(miopenCreateWithStream(&owned_handle.handle, get_handle().GetStream()),
+                  miopenStatusSuccess);
+        auto&& handle = miopen::deref(owned_handle.handle);
+
+        TrainData train;
+        TrainUnderPolicy(handle, train, miopenBNSpatial, test_case);
+        BwdData bwd;
+        BwdUnderPolicy(handle, bwd, miopenBNSpatial, test_case);
+    }
+}
+
 // MIOpen tunes the spatial training and backward solvers when the handle asks for
 // Search. The provider runs on a handle of its own, so the shim carries Search
 // over as the plan's benchmarking knob, under which the provider sets Search on
@@ -1514,13 +1533,14 @@ bool Searched(const hs::CallResult& result)
 //
 // The results alone cannot tell a search from a run under None, so the test also
 // looks for MIOpen's "Search Started" line, which MIOPEN_WARN_SEARCH raises to a
-// warning. Both perf dbs are off, because a record found there, from an earlier
-// run or another test, is loaded in place of a search.
+// warning. A perf-db record for the case would be loaded in place of a search, so
+// the test drops any first.
 TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyIsServed)
 {
+    const SearchLogScope search_log;
+    ForgetTuning(SearchCase());
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
-    const SearchLogScope search_log;
 
     {
         SCOPED_TRACE("train");
@@ -1652,26 +1672,26 @@ void ExpectFindEnforceOutcome(const std::string& case_name,
 // it as MIOpen does: in whether a call searches, and in what it leaves in the user
 // perf db. The steps run in order and see each other only through that db, since
 // each gets a handle of its own and so cannot reuse an invoker or plan an earlier
-// step cached:
+// step cached. ForgetTuning first drops any record an earlier test or run left.
 //
-//   DB_CLEAN          removes any record an earlier run left
 //   SEARCH            finds no record, so searches and stores one
 //   SEARCH            loads that record instead of searching
 //   SEARCH_DB_UPDATE  searches even though there is a record
 //   NONE, DB_UPDATE   load the record, no search
 //   DB_CLEAN          removes the record
 //   SEARCH            searches again, so the record really went
-//   DB_CLEAN          removes it, so the next run starts the same way
+//   NONE              loads it, so the next step sees it
+//   DB_CLEAN          removes it
 //
-// The user db is on and the system db off. MIOpen opens each perf db once per
-// process, and if an earlier test opened the user db while it was off, its records
-// stay in memory, which the steps cannot tell apart from the file.
+// DB_CLEAN removes from MIOpen's in-memory copy of the db without rereading the
+// file, and a search's store leaves that copy behind the file, so each DB_CLEAN
+// follows a load. Without the second NONE, MIOpen misses the backward record.
 TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
 {
-    const SearchLogScope search_log(true);
+    const SearchLogScope search_log;
+    ForgetTuning(FindEnforceCase());
 
     const std::vector<FindEnforceStep> steps = {
-        {"DB_CLEAN", false, std::nullopt},
         {"SEARCH", true, false},
         {"SEARCH", false, false},
         {"SEARCH_DB_UPDATE", true, false},
@@ -1679,6 +1699,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
         {"DB_UPDATE", false, false},
         {"DB_CLEAN", false, true},
         {"SEARCH", true, false},
+        {"NONE", false, false},
         {"DB_CLEAN", false, true},
     };
 
@@ -1719,7 +1740,8 @@ TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
 // write or clean the perf db. Under SEARCH, here also spelled as its number 3, both
 // MIOpen and the provider search, so the call is served and searches. Each value
 // gets a handle of its own, so the second cannot reuse the first one's invoker or
-// plan, and both perf dbs are off, so neither can load a record.
+// plan, and ForgetTuning drops the perf-db record before each, so neither can load
+// one.
 TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
 {
     const SearchLogScope search_log;
@@ -1727,6 +1749,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
     for(const char* value : {"SEARCH", "3"})
     {
         SCOPED_TRACE(value);
+        ForgetTuning(SearchCase());
         const ScopedFindEnforce find_enforce(value);
 
         hs::Owned<miopenHandle_t, miopenDestroy> owned_handle;
