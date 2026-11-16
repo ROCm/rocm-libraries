@@ -66,6 +66,17 @@ target_link_libraries(hipblaslt-test-hostunit
 
 target_compile_definitions(hipblaslt-test-hostunit PRIVATE GOOGLE_TEST)
 
+# The rocRoller host tests include the ranker headers, which include
+# rocblaslt.h. hipblaslt-test does not otherwise put that directory on the
+# include path. hipblaslt-test already exists (clients/CMakeLists.txt adds it
+# before this directory).
+foreach(hblt_test_target hipblaslt-test hipblaslt-test-hostunit)
+    target_include_directories(${hblt_test_target}
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
+            "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include")
+endforeach()
+
 set_source_files_properties(${HIPBLASLT_ROCROLLER_UNBUILDABLE_TEST_SOURCES}
     TARGET_DIRECTORY hipblaslt-test hipblaslt-test-hostunit
     PROPERTIES INCLUDE_DIRECTORIES
