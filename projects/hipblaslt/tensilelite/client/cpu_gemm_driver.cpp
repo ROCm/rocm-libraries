@@ -40,6 +40,7 @@
 #include "Reference.hpp"
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
+#include <Tensile/DataTypes.hpp>
 
 /*
  * CPU GEMM Driver and Validator
@@ -76,78 +77,6 @@ namespace
 {
     using namespace TensileLite;
     using namespace TensileLite::Client;
-
-    // Helper traits to map C++ storage types to rocisa data type enums.
-    template <typename T>
-    struct TypeTraits;
-
-    template <>
-    struct TypeTraits<float>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float;
-    };
-
-    template <>
-    struct TypeTraits<double>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Double;
-    };
-
-    template <>
-    struct TypeTraits<int8_t>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Int8;
-    };
-
-    template <>
-    struct TypeTraits<int32_t>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Int32;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::Half>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Half;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::BFloat16>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::BFloat16;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::Float8>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float8;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::BFloat8>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::Float8_fnuz>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float8_fnuz;
-    };
-
-    template <>
-    struct TypeTraits<TensileLite::BFloat8_fnuz>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::BFloat8_fnuz;
-    };
-
-#ifndef _WIN32
-    template <>
-    struct TypeTraits<TensileLite::Float4x2>
-    {
-        static constexpr rocisa::DataType value = rocisa::DataType::Float4;
-    };
-#endif
 
     // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
@@ -507,8 +436,8 @@ int runGemm(size_t         m,
         std::cerr << "Error: batchCount (" << batchCount << ") must be >= 1" << std::endl;
         return 1;
     }
-    constexpr rocisa::DataType dtypeEnumA = TypeTraits<InputAT>::value;
-    constexpr rocisa::DataType dtypeEnumB = TypeTraits<InputBT>::value;
+    constexpr rocisa::DataType dtypeEnumA = TypeInfo<InputAT>::Enum;
+    constexpr rocisa::DataType dtypeEnumB = TypeInfo<InputBT>::Enum;
     if(computeInputA == rocisa::DataType::None) computeInputA = dtypeEnumA;
     if(computeInputB == rocisa::DataType::None) computeInputB = dtypeEnumB;
 
@@ -592,8 +521,8 @@ int runGemm(size_t         m,
     size_t ldc        = m;
 
     // alpha/beta (and bias, scale vectors, AMAX-D) use AccumulateT; C/D use OutputT.
-    constexpr rocisa::DataType accumDtypeEnum  = TypeTraits<AccumulateT>::value;
-    constexpr rocisa::DataType outputDtypeEnum = TypeTraits<OutputT>::value;
+    constexpr rocisa::DataType accumDtypeEnum  = TypeInfo<AccumulateT>::Enum;
+    constexpr rocisa::DataType outputDtypeEnum = TypeInfo<OutputT>::Enum;
 
     // Define the contraction problem (geometry, strides, types)
     ContractionProblemGemm contraction
