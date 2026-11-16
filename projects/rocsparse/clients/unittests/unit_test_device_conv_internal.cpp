@@ -1490,6 +1490,8 @@ namespace
                 EXPECT_EQ(sparse_to_sparse(handle, source.descr, target.descr, c.permissive),
                           c.sf == rocsparse_format_csc ? rocsparse_status_invalid_value
                                                        : rocsparse_status_not_implemented);
+                EXPECT_EQ(target.read_a(), std::vector<int32_t>(target.host.a.size(), -7));
+                EXPECT_EQ(target.read_b(), std::vector<int32_t>(target.host.b.size(), -7));
                 EXPECT_EQ(target.read_val(), std::vector<T>(want.val.size(), fill));
                 continue;
             }
