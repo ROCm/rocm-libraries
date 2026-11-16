@@ -1203,6 +1203,13 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 
 namespace detail {
 
+// MX only when the problem has a QScaleEnum: pipelines without quant scales reuse this layout.
+template <typename Problem, typename = void>
+inline constexpr bool is_mx_problem_v = false;
+template <typename Problem>
+inline constexpr bool is_mx_problem_v<Problem, std::void_t<decltype(Problem::QScaleEnum)>> =
+    Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+
 // One 256-byte-aligned arena backs every qr_tdm LDS region. Q intentionally aliases K0 at offset
 // zero and, on the single-V/double-K LDS buffer path, overlaps the later S/V regions: the pipeline
 // loads Q into registers and completes the tensor-count barrier before K/V overwrite that storage.
@@ -1277,7 +1284,7 @@ struct QrTdmLdsArenaLayout
     // MX: the TDM-loaded E8M0 scales of a KV tile, one byte per 32 K elements, ping-ponged like
     // K / V: K as [kN0][4 per K128 step] (a K64 head dim pads its row to one step), V as
     // [kN1][kK1 / 32]. Q's scales borrow K0's scale region.
-    static constexpr bool kMx = Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+    static constexpr bool kMx                    = is_mx_problem_v<Problem>;
     static constexpr index_t kMxScaleGranularity = 32;
     static constexpr index_t kMxKScaleBytes =
         kMx ? Shape::kN0 * integer_divide_ceil(Shape::kK0, 4 * kMxScaleGranularity) * 4 : 0;
