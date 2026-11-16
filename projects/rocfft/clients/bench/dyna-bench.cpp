@@ -781,7 +781,7 @@ int main(int argc, char* argv[])
             {
                 for(size_t ilib = 0; ilib < index_lib_string.size(); ++ilib)
                 {
-                    testcase[ilib * ntrial + itrial] = ilib;
+                    testcase[ilib * ntrial_runs[ridx] + itrial] = ilib;
                 }
             }
             break;
