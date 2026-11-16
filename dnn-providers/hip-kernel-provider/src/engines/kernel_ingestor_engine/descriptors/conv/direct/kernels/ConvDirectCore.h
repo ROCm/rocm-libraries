@@ -768,7 +768,7 @@ template <class T,
           int SPLIT = 0,
           int HALO = k2HaloMax(BM, R, S),
           int CF = 0,
-          int CFRW = 2>
+          int CF_RUN = 2>
 __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -789,7 +789,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
     // CF 1: packed channels-first activations in place (K2HaloLoadCf in, channel-major stores out).
     static_assert(CF == 0 || (SPLIT == 0 && sizeof(T) == 2), "channels-first tile");
     typedef typename K1If<CF != 0,
-                          K2HaloLoadCf<T, BC, THREADS, k2CfTasks(BM, R, S, BC, CFRW), CFRW>,
+                          K2HaloLoadCf<T, BC, THREADS, k2CfTasks(BM, R, S, BC, CF_RUN), CF_RUN>,
                           K2HaloLoad<T, BC, VEC, THREADS, HALO>>::type Loader;
     typedef typename Atom::frag Frag;
 

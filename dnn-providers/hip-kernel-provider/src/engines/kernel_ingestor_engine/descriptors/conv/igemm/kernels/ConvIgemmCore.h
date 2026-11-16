@@ -1816,6 +1816,11 @@ struct K1TilesCf : K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0>
     };
 
     int plane; // gathered tensor's pixels per channel (D H W)
+    // Aligned form (16-bit, MV 8, width stride 1 or 2, input and output widths multiples of 8):
+    // every unit's rows are 8 consecutive output columns of one row, so its inputs span whole
+    // aligned 16-byte vectors of one input row, loaded aligned and shifted in registers by the
+    // tap's offset within a vector (uniform over the block).
+    bool aligned;
     int cImg[CPASSES]; // image of the unit's first row, from the block's first image
     int cD[CPASSES], cH[CPASSES], cW[CPASSES]; // first row's output position
     int cRows[CPASSES]; // the unit's rows that exist (MV when all of them do)
@@ -1833,6 +1838,8 @@ struct K1TilesCf : K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0>
         Base::init(a, gth, mp, g, m0, n0, tid);
         const K1Gather& gt = this->gather;
         plane = gt.in[0] * gt.in[1] * gt.in[2];
+        aligned = sizeof(T) == 2 && MV == 8 && (gt.stride[2] == 1 || gt.stride[2] == 2)
+                  && gt.in[2] % 8 == 0 && gt.out[2] % 8 == 0;
         const long long spatial = static_cast<long long>(gt.out[0]) * gt.out[1] * gt.out[2];
         const long long firstImage = m0 / spatial;
 #pragma unroll
@@ -1867,6 +1874,79 @@ struct K1TilesCf : K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, 0, 0>
         const int iw = cW[p] * sw - gt.pad[2] + tw;
         const bool rowIn = (static_cast<unsigned>(id) < static_cast<unsigned>(gt.in[0]))
                            & (static_cast<unsigned>(ih) < static_cast<unsigned>(gt.in[1]));
+        if constexpr(sizeof(T) == 2 && MV == 8)
+        {
+            if(aligned & (cRows[p] == MV))
+            {
+                // a0: the aligned vector at or left of iw; dl: iw's element within it (uniform).
+                const int dl = iw & 7;
+                const int a0 = iw - dl;
+                const int rowOff
+                    = (cImg[p] * chans + chan0 + c) * plane + (id * gt.in[1] + ih) * gt.in[2];
+                const bool live = cOk & rowIn;
+                auto vec = [&](int a) {
+                    const bool ok
+                        = live & (static_cast<unsigned>(a) < static_cast<unsigned>(gt.in[2]));
+                    return k1BufferLoad<RawM>(
+                        this->aRsrc,
+                        ok ? static_cast<unsigned>((rowOff + a) * static_cast<int>(sizeof(T)))
+                           : K1_OUT_OF_RANGE);
+                };
+                unsigned w[12];
+                const RawM v0 = vec(a0), v1 = vec(a0 + 8);
+#pragma unroll
+                for(int q = 0; q < 4; ++q)
+                {
+                    w[q] = v0[q];
+                    w[4 + q] = v1[q];
+                    w[8 + q] = 0;
+                }
+                RawM r;
+                if(sw == 1)
+                {
+                    // Elements dl .. dl + 7 of the 16.
+                    const int q0 = dl >> 1;
+#pragma unroll
+                    for(int k = 0; k < 4; ++k)
+                    {
+                        unsigned lo = w[k], hi = w[k + 1];
+#pragma unroll
+                        for(int q = 1; q < 4; ++q)
+                            if(q == q0)
+                            {
+                                lo = w[k + q];
+                                hi = w[k + q + 1];
+                            }
+                        r[k] = (dl & 1) != 0 ? __builtin_amdgcn_alignbyte(hi, lo, 2) : lo;
+                    }
+                }
+                else
+                {
+                    // Elements dl, dl + 2, .., dl + 14 of the 24: one half of each dword.
+                    const RawM v2 = vec(a0 + 16);
+#pragma unroll
+                    for(int q = 0; q < 4; ++q)
+                        w[8 + q] = v2[q];
+                    const int q0 = dl >> 1;
+                    const unsigned sel = (dl & 1) != 0 ? 0x07060302u : 0x05040100u;
+#pragma unroll
+                    for(int k = 0; k < 4; ++k)
+                    {
+                        unsigned x0 = w[2 * k], x1 = w[2 * k + 1];
+#pragma unroll
+                        for(int q = 1; q < 4; ++q)
+                            if(q == q0)
+                            {
+                                x0 = w[2 * k + q];
+                                x1 = w[2 * k + q + 1];
+                            }
+                        r[k] = __builtin_amdgcn_perm(x1, x0, sel);
+                    }
+                }
+                ca[p][j] = r;
+                return;
+            }
+        }
         // One vector when the MV rows are consecutive positions of one input row, all inside.
         if((sw == 1) & (cRows[p] == MV) & (cW[p] + MV <= gt.out[2]) & rowIn & (iw >= 0)
            & (iw + MV <= gt.in[2]))
