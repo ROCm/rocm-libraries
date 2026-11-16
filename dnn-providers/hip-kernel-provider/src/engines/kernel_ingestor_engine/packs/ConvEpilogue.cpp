@@ -92,7 +92,11 @@ std::optional<ConvEpilogue> parseConvEpilogue(const MatchContext& context,
 
 std::string patternOf(const ConvEpilogue& epilogue)
 {
-    // The generated code is a function of this text alone.
+    // The generated code is a function of this text alone. The activations built on exp2 come in
+    // two forms, the few-ulp one for an fp32 output (".fp32") and a faster one for 16-bit outputs.
+    const std::string form = epilogue.outputType == data_objects::DataType::FLOAT
+                                 ? std::string(".fp32")
+                                 : std::string();
     std::string pattern;
     for(const auto& op : epilogue.ops)
     {
@@ -121,28 +125,28 @@ std::string patternOf(const ConvEpilogue& epilogue)
             pattern += reluForm(epilogue, op);
             break;
         case OpCode::GELU:
-            pattern += "gelu";
+            pattern += "gelu" + form;
             break;
         case OpCode::GELU_TANH:
-            pattern += "gelu_tanh";
+            pattern += "gelu_tanh" + form;
             break;
         case OpCode::SWISH:
-            pattern += "swish";
+            pattern += "swish" + form;
             break;
         case OpCode::SIGMOID:
-            pattern += "sigmoid";
+            pattern += "sigmoid" + form;
             break;
         case OpCode::TANH:
-            pattern += "tanh";
+            pattern += "tanh" + form;
             break;
         case OpCode::ELU:
-            pattern += "elu";
+            pattern += "elu" + form;
             break;
         case OpCode::ABS:
             pattern += "abs";
             break;
         case OpCode::SOFTPLUS:
-            pattern += "softplus";
+            pattern += "softplus" + form;
             break;
         default:
             break;
@@ -170,6 +174,10 @@ void addEpilogueDefines(compilation::KernelCompileOptions& options, const ConvEp
         chan += reg(index) + "=" + std::string(loaderFor(operand.dataType)) + "(e.operand["
                 + std::to_string(index) + "]," + (operand.perChannel ? "ok?ch:0" : "0") + ");";
     }
+    // The activations' form: few-ulp for an fp32 output, the faster form for a 16-bit output.
+    const std::string form
+        = epilogue.outputType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? "<1>"
+                                                                                       : "<0>";
     std::string code;
     for(const auto& op : epilogue.ops)
     {
@@ -212,28 +220,28 @@ void addEpilogueDefines(compilation::KernelCompileOptions& options, const ConvEp
             break;
         }
         case OpCode::GELU:
-            code += "v=convEpiGelu(v);";
+            code += "v=convEpiGelu" + form + "(v);";
             break;
         case OpCode::GELU_TANH:
-            code += "v=convEpiGeluTanh(v);";
+            code += "v=convEpiGeluTanh" + form + "(v);";
             break;
         case OpCode::SWISH:
-            code += "v=convEpiSwish(v," + slot(op.slot) + ");";
+            code += "v=convEpiSwish" + form + "(v," + slot(op.slot) + ");";
             break;
         case OpCode::SIGMOID:
-            code += "v=convEpiSigmoid(v);";
+            code += "v=convEpiSigmoid" + form + "(v);";
             break;
         case OpCode::TANH:
-            code += "v=convEpiTanh(v);";
+            code += "v=convEpiTanh" + form + "(v);";
             break;
         case OpCode::ELU:
-            code += "v=convEpiElu(v," + slot(op.slot) + ");";
+            code += "v=convEpiElu" + form + "(v," + slot(op.slot) + ");";
             break;
         case OpCode::ABS:
             code += "v=fabsf(v);";
             break;
         case OpCode::SOFTPLUS:
-            code += "v=convEpiSoftplus(v," + slot(op.slot) + ");";
+            code += "v=convEpiSoftplus" + form + "(v," + slot(op.slot) + ");";
             break;
         default:
             break;

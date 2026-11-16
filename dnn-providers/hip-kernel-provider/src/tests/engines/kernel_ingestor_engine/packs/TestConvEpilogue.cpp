@@ -737,6 +737,58 @@ TEST(TestConvEpilogueKey, SignatureCheckTakesBothArities)
     EXPECT_ANY_THROW(requireSignatureMatch(fused, unfused, "k", "k"));
 }
 
+std::string generatedCode(const conv_epilogue::ConvEpilogue& epilogue)
+{
+    compilation::KernelCompileOptions options("gfx942");
+    conv_epilogue::addEpilogueDefines(options, epilogue);
+    const std::vector<std::string> defines = options;
+    for(const auto& define : defines)
+    {
+        if(define.find("CONV_EPI_CODE=") != std::string::npos)
+        {
+            return define;
+        }
+    }
+    return {};
+}
+
+TEST(TestConvEpilogueKey, ActivationFormFollowsTheOutputType)
+{
+    // An fp32 output takes the few-ulp activations, a 16-bit output the faster form: different
+    // generated code and code-object keys for the same chain, the same for a chain without one.
+    ConvShape fp32 = nhwcHalf();
+    fp32.dataType = DataType::FLOAT;
+    ConvShape bf16 = nhwcHalf();
+    bf16.dataType = DataType::BFLOAT16;
+    for(const auto mode : {PointwiseMode::GELU_FWD,
+                           PointwiseMode::GELU_APPROX_TANH_FWD,
+                           PointwiseMode::SWISH_FWD,
+                           PointwiseMode::SIGMOID_FWD,
+                           PointwiseMode::TANH_FWD,
+                           PointwiseMode::ELU_FWD,
+                           PointwiseMode::SOFTPLUS_FWD})
+    {
+        const std::vector<Step> chain{bias(), unary(mode)};
+        const auto wide = parseFused(fusedSpecFor(fp32, chain));
+        const auto half = parseFused(fusedSpecFor(nhwcHalf(), chain));
+        const auto brain = parseFused(fusedSpecFor(bf16, chain));
+        ASSERT_TRUE(wide.has_value() && half.has_value() && brain.has_value());
+        EXPECT_EQ(wide->epilogue.outputType, DataType::FLOAT);
+        EXPECT_NE(generatedCode(wide->epilogue).find("<1>("), std::string::npos);
+        EXPECT_NE(generatedCode(half->epilogue).find("<0>("), std::string::npos);
+        EXPECT_EQ(generatedCode(half->epilogue), generatedCode(brain->epilogue));
+        EXPECT_NE(generatedCode(wide->epilogue), generatedCode(half->epilogue));
+        EXPECT_NE(conv_epilogue::patternOf(wide->epilogue),
+                  conv_epilogue::patternOf(half->epilogue));
+        EXPECT_NE(naiveKey(*wide), naiveKey(*half));
+    }
+    const std::vector<Step> reluChain{bias(), relu()};
+    const auto wide = parseFused(fusedSpecFor(fp32, reluChain));
+    const auto half = parseFused(fusedSpecFor(nhwcHalf(), reluChain));
+    ASSERT_TRUE(wide.has_value() && half.has_value());
+    EXPECT_EQ(generatedCode(wide->epilogue), generatedCode(half->epilogue));
+}
+
 TEST(TestConvEpilogueKey, GeneratedCodeIsCanonical)
 {
     // Two parses of one pattern give byte-identical generated defines.

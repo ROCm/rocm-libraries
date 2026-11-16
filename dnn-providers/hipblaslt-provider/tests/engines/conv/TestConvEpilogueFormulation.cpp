@@ -158,9 +158,9 @@ std::vector<NativeCase> nativeCases()
     return {
         {"Bias", {bias(DataType::HALF)}, NATIVE_EPILOGUE_BIAS},
         {"Fp32Bias", {bias(DataType::FLOAT)}, NATIVE_EPILOGUE_BIAS},
-        {"Sigmoid", {unary(PointwiseMode::SIGMOID_FWD)}, NATIVE_EPILOGUE_SIGMOID},
-        // hipBLASLt's activations differ from the chain on NaN or infinity: the pass applies
-        // them.
+        // Activations run in the pass: hipBLASLt's differ from the chain on accuracy, NaN or
+        // infinity.
+        {"Sigmoid", {unary(PointwiseMode::SIGMOID_FWD)}, 0},
         {"Relu", {relu()}, 0},
         {"BiasRelu", {bias(DataType::HALF), relu(0.0F, std::nullopt, 0.0F)}, 0},
         {"BiasClamp", {bias(), relu(-1.0F, 6.0F)}, 0},
