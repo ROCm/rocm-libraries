@@ -106,11 +106,7 @@ The following table lists all operations currently supported in hipDNN:
 > `generate_index`, Y's dimensions and packed NCHW/NCDHW strides, and must not alias X or Y. On
 > channels-last tensors, graphs whose window, stride, datatype and rank need a per-thread tile
 > above the scratch limit of MIOpen's tiled kernels (about 128 KiB) are not supported. In-place
-> execution and override-shape graphs are not supported. Max pooling ignores NaN inputs. A window
-> with no finite input (all NaN or -inf) gives index 0, even when the window does not hold element
-> 0, and Y equal to the datatype's lowest finite value for FP32 and FP16, or -inf for BFLOAT16 (a
-> known MIOpen limitation). For such a window the HIP MLops engine writes index -1, and the CPU
-> reference writes the first in-bounds value and its index.
+> execution and override-shape graphs are not supported.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.

@@ -76,14 +76,15 @@
 // WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding) is true for the
 // graphs the resample forward checks decline until the fix lands: BFLOAT16 max
 // pooling that requests an index with any non-zero padding. Without padding, or
-// without an index, the graph is unaffected.
+// without an index, no index can name a padded position.
 //
-// To remove after the fix: delete this section and its macro, its call site in
-// engines/plans/MiopenResampleFwdChecks.cpp, and the decline test tagged
-// ALMIOPEN-3295 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp; update
-// the expected BFLOAT16 value of the plan test tagged ALMIOPEN-3295 in
-// tests/engines/plans/TestMiopenResampleFwdPlan.cpp; drop the BFLOAT16 notes
-// from the Resample Forward docs. `git grep ALMIOPEN.3295` finds them all.
+// To remove after the fix: delete this section and its macro, its call site and
+// the `#include "Workarounds.hpp"` in engines/plans/MiopenResampleFwdChecks.cpp,
+// and the decline test tagged ALMIOPEN-3295 in
+// tests/engines/plans/TestMiopenResampleFwdChecks.cpp; drop the BFLOAT16 index
+// rule from the Resample Forward notes in docs/OperationSupport.md and
+// projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
+// ALMIOPEN.3295` finds the code sites.
 // ----------------------------------------------------------------------------
 
 #define WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding) \
