@@ -14,7 +14,7 @@ SPDX-License-Identifier:  MIT
 - **Row width:** a whole row must fit in one wave (lanes x `p` output columns). That is at most 512 columns on wave64 and 256 on wave32 with the widest shipped `p`. Wider rows are declined.
 - **Arches:** every arch, VALU only. Both packs ship both layouts. The `valu` pack (gfx906, gfx908) ships every tile. The `mma` pack (gfx90a, gfx942, gfx950, gfx11, gfx12) ships the few tiles that won there.
 - **Wins when:** a per-group GEMM would leave the matrix tile mostly empty: ResNeXt / RegNet groups of 4 to 56 channels, ResNeXt3D 3-D grouped layers, few-channel dense and pointwise wrw, 3-D depthwise wrw, and most wrw on gfx906 (no matrix cores).
-- **Loses when:** channels per group are wide (FWD/BWD at 56 or more go to Winograd; WRW to K3 / BLAS), on large pointwise wrw (a GEMM), on dense 3x3 wrw on gfx906 (MIOpen's asm is about 1.3x faster), on channels-last grouped layers on MI325X (no win measured; see Strengths), and on rows too wide for a wave.
+- **Loses when:** channels per group are wide (FWD/BWD at 56 or more go to Winograd; WRW to K3 / BLAS), on large pointwise wrw (a GEMM), on dense 3x3 wrw on gfx906 (MIOpen's asm is about 1.3x faster), on channels-last layers on the matrix-core arches (on MI325X another engine is faster on every grouped NHWC graph of the corpus; see Strengths), and on rows too wide for a wave.
 - **Precision:** fp32 accumulation and one rounding at the store. 16-bit products are exact in fp32, and the fp16 `dot2` path adds two exact products to the fp32 sum. Fixed-order reductions with no atomics give bitwise-repeatable results, so the engine carries no numerical notes.
 - **Instances:** FWD 180 `valu` + 30 `mma`, BWD 168 + 30, WRW 254 `valu` + 173 `mma` (835 in all). Every config is admitted on correctness alone and autotune picks among them.
 - **vs MIOpen:** WRW replaces `ConvAsmBwdWrW3x3`, which is limited to gfx8/gfx90x, 2-D NCHW 3x3 pad 1, fp32/fp16, even N for fp16, and one code object per shape. On gfx906 it is 5.5x faster on ResNeXt-50 g32 56² n128 fp16 wrw and 17.6x on its stride-2 layer. On ResNeXt3D grouped wrw it is about 33x faster than MIOpen's best solver.
@@ -124,7 +124,7 @@ All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen i
 - **Matrix-core arches:**
   - Over 125 grouped wrw graphs, our engines with this WRW run 1.18x faster than without it on MI325X, 1.23x on gfx1201 and 1.22x on gfx90a, with 7-8 fewer losses against MIOpen per arch.
   - FWD/BWD spot checks, against our engines without it: 1.02x on gfx90a, 1.06x on MI325X, 1.02x on gfx1201. These are small, as expected, since the matrix-core engines (K4, K1 `fuse`) cover most of the space.
-  - Channels-last on MI325X: over the 80 grouped graphs of the real-model corpus in fp32, fp16 and bf16 (240 NHWC graphs, all directions), the `mma` NHWC configs serve every graph and are the best engine on none. The closest is 1.44x behind `CONV_GROUP_FWD` (ResNeXt-50 c128 g32 56² n1 fp32), and the median is about 13x behind the best engine. The engine's NHWC time is a median 3.2x its NCHW time on the same layer.
+  - Channels-last on MI325X: the `mma` NHWC configs serve every grouped NHWC graph of the real-model corpus (80 layers in fp32, fp16 and bf16: 240 graphs, all directions). Another engine is faster on all of them. The closest is `CONV_GROUP_FWD`, 1.44x faster (ResNeXt-50 c128 g32 56² n1 fp32), and the median gap to the best engine is about 13x. This engine's NHWC time is a median 3.2x its NCHW time on the same layer.
 - **Weaknesses:**
   - Dense 3x3 wrw on gfx906 is about 1.3x behind MIOpen's asm.
   - HRNet c64 28² n128 wrw on gfx906 is 1.33x behind MIOpen. The hipDNN engine that serves that shape best is not recorded.
@@ -179,6 +179,7 @@ All numbers come from autotuned hipDNN runs (fresh cache) compared with MIOpen i
 3. **Rows wider than a wave:** split a row across passes, or let a lane own more columns. This would widen coverage for high-resolution grouped layers that are declined today.
 4. **Workspace cap:** WRW's fixed 256 MiB cap does not yet consult a user workspace limit. An investigation of fixed caps across engines is open.
 5. **Small depthwise fp16 wrw on gfx906:** re-measure this engine's tiles on small depthwise fp16 wrw layers, where measured timings are inconsistent.
+6. **Channels-last speed:** NHWC runs about 3.2x this engine's NCHW time on MI325X. The likely cause is the load pattern: lanes lie along the row, so in NHWC each lane reads its columns one at a time, a few channels (`cb`) wide, with neighbouring lanes a whole pixel of channels apart. NCHW reads one contiguous vector per row. Staging a channels-packed tile through LDS, or wider `cb` tiles for NHWC, could close part of the gap. This is unmeasured.
 
 ## Tests
 - `src/tests/engines/kernel_ingestor_engine/packs/TestConvGroupValuWrwProblem.cpp` and `TestConvGroupValuProblem.cpp`, host-only:
