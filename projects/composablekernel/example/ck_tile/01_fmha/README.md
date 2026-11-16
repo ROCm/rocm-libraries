@@ -63,9 +63,9 @@ The LDS read schedule is chosen per head dim (`QrTdmPingPongLdsReadSchedule`,
 the next K/V slice while the current slice's WMMAs run, and reading V's first slice
 before the softmax, each from the tile size on where its VGPRs leave the occupancy
 unchanged. Instance names carry `_sp<rows>` / `_vbs<rows>` for the configured parts that
-take effect on their tile. Independently of that switch, the 128-row tiles that run
-without a per-tile row max (no window mask, no bias, no dropout) always prefetch the next
-slice; their names do not show it.
+take effect on their tile. Independently of that switch, the plain 128-row tiles (no
+window mask, no bias, no dropout) always prefetch the next slice; their names do not show
+it.
 
 It supports masks, LSE, logits soft cap, elementwise bias and ALiBi, dropout (not on
 the 16-row tile), sink tokens, column-major V, batch and group mode. The one query it

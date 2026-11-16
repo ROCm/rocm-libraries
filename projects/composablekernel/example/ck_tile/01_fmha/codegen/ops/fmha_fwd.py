@@ -918,9 +918,9 @@ def qr_tdm_pingpong_effective_schedule(
     the tile, as BlockFmhaPipelineQRKSVSTdmPingPong decides them (kPrefetchNextSlice,
     kReadVBeforeSoftmax); the others are set to 0. Instance names and the rendered
     QrTdmPingPongLdsReadSchedule then name the configured parts the kernel runs. The
-    pipeline also prefetches the next slice on its 128-row tiles without a per-tile row
-    max (kSkipRowMax: no window mask, bias or dropout) whatever the schedule says; the
-    names do not show that."""
+    pipeline also prefetches the next slice on its plain 128-row tiles (kPlainSoftmaxTile:
+    no window mask, bias or dropout) whatever the schedule says; the names do not show
+    that."""
     sp = pipeline.F_pp_slice_prefetch
     vbs = pipeline.F_pp_v_before_softmax
     if not (sp > 0 and tile.F_bm0 >= max(sp, 64)):

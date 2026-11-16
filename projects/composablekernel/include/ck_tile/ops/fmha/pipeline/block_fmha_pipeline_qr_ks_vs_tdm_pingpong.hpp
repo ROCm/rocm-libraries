@@ -146,55 +146,47 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     // The gemm_1 warps are all on M (every tile but the short-query one, which spends them
     // on N).
     static constexpr bool kGemm1WarpsOnM = BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1;
-    // Without a per-tile row max (whole rows in one warp, gemm_1 warps all on M, no
-    // dropout): P is taken against the running base m_base and its fp32 row sum, which l
-    // and the LSE need anyway, bounds every p. A tile whose sum stays at most
-    // 2^kRebaseThreshold per thread needs no row max (v_max3 and a cross-lane sync ahead
-    // of the exps). The rare tile over it, or with a row that has no base yet, goes the
-    // row max way, the former taking S again from the K tile still in LDS. l and o_acc
-    // then sum the same fp32 P with and without the LSE, and the LSE store is all the
-    // LSE adds. Each thread keeps its part of l; the lanes are synced once, after the
-    // main loop.
+    // Whole rows in one warp, gemm_1 warps all on M, no dropout: l and o_acc sum the same
+    // fp32 P with and without the LSE, and the LSE store is all the LSE adds. Each thread
+    // keeps its part of l; the lanes are synced once, after the main loop.
     static constexpr bool kRowMaxBySum = kGemm1WarpsOnM && kNWarp == 1 && !Base::kHasDropout;
-    // A mask whose rows start their keys in later tiles (a window) leaves rows without a
-    // base for most of a row's few tiles: those tiles take the row max anyway, and the
-    // check only costs (gfx1250 d128 window 127 x 2048 keys: +3%); the row max then stays.
+    // A mask whose rows start their keys in later tiles (a window).
     static constexpr bool kMaskStartsRowsLate = []() {
         if constexpr(!FmhaMask::IsMasking)
             return false;
         else
             return detail::qr_tdm_mask_starts_rows_late_v<FmhaMask>;
     }();
-    // A bias keeps the row max as well: its per-score work leaves the check little to save,
-    // and the fallback's second bias pass took the d160 ALiBi tile over 512 VGPRs.
-    static constexpr bool kSkipRowMax =
+    // A tile whose softmax has no per-score bias and whose rows all start at the first key
+    // tile (no window): the deeper read schedules below (slice prefetch, K two slices
+    // ahead, four waves) apply to it. Every tile takes the row max (see the rebasing in
+    // the main loop).
+    static constexpr bool kPlainSoftmaxTile =
         kRowMaxBySum && !kMaskStartsRowsLate && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
     // The short-query tile keeps the whole-gemm read-ahead: its slices are a single
-    // WMMA row. Without the row max the 128-row tiles take the slice prefetch at two
-    // waves per SIMD, K two slices ahead (gfx1250 d128 512 x 5252 keys, with the row
-    // max: 1.77 ms, without, three waves: 1.88 ms, two waves with K two ahead: 1.75 ms).
+    // WMMA row. The plain 128-row tiles take the slice prefetch at two waves per SIMD,
+    // K two slices ahead.
     static constexpr bool kPrefetchNextSlice =
         BlockFmhaShape::kM0 >= 64 &&
-        ((kSkipRowMax && BlockFmhaShape::kM0 >= 128) ||
+        ((kPlainSoftmaxTile && BlockFmhaShape::kM0 >= 128) ||
          (LdsReadSchedule::kPrefetchNextSliceMinRows > 0 &&
           BlockFmhaShape::kM0 >= LdsReadSchedule::kPrefetchNextSliceMinRows));
     static constexpr bool kKReadsTwoSlicesAhead =
-        kPrefetchNextSlice && kSkipRowMax && kQKHeaddim / kK0 >= 3;
+        kPrefetchNextSlice && kPlainSoftmaxTile && kQKHeaddim / kK0 >= 3;
     static constexpr bool kReadVBeforeSoftmax =
         LdsReadSchedule::kReadVBeforeSoftmaxMinRows > 0 &&
         BlockFmhaShape::kM0 >= LdsReadSchedule::kReadVBeforeSoftmaxMinRows&& kDoubleV;
-    // P goes to 16 bits right after the exps, so the fp32 P is gone before the bound
-    // check; only the slice prefetch schedule with the check converts under the PV WMMAs
-    // (gfx1250 d96 window 1024 keys: early 332 VGPRs, three waves; late 341, two).
-    static constexpr bool kEarlyPConvert = kRowMaxBySum && (!kSkipRowMax || !kPrefetchNextSlice);
-    // Without the row max the 128-row tiles of d32..d96 keep the waves per SIMD they have
-    // with it (the bound check and its fallback otherwise leave the compiler a few VGPRs
-    // over: d64 512 x 5252 keys three waves 1.045 ms, four 1.000 ms; d96 causal 1024 keys
-    // two waves +6%, d96 window with the LSE two waves +5%); d128 and up take two waves
-    // with the slice prefetch. The masked d32 tile spills at four (and keeps its waves
-    // without).
+    // P goes to 16 bits right after the exps; the plain tiles with the slice prefetch
+    // convert under the PV WMMAs (gfx1250 d96 window 1024 keys: early 332 VGPRs, three
+    // waves; late 341, two).
+    static constexpr bool kEarlyPConvert =
+        kRowMaxBySum && (!kPlainSoftmaxTile || !kPrefetchNextSlice);
+    // The plain 128-row tiles of d33..d64 (and the unmasked d32 one) take four waves per
+    // SIMD (d64 512 x 5252 keys: three waves 1.045 ms, four 1.000 ms), the other 128-row
+    // tiles of d32..d96 three (d96 causal 1024 keys two waves +6%, d96 window with the LSE
+    // two waves +5%); d128 and up take two waves with the slice prefetch.
     static constexpr index_t kBlockPerCu = []() {
-        if constexpr(kSkipRowMax && BlockFmhaShape::kM0 >= 128 && kQKHeaddim <= 64 &&
+        if constexpr(kPlainSoftmaxTile && BlockFmhaShape::kM0 >= 128 && kQKHeaddim <= 64 &&
                      (kQKHeaddim > 32 || !FmhaMask::IsMasking))
             return index_t{4};
         else if constexpr(kRowMaxBySum && BlockFmhaShape::kM0 >= 128 && kQKHeaddim <= 96)
@@ -674,12 +666,11 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
         // init M, L (sink-aware: when sink_v is finite, pre-seed m/l). l normalises O: the
-        // row sum of the fp32 P. Without the row max (kRowMaxBySum) it is each thread's part
+        // row sum of the fp32 P. With kRowMaxBySum it is each thread's part
         // of that sum, without the sink's seed, synced and seeded after the main loop.
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
-        // row max o_acc and l are normalised to; trails m by up to
-        // kRebaseThreshold (see the lazy rebasing in the main loop)
+        // row max o_acc and l are normalised to (m as of the last rebase, see the main loop)
         auto m_base = MLBlockTileType{};
 
         clear_tile(o_acc);
@@ -1032,7 +1023,6 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     ? kv_load_start + i_total_loops * kN0
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
 
-            [[maybe_unused]] const auto bias_window_of_tile = bias_dram_window;
             // STAGE 2: scale_s, add bias, mask
             ApplyScaleAndBias(s_acc,
                               bias_dram_window,
@@ -1125,20 +1115,27 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
 
-            // Lazy rebasing: o_acc and l stay normalised to m_base, and are
-            // rescaled only when a row max outgrows it by more than
-            // kRebaseThreshold (p then stays below 2^kRebaseThreshold). The gap
-            // uses the raw maxima: a row whose m_base is -inf always rebases, a
-            // fully masked row (NaN gap) never does.
-            constexpr auto kRebaseThreshold = SMPLComputeDataType{8}; // 256x
-            const auto row_gap              = [&](auto i_idx) {
+            // o_acc and l stay normalised to m_base, the row max as of the last rebase,
+            // and are rescaled when a tile raises a row max by more than a factor of 2
+            // (kRebaseThreshold, log2): p stays below 2, and a row's largest p is 1 (exact
+            // in the 16-bit P) unless its max rose less than that, when the old largest
+            // still weighs at least half of it. A base trailing the row max by up to 2^8
+            // (skipping the row max on most tiles) left the largest p anywhere up to 256,
+            // rounded in the 16-bit P: on bf16 (-init=0, 1024 x 1024, 100 seeds) up to 21%
+            // of the runs past the reference's tolerance at d512, where threshold 1 stays
+            // with qr_tdm and the exact max (one run, at the tolerance). Rebasing on every
+            // raise took the causal d64..d128 tiles 2-3% longer. The gap uses the raw
+            // maxima: a row whose m_base is -inf always rebases, a fully masked row (NaN
+            // gap) never does.
+            const auto row_gap = [&](auto i_idx) {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
                     return m[i_idx] - m_base[i_idx];
                 else
                     return scale_s * (m[i_idx] - m_base[i_idx]);
             };
-            const auto rebase_rows = [&]() {
+            constexpr auto kRebaseThreshold = SMPLComputeDataType{1}; // 2x
+            const auto rebase_rows          = [&]() {
                 bool need_rebase = false;
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
                     need_rebase |= row_gap(make_tuple(idx0)) > kRebaseThreshold;
@@ -1148,7 +1145,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     sweep_tile_span(o_spans[I0], [&](auto idx0) {
                         constexpr auto i_idx = make_tuple(idx0);
                         const auto gap       = row_gap(i_idx);
-                        if(gap > 0)
+                        if(gap > kRebaseThreshold)
                         {
                             const auto tmp = exp2(-gap);
                             l(i_idx) *= tmp;
@@ -1192,91 +1189,25 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             using PTileEarly =
                 decltype(Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale_early));
             [[maybe_unused]] PTileEarly p_tile_early{};
-            // kEarlyPConvert: P in 16 bits before the bound check
+            // kEarlyPConvert: P in 16 bits right after the exps
             [[maybe_unused]] auto make_p_tile = [&]() {
                 if constexpr(kRowMaxBySum)
                     return Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale_early);
                 else
                     return 0;
             };
+            update_row_max(s_new);
+            rebase_rows();
+            compute_p(s_new);
             if constexpr(kRowMaxBySum)
             {
-                // P against the running base (see kRowMaxBySum)
-                // a row without a key yet has no base (-inf): its tile takes the row max
-                bool no_base = false;
-                sweep_tile_span(o_spans[I0], [&](auto idx0) {
-                    no_base |=
-                        m_base[make_tuple(idx0)] == -numeric<SMPLComputeDataType>::infinity();
-                });
-                const bool row_max_tile = !kSkipRowMax || __builtin_amdgcn_ballot_w32(no_base) != 0;
-                if(row_max_tile)
-                {
-                    update_row_max(s_new);
-                    rebase_rows();
-                }
-                compute_p(s_new);
                 if constexpr(kEarlyPConvert)
                     p_tile_early = make_p_tile();
-                auto part = BlockRowSum<false>(p_compute);
-                if constexpr(kSkipRowMax)
-                {
-                    bool redo = false;
-                    if(!row_max_tile)
-                        sweep_tile_span(o_spans[I0], [&](auto idx0) {
-                            redo |= !(part[make_tuple(idx0)] <=
-                                      SMPLComputeDataType{256} /* 2^kRebaseThreshold */);
-                        });
-                    if(__builtin_expect(__builtin_amdgcn_ballot_w32(redo) != 0, 0))
-                    {
-                        // a p over 2^kRebaseThreshold, or one that does not fit the 16-bit P:
-                        // S again (K_i is still in LDS, the TDM stages K_{i+1} into the other
-                        // buffer), then the row max way
-                        __builtin_amdgcn_sched_barrier(0);
-                        // S again into P's registers (same layout, P is retaken from it)
-                        clear_tile(p_compute);
-                        static_for<0, k0_loops, 1>{}([&](auto i_k0) {
-                            gemm_0(p_compute,
-                                   get_slice_tile(q_tile,
-                                                  sequence<0, i_k0 * kK0>{},
-                                                  sequence<kM0, (i_k0 + 1) * kK0>{}),
-                                   (k_tile = load_tile(k_lds_read_window), k_tile));
-                            move_tile_window(k_lds_read_window, {0, kK0});
-                            __builtin_amdgcn_sched_barrier(0);
-                        });
-                        move_tile_window(k_lds_read_window, {0, -kK0 * k0_loops});
-                        auto bias_window_2 = bias_window_of_tile;
-                        ApplyScaleAndBias(p_compute,
-                                          bias_window_2,
-                                          q_origin,
-                                          kv_tile_start,
-                                          scale_s,
-                                          position_encoding,
-                                          logits_soft_cap,
-                                          logits_soft_cap_rcp);
-                        MaskScores(p_compute,
-                                   mask,
-                                   q_origin,
-                                   kv_tile_start,
-                                   i_total_loops == num_total_loop - 1,
-                                   physical_seqlen_k_end);
-                        update_row_max(p_compute);
-                        rebase_rows();
-                        compute_p(p_compute);
-                        if constexpr(kEarlyPConvert)
-                            p_tile_early = make_p_tile();
-                        part = BlockRowSum<false>(p_compute);
-                    }
-                }
+                const auto part = BlockRowSum<false>(p_compute);
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
                     l(i_idx) += part[i_idx];
                 });
-            }
-            else
-            {
-                update_row_max(s_new);
-                rebase_rows();
-                compute_p(s_new);
             }
 
             // MakePForGemm1 reorders P's (MIter, KIter) blocks within a thread, which
