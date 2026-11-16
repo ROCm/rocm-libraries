@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import re
 import statistics
 import subprocess
@@ -163,44 +164,84 @@ def detect_cuda():
 BUSY_ACTIVITY_PCT = 50
 
 
-def get_gfx_activity(device_number, cuda):
-    """GFX engine activity in percent from amd-smi, or None when it cannot be read."""
-    if cuda:
-        return None
-    cmd = [getspecs.get_smi_exec(cuda), "metric", "-g", str(device_number), "-u", "--csv"]
-    success, cout = getspecs._subprocess_helper(cmd)
-    if not success:
-        return None
-    for col in ('gfx_activity', 'GFX_ACTIVITY', 'gfx_busy_inst'):
-        value = ClockSampler._mhz(getspecs.get_csv_val(cout, col, device_number))
-        if value is not None:
-            return value
+def _number(value):
+    match = re.search(r'[-+]?\d+(\.\d+)?', str(value))
+    return float(match.group(0)) if match else None
+
+
+def parse_smi_metrics(csv_text, device_number):
+    """
+    One telemetry sample from `amd-smi metric -c -u -p -t --csv` output, or None.
+    Parts with several GFX clock domains (gfx_0_clk, gfx_1_clk, ...) report sclk as the mean over the
+    domains, with the slowest and fastest domain alongside. The memory clock is mem_0_clk, or the mean
+    of the uclk_* columns on parts that report it there.
+    """
+    header = None
+    for record in csv.reader(csv_text.splitlines()):
+        if not record:
+            continue
+        if record[0].strip() == 'gpu':
+            header = [h.strip() for h in record]
+            continue
+        if header is None or _number(record[0]) != device_number:
+            continue
+        row = dict(zip(header, record))
+        gfx = [v for v in (_number(row[k]) for k in header if re.fullmatch(r'gfx_\d+_clk', k)) if v]
+        mclk = _number(row.get('mem_0_clk'))
+        if not mclk:
+            uclk = [v for v in (_number(row[k]) for k in header if k.startswith('uclk')) if v]
+            mclk = statistics.mean(uclk) if uclk else None
+        if not gfx and not mclk:
+            return None
+        return {
+            'sclk': statistics.mean(gfx) if gfx else None,
+            'sclk_min': min(gfx) if gfx else None,
+            'sclk_max': max(gfx) if gfx else None,
+            'mclk': mclk,
+            'activity': _number(row.get('gfx_activity')),
+            'fclk': _number(row.get('fclk_0_clk')),
+            'power': _number(row.get('socket_power')),
+            'hotspot': _number(row.get('hotspot')),
+        }
     return None
 
 
 class ClockSampler:
-    """Samples sclk, mclk and GFX activity with amd-smi in a background thread while benchmarks run."""
+    """Samples clocks, GFX activity, power and temperature with amd-smi in a background thread."""
 
     def __init__(self, device_number, cuda, interval):
         self.device_number = device_number
         self.cuda = cuda
         self.interval = interval
-        self.samples = []   # (sclk MHz or None, mclk MHz or None, activity % or None)
+        self.samples = []   # dicts from parse_smi_metrics
         self._stop = threading.Event()
         self._thread = None
 
     @staticmethod
     def _mhz(value):
-        match = re.search(r'[-+]?\d+(\.\d+)?', str(value))
-        return float(match.group(0)) if match else None
+        return _number(value)
+
+    def _sample(self):
+        if not self.cuda:
+            cmd = [getspecs.get_smi_exec(self.cuda), "metric", "-g", str(self.device_number),
+                   "-c", "-u", "-p", "-t", "--csv"]
+            success, cout = getspecs._subprocess_helper(cmd)
+            sample = parse_smi_metrics(cout, self.device_number) if success else None
+            if sample:
+                return sample
+        # older amd-smi output or the cuda backend: one clock of each kind, no activity
+        sclk = self._mhz(getspecs.getsclk(self.device_number, self.cuda))
+        mclk = self._mhz(getspecs.getmclk(self.device_number, self.cuda))
+        if not sclk and not mclk:
+            return None
+        return {'sclk': sclk, 'sclk_min': sclk, 'sclk_max': sclk, 'mclk': mclk, 'activity': None,
+                'fclk': None, 'power': None, 'hotspot': None}
 
     def _run(self):
         while not self._stop.is_set():
-            sclk = self._mhz(getspecs.getsclk(self.device_number, self.cuda))
-            mclk = self._mhz(getspecs.getmclk(self.device_number, self.cuda))
-            activity = get_gfx_activity(self.device_number, self.cuda)
-            if sclk or mclk:
-                self.samples.append((sclk, mclk, activity))
+            sample = self._sample()
+            if sample:
+                self.samples.append(sample)
             self._stop.wait(self.interval)
 
     def __enter__(self):
@@ -220,9 +261,10 @@ class ClockSampler:
         Samples taken while the GPU was busy, and whether activity was available to decide.
         Without activity readings every sample is kept.
         """
-        if not any(a is not None for _, _, a in samples):
+        if not any(smp.get('activity') is not None for smp in samples):
             return list(samples), False
-        return [smp for smp in samples if smp[2] is not None and smp[2] >= BUSY_ACTIVITY_PCT], True
+        return [smp for smp in samples
+                if smp.get('activity') is not None and smp['activity'] >= BUSY_ACTIVITY_PCT], True
 
     @staticmethod
     def summary(samples):
@@ -230,6 +272,10 @@ class ClockSampler:
             return None
         return {'min': min(samples), 'median': statistics.median(samples),
                 'mean': statistics.mean(samples), 'max': max(samples), 'count': len(samples)}
+
+    @staticmethod
+    def field_summary(samples, key):
+        return ClockSampler.summary([smp[key] for smp in samples if smp.get(key)])
 
 
 def load_machine_file(filename):
@@ -429,10 +475,15 @@ if __name__ =='__main__':
     sclk_stats = mclk_stats = None
     if sampler:
         busy, have_activity = ClockSampler.busy_samples(sampler.samples)
-        sclk_stats = ClockSampler.summary([smp[0] for smp in busy if smp[0]])
-        mclk_stats = ClockSampler.summary([smp[1] for smp in busy if smp[1]])
+        sclk_stats = ClockSampler.field_summary(busy, 'sclk')
+        mclk_stats = ClockSampler.field_summary(busy, 'mclk')
+        # sclk is the mean over the GFX clock domains; the slowest domain can gate evenly split work
         telemetry['sclk_mhz'] = sclk_stats
+        telemetry['sclk_slowest_domain_mhz'] = ClockSampler.field_summary(busy, 'sclk_min')
         telemetry['mclk_mhz'] = mclk_stats
+        telemetry['fclk_mhz'] = ClockSampler.field_summary(busy, 'fclk')
+        telemetry['socket_power_w'] = ClockSampler.field_summary(busy, 'power')
+        telemetry['hotspot_c'] = ClockSampler.field_summary(busy, 'hotspot')
         telemetry['telemetry_samples'] = len(sampler.samples)
         telemetry['telemetry_busy_samples'] = len(busy) if have_activity else None
         telemetry['perf_level'] = getspecs.getperflevel(args.device_number, cuda)
