@@ -20,7 +20,7 @@ struct FmhaFwdTdmCrSelector
     using Tuning       = Tuning_;
     static constexpr bool kHeadPadded =
         Pipeline_::Problem::kPadHeadDimQ || Pipeline_::Problem::kPadHeadDimV;
-    static constexpr bool kGeneral = std::is_same_v<Tuning, FmhaTdmCrGeneralTuning> ||
+    static constexpr bool kGeneral = std::is_base_of_v<FmhaTdmCrGeneralTuning, Tuning> ||
                                      Pipeline_::kGeneralArguments || Tuning::kVirtualSink;
     using StridedKernel = FmhaFwdKernel<Pipeline_, Epilogue_>;
     using GeneralKernel =
@@ -66,7 +66,63 @@ struct FmhaFwdTdmCrSelector
         else
         {
             if(a.scale_s <= 0 || !detail::fmha_fwd_cr_vector_output(a))
+            {
+                if constexpr(Pipeline::kSupportsFlatHeadOrder)
+                {
+                    if(detail::fmha_fwd_cr_flat_head_order(
+                           a, get_num_cus(), Pipeline::kM0 == 64 ? 6 : 4))
+                    {
+                        using FlatKernel =
+                            FmhaFwdKernel<FmhaTdmCrPipelineVariant<Pipeline_, FmhaTdmCrFlatTuning>,
+                                          Epilogue_>;
+                        return visitor(FlatKernel{});
+                    }
+                }
+                if constexpr(Pipeline::kHeadDim == 64 && Pipeline::kValueDim == 64 &&
+                             Pipeline::kM0 == 128 && Pipeline::kN0 == 64 && Pipeline::kCausal &&
+                             !Pipeline::kIsGroupMode && !Pipeline::kHasDropout &&
+                             !Problem::kSkipMinSeqlenQ)
+                {
+                    // Query-heavy top-left rectangles benefit from extra residency.
+                    // Vector K/V tolerates a partial fourth grid; scalar K/V needs
+                    // four workgroups per CU. Triangular work keeps early V.
+                    if(a.scale_s > 0 && a.seqlen_k >= 8192 &&
+                       int64_t{a.seqlen_q} >= 3 * int64_t{a.seqlen_k} && a.mask_type == 1 &&
+                       a.window_size_left < 0 && a.window_size_right == 0 && !a.seqstart_q_ptr &&
+                       !a.seqstart_k_ptr && !a.seqlen_q_ptr && !a.seqlen_k_ptr &&
+                       !a.cu_seqlen_q_ptr && !a.cu_seqlen_k_ptr &&
+                       4 * ((int64_t{a.seqlen_q} + Pipeline::kM0 - 1) / Pipeline::kM0) * a.batch *
+                               a.nhead_q >=
+                           (detail::fmha_fwd_cr_vector_kv(a) ? 15 : 16) *
+                               static_cast<int64_t>(get_num_cus()))
+                    {
+                        using LateValueKernel = FmhaFwdKernel<
+                            FmhaTdmCrPipelineVariant<Pipeline_, FmhaTdmCrGeneralLateValueTuning>,
+                            Epilogue_>;
+                        return visitor(LateValueKernel{});
+                    }
+                }
                 return visitor(GeneralKernel{});
+            }
+
+            if constexpr(Pipeline::kHeadDim == 64 && Pipeline::kValueDim == 64 &&
+                         Pipeline::kM0 == 128 && Pipeline::kN0 == 64 && Pipeline::kCausal &&
+                         !Pipeline::kIsGroupMode && !Pipeline::kHasDropout &&
+                         !Problem::kSkipMinSeqlenQ)
+            {
+                // Vector K/V benefits from extra residency when Q is not vector-aligned.
+                // Misaligned K/V keeps its schedule.
+                if(a.seqlen_q >= 8192 && a.seqlen_k >= 8192 && a.window_size_left < 0 &&
+                   a.window_size_right == 0 && !a.seqstart_q_ptr && !a.seqstart_k_ptr &&
+                   !a.seqlen_q_ptr && !a.seqlen_k_ptr && !a.cu_seqlen_q_ptr && !a.cu_seqlen_k_ptr &&
+                   !detail::fmha_fwd_cr_preferred_args(a) && detail::fmha_fwd_cr_vector_kv(a))
+                {
+                    using LateValueKernel =
+                        FmhaFwdKernel<FmhaTdmCrPipelineVariant<Pipeline_, FmhaTdmCrLateValueTuning>,
+                                      Epilogue_>;
+                    return visitor(LateValueKernel{});
+                }
+            }
 
             auto launch_strided = [&] { return visitor(typename Kernel::StridedKernel{}); };
             if constexpr(!Pipeline::kCompact)

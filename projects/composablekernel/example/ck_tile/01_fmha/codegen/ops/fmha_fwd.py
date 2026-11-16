@@ -328,6 +328,114 @@ def qr_tdm_cr_m64_preference(dtype, hdim, hdim_v) -> CppConstraint:
     return CppConstraint(small)
 
 
+def qr_tdm_cr_long_preference(hdim) -> CppConstraint:
+    """Long native views qualified against both CR and the original pipelines."""
+    hdim = int(hdim)
+    causal = "a.mask_type != 0 && a.window_size_left < 0 && a.window_size_right == 0"
+    kv = "!fmha_fwd_cr_vector_kv(a)"
+    output = "!fmha_fwd_cr_vector_output(a)"
+    if hdim == 64:
+        # Large native grids amortize M128's row fragments; output-strided
+        # rectangles benefit earlier from the fully visible causal prefix.
+        native = (
+            "!fmha_fwd_cr_preferred_args(a) && "
+            "int64_t{a.batch} * a.nhead_q <= 32 && "
+            f"(({output} && get_num_blocks(128) >= 2 * num_cus) || "
+            "get_num_blocks(128) >= 8 * num_cus)"
+        )
+        view = f"({causal}) && ({kv} || ({native}))"
+    elif hdim == 128:
+        view = (
+            f"(a.mask_type == 0 && a.seqlen_q == a.seqlen_k && ({kv} || {output})) || "
+            f"(({causal}) && ({kv} || {output}))"
+        )
+    elif hdim == 192:
+        view = (
+            f"(a.mask_type == 0 && a.seqlen_q == a.seqlen_k && "
+            f"({kv} || ({output} && get_num_blocks(128) > num_cus))) || "
+            f"(({causal}) && ({kv} || {output}))"
+        )
+    else:
+        return CppConstraint("false")
+    return CppConstraint(
+        "!t.is_group_mode && a.sink_ptr == nullptr && "
+        "a.cu_seqlen_q_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr && "
+        "a.seqlen_q >= 8192 && a.seqlen_k >= 8192 && "
+        "int64_t{a.batch} * a.nhead_q >= 4 && "
+        f"int64_t{{a.batch}} * a.nhead_q <= {32 if hdim == 192 else 64} && ({view})"
+    )
+
+
+def qr_tdm_cr_native_long_preference(hdim) -> CppConstraint:
+    """Additional long views retain their ordinary CR geometry order."""
+    hdim = int(hdim)
+    causal = "a.mask_type != 0 && a.window_size_left < 0 && a.window_size_right == 0"
+    if hdim == 64:
+        view = (
+            "(a.mask_type == 0 && a.seqlen_q == a.seqlen_k) || "
+            f"(({causal}) && fmha_fwd_cr_vector_kv(a))"
+        )
+    elif hdim == 128:
+        view = f"({causal}) && fmha_fwd_cr_vector_kv(a) && fmha_fwd_cr_vector_output(a)"
+    else:
+        return CppConstraint("false")
+    return CppConstraint(
+        "!t.is_group_mode && a.sink_ptr == nullptr && "
+        "a.cu_seqlen_q_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr && "
+        "a.seqlen_q >= 8192 && a.seqlen_k >= 8192 && "
+        "int64_t{a.batch} * a.nhead_q >= 4 && "
+        "int64_t{a.batch} * a.nhead_q <= 32 && "
+        f"!fmha_fwd_cr_preferred_args(a) && ({view})"
+    )
+
+
+def qr_tdm_cr_long_m64_preference(hdim) -> CppConstraint:
+    # A partial Q tile favors fewer row fragments. Keep larger active grids
+    # on M128; bottom-right rectangles can fully mask leading Q rows.
+    hdim = int(hdim)
+    work = (
+        "int64_t{a.batch} * a.nhead_q * "
+        "(a.mask_type == 1 || a.seqlen_q < a.seqlen_k ? "
+        "a.seqlen_q : a.seqlen_k)"
+    )
+    tail_work = f"({work}) <= {256 if hdim == 128 else 192} * num_cus"
+    if hdim == 128:
+        tail_work = (
+            f"({tail_work}) || (a.seqlen_q == a.seqlen_k && "
+            "2 * get_num_blocks(128) <= 7 * num_cus)"
+        )
+    tail = (
+        f"a.seqlen_q % 128 != 0 && int64_t{{a.batch}} * a.nhead_q <= 4 && ({tail_work})"
+    )
+    shape = tail
+    if hdim == 128:
+        small = (
+            f"({work}) <= 192 * num_cus && "
+            "(int64_t{a.batch} * a.nhead_q <= 4 || "
+            "(a.mask_type == 2 && a.seqlen_q != a.seqlen_k))"
+        )
+        # Keep near-square shapes on their existing geometry. With many
+        # visible K rows, N64 becomes preferable before the Q-heavy case.
+        rectangular = (
+            "a.mask_type == 2 && "
+            "((int64_t{a.seqlen_q} >= 2 * int64_t{a.seqlen_k} && "
+            f"({work}) <= 256 * num_cus) || "
+            "(int64_t{a.seqlen_k} >= 2 * int64_t{a.seqlen_q} && "
+            f"({work}) < 208 * num_cus))"
+        )
+        # A small interleaved head grid between two and two-and-a-half M128
+        # waves benefits from the additional row parallelism of M64.
+        flat = (
+            "fmha_fwd_cr_flat_head_order(a, num_cus, 6) && "
+            f"({work}) > 256 * num_cus && ({work}) <= 320 * num_cus"
+        )
+        shape = f"({small}) || ({tail}) || ({rectangular}) || ({flat})"
+    return CppConstraint(
+        "a.mask_type != 0 && fmha_fwd_cr_vector_kv(a) && "
+        f"!fmha_fwd_cr_vector_output(a) && ({shape})"
+    )
+
+
 @dataclass
 class FmhaFwdApiTrait:
     arch: ArchTrait
@@ -787,6 +895,21 @@ class FmhaFwdApiPool:
                         for trait in traits
                         if trait.pipeline_tag == "qr_tdm_cr" and trait.bm0 == 64
                     )
+                    native_long_cr = [
+                        replace(
+                            trait,
+                            constraint=trait.constraint
+                            & qr_tdm_cr_native_long_preference(hdim),
+                        )
+                        for trait in preferred_cr + traits
+                        if trait.pipeline_tag == "qr_tdm_cr"
+                        and (int(hdim), int(hdim_v)) in ((64, 64), (128, 128))
+                        and trait.mode == "batch"
+                        and trait.dpad == trait.dvpad == "f"
+                        and trait.logits == "f"
+                        and trait.bias == "no"
+                        and trait.sink == trait.skip == "f"
+                    ]
                     if any(trait.pipeline_tag != "qr_tdm_cr" for trait in traits):
                         # Keep the qualified CR-only geometry order when these
                         # families participate in the common dispatcher.
@@ -827,11 +950,47 @@ class FmhaFwdApiPool:
                                     f"a.hdim_q != {hdim} || a.hdim_v != {hdim_v} || a.sink_ptr != nullptr"
                                 )
                             else:
-                                feature = CppConstraint("a.sink_ptr != nullptr")
+                                # Nonpositive scales must be applied before masking.
+                                # The CR general path preserves finite scores at K tails.
+                                feature = CppConstraint(
+                                    "a.sink_ptr != nullptr || a.scale_s <= 0"
+                                )
                             preferred_cr.append(
                                 replace(trait, constraint=trait.constraint & feature)
                             )
-                    traits = preferred_cr + traits
+                    # These strided views have separately qualified geometry.
+                    # Keep them ahead of the small aligned-view preference.
+                    long_cr = [
+                        replace(
+                            trait,
+                            constraint=trait.constraint
+                            & qr_tdm_cr_long_preference(hdim)
+                            & (
+                                qr_tdm_cr_long_m64_preference(hdim)
+                                if trait.bm0 == 64
+                                else CppConstraint()
+                            ),
+                        )
+                        for trait in sorted(traits, key=lambda trait: trait.bm0 != 64)
+                        if trait.pipeline_tag == "qr_tdm_cr"
+                        and (int(hdim), int(hdim_v))
+                        in ((64, 64), (128, 128), (192, 128))
+                        and (
+                            trait.bm0 == 128
+                            or (
+                                int(hdim) in (128, 192)
+                                and trait.bm0 == 64
+                                and trait.mask not in ("no", "s_no")
+                            )
+                        )
+                        and trait.spad == trait.skpad == "t"
+                        and trait.dpad == trait.dvpad == "f"
+                        and trait.logits == "f"
+                        and trait.bias == "no"
+                        and trait.sink == trait.skip == "f"
+                        and (int(hdim) != 64 or trait.mask not in ("no", "s_no"))
+                    ]
+                    traits = long_cr + native_long_cr + preferred_cr + traits
                     max_bm0 = max((trait.bm0 for trait in traits), default=0)
                     inners = str()
                     for i_trait, trait in enumerate(traits):
@@ -1959,6 +2118,84 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         pipeline = kernel_ctx.pipeline
         if (
             pipeline.tag == "qr_tdm_cr"
+            and pipeline.F_bias == "alibi"
+            and pipeline.F_mask not in ("no", "s_no")
+            and pipeline.F_logits == pipeline.F_sink == pipeline.F_skip == "f"
+        ):
+            padded = pipeline.F_dpad == pipeline.F_dvpad == "t"
+            small_head = padded and problem_ctx.hdim in (32, 64)
+            long_alibi = CppConstraint(
+                "a.sink_ptr == nullptr && a.window_size_left < 0 && "
+                "a.window_size_right == 0 && "
+                f"a.max_seqlen_q >= {8192 if small_head else 4096}"
+            )
+            if (
+                problem_ctx.hdim == 64
+                and pipeline.F_dpad == pipeline.F_dvpad == "f"
+                and tile.F_bm0 == 64
+            ):
+                # Native D64 avoids the spilled M128 ALiBi score tile.
+                return (
+                    replace(
+                        tile,
+                        F_constraint=CppConstraint(
+                            f"({tile.F_constraint}) || ({long_alibi})"
+                        ),
+                    ),
+                )
+            if padded and problem_ctx.hdim in (32, 64, 128) and tile.F_bm0 == 128:
+                # N64 reduces score-register pressure. Small heads also need
+                # enough work in one sequence, including sparse groups.
+                if small_head:
+                    long_alibi = long_alibi & CppConstraint("a.nhead_q >= 16")
+                return (
+                    replace(
+                        tile,
+                        F_bn0=64,
+                        F_constraint=tile.F_constraint & long_alibi,
+                    ),
+                    replace(
+                        tile,
+                        F_constraint=tile.F_constraint
+                        & CppConstraint(f"!({long_alibi})"),
+                    ),
+                )
+        if (
+            pipeline.tag == "qr_tdm_cr"
+            and problem_ctx.hdim in (96, 160)
+            and pipeline.F_dpad == pipeline.F_dvpad == "f"
+            and tile.F_bm0 == 64
+            and pipeline.F_mask not in ("no", "s_no")
+            and pipeline.F_bias == "no"
+            and pipeline.F_logits == pipeline.F_sink == pipeline.F_skip == "f"
+        ):
+            # M128 needs enough visible query rows. Group totals can screen
+            # small or sparse batches, but do not describe individual members.
+            work = "a.mask_type == 1 || a.seqlen_k >= 8192"
+            if problem_ctx.mode == "group":
+                density = (
+                    "(a.batch <= 2 && 4 * int64_t{a.seqlen_q} >= "
+                    "3 * int64_t{a.batch} * a.max_seqlen_q)"
+                )
+                if problem_ctx.dtype == "bf16":
+                    density += (
+                        " || (a.batch == 4 && a.nhead_q == 8 && "
+                        "2 * int64_t{a.seqlen_q} >= "
+                        "int64_t{a.batch} * a.max_seqlen_q)"
+                    )
+                work = f"({density}) && (a.mask_type == 1 || a.seqlen_k >= a.seqlen_q)"
+            wide = (
+                "a.sink_ptr == nullptr && a.window_size_left < 0 && "
+                "a.window_size_right == 0 && a.nhead_q >= 8 && "
+                f"a.max_seqlen_q >= 8192 && ({work})"
+            )
+            return (
+                replace(
+                    tile, F_constraint=tile.F_constraint & CppConstraint(f"!({wide})")
+                ),
+            )
+        if (
+            pipeline.tag == "qr_tdm_cr"
             and problem_ctx.mode == "batch"
             and problem_ctx.hdim == 64
             and pipeline.F_dpad == "f"
@@ -1982,9 +2219,13 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     F_bn0=128,
                     F_constraint=tile.F_constraint & CppConstraint(virtual),
                 ),
-                replace(
-                    tile,
-                    F_constraint=tile.F_constraint & CppConstraint(f"!({virtual})"),
+                *cls._get_long_cr_kernel_tiles(
+                    problem_ctx,
+                    pipeline,
+                    replace(
+                        tile,
+                        F_constraint=tile.F_constraint & CppConstraint(f"!({virtual})"),
+                    ),
                 ),
             )
         if (
@@ -2017,7 +2258,65 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     F_constraint=tile.F_constraint & CppConstraint(f"!({virtual})"),
                 ),
             )
-        return (tile,)
+        return cls._get_long_cr_kernel_tiles(problem_ctx, pipeline, tile)
+
+    @staticmethod
+    def _get_long_cr_kernel_tiles(problem_ctx, pipeline, tile):
+        if not (
+            pipeline.tag == "qr_tdm_cr"
+            and problem_ctx.mode == "batch"
+            and problem_ctx.hdim in (64, 128, 192)
+            and tile.F_bm0 == 128
+            and pipeline.F_dpad == pipeline.F_dvpad == "f"
+            and pipeline.F_spad == pipeline.F_skpad == "t"
+            and pipeline.F_bias == "no"
+            and pipeline.F_logits == pipeline.F_sink == pipeline.F_skip == "f"
+            and (problem_ctx.hdim != 64 or pipeline.F_mask not in ("no", "s_no"))
+        ):
+            return (tile,)
+        hdim = problem_ctx.hdim
+        long_view = qr_tdm_cr_long_preference(hdim)
+        if hdim == 192:
+            # N128 amortizes loop overhead when the wider tile fills at most
+            # one wave of workgroups. Larger grids retain N64.
+            alternate = long_view & CppConstraint("get_num_blocks(128) <= num_cus")
+            bn0 = 128
+        else:
+            # N64 needs enough active work to hide its extra iterations.
+            # Top-left uses every Q row; bottom-right can fully mask leading
+            # rows. D64 keeps N128 for larger batches.
+            alternate = long_view & CppConstraint(
+                "int64_t{a.batch} * a.nhead_q <= 32"
+                if hdim == 64
+                else "(a.mask_type == 0 && get_num_blocks(128) >= 2 * num_cus) || "
+                "(a.mask_type != 0 && int64_t{a.batch} * a.nhead_q * "
+                "(a.mask_type == 1 || a.seqlen_q < a.seqlen_k ? "
+                "a.seqlen_q : a.seqlen_k) > "
+                "256 * num_cus) || "
+                "(a.mask_type == 2 && fmha_fwd_cr_vector_kv(a) && "
+                "!fmha_fwd_cr_vector_output(a) && "
+                "int64_t{a.seqlen_k} >= 2 * int64_t{a.seqlen_q} && "
+                "int64_t{a.batch} * a.nhead_q * a.seqlen_q >= 208 * num_cus)"
+            )
+            bn0 = 64
+            if hdim == 64:
+                # A query-heavy top-left rectangle with misaligned K/V favors
+                # N128 near four workgroups per CU. Keep N64 outside this range.
+                wide_k = CppConstraint(
+                    "a.mask_type == 1 && a.scale_s > 0 && "
+                    "fmha_fwd_cr_vector_output(a) && !fmha_fwd_cr_vector_kv(a) && "
+                    "int64_t{a.batch} * a.nhead_q <= 4 && "
+                    "4 * int64_t{a.seqlen_q} >= 15 * int64_t{a.seqlen_k} && "
+                    "4 * get_num_blocks(128) >= 15 * num_cus && "
+                    "4 * get_num_blocks(128) <= 19 * num_cus"
+                )
+                alternate = alternate & CppConstraint(f"!({wide_k})")
+        return (
+            replace(tile, F_bn0=bn0, F_constraint=tile.F_constraint & alternate),
+            replace(
+                tile, F_constraint=tile.F_constraint & CppConstraint(f"!({alternate})")
+            ),
+        )
 
     @staticmethod
     def _get_cr_kernel_tile(
@@ -2091,14 +2390,14 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             and pipeline.F_bias == "no"
             and pipeline.F_logits == "f"
         ):
-            # Virtual sinks use the wider Q tile for long dense attention.
-            # Keep the ordinary dense path under its existing dispatch rule.
+            # Virtual sinks and qualified strided dense views use the wider Q tile.
             return replace(
                 tile,
                 F_constraint=CppConstraint(
-                    "a.sink_ptr != nullptr && !t.is_group_mode && "
+                    "(a.sink_ptr != nullptr && !t.is_group_mode && "
                     "a.seqlen_q >= 8192 && a.seqlen_k >= 8192 && "
-                    "int64_t{a.batch} * a.nhead_q <= 32"
+                    "int64_t{a.batch} * a.nhead_q <= 32) || "
+                    f"({qr_tdm_cr_long_preference(hdim)})"
                 ),
             )
         return tile
@@ -2500,12 +2799,21 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     "t.hdim_q == a.hdim_q && t.hdim_v == a.hdim_v && "
                     "t.is_group_mode == (a.seqstart_q_ptr != nullptr) && fmha_fwd_cr_supported_args(a)"
                 )
-                for mask, lse, spad, skpad, head_pad, (
-                    logits,
-                    bias,
-                ), sink, skip in itertools.product(
+                # Keep LSE-producing forward on the existing pipelines until
+                # conditional rescaling has been qualified with backward.
+                for (
+                    mask,
+                    spad,
+                    skpad,
+                    head_pad,
+                    (
+                        logits,
+                        bias,
+                    ),
+                    sink,
+                    skip,
+                ) in itertools.product(
                     get_mask_map(mask_impl),
-                    ["t", "f"],
                     ["f", "t"],
                     ["f", "t"],
                     ["f", "t"],
@@ -2528,7 +2836,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                             f"fmha_fwd_cr_score_args<ck_tile::BlockAttentionBiasEnum::{bias_enum}, "
                             f"{'true' if logits == 't' else 'false'}>(a)"
                         )
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_cr", "row", spad, skpad, head_pad, head_pad, logits, bias, lse, "f", "no", mask, skip, "f", sink, F_constraint=score_constraint))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr_tdm_cr", "row", spad, skpad, head_pad, head_pad, logits, bias, "f", "f", "no", mask, skip, "f", sink, F_constraint=score_constraint))  # fmt: skip
 
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a

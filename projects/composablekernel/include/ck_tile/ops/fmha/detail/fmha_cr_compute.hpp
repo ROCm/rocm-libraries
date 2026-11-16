@@ -173,7 +173,8 @@ template <bool Causal,
           int KeyTiles        = 0,
           int KeyTile         = Tile,
           bool TailFragments  = false,
-          bool PreferNonempty = false>
+          bool PreferNonempty = false,
+          bool LateValue      = false>
 CK_TILE_DEVICE void run(Args a)
 {
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
@@ -193,7 +194,10 @@ CK_TILE_DEVICE void run(Args a)
     // the following K/V in flight (count 0 when there is no following tile).
     constexpr bool DeferredValueWait =
         CooperativePrefetch && (DQ != 32 || (HeadPadded && std::is_same_v<T, __bf16>));
-    constexpr bool SoftmaxV = DeferredValueWait && BM == 128;
+    static_assert(!LateValue || (Causal && DQ == 64 && DV == 64 && BM == 128 && BN == 64 &&
+                                 (std::is_same_v<Args, StridedArguments> ||
+                                  std::is_same_v<Args, GeneralArguments>)));
+    constexpr bool SoftmaxV = (DeferredValueWait && BM == 128) || LateValue;
     // Wide causal ALiBi tiles rescale often enough to favor a maximum before
     // every exponentiation. A finite base also avoids per-lane reinitialization
     // while a row is fully masked; those tiles still contribute zero weight.
@@ -373,7 +377,8 @@ CK_TILE_DEVICE void run(Args a)
                     return 0.f;
             }();
             const bool vector_output = [&] {
-                if constexpr(!General && (DQ == 128 || DQ == 192))
+                if constexpr((DQ == 128 && !HeadPadded && DV % 8 == 0 && !Args::kVirtualSink) ||
+                             (!General && DQ == 192))
                     return true;
                 else if constexpr(Args::kVirtualSink && DQ == 192 && !HeadPadded &&
                                   Args::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
@@ -398,11 +403,12 @@ CK_TILE_DEVICE void run(Args a)
                                     : 0.f);
                             zero = V8<T>{value, value, value, value, value, value, value, value};
                         }
-                        __builtin_memcpy(__builtin_assume_aligned(o + int64_t(row) * row_stride +
-                                                                      (i % (DV / 8)) * 8,
-                                                                  16),
-                                         &zero,
-                                         sizeof(zero));
+                        auto* destination = o + int64_t(row) * row_stride + (i % (DV / 8)) * 8;
+                        if constexpr(General && DQ == 128)
+                            __builtin_memcpy(destination, &zero, sizeof(zero));
+                        else
+                            __builtin_memcpy(
+                                __builtin_assume_aligned(destination, 16), &zero, sizeof(zero));
                     }
                 }
             }
@@ -511,9 +517,16 @@ CK_TILE_DEVICE void run(Args a)
         __syncthreads();
     }
 
-    constexpr bool FoldScaleIntoExp = DQ == 32 && BM == 128 && BN == 64 && Args::kVirtualSink &&
-                                      Args::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-                                      !Args::kHasLogitsSoftCap;
+    // Independent sums shorten dense D64 softmax's dependency chain. Positive
+    // scales can share the exponentiation FMA, as on the strided path.
+    constexpr bool DenseSmallHead = std::is_same_v<Args, GeneralArguments> && DQ == 64 &&
+                                    DV == 64 && BM == 128 && BN == 128 && !Causal;
+    constexpr bool FoldScaleIntoExp =
+        DenseSmallHead ||
+        (Causal && DQ == 64 && DV == 64 && BM == 128 && BN == 64 &&
+         std::is_same_v<Args, GeneralArguments>) ||
+        (DQ == 32 && BM == 128 && BN == 64 && Args::kVirtualSink &&
+         Args::BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !Args::kHasLogitsSoftCap);
     const bool scale_before_mask = General && (!FoldScaleIntoExp || a.scale <= 0.f);
     const float scale2           = scale_before_mask ? 1.f : a.scale * 1.4426950408889634f;
     const auto* bias             = [&]() {
@@ -562,10 +575,10 @@ CK_TILE_DEVICE void run(Args a)
     constexpr bool ReverseDepth = StaticS == 32768 && !Causal;
     // Keep the expensive rescale path out of the common instruction sequence.
     // The expectation must stay at the branch site to preserve its code placement.
-    constexpr bool HintRescale =
-        (StaticS == 32768 && !Causal) || (!StoreLSE && !Generic && !Causal &&
-                                          (DenseRectangle || (QueryTiles == 2 && KeyTiles == 2) ||
-                                           (QueryTiles == 5 && KeyTiles == 5)));
+    constexpr bool HintRescale = DenseSmallHead || (StaticS == 32768 && !Causal) ||
+                                 (!StoreLSE && !Generic && !Causal &&
+                                  (DenseRectangle || (QueryTiles == 2 && KeyTiles == 2) ||
+                                   (QueryTiles == 5 && KeyTiles == 5)));
     // Native vector assignments preserve D32 padded bias's LDS/WMMA schedule.
     // Even identity bit_casts change LLVM's vector decomposition on this path.
     constexpr bool PaddedBias32 = DQ == 32 && BM == 128 && BN == 128 && HeadPadded &&
@@ -952,7 +965,7 @@ CK_TILE_DEVICE void run(Args a)
                 return fmaxf(lm, swap16(lm)) * scale2;
             };
             auto exponentiate = [&](const auto& logits, float base) {
-                constexpr int Parts = StaticS == 32768 ? 4 : 2;
+                constexpr int Parts = DenseSmallHead ? 8 : (StaticS == 32768 ? 4 : 2);
                 F2 partial[Parts]   = {};
 #pragma unroll
                 for(int n = 0; n < BN / 16; ++n)
@@ -987,10 +1000,15 @@ CK_TILE_DEVICE void run(Args a)
                         }
                     }
                 }
-                if constexpr(StaticS == 32768)
+                if constexpr(Parts == 8)
                 {
-                    // Independent accumulators shorten the softmax dependency
-                    // chain; combine them before the same partial-sum guard.
+                    partial[0] += partial[4];
+                    partial[1] += partial[5];
+                    partial[2] += partial[6];
+                    partial[3] += partial[7];
+                }
+                if constexpr(Parts >= 4)
+                {
                     partial[0] += partial[2];
                     partial[1] += partial[3];
                 }
@@ -1092,11 +1110,14 @@ CK_TILE_DEVICE void run(Args a)
                 // Reuse the first query fragment's dead score registers for V.
                 if(qm == 0)
                 {
-                    if(PaddedBias32 ? next_tile(start) < end : has_next)
-                        __builtin_amdgcn_s_wait_tensorcnt(2);
-                    else
-                        __builtin_amdgcn_s_wait_tensorcnt(0);
-                    __syncthreads();
+                    if constexpr(DeferredValueWait)
+                    {
+                        if(PaddedBias32 ? next_tile(start) < end : has_next)
+                            __builtin_amdgcn_s_wait_tensorcnt(2);
+                        else
+                            __builtin_amdgcn_s_wait_tensorcnt(0);
+                        __syncthreads();
+                    }
 #pragma unroll
                     for(int d = 0; d < VFragments; ++d)
                     {
@@ -1265,6 +1286,25 @@ CK_TILE_DEVICE void run(Args a)
 #pragma unroll LoopUnroll
         for(; start < end; start = next_tile(start), stage ^= 1)
             iteration_body(std::true_type{}, std::false_type{}, start, std::false_type{});
+    }
+    // The prefix is visible to every row in the Q tile. Window attention keeps
+    // its masked loop; bottom-right rectangles may have no visible prefix.
+    else if constexpr(Causal && ((DQ == 128 && DV == 128 &&
+                                  (std::is_same_v<Args, GeneralArguments> ||
+                                   std::is_same_v<Args, StridedArguments>)) ||
+                                 (DQ == 64 && DV == 64 && BM == 128 && BN == 64 &&
+                                  std::is_same_v<Args, GeneralArguments>)))
+    {
+        int start          = begin;
+        const int full_end = a.left < 0 && a.right == 0
+                                 ? min(a.sk, tile * BM + (a.mask_type == 1 ? 0 : a.sk - a.sq) + 1)
+                                 : begin;
+#pragma unroll LoopUnroll
+        for(; start + BN <= full_end; start += BN, stage ^= 1)
+            iteration(std::false_type{}, std::false_type{}, start);
+#pragma unroll LoopUnroll
+        for(; start < end; start = next_tile(start), stage ^= 1)
+            iteration(std::true_type{}, std::false_type{}, start);
     }
     else if constexpr(!Generic && Pad && !Causal && BM == 128)
     {

@@ -129,6 +129,38 @@ bool fmha_fwd_cr_vector_output(const Args& a)
            a.nhead_stride_o % 8 == 0 && (a.seqstart_q_ptr || a.batch_stride_o % 8 == 0);
 }
 
+template <typename Args>
+bool fmha_fwd_cr_vector_kv(const Args& a)
+{
+    if((reinterpret_cast<uintptr_t>(a.k_ptr) | reinterpret_cast<uintptr_t>(a.v_ptr)) & 15)
+        return false;
+    for(auto stride : {a.stride_k, a.stride_v, a.nhead_stride_k, a.nhead_stride_v})
+        if(stride % 8)
+            return false;
+    return a.seqstart_q_ptr || (a.batch_stride_k % 8 == 0 && a.batch_stride_v % 8 == 0);
+}
+
+// Interleave a small number of batch/head pairs across long causal query tiles.
+// Callers also restrict this tuning to native heads without score/sequence features.
+template <typename Args>
+bool fmha_fwd_cr_flat_head_order(const Args& a, int64_t num_cus, int min_heads = 4)
+{
+    const int64_t heads = int64_t{a.batch} * a.nhead_q;
+    if(a.batch < 2 || heads < min_heads || heads > 8 || a.seqlen_q < 8192 || a.seqlen_k < 8192 ||
+       a.window_size_left >= 0 || a.window_size_right != 0 || !(a.scale_s > 0) || a.sink_ptr ||
+       a.seqstart_q_ptr || a.seqstart_k_ptr || a.seqlen_q_ptr || a.seqlen_k_ptr ||
+       a.cu_seqlen_q_ptr || a.cu_seqlen_k_ptr || fmha_fwd_cr_vector_output(a))
+        return false;
+    if(a.hdim_q == 128 && a.hdim_v == 128)
+        // Small two-head sequences retain their per-sequence causal order.
+        return (heads != 4 || a.nhead_q == 1 || heads * a.seqlen_q > 208 * num_cus) &&
+               a.seqlen_q == a.seqlen_k && a.mask_type != 0 && fmha_fwd_cr_vector_kv(a);
+    // Uneven D64 query-head groups retain their existing causal order.
+    return a.hdim_q == 64 && a.hdim_v == 64 && (a.nhead_q & (a.nhead_q - 1)) == 0 &&
+           a.mask_type == 2 && int64_t{a.seqlen_q} >= 2 * int64_t{a.seqlen_k} &&
+           !fmha_fwd_cr_vector_kv(a);
+}
+
 // The default dispatcher applies this alignment preference to native
 // D64/D128/D192 without bias, soft cap, sink, or skip. Expanded CR families
 // prefer all supported views.

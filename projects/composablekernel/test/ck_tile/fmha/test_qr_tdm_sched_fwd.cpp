@@ -1153,8 +1153,9 @@ std::vector<QrTdmSchedForward::ParamType> ForwardParameters()
             {
                 result.emplace_back(index, lse, pattern, false);
                 // Virtual sinks are qr_tdm fallback tests, outside sched's
-                // generated support. CR also covers sched's short-Q fallback.
-                if(!GetCase(index).virtual_sink)
+                // generated support. CR also covers sched's short-Q fallback,
+                // but generated CR dispatch is restricted to calls without LSE.
+                if(!lse && !GetCase(index).virtual_sink)
                     result.emplace_back(index, lse, pattern, true);
             }
     return result;

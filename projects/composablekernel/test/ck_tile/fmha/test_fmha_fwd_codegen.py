@@ -168,7 +168,7 @@ int main() {
     fmha_fwd_args a;
     int mask, bias, scale, arg_q, arg_v, max_q, has_cu_sk, has_sk_ptr, has_sink_ptr, o_offset, bshd;
     int lse_offset, lse_head_stride, lse_batch_stride, has_seqstart, has_sq_ptr, has_cu_sq;
-    int input_offset, input_padding;
+    int input_offset, input_padding, input_parts;
     if(!(std::cin >> t.hdim_q >> t.hdim_v >> a.seqlen_q >> a.seqlen_k
          >> t.is_group_mode >> t.is_v_rowmajor >> t.has_logits_soft_cap >> mask >> bias
          >> t.has_lse >> t.has_dropout >> scale >> t.skip_min_seqlen_q >> t.has_sink
@@ -177,7 +177,8 @@ int main() {
          >> has_cu_sk >> has_sk_ptr >> has_sink_ptr >> o_offset >> a.stride_o
          >> a.nhead_stride_o >> a.batch_stride_o >> bshd
          >> lse_offset >> lse_head_stride >> lse_batch_stride >> has_seqstart
-         >> has_sq_ptr >> has_cu_sq >> a.scale_s >> input_offset >> input_padding)) return 2;
+         >> has_sq_ptr >> has_cu_sq >> a.scale_s >> input_offset >> input_padding
+         >> input_parts)) return 2;
     t.mask_type = static_cast<mask_enum>(mask);
     t.bias_type = static_cast<bias_enum>(bias);
     t.qscale_type = static_cast<quant_scale_enum>(scale);
@@ -193,10 +194,12 @@ int main() {
     a.sink_size = t.has_sink ? 65 : 0;
     a.o_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + o_offset);
     if(bshd) {
-        a.q_ptr = a.k_ptr = a.v_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + input_offset);
-        a.stride_q = a.nhead_q * a.hdim_q + input_padding;
-        a.stride_k = a.nhead_k * a.hdim_q + input_padding;
-        a.stride_v = a.nhead_k * a.hdim_v + input_padding;
+        a.q_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + ((input_parts & 1) ? input_offset : 0));
+        a.k_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + ((input_parts & 2) ? input_offset : 0));
+        a.v_ptr = reinterpret_cast<const void*>(std::uintptr_t{4096} + ((input_parts & 4) ? input_offset : 0));
+        a.stride_q = a.nhead_q * a.hdim_q + ((input_parts & 1) ? input_padding : 0);
+        a.stride_k = a.nhead_k * a.hdim_q + ((input_parts & 2) ? input_padding : 0);
+        a.stride_v = a.nhead_k * a.hdim_v + ((input_parts & 4) ? input_padding : 0);
         a.nhead_stride_q = a.nhead_stride_k = a.hdim_q;
         a.nhead_stride_v = a.hdim_v;
         a.batch_stride_q = a.stride_q * a.seqlen_q;
@@ -348,6 +351,7 @@ class _CompiledDispatcher:
             scale_s=0.08838835,
             input_offset=0,
             input_padding=0,
+            input_parts=7,
         )
         if changes.keys() - case.keys():
             raise ValueError(
@@ -374,6 +378,85 @@ class _CompiledDispatcher:
 
 
 class TestGfx125TdmCrCodegen(unittest.TestCase):
+    def test_lse_keeps_original_dispatch_including_python_receipt(self):
+        for receipt in (0, 5):
+            with self.subTest(receipt=receipt):
+                _, kernels = get_fwd_blobs(
+                    ["gfx1250"],
+                    "fmha_fwd_*_lse_*",
+                    receipt,
+                    [32, 64, 96, 128, 160, 192],
+                    "simplified",
+                )
+                self.assertTrue(kernels)
+                self.assertTrue(all(k.F_pipeline.F_lse == "t" for k in kernels))
+                self.assertFalse(any(k.F_pipeline.tag == "qr_tdm_cr" for k in kernels))
+                # Compile the real dispatcher with launch-ID stubs. Limit this
+                # check to one score/sequence feature at a time; the policy
+                # assertion above covers the entire LSE inventory.
+                selected_kernels = []
+                selected_pool = FmhaFwdApiPool()
+                for kernel in kernels:
+                    p = kernel.F_pipeline
+                    feature_count = (
+                        (p.F_logits == "t")
+                        + (p.F_bias != "no")
+                        + (p.F_sink == "t")
+                        + (p.F_skip == "t")
+                    )
+                    if (
+                        kernel.F_dtype not in ("fp16", "bf16")
+                        or p.F_dropout != "f"
+                        or p.F_qscale != "no"
+                    ):
+                        continue
+                    if feature_count and (kernel.F_hdim != 128 or feature_count != 1):
+                        continue
+                    selected_kernels.append(kernel)
+                    selected_pool.register_traits(kernel.api_trait())
+                dispatch = _CompiledDispatcher(self, selected_pool, selected_kernels)
+                features = [dict(hdim_q=d, hdim_v=d) for d in (32, 64, 96, 128, 160)]
+                features += [dict(hdim_q=65, hdim_v=65), dict(bias=1), dict(bias=2)]
+                if receipt == 0:
+                    features += [
+                        dict(hdim_q=192, hdim_v=128),
+                        dict(logits=1),
+                        dict(sink=1),
+                        dict(skip=1),
+                    ]
+                for dtype, group, length, mask, feature in itertools.product(
+                    ("fp16", "bf16"), (0, 1), (257, 8192), (0, 2), features
+                ):
+                    if receipt == 5 and group and feature.get("bias") == 1:
+                        continue  # The Python receipt exposes elementwise bias in batch only.
+                    args = dict(
+                        dtype=dtype,
+                        hdim_q=128,
+                        hdim_v=128,
+                        group=group,
+                        has_seqstart=group,
+                        bshd=1,
+                        seqlen_q=length,
+                        seqlen_k=length,
+                        mask=mask,
+                        window_size_right=0 if mask else -1,
+                        lse=1,
+                    )
+                    args.update(feature)
+                    args.update(
+                        stride_o=8 * args["hdim_v"],
+                        nhead_stride_o=args["hdim_v"],
+                        batch_stride_o=length * 8 * args["hdim_v"],
+                    )
+                    with self.subTest(receipt=receipt, **args):
+                        selected = dispatch.run(**args)[0]
+                        self.assertGreater(selected, 0)
+                        kernel = next(
+                            k for k, i in dispatch.kernel_ids if i == selected
+                        )
+                        self.assertNotEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
+                        self.assertEqual(kernel.F_pipeline.F_lse, "t")
+
     def test_expanded_default_dispatch_preserves_cr_geometry(self):
         _, generated = get_fwd_blobs(
             ["gfx1250"], "*", 0, [32, 64, 96, 128, 160, 192], "simplified"
@@ -387,7 +470,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 or p.tag not in ("qr_tdm", "qr_tdm_sched", "qr_tdm_cr")
                 or p.F_dropout != "f"
                 or p.F_qscale != "no"
-                or p.F_lse != "t"
+                or p.F_lse != "f"
             ):
                 continue
             features = (
@@ -442,7 +525,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 seqlen_k=sq + 2,
                 bshd=1,
                 mask=mask,
-                lse=1,
+                lse=0,
                 window_size_right=0 if mask else -1,
             )
             args.update(feature)
@@ -482,7 +565,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 skip=skip,
                 has_sink_ptr=virtual,
                 mask=mask,
-                lse=1,
+                lse=0,
                 stride_o=256,
                 nhead_stride_o=32,
                 batch_stride_o=257 * 256,
@@ -526,7 +609,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 seqlen_q=257,
                 seqlen_k=515,
                 mask=mask,
-                lse=1,
+                lse=0,
                 window_size_left=31 if mask == 3 else -1,
                 window_size_right=0 if mask else -1,
                 stride_o=8 * dv + 1,
@@ -573,7 +656,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     bshd=1,
                     bias=2,
                     mask=mask,
-                    lse=1,
+                    lse=0,
                     sink=sink,
                     window_size_left=left,
                     window_size_right=0 if mask else -1,
@@ -621,7 +704,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 hdim_q=dq,
                 hdim_v=dv,
                 mask=mask,
-                lse=1,
+                lse=0,
                 window_size_right=0 if mask else -1,
                 seqlen_q=257,
                 seqlen_k=515,
@@ -662,11 +745,10 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
         )
         dispatch = _CompiledDispatcher(self, pool, kernels)
         covered = {}
-        for dtype, group, mask, lse, (batch, sq), (dq, dv) in itertools.product(
+        for dtype, group, mask, (batch, sq), (dq, dv) in itertools.product(
             ("fp16", "bf16"),
             (0, 1),
             (0, 1, 2, 3),
-            (0, 1),
             ((2, 257), (8, 257), (2, 8192)),
             ((32, 32), (64, 64), (96, 96), (128, 128), (160, 160), (192, 128)),
         ):
@@ -678,7 +760,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 hdim_q=dq,
                 hdim_v=dv,
                 mask=mask,
-                lse=lse,
+                lse=0,
                 batch=batch,
                 window_size_left=31 if mask == 3 else -1,
                 window_size_right=0 if mask else -1,
@@ -872,11 +954,10 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 and t.mask == "no"
             ),
         )
-        for dtype, (sq, sk), heads, group, virtual, lse in itertools.product(
+        for dtype, (sq, sk), heads, group, virtual in itertools.product(
             ("bf16", "fp16"),
             ((8191, 8192), (8192, 8191), (8192, 8192), (8193, 8192), (8192, 16384)),
             (4, 32, 33),
-            (0, 1),
             (0, 1),
             (0, 1),
         ):
@@ -887,7 +968,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 heads=heads,
                 group=group,
                 virtual=virtual,
-                lse=lse,
+                lse=0,
             ):
                 args = dict(
                     dtype=dtype,
@@ -903,7 +984,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     has_seqstart=group,
                     has_sink_ptr=virtual,
                     mask=0,
-                    lse=lse,
+                    lse=0,
                     stride_o=heads * 128,
                     nhead_stride_o=128,
                     batch_stride_o=sq * heads * 128,
@@ -933,14 +1014,12 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             ["gfx1250"], "*qr_tdm_cr*", 0, [32, 64, 96, 128, 160, 192], "simplified"
         )
         dispatch = _CompiledDispatcher(self, pool, kernels)
-        for dtype, group, mask, lse, (dq, dv) in itertools.product(
+        for dtype, group, mask, (dq, dv) in itertools.product(
             ("fp16", "bf16"),
             (0, 1),
             (0, 2),
-            (0, 1),
             ((31, 17), (33, 63), (65, 95), (127, 113), (129, 159), (161, 127)),
         ):
-            # Long padded heads use M128; D192 additionally requires BH <= 32.
             batch, length = (2, 8192) if dq == 161 else (8, 8192)
             args = dict(
                 dtype=dtype,
@@ -951,7 +1030,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 hdim_q=dq,
                 hdim_v=dv,
                 mask=mask,
-                lse=lse,
+                lse=0,
                 window_size_right=0 if mask else -1,
                 seqlen_q=length,
                 seqlen_k=length,
@@ -972,6 +1051,140 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     64 if dq == 161 and group else 128,
                 )
 
+    def test_long_alibi_tile_selection(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"], "*qr_tdm_cr*", 0, [32, 64, 96, 128], "simplified"
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        # Per-sequence heads matter for sparse groups; total packed Q must not
+        # substitute for the maximum logical query length at either boundary.
+        for dtype, group in itertools.product(("bf16", "fp16"), (0, 1)):
+            for dq, dv, heads, length, mask, virtual, expected in (
+                (31, 17, 4, 8192, 2, 0, (128, 128)),
+                (31, 17, 16, 8191, 2, 0, (128, 128)),
+                (31, 17, 16, 8192, 2, 0, (128, 64)),
+                (33, 63, 4, 8192, 2, 0, (128, 128)),
+                (33, 63, 16, 8192, 1, 0, (128, 64)),
+                (65, 95, 16, 8192, 2, 0, (128, 64)),
+                (97, 113, 4, 4095, 2, 0, (128, 128)),
+                (97, 113, 4, 4096, 2, 0, (128, 64)),
+                (64, 64, 4, 4095, 2, 0, (128, 128)),
+                (64, 64, 4, 4096, 2, 0, (64, 64)),
+                (64, 64, 24, 8192, 1, 0, (64, 64)),
+                (31, 17, 24, 2048, 2, 0, (64, 64)),
+                (97, 113, 24, 8192, 0, 0, (128, 128)),
+                (31, 17, 24, 8192, 2, 1, (128, 128)),
+                (64, 64, 24, 8192, 2, 1, (128, 128)),
+            ):
+                with self.subTest(
+                    dtype=dtype,
+                    group=group,
+                    lse=0,
+                    dq=dq,
+                    heads=heads,
+                    length=length,
+                    mask=mask,
+                    virtual=virtual,
+                ):
+                    selected = dispatch.run(
+                        dtype=dtype,
+                        group=group,
+                        has_seqstart=group,
+                        has_sq_ptr=group,
+                        has_sk_ptr=group,
+                        bshd=1,
+                        batch=2,
+                        hdim_q=dq,
+                        hdim_v=dv,
+                        nhead_q=heads,
+                        nhead_k=heads // 4,
+                        seqlen_q=length * (2 if group else 1),
+                        seqlen_k=(length + 64) * (2 if group else 1),
+                        max_seqlen_q=length,
+                        mask=mask,
+                        bias=2,
+                        lse=0,
+                        window_size_right=0 if mask else -1,
+                        has_sink_ptr=virtual,
+                        stride_o=heads * dv,
+                        nhead_stride_o=dv,
+                        batch_stride_o=length * heads * dv,
+                    )[0]
+                    self.assertGreater(selected, 0)
+                    kernel = next(k for k, i in dispatch.kernel_ids if i == selected)
+                    self.assertEqual(
+                        (kernel.F_tile.F_bm0, kernel.F_tile.F_bn0), expected
+                    )
+
+    def test_long_native_active_work_selection(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"], "*qr_tdm_cr*", 0, [96, 160], "simplified"
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for dtype, dim in itertools.product(("bf16", "fp16"), (96, 160)):
+            b4_m = 128 if dtype == "bf16" else 64
+            for group, batch, heads, sq, sk, maximum, mask, expected_m in (
+                (0, 2, 8, 8192, 8256, 8192, 2, 128),
+                (0, 2, 8, 8192, 257, 8192, 2, 64),
+                (0, 2, 8, 8192, 257, 8192, 1, 128),
+                (1, 2, 8, 16448, 16576, 8192, 2, 128),
+                (1, 2, 8, 12352, 12480, 8192, 2, 128),
+                (1, 2, 8, 8288, 8352, 8192, 2, 64),
+                (1, 2, 8, 16448, 640, 8192, 2, 64),
+                (1, 2, 8, 16448, 640, 8192, 1, 128),
+                (1, 4, 8, 32896, 33152, 8192, 2, b4_m),
+                (1, 4, 8, 16383, 16512, 8192, 2, 64),
+                (1, 4, 8, 16384, 16512, 8192, 2, b4_m),
+                (1, 4, 8, 20608, 20864, 8192, 2, b4_m),
+                (1, 4, 8, 32896, 1028, 8192, 2, 64),
+                (1, 4, 8, 32896, 1028, 8192, 1, b4_m),
+                (1, 3, 8, 24672, 24864, 8192, 2, 64),
+                (1, 4, 4, 32896, 33152, 8192, 2, 64),
+                (1, 4, 12, 32896, 33152, 8192, 2, 128),
+                (1, 2, 16, 16448, 16576, 8192, 2, 128),
+                (1, 2, 4, 16448, 16576, 8192, 2, 64),
+                (1, 4, 8, 16512, 16768, 4096, 2, 64),
+                (1, 2, 8, 16448, 16576, 8191, 2, 64),
+                (0, 1, 4, 32768, 32832, 32768, 2, 64),
+            ):
+                args = dict(
+                    dtype=dtype,
+                    hdim_q=dim,
+                    hdim_v=dim,
+                    lse=0,
+                    group=group,
+                    has_seqstart=group,
+                    has_sq_ptr=group,
+                    has_sk_ptr=group,
+                    batch=batch,
+                    nhead_q=heads,
+                    nhead_k=heads // 4,
+                    bshd=1,
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                    max_seqlen_q=maximum,
+                    mask=mask,
+                    window_size_right=0,
+                    stride_o=heads * dim,
+                    nhead_stride_o=dim,
+                    batch_stride_o=maximum * heads * dim,
+                )
+                with self.subTest(**args):
+                    selected = dispatch.run(**args)[0]
+                    self.assertGreater(selected, 0)
+                    kernel = next(k for k, i in dispatch.kernel_ids if i == selected)
+                    self.assertEqual(kernel.F_tile.F_bm0, expected_m)
+                    self.assertEqual(kernel.F_tile.F_bn0, 64)
+                    if group and expected_m == 128 and batch * heads <= 32:
+                        # Score transforms and virtual sinks retain their
+                        # independently qualified small-grid preference.
+                        for changes in (dict(bias=2), dict(has_sink_ptr=1)):
+                            selected = dispatch.run(**(args | changes))[0]
+                            kernel = next(
+                                k for k, i in dispatch.kernel_ids if i == selected
+                            )
+                            self.assertEqual(kernel.F_tile.F_bm0, 64)
+
     def test_scalar_views_preserve_default_pipeline_preference(self):
         pool, kernels = get_fwd_blobs(
             ["gfx1250"],
@@ -987,9 +1200,9 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
         cr_only = _CompiledDispatcher(
             self, pool, kernels, filter_fn=lambda t: t.pipeline_tag == "qr_tdm_cr"
         )
-        # Preserve the native scalar-view fallback while the newly qualified
-        # dimensions and padded heads use the same geometry as CR-only dispatch.
-        for dtype, (dq, dv), mask, lse, view, group, (sq, sk) in itertools.product(
+        # Native short and group scalar views retain their fallback. Qualified
+        # long batch views, new dimensions and padded heads use CR geometry.
+        for dtype, (dq, dv), mask, view, group, (sq, sk) in itertools.product(
             ("fp16", "bf16"),
             (
                 (32, 32),
@@ -1002,7 +1215,6 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 (192, 128),
             ),
             (0, 2),
-            (0, 1),
             ("qkv", "o"),
             (0, 1),
             ((256, 512), (8192, 8192)),
@@ -1021,7 +1233,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 has_seqstart=group,
                 mask=mask,
                 window_size_right=0 if mask else -1,
-                lse=lse,
+                lse=0,
                 stride_o=2 * dv + (view == "o"),
                 nhead_stride_o=dv,
                 batch_stride_o=sq * (2 * dv + (view == "o")),
@@ -1031,7 +1243,16 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             )
             with self.subTest(**args):
                 native = (dq, dv) in ((64, 64), (128, 128), (192, 128))
-                preferred = fallback if native else cr_only
+                long_native = (
+                    native
+                    and not group
+                    and sq >= 8192
+                    and sk >= 8192
+                    and (
+                        dq == 64 or dq == 128 or (dq == 192 and (mask or view == "qkv"))
+                    )
+                )
+                preferred = fallback if native and not long_native else cr_only
                 selected = preferred.run(**args)[0]
                 self.assertGreater(selected, 0)
                 expected = next(
@@ -1042,6 +1263,14 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 actual = next(k.name for k, i in default.kernel_ids if i == selected)
                 self.assertEqual(actual, expected)
                 self.assertGreater(cr_only.run(**args)[0], 0)
+                if native:
+                    # The original path can multiply the masked -infinity by a
+                    # nonpositive scale. Native CR must handle scalar views too.
+                    for scale in (0, -0.19):
+                        scaled = args | dict(scale_s=scale)
+                        selected = default.run(**scaled)[0]
+                        kernel = next(k for k, i in default.kernel_ids if i == selected)
+                        self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
                 if not native:
                     # Aligned and scalar views share the qualified CR preference.
                     aligned = args | dict(
@@ -1074,7 +1303,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                             default.run(**(aligned | dict(scale_s=scale))), [selected]
                         )
 
-    def test_sched_supported_inputs_select_cr(self):
+    def test_sched_supported_inputs_select_cr_only_without_lse(self):
         dispatchers = {}
         for pipeline in ("qr_tdm_sched", "qr_tdm_cr"):
             pool, kernels = get_fwd_blobs(
@@ -1133,6 +1362,9 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     continue
                 covered.add((dtype, dq, group, mask, lse))
                 selected_cr = cr.run(**args)[0]
+                if lse:
+                    self.assertEqual(selected_cr, -1)
+                    continue
                 self.assertGreater(selected_cr, 0)
                 kernel = next(k for k, i in cr.kernel_ids if i == selected_cr)
                 self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
@@ -1187,14 +1419,18 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             Counter(
                 {
                     (dtype, dim, mode): (
-                        (16 if mode == "batch" else 8)
+                        (10 if mode == "batch" else 4)
                         if dim == 192
                         else (
-                            40
+                            22
                             if (dtype, dim, mode) == ("bf16", 128, "batch")
-                            else 18
-                            if mode == "batch" and dim in (32, 64, 96)
-                            else 16
+                            else (
+                                10
+                                if mode == "batch" and dim in (64, 128)
+                                else 9
+                                if mode == "batch" and dim in (32, 96)
+                                else 8
+                            )
                         )
                     )
                     for dtype in ("fp16", "bf16")
@@ -1296,7 +1532,13 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                         lse=lse,
                     )
                     with self.subTest(b=b, h=h, sq=sq, sk=sk, mask=mask, lse=lse):
-                        if b == 32 and h == 8 and sq == sk and sq in static_lengths:
+                        if (
+                            not lse
+                            and b == 32
+                            and h == 8
+                            and sq == sk
+                            and sq in static_lengths
+                        ):
                             expected = dispatch.expected_id(
                                 pipeline="qr_tdm_cr",
                                 dpad="f",
@@ -1308,12 +1550,15 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                                 spad="f",
                                 skpad="f",
                             )
-                        elif (b * h <= 8 and sq <= 4096) or (
-                            b == 32
-                            and h == 8
-                            and sq == sk
-                            and sq in (128, 256)
-                            and mask == 1
+                        elif not lse and (
+                            (b * h <= 8 and sq <= 4096)
+                            or (
+                                b == 32
+                                and h == 8
+                                and sq == sk
+                                and sq in (128, 256)
+                                and mask == 1
+                            )
                         ):
                             expected = dispatch.expected_id(
                                 pipeline="qr_tdm_cr",
@@ -1414,6 +1659,9 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                         kernel = next(
                             k for k, i in dispatch.kernel_ids if i == selected
                         )
+                        if lse:
+                            self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_sched")
+                            continue
                         self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
                         self.assertEqual(kernel.F_tile.F_bm0, 64)
 
@@ -1462,6 +1710,226 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                             if dim == 192 and not group and min(sq, sk) >= 8192
                             else 64,
                         )
+
+    def test_long_strided_native_geometry(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"], "*qr_tdm_[cs]*", 0, [64, 128, 192], "simplified"
+        )
+        default = _CompiledDispatcher(self, pool, kernels)
+        fallback = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda t: t.pipeline_tag != "qr_tdm_cr"
+        )
+        # K/V alignment and available workgroups determine the long geometry.
+        # Large Q-only grids also use M128; windows retain the existing geometry.
+        for dtype in ("bf16", "fp16"):
+            for dim, length, heads, mask, view, tile in (
+                (64, 8192, 16, 2, "kv", (128, 64)),
+                (64, 8192, 64, 2, "kv", (128, 128)),
+                (128, 8192, 16, 2, "kv", (128, 64)),
+                (128, 8192, 4, 2, "kv", (128, 128)),
+                (128, 16384, 4, 2, "kv", (128, 128)),
+                (128, 32768, 4, 2, "kv", (128, 64)),
+                (128, 8192, 4, 2, "o", (64, 64)),
+                (128, 8193, 4, 2, "o", (64, 64)),
+                (128, 12288, 4, 2, "o", (64, 64)),
+                (128, 12289, 4, 2, "o", (64, 64)),
+                (128, 12352, 4, 2, "o", (64, 64)),
+                (128, 12415, 4, 2, "o", (64, 64)),
+                (128, 12416, 4, 2, "o", (128, 128)),
+                (128, 12800, 4, 2, "o", (128, 128)),
+                (128, 13312, 4, 2, "o", (128, 128)),
+                (128, 13313, 4, 2, "o", (64, 64)),
+                (128, 14336, 4, 2, "o", (128, 128)),
+                (128, 8192, 6, 2, "o", (128, 128)),
+                (128, 8192, 4, 2, "all", (128, 128)),
+                (128, 16384, 4, 2, "o", (128, 128)),
+                (128, 16385, 4, 2, "o", (64, 64)),
+                (128, 20481, 4, 2, "o", (64, 64)),
+                (128, 24577, 4, 2, "o", (64, 64)),
+                (128, 28673, 4, 2, "o", (128, 64)),
+                (128, 32768, 4, 2, "o", (128, 64)),
+                (128, 32769, 4, 2, "o", (128, 64)),
+                (128, 8192, 4, 0, "o", (128, 128)),
+                (128, 16384, 4, 0, "o", (128, 64)),
+                (128, 8192, 16, 0, "kv", (128, 64)),
+                (192, 32768, 4, 0, "o", (128, 64)),
+                (192, 8192, 4, 2, "o", (128, 128)),
+                (192, 8193, 4, 2, "o", (64, 64)),
+                (192, 8256, 4, 2, "o", (64, 64)),
+                (192, 8319, 4, 2, "o", (64, 64)),
+                (192, 9217, 4, 2, "o", (64, 64)),
+                (192, 8193, 4, 2, "all", (128, 64)),
+                (192, 16385, 4, 2, "o", (128, 64)),
+                (192, 32769, 4, 2, "o", (128, 64)),
+                (192, 8192, 4, 0, "o", None),
+                (64, 8192, 16, 2, "q", (64, 64)),
+                (64, 8192, 32, 2, "q", (128, 64)),
+                (64, 32768, 16, 2, "q", (128, 64)),
+                (64, 16384, 4, 2, "o", (128, 64)),
+                (64, 8192, 16, 2, "window", None),
+                (192, 8192, 4, 2, "q", None),
+            ):
+                dv = min(dim, 128)
+                output_padding = int(view in ("o", "all"))
+                args = dict(
+                    dtype=dtype,
+                    lse=0,
+                    hdim_q=dim,
+                    hdim_v=dv,
+                    batch=heads // 2,
+                    nhead_q=2,
+                    nhead_k=1,
+                    bshd=1,
+                    seqlen_q=length,
+                    seqlen_k=length,
+                    mask=mask,
+                    window_size_left=31 if view == "window" else -1,
+                    window_size_right=0 if mask else -1,
+                    input_offset=0 if view == "o" else 2,
+                    input_padding=0 if view == "o" else 1,
+                    input_parts=7 if view == "all" else 1 if view == "q" else 6,
+                    o_offset=2 * output_padding,
+                    stride_o=2 * dv + output_padding,
+                    nhead_stride_o=dv,
+                    batch_stride_o=length * (2 * dv + output_padding),
+                )
+                with self.subTest(
+                    dtype=dtype,
+                    dim=dim,
+                    length=length,
+                    heads=heads,
+                    mask=mask,
+                    view=view,
+                    lse=0,
+                ):
+                    selected = default.run(**args)[0]
+                    kernel = next(k for k, i in default.kernel_ids if i == selected)
+                    if tile is None:
+                        original = fallback.run(**args)[0]
+                        self.assertEqual(
+                            kernel.name,
+                            next(
+                                k.name for k, i in fallback.kernel_ids if i == original
+                            ),
+                        )
+                    else:
+                        self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
+                        self.assertEqual(
+                            (kernel.F_tile.F_bm0, kernel.F_tile.F_bn0), tile
+                        )
+
+            # A narrow query-heavy grid favors N128 for misaligned K/V.
+            # Check both boundaries; larger batches retain their geometry.
+            for sq, sk, heads, expected_n in (
+                (16383, 8192, 4, 64),
+                (16384, 8192, 4, 64),
+                (16385, 8192, 4, 64),
+                (30719, 8192, 4, 64),
+                (30720, 8192, 4, 128),
+                (30723, 8193, 4, 64),
+                (30724, 8193, 4, 128),
+                (32768, 8192, 4, 128),
+                (32897, 8192, 4, 128),
+                (38912, 8192, 4, 128),
+                (38913, 8192, 4, 64),
+                (40960, 8192, 4, 64),
+                (38399, 10240, 4, 64),
+                (38400, 10240, 4, 128),
+                (32768, 9000, 4, 64),
+                (32768, 8192, 8, 64),
+                (16383, 8192, 32, 64),
+                (16384, 8192, 32, 64),
+                (16383, 8192, 64, 128),
+                (16384, 8192, 64, 128),
+            ):
+                selected = default.run(
+                    dtype=dtype,
+                    lse=0,
+                    hdim_q=64,
+                    hdim_v=64,
+                    batch=heads // 2,
+                    nhead_q=2,
+                    nhead_k=1,
+                    bshd=1,
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                    mask=1,
+                    window_size_right=0,
+                    input_offset=2,
+                    input_padding=1,
+                    input_parts=6,
+                    stride_o=128,
+                    nhead_stride_o=64,
+                    batch_stride_o=sq * 128,
+                )[0]
+                kernel = next(k for k, i in default.kernel_ids if i == selected)
+                self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
+                self.assertEqual(
+                    (kernel.F_tile.F_bm0, kernel.F_tile.F_bn0), (128, expected_n)
+                )
+
+            # Top-left uses every Q row; bottom-right can have fully masked
+            # leading rows. Only active work should select the smaller K tile.
+            for (sq, sk), mask, view, (batch, heads) in itertools.product(
+                ((32768, 8192), (8192, 32768)),
+                (1, 2),
+                ("kv", "o"),
+                (
+                    (2, 2),
+                    (1, 5),
+                    (5, 1),
+                    (3, 2),
+                    (2, 3),
+                    (1, 7),
+                    (7, 1),
+                    (2, 4),
+                    (4, 2),
+                ),
+            ):
+                output_padding = int(view == "o")
+                selected = default.run(
+                    dtype=dtype,
+                    lse=0,
+                    hdim_q=128,
+                    hdim_v=128,
+                    batch=batch,
+                    nhead_q=heads,
+                    nhead_k=1,
+                    bshd=1,
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                    mask=mask,
+                    window_size_right=0,
+                    input_offset=0 if output_padding else 2,
+                    input_padding=0 if output_padding else 1,
+                    input_parts=6,
+                    o_offset=2 * output_padding,
+                    stride_o=heads * 128 + output_padding,
+                    nhead_stride_o=128,
+                    batch_stride_o=sq * (heads * 128 + output_padding),
+                )[0]
+                kernel = next(k for k, i in default.kernel_ids if i == selected)
+                self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
+                self.assertEqual(
+                    (kernel.F_tile.F_bm0, kernel.F_tile.F_bn0),
+                    (
+                        (64, 64)
+                        if view == "o"
+                        and (
+                            (mask == 2 and (sq > sk or batch * heads <= 6))
+                            or (sq < sk and batch * heads == 4)
+                        )
+                        else (
+                            128,
+                            (
+                                64
+                                if (mask == 1 and sq > sk)
+                                or (view == "o" and mask == 2 and sq < sk)
+                                else 128
+                            ),
+                        )
+                    ),
+                )
 
     def test_sequence_length_pointer_contract(self):
         pool, kernels = get_fwd_blobs(
@@ -1522,30 +1990,27 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             (32, 8, 32768, 32768, 128, 128),
         ):
             for mask in (0, 1):
-                for lse in (0, 1):
-                    with self.subTest(b=b, h=h, sq=sq, sk=sk, mask=mask, lse=lse):
-                        selected = dispatch.run(
-                            dtype="bf16",
-                            hdim_q=128,
-                            hdim_v=128,
-                            bshd=1,
-                            batch=b,
-                            nhead_q=h,
-                            nhead_k=h,
-                            seqlen_q=sq,
-                            seqlen_k=sk,
-                            stride_o=h * 128,
-                            batch_stride_o=sq * h * 128,
-                            mask=mask,
-                            window_size_right=0 if mask else -1,
-                            lse=lse,
-                        )[0]
-                        kernel = next(
-                            k for k, i in dispatch.kernel_ids if i == selected
-                        )
-                        self.assertEqual(
-                            kernel.F_tile.F_bm0, causal_tile if mask else dense_tile
-                        )
+                with self.subTest(b=b, h=h, sq=sq, sk=sk, mask=mask, lse=0):
+                    selected = dispatch.run(
+                        dtype="bf16",
+                        hdim_q=128,
+                        hdim_v=128,
+                        bshd=1,
+                        batch=b,
+                        nhead_q=h,
+                        nhead_k=h,
+                        seqlen_q=sq,
+                        seqlen_k=sk,
+                        stride_o=h * 128,
+                        batch_stride_o=sq * h * 128,
+                        mask=mask,
+                        window_size_right=0 if mask else -1,
+                        lse=0,
+                    )[0]
+                    kernel = next(k for k, i in dispatch.kernel_ids if i == selected)
+                    self.assertEqual(
+                        kernel.F_tile.F_bm0, causal_tile if mask else dense_tile
+                    )
 
     def test_inventory_and_filtered_dispatch(self):
         pool, kernels = get_fwd_blobs(
@@ -1556,10 +2021,12 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             "simplified",
         )
         candidates = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_cr"]
-        self.assertEqual(len(candidates), 56)
+        self.assertEqual(len(candidates), 30)
         for k in candidates:
             self.assertIn(k.F_mode, ("batch", "group"))
-            self.assertIn((k.F_tile.F_bm0, k.F_tile.F_bn0), ((64, 64), (128, 128)))
+            self.assertIn(
+                (k.F_tile.F_bm0, k.F_tile.F_bn0), ((64, 64), (128, 64), (128, 128))
+            )
             self.assertIn("FmhaFwdLaunch<k_,", k.render())
             self.assertIn("ck_tile::FmhaFwdKernel<", k.render())
         dispatch = _CompiledDispatcher(
@@ -1583,11 +2050,15 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     window_size_right=0 if mask else -1,
                     lse=lse,
                 )
+                if lse:
+                    self.assertEqual(dispatch.run(**args), [-1])
+                    continue
                 expected = dispatch.expected_id(
                     pipeline="qr_tdm_cr",
                     dpad="f",
                     dvpad="f",
                     bm0=128,
+                    bn0=128,
                     mode="batch",
                     mask="s_mask" if mask else "s_no",
                     lse="t" if lse else "f",
@@ -1614,12 +2085,6 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     ):
                         self.assertNotIn(dispatch.run(**(args | changes))[0], family)
                 self.assertNotIn(dispatch.run(device="gfx1251", **args)[0], family)
-                if lse:
-                    for changes in (dict(lse_offset=2),):
-                        with self.subTest(sq=sq, sk=sk, mask=mask, changes=changes):
-                            self.assertNotIn(
-                                dispatch.run(**(args | changes))[0], family
-                            )
                 for changes in (
                     dict(has_sink_ptr=1),
                     dict(nhead_k=2),
@@ -1627,8 +2092,6 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                     dict(has_cu_sk=1),
                     dict(stride_o=128),
                     dict(seqlen_k=0),
-                    dict(lse_head_stride=sq + 1),
-                    dict(lse_batch_stride=sq * 8 + 1),
                     dict(o_offset=2),
                     dict(stride_o=1025, batch_stride_o=sq * 1025),
                     dict(batch_stride_o=sq * 1024 + 1),

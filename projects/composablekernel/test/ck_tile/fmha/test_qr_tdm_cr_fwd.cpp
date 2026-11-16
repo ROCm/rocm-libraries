@@ -117,20 +117,24 @@ enum class InputPattern
 
 struct ForwardTestOptions
 {
-    InputPattern input_pattern    = InputPattern::Rescaling;
-    bool output_head_major        = false;
-    int output_padding            = 0;
-    int output_offset             = 0;
-    int input_padding             = 0;
-    int input_offset              = 0;
-    int repeats                   = 1;
-    float scale_s                 = std::numeric_limits<float>::quiet_NaN();
-    bool fixed_tolerance          = false;
-    bool check_all_rows           = false;
-    bool check_output_writes      = false;
-    int hdim_q                    = 0;
-    int hdim_v                    = 0;
-    bool second_group_has_keys    = false;
+    InputPattern input_pattern = InputPattern::Rescaling;
+    bool output_head_major     = false;
+    int output_padding         = 0;
+    int output_offset          = 0;
+    int input_padding          = 0;
+    int query_padding          = 0;
+    int input_offset           = 0;
+    int repeats                = 1;
+    float scale_s              = std::numeric_limits<float>::quiet_NaN();
+    bool fixed_tolerance       = false;
+    bool check_all_rows        = false;
+    bool check_output_writes   = false;
+    int hdim_q                 = 0;
+    int hdim_v                 = 0;
+    int num_heads              = 8;
+    bool second_group_has_keys = false;
+    bool packed_groups         = false;
+    std::vector<int32_t> group_lengths_q, group_lengths_k;
     bool shared_bias              = false;
     bool masked_bias              = false;
     bool first_column_masked_bias = false;
@@ -142,6 +146,10 @@ struct ForwardTestOptions
     int min_seqlen_q              = 0;
     std::vector<float> virtual_sink;
     std::optional<bool> causal_sink_tuning;
+    std::optional<bool> flat_head_tuning;
+    std::optional<bool> general_tuning;
+    std::optional<bool> general_late_value_tuning;
+    std::optional<bool> strided_late_value_tuning;
 };
 
 // Rescaling inputs use exact multiples of 1/16 and a later K tile with larger
@@ -169,13 +177,16 @@ template <typename Data,
 void CheckForward(
     int sq, int sk, int kv_heads, int mask_type = 1, int left = -1, ForwardTestOptions options = {})
 {
-    static_assert(!Group || B == 2, "The packed test metadata describes two groups");
+    static_assert(B > 0);
     using Test =
         Model<Data, D, Group, Mask, Pad, M, StoreLSE, HeadPad, Bias, SoftCap, Sink, Skip, KeyTile>;
-    using Kernel    = typename Test::Kernel;
-    constexpr int H = 8;
-    const int QDim  = options.hdim_q ? options.hdim_q : D;
-    const int V     = options.hdim_v ? options.hdim_v : Test::V;
+    using Kernel = typename Test::Kernel;
+    const int H  = options.num_heads;
+    ASSERT_GT(H, 0);
+    ASSERT_GT(kv_heads, 0);
+    ASSERT_EQ(H % kv_heads, 0);
+    const int QDim = options.hdim_q ? options.hdim_q : D;
+    const int V    = options.hdim_v ? options.hdim_v : Test::V;
     std::vector<Data> q(B * sq * H * QDim), k(B * sk * kv_heads * QDim), v(B * sk * kv_heads * V);
     const bool output_head_major  = options.output_head_major;
     const int output_padding      = options.output_padding;
@@ -228,32 +239,33 @@ void CheckForward(
                         ck_tile::type_convert<Data>(32.f);
     }
     const int input_padding = options.input_padding, input_offset = options.input_offset;
-    const int q_stride = H * QDim + input_padding, k_stride = kv_heads * QDim + input_padding,
-              v_stride = kv_heads * V + input_padding;
+    const int q_stride = H * QDim + input_padding + options.query_padding,
+              k_stride = kv_heads * QDim + input_padding, v_stride = kv_heads * V + input_padding;
     ck_tile::DeviceMem dq((B * sq * q_stride + 2 * input_offset) * sizeof(Data)),
         dk(std::max(B * sk * k_stride + 2 * input_offset, 1) * sizeof(Data));
     ck_tile::DeviceMem dv(std::max(B * sk * v_stride + 2 * input_offset, 1) * sizeof(Data)),
         dout(o.size() * sizeof(Data));
     ck_tile::DeviceMem dlse(lse.size() * sizeof(float));
-    auto upload = [&](ck_tile::DeviceMem& device, const auto& data, int rows, int width) {
-        if(input_padding == 0 && input_offset == 0)
-            device.ToDevice(data.data());
-        else
-        {
-            std::vector<Data> padded(rows * (width + input_padding) + 2 * input_offset,
-                                     ck_tile::type_convert<Data>(NAN));
-            for(int row = 0; row < rows; ++row)
-                std::copy_n(data.begin() + row * width,
-                            width,
-                            padded.begin() + input_offset + row * (width + input_padding));
-            device.ToDevice(padded.data());
-        }
-    };
-    upload(dq, q, B * sq, H * QDim);
+    auto upload =
+        [&](ck_tile::DeviceMem& device, const auto& data, int rows, int width, int padding) {
+            if(padding == 0 && input_offset == 0)
+                device.ToDevice(data.data());
+            else
+            {
+                std::vector<Data> padded(rows * (width + padding) + 2 * input_offset,
+                                         ck_tile::type_convert<Data>(NAN));
+                for(int row = 0; row < rows; ++row)
+                    std::copy_n(data.begin() + row * width,
+                                width,
+                                padded.begin() + input_offset + row * (width + padding));
+                device.ToDevice(padded.data());
+            }
+        };
+    upload(dq, q, B * sq, H * QDim, input_padding + options.query_padding);
     if(sk)
     {
-        upload(dk, k, B * sk, kv_heads * QDim);
-        upload(dv, v, B * sk, kv_heads * V);
+        upload(dk, k, B * sk, kv_heads * QDim, input_padding);
+        upload(dv, v, B * sk, kv_heads * V, input_padding);
     }
     // A finite fill detects missing writes when the expected output is NaN.
     // Compare guards by bits so a NaN store cannot hide an out-of-bounds write.
@@ -263,13 +275,29 @@ void CheckForward(
     ASSERT_EQ(hipMemset(dout.GetDeviceBuffer(), output_fill, o.size() * sizeof(Data)), hipSuccess);
     ASSERT_EQ(hipMemset(dlse.GetDeviceBuffer(), output_fill, lse.size() * sizeof(float)),
               hipSuccess);
-    // Keep physical padding after the second group's live rows. With keys it
+    // Keep physical padding after each group's live rows unless packed. With keys it
     // exercises nonzero Q/K/V offsets and both M128 query fragments; without
     // keys its live rows must produce zero O and -infinity LSE.
-    const std::vector<int32_t> starts_q{0, sq, 2 * sq}, starts_k{0, sk, 2 * sk};
-    const std::vector<int32_t> lengths_q{sq,
-                                         std::min(sq, options.second_group_has_keys ? 145 : 17)};
-    const std::vector<int32_t> lengths_k{sk, options.second_group_has_keys ? std::min(sk, 193) : 0};
+    std::vector<int32_t> lengths_q(B, std::min(sq, options.second_group_has_keys ? 145 : 17));
+    std::vector<int32_t> lengths_k(B, options.second_group_has_keys ? std::min(sk, 193) : 0);
+    lengths_q[0] = sq;
+    lengths_k[0] = sk;
+    if(!options.group_lengths_q.empty())
+        lengths_q = options.group_lengths_q;
+    if(!options.group_lengths_k.empty())
+        lengths_k = options.group_lengths_k;
+    ASSERT_EQ(lengths_q.size(), static_cast<std::size_t>(B));
+    ASSERT_EQ(lengths_k.size(), static_cast<std::size_t>(B));
+    std::vector<int32_t> starts_q(B + 1), starts_k(B + 1);
+    for(int b = 0; b < B; ++b)
+    {
+        ASSERT_GE(lengths_q[b], 0);
+        ASSERT_LE(lengths_q[b], sq);
+        ASSERT_GE(lengths_k[b], 0);
+        ASSERT_LE(lengths_k[b], sk);
+        starts_q[b + 1] = starts_q[b] + (options.packed_groups ? lengths_q[b] : sq);
+        starts_k[b + 1] = starts_k[b] + (options.packed_groups ? lengths_k[b] : sk);
+    }
     ck_tile::DeviceMem dsq(starts_q.size() * sizeof(int32_t)),
         dsk(starts_k.size() * sizeof(int32_t));
     ck_tile::DeviceMem dlq(lengths_q.size() * sizeof(int32_t)),
@@ -289,9 +317,9 @@ void CheckForward(
     a.nhead_k      = kv_heads;
     a.hdim_q       = QDim;
     a.hdim_v       = V;
-    a.seqlen_q     = Group ? 2 * sq : sq;
+    a.seqlen_q     = Group ? starts_q.back() : sq;
     a.max_seqlen_q = sq;
-    a.seqlen_k     = Group ? 2 * sk : sk;
+    a.seqlen_k     = Group ? starts_k.back() : sk;
     a.scale_s = options.input_pattern == InputPattern::Random ? 1.f / std::sqrt(float(QDim)) : 0.5f;
     if(std::isfinite(options.scale_s))
         a.scale_s = options.scale_s;
@@ -316,8 +344,8 @@ void CheckForward(
     {
         a.seqstart_q_ptr = dsq.GetDeviceBuffer();
         a.seqstart_k_ptr = dsk.GetDeviceBuffer();
-        a.seqlen_q_ptr   = dlq.GetDeviceBuffer();
-        a.seqlen_k_ptr   = dlk.GetDeviceBuffer();
+        a.seqlen_q_ptr   = options.packed_groups ? nullptr : dlq.GetDeviceBuffer();
+        a.seqlen_k_ptr   = options.packed_groups ? nullptr : dlk.GetDeviceBuffer();
     }
     std::vector<Data> bias;
     std::vector<float> slopes;
@@ -376,7 +404,7 @@ void CheckForward(
     ck_tile::DeviceMem dsink(H * sizeof(float));
     if(!options.virtual_sink.empty())
     {
-        ASSERT_EQ(options.virtual_sink.size(), std::size_t{H});
+        ASSERT_EQ(options.virtual_sink.size(), static_cast<std::size_t>(H));
         dsink.ToDevice(options.virtual_sink.data());
         a.sink_ptr = dsink.GetDeviceBuffer();
     }
@@ -399,13 +427,28 @@ void CheckForward(
         validate_native(Strided{});
     else
         validate_native(typename Strided::template WithTuning<ck_tile::FmhaTdmCrSinkTuning>{});
-    if(options.causal_sink_tuning.has_value())
+    if(options.causal_sink_tuning.has_value() || options.flat_head_tuning.has_value() ||
+       options.general_tuning.has_value() || options.general_late_value_tuning.has_value() ||
+       options.strided_late_value_tuning.has_value())
     {
         const auto selection_status = Kernel::VisitKernels(a, [&](auto selected) {
             using Selected = decltype(selected);
             using Tuning   = typename Selected::FmhaPipeline::Tuning;
-            EXPECT_EQ((std::is_same_v<Tuning, ck_tile::FmhaTdmCrCausalSinkTuning>),
-                      *options.causal_sink_tuning);
+            if(options.causal_sink_tuning.has_value())
+                EXPECT_EQ((std::is_same_v<Tuning, ck_tile::FmhaTdmCrCausalSinkTuning>),
+                          *options.causal_sink_tuning);
+            if(options.flat_head_tuning.has_value())
+                EXPECT_EQ((std::is_same_v<Tuning, ck_tile::FmhaTdmCrFlatTuning>),
+                          *options.flat_head_tuning);
+            if(options.general_tuning.has_value())
+                EXPECT_EQ((std::is_same_v<Tuning, ck_tile::FmhaTdmCrGeneralTuning>),
+                          *options.general_tuning);
+            if(options.general_late_value_tuning.has_value())
+                EXPECT_EQ((std::is_same_v<Tuning, ck_tile::FmhaTdmCrGeneralLateValueTuning>),
+                          *options.general_late_value_tuning);
+            if(options.strided_late_value_tuning.has_value())
+                EXPECT_EQ((std::is_same_v<Tuning, ck_tile::FmhaTdmCrLateValueTuning>),
+                          *options.strided_late_value_tuning);
             EXPECT_TRUE(Selected::IsSupportedInput(a));
             validate_native(selected);
             return 0.f;
@@ -446,6 +489,26 @@ void CheckForward(
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     dout.FromDevice(o.data());
     dlse.FromDevice(lse.data());
+    if(options.flat_head_tuning.value_or(false))
+    {
+        // A deterministic traversal error can miss tiles on every repeat.
+        // Scan all live outputs in addition to the sampled numerical reference.
+        ASSERT_FALSE(Group);
+        for(int b = 0; b < B; ++b)
+            for(int head = 0; head < H; ++head)
+                for(int row = 0; row < sq; ++row)
+                {
+                    for(int d = 0; d < V; ++d)
+                        ASSERT_TRUE(std::isfinite(ck_tile::type_convert<float>(
+                            o[output_offset + b * output_batch_stride + head * output_head_stride +
+                              row * output_stride + d])))
+                            << "unwritten/nonfinite output b=" << b << " h=" << head << " q=" << row
+                            << " d=" << d;
+                    if constexpr(StoreLSE)
+                        ASSERT_NE(ck_tile::bit_cast<uint32_t>(lse[(b * H + head) * sq + row]),
+                                  lse_guard);
+                }
+    }
     // Sparse output races can miss the sampled reference rows below. Compare
     // every output bit across repeated launches of the same attention problem.
     if(options.repeats > 1)
@@ -491,18 +554,21 @@ void CheckForward(
     }
     for(int b = 0; b < B; ++b)
     {
+        const int q_start = Group ? starts_q[b] : b * sq;
+        const int k_start = Group ? starts_k[b] : b * sk;
         if constexpr(Group)
-            for(int row = lengths_q[b]; row < sq; ++row)
+            for(int row = lengths_q[b]; row < (b + 1 == B ? B * sq : starts_q[b + 1]) - q_start;
+                ++row)
                 for(int head = 0; head < H; ++head)
                 {
                     for(int d = 0; d < V; ++d)
                         ASSERT_EQ(ck_tile::bit_cast<uint16_t>(
-                                      o[output_offset + (b * sq + row) * output_stride +
+                                      o[output_offset + (q_start + row) * output_stride +
                                         head * output_head_stride + d]),
                                   o_guard)
                             << "group padding b=" << b << " h=" << head << " q=" << row;
                     if constexpr(StoreLSE)
-                        ASSERT_EQ(ck_tile::bit_cast<uint32_t>(lse[head * B * sq + b * sq + row]),
+                        ASSERT_EQ(ck_tile::bit_cast<uint32_t>(lse[head * B * sq + q_start + row]),
                                   lse_guard);
                 }
         // Long regressions execute the full B32/H8 grid; sample its first and
@@ -510,6 +576,8 @@ void CheckForward(
         if(sq >= 16384 && b != 0 && b != B - 1)
             continue;
         const int qlen = Group ? lengths_q[b] : sq, klen = Group ? lengths_k[b] : sk;
+        if(qlen == 0)
+            continue;
         if constexpr(Skip)
             if(qlen <= options.min_seqlen_q)
             {
@@ -518,12 +586,12 @@ void CheckForward(
                     {
                         for(int d = 0; d < V; ++d)
                             ASSERT_EQ(ck_tile::bit_cast<uint16_t>(
-                                          o[output_offset + (b * sq + row) * output_stride +
+                                          o[output_offset + (q_start + row) * output_stride +
                                             head * output_head_stride + d]),
                                       o_guard);
                         if constexpr(StoreLSE)
                             ASSERT_EQ(
-                                ck_tile::bit_cast<uint32_t>(lse[head * B * sq + b * sq + row]),
+                                ck_tile::bit_cast<uint32_t>(lse[head * B * sq + q_start + row]),
                                 lse_guard);
                     }
                 continue;
@@ -537,6 +605,9 @@ void CheckForward(
                                          std::max(0, qlen / 2 - 1),
                                          qlen / 2,
                                          qlen - 1};
+        if(options.flat_head_tuning.value_or(false) && qlen > klen)
+            for(int row : {qlen - klen + 63, qlen - klen + 128, qlen - klen / 2 - 1})
+                checked_rows.push_back(std::min(row, qlen - 1));
         if(options.check_all_rows)
         {
             checked_rows.resize(qlen);
@@ -563,9 +634,9 @@ void CheckForward(
                     double dot = 0;
                     for(int d = 0; d < QDim; ++d)
                         dot += ck_tile::type_convert<float>(
-                                   q[((b * sq + row) * H + head) * QDim + d]) *
+                                   q[((q_start + row) * H + head) * QDim + d]) *
                                ck_tile::type_convert<float>(
-                                   k[((b * sk + col) * kv_heads + kh) * QDim + d]);
+                                   k[((k_start + col) * kv_heads + kh) * QDim + d]);
                     scores[col] = dot * a.scale_s;
                     if constexpr(SoftCap)
                     {
@@ -579,7 +650,7 @@ void CheckForward(
                     if constexpr(Bias == ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                     {
                         const auto offset =
-                            (Group ? b * sq * a.stride_bias : b * a.batch_stride_bias) +
+                            (Group ? q_start * a.stride_bias : b * a.batch_stride_bias) +
                             head * a.nhead_stride_bias + row * a.stride_bias + col;
                         scores[col] += ck_tile::type_convert<float>(bias[offset]);
                     }
@@ -618,13 +689,13 @@ void CheckForward(
                         for(int d = 0; d < V; ++d)
                             expected[d] +=
                                 weight * ck_tile::type_convert<float>(
-                                             v[((b * sk + col) * kv_heads + kh) * V + d]);
+                                             v[((k_start + col) * kv_heads + kh) * V + d]);
                     }
                 for(int d = 0; d < V; ++d)
                 {
                     const double actual = ck_tile::type_convert<float>(
                         o[output_offset +
-                          (Group ? b * sq * output_stride : b * output_batch_stride) +
+                          (Group ? q_start * output_stride : b * output_batch_stride) +
                           row * output_stride + head * output_head_stride + d]);
                     // P and O are rounded to the input dtype (7 BF16 fraction bits).
                     // The dominant late V values have magnitude <1, allowing 1/64
@@ -645,7 +716,7 @@ void CheckForward(
                 if constexpr(StoreLSE)
                 {
                     const float actual_lse =
-                        lse[Group ? head * B * sq + b * sq + row : (b * H + head) * sq + row];
+                        lse[Group ? head * B * sq + q_start + row : (b * H + head) * sq + row];
                     if(std::isnan(sink))
                         EXPECT_TRUE(std::isnan(actual_lse));
                     else if(sink == std::numeric_limits<double>::infinity())
@@ -1291,11 +1362,226 @@ void CheckPackedD32Features()
     CheckForward<Data, 32, false, true, 128, true, 2, true, true>(257, 130, 1, 2, 31, options);
 }
 
+template <typename Data, int D, int N, bool Mask = true, bool HeadPad = false>
+void CheckAlternateKeyTile()
+{
+    constexpr auto bias =
+        HeadPad ? ck_tile::BlockAttentionBiasEnum::ALIBI : ck_tile::BlockAttentionBiasEnum::NO_BIAS;
+    ForwardTestOptions options;
+    options.input_pattern       = InputPattern::Random;
+    options.fixed_tolerance     = true;
+    options.check_all_rows      = true;
+    options.check_output_writes = true;
+    options.repeats             = 3;
+    options.hdim_q              = HeadPad ? D - 1 : D;
+    options.hdim_v              = HeadPad ? D - 1 : Model<Data, D, false, Mask>::V;
+    for(int view = 0; view < (HeadPad ? 1 : 3); ++view)
+    {
+        options.output_padding = view == 1 ? 1 : 0;
+        options.input_padding  = view == 2 ? 1 : 0;
+        if constexpr(D == 64 && N == 128 && !Mask && !HeadPad)
+            options.general_tuning = view == 1;
+        CheckForward<Data,
+                     D,
+                     false,
+                     Mask,
+                     128,
+                     true,
+                     2,
+                     true,
+                     HeadPad,
+                     bias,
+                     false,
+                     false,
+                     false,
+                     N>(257, 130, 2, Mask ? 2 : 0, -1, options);
+    }
+}
+
+template <typename Data, int D, int M, int N, bool StoreLSE = false>
+void CheckFlatHeadTraversal()
+{
+    ForwardTestOptions options;
+    options.input_pattern    = InputPattern::Random;
+    options.fixed_tolerance  = true;
+    options.repeats          = 3;
+    options.num_heads        = D == 64 ? 2 : 3;
+    options.output_padding   = 1;
+    options.input_padding    = D == 64 ? 1 : 0;
+    options.flat_head_tuning = true;
+    // D64 uses a bottom-right rectangle with scalar KV views; D128 uses
+    // square attention with aligned KV. Both must select Flat, not General.
+    CheckForward<Data,
+                 D,
+                 false,
+                 true,
+                 M,
+                 true,
+                 2,
+                 StoreLSE,
+                 false,
+                 ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                 false,
+                 false,
+                 false,
+                 N>(D == 64 ? 16384 : 8192, 8192, 1, 2, -1, options);
+}
+
 #if defined(CK_TILE_TEST_CR_HEAD_DIM)
+template <typename Data, int M, bool StoreLSE>
+void CheckNativeSkipCausalPrefix()
+{
+    ForwardTestOptions options;
+    options.input_pattern       = InputPattern::Random;
+    options.fixed_tolerance     = true;
+    options.check_all_rows      = true;
+    options.check_output_writes = true;
+    options.num_heads           = 2;
+    options.min_seqlen_q        = 17;
+    options.group_lengths_q     = {257, 17, 0, 129};
+    options.group_lengths_k     = {385, 257, 0, 0};
+    // No score transform: exercise the native causal loop for an active
+    // member while preserving skipped rows and clearing an empty-K member.
+    for(int padding : {0, 1})
+    {
+        options.output_padding = padding;
+        CheckForward<Data,
+                     128,
+                     true,
+                     true,
+                     M,
+                     true,
+                     4,
+                     StoreLSE,
+                     false,
+                     ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                     false,
+                     false,
+                     true,
+                     M>(257, 385, 1, 1, -1, options);
+    }
+}
+
+TEST_F(CrForward, NativeSkipCausalPrefix)
+{
+    CheckNativeSkipCausalPrefix<ck_tile::bf16_t, 64, false>();
+    CheckNativeSkipCausalPrefix<ck_tile::bf16_t, 64, true>();
+    CheckNativeSkipCausalPrefix<ck_tile::half_t, 64, false>();
+    CheckNativeSkipCausalPrefix<ck_tile::half_t, 64, true>();
+    CheckNativeSkipCausalPrefix<ck_tile::bf16_t, 128, false>();
+    CheckNativeSkipCausalPrefix<ck_tile::bf16_t, 128, true>();
+    CheckNativeSkipCausalPrefix<ck_tile::half_t, 128, false>();
+    CheckNativeSkipCausalPrefix<ck_tile::half_t, 128, true>();
+}
+
+TEST_F(CrForward, AlternateNativeKeyTiles)
+{
+    CheckAlternateKeyTile<ck_tile::bf16_t, 128, 64>();
+    CheckAlternateKeyTile<ck_tile::half_t, 128, 64>();
+    CheckAlternateKeyTile<ck_tile::bf16_t, 128, 64, false>();
+    CheckAlternateKeyTile<ck_tile::half_t, 128, 64, false>();
+    CheckAlternateKeyTile<ck_tile::bf16_t, 192, 128>();
+    CheckAlternateKeyTile<ck_tile::half_t, 192, 128>();
+    CheckAlternateKeyTile<ck_tile::bf16_t, 192, 128, false>();
+    CheckAlternateKeyTile<ck_tile::half_t, 192, 128, false>();
+    CheckAlternateKeyTile<ck_tile::bf16_t, 128, 64, true, true>();
+    CheckAlternateKeyTile<ck_tile::half_t, 128, 64, true, true>();
+}
+
 TEST_F(CrForward, SinkAndSkipFp16) { CheckSinkAndSkip<ck_tile::half_t>(); }
 TEST_F(CrForward, SinkAndSkipBf16) { CheckSinkAndSkip<ck_tile::bf16_t>(); }
 TEST_F(CrForward, ScoreTransformsFp16) { CheckScoreTransforms<ck_tile::half_t>(); }
 TEST_F(CrForward, ScoreTransformsBf16) { CheckScoreTransforms<ck_tile::bf16_t>(); }
+
+TEST_F(CrForward, GroupedHeadMapping)
+{
+    using Bias = ck_tile::BlockAttentionBiasEnum;
+    ForwardTestOptions options;
+    options.input_pattern       = InputPattern::Random;
+    options.fixed_tolerance     = true;
+    options.check_all_rows      = true;
+    options.check_output_writes = true;
+    options.repeats             = 3;
+    options.output_offset       = 1;
+    options.output_padding      = 1;
+    // H16 groups heads within each sequence; H8 and H24 group across sequences.
+    // Three query tiles exercise an odd tile count.
+    for(int heads : {8, 16, 24})
+        for(bool has_keys : {false, true})
+        {
+            options.num_heads             = heads;
+            options.second_group_has_keys = has_keys;
+            CheckForward<ck_tile::bf16_t, 160, true, true, 128, true, 2, true, false, Bias::ALIBI>(
+                257, 259, heads / 4, 2, -1, options);
+            CheckForward<ck_tile::bf16_t, 160, true, true, 128, true, 2, false, false, Bias::ALIBI>(
+                257, 259, heads / 4, 2, -1, options);
+        }
+    options.num_heads = 16;
+    CheckForward<ck_tile::bf16_t, 160, true, true>(257, 259, 4, 2, -1, options);
+    // No-bias calls exercise TDM stores with the same partial tiles.
+    options.output_offset  = 0;
+    options.output_padding = 0;
+    for(bool has_keys : {false, true})
+    {
+        options.second_group_has_keys = has_keys;
+        CheckForward<ck_tile::bf16_t, 160, true, true, 128, true, 2, true, false, Bias::ALIBI>(
+            257, 259, 4, 2, -1, options);
+        CheckForward<ck_tile::bf16_t, 160, true, true, 128, true, 2, false, false, Bias::ALIBI>(
+            257, 259, 4, 2, -1, options);
+        CheckForward<ck_tile::bf16_t, 160, true, true>(257, 259, 4, 2, -1, options);
+    }
+    // Small native groups keep causal order even when the packed Q span is dense.
+    options.num_heads       = 8;
+    options.packed_groups   = true;
+    options.group_lengths_q = {257, 257};
+    options.group_lengths_k = {259, 13};
+    CheckForward<ck_tile::bf16_t, 96, true, true>(257, 259, 2, 2, -1, options);
+    CheckForward<ck_tile::bf16_t, 160, true, true>(257, 259, 2, 2, -1, options);
+    // Packed B4 groups cross the seven-eighths span boundary between 899 and 900 Q rows.
+    // Include empty KV and different Q/K starts to expose missing or
+    // duplicated workgroups. Padded metadata exercises the original order.
+    options.num_heads       = 8;
+    options.group_lengths_k = {259, 0, 13, 193};
+    for(bool packed : {false, true})
+        for(int last_q : {255, 256, 257})
+        {
+            options.packed_groups   = packed;
+            options.group_lengths_q = {257, 193, 193, last_q};
+            options.output_offset   = packed ? 1 : 0;
+            options.output_padding  = packed ? 1 : 0;
+            options.hdim_q          = 31;
+            options.hdim_v          = 17;
+            CheckForward<ck_tile::bf16_t, 32, true, true, 128, true, 4, true, true>(
+                257, 259, 2, 2, -1, options);
+            options.hdim_q = options.hdim_v = 0;
+            CheckForward<ck_tile::bf16_t, 96, true, true, 128, true, 4>(
+                257, 259, 2, 2, -1, options);
+            CheckForward<ck_tile::bf16_t, 160, true, true, 128, true, 4>(
+                257, 259, 2, 2, -1, options);
+            CheckForward<ck_tile::bf16_t, 160, true, true, 128, true, 4, true, false, Bias::ALIBI>(
+                257, 259, 2, 2, -1, options);
+            if(packed && last_q == 255)
+            {
+                // Include an empty Q group; D96 also checks TDM output.
+                options.group_lengths_q = {257, 0, 128, 128};
+                options.output_offset = options.output_padding = 0;
+                CheckForward<ck_tile::bf16_t, 96, true, true, 128, true, 4>(
+                    257, 259, 2, 2, -1, options);
+                CheckForward<ck_tile::bf16_t, 160, true, true, 128, true, 4>(
+                    257, 259, 2, 2, -1, options);
+                CheckForward<ck_tile::bf16_t,
+                             160,
+                             true,
+                             true,
+                             128,
+                             true,
+                             4,
+                             true,
+                             false,
+                             Bias::ALIBI>(257, 259, 2, 2, -1, options);
+            }
+        }
+}
 
 TEST_F(CrForward, HeadDimensionsAndPaddingFp16)
 {
@@ -1336,6 +1622,18 @@ TEST_F(CrForward, RepeatedD160Output)
     CheckForward<ck_tile::bf16_t, 160, false, true, 128>(257, 515, 2, 1, -1, options);
 }
 #elif defined(CK_TILE_TEST_CR_LONG)
+TEST_F(CrForward, FlatD128HeadTraversal)
+{
+    CheckFlatHeadTraversal<ck_tile::bf16_t, 128, 64, 64>();
+    CheckFlatHeadTraversal<ck_tile::half_t, 128, 64, 64>();
+    CheckFlatHeadTraversal<ck_tile::bf16_t, 128, 128, 64>();
+    CheckFlatHeadTraversal<ck_tile::half_t, 128, 128, 64>();
+    CheckFlatHeadTraversal<ck_tile::bf16_t, 128, 128, 128>();
+    CheckFlatHeadTraversal<ck_tile::half_t, 128, 128, 128>();
+    CheckFlatHeadTraversal<ck_tile::bf16_t, 128, 128, 64, true>();
+    CheckFlatHeadTraversal<ck_tile::half_t, 128, 128, 64, true>();
+}
+
 TEST_F(CrForward, Static16384Dense)
 {
     CheckForward<ck_tile::bf16_t, 128, false, false, 128, false, 32>(16384, 16384, 8);
@@ -1353,6 +1651,76 @@ TEST_F(CrForward, Static32768Causal)
     CheckForward<ck_tile::bf16_t, 128, false, true, 128, false, 32>(32768, 32768, 8);
 }
 #elif defined(CK_TILE_TEST_CR_D64)
+TEST_F(CrForward, AlternateSmallKeyTiles)
+{
+    CheckAlternateKeyTile<ck_tile::bf16_t, 64, 64>();
+    CheckAlternateKeyTile<ck_tile::half_t, 64, 64>();
+    // The output-strided view exercises positive-scale folding and the
+    // eight partial sums in dense D64 General arguments, including a K tail.
+    CheckAlternateKeyTile<ck_tile::bf16_t, 64, 128, false>();
+    CheckAlternateKeyTile<ck_tile::half_t, 64, 128, false>();
+    CheckAlternateKeyTile<ck_tile::bf16_t, 32, 64, true, true>();
+    CheckAlternateKeyTile<ck_tile::half_t, 32, 64, true, true>();
+    CheckAlternateKeyTile<ck_tile::bf16_t, 64, 64, true, true>();
+    CheckAlternateKeyTile<ck_tile::half_t, 64, 64, true, true>();
+}
+
+TEST_F(CrForward, FlatD64HeadTraversal)
+{
+    CheckFlatHeadTraversal<ck_tile::bf16_t, 64, 128, 64>();
+    CheckFlatHeadTraversal<ck_tile::half_t, 64, 128, 64>();
+}
+
+template <typename Data, bool StoreLSE>
+void CheckValueScheduling(bool general)
+{
+    ForwardTestOptions options;
+    options.input_pattern             = InputPattern::Random;
+    options.fixed_tolerance           = true;
+    options.repeats                   = 3;
+    options.num_heads                 = 2;
+    options.output_padding            = general ? 1 : 0;
+    options.input_padding             = general ? 1 : 0;
+    options.query_padding             = general ? 0 : 1;
+    options.general_late_value_tuning = general;
+    options.strided_late_value_tuning = !general;
+    // Exercise the late-V General entry with nonvector K/V and O. Scale the
+    // grid with the device so the test remains valid across GPU partitions.
+    // Strided arguments retain vector K/V/O and only pad Q. Their square
+    // shape also exercises the masked portion after the visible prefix.
+    const int sq = general ? std::max(32768, static_cast<int>(ck_tile::get_num_cus()) * 128) : 8192;
+    CheckForward<Data,
+                 64,
+                 false,
+                 true,
+                 128,
+                 true,
+                 2,
+                 StoreLSE,
+                 false,
+                 ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                 false,
+                 false,
+                 false,
+                 64>(sq, 8192, 1, 1, -1, options);
+}
+
+TEST_F(CrForward, GeneralValueScheduling)
+{
+    CheckValueScheduling<ck_tile::bf16_t, false>(true);
+    CheckValueScheduling<ck_tile::half_t, false>(true);
+    CheckValueScheduling<ck_tile::bf16_t, true>(true);
+    CheckValueScheduling<ck_tile::half_t, true>(true);
+}
+
+TEST_F(CrForward, StridedValueScheduling)
+{
+    CheckValueScheduling<ck_tile::bf16_t, false>(false);
+    CheckValueScheduling<ck_tile::half_t, false>(false);
+    CheckValueScheduling<ck_tile::bf16_t, true>(false);
+    CheckValueScheduling<ck_tile::half_t, true>(false);
+}
+
 TEST_F(CrForward, HeadDimensionsAndPadding)
 {
     // D64 and D32's large tiles use packed register allocation in codegen.

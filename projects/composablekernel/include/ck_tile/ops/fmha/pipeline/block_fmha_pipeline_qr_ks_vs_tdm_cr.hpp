@@ -19,6 +19,8 @@ template <int Sequence = 0, bool Short = false, bool FirstScore = false, int Gri
 struct FmhaTdmCrTuning
 {
     static constexpr bool kVirtualSink   = false;
+    static constexpr bool kLateValue     = false;
+    static constexpr bool kFlatHeadOrder = false;
     static constexpr int kSequence       = Sequence;
     static constexpr bool kShort         = Sequence ? Sequence <= 2048 : Short;
     static constexpr bool kFirstScore    = Sequence ? Sequence <= 2048 : FirstScore;
@@ -28,8 +30,25 @@ struct FmhaTdmCrTuning
     static constexpr bool kTailFragments = false;
 };
 
+// Delay V operands across softmax when an extra resident workgroup is useful.
+struct FmhaTdmCrLateValueTuning : FmhaTdmCrTuning<>
+{
+    static constexpr bool kLateValue = true;
+};
+
 struct FmhaTdmCrGeneralTuning : FmhaTdmCrTuning<>
 {
+};
+
+struct FmhaTdmCrGeneralLateValueTuning : FmhaTdmCrGeneralTuning
+{
+    static constexpr bool kLateValue = true;
+};
+
+// Interleave query tiles across all batch/head rows for long causal workloads.
+struct FmhaTdmCrFlatTuning : FmhaTdmCrGeneralTuning
+{
+    static constexpr bool kFlatHeadOrder = true;
 };
 
 struct FmhaTdmCrSinkTuning : FmhaTdmCrGeneralTuning
@@ -104,10 +123,15 @@ struct BlockFmhaPipelineQRKSVSTdmCr
     static constexpr bool kGeneralArguments = kScoreTransform || kSequenceFeatures;
     static constexpr int kHeadDim           = BlockFmhaShape::kQKHeaddim;
     static constexpr int kValueDim          = BlockFmhaShape::kN1;
-    static constexpr bool kCompact = std::is_same_v<QDataType, bf16_t> && kHeadDim == 128 &&
-                                     kValueDim == 128 && !Problem::kIsGroupMode &&
-                                     !Problem::kPadHeadDimQ && !Problem::kPadHeadDimV &&
-                                     !kGeneralArguments;
+    static constexpr bool kSupportsFlatHeadOrder =
+        kCausal && !kIsGroupMode && !kPadHeadDimQ && !kPadHeadDimV && !kGeneralArguments &&
+        ((kHeadDim == 128 && kValueDim == 128 &&
+          ((kM0 == 64 && kN0 == 64) || (kM0 == 128 && (kN0 == 64 || kN0 == 128)))) ||
+         (kHeadDim == 64 && kValueDim == 64 && kM0 == 128 && kN0 == 64));
+    static constexpr bool kCompact = kM0 == kN0 && std::is_same_v<QDataType, bf16_t> &&
+                                     kHeadDim == 128 && kValueDim == 128 &&
+                                     !Problem::kIsGroupMode && !Problem::kPadHeadDimQ &&
+                                     !Problem::kPadHeadDimV && !kGeneralArguments;
     static_assert(std::is_same_v<QDataType, bf16_t> || std::is_same_v<QDataType, half_t>);
     static_assert(std::is_same_v<typename Problem::KDataType, QDataType> &&
                   std::is_same_v<typename Problem::VDataType, QDataType> &&
@@ -169,13 +193,49 @@ struct BlockFmhaPipelineQRKSVSTdmCr
             (kPadHeadDimQ || kPadHeadDimV || kHeadDim == 32 || kHeadDim == 96 || kHeadDim == 160);
         if constexpr(grouped_heads)
         {
-            if(gridDim.y % 16 == 0)
+            // D160 no-bias and ALiBi schedules favor grouping complete sets of
+            // 16 heads within each sequence.
+            constexpr bool sequence_groups =
+                kIsGroupMode && kHeadDim == 160 && !kPadHeadDimQ && !kPadHeadDimV &&
+                (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
+                 BiasEnum == BlockAttentionBiasEnum::ALIBI) &&
+                !kHasLogitsSoftCap && !kHasSink && !Problem::kSkipMinSeqlenQ;
+            const bool local_heads =
+                sequence_groups && a.num_head_q % 16 == 0 && a.sink_ptr == nullptr;
+            const unsigned heads = local_heads ? unsigned(a.num_head_q) : gridDim.y;
+            bool regroup         = heads % 16 == 0;
+            if constexpr(kIsGroupMode &&
+                         (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
+                          BiasEnum == BlockAttentionBiasEnum::ALIBI) &&
+                         !kHasLogitsSoftCap && !kHasSink && !Problem::kSkipMinSeqlenQ)
             {
-                const unsigned physical = blockIdx.x + tiles * blockIdx.y;
+                if constexpr((kHeadDim == 96 || kHeadDim == 160) && !kPadHeadDimQ &&
+                             !kPadHeadDimV && BiasEnum == BlockAttentionBiasEnum::NO_BIAS)
+                {
+                    // Keep small native H8 groups in their per-sequence causal order.
+                    if(a.num_head_q == 8 && gridDim.y <= 32 && a.sink_ptr == nullptr)
+                        regroup = false;
+                }
+                if(regroup && !local_heads && a.sink_ptr == nullptr)
+                {
+                    const unsigned sequences = gridDim.y / unsigned(a.num_head_q);
+                    const long_index_t rows =
+                        long_index_t{a.seqstart_q_ptr[sequences]} - a.seqstart_q_ptr[0];
+                    // Sparse physical spans favor the per-sequence causal order.
+                    // Padding up to max length hides this imbalance.
+                    regroup = 8 * rows >= 7 * long_index_t{sequences} * a.seqlen_q;
+                }
+            }
+            if(regroup)
+            {
+                const unsigned global_block = blockIdx.x + tiles * blockIdx.y;
+                const unsigned per_sequence = tiles * heads;
+                const unsigned physical  = local_heads ? global_block % per_sequence : global_block;
+                const unsigned head_base = local_heads ? (global_block / per_sequence) * heads : 0;
                 const unsigned slot = physical / 8, depth = slot / 2;
                 const unsigned chunk = depth / tiles;
-                bh                   = (physical % 8) * (gridDim.y / 8) + chunk * 2 + slot % 2;
-                tile                 = tiles - 1 - (depth - chunk * tiles);
+                bh   = head_base + (physical % 8) * (heads / 8) + chunk * 2 + slot % 2;
+                tile = tiles - 1 - (depth - chunk * tiles);
             }
         }
         bh   = amd_wave_read_first_lane(bh);
@@ -196,7 +256,7 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                                            long_index_t lse_offset)
     {
         constexpr bool general = kGeneralArguments || NativeTuning::kVirtualSink ||
-                                 std::is_same_v<NativeTuning, FmhaTdmCrGeneralTuning>;
+                                 std::is_base_of_v<FmhaTdmCrGeneralTuning, NativeTuning>;
         using Base = std::conditional_t<kPadHeadDimQ || kPadHeadDimV,
                                         detail::fmha_cr::HeadPaddedArguments,
                                         std::conditional_t<general,
@@ -213,6 +273,9 @@ struct BlockFmhaPipelineQRKSVSTdmCr
         using Prepared = std::conditional_t<kIsGroupMode && kHeadDim == 64,
                                             detail::fmha_cr::WideStrideArguments<Sequence>,
                                             Sequence>;
+        static_assert(!NativeTuning::kFlatHeadOrder ||
+                          std::is_same_v<Prepared, detail::fmha_cr::GeneralArguments>,
+                      "Flat head order requires native general arguments");
         Prepared x{};
         x.q = q;
         x.k = k;
@@ -293,7 +356,8 @@ struct BlockFmhaPipelineQRKSVSTdmCr
                                  0,
                                  kN0,
                                  false,
-                                 std::is_same_v<Tuning, FmhaTdmCrCausalSinkTuning>>(a);
+                                 std::is_same_v<Tuning, FmhaTdmCrCausalSinkTuning>,
+                                 Tuning::kLateValue>(a);
         }
         else
         {
@@ -357,13 +421,31 @@ template <typename Pipeline, typename Tuning_>
 struct FmhaTdmCrPipelineVariant : Pipeline
 {
     using Tuning                         = Tuning_;
-    static constexpr index_t kBlockPerCu = Pipeline::kHeadDim == 192 && !Pipeline::kCausal &&
+    static constexpr index_t kBlockPerCu = Pipeline::kHeadDim == 192 && Pipeline::kM0 == 64 &&
+                                                   !Pipeline::kCausal &&
                                                    std::is_same_v<Tuning, FmhaTdmCrGeneralTuning>
                                                ? 3
                                                : Pipeline::kBlockPerCu;
-    static_assert(std::is_same_v<Tuning, FmhaTdmCrGeneralTuning> ||
-                  std::is_same_v<Tuning, FmhaTdmCrSinkTuning> ||
-                  std::is_same_v<Tuning, FmhaTdmCrCausalSinkTuning>);
+    static_assert(std::is_base_of_v<FmhaTdmCrGeneralTuning, Tuning> ||
+                  std::is_same_v<Tuning, FmhaTdmCrLateValueTuning>);
+    static_assert(!Tuning::kFlatHeadOrder || Pipeline::kSupportsFlatHeadOrder);
+
+    template <typename Kargs>
+    CK_TILE_DEVICE static auto GetTileIndex(const Kargs& a)
+    {
+        if constexpr(Tuning::kFlatHeadOrder)
+        {
+            const int tiles  = gridDim.x;
+            const int linear = blockIdx.x + tiles * blockIdx.y;
+            const int heads  = gridDim.y;
+            const int bh     = amd_wave_read_first_lane(linear % heads);
+            const int tile   = amd_wave_read_first_lane(tiles - 1 - linear / heads);
+            return make_tuple(tile, 0, bh % a.num_head_q, bh / a.num_head_q);
+        }
+        else
+            return Pipeline::GetTileIndex(a);
+    }
+
     template <typename... Args>
     CK_TILE_DEVICE static void RunPrepared(Args&&... args)
     {
