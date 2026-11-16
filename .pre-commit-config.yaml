@@ -35,7 +35,6 @@ exclude: |
     projects/rocfft/.*|
     projects/rocprim/.*|
     projects/rocsolver/.*|
-    projects/rocsparse/.*|
     projects/rocthrust/.*|
     projects/rocwmma/.*|
     shared/mxdatagenerator/.*|
@@ -90,6 +89,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           # Vendored AOTriton test sources, kept byte-identical to their pin
           # (tools/sdpa_conformance/aotriton/VENDOR.md, sync.py --check).
@@ -101,6 +101,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           ^projects/hipdnn/\.clang-format$|
           ^projects/miopen/\.clang-format$|
@@ -411,6 +412,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsparse/.*|
           shared/tensile/.*|
           # MIOpen CMake files have not been audited for cmake-lint compliance yet.
           ^projects/miopen/.*
