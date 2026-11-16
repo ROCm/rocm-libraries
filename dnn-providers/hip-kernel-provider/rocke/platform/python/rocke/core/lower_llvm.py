@@ -47,6 +47,7 @@ from .ir import (
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
     _int_add_wrap_error,
+    _int_cmp_pred_error,
     _scf_for_error,
     _scf_if_error,
     BF16,
@@ -2764,6 +2765,9 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
+        pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
+        if pred_error:
+            raise ValueError(pred_error)
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "

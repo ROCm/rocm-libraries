@@ -29,7 +29,11 @@ from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.core.passes import optimize_kernel
 from rocke.core.verify import ERROR, verify
 from rocke.tests.built_programs import assert_refuses_arguments, built_program
-from rocke.tests.engines import ENGINES, assert_engine_rejects_hip
+from rocke.tests.engines import (
+    ENGINES,
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
+)
 
 FLAVORS = LLVM_FLAVORS
 
@@ -221,6 +225,41 @@ def test_both_lowerings_refuse_a_narrow_nuw_add():
     native = pytest.importorskip("rocke_engine")
     with pytest.raises(Exception, match=message):
         native.lower_serialized_ir(serialize(b.kernel), arch="gfx942", flavor="llvm20")
+
+
+# (pred attr, operand type, the refusal): the verifier's rule and text. ``ult``
+# takes i32 or i64 operands, so an f32 or i8 one is refused, not lowered.
+_REFUSED_PREDS = [
+    ("ult", F32, "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"),
+    ("ult", I8, "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"),
+    ("ugt", I32, "arith.cmp: unknown pred 'ugt'"),
+    (1, I32, "arith.cmp: pred must be a string"),
+]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "pred,operand_type,message",
+    _REFUSED_PREDS,
+    ids=["ult_f32", "ult_i8", "unknown", "not_a_string"],
+)
+def test_both_lowerings_refuse_a_pred_the_ir_rule_refuses(
+    pred: str | int, operand_type: Type, message: str, engine: str
+) -> None:
+    """Each engine's LLVM and HIP lowerings check an ``arith.cmp`` pred against
+    the verifier's rule before reading it, and refuse it with a ``ValueError``
+    (``ROCKE_ERR_VALUE``) in the verifier's words: an f32 ``ult`` is not
+    lowered to an integer compare, and an unknown or non-string pred is not
+    read as ``lt``. The ctest repeats these cases for the C++ engine without
+    the binding."""
+    b = IRBuilder("refused_pred")
+    a = b.param("a", operand_type)
+    b._op("arith.cmp", [a, a], [I1], attrs={"pred": pred})
+    b.ret()
+    for assert_rejects in (assert_engine_rejects, assert_engine_rejects_hip):
+        assert_rejects(
+            b.kernel, "gfx942", engine=engine, error_type=ValueError, message=message
+        )
 
 
 # The texts the C++ verifier reports for the same markers (the ctest).
@@ -540,38 +579,6 @@ def test_hip_lowering_spells_unsigned_forms():
     assert "int add1 = (int32_t)((uint32_t)a + (uint32_t)b);" in hip
     assert "bool ult3 = (uint32_t)a < (uint32_t)b;" in hip
     assert "int range5 = a;" in hip
-
-
-# (pred attr, operand type, the refusal): the verifier's rule and text. ``ult``
-# takes i32 or i64 operands, so an f32 or i8 one is refused, not lowered.
-_REFUSED_HIP_PREDS = [
-    ("ult", F32, "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"),
-    ("ult", I8, "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"),
-    ("ugt", I32, "arith.cmp: unknown pred 'ugt'"),
-    (1, I32, "arith.cmp: pred must be a string"),
-]
-
-
-@pytest.mark.parametrize("engine", ENGINES)
-@pytest.mark.parametrize(
-    "pred,operand_type,message",
-    _REFUSED_HIP_PREDS,
-    ids=["ult_f32", "ult_i8", "unknown", "not_a_string"],
-)
-def test_hip_lowering_refuses_a_pred_the_ir_rule_refuses(
-    pred: str | int, operand_type: Type, message: str, engine: str
-) -> None:
-    """Each engine's HIP lowering checks an ``arith.cmp`` pred against the
-    verifier's rule before reading it, and refuses it with a ``ValueError``
-    (``ROCKE_ERR_VALUE``) in the verifier's words. The ctest repeats these
-    cases for the C++ engine without the binding."""
-    b = IRBuilder("refused_pred")
-    a = b.param("a", operand_type)
-    b._op("arith.cmp", [a, a], [I1], attrs={"pred": pred})
-    b.ret()
-    assert_engine_rejects_hip(
-        b.kernel, "gfx942", engine=engine, error_type=ValueError, message=message
-    )
 
 
 def test_hip_add_nuw_compiles_without_nsw(tmp_path):
