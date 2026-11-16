@@ -324,6 +324,43 @@ def _matrix_problems():
         p(512, 1, 32, 32, 64, 32, 512, 4096, use_qq_bias=True),
         p(512, 1, 32, 32, 64, 32, 512, 4096, sliding_window=256),
         p(512, 1, 32, 32, 128, 16, 512, 4096, dtype="fp16", sliding_window=256),
+        # single-batch d128 sliding-window combo at every block size, both dtypes
+        p(8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096),
+        p(8192, 1, 32, 8, 128, 32, 8192, 8192, sliding_window=4096),
+        p(8192, 1, 32, 8, 128, 64, 8192, 8192, sliding_window=4096),
+        p(8192, 1, 32, 8, 128, 16, 8192, 8192, sliding_window=4096, dtype="fp16"),
+        p(8192, 1, 32, 8, 128, 32, 8192, 8192, sliding_window=4096, dtype="fp16"),
+        p(8192, 1, 32, 8, 128, 64, 8192, 8192, sliding_window=4096, dtype="fp16"),
+        # fp8 single-batch combo and its sliding-window / sinks exclusions
+        p(2048, 1, 64, 8, 128, 64, 2048, 2048, use_fp8=True),
+        p(2048, 1, 64, 8, 64, 64, 2048, 2048, use_fp8=True),
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_fp8=True),
+        p(512, 1, 32, 32, 128, 16, 512, 4096, use_fp8=True, sliding_window=256),
+        p(2048, 1, 64, 8, 128, 64, 2048, 2048, use_fp8=True, use_sinks=True),
+        # head_size 192 single-batch combo, and its sinks exclusion
+        p(2048, 1, 96, 96, 192, 16, 2048, 2048),
+        p(512, 1, 96, 96, 192, 16, 512, 4096),
+        p(2048, 1, 96, 96, 192, 16, 2048, 2048, use_sinks=True),
+        # single-batch combo with a sliding window and/or sinks
+        p(
+            2048,
+            1,
+            128,
+            8,
+            128,
+            64,
+            2048,
+            2048,
+            dtype="fp16",
+            use_sinks=True,
+            sliding_window=128,
+        ),
+        p(2048, 1, 32, 8, 128, 32, 2048, 2048, sliding_window=4096),
+        p(2048, 1, 32, 8, 128, 16, 2048, 2048, sliding_window=4096),
+        p(512, 1, 128, 8, 128, 64, 512, 512, use_sinks=True),
+        p(2048, 1, 128, 8, 128, 64, 2048, 2048, dtype="fp16", use_sinks=True),
+        p(2048, 1, 64, 8, 64, 64, 2048, 2048, use_sinks=True, sliding_window=128),
+        p(512, 1, 64, 8, 64, 64, 512, 512, dtype="fp16", sliding_window=256),
         # transposed 32x32 multi-batch path
         p(512, 4, 32, 32, 64, 32, 512, 4096),
         p(512, 4, 32, 32, 128, 32, 512, 4096),
@@ -442,7 +479,7 @@ _PY_ONLY_3D_SPEC_FIELDS = {
 
 # The C 3D spec struct both arches share carries the gfx950 mask band.
 _CPP_ONLY_3D_SPEC_FIELDS = {
-    "gfx942": {"causal_top_left", "right_bound"},
+    "gfx942": {"causal_top_left", "right_bound", "emit_lse"},
     "gfx950": set(),
 }
 

@@ -192,8 +192,7 @@ static void test_canonical_arch(void)
     CHECK_EQ_STR(rocke_unified_attention_canonical_arch(" GFX950 ", out, sizeof(out)), "gfx950");
     CHECK_EQ_STR(rocke_unified_attention_canonical_arch("gfx1250-strict", out, sizeof(out)),
                  "gfx1250");
-    CHECK_EQ_STR(rocke_unified_attention_canonical_arch("gfx1100", out, sizeof(out)),
-                 "gfx11-generic");
+    CHECK_EQ_STR(rocke_unified_attention_canonical_arch("gfx1100", out, sizeof(out)), "gfx1100");
 
     CHECK_EQ_STR(rocke_unified_attention_canonical_arch(NULL, out, sizeof(out)), "gfx950");
     CHECK_EQ_STR(rocke_unified_attention_canonical_arch("", out, sizeof(out)), "gfx950");
@@ -304,8 +303,10 @@ static void test_supports_tiled_2d(void)
     check_tiled_2d(&p, "gfx1250", false, "gfx1250 tiled 2D is not ported to C++");
 
     p.head_size = 96;
-    check_tiled_2d(
-        &p, "gfx950", false, "tiled 2D kernel only supports head_size in {64,128,256} (got 96)");
+    check_tiled_2d(&p,
+                   "gfx950",
+                   false,
+                   "tiled 2D kernel only supports head_size in {64,128,192,256} (got 96)");
 
     p = decode_problem();
     p.use_additive_bias = true;
@@ -427,9 +428,10 @@ static void test_tiled_attention_arch(void)
         CHECK_EQ_STR(reason, want);
     }
     static const char* const k_unknown
-        = "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1151', "
-          "'gfx12-generic', 'gfx1201', 'gfx1250', 'gfx90a', 'gfx942', 'gfx950']. Add a row to "
-          "arch_specs.json.\"";
+        = "\"unknown gfx target 'gfx9999'; known: ['gfx11-generic', 'gfx1100', 'gfx1101', "
+          "'gfx1102', 'gfx1103', 'gfx1150', 'gfx1151', 'gfx1152', 'gfx1153', 'gfx1154', "
+          "'gfx12-generic', 'gfx1200', 'gfx1201', 'gfx1250', 'gfx908', 'gfx90a', 'gfx942', "
+          "'gfx950']. Add a row to arch_specs.json.\"";
     CHECK(!rocke_validate_tiled_attention_arch("gfx9999", reason, sizeof(reason)));
     CHECK_EQ_STR(reason, k_unknown);
 

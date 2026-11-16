@@ -117,16 +117,22 @@ static bool reject_mask_on_arch(const rocke_unified_attention_problem_t* p,
     return false;
 }
 
-/* path is "3d" for split-KV, else a label for the refused path. */
+/* path is "3d" (split-KV) or "tiled 2D"; any other label names a path that
+ * writes no LSE and is refused. */
 static bool reject_lse(const rocke_unified_attention_problem_t* p,
                        const char* arch,
                        const char* path,
                        char* reason,
                        size_t reason_cap)
 {
+    const char* label;
     if(!p->emit_lse)
         return false;
-    if(!streq(path, "3d"))
+    if(streq(path, "3d"))
+        label = "split-KV";
+    else if(streq(path, "tiled 2D"))
+        label = "tiled 2D";
+    else
     {
         gate_reason(
             reason, reason_cap, "LSE output is not implemented on the %s attention path", path);
@@ -135,14 +141,14 @@ static bool reject_lse(const rocke_unified_attention_problem_t* p,
     if(!streq(arch, "gfx942") && !streq(arch, "gfx950"))
     {
         gate_reason(
-            reason, reason_cap, "LSE output is not implemented on %s split-KV attention", arch);
+            reason, reason_cap, "LSE output is not implemented on %s %s attention", arch, label);
         return true;
     }
     if(p->use_sinks)
     {
         gate_reason(reason,
                     reason_cap,
-                    "LSE output with attention sinks is not implemented on split-KV "
+                    "LSE output with attention sinks is not implemented on unified "
                     "attention (keyless rows would drop the sink)");
         return true;
     }

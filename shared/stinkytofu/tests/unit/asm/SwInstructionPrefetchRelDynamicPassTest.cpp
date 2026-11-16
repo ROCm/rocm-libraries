@@ -62,6 +62,23 @@ void buildAboveP0WmmaKernel(BasicBlock* bb, GfxArchID arch) {
     createVAddInBlock(bb, arch, 3, 4, 5);
 }
 
+StinkyInstruction* createSLoadB32InBlock(BasicBlock* bb, GfxArchID arch, int dstReg, int addrReg) {
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_load_b32, arch));
+    inst->addDestReg(StinkyRegister("s", dstReg, 1));
+    inst->addSrcReg(StinkyRegister("s", addrReg, 2));
+    return inst;
+}
+
+/// Same layout as buildAboveP0WmmaKernel, but with s_load_b32 as the first instruction, so an SMEM
+/// replay group is still open at the insertion site, and as the 8 B P(0) anchor.
+void buildAboveP0OpenSmemGroupKernel(BasicBlock* bb, GfxArchID arch) {
+    createSLoadB32InBlock(bb, arch, 4, 0);
+    appendAlignDirective(bb, 32632);
+    createSLoadB32InBlock(bb, arch, 5, 2);
+    createVAddInBlock(bb, arch, 3, 4, 5);
+}
+
 int parsePlanInsertCount(const std::string& text) {
     const std::string key = "PLAN_INSERT=";
     const auto pos = text.find(key);
@@ -77,6 +94,18 @@ int countPrefetchInstPcRel(const BasicBlock& bb) {
         const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
         const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
         if (m && std::strcmp(m, "s_prefetch_inst_pc_rel") == 0) ++c;
+    }
+    return c;
+}
+
+int countSWaitXcnt(const BasicBlock& bb) {
+    int c = 0;
+    for (auto it = bb.begin(); it != bb.end(); ++it) {
+        const IRBase* n = it.getNodePtr();
+        if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+        const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+        const char* m = inst.getHwInstDesc() ? inst.getHwInstDesc()->mnemonic : nullptr;
+        if (m && std::strcmp(m, "s_wait_xcnt") == 0) ++c;
     }
     return c;
 }
@@ -214,6 +243,44 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest, AboveP0Wmma_InsertsOnePrefetch) 
     EXPECT_EQ(countPrefetchInstPcRel(*bb), 1);
 }
 
+// The drain follows AsmCapsConfig::enableXnackReplay. These two go through the
+// PassManager rather than calling the insert helper directly, so the capability
+// is read the way a real run reads it. The kernel leaves an SMEM replay group
+// open at the insertion site, so the relative prefetch there needs the drain.
+TEST_F(SwInstructionPrefetchRelDynamicPassTest, XnackReplayOn_OpenSmemGroup_EmitsTheDrain) {
+    buildAboveP0OpenSmemGroupKernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    AsmCapsConfig caps;
+    caps.enableXnackReplay = true;
+    pm.setAsmCapsConfig(caps);
+    pm.addPass(createSwInstructionPrefetchRelDynamicPass(std::string{}));
+    pm.run(*func);
+
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 1);
+    EXPECT_EQ(countSWaitXcnt(*bb), 1);
+}
+
+TEST_F(SwInstructionPrefetchRelDynamicPassTest,
+       XnackReplayOff_OpenSmemGroup_KeepsThePrefetchAndDropsTheDrain) {
+    buildAboveP0OpenSmemGroupKernel(bb, arch);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    AsmCapsConfig caps;
+    caps.enableXnackReplay = false;
+    pm.setAsmCapsConfig(caps);
+    pm.addPass(createSwInstructionPrefetchRelDynamicPass(std::string{}));
+    pm.run(*func);
+
+    // Only the wait goes: dropping it must not cost the prefetch it guarded.
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 1);
+    EXPECT_EQ(countSWaitXcnt(*bb), 0);
+}
+
 TEST_F(SwInstructionPrefetchRelDynamicPassTest, AboveP0Wmma_PlanInsertMatchesIrCount) {
     buildAboveP0WmmaKernel(bb, arch);
 
@@ -254,7 +321,8 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest,
     computeSwPrefetchRelPhase1Accum(*func, nullptr, phase1);
 
     const int inserted = insertSwPrefetchLabelsDynamic(
-        *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), 0, arch, nullptr, nullptr, true);
+        *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), 0, arch, nullptr, nullptr,
+        /*emitXnackWait=*/true, /*allowSwPrefetchInsertion=*/true);
     EXPECT_EQ(inserted, 0);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
 }
@@ -332,7 +400,7 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest,
 
     const int inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(
         *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), kSwPrefetchNoPerBbGridAnchor, 0,
-        arch, nullptr, nullptr, true);
+        arch, nullptr, nullptr, /*emitXnackWait=*/true, /*allowSwPrefetchInsertion=*/true);
     EXPECT_EQ(inserted, 0);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
 }
@@ -347,9 +415,10 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest,
     const int64_t anchor = phase1.firstPostCpLayoutByte.at(bb);
     ASSERT_NE(anchor, kSwPrefetchNoPerBbGridAnchor);
 
-    const int inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(*bb, phase1.layoutStart.at(bb),
-                                                                  phase1.accumByte.at(bb), anchor,
-                                                                  0, arch, nullptr, nullptr, true);
+    const int inserted = insertSwPrefetchLabelsDynamicPerBbAnchor(
+        *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), anchor, 0, arch, nullptr, nullptr,
+        /*emitXnackWait=*/true,
+        /*allowSwPrefetchInsertion=*/true);
     EXPECT_GE(inserted, 1);
     EXPECT_EQ(countPrefetchInstPcRel(*bb), inserted);
 }

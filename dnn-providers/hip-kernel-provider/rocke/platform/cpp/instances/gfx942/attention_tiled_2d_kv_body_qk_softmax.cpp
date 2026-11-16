@@ -141,6 +141,10 @@ static rocke_value_t* fh_max_seq_prefix_len(rocke_gfx942_attn2d_build_ctx_t* ctx
 
 static rocke_value_t* fh_warp_xor_reduce_max(rocke_gfx942_attn2d_build_ctx_t* ctx, rocke_value_t* v)
 {
+    /* Intentionally on ds_swizzle for all masks (mirrors Python
+     * attention.py::warp_xor_reduce_max): masks 1, 2, 4, 8 are not routed
+     * to warp_shuffle_xor_dpp here, unlike the sum reduce. They could take
+     * the same win; add it on both engines together if so. */
     rocke_value_t* cur = v;
     for(int k = 0; k < 4; ++k)
     {
@@ -365,7 +369,9 @@ static void fh_qk_sliced_ring(rocke_gfx942_attn2d_build_ctx_t* ctx,
  *  gated by ctx flags so the default narrow build is byte-faithful.
  *
  *  On return the front half has populated, for reg in [0, REGS_PER_LANE):
- *    - ctx->m_cur[reg]  = m_new[reg]   (running max, this tile)
+ *    - m_carry_out[reg] = raw max      (unclamped running max, yielded as the carry;
+ *                                       the clamped m_new[reg] stays local as the
+ *                                       exponent reference for P and alpha)
  *    - ctx->l_cur[reg]  = l_local[reg] (this tile's local L, pre alpha-fold)
  *  and (non-register-PV path) published P into ctx->P_lds. The PV phase reads the
  *  per-reg P (register-PV) or P_lds (LDS path) and finishes the carry.
@@ -481,7 +487,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* row_ok = land(qp<cur_batch_q_len, qh<NUM_QH[, st_q_row_iter<VALID_ROWS]).
          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
-        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
         rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
         {
@@ -496,8 +502,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_iter_ok
-                = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* st_qh_iter_ok = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
             st_alibi_slope_iter = rocke_b_masked_global_load(b,
                                                              ctx->alibi_slopes_ptr,
                                                              st_qh_iter,
@@ -518,15 +523,19 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
     (void)safe_next_tile;
 
     /* softmax-derived state forwarded to the PV bucket (filled by the narrow
-     * path below; alpha/new_l/m_new per softmax state slot). */
+     * path below; alpha/new_l/m_carry per softmax state slot, where m_carry is
+     * the raw running max). */
     rocke_value_t* alpha_regs[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* new_l_vals[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
-    rocke_value_t* m_new_out[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* m_carry_out[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    /* Clamped max for a NULL m_carry_out slot, rebuilt at the yield. */
+    rocke_value_t* m_carry_new[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     for(int _i = 0; _i < ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE; ++_i)
     {
         alpha_regs[_i] = NULL;
         new_l_vals[_i] = NULL;
-        m_new_out[_i] = NULL;
+        m_carry_out[_i] = NULL;
+        m_carry_new[_i] = NULL;
     }
 
     /* PT32 register groups for the transposed register-P PV (Python PT32_groups,
@@ -710,8 +719,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 rocke_value_t* qh_mod
                     = rocke_b_mod(b, q_row_t_alibi, rocke_b_const_i32(b, ctx->NQK));
                 rocke_value_t* qh_t_alibi = rocke_b_add(b, qh_mul, qh_mod);
-                rocke_value_t* qh_ok
-                    = rocke_b_cmp_lt(b, qh_t_alibi, rocke_b_const_i32(b, ctx->NUM_QH));
+                rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_t_alibi, ctx->num_qh_p);
                 slope_for_lane = rocke_b_masked_global_load(b,
                                                             ctx->alibi_slopes_ptr,
                                                             qh_t_alibi,
@@ -793,8 +801,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                             /* row_ok = land(qp<q_len, qh<NUM_QH[, q_row_t<VALID_ROWS]).
                          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M. */
                             rocke_value_t* ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-                            rocke_value_t* ok_qh
-                                = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+                            rocke_value_t* ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
                             rocke_value_t* ok_inner = rocke_b_land(b, ok_pos, ok_qh);
                             if(ctx->VALID_ROWS < ctx->BLOCK_M)
                             {
@@ -873,8 +880,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_m_raw = rocke_b_fmax(b, ctx->m_cur[0], st_tile_max);
         rocke_value_t* st_ok = rocke_b_fcmp(b, "ogt", st_m_raw, neg_inf);
         rocke_value_t* st_m_new = rocke_b_select(b, st_ok, st_m_raw, zero_f);
-        /* Split cfvst: V's VMEM load overlaps the exp2 pass below; the LDS store
-         * follows it. */
+        /* Split cfvst: issue the V loads now so they overlap the exp2 pass. */
         void* cfvst_payload = (ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
                                   ? rocke_gfx942_attn2d_cfvst_load_v_regs(ctx, ctx->kv_tile_iv)
                                   : NULL;
@@ -899,7 +905,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* l_sum = l_local + lane^32 (Python 2876-2877). */
         rocke_value_t* st_l_remote = rocke_b_warp_shuffle_xor(b, st_l_local, 32);
         rocke_value_t* st_l_sum = rocke_b_fadd(b, st_l_local, st_l_remote);
-        if(cfvst_payload != NULL)
+        /* Split cfvst: publish the transposed V tile loaded above. */
+        if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
             rocke_gfx942_attn2d_cfvst_store_v_regs(ctx, cfvst_payload);
 
         /* m_new / l_local broadcast across SOFTMAX_STATE_SLOTS (Python 2885-2886);
@@ -909,23 +916,33 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             m_new[r] = st_m_new;
+            /* gfx942 (Python gfx942/attention_tiled_2d.py): the yield rebuilds
+             * the raw max from l and st_m_new, so st_m_raw does not stay live
+             * through the body. gfx950 fastkv_regp shares this body but its
+             * Python (gfx950/attention_tiled_2d.py) carries st_m_raw. */
+            if(strcmp(ctx->arch, "gfx942") == 0)
+                m_carry_new[r] = st_m_new;
+            else
+                m_carry_out[r] = st_m_raw;
             l_local[r] = st_l_sum;
         }
 
         /* ============================================================ *
          *  post-QK V/K issue (Python 2962-2974). For the transposed path this
-         *  happens AFTER the softmax above (matches Python ordering).
+         *  happens AFTER the softmax above (matches Python ordering). Same
+         *  schedule as the non-transposed 32x32 path below.
          * ============================================================ */
         rocke_value_t* cur_buf = ctx->cur_buf;
         rocke_value_t* nxt_buf = ctx->nxt_buf_v;
         if(ctx->K_SINGLE_BUF)
         {
-            /* next-K reuses the slot QK just read: drain LDS reads first. */
+            /* Single K slot: drain the QK K-reads and barrier before the next-K
+             * copy reuses the slot (Python's K_SINGLE_BUF branch). */
             rocke_b_s_waitcnt(b, /*vmcnt=*/-1, /*lgkmcnt=*/0, /*expcnt=*/-1);
             rocke_b_sync(b);
             if(ctx->TRANSPOSED_V_STORE && ctx->CFV_STORE_SPLIT)
             {
-                /* split cfvst already published V; only next-K remains. */
+                /* split cfvst already issued V; only next-K remains. */
             }
             else if(!ctx->EARLY_V_SCHEDULE)
             {
@@ -962,7 +979,6 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
     else if(ctx->USE_MFMA_32X32)
@@ -1132,6 +1148,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
             rocke_value_t* ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
             m_new[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+            m_carry_out[reg] = full_max_raw;
         }
 
         /* ---- P = exp2(S - m_new), store to P_lds, per-row L (Python
@@ -1160,7 +1177,6 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
     else
@@ -1357,6 +1373,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
             rocke_value_t* ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
             m_new[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+            m_carry_out[reg] = full_max_raw;
         }
 
         /* ============================================================ *
@@ -1422,7 +1439,6 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
 
@@ -1471,8 +1487,8 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
      *
      *  Hand the softmax results to the peer PV bucket, which runs acc *= alpha;
      *  acc += P @ V and emits the scf_yield carry. The narrow (non-register-PV)
-     *  path reads P from P_lds; alpha/new_l/m_new and the buffer carry come from
-     *  the front half here.
+     *  path reads P from P_lds; alpha/new_l/m_carry (the raw running max) and
+     *  the buffer carry come from the front half here.
      * ============================================================ */
     {
         rocke_gfx942_attn2d_pv_inputs_t pv_in;
@@ -1480,7 +1496,10 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         pv_in.alpha_regs = alpha_regs;
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
         pv_in.new_l_vals = new_l_vals;
-        pv_in.m_new = m_new_out;
+        pv_in.m_carry = m_carry_out;
+        pv_in.m_new = m_carry_new;
+        pv_in.zero_f = zero_f;
+        pv_in.neg_inf = neg_inf;
         if(ctx->REGISTER_PV)
         {
             pv_in.p_regs_f32 = p_regs_f32_buf;

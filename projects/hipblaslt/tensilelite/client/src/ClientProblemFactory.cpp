@@ -27,6 +27,11 @@
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 
+#include <Tensile/ScaleAlphaVec.hpp>
+#include <Tensile/FusedA2AKernArg.hpp>
+
+#include "TimingInstrumentation.hpp"
+
 #include <cstddef>
 #include <stdexcept>
 
@@ -80,6 +85,7 @@ namespace TensileLite
             , m_performanceMetric(args["performance-metric"].as<PerformanceMetric>())
             , m_deterministicMode(args["deterministic-mode"].as<bool>())
             , m_cEqualsD(args["c-equal-d"].as<bool>())
+            , m_deviceScalarAlpha(args["device-scalar-alpha"].as<bool>())
             , m_uniformSummationOrder(args["uniform-summation-order"].as<int>())
             , m_biasTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
             , m_gateTypeArgs(std::vector<rocisa::DataType>(1, rocisa::DataType::Float))
@@ -100,7 +106,12 @@ namespace TensileLite
             , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
-            , m_fusedGemmA2A(args["fused-gemm-a2a"].as<bool>())
+            , m_fusedA2A(args["fused-a2a"].as<FusedA2A>())
+            , m_worlds(args.count("world") ? args["world"].as<std::vector<int>>()
+                                           : std::vector<int>())
+            , m_fusedA2AExtents(args.count("fused-a2a-extent")
+                                    ? args["fused-a2a-extent"].as<std::vector<int>>()
+                                    : std::vector<int>())
             , m_metadataLayout(args["metadata-layout"].as<int>())
             , m_aOps(args["a-ops"].as<TensorOps>())
             , m_bOps(args["b-ops"].as<TensorOps>())
@@ -125,11 +136,51 @@ namespace TensileLite
             if(pointerArrayBatch && m_sparse)
                 throw std::invalid_argument("batch-mode=1 does not support sparse GEMM");
 
+            if(m_fusedA2A != FusedA2A::Disabled)
+            {
+                if(m_fusedA2A == FusedA2A::A2AGemm && m_fusedA2AExtents.empty())
+                    for(auto const& sizes : m_problemSizes)
+                        m_fusedA2AExtents.push_back(static_cast<int>(sizes.at(3)));
+
+                if(m_worlds.size() != m_problemSizes.size()
+                   || m_fusedA2AExtents.size() != m_problemSizes.size())
+                    throw std::invalid_argument(
+                        concatenate("fused-a2a ",
+                                    ToString(m_fusedA2A),
+                                    " needs one world and one fused-a2a-extent per problem-size; "
+                                    "got ",
+                                    m_worlds.size(),
+                                    " and ",
+                                    m_fusedA2AExtents.size(),
+                                    " for ",
+                                    m_problemSizes.size()));
+                for(int world : m_worlds)
+                    if(!fusedA2AWorldSizeValid(world))
+                        throw std::invalid_argument(concatenate(
+                            "world=", world, " is out of range [1, ", FUSED_A2A_MAX_RANKS, "]"));
+                for(size_t i = 0; i < m_fusedA2AExtents.size(); i++)
+                {
+                    int const extent = m_fusedA2AExtents[i];
+                    int const k      = static_cast<int>(m_problemSizes[i].at(3));
+                    if(m_fusedA2A == FusedA2A::GemmA2A ? extent < 1 : extent != k)
+                        throw std::invalid_argument(concatenate(
+                            "fused-a2a-extent=",
+                            extent,
+                            m_fusedA2A == FusedA2A::GemmA2A ? std::string(" must be >= 1")
+                                                            : concatenate(" must equal K=", k)));
+                }
+            }
+            else if(!m_worlds.empty() || !m_fusedA2AExtents.empty())
+                throw std::invalid_argument("world and fused-a2a-extent apply only with fused-a2a");
+
             if(m_mxBlockA || m_mxBlockB)
             {
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
-                HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
+                {
+                    ScopedTimer timer("factory_hip_get_device_properties");
+                    HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceIdx));
+                }
                 std::string archName(prop.gcnArchName);
                 m_padMXScaleTensorFreeDim = (archName.find("gfx950") != std::string::npos);
             }
@@ -270,6 +321,13 @@ namespace TensileLite
                 m_useScaleCD = args["use-scaleCD"].as<bool>();
             if(args.count("use-scaleAlphaVec"))
                 m_useScaleAlphaVec = args["use-scaleAlphaVec"].as<int>();
+            if(!validScaleAlphaVecMode(m_useScaleAlphaVec))
+                throw std::invalid_argument("use-scaleAlphaVec must be 0, 1, 2, 3, 5, 6, or 7");
+            if(args["device-scalar-alpha"].empty())
+                m_deviceScalarAlpha = scaleAlphaSupportsDeviceScalar(m_useScaleAlphaVec);
+            if(m_deviceScalarAlpha && !m_useScaleAlphaVec)
+                throw std::invalid_argument(
+                    "device-scalar-alpha requires use-scaleAlphaVec to be enabled");
             if(args.count("max-workspace-size"))
                 m_maxWorkspaceSize = args["max-workspace-size"].as<size_t>();
 
@@ -338,8 +396,9 @@ namespace TensileLite
             int biasSize       = std::max(1, (int)m_biasTypeArgs.size());
             int gateSize       = std::max(1, (int)m_gateTypeArgs.size());
             int activationSize = std::max(1, (int)m_activationEnumArg.size());
+            const int vectorAlphaMode = scaleAlphaVectorMode(m_useScaleAlphaVec);
             int factorDimSize  = std::max(
-                1, m_useScaleAlphaVec == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
+                1, vectorAlphaMode == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
             // StreamK=5 hybrid-mode toggle variants. When the YAML sets
             // StreamKHybridMode: [0, 1] each base problem is replayed
             // twice (one static pass, one dynamic pass) so a single
@@ -405,12 +464,13 @@ namespace TensileLite
                                     gateStrides
                                         = m_tensorStrides[ContractionProblemGemm::TENSOR::GATE_RESIDUAL][i];
 
-                                if(m_useBias && m_useScaleAlphaVec && m_useBias != m_useScaleAlphaVec)
+                                if(!m_deviceScalarAlpha && m_useBias && vectorAlphaMode
+                                   && m_useBias != vectorAlphaMode)
                                     continue;
 
-                                int factorDim = (m_useScaleAlphaVec == 1 || m_useBias == 1)   ? 0
-                                                : (m_useScaleAlphaVec == 2 || m_useBias == 2) ? 1
-                                                : (m_useScaleAlphaVec == 3 || m_useBias == 3)
+                                int factorDim = (vectorAlphaMode == 1 || m_useBias == 1)   ? 0
+                                                : (vectorAlphaMode == 2 || m_useBias == 2) ? 1
+                                                : (vectorAlphaMode == 3 || m_useBias == 3)
                                                     ? m_factorDimArgs[l]
                                                     : 0;
                                 rv.push_back(ContractionProblemGemm::FromIndexSizes(
@@ -434,8 +494,14 @@ namespace TensileLite
 
                                 rv.back().setComputeInputTypeA(m_computeInputTypeA);
                                 rv.back().setComputeInputTypeB(m_computeInputTypeB);
-                                rv.back().setAlphaRestriction(toScalarValueEnum(
-                                    m_constantValues[ContractionProblemGemm::CONST::ALPHA]));
+                                // A device scalar replaces the inline alpha, but its value is not
+                                // available while constructing the problem. Do not select an
+                                // AlphaValue-specialized solution from the ignored inline value.
+                                rv.back().setAlphaRestriction(
+                                    m_deviceScalarAlpha
+                                        ? ScalarValue::Any
+                                        : toScalarValueEnum(m_constantValues[
+                                              ContractionProblemGemm::CONST::ALPHA]));
                                 rv.back().setCEqualsD(m_cEqualsD);
                                 rv.back().setAlphaType(
                                     m_constantTypes[ContractionProblemGemm::CONST::ALPHA]);
@@ -459,7 +525,28 @@ namespace TensileLite
                                 rv.back().setWorkspaceSize(m_maxWorkspaceSize);
                                 rv.back().setSwizzleTensorA(m_swizzleTensorA);
                                 rv.back().setSwizzleTensorB(m_swizzleTensorB);
-                                rv.back().setFusedGemmA2A(m_fusedGemmA2A);
+                                rv.back().setFusedA2A(m_fusedA2A);
+                                if(m_fusedA2A != FusedA2A::Disabled)
+                                {
+                                    if(m_fusedA2A == FusedA2A::GemmA2A
+                                       && static_cast<size_t>(m_fusedA2AExtents[i])
+                                              > rv.back().freeSizeA(0))
+                                        throw std::invalid_argument(
+                                            concatenate("fused-a2a-extent=",
+                                                        m_fusedA2AExtents[i],
+                                                        " exceeds M=",
+                                                        rv.back().freeSizeA(0)));
+                                    rv.back().setWorld(m_worlds[i]);
+                                    rv.back().setFusedA2AExtent(m_fusedA2AExtents[i]);
+                                    if(m_fusedA2A == FusedA2A::A2AGemm
+                                       && rv.back().boundSize(0) % m_worlds[i] != 0)
+                                        throw std::invalid_argument(
+                                            concatenate("K=",
+                                                        rv.back().boundSize(0),
+                                                        " is not a multiple of world=",
+                                                        m_worlds[i]));
+                                    rv.back().setA2ABuf();
+                                }
                                 if(k < m_biasTypeArgs.size())
                                 {
                                     auto length
@@ -548,10 +635,13 @@ namespace TensileLite
                                 rv.back().setScaleD(
                                     m_constantTypes[ContractionProblemGemm::CONST::BETA]);
                             }
-                            rv.back().setUseScaleAlphaVec(m_useScaleAlphaVec);
+                            rv.back().setUseScaleAlphaVec(m_deviceScalarAlpha
+                                                             ? ScaleAlphaVecDeviceScalarBit
+                                                             : vectorAlphaMode);
+                            rv.back().setParams().setDeviceScalarAlpha(m_deviceScalarAlpha);
                             rv.back().setScaleAlphaVec(
                                 m_constantTypes[ContractionProblemGemm::CONST::ALPHA],
-                                rv.back().d().sizes()[factorDim],
+                                m_deviceScalarAlpha ? 1 : rv.back().d().sizes()[factorDim],
                                 factorDim);
                             rv.back().setGroupedGemm(m_groupedGemm);
                             rv.back().setF32XdlMathOp(m_f32XdlMathOp);

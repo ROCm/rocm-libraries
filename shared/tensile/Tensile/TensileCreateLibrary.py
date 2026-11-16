@@ -54,6 +54,7 @@ from .Common import (
     getArchitectureName,
     gfxName,
     globalParameters,
+    isStubGfxTarget,
     printExit,
     printWarning,
     splitArchs,
@@ -86,11 +87,13 @@ def libraryDir(outputPath: Union[str, Path], archs: List[str]) -> Path:
     Single base arch, single xnack variant → library/<arch>/      e.g. library/gfx90a-xnack-/
     Single base arch, multiple xnack variants → library/<base>/   e.g. library/gfx90a/
     Multiple distinct base archs → library/                        (flat, multi-arch build)
+    Stub gfx000 only → library/                                    (no catalog is packaged)
 
     The runtime probes most-specific to least-specific (tensile_host.cpp):
       library/<base>-<xnack>/ → library/<base>/ → library/
     """
     path = Path(outputPath)
+    archs = [a for a in archs if not isStubGfxTarget(a)]
     if not archs:
         return path / TENSILE_LIBRARY_DIR
     base_archs = {a.split("-xnack")[0] for a in archs}
@@ -656,8 +659,10 @@ def buildObjectFileNames(
 
     kernelHelperObjNames = [ko.getKernelName() for ko in kernelHelperObjs]
 
-    # Source based kernels are built for all supported architectures
+    # Source based kernels are built for requested compileable architectures.
+    # gfx000 is a Tensile stub and is not a compiler offload target.
     sourceArchs, _ = splitArchs()
+    sourceArchs = [arch for arch in sourceArchs if not isStubGfxTarget(arch)]
 
     # Asm based kernels target the configured ISA
     asmArchs = collections.defaultdict(list)
@@ -829,6 +834,8 @@ def buildObjectFilePaths(
     newMetadataPaths = set()
     if "full" not in masterLibraries.keys():
         for arch, lib in masterLibraries.items():
+            if isStubGfxTarget(arch):
+                continue
             if globalParameters["LazyLibraryLoading"]:
                 newMetadataPaths.add(
                     os.path.join(libDir, "TensileLibrary_lazy_" + arch + libraryExt)
@@ -1002,6 +1009,8 @@ def addFallback(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
             value.insert(masterLibraries["fallback"])
 
     for archName in archs:
+        if isStubGfxTarget(archName):
+            continue
         archName = archName.split("-xnack", 1)[0]
         if archName not in masterLibraries:
             tPrint(1, "Using fallback for arch: " + archName)
@@ -1152,6 +1161,9 @@ def generateLogicData(
     applyNaming(masterLibraries)
     if fallbackAdded:
         renameFallbacksPerArch(masterLibraries)
+    for key in [k for k in masterLibraries if isStubGfxTarget(k)]:
+        tPrint(1, f"# Skipping Tensile packaging for stub gfx target: {key}")
+        masterLibraries.pop(key)
     for lib in masterLibraries.values():
         lib.version = version
 
@@ -1473,6 +1485,16 @@ def TensileCreateLibrary():
     tPrint(3, HR)
     tPrint(3, "")
 
+    # The build runs --verify-manifest on every invocation, including no-op
+    # rebuilds. For named targets the manifest location does not depend on
+    # assembler capabilities, so verify before probing the assembler.
+    if args["VerifyManifest"] and Common.asmCapsProbeIsas(args["Architecture"]) is not None:
+        requestedArchs, _ = Common.splitNamedArchs(args["Architecture"])
+        if verifyManifest(libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME):
+            tPrint(1, "Successfully verified all files in manifest were generated")
+            return
+        printExit("Failed to verify all files in manifest")
+
     # Library generation does not benchmark assembly kernels, so a GPU-less
     # host (e.g. CI) is expected; suppress the "no ISA detected" warning.
     Common.configureCompilerTarget(args["Architecture"])
@@ -1487,9 +1509,16 @@ def TensileCreateLibrary():
     ]
 
     requestedArchs, cmdlineArchs = splitArchs()
-    if all(a.split(":")[0] not in supportedArchs for a in cmdlineArchs):
+    compileableArchs = [a for a in cmdlineArchs if not isStubGfxTarget(a)]
+    if compileableArchs and all(a.split(":")[0] not in supportedArchs for a in compileableArchs):
         printExit(
             f"No requested architecture is supported by ROCm {globalParameters['HipClangVersion']}\n  Requested {', '.join(requestedArchs)}\n  Supported {', '.join(supportedArchs)}"
+        )
+    if cmdlineArchs and not compileableArchs:
+        tPrint(
+            1,
+            "# Requested only Tensile stub gfx target(s); "
+            "skipping device kernel compilation and catalog packaging",
         )
 
     manifestFile = libraryDir(outputPath, requestedArchs) / TENSILE_MANIFEST_FILENAME
@@ -1581,19 +1610,23 @@ def TensileCreateLibrary():
     for fileName in staticFiles:
         shutil.copy(os.path.join(globalParameters["SourcePath"], fileName), outputPath)
 
-    codeObjectFiles, kernels, solutions = writeKernels(
-        outputPath,
-        args["CxxCompiler"],
-        globalParameters["ClangOffloadBundlerPath"],
-        args,
-        solutions,
-        kernels,
-        kernelHelperObjs,
-        kernelWriterSource,
-        kernelWriterAssembly,
-        removeTemporaries=removeTemporaries,
-        libraryPath=libraryDir(outputPath, requestedArchs),
-    )
+    if compileableArchs:
+        codeObjectFiles, kernels, solutions = writeKernels(
+            outputPath,
+            args["CxxCompiler"],
+            globalParameters["ClangOffloadBundlerPath"],
+            args,
+            solutions,
+            kernels,
+            kernelHelperObjs,
+            kernelWriterSource,
+            kernelWriterAssembly,
+            removeTemporaries=removeTemporaries,
+            libraryPath=libraryDir(outputPath, requestedArchs),
+        )
+    else:
+        tPrint(1, "# Skipping device kernel compilation for stub gfx target")
+        codeObjectFiles = []
 
     sanityCheck(
         sourceLibPaths,
@@ -1608,28 +1641,32 @@ def TensileCreateLibrary():
     newLibraryDir = libraryDir(outputPath, requestedArchs)
     newLibraryDir.mkdir(parents=True, exist_ok=True)
 
-    masterFileList = generateMasterFileList(masterLibraries, supportedArchs, lazyLoading)
+    catalogArchs = [a for a in supportedArchs if not isStubGfxTarget(a)]
+
+    masterFileList = generateMasterFileList(masterLibraries, catalogArchs, lazyLoading)
 
     tPrint(1, f"# Writing {len(masterFileList)} solution selection catalog(s)")
     for name, lib in masterFileList:
         writeMasterFile(newLibraryDir, libraryFormat, kernelMinNaming, name, lib)
 
-    if embedLibrary or args["ClientConfig"]:
+    if masterFileList and (embedLibrary or args["ClientConfig"]):
         masterFile, fullMasterLibrary = masterFileList[0]
         ext = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
 
-    if embedLibrary:
-        embedFileName = Path(outputPath) / "library" / args["EmbedLibrary"]
-        EmbeddedData.generateLibrary(
-            embedFileName,
-            args["EmbedLibraryKey"],
-            (newLibraryDir / masterFile).with_suffix(ext),
-            fullMasterLibrary.cpp_base_class,
-            codeObjectFiles,
-        )
+        if embedLibrary:
+            embedFileName = Path(outputPath) / "library" / args["EmbedLibrary"]
+            EmbeddedData.generateLibrary(
+                embedFileName,
+                args["EmbedLibraryKey"],
+                (newLibraryDir / masterFile).with_suffix(ext),
+                fullMasterLibrary.cpp_base_class,
+                codeObjectFiles,
+            )
 
-    if args["ClientConfig"]:
-        generateClientConfig(Path(outputPath), Path(masterFile).with_suffix(ext), codeObjectFiles)
+        if args["ClientConfig"]:
+            generateClientConfig(
+                Path(outputPath), Path(masterFile).with_suffix(ext), codeObjectFiles
+            )
 
     if removeTemporaries:
         buildTmp = Path(outputPath).parent / "build_tmp"

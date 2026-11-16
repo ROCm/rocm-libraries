@@ -233,9 +233,9 @@ void latrd_forsytrd_getError(const rocblas_handle handle,
     rocblas_int offset = (uplo == rocblas_fill_lower) ? k : 0;
     *max_err = 0;
     err = norm_error('F', n, n, lda, hA[0], hARes[0]);
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
     err = norm_error('F', n - k, k, ldw, hW[0] + offset, hWRes[0] + offset);
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
 }
 
 template <typename T, typename Sd, typename Td, typename Sh, typename Th>

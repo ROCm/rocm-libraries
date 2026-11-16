@@ -842,6 +842,18 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== gfx942 / gfx950 tiled-2d ======================== */
 
+/* gfx950 lse_layout: absent or "token_major" keeps the default. */
+static bool t2d_lse_head_major(const py::dict& d, bool current)
+{
+    if(!d.contains("lse_layout") || d["lse_layout"].is_none())
+        return current;
+    std::string layout = "token_major";
+    a_str(d, "lse_layout", layout);
+    if(layout != "token_major" && layout != "head_major")
+        throw py::value_error("lse_layout must be 'token_major' or 'head_major'");
+    return layout == "head_major";
+}
+
 /* Python fields of the gfx942 and gfx950 UnifiedAttention2DTiledSpec that the
  * shared C spec struct has no slot for. */
 const unported_field k_t2d_unported[] = {
@@ -913,6 +925,9 @@ void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
     s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_conflict_free_v = a_bool(d, "use_conflict_free_v", s.use_conflict_free_v);
+    s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
+    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.lse_head_major = t2d_lse_head_major(d, s.lse_head_major);
     s.use_conflict_free_v_store
         = a_bool(d, "use_conflict_free_v_store", s.use_conflict_free_v_store);
     s.use_conflict_free_v_store_split
@@ -1263,6 +1278,7 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.use_wave_page_id_load = a_bool(d, "use_wave_page_id_load", s.use_wave_page_id_load);
     s.causal_top_left = a_bool(d, "causal_top_left", s.causal_top_left);
     s.right_bound = a_int(d, "right_bound", s.right_bound);
+    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1275,18 +1291,45 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     return s;
 }
 
-/* gfx942 3d: emitter lowers only the segment via the family convenience. */
+/* gfx942 3d: the emitter prints the segment, then the reduce derived from it
+ * (head_size / num_query_heads / num_kv_heads / dtype / num_segments, plus
+ * emit_lse), concatenated. */
+static std::string t3d942_segment_ll(const rocke_unified_attention_3d_tiled_spec_t& s,
+                                     const char* target)
+{
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
+        &s, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+}
+
 std::string t3d942_lower(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
     Store st;
     rocke_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
+    const char* target = arch.c_str();
+    std::string out = t3d942_segment_ll(s, target);
+    rocke_unified_attention_reduce_tiled_spec_t r
+        = rocke_unified_attention_reduce_tiled_spec_default();
+    r.head_size = s.head_size;
+    r.num_query_heads = s.num_query_heads;
+    r.num_kv_heads = s.num_kv_heads;
+    r.dtype = s.dtype;
+    r.num_segments = s.num_segments;
+    r.has_waves_per_eu = s.has_waves_per_eu;
+    r.waves_per_eu = s.waves_per_eu;
+    /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+    r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
-        &s, arch.c_str(), resolve_python_llvm_flavor(), &ll, err, sizeof err);
-    return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+    rocke_status_t status = rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm(
+        &r, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
+    out += take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+    return out;
 }
 std::string t3d942_serialize(const py::dict& d, const std::string& arch)
 {
@@ -1373,6 +1416,8 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         r.num_segments = s.num_segments;
         r.has_waves_per_eu = s.has_waves_per_eu;
         r.waves_per_eu = s.waves_per_eu;
+        /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+        r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "attention_tiled_3d_reduce");
         rocke_kernel_def_t* k = rocke_build_unified_attention_reduce_tiled_gfx950(&b, &r, a);
@@ -1585,6 +1630,9 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["use_causal_mask_phase_split"] = s.use_causal_mask_phase_split;
     d["causal_top_left"] = s.causal_top_left;
     d["right_bound"] = s.right_bound;
+    d["use_qblock_reverse"] = s.use_qblock_reverse;
+    d["emit_lse"] = s.emit_lse;
+    d["lse_layout"] = s.lse_head_major ? "head_major" : "token_major";
     return d;
 }
 
@@ -1635,6 +1683,9 @@ py::dict attn_tiled_spec_from_problem(const py::dict& d,
     rocke_unified_attention_problem_t p = problem_dict_to_c(d, st);
     const char* a = arch.c_str();
     rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, a);
+    /* Output contract, not a tuning choice (Python's wrapper sets it). */
+    if(p.emit_lse)
+        spec.emit_lse = true;
     if(arch == "gfx942")
         raise_if_spec_invalid("attn_tiled_spec_from_problem", [&](rocke_ir_builder_t* b) {
             return rocke_attention_tiled_2d_spec_validate(b, &spec);
@@ -1734,6 +1785,7 @@ static py::dict spec_3d_to_dict(const rocke_unified_attention_3d_tiled_spec_t& s
     d["use_kv_lds_swizzle"] = s.use_kv_lds_swizzle;
     d["use_wave_page_id_load"] = s.use_wave_page_id_load;
     d["kv_layout"] = std::string(s.kv_layout ? s.kv_layout : "paged");
+    d["emit_lse"] = s.emit_lse;
     d["causal_top_left"] = s.causal_top_left;
     d["right_bound"] = s.right_bound;
     return d;

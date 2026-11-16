@@ -1,16 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * instance_gfx950_attention_tiled_2d_gfx950_attention_tiled_2d_ctx_prologue.c --
- * per-lane row and accumulator helpers of the chunked C99 port of
- * rocke/instances/gfx950/attention_tiled_2d.py (arch gfx950, WIDE-K atoms).
- * The build prologue itself lives in the public entry glue.
- *
- * Scope (this part-file):
+ * The per-lane row and bit helpers and the accumulator-index helpers of the
+ * gfx950 tiled 2D attention C++ port (library/kernels/gfx950/attention_tiled_2d.py):
  *   - the pure per-lane row/bit closures _in_warp_row / _state_row / _bit2 /
  *       _select_lane_rg (lines 1270-1290).
  *   - the accumulator-index helpers _acc_idx / _acc_get / _acc_final_get
  *       (lines 1386 / 2505 / 3605).
+ *
+ * The build prologue itself lives in the driver TU
+ * (attention_tiled_2d_public_entry_glue.cpp, rocke_gfx950_attn2d_build_ctx_init).
  *
  * The Python closures capture the enclosing-function locals; here they read the
  * shared rocke_gfx950_attn2d_build_ctx_t. The per-warp lane-decomposition scalars
@@ -21,8 +20,6 @@
  *
  * Every IR node is arena-owned (ctx->b->arena).
  */
-
-#include <stdbool.h>
 
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 

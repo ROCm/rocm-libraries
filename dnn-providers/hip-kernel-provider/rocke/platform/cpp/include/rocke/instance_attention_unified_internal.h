@@ -245,13 +245,12 @@ void rocke_attn_unified_emit_2d_softmax_loop(rocke_attn_unified_build_ctx_t* ctx
  * q_desc.offset(q_tok,q_head,dim) under (active && dim < head_size). */
 void rocke_attn_unified_emit_2d_epilogue(rocke_attn_unified_build_ctx_t* ctx);
 
-/* Python: _scalar_band_ok(b, p, context_len, query_pos, kpos, window=window).
+/* Python: _scalar_band_ok(b, p, context_len, query_pos, kpos).
  * Visibility of key ``kpos``: the right bound k <= context_len + query_pos + R
- * (R >= 0) and, when ``window``, the sliding-window left bound. Returns NULL
- * when neither bounds anything. Shared by the 2D and 3D bodies. */
+ * (R >= 0) and the sliding-window left bound. Returns NULL when neither bounds
+ * anything. Shared by the 2D and 3D bodies. */
 rocke_value_t* rocke_attn_unified_scalar_band_ok(rocke_attn_unified_build_ctx_t* ctx,
-                                                 rocke_value_t* kpos,
-                                                 bool window);
+                                                 rocke_value_t* kpos);
 
 /* ============================================================ *
  * 3D scalar segment kernel phases (build_unified_attention_3d)
@@ -276,15 +275,20 @@ void rocke_attn_unified_emit_3d_epilogue(rocke_attn_unified_build_ctx_t* ctx);
  * ctx->output / segm_* / abi_seq_lens / abi_cu_q + grid ids. */
 void rocke_attn_unified_declare_reduce_params(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce max-pass over [0, num_segments): overall = max(segm_max[..,seg]).
+/* The reduce max-pass over [0, num_segments):
+ * overall = max over seg of segm_max. An empty segment already stores -inf
+ * there, so the pass does not read segm_expsum.
  * Writes ctx->overall. */
 void rocke_attn_unified_emit_reduce_max_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce combine-pass over [0, num_segments): den += l*exp2(m-overall);
- * acc += segm_output[..,seg,dim]*exp2(m-overall). Writes ctx->red_den/red_acc. */
+/* The reduce combine-pass over [0, num_segments), after one exponent reference
+ * ref = select(overall > -inf, overall, 0): factor = exp2(m - ref);
+ * den += l*factor; acc += segm_output[..,seg,dim]*factor. An empty segment
+ * (m = -inf) gets factor 0. Writes ctx->red_den/red_acc. */
 void rocke_attn_unified_emit_reduce_combine_loop(rocke_attn_unified_build_ctx_t* ctx);
 
-/* The reduce guarded epilogue: result = acc * rcp(den); cast to dtype; store at
+/* The reduce guarded epilogue: result = select(den == 0, 0, acc * rcp(den));
+ * a NaN den still reaches the output. Cast to dtype; store at
  * q_desc.offset(q_tok,q_head,dim) under active. */
 void rocke_attn_unified_emit_reduce_epilogue(rocke_attn_unified_build_ctx_t* ctx);
 

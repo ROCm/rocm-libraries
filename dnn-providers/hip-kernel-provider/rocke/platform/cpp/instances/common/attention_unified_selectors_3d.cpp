@@ -36,10 +36,13 @@ static bool fp16_bf16_kv(const rocke_unified_attention_problem_t* p)
     return rocke_unified_attn_kv_storage_dtype(p) == NULL;
 }
 
-int rocke_unified_attn_pre_bump_segments(const rocke_unified_attention_problem_t* p)
+/* decode_grid counts one q-block per sequence (the all-decode launch grid)
+ * instead of the prefill upper bound. */
+static int pre_bump_segments(const rocke_unified_attention_problem_t* p, bool decode_grid)
 {
-    int num_2d
-        = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p) * p->num_kv_heads;
+    int num_2d = (decode_grid ? p->num_seqs
+                              : rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p))
+                 * p->num_kv_heads;
     int min_seg = p->block_size <= 16 ? 16 : 8;
 
     if(num_2d <= 0)
@@ -50,6 +53,11 @@ int rocke_unified_attn_pre_bump_segments(const rocke_unified_attention_problem_t
                                                      / num_2d),
                      128),
                 min_seg);
+}
+
+int rocke_unified_attn_pre_bump_segments(const rocke_unified_attention_problem_t* p)
+{
+    return pre_bump_segments(p, false);
 }
 
 bool rocke_unified_attn_gfx942_3d_decode_ctas_per_segment(
@@ -114,7 +122,19 @@ int rocke_unified_attn_num_segments(const rocke_unified_attention_problem_t* p, 
             }
             return imax(2, imin(per_cu * p->num_cus / ctas, cap));
         }
-        pre_bump = rocke_unified_attn_pre_bump_segments(p);
+        if(rocke_unified_attention_problem_all_decode(p) && p->head_size == 256
+           && p->block_size == 16 && p->target_ctas <= 0 && fp16_bf16_kv(p))
+        {
+            /* Head-size-256 decode: about 2 CTAs per CU, at least two pages per
+             * segment. */
+            int n = p->num_seqs * p->num_kv_heads;
+            if(n <= 0)
+            {
+                return 0;
+            }
+            return imax(2, imin(imin(2 * p->num_cus / n, 128), p->max_seqlen_k / 32));
+        }
+        pre_bump = pre_bump_segments(p, rocke_unified_attention_problem_all_decode(p));
         if(p->max_seqlen_q == 1)
         {
             if(p->max_seqlen_k <= 2048)
@@ -159,6 +179,14 @@ int rocke_unified_attn_num_segments(const rocke_unified_attention_problem_t* p, 
                 return imax(1, imin(n, kv / 64));
             }
             return imax(2, imin(4 * cus / ctas, kv < 8192 ? 64 : 128));
+        }
+        if(rocke_unified_attention_problem_all_decode(p) && p->head_size == 256
+           && p->block_size == 16 && fp16_bf16_kv(p))
+        {
+            /* Few-CTA head-size-256 decode: at least two pages per segment. */
+            return imax(1,
+                        imin(imin(segments, rocke_unified_attn_pre_bump_segments(p)),
+                             p->max_seqlen_k / 32));
         }
         return imin(segments, rocke_unified_attn_pre_bump_segments(p));
     }
@@ -276,11 +304,18 @@ bool rocke_unified_attn_use_decode_grid(const rocke_unified_attention_problem_t*
 const char* rocke_unified_attn_kv_cache_policy_3d(const rocke_unified_attention_problem_t* p,
                                                   const char* arch)
 {
-    /* All-decode reads each K/V byte once: stream it past the caches. */
+    /* All-decode reads each K/V byte once: stream it past the caches once the
+     * K/V it reads outgrows the last-level cache (Python _DECODE_KV_LLC_BYTES). */
     if((arch_is(arch, "gfx942") || arch_is(arch, "gfx950"))
        && rocke_unified_attention_problem_all_decode(p) && fp16_bf16_kv(p))
     {
-        return "stream";
+        const uint64_t kv_bytes = 2ULL * (uint64_t)p->num_seqs * (uint64_t)p->max_seqlen_k
+                                  * (uint64_t)p->num_kv_heads * (uint64_t)p->head_size
+                                  * (uint64_t)(p->use_fp8 ? 1 : 2);
+        if(kv_bytes > (256ULL << 20))
+        {
+            return "stream";
+        }
     }
     return "all";
 }

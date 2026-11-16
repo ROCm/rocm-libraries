@@ -31,6 +31,7 @@
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
+#include "rocblaslt_mat_utils.hpp"
 
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -77,6 +78,176 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
         throw HIPBLAS_STATUS_INVALID_ENUM;
     }
 }
+
+hipblasStatus_t refuse_unsupported_order(const char*      caller,
+                                         hipblasLtOrder_t orderA,
+                                         hipblasLtOrder_t orderB,
+                                         hipblasLtOrder_t orderC,
+                                         hipblasLtOrder_t orderD)
+{
+    const hipblasLtOrder_t orders[] = {orderA, orderB, orderC, orderD};
+    const char* const      names[]  = {"A", "B", "C", "D"};
+    for(int i = 0; i < 4; ++i)
+    {
+        if(orders[i] == HIPBLASLT_ORDER_ROW)
+        {
+            log_error(caller,
+                      "HIPBLASLT_ORDER_ROW is not supported for a matmul; only "
+                      "hipblasLtMatrixTransform accepts it",
+                      "matrix",
+                      names[i]);
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+    // The kernels write D, and read C, column-major only. Swizzled orders exist for A and B.
+    for(int i = 2; i < 4; ++i)
+    {
+        if(orders[i] != HIPBLASLT_ORDER_COL)
+        {
+            log_error(caller,
+                      "C and D must be HIPBLASLT_ORDER_COL",
+                      "matrix",
+                      names[i],
+                      "order",
+                      int(orders[i]));
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+    return HIPBLAS_STATUS_SUCCESS;
+}
+
+hipblasStatus_t refuse_unsupported_order(const char*             caller,
+                                         rocblaslt_matrix_layout matA,
+                                         rocblaslt_matrix_layout matB,
+                                         rocblaslt_matrix_layout matC,
+                                         rocblaslt_matrix_layout matD)
+{
+    // A null layout is reported by the caller's own validation.
+    for(auto mat : {matA, matB, matC, matD})
+        if(!mat)
+            return HIPBLAS_STATUS_SUCCESS;
+
+    return refuse_unsupported_order(caller, matA->order, matB->order, matC->order, matD->order);
+}
+
+bool gemm_pointers_missing(int64_t                m,
+                           int64_t                n,
+                           int64_t                k,
+                           int64_t                batchCount,
+                           bool                   grouped,
+                           rocblaslt_compute_type computeType,
+                           hipDataType            scaleType,
+                           hipDataType            typeA,
+                           rocblaslt_pointer_mode pointerMode,
+                           const void*            alpha,
+                           const void*            beta,
+                           const void*            A,
+                           const void*            B,
+                           const void*            C,
+                           const void*            D)
+{
+    // validateMatmulArgs returns early for an empty problem, before it checks pointers.
+    if(!m || !batchCount)
+        return false;
+    if(!beta)
+        return true;
+    // After validateMatmulArgs, groupedGemmCreate requires every pointer of a GEMM with n > 0,
+    // and gemmCreate requires alpha, C, and D whatever n and k are, and A and B unless a host
+    // alpha of 0 makes them unused.
+    if(grouped)
+        return n && (!alpha || !A || !B || !C || !D);
+    return !alpha || !C || !D
+           || alphaForbidsNullAB(
+               alphaBetaScalarType(scaleType, computeType, typeA), pointerMode, alpha, A, B);
+}
+
+bool gemm_pointers_missing(bool                    grouped,
+                           rocblaslt_matmul_desc   desc,
+                           rocblaslt_matrix_layout matA,
+                           rocblaslt_matrix_layout matB,
+                           rocblaslt_matrix_layout matC,
+                           rocblaslt_matrix_layout matD,
+                           const void*             alpha,
+                           const void*             beta,
+                           const void*             A,
+                           const void*             B,
+                           const void*             C,
+                           const void*             D)
+{
+    if(!desc || !matA || !matB || !matC || !matD)
+        return true;
+    return gemm_pointers_missing(matD->m,
+                                 matD->n,
+                                 desc->op_A == HIPBLAS_OP_N ? matA->n : matA->m,
+                                 matA->batch_count,
+                                 grouped,
+                                 desc->compute_type,
+                                 desc->scale_type,
+                                 matA->type,
+                                 desc->pointermode,
+                                 alpha,
+                                 beta,
+                                 A,
+                                 B,
+                                 C,
+                                 D);
+}
+
+namespace
+{
+    // The arguments rocblaslt_matmul checks before anything else. A missing one keeps its
+    // usual status rather than being reported as an unsupported order.
+    bool matmul_arguments_present(hipblasLtHandle_t       handle,
+                                  hipblasLtMatmulDesc_t   matmulDesc,
+                                  const void*             alpha,
+                                  const void*             A,
+                                  hipblasLtMatrixLayout_t matA,
+                                  const void*             B,
+                                  hipblasLtMatrixLayout_t matB,
+                                  const void*             beta,
+                                  const void*             C,
+                                  hipblasLtMatrixLayout_t matC,
+                                  void*                   D,
+                                  hipblasLtMatrixLayout_t matD,
+                                  void*                   workspace,
+                                  size_t                  workspaceSizeInBytes)
+    {
+        if(!handle || !matmulDesc || !matA || !matB || !matC || !matD || !alpha || !beta || !C || !D
+           || (!workspace && workspaceSizeInBytes > 0))
+            return false;
+        auto desc = (rocblaslt_matmul_desc)matmulDesc;
+        return !alphaForbidsNullAB(alphaBetaScalarType(desc->scale_type,
+                                                       desc->compute_type,
+                                                       ((rocblaslt_matrix_layout)matA)->type),
+                                   desc->pointermode,
+                                   alpha,
+                                   A,
+                                   B);
+    }
+
+    // rocblaslt_matmul and rocblaslt_matmul_algo_get_heuristic send a call with any grouped
+    // layout to the grouped path, which refuses every order but COL itself.
+    bool any_grouped(hipblasLtMatrixLayout_t matA,
+                     hipblasLtMatrixLayout_t matB,
+                     hipblasLtMatrixLayout_t matC,
+                     hipblasLtMatrixLayout_t matD)
+    {
+        for(auto mat : {matA, matB, matC, matD})
+            if(mat && ((rocblaslt_matrix_layout)mat)->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+                return true;
+        return false;
+    }
+
+    // The arguments rocblaslt_matmul_algo_get_heuristic checks before anything else.
+    bool heuristic_arguments_present(hipblasLtHandle_t           handle,
+                                     hipblasLtMatmulDesc_t       matmulDesc,
+                                     hipblasLtMatmulPreference_t pref,
+                                     int                         requestedAlgoCount,
+                                     int*                        returnAlgoCount)
+    {
+        return handle && matmulDesc && pref && returnAlgoCount && requestedAlgoCount >= 1;
+    }
+} // namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /********************************************************************************
@@ -1177,6 +1348,22 @@ try
     }
 #endif
 
+    if(auto order_status
+       = heuristic_arguments_present(handle, matmulDesc, pref, requestedAlgoCount, returnAlgoCount)
+                 && !any_grouped(Adesc, Bdesc, Cdesc, Ddesc)
+             ? refuse_unsupported_order(__func__,
+                                        (rocblaslt_matrix_layout)Adesc,
+                                        (rocblaslt_matrix_layout)Bdesc,
+                                        (rocblaslt_matrix_layout)Cdesc,
+                                        (rocblaslt_matrix_layout)Ddesc)
+             : HIPBLAS_STATUS_SUCCESS;
+       order_status != HIPBLAS_STATUS_SUCCESS)
+    {
+        *returnAlgoCount = 0;
+        rocblaslt::Debug::Instance().markerStop();
+        return order_status;
+    }
+
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,
         (rocblaslt_matmul_desc)matmulDesc,
@@ -1225,6 +1412,32 @@ try
         return return_status;
     }
 #endif
+
+    if(matmul_arguments_present(handle,
+                                matmul_descr,
+                                alpha,
+                                A,
+                                matA,
+                                B,
+                                matB,
+                                beta,
+                                C,
+                                matC,
+                                D,
+                                matD,
+                                workspace,
+                                workspaceSizeInBytes)
+       && !any_grouped(matA, matB, matC, matD))
+        return_status = refuse_unsupported_order(__func__,
+                                                 (rocblaslt_matrix_layout)matA,
+                                                 (rocblaslt_matrix_layout)matB,
+                                                 (rocblaslt_matrix_layout)matC,
+                                                 (rocblaslt_matrix_layout)matD);
+    if(return_status != HIPBLAS_STATUS_SUCCESS)
+    {
+        rocblaslt::Debug::Instance().markerStop();
+        return return_status;
+    }
 
     return_status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul((rocblaslt_handle)handle,
                                                                 (rocblaslt_matmul_desc)matmul_descr,

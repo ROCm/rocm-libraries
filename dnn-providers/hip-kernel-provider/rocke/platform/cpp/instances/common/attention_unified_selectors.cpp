@@ -194,22 +194,22 @@ static bool enable_single_batch_combo(const rocke_unified_attention_problem_t* p
     {
         return false;
     }
-    if(p->use_fp8)
+    if(p->softcap > 0)
     {
         return false;
     }
-    if(p->softcap > 0 || p->use_sinks)
+    /* FP8 K/V rides the combo through the sync-dequant loader (K/V land in LDS
+       at the working dtype), with no sliding window and no sinks. */
+    if(p->use_fp8 && (p->sliding_window > 0 || p->use_sinks))
     {
         return false;
     }
-    /* fp16 & bf16 D128 sliding-window (block_size==16 only) route to the
-     * transposed-32x32 combo; all other SW shapes keep their existing
-     * routing. */
-    if(p->sliding_window > 0 && !(p->head_size == 128 && p->block_size == 16))
+    /* Sliding window and sinks ride the combo at D64 and D128 only. */
+    if((p->sliding_window > 0 || p->use_sinks) && p->head_size != 64 && p->head_size != 128)
     {
         return false;
     }
-    if(p->head_size != 64 && p->head_size != 128)
+    if(p->head_size != 64 && p->head_size != 128 && p->head_size != 192)
     {
         return false;
     }
@@ -254,7 +254,9 @@ static bool enable_softmax_mfma_interleave(const rocke_unified_attention_problem
     {
         return false;
     }
-    return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p, arch);
+    /* d192 takes the d128 interleave + nw=4 geometry. */
+    return (p->head_size == 128 || p->head_size == 192) && !p->use_fp8
+           && enable_single_batch_combo(p, arch);
 }
 
 /* Python: _enable_i64_kv_addr(problem). Switch to i64 addressing when the paged
@@ -289,19 +291,21 @@ static bool d256_gfx950_fast(const rocke_unified_attention_problem_t* p, const c
 }
 
 /* Python: _gfx942_4warp_eligible(problem) -- the clauses shared by the gfx942
- * 4-warp GQA cohorts. Caches > 2 GiB need the i64 path and fall back to the
- * default builder. */
+ * 4-warp GQA cohorts. Caches > 2 GiB need the i64 path, and an LSE request
+ * needs the default builder's LSE store; both fall back to it. */
 static bool gfx942_4warp_eligible(const rocke_unified_attention_problem_t* p, const char* arch)
 {
     return arch_is(arch, "gfx942") && !p->use_fp8 && p->softcap == 0 && !p->use_sinks
-           && !has_score_bias(p) && p->max_seqlen_q > 1 && !enable_i64_kv_addr(p);
+           && !has_score_bias(p) && p->max_seqlen_q > 1 && !enable_i64_kv_addr(p) && !p->emit_lse;
 }
 
 /* Python: _d256_gfx942_fast(problem). */
 static bool d256_gfx942_fast(const rocke_unified_attention_problem_t* p, const char* arch)
 {
-    return gfx942_4warp_eligible(p, arch) && p->head_size == 256 && strcmp(p->dtype, "bf16") == 0
-           && p->sliding_window == 0 && (p->block_size == 16 || p->block_size == 32);
+    /* d192 rides the same lean 4-warp body as d256. */
+    return gfx942_4warp_eligible(p, arch) && (p->head_size == 192 || p->head_size == 256)
+           && strcmp(p->dtype, "bf16") == 0 && p->sliding_window == 0
+           && (p->block_size == 16 || p->block_size == 32);
 }
 
 /* Python: _d128_gfx942_swa_fast(problem). */
@@ -398,6 +402,11 @@ static bool enable_early_v_schedule(const rocke_unified_attention_problem_t* p, 
     {
         return false;
     }
+    /* The FP8 sync-dequant loader has no async V issue to move earlier. */
+    if(p->use_fp8)
+    {
+        return false;
+    }
     return p->head_size == 64 && p->max_seqlen_q >= 2048;
 }
 
@@ -413,11 +422,17 @@ static bool enable_v_double_buffer(const rocke_unified_attention_problem_t* p, c
     {
         return false;
     }
+    /* The FP8 sync-dequant loader has no in-flight V DMA to prefetch. */
+    if(p->use_fp8)
+    {
+        return false;
+    }
     if(enable_early_v_schedule(p, arch))
     {
         return false;
     }
-    if(p->head_size == 128)
+    /* d128 (and d192, which follows it): vdbuf is a net drag -> OFF. */
+    if(p->head_size != 64)
     {
         return false;
     }
@@ -912,7 +927,7 @@ static int select_2d_tile_size(const rocke_unified_attention_problem_t* p, const
     {
         return p->block_size;
     }
-    /* fp16 & bf16 D128 single-batch sliding-window: force T=64. */
+    /* Single-batch d128 sliding-window combo: T=64. */
     if(enable_single_batch_combo(p, arch) && p->sliding_window > 0 && p->head_size == 128)
     {
         return 64;
@@ -930,6 +945,11 @@ static int select_2d_tile_size(const rocke_unified_attention_problem_t* p, const
             }
 
             return 128;
+        }
+        /* FP8 K/V d128 and d192: T=64 (measured on gfx950). */
+        if(p->use_fp8 || p->head_size == 192)
+        {
+            return 64;
         }
         /* d128 occupancy lever: K-single-buffer (see enable_d128_small_tile). */
         if(enable_d128_small_tile(p, arch))
@@ -1474,6 +1494,9 @@ static rocke_attention_tiled_2d_spec_t
     bool combo = enable_combo_2d(p, arch);
     bool combo_no_sw = combo && (p->sliding_window == 0);
     bool subflags = enable_transposed_subflags(p, arch);
+    /* Sinks on the transposed 32x32 path seed the running max per lane row, which
+     * only the scalar-state layout maps correctly, so sinks always take it. */
+    bool scalar_state = combo || subflags || (p->use_sinks && enable_transposed_qk_32x32(p, arch));
     bool bias_active = (p->softcap > 0) || has_score_bias(p);
     bool mask_opts = (combo_no_sw && !bias_active) || subflags;
     int tile_size = rocke_unified_attn_select_2d_tile_size(p, arch);
@@ -1489,7 +1512,7 @@ static rocke_attention_tiled_2d_spec_t
     s.use_mfma_32x32 = enable_transposed_qk_32x32(p, arch);
     s.use_transposed_qk_32x32 = s.use_mfma_32x32;
     s.use_transposed_half_local_pv = s.use_mfma_32x32;
-    s.use_transposed_scalar_state = combo || subflags;
+    s.use_transposed_scalar_state = scalar_state;
     s.use_transposed_mask_once = mask_opts;
     s.use_transposed_mask_limit = mask_opts;
     s.use_mfma32_skip_legacy_qreg = combo || subflags;
@@ -1561,6 +1584,7 @@ static rocke_attention_tiled_2d_spec_t
         s.use_mfma32_skip_legacy_qreg = false;
         s.use_kq_lds_pad = true;
         s.kq_lds_pad_halves = 16;
+        s.use_qblock_reverse = true;
     }
     return s;
 }
@@ -2155,10 +2179,11 @@ rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            /* Sequenced: Python emits the Q operand before the K one. */
-            rocke_value_t* qv_f = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
-            rocke_value_t* kv_f = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
-            score = rocke_b_fadd(b, score, rocke_b_fmul(b, qv_f, kv_f));
+            /* C leaves argument evaluation order unspecified: emit the q extract
+             * before the k extract, as Python does. */
+            rocke_value_t* qf = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i));
+            rocke_value_t* kf = rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i));
+            score = rocke_b_fadd(b, score, rocke_b_fmul(b, qf, kf));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the

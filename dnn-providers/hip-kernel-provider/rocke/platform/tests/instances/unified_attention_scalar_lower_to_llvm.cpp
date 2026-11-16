@@ -211,13 +211,13 @@ static int check_names_and_signature(void)
          -1,
          "rocke_unified_attention_2d_scalar_h8_kv2_d64_b16_fp16_rbu",
          "rocke_unified_attention_3d_scalar_h8_kv2_d64_b16_seg8_fp16_rbu"},
-        /* The default-mask 3D kernel never applies the window: no "sw". */
+        /* The default mask applies the window in both kernels. */
         {false,
          false,
          64,
          0,
          "rocke_unified_attention_2d_scalar_h8_kv2_d64_b16_fp16_sw",
-         "rocke_unified_attention_3d_scalar_h8_kv2_d64_b16_seg8_fp16"},
+         "rocke_unified_attention_3d_scalar_h8_kv2_d64_b16_seg8_fp16_sw"},
     };
     int failures = 0;
     size_t i;

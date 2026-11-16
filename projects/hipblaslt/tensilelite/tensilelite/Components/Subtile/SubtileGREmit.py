@@ -409,6 +409,17 @@ def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   DepthU * bpe * strideK bytes.  depthUBytes is already DepthU * bpe, so it only
   needs scaling by the runtime K stride.  When K is itself unit-stride the window
   is the plain TLU=0 advance, which that case and the TDM path both defer to.
+
+  The window lands in the persistent GlobalReadIncs{tc} rather than a pool temp.
+  PostLoopStoreInNll weaves the fused store's coordinate VALU into this block's
+  MFMA gaps (LogicalScheduler._emitNGLL), and that splice happens AFTER both
+  streams are generated -- so a temp whose allocTmpSgpr scope has already closed
+  gets handed out again to the coord stream and the two live ranges overlap. A
+  pinned register cannot be re-handed. The pin is guaranteed here: this branch
+  writes Srd{tc}, so BufferLoad is on (globalReadIncsUseVgpr False), and TLU=1
+  keeps useConstSgprGlobalReadIncs off, so numSgprGlobalReadIncs{tc} >= 1 and
+  removeGROffsetsVariableSgprsFromPool holds it out of the pool for the whole
+  loop. The value is also exactly what GlobalReadIncs{tc} is defined to hold.
   """
   tc = ti.tc
   strideK = writer.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
@@ -417,14 +428,15 @@ def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel, holdOnLastIter=False):
 
   module = Module(f"GR Ptr Update ({tc})")
   inc = int(ti.depthUBytes)
-  with writer.allocTmpSgpr(1) as tmpSgprRes:
-    incSgpr = tmpSgprRes.idx
-    module.add(SMulI32(dst=sgpr(incSgpr), src0=inc, src1=strideK,
-               comment=f"{tc}: DepthU*bpe({inc}) * strideK (NT K-window bytes)"))
-    module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(incSgpr),
-               comment=f"{tc}: advance SRD by DepthU K-window"))
-    module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
-               comment=f"{tc}: carry"))
+  incSgpr = writer.globalReadIncsOperand(tc, writer.states.unrollIdx)
+  assert not isinstance(incSgpr, str), \
+    f"GR Ptr Update ({tc}): TLU=1 must hold its K-window in a GlobalReadIncs SGPR"
+  module.add(SMulI32(dst=incSgpr, src0=inc, src1=strideK,
+             comment=f"{tc}: DepthU*bpe({inc}) * strideK (NT K-window bytes)"))
+  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=incSgpr,
+             comment=f"{tc}: advance SRD by DepthU K-window"))
+  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+             comment=f"{tc}: carry"))
   return module
 
 
@@ -504,17 +516,22 @@ def _grComputeRowPartition(module, kernel, writer, tileInfo, waveId, rowOffset):
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
 
-  if tileInfo.loadRatioGR == 1.0:
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-  elif tileInfo.loadRatioGR == 0.5:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
-  elif tileInfo.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
-  else:
+  wavesPerPartition = int(2 * tileInfo.loadRatioGR)
+  if tileInfo.loadRatioGR not in (0.5, 1.0, 2.0):
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+  # loadRatioGR determines how many waves cooperate inside one free-dimension
+  # partition: 0.5 -> 1, 1.0 -> 2, 2.0 -> 4.  Express the old three special
+  # cases as a single quotient/remainder mapping so eight-wave asymmetric
+  # groups do not send the upper waves past the end of LDS.
+  if wavesPerPartition == 1:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
+  else:
+    shift = wavesPerPartition.bit_length() - 1
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
+                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
+                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
 
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
@@ -648,17 +665,18 @@ def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowO
   partitionRow = tmpVgpr+1
   partitionOffset = tileInfo.mmaTileShape[0]*tileInfo.localSubtileGrid[0]
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
-  if tileInfo.loadRatioGR == 1.0:
-    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
-    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
-  elif tileInfo.loadRatioGR == 0.5:
-    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
-  elif tileInfo.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
-  else:
+  wavesPerPartition = int(2 * tileInfo.loadRatioGR)
+  if tileInfo.loadRatioGR not in (0.5, 1.0, 2.0):
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
+  if wavesPerPartition == 1:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s: one wave per partition"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s: partition = waveId"%tc))
+  else:
+    shift = wavesPerPartition.bit_length() - 1
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(wavesPerPartition - 1), src1=vgpr(waveId),
+                      comment="%s: waveId %% %u"%(tc, wavesPerPartition)))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(shift), src=vgpr(waveId),
+                              comment="%s: waveId / %u"%(tc, wavesPerPartition)))
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
   module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
   module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))

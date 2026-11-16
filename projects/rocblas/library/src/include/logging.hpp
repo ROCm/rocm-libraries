@@ -171,6 +171,16 @@ inline std::string rocblas_internal_log_bench_scalar_value<rocblas_half>(const c
     return ss.str();
 }
 
+template <>
+inline std::string
+    rocblas_internal_log_bench_scalar_value<rocblas_bfloat16>(const char*             name,
+                                                              const rocblas_bfloat16* value)
+{
+    rocblas_internal_ostream ss;
+    ss << "--" << name << " " << (value ? float(*value) : std::numeric_limits<float>::quiet_NaN());
+    return ss.str();
+}
+
 template <typename T>
 std::string rocblas_internal_log_bench_scalar_value(rocblas_handle handle,
                                                     const char*    name,

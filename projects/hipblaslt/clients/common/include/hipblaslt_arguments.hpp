@@ -183,10 +183,15 @@ struct Arguments
     int32_t fast_check_repeat;
     int32_t fast_check_inject;
     int8_t  requires_streamk;
+    // Self-test of the checks of D across solutions: the position in the solution list of a
+    // solution that is never launched, which the allclose check must report (-1 = none)
+    int32_t skip_launch_solution;
     // integer_exact value pattern: '' (standard), ternary or sparse_k (hipblaslt_init.hpp)
     char    integer_exact_pattern[16];
     // skip, rather than fail, when the library offers no solution (size-threshold sweeps)
     int8_t  allow_no_solution;
+    // PCI chip IDs on which allow_no_solution does not apply, so no solution fails (0 = unused)
+    int32_t require_solution_chip_ids[4];
     int8_t  timing;
 
     char transA;
@@ -210,6 +215,7 @@ struct Arguments
     bool                     scaleD;
     bool                     scaleE;
     bool                     scaleAlpha_vector;
+    bool                     device_scalar_alpha;
     bool                     amaxScaleA;
     bool                     amaxScaleB;
     bool                     amaxD;
@@ -231,7 +237,7 @@ struct Arguments
     int32_t rotating;
     bool    use_gpu_timer;
     float   skip_slow_solution_ratio;
-    // -1 inherits the handle. 0/1 set HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
+    // Uniform-order request for the client handle: -1=unspecified, 0=off, 1=on.
     int32_t uniform_summation_order;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -328,8 +334,10 @@ struct Arguments
     OPER(fast_check_repeat) SEP      \
     OPER(fast_check_inject) SEP      \
     OPER(requires_streamk) SEP       \
+    OPER(skip_launch_solution) SEP   \
     OPER(integer_exact_pattern) SEP  \
     OPER(allow_no_solution) SEP      \
+    OPER(require_solution_chip_ids) SEP \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
@@ -348,6 +356,7 @@ struct Arguments
     OPER(scaleD) SEP                 \
     OPER(scaleE) SEP                 \
     OPER(scaleAlpha_vector) SEP      \
+    OPER(device_scalar_alpha) SEP    \
     OPER(amaxScaleA) SEP             \
     OPER(amaxScaleB) SEP             \
     OPER(amaxD) SEP                  \
@@ -1058,3 +1067,6 @@ namespace ArgumentsHelper
 #endif
 
 #undef APPLY
+
+// Validate explicit operand compute types and derive unset ones from compute_type.
+std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg);

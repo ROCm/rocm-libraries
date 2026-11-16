@@ -1,5 +1,5 @@
 {
-  "aliases": {"llvm24": "llvm23"},
+  "aliases": {},
   "arches": {
     "gfx942": {
       "flavors": {
@@ -52,6 +52,30 @@
           }
         },
         "llvm23": {
+          "cases": {
+            "deepseek_hi64": {
+              "bytes": 69702,
+              "sha256": "00640db746603922eff6e1b59e7f2af3dec3f0226d84786c5f28fe1cd3038954"
+            },
+            "glm_hi32": {
+              "bytes": 69702,
+              "sha256": "ec5d7a3f3d4691f4d08d9b41638c6e8bfce4cee78a060323d22c904860145b47"
+            },
+            "mfma_deepseek_hi64": {
+              "bytes": 14705,
+              "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507"
+            },
+            "mfma_glm_hi32": {
+              "bytes": 14705,
+              "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f"
+            },
+            "small": {
+              "bytes": 11199,
+              "sha256": "4a440765966f9e63be0eae1f4d1790eab0679d740f8ddca799515827da018d8f"
+            }
+          }
+        },
+        "llvm24": {
           "cases": {
             "deepseek_hi64": {
               "bytes": 69702,
@@ -128,6 +152,30 @@
           }
         },
         "llvm23": {
+          "cases": {
+            "deepseek_hi64": {
+              "bytes": 69702,
+              "sha256": "00640db746603922eff6e1b59e7f2af3dec3f0226d84786c5f28fe1cd3038954"
+            },
+            "glm_hi32": {
+              "bytes": 69702,
+              "sha256": "ec5d7a3f3d4691f4d08d9b41638c6e8bfce4cee78a060323d22c904860145b47"
+            },
+            "mfma_deepseek_hi64": {
+              "bytes": 14705,
+              "sha256": "0e2db2dba109e5beae9061bbfe1d7f689600c1cabab137fe82005c7ee238b507"
+            },
+            "mfma_glm_hi32": {
+              "bytes": 14705,
+              "sha256": "45b70fe621d9b73e8fa5ed9fb426aaa064631f6f03927184321b3b5e5c77253f"
+            },
+            "small": {
+              "bytes": 11199,
+              "sha256": "4a440765966f9e63be0eae1f4d1790eab0679d740f8ddca799515827da018d8f"
+            }
+          }
+        },
+        "llvm24": {
           "cases": {
             "deepseek_hi64": {
               "bytes": 69702,

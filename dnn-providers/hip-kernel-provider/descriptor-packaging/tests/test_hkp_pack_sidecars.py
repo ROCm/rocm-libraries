@@ -3,14 +3,21 @@
 """Tests that the packer resolves and carries the model file a trained UHD names."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
 import pytest
 
-from hkp_pack.descriptors import HkpPackError, load_flat_input
+from hkp_pack.descriptors import (
+    _BEHAVIOR_NOTES,
+    _NUMERICAL_NOTES,
+    HkpPackError,
+    load_flat_input,
+)
 from hkp_pack.pipeline import compile_intermediate
 from pack_helpers import GENERIC_TARGETS
 
@@ -165,6 +172,120 @@ class TestResolution:
 
         assert (inter_dir / "pack" / "model.bin").read_bytes() == b"linked"
         assert not (inter_dir / "pack" / "store" / "real.bin").exists()
+
+
+_POINTER = (
+    "outs:\n- md5: 0123456789abcdef0123456789abcdef\n  size: 9\n  path: model.bin\n"
+)
+
+
+def _root_with_unpulled_model(
+    tmp_path: Path, artifact: str = "model.bin", pointer: bool = True
+) -> Path:
+    """A model UHD whose model file was never pulled; its `.dvc` pointer is in git."""
+    root = tmp_path / "src"
+    _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd(artifact))
+    if pointer:
+        pointer_path = root / "pack" / (artifact + ".dvc")
+        pointer_path.parent.mkdir(parents=True, exist_ok=True)
+        pointer_path.write_text(_POINTER, encoding="utf-8")
+    return root
+
+
+class TestUnpulledModel:
+    """A model file that `dvc pull` never fetched leaves its UHD out, not the pack
+    failing; a release build that sets REQUIRE_DVC_DESCRIPTORS still fails."""
+
+    def test_an_absent_model_with_a_pointer_leaves_its_uhd_out_with_a_warning(
+        self, tmp_path: Path
+    ):
+        root = _root_with_unpulled_model(tmp_path)
+        logs: list[str] = []
+
+        flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
+
+        assert [d for d in flat.descriptors if d.type == "uhd"] == []
+        assert flat.sidecars_for(flat.descriptors) == []
+        (warning,) = [m for m in logs if m.startswith("warning:")]
+        assert "heuristic.uhd.json" in warning
+        assert str(root / "pack" / "model.bin.dvc") in warning
+        assert "dvc pull -r ingestor" in warning
+
+    def test_the_pointer_of_a_nested_model_is_the_one_beside_that_model(
+        self, tmp_path: Path
+    ):
+        root = _root_with_unpulled_model(tmp_path, "models/model.bin")
+        logs: list[str] = []
+
+        flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
+
+        assert [d for d in flat.descriptors if d.type == "uhd"] == []
+        assert any(str(root / "pack" / "models" / "model.bin.dvc") in m for m in logs)
+
+    def test_strict_dvc_makes_an_absent_model_with_a_pointer_an_error(
+        self, tmp_path: Path
+    ):
+        root = _root_with_unpulled_model(tmp_path)
+
+        with pytest.raises(HkpPackError, match="payload source not found") as caught:
+            load_flat_input(
+                root, GENERIC_TARGETS, log=lambda *_: None, require_dvc=True
+            )
+
+        assert "dvc pull -r ingestor" in str(caught.value)
+
+    def test_an_absent_model_without_a_pointer_is_an_error_even_when_not_strict(
+        self, tmp_path: Path
+    ):
+        """A missing file nothing tracks is a typo, not an un-pulled build."""
+        root = _root_with_unpulled_model(tmp_path, pointer=False)
+        # A pointer for some other file does not excuse this one.
+        (root / "pack" / "other.bin.dvc").write_text(_POINTER, encoding="utf-8")
+
+        with pytest.raises(HkpPackError, match="payload source not found"):
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+    @pytest.mark.parametrize("strict", [False, True])
+    def test_a_present_model_ships_unchanged_pointer_or_not(
+        self, tmp_path: Path, strict: bool
+    ):
+        root = _root_with_unpulled_model(tmp_path)
+        (root / "pack" / "model.bin").write_bytes(b"HGBM-stub")
+        logs: list[str] = []
+
+        flat = load_flat_input(
+            root, GENERIC_TARGETS, log=logs.append, require_dvc=strict
+        )
+
+        (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
+        (sidecar,) = uhd.sidecars
+        assert sidecar.source.read_bytes() == b"HGBM-stub"
+        assert not any(m.startswith("warning:") for m in logs)
+
+    def test_a_ued_naming_the_left_out_model_still_loads(
+        self, tmp_path: Path, main_fixture: Path
+    ):
+        """The packer validates the dropped UHD with the UED that names it, then
+        ships the UED with a dangling id, which the loader reads as the role off
+        (RFC 0020 §13.2). Every other UHD of the root still ships."""
+        root = _root_with_roles(
+            tmp_path, main_fixture, predict_engine={"gfx942": _TFLOPS_ID}
+        )
+        model = _model_uhd("model.bin")
+        model["id"] = _TFLOPS_ID
+        model["score"] = {"metric": "tflops", "calibrated": True}
+        _write_json(root / f"model_{_TFLOPS_ID[:3]}.uhd.json", model)
+        (root / "model.bin.dvc").write_text(_POINTER, encoding="utf-8")
+
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+        shipped = {d.id for d in flat.by_type("uhd")}
+        assert _TFLOPS_ID not in shipped
+        assert {_TIME_ID, _OTHER_TFLOPS_ID, _ORDERING_ID} <= shipped
+        ued = next(
+            d for d in flat.by_type("ued") if d.path.name == "pointwise.ued.json"
+        )
+        assert ued.doc["predict_engine"] == {"gfx942": _TFLOPS_ID}
 
 
 class TestRejection:
@@ -394,6 +515,7 @@ def _canonical_uhd_validator():
         "empty_feature",
         "invalid_hash",
         "unknown_header",
+        "format_1_1",
         "unsupported_format",
         "tflops_metric",
         "time_metric",
@@ -406,6 +528,10 @@ def _canonical_uhd_validator():
         "feature_semantics_text",
         "unsupported_transform",
         "uppercase_ids",
+        "linear_data",
+        "linear_data_max_objective",
+        "linear_data_metric",
+        "linear_data_transform",
     ],
 )
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
@@ -413,11 +539,18 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     doc = _model_uhd("model.bin")
     valid = mutation in (
         "valid",
+        "format_1_1",
         "tflops_metric",
         "time_metric",
         "feature_semantics",
         "uppercase_ids",
+        "linear_data",
     )
+    if mutation.startswith("linear_data"):
+        # RFC 0019 §7.5: a log slowdown, lower is better, in no registered unit.
+        doc["adapter"] = "linear_data"
+        doc["linear_data"] = doc.pop("tree_data")
+        doc["objective"] = "min"
     if mutation == "missing_objective":
         del doc["objective"]
     elif mutation == "missing_provenance":
@@ -438,8 +571,10 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["features_hash"] = "sha256:not-hex"
     elif mutation == "unknown_header":
         doc["unknown"] = True
-    elif mutation == "unsupported_format":
+    elif mutation == "format_1_1":
         doc["version"] = "1.1"
+    elif mutation == "unsupported_format":
+        doc["version"] = "1.2"
     elif mutation == "tflops_metric":
         doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log1p"}
     elif mutation == "time_metric":
@@ -462,6 +597,12 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["trained_against"]["feature_semantics_revision"] = "1"
     elif mutation == "unsupported_transform":
         doc["score"] = {"transform": "softplus"}
+    elif mutation == "linear_data_max_objective":
+        doc["objective"] = "max"
+    elif mutation == "linear_data_metric":
+        doc["score"] = {"metric": "time"}
+    elif mutation == "linear_data_transform":
+        doc["score"] = {"transform": "log1p"}
     elif mutation == "uppercase_ids":
         doc["id"] = doc["id"].upper()
         doc["trained_against"]["ued"]["id"] = doc["trained_against"]["ued"][
@@ -471,6 +612,63 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     _write_json(root / "heuristic.uhd.json", doc)
     (root / "model.bin").write_bytes(b"artifact")
     assert validator.is_valid(doc) == valid
+    if valid:
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+        assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"
+    else:
+        with pytest.raises(HkpPackError):
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+
+_SLOT_CORPUS_PATH = (
+    "projects/hipdnn/plugin_sdk/tests/ingestor/uhd/fixtures/conformance/"
+    "trained_against_slots.json"
+)
+_ROOT = _repo_root()
+_SLOT_CORPUS = (
+    json.loads((_ROOT / _SLOT_CORPUS_PATH).read_text(encoding="utf-8"))
+    if _ROOT
+    else {"bases": {}, "rows": []}
+)
+
+
+def _patched(base: dict, patch: list) -> dict:
+    """@p base with the RFC 6902 add/replace/remove steps of @p patch applied."""
+    doc = copy.deepcopy(base)
+    for step in patch:
+        *parents, leaf = step["path"].split("/")[1:]
+        node = doc
+        for token in parents:
+            node = node[int(token) if isinstance(node, list) else token]
+        if isinstance(node, list):
+            leaf = len(node) if leaf == "-" else int(leaf)
+        if step["op"] == "remove":
+            del node[leaf]
+        elif step["op"] == "add" and isinstance(node, list):
+            node.insert(leaf, step["value"])
+        else:
+            node[leaf] = step["value"]
+    return doc
+
+
+@pytest.mark.parametrize("row", _SLOT_CORPUS["rows"], ids=lambda row: row["name"])
+def test_packaging_and_canonical_schema_agree_on_slot_provenance(tmp_path, row):
+    """The `trained_against` header grammar of RFC 0021 §9, from the corpus the runtime
+    parser and `uhd_gen` also run."""
+    validator = _canonical_uhd_validator()
+    patched = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])
+    doc = _model_uhd("model.bin")
+    doc["version"] = patched["version"]
+    doc["trained_against"] = patched["trained_against"]
+    valid = not row.get("reject")
+    skipped = row.get("skip", [])
+    root = tmp_path / "src"
+    _write_json(root / "heuristic.uhd.json", doc)
+    (root / "model.bin").write_bytes(b"artifact")
+    if "schema" not in skipped:
+        assert validator.is_valid(doc) == valid
+    if "packer" in skipped:
+        return
     if valid:
         flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
         assert flat.descriptors[0].sidecars[0].source.read_bytes() == b"artifact"
@@ -889,7 +1087,7 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(
         tmp_path,
         main_fixture,
         predict_engine={"gfx942": [_TFLOPS_ID, _TIME_ID]},
-        predict_applicable_kernels={"default": _ORDERING_ID},
+        predict_applicable_kernels={"default": [_ORDERING_ID]},
     )
     ued_path = root / "pointwise.ued.json"
     ued = json.loads(ued_path.read_text(encoding="utf-8"))
@@ -916,6 +1114,14 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(
         (
             {
                 "sort_kernel_catalog": {
+                    "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _ORDERING_ID]
+                }
+            },
+            "no metric",
+        ),
+        (
+            {
+                "predict_applicable_kernels": {
                     "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _ORDERING_ID]
                 }
             },
@@ -974,13 +1180,70 @@ def _drop(key):
     return lambda doc: doc.pop(key)
 
 
+def test_packaging_admits_an_authored_empty_numerical_notes_list(
+    tmp_path, main_fixture
+):
+    """`[]` is an explicit claim of no notes, not an absent field."""
+    load_flat_input(
+        _root_with_ued(
+            tmp_path, main_fixture, lambda ued: ued.update(numerical_notes=[])
+        ),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
+
+
+@pytest.mark.parametrize("note", _NUMERICAL_NOTES)
+def test_packaging_admits_every_numerical_note_name(tmp_path, main_fixture, note):
+    load_flat_input(
+        _root_with_ued(
+            tmp_path, main_fixture, lambda ued: ued.update(numerical_notes=[note])
+        ),
+        GENERIC_TARGETS,
+        log=lambda *_: None,
+    )
+
+
+def test_numerical_note_names_match_the_loader():
+    """The packer and DescriptorLoader.hpp accept the same names, in enum order."""
+    header = (
+        Path(__file__).resolve().parents[4]
+        / "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp"
+    )
+    text = header.read_text(encoding="utf-8")
+    body = text[text.index("numericalNoteFromString(") :]
+    body = body[: body.index("fail(")]
+    pairs = re.findall(
+        r'\{"([a-z_0-9]+)", HIPDNN_NUMERICAL_NOTE_([A-Za-z_0-9]+)\}', body
+    )
+    assert [name for name, _ in pairs] == list(_NUMERICAL_NOTES)
+    assert all(constant.lower() == name for name, constant in pairs)
+
+
+def test_behavior_note_names_match_the_loader():
+    """The packer and DescriptorLoader.hpp accept the same behavior-note names."""
+    header = (
+        Path(__file__).resolve().parents[4]
+        / "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp"
+    )
+    text = header.read_text(encoding="utf-8")
+    body = text[text.index("behaviorNoteFromString(") :]
+    body = body[: body.index("fail(")]
+    pairs = re.findall(
+        r'text == "([a-z_0-9]+)"\)\s*\{\s*return HIPDNN_BEHAVIOR_NOTE_([A-Za-z_0-9]+);',
+        body,
+    )
+    assert [name for name, _ in pairs] == list(_BEHAVIOR_NOTES)
+    assert all(constant.lower() == name for name, constant in pairs)
+
+
 def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixture):
     """The control for the rejections below: each field, well formed, loads."""
 
     def mutate(ued):
         ued["knobs"] = ["block_size"]
-        ued["behavior_notes"] = ["runtime_compilation"]
-        ued["numerical_notes"] = ["ftz"]
+        ued["behavior_notes"] = ["runtime_compilation", "supports_graph_capture"]
+        ued["numerical_notes"] = ["nondeterministic"]
         ued["sdk_version"] = "1.2.3"
         ued["graph_match"] = {"native": "test.match", "x-note": "ignored"}
         ued["revision"] = "999999999.999999999"
@@ -1018,14 +1281,39 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
             id="behavior_note_unknown",
         ),
         pytest.param(
+            _set("behavior_notes", ["RUNTIME_COMPILATION"]),
+            "unknown note",
+            id="behavior_note_wrong_case",
+        ),
+        pytest.param(
+            _set("behavior_notes", ["nondeterministic"]),
+            "unknown note",
+            id="behavior_note_numerical_name",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["runtime_compilation"]),
+            "unknown note",
+            id="numerical_note_behavior_name",
+        ),
+        pytest.param(
             _set("behavior_notes", "runtime_compilation"),
             "array of strings",
             id="behavior_notes_not_array",
         ),
         pytest.param(
-            _set("numerical_notes", ["ftz", "ftz"]),
+            _set("numerical_notes", ["nondeterministic", "nondeterministic"]),
             "twice",
             id="numerical_note_repeated",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["ftz"]),
+            "unknown note",
+            id="numerical_note_unknown",
+        ),
+        pytest.param(
+            _set("numerical_notes", ["NONDETERMINISTIC"]),
+            "unknown note",
+            id="numerical_note_wrong_case",
         ),
         pytest.param(
             _set("sdk_version", "1.2"), "MAJOR.MINOR.PATCH", id="sdk_version_short"
@@ -1100,11 +1388,6 @@ def test_packaging_rejects_a_model_named_outside_an_arch_map(
             "twice",
         ),
         ({"predict_engine": {"gfx942": [_TFLOPS_ID, "not-a-uuid"]}}, "requires a UUID"),
-        # A candidate generator has no metric, so no list form (RFC 0019 §3.1).
-        (
-            {"predict_applicable_kernels": {"default": [_ORDERING_ID]}},
-            "requires a UUID",
-        ),
     ],
 )
 def test_packaging_rejects_malformed_role_values(

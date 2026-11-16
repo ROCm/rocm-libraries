@@ -267,7 +267,12 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
     if(p == NULL)
         return scalar_gate_fail(reason, reason_cap, "null problem");
     rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch));
-    if(p->head_size != 64 && p->head_size != 128 && p->head_size != 256)
+    /* The scalar kernel writes no LSE; refusing here keeps the auto tail from
+     * ever launching it for an LSE request. */
+    if(p->emit_lse)
+        return scalar_gate_fail(
+            reason, reason_cap, "LSE output is not implemented on the scalar 2D attention path");
+    if(p->head_size != 64 && p->head_size != 128 && p->head_size != 192 && p->head_size != 256)
         return scalar_gate_fail(reason, reason_cap, "unsupported head_size %d", p->head_size);
     if(p->block_size != 16 && p->block_size != 32 && p->block_size != 64)
         return scalar_gate_fail(reason, reason_cap, "unsupported block_size %d", p->block_size);
@@ -367,13 +372,10 @@ rocke_status_t
     {
         const char* parts[6] = {hbuf, kvbuf, dbuf, bbuf, segbuf, p->dtype ? p->dtype : ""};
         char rbbuf[32];
-        /* flags={"tl", **_right_bound_flag(p), "sw"}; the default-mask 3D kernel
-         * never applies the window, so "sw" marks only a non-default mask. */
+        /* flags={"tl", **_right_bound_flag(p), "sw"}. */
         const char* flag_names[3] = {"tl", right_bound_token(p, rbbuf, sizeof(rbbuf)), "sw"};
-        int flag_on[3]
-            = {p->causal_top_left ? 1 : 0,
-               p->right_bound != 0 ? 1 : 0,
-               (p->sliding_window > 0 && !rocke_unified_attention_problem_default_mask(p)) ? 1 : 0};
+        int flag_on[3] = {
+            p->causal_top_left ? 1 : 0, p->right_bound != 0 ? 1 : 0, p->sliding_window > 0 ? 1 : 0};
         return rocke_kernel_name_join(prefix, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }

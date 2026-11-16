@@ -51,6 +51,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendHeuristicType.h"
 #include "HipdnnBackendLimits.h"
+#include "HipdnnBackendNumericalNote.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
@@ -196,10 +197,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute(hipdnnHandle_t handle,
 * hipdnnBackendCreateDescriptor() or initialized using hipdnnBackendInitialize().
 *
 * @note An engine descriptor validates its graph and engine applicability here, but loads
-* plugin metadata lazily. The first engine-name, knob-info, or behavior-note attribute query
-* fetches and validates EngineDetails, including count-only queries. Successful finalization
-* does not guarantee that metadata retrieval will succeed; callers requiring eager metadata
-* validation should issue such a query after finalization.
+* plugin metadata lazily. The first engine-name, knob-info, behavior-note, or numerical-note
+* attribute query fetches and validates EngineDetails, including count-only queries. Successful
+* finalization does not guarantee that metadata retrieval will succeed; callers requiring eager
+* metadata validation should issue such a query after finalization.
 *
 * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t to finalize
 *
@@ -221,9 +222,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize(hipdnnBackendDescript
  * pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the
  * descriptor has not been successfully finalized using hipdnnBackendFinalize()
  *
- * @note Engine-name, knob-info, and behavior-note queries lazily fetch plugin EngineDetails.
- * Retrieval or validation errors are reported by this call, not engine finalization. A failed
- * metadata load publishes no partial result and can be retried by a later attribute query.
+ * @note Engine-name, knob-info, behavior-note, and numerical-note queries lazily fetch plugin
+ * EngineDetails. Retrieval or validation errors are reported by this call, not engine
+ * finalization. A failed metadata load publishes no partial result and can be retried by a later
+ * attribute query.
  *
  * @param  [in]   descriptor               Instance of hipdnnBackendDescriptor_t whose attribute to
  *                                         retrieve
@@ -438,6 +440,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * contain a hipDNN FlatBuffer envelope with routing metadata, plan tensor UIDs, and opaque
  * plugin-specific execution context bytes.
  *
+ * A plan created by hipdnnBackendCreateAndDeserializeExecutionPlan_ext() is not serialized again:
+ * the call returns the plan bytes it was deserialized from, unchanged, and does not call the
+ * plugin. When those bytes came from a graph-and-plan container, only the embedded plan is
+ * returned. The returned bytes keep their original envelope version, plugin payload and kernel,
+ * so upgrading a plugin does not change them; build a new plan to pick up a newer kernel.
+ *
  * @param [in]  descriptor        A finalized execution plan descriptor.
  * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
  *                                Ignored when @p serializedPlan is @c nullptr.
@@ -459,7 +467,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
  * extracted and deserialized. A container that carries no execution plan is rejected with
  * HIPDNN_STATUS_BAD_PARAM. A bare execution-plan blob (as produced by
  * hipdnnBackendGetSerializedExecutionPlan_ext()) is deserialized directly. The returned execution
- * plan descriptor is finalized in both cases.
+ * plan descriptor is finalized in both cases. It keeps a copy of the plan bytes, which can include
+ * GPU code objects, for its lifetime; hipdnnBackendGetSerializedExecutionPlan_ext() returns them.
  *
  * The returned plan is bound to the device of @p handle's stream and executes only on handles
  * whose stream is on that device (see hipdnnBackendExecute()). To move a plan to another device,

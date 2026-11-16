@@ -30,9 +30,6 @@
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 
 #define FWG_LOG2E 1.4426950408889634
-/* Head size the lean body is written for: its V-staging stride is hardwired to
- * the 256-wide row. */
-#define FWG_LEAN_HEAD_SIZE 256
 /* Query heads sharing the 128-row M-tile under the head-fold (tile geometry). */
 #define FWG_FOLD_HEADS 4
 #define FWG_MAX_NDDIM 8 /* HD / 32 at HD = 256 */
@@ -42,6 +39,12 @@
 #define FWG_MAX_CPL 16
 #define FWG_MAX_APL 4
 #define FWG_MAX_NLOADS 8
+
+/* Head sizes the lean body is validated for (Python _4WGQA_LEAN_HEAD_SIZES). */
+static bool fwg_lean_head_size(int hd)
+{
+    return hd == 192 || hd == 256;
+}
 
 static bool fwg_streq(const char* a, const char* c)
 {
@@ -178,8 +181,16 @@ typedef struct fwg_ctx
     rocke_value_t* ninf;
     rocke_value_t* zf;
     rocke_tensor_descriptor_t* q_desc;
+    rocke_value_t* hq; /* num_query_heads kernarg */
+    rocke_value_t* hkv; /* num_kv_heads kernarg */
+    rocke_value_t* window; /* sliding_window kernarg */
+    /* Lean body: last valid key. General body: last valid page. */
+    rocke_value_t* k_last;
+    rocke_value_t* k_last_page;
+    /* General body: this lane's clamped Q row and its head. */
+    rocke_value_t* q_row;
+    rocke_value_t* q_row_head;
     int HD;
-    int HKV;
     int BS;
     int BN;
     int BPT;
@@ -206,25 +217,50 @@ static rocke_value_t* fwg_mul_consts(fwg_ctx_t* c, int x, int y)
     return rocke_b_mul(c->b, cx, cy);
 }
 
-/* phys_key(kv, keytile): paged key row of logical key `keytile` in tile `kv`. */
+/* _clamp_to_last(b, idx, last): min(idx, last). */
+static rocke_value_t* fwg_clamp_to_last(fwg_ctx_t* c, rocke_value_t* idx, rocke_value_t* last)
+{
+    rocke_value_t* lt = rocke_b_cmp_lt(c->b, idx, last);
+    return rocke_b_select(c->b, lt, idx, last);
+}
+
+/* Lean phys_key(kv, keytile): paged key row of logical key `keytile` in tile
+ * `kv`, the key clamped to the last valid one. */
+static rocke_value_t* fwg_phys_key_lean(fwg_ctx_t* c, rocke_value_t* kv, rocke_value_t* keytile)
+{
+    rocke_ir_builder_t* b = c->b;
+    rocke_value_t* k0 = rocke_b_mul(b, kv, ci(c, c->BN));
+    rocke_value_t* key = rocke_b_add(b, k0, keytile);
+    key = fwg_clamp_to_last(c, key, c->k_last);
+    rocke_value_t* sb = rocke_b_mul(b, c->sid, c->bt_stride);
+    rocke_value_t* kd = rocke_b_div(b, key, ci(c, c->BS));
+    rocke_value_t* lblk = rocke_b_add(b, sb, kd);
+    rocke_value_t* pb = rocke_b_global_load_i32(b, c->BT, lblk, 4);
+    rocke_value_t* base = rocke_b_mul(b, pb, ci(c, c->BS));
+    rocke_value_t* off = rocke_b_mod(b, key, ci(c, c->BS));
+    return rocke_b_add(b, base, off);
+}
+
+/* General phys_key(kv, keytile): the page clamped to the last valid one. */
 static rocke_value_t* fwg_phys_key(fwg_ctx_t* c, rocke_value_t* kv, rocke_value_t* keytile)
 {
     rocke_ir_builder_t* b = c->b;
-    rocke_value_t* sb = rocke_b_mul(b, c->sid, c->bt_stride);
     rocke_value_t* kb = rocke_b_mul(b, kv, ci(c, c->BPT));
     rocke_value_t* kd = rocke_b_div(b, keytile, ci(c, c->BS));
-    rocke_value_t* lblk = rocke_b_add(b, sb, rocke_b_add(b, kb, kd));
+    rocke_value_t* page = rocke_b_add(b, kb, kd);
+    rocke_value_t* sb = rocke_b_mul(b, c->sid, c->bt_stride);
+    rocke_value_t* lblk = rocke_b_add(b, sb, rocke_b_smin(b, page, c->k_last_page));
     rocke_value_t* pb = rocke_b_global_load_i32(b, c->BT, lblk, 4);
     rocke_value_t* base = rocke_b_mul(b, pb, ci(c, c->BS));
     rocke_value_t* off = rocke_b_mod(b, keytile, ci(c, c->BS));
     return rocke_b_add(b, base, off);
 }
 
-/* (row * HKV + kvh) * HD + col: element offset of a K/V cache row. */
+/* (row * num_kv_heads + kvh) * HD + col: element offset of a K/V cache row. */
 static rocke_value_t* fwg_kv_elem(fwg_ctx_t* c, rocke_value_t* row, rocke_value_t* col)
 {
     rocke_ir_builder_t* b = c->b;
-    rocke_value_t* r = rocke_b_mul(b, row, ci(c, c->HKV));
+    rocke_value_t* r = rocke_b_mul(b, row, c->hkv);
     r = rocke_b_add(b, r, c->kvh);
     r = rocke_b_mul(b, r, ci(c, c->HD));
     return rocke_b_add(b, r, col);
@@ -332,9 +368,11 @@ static const char* fwg_name(rocke_ir_builder_t* b, const char* prefix, int idx)
     return rocke_arena_strdup(&b->arena, buf);
 }
 
-/* The 18-argument production paged ABI (_attn_signature). Writes C, Q, K, V,
- * BT, KL, CUQ, scale, num_seqs, block_table_stride into out[0..9]. */
-static void fwg_params(rocke_ir_builder_t* b, const rocke_type_t* dtype, rocke_value_t* out[10])
+/* The production paged ABI (_attn_signature), then the unused qq_bias_stride_0
+ * and the RUNTIME_KERNARG_FIELDS kernargs. Writes C, Q, K, V, BT, KL, CUQ, scale,
+ * num_seqs, block_table_stride, num_query_heads, num_kv_heads, sliding_window
+ * into out[0..12]. */
+static void fwg_params(rocke_ir_builder_t* b, const rocke_type_t* dtype, rocke_value_t* out[13])
 {
     rocke_param_opts_t o;
     const rocke_type_t* ptr_dt = rocke_ptr_type(b, dtype, "global");
@@ -385,6 +423,12 @@ static void fwg_params(rocke_ir_builder_t* b, const rocke_type_t* dtype, rocke_v
     rocke_b_param(b, "softcap", rocke_f32(), NULL);
     out[8] = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
     out[9] = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
+    /* Unused here; declared so every later param sits where the shared 2D
+     * launch signature packs it. */
+    rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+    out[10] = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+    out[11] = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
+    out[12] = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
 }
 
 /* tid, wid, lane, decode_mfma_lanes, wq: the shared lane prologue. */
@@ -406,6 +450,7 @@ typedef struct fwg_seq
     rocke_value_t* klen;
     rocke_value_t* qbase;
     rocke_value_t* qstart;
+    rocke_value_t* cu_q_stop;
 } fwg_seq_t;
 
 static fwg_seq_t fwg_seq_prologue(fwg_ctx_t* c,
@@ -413,15 +458,16 @@ static fwg_seq_t fwg_seq_prologue(fwg_ctx_t* c,
                                   rocke_value_t* KL,
                                   rocke_value_t* num_seqs,
                                   rocke_value_t* gqb,
-                                  int tokblk,
-                                  int iters)
+                                  int tokblk)
 {
     rocke_ir_builder_t* b = c->b;
     fwg_seq_t s;
-    c->sid = rocke_binary_search_seq_idx(b, CUQ, gqb, num_seqs, tokblk, iters, false);
+    rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, num_seqs);
+    c->sid = rocke_binary_search_seq_idx_dyn(b, CUQ, gqb, num_seqs, tokblk, trip, false);
     rocke_value_t* cu_q_start = rocke_b_global_load_i32(b, CUQ, c->sid, 4);
     rocke_value_t* sid1 = rocke_b_add(b, c->sid, ci(c, 1));
     rocke_value_t* cu_q_stop = rocke_b_global_load_i32(b, CUQ, sid1, 4);
+    s.cu_q_stop = cu_q_stop;
     s.qlen = rocke_b_sub(b, cu_q_stop, cu_q_start);
     rocke_value_t* qbs = rocke_b_div(b, cu_q_start, ci(c, tokblk));
     rocke_value_t* q_block_start = rocke_b_add(b, qbs, c->sid);
@@ -443,11 +489,21 @@ static void fwg_kernel_attrs(rocke_ir_builder_t* b, const rocke_attention_tiled_
         rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
 }
 
-static void fwg_q_desc(fwg_ctx_t* c, int H)
+/* DynamicTensorDescriptor over (token, head, dim): the head count is a
+ * kernarg, so the token stride is too. */
+static void fwg_q_desc(fwg_ctx_t* c)
 {
     static const char* const coord_names[3] = {"token", "head", "dim"};
-    int lengths[3] = {1 << 30, H, c->HD};
-    c->q_desc = rocke_tensor_descriptor_naive(c->b, "query_ptr", lengths, 3, NULL, coord_names, 3);
+    rocke_value_t* strides[3] = {rocke_b_mul(c->b, c->hq, ci(c, c->HD)), NULL, NULL};
+    const int static_strides[3] = {1, c->HD, 1};
+    c->q_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+        c->b, "query_ptr", coord_names, 3, strides, static_strides);
+}
+
+/* last = x - 1 */
+static rocke_value_t* fwg_minus_one(fwg_ctx_t* c, rocke_value_t* x)
+{
+    return rocke_b_sub(c->b, x, ci(c, 1));
 }
 
 static void fwg_softmax_consts(fwg_ctx_t* c, rocke_value_t* scale_p)
@@ -472,13 +528,14 @@ static void fwg_geometry(fwg_ctx_t* c, int BN)
     c->NKpv = BN / c->K;
 }
 
-/* The output epilogue: acc * (1/l), cast, masked per-lane store. */
+/* The output epilogue: acc * (1/l), 0 for a row that sees no key, cast,
+ * masked per-lane store. */
 static void fwg_epilogue(fwg_ctx_t* c,
                          rocke_value_t* out_ptr,
                          const fwg_seq_t* s,
+                         rocke_value_t* context_off,
                          rocke_value_t* l_f,
                          rocke_value_t* const* accs_f,
-                         int H,
                          int GQAG,
                          bool fold)
 {
@@ -500,7 +557,7 @@ static void fwg_epilogue(fwg_ctx_t* c,
                 rocke_value_t* hl = rocke_b_mod(b, m, ci(c, FWG_FOLD_HEADS));
                 q_inseq = rocke_b_add(b, s->qbase, tl);
                 rocke_value_t* tok = rocke_b_add(b, s->qstart, tl);
-                rocke_value_t* row = rocke_b_mul(b, tok, ci(c, H));
+                rocke_value_t* row = rocke_b_mul(b, tok, c->hq);
                 rocke_value_t* hb = rocke_b_mul(b, c->kvh, ci(c, GQAG));
                 oi = rocke_b_add(b, row, rocke_b_add(b, hb, hl));
             }
@@ -509,11 +566,16 @@ static void fwg_epilogue(fwg_ctx_t* c,
                 q_inseq = rocke_b_add(b, s->qbase, rocke_b_add(b, c->wq, col));
                 rocke_value_t* w = rocke_b_add(b, c->wq, col);
                 rocke_value_t* tok = rocke_b_add(b, s->qstart, w);
-                rocke_value_t* row = rocke_b_mul(b, tok, ci(c, H));
+                rocke_value_t* row = rocke_b_mul(b, tok, c->hq);
                 oi = rocke_b_add(b, row, c->qhead);
             }
+            /* A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+             * every score was masked, so m/l/acc hold no softmax. Its O is 0. */
+            rocke_value_t* diag = rocke_b_add(b, context_off, q_inseq);
+            rocke_value_t* no_key = rocke_b_cmp_lt(b, diag, ci(c, 0));
             rocke_value_t* e = rocke_b_vec_extract(b, accs_f[nt], i);
-            rocke_value_t* val = rocke_b_cast_f32_to(b, rocke_b_fmul(b, e, recip), c->dtype);
+            rocke_value_t* o = rocke_b_select(b, no_key, c->zf, rocke_b_fmul(b, e, recip));
+            rocke_value_t* val = rocke_b_cast_f32_to(b, o, c->dtype);
             rocke_if_t f = rocke_b_scf_if(b, rocke_b_cmp_lt(b, q_inseq, s->qlen));
             rocke_b_region_enter(b, f.then_region);
             {
@@ -538,16 +600,15 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
     c->b = b;
     c->dtype = rocke_attention_tiled_2d_spec_dtype_ir(spec);
     c->HD = spec->head_size;
-    c->HKV = spec->num_kv_heads;
     c->BS = spec->block_size;
     c->at = rocke_mfma_atom("bf16", 32, 32, 8);
     fwg_geometry(c, 64);
-    const int H = spec->num_query_heads;
     const int GQAG = rocke_attention_tiled_2d_spec_num_queries_per_kv(spec);
-    const int ITERS = rocke_attention_tiled_2d_spec_binary_search_iters(spec);
+    /* V-fill: elements per thread (256 = 4 wave64 threads), 8-wide loads. */
+    const int v_fill_epw = (c->BN * c->HD) / 256;
 
     fwg_kernel_attrs(b, spec);
-    rocke_value_t* P[10];
+    rocke_value_t* P[13];
     fwg_params(b, c->dtype, P);
     rocke_value_t* Cout = P[0];
     c->Q = P[1];
@@ -555,16 +616,23 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
     c->Vp = P[3];
     c->BT = P[4];
     c->bt_stride = P[9];
+    c->hq = P[10];
+    c->hkv = P[11];
 
     fwg_lanes(c);
     c->qhead = rocke_b_block_id_x(b);
     c->kvh = rocke_b_div(b, c->qhead, ci(c, GQAG));
     rocke_value_t* gqb = rocke_b_block_id_y(b);
-    fwg_seq_t s = fwg_seq_prologue(c, P[6], P[5], P[8], gqb, 128, ITERS);
+    fwg_seq_t s = fwg_seq_prologue(c, P[6], P[5], P[8], gqb, 128);
 
     int vshape[2] = {c->BN, c->HD};
     rocke_value_t* V_lds = rocke_b_smem_alloc(b, c->dtype, vshape, 2, "Vlds");
-    fwg_q_desc(c, H);
+    fwg_q_desc(c);
+    /* Every K/V key is bounded by the last valid key and every Q row by the last
+     * token of its sequence, so tiles past the sequence stay in bounds; clamped
+     * keys are masked and clamped rows never stored. */
+    c->k_last = fwg_minus_one(c, s.klen);
+    rocke_value_t* q_last = fwg_minus_one(c, s.cu_q_stop);
     fwg_softmax_consts(c, P[7]);
 
     rocke_iter_arg_t iters[2 + FWG_MAX_NDDIM];
@@ -595,13 +663,13 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
         rocke_value_t* l_old = loop.iter_vars[1];
         rocke_value_t* const* accs = loop.iter_vars + 2;
         rocke_b_sync(b);
-        for(int cc = 0; cc < 8; cc++)
+        for(int cc = 0; cc < v_fill_epw / 8; cc++)
         {
-            rocke_value_t* t = rocke_b_mul(b, c->tid, ci(c, 64));
+            rocke_value_t* t = rocke_b_mul(b, c->tid, ci(c, v_fill_epw));
             rocke_value_t* lin = rocke_b_add(b, t, ci(c, cc * 8));
             rocke_value_t* key = rocke_b_div(b, lin, ci(c, c->HD));
             rocke_value_t* hd = rocke_b_mod(b, lin, ci(c, c->HD));
-            rocke_value_t* pk = fwg_phys_key(c, kv, key);
+            rocke_value_t* pk = fwg_phys_key_lean(c, kv, key);
             rocke_value_t* velem = fwg_kv_elem(c, pk, hd);
             rocke_value_t* idx[2] = {key, hd};
             rocke_value_t* v = rocke_b_global_load_vN(b, c->Vp, velem, c->dtype, 8, 16);
@@ -615,13 +683,14 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
         for(int kt = 0; kt < c->NKEYT; kt++)
         {
             rocke_value_t* kr = rocke_b_add(b, ci(c, kt * 32), c->ld.m_in_atom);
-            pk_kt[kt] = fwg_phys_key(c, kv, kr);
+            pk_kt[kt] = fwg_phys_key_lean(c, kv, kr);
         }
         for(int h = 0; h < c->NK; h++)
         {
             rocke_value_t* koff = fwg_koff(c, h);
             rocke_value_t* q_tok = rocke_b_add(b, s.qstart, c->wq);
             q_tok = rocke_b_add(b, q_tok, c->ld.n_in_atom);
+            q_tok = fwg_clamp_to_last(c, q_tok, q_last);
             rocke_value_t* q_off = fwg_q_offset(c, q_tok, c->qhead, koff);
             rocke_value_t* q = rocke_b_global_load_vN(b, c->Q, q_off, c->dtype, c->BPL, c->BPL * 2);
             for(int kt = 0; kt < c->NKEYT; kt++)
@@ -694,7 +763,7 @@ static rocke_kernel_def_t* fwg_build_lean(rocke_ir_builder_t* b,
     if(loop.op == NULL || b->status != ROCKE_OK)
         return NULL;
     rocke_value_t** res = loop.op->results;
-    fwg_epilogue(c, Cout, &s, res[1], res + 2, H, GQAG, false);
+    fwg_epilogue(c, Cout, &s, context_off, res[1], res + 2, GQAG, false);
     return b->status == ROCKE_OK ? b->kernel : NULL;
 }
 
@@ -862,23 +931,7 @@ static void fwg_body(
     for(int h = 0; h < c->NK; h++)
     {
         rocke_value_t* koff = fwg_koff(c, h);
-        rocke_value_t* q_off;
-        if(g->fold)
-        {
-            rocke_value_t* m = rocke_b_add(b, c->wq, c->ld.n_in_atom);
-            rocke_value_t* md = rocke_b_div(b, m, ci(c, FWG_FOLD_HEADS));
-            rocke_value_t* tok = rocke_b_add(b, s->qstart, md);
-            rocke_value_t* hb = rocke_b_mul(b, c->kvh, ci(c, g->GQAG));
-            rocke_value_t* mm = rocke_b_mod(b, m, ci(c, FWG_FOLD_HEADS));
-            rocke_value_t* head = rocke_b_add(b, hb, mm);
-            q_off = fwg_q_offset(c, tok, head, koff);
-        }
-        else
-        {
-            rocke_value_t* q_tok = rocke_b_add(b, s->qstart, c->wq);
-            q_tok = rocke_b_add(b, q_tok, c->ld.n_in_atom);
-            q_off = fwg_q_offset(c, q_tok, c->qhead, koff);
-        }
+        rocke_value_t* q_off = fwg_q_offset(c, c->q_row, c->q_row_head, koff);
         rocke_value_t* q = rocke_b_global_load_vN(b, c->Q, q_off, c->dtype, c->BPL, c->BPL * 2);
         for(int kt = 0; kt < c->NKEYT; kt++)
         {
@@ -926,7 +979,7 @@ static void fwg_body(
             if(g->window > 0)
             {
                 rocke_value_t* dist = rocke_b_sub(b, q_g, key_g);
-                rocke_value_t* mw = rocke_b_cmp_ge(b, dist, ci(c, g->window));
+                rocke_value_t* mw = rocke_b_cmp_ge(b, dist, c->window);
                 mask_cond = rocke_b_lor(b, mask_cond, mw);
             }
             Sm[kt][i] = rocke_b_select(b, mask_cond, c->ninf, raw);
@@ -1060,19 +1113,19 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
     c->b = b;
     c->dtype = rocke_attention_tiled_2d_spec_dtype_ir(spec);
     c->HD = spec->head_size;
-    c->HKV = spec->num_kv_heads;
     c->BS = spec->block_size;
     c->at = rocke_mfma_atom(fwg_streq(spec->dtype, "bf16") ? "bf16" : "f16", 32, 32, 8);
     fwg_geometry(c, pipe ? 32 : 64);
-    const int H = spec->num_query_heads;
+    int bs_log2 = 0;
+    while((1 << bs_log2) < c->BS)
+        ++bs_log2;
     g->GQAG = rocke_attention_tiled_2d_spec_num_queries_per_kv(spec);
     g->v_fill_epw = (c->BN * c->HD) / 256;
     g->v_fill_nloads = g->v_fill_epw / 8;
-    const int ITERS = rocke_attention_tiled_2d_spec_binary_search_iters(spec);
     const int TOKBLK = fold ? 128 / FWG_FOLD_HEADS : 128;
 
     fwg_kernel_attrs(b, spec);
-    rocke_value_t* P[10];
+    rocke_value_t* P[13];
     fwg_params(b, c->dtype, P);
     rocke_value_t* Cout = P[0];
     c->Q = P[1];
@@ -1080,6 +1133,9 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
     c->Vp = P[3];
     c->BT = P[4];
     c->bt_stride = P[9];
+    c->hq = P[10];
+    c->hkv = P[11];
+    c->window = P[12];
 
     fwg_lanes(c);
     if(fold)
@@ -1093,7 +1149,7 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
         c->kvh = rocke_b_div(b, c->qhead, ci(c, g->GQAG));
     }
     rocke_value_t* gqb = rocke_b_block_id_y(b);
-    fwg_seq_t s = fwg_seq_prologue(c, P[6], P[5], P[8], gqb, TOKBLK, ITERS);
+    fwg_seq_t s = fwg_seq_prologue(c, P[6], P[5], P[8], gqb, TOKBLK);
     g->s = &s;
 
     int shape[2] = {64, c->HD};
@@ -1125,7 +1181,33 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
             return NULL;
         }
     }
-    fwg_q_desc(c, H);
+    fwg_q_desc(c);
+    /* Every Q row is bounded by the last token of its sequence and every K/V page
+     * by its last page. This clamps the page, not the key, so keys past klen read
+     * rows of the last valid page; they are masked and clamped rows never stored. */
+    {
+        rocke_value_t* kl1 = fwg_minus_one(c, s.klen);
+        c->k_last_page = rocke_b_lshr(b, kl1, ci(c, bs_log2));
+    }
+    rocke_value_t* q_last = fwg_minus_one(c, s.cu_q_stop);
+    /* This lane's clamped Q row is loop-invariant. */
+    if(fold)
+    {
+        rocke_value_t* m = rocke_b_add(b, c->wq, c->ld.n_in_atom);
+        rocke_value_t* md = rocke_b_div(b, m, ci(c, FWG_FOLD_HEADS));
+        c->q_row = rocke_b_add(b, s.qstart, md);
+        c->q_row = fwg_clamp_to_last(c, c->q_row, q_last);
+        rocke_value_t* hb = rocke_b_mul(b, c->kvh, ci(c, g->GQAG));
+        rocke_value_t* mm = rocke_b_mod(b, m, ci(c, FWG_FOLD_HEADS));
+        c->q_row_head = rocke_b_add(b, hb, mm);
+    }
+    else
+    {
+        rocke_value_t* q_tok = rocke_b_add(b, s.qstart, c->wq);
+        c->q_row = rocke_b_add(b, q_tok, c->ld.n_in_atom);
+        c->q_row = fwg_clamp_to_last(c, c->q_row, q_last);
+        c->q_row_head = c->qhead;
+    }
     fwg_softmax_consts(c, P[7]);
 
     rocke_iter_arg_t iters[2 + FWG_MAX_NDDIM];
@@ -1151,7 +1233,7 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
     if(g->window > 0)
     {
         rocke_value_t* ks = rocke_b_add(b, g->context_off, s.qbase);
-        ks = rocke_b_sub(b, ks, ci(c, g->window));
+        ks = rocke_b_sub(b, ks, c->window);
         rocke_value_t* pos = rocke_b_cmp_gt(b, ks, ci(c, 0));
         ks = rocke_b_select(b, pos, ks, ci(c, 0));
         kvstart = rocke_b_div(b, ks, ci(c, BN));
@@ -1178,7 +1260,7 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
     if(g->window > 0)
     {
         rocke_value_t* sn = rocke_b_add(b, q_blk_hi, ci(c, 1));
-        sn = rocke_b_sub(b, sn, ci(c, g->window));
+        sn = rocke_b_sub(b, sn, c->window);
         rocke_value_t* sc = rocke_b_add(b, sn, ci(c, BN - 1));
         rocke_value_t* cs = rocke_b_div(b, sc, ci(c, BN));
         int_start = rocke_b_select(b, rocke_b_cmp_lt(b, sn, ci(c, 0)), kvstart, cs);
@@ -1252,7 +1334,7 @@ static rocke_kernel_def_t* fwg_build_general(rocke_ir_builder_t* b,
     if(l3.op == NULL || b->status != ROCKE_OK)
         return NULL;
     rocke_value_t** res = l3.op->results;
-    fwg_epilogue(c, Cout, &s, res[1], res + 2, H, g->GQAG, fold);
+    fwg_epilogue(c, Cout, &s, g->context_off, res[1], res + 2, g->GQAG, fold);
     return b->status == ROCKE_OK ? b->kernel : NULL;
 }
 
@@ -1286,6 +1368,16 @@ static rocke_kernel_def_t*
         return NULL;
     if(!rocke_require_tiled_attention_arch(b, arch))
         return NULL;
+    if(spec->emit_lse)
+    {
+        /* This body has no LSE store; refuse rather than build a kernel that
+         * carries the "lse" name but takes no lse_ptr and writes nothing. */
+        fwg_fail(b,
+                 ROCKE_ERR_NOTIMPL,
+                 "LSE output is not implemented on the gfx942 4-warp GQA builder (finite "
+                 "-1e30 max sentinel, no l == 0 guard, fixed 17-argument ABI)");
+        return NULL;
+    }
     if(spec->use_i64_kv_addr)
     {
         fwg_fail(b,
@@ -1299,12 +1391,12 @@ static rocke_kernel_def_t*
         fwg_fail(b, ROCKE_ERR_NOTIMPL, "4-warp GQA kernel supports dtype in {bf16, fp16}");
         return NULL;
     }
-    if(HD != 128 && HD != 256)
+    if(HD != 128 && HD != 192 && HD != 256)
     {
-        fwg_fail(b, ROCKE_ERR_NOTIMPL, "4-warp GQA kernel supports head_size in {128, 256}");
+        fwg_fail(b, ROCKE_ERR_NOTIMPL, "4-warp GQA kernel supports head_size in {128, 192, 256}");
         return NULL;
     }
-    if(HD == FWG_LEAN_HEAD_SIZE)
+    if(fwg_lean_head_size(HD))
     {
         if(!fwg_streq(spec->dtype, "bf16"))
         {
@@ -1319,6 +1411,25 @@ static rocke_kernel_def_t*
             return NULL;
         }
         return fwg_build_lean(b, spec);
+    }
+    if(BS <= 0 || (BS & (BS - 1)) != 0)
+    {
+        char m[ROCKE_ERR_MSG_CAP];
+        snprintf(m, sizeof(m), "4-warp GQA kernel needs a power-of-two block_size, got %d", BS);
+        fwg_fail(b, ROCKE_ERR_NOTIMPL, m);
+        return NULL;
+    }
+    if((pipe ? 32 : 64) % BS != 0)
+    {
+        /* A page wider than the KV tile would make BPT 0 and misplace every page. */
+        char m[ROCKE_ERR_MSG_CAP];
+        snprintf(m,
+                 sizeof(m),
+                 "4-warp GQA kernel needs block_size to divide the %d-key tile, got %d",
+                 pipe ? 32 : 64,
+                 BS);
+        fwg_fail(b, ROCKE_ERR_NOTIMPL, m);
+        return NULL;
     }
     if(fold && GQAG != FWG_FOLD_HEADS)
     {

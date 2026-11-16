@@ -11,6 +11,8 @@
  *   - _emit_kloop_simple         (rocke_gemm_emit_kloop_simple)
  *   - _emit_kloop_prefetch       (rocke_gemm_emit_kloop_prefetch)
  *
+ * The TDM K-loops are in gemm_build_kloop_tdm.cpp (Python _gemm_kloop_tdm.py).
+ *
  * These map to the Python closures of the same names (gemm_universal.py
  * ~1466-1782). Every other closure/helper is a peer TU reached via
  * rocke/instance_gemm_internal.h. The emission order + builder-call sequence is a
@@ -29,8 +31,8 @@
  *  One K-tile worth of MMAs across all per-warp atom positions and every K
  *  atom step inside this K-tile. On WMMA (RDNA) this delegates to the fully
  *  contract-driven _emit_wmma_phase. On MFMA (CDNA) it keeps the byte-identical
- *  arch-formula fragment load; the matmul + accumulator length are
- *  contract-driven (rocke_gemm_emit_mma / op->c_frag_len).
+ *  arch-formula fragment load; the matmul + result fragment length are
+ *  contract-driven (rocke_gemm_emit_mma / op->dst.frag_len).
  *
  *  lds_parity is split (per the internal-header convention) into a compile-time
  *  int (parity_imm) OR a runtime Value (parity_v != NULL == Python isinstance
@@ -71,7 +73,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
 
     if(ctx->is_wmma)
     {
-        rocke_gemm_emit_wmma_phase(ctx, A_src, B_src, iter_vars, num_iter_vars, out_accs);
+        rocke_gemm_emit_wmma_phase(
+            ctx, A_src, B_src, iter_vars, num_iter_vars, parity_imm, parity_v, out_accs);
         return;
     }
 
@@ -201,7 +204,9 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
  * ===================================================================== */
 void rocke_gemm_emit_compute_and_epilogue(rocke_gemm_build_ctx_t* ctx)
 {
-    if(ctx->prefetch)
+    if(ctx->spec->trait.tdm)
+        rocke_gemm_emit_kloop_tdm(ctx);
+    else if(ctx->prefetch)
         rocke_gemm_emit_kloop_prefetch(ctx);
     else if(ctx->db)
         rocke_gemm_emit_kloop_db(ctx);
@@ -260,8 +265,7 @@ void rocke_gemm_emit_kloop_db(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Start-of-iter barrier (RAW-safe read of half(parity), WAR-safe
-         * overwrite of half(next)). */
+        /* Start-of-iter barrier (compv4 non-TDM path; TDM never reaches kloop_db). */
         rocke_b_sync(b);
         /* Issue next-tile global->VGPR->LDS copy into the other half. */
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
@@ -362,6 +366,7 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
     int i;
 
     loads_per_tile = ctx->dtl_a_passes + ctx->dtl_b_passes;
+    /* vmcnt is 6 bits on gfx950 (max 63); saturates at 63 and loses the prefetch. */
     if(loads_per_tile > 63)
     {
         rocke_gemm_emit_kloop_simple(ctx);

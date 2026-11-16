@@ -162,7 +162,7 @@ static void test_shared_and_gfx950(void)
         check_spec_flag(c.name, "use_transposed_mask_limit", s.use_transposed_mask_limit, false);
     }
 
-    c = make_case("single-batch fp16 D128 bs32 SW", "gfx950", 64, 2, 16, NA, 0);
+    c = make_case("single-batch fp16 D128 bs32 SW", "gfx950", 64, 4, 32, NA, 1);
     c.p.dtype = "fp16";
     c.p.block_size = 32;
     c.p.sliding_window = 256;
@@ -740,7 +740,7 @@ static void test_3d_selectors(void)
             target_ctas, use_fp8;
         int segments, tile_override, wide_kv, decode_grid, stream, swizzle, page_ids;
     } rows[] = {
-        {"942 decode rule", "gfx942", 128, 16, 4, 1, 2048, 0, 304, 0, 0, 38, -1, 1, 1, 1, 1, 1},
+        {"942 decode rule", "gfx942", 128, 16, 4, 1, 2048, 0, 304, 0, 0, 38, -1, 1, 1, 0, 1, 1},
         {"942 D64 bs32 short kv",
          "gfx942",
          64,
@@ -756,7 +756,7 @@ static void test_3d_selectors(void)
          -1,
          1,
          1,
-         1,
+         0,
          1,
          1},
         {"942 D128 bs32 short kv",
@@ -774,7 +774,7 @@ static void test_3d_selectors(void)
          16,
          1,
          1,
-         1,
+         0,
          1,
          0},
         {"942 D256 bs32 short kv",
@@ -792,7 +792,7 @@ static void test_3d_selectors(void)
          16,
          0,
          1,
-         1,
+         0,
          0,
          0},
         {"942 D128 bs32 k16384",
@@ -810,7 +810,7 @@ static void test_3d_selectors(void)
          16,
          1,
          1,
-         1,
+         0,
          1,
          0},
         {"942 prefill clamp", "gfx942", 128, 16, 4, 8, 2048, 0, 1024, 0, 0, 16, -1, 1, 0, 0, 0, 0},
@@ -829,12 +829,12 @@ static void test_3d_selectors(void)
          -1,
          1,
          1,
-         1,
+         0,
          1,
          1},
         {"942 fp8 decode", "gfx942", 128, 16, 4, 1, 2048, 0, 304, 0, 1, 16, -1, 0, 1, 0, 0, 0},
-        {"942 D256 bs16", "gfx942", 256, 16, 4, 1, 2048, 0, 304, 0, 0, 32, -1, 0, 1, 1, 1, 1},
-        {"950 thin decode", "gfx950", 128, 16, 1, 1, 65536, 0, 304, 0, 0, 64, 64, 0, 1, 1, 1, 1},
+        {"942 D256 bs16", "gfx942", 256, 16, 4, 1, 2048, 0, 304, 0, 0, 19, -1, 0, 1, 0, 1, 1},
+        {"950 thin decode", "gfx950", 128, 16, 1, 1, 65536, 0, 304, 0, 0, 64, 64, 0, 1, 0, 1, 1},
         {"950 thin decode 600 cus",
          "gfx950",
          128,
@@ -850,10 +850,10 @@ static void test_3d_selectors(void)
          64,
          0,
          1,
-         1,
+         0,
          1,
          1},
-        {"950 decode rule", "gfx950", 128, 16, 16, 1, 2048, 0, 304, 0, 0, 9, -1, 0, 1, 1, 0, 1},
+        {"950 decode rule", "gfx950", 128, 16, 16, 1, 2048, 0, 304, 0, 0, 9, -1, 0, 1, 0, 0, 1},
         {"950 prefill clamp", "gfx950", 128, 16, 4, 8, 2048, 0, 1024, 0, 0, 16, -1, 0, 0, 0, 0, 0},
         {"950 target_ctas", "gfx950", 128, 16, 4, 8, 2048, 0, 304, 2048, 0, 32, -1, 0, 0, 0, 0, 0},
     };
@@ -1033,7 +1033,7 @@ static void test_bias(void)
     c.p.use_additive_bias = true;
     check_gate(c.name, "register_pv", rocke_unified_attn_enable_register_pv(&c.p, "gfx950"), false);
 
-    c = make_case("sink wpe3", "gfx950", 64, 4, 16, 3, NA);
+    c = make_case("sink wpe3", "gfx950", 128, 4, 32, 2, NA);
     c.p.head_size = 64;
     c.p.use_sinks = true;
     c.p.max_seqlen_q = 1024;
