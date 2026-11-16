@@ -182,6 +182,8 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # ../hipkernel_Gfx9*Attention*_test_categories_integration.yaml instead, and
     # ../descriptor-packaging/tests/test_attention_bundle_filters.py fails on a mismatch.
     # The SdpaFwdPlan bundles are the generic SDPA forward tests every SDPA engine runs.
+    # The GPU-reference targets use the same filters and run every SdpaFwdPlan case on purpose:
+    # they check each attention engine against the GPU reference on the full set.
     string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
         "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
         "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*"
