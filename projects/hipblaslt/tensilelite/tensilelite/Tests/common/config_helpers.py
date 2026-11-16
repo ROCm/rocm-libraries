@@ -132,12 +132,18 @@ def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
         marks.append(pytest.mark.syntax_error)
         return marks
 
-    # A TensileLite config is a mapping (GlobalParameters/BenchmarkProblems/...).
-    # Top-level sequences are library logic YAMLs (e.g. characterization data
-    # files), and mappings without BenchmarkProblems are unit-test data files;
-    # neither is a standalone run.py config. Signal the caller to skip them
-    # rather than crashing on doc["BenchmarkProblems"].
-    if not isinstance(doc, dict) or "BenchmarkProblems" not in doc:
+    # A TensileLite config is a mapping with BenchmarkProblems. Top-level
+    # sequences are library logic YAMLs, and mappings with neither
+    # BenchmarkProblems nor GlobalParameters are unit-test data; both are
+    # skipped. A mapping that has GlobalParameters but no BenchmarkProblems
+    # is a config whose key is missing or misspelled, so it must not vanish.
+    if not isinstance(doc, dict):
+        return None
+    if "BenchmarkProblems" not in doc:
+        if "GlobalParameters" in doc:
+            raise ValueError(
+                "%s: mapping has GlobalParameters but no BenchmarkProblems"
+                % filepath)
         return None
 
     if "TestParameters" in doc:

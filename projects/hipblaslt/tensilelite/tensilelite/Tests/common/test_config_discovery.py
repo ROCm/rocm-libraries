@@ -25,15 +25,24 @@ pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnknownMarkWarning
     "body",
     [
         "kernels: {a: [1, 2]}\n",
-        "GlobalParameters: {}\n",
         "- [1, 2]\n",
     ],
-    ids=["data-mapping", "no-benchmark-problems", "sequence"],
+    ids=["data-mapping", "sequence"],
 )
 def test_yaml_that_is_not_a_config_is_skipped(tmp_path, body):
+    """A sequence, or a mapping with neither key, is not a run.py config."""
     path = tmp_path / "data.yaml"
     path.write_text(body)
     assert configMarks(str(path), str(tmp_path), ["gfx950"]) is None
+
+
+def test_global_parameters_without_benchmark_problems_raises(tmp_path):
+    """A misspelled BenchmarkProblems key must not disappear from collection."""
+    path = tmp_path / "misspelled.yaml"
+    path.write_text("GlobalParameters: {}\nBenchmarkProblem:\n  - []\n")
+    with pytest.raises(ValueError, match="BenchmarkProblems") as exc:
+        configMarks(str(path), str(tmp_path), ["gfx950"])
+    assert str(path) in str(exc.value)
 
 
 def test_find_configs_keeps_configs_next_to_data(tmp_path):

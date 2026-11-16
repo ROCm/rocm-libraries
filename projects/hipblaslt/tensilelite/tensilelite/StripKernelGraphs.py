@@ -120,7 +120,10 @@ _KEEP_COMMENT_RE = re.compile(
 # Only rocRoller writes trace comments.  Every other custom kernel in the tree
 # is hand-written, and its comments are the only documentation it has, so the
 # trace strip runs solely on kernels whose custom.config declares this origin.
-_ROCROLLER_ORIGIN_RE = re.compile(r"^\s*Origin:\s*rocroller\s*$", re.IGNORECASE)
+# The spelling is exact and case-sensitive, matching the other rocRoller
+# checks: ``Origin: RocRoller`` is a different origin and is left alone.
+# Leading indentation is allowed because the key sits under Source.
+_ROCROLLER_ORIGIN_RE = re.compile(r"^\s*Origin: rocroller\s*$")
 
 
 def _indent(line):

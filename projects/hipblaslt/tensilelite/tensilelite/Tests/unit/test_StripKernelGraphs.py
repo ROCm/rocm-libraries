@@ -677,6 +677,40 @@ def test_a_kernel_from_another_source_keeps_its_comments(tmp_path, origin):
     assert path.read_text(encoding="utf-8") == source
 
 
+def test_origin_must_be_the_exact_line(tmp_path):
+    """Only the line ``Origin: rocroller`` selects the rocRoller strips.
+
+    ``Origin: RocRoller`` is not rocRoller, so a kernel that has only trace
+    comments is not stripped. A kernel-graph dump is still removed, because
+    that strip does not read Origin; the comments beside it stay. The exact
+    line loses both.
+    """
+    comments = "".join(TRACE_COMMENTS)
+    kept = buildSource(comments=comments, origin="RocRoller")
+    path = writeKernel(tmp_path, kept, name="kept.s")
+    assert processFile(str(path)) == ({}, 0)
+    assert path.read_text(encoding="utf-8") == kept
+
+    mixed = buildSource(comments=comments, origin="RocRoller", dump=KERNEL_GRAPH)
+    path = writeKernel(tmp_path, mixed, name="mixed.s")
+    removed, _ = processFile(str(path))
+    text = path.read_text(encoding="utf-8")
+    assert removed == {"kernel_graph": 9}
+    for line in TRACE_COMMENTS:
+        assert line in text
+    assert ".kernel_graph:" not in text
+
+    exact = buildSource(comments=comments, origin="rocroller", dump=KERNEL_GRAPH)
+    path = writeKernel(tmp_path, exact, name="exact.s")
+    removed, _ = processFile(str(path))
+    text = path.read_text(encoding="utf-8")
+    assert removed[COMMENT_LABEL] == len(TRACE_COMMENTS)
+    assert removed["kernel_graph"] == 9
+    for line in TRACE_COMMENTS:
+        assert line not in text
+    assert ".kernel_graph:" not in text
+
+
 def test_a_kernel_with_no_metadata_keeps_its_comments(tmp_path):
     source = TARGET_LINE + "".join(TRACE_COMMENTS) + INSTRUCTIONS
     path = writeKernel(tmp_path, source)
@@ -920,16 +954,43 @@ def customKernelRoot():
 def test_no_shipped_custom_kernel_carries_provenance(capsys):
     """Regression gate: a kernel added later must not bring provenance back.
 
-    That covers the graph dump, the launch metadata and the trace comments;
-    the next test pins the launch keys so the gate cannot quietly lose one.
+    That covers the graph dump, the launch metadata and the trace comments.
     """
     assert main(["--check", customKernelRoot()]) == 0
     assert "0 of" in capsys.readouterr().out
 
 
-def test_the_gate_covers_every_launch_metadata_key():
-    assert set(ROCROLLER_KERNEL_KEYS) | {"args[]." + k for k in ROCROLLER_ARG_KEYS} == set(
-        LAUNCH_REMOVED)
+def test_stripping_removes_every_launch_metadata_key_and_the_record_still_loads(tmp_path):
+    """Each launch-metadata key is removed, and the kernel still registers.
+
+    The synthetic kernel carries every key in ``ROCROLLER_KERNEL_KEYS`` and
+    ``ROCROLLER_ARG_KEYS`` (the same set ``LAUNCH_REMOVED`` counts). After the
+    strip those keys are gone, and ``readCustomKernelConfig`` still returns
+    the registration record.
+    """
+    from tensilelite.CustomKernels import readCustomKernelConfig
+
+    source = buildSource(kernelHead=LAUNCH_KERNEL_HEAD)
+    for key in (*ROCROLLER_KERNEL_KEYS, *ROCROLLER_ARG_KEYS):
+        assert f".{key}:" in source
+    for label in LAUNCH_REMOVED:
+        key = label.split(".", 1)[-1]
+        assert f".{key}:" in source
+
+    path = writeKernel(tmp_path, source)
+    processFile(str(path))
+    text = path.read_text(encoding="utf-8")
+    kernel = metadataYaml(text)["amdhsa.kernels"][0]
+    for key in ROCROLLER_KERNEL_KEYS:
+        assert f".{key}:" not in text
+        assert f".{key}" not in kernel
+    for key in ROCROLLER_ARG_KEYS:
+        assert f".{key}:" not in text
+        assert all(f".{key}" not in arg for arg in kernel[".args"])
+
+    config = readCustomKernelConfig(path.stem, directory=str(path.parent))
+    assert "ProblemType" in config
+    assert set(config["CustomKernel"]) >= {"args", "macrotile", "threads", "grid"}
 
 
 def test_shipped_rocroller_kernels_keep_only_their_licence_header():
