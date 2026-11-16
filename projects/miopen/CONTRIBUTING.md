@@ -119,6 +119,8 @@ Component CI does not run the MIOpen build matrix for changes limited to
 Markdown and reStructuredText files under `projects/miopen` (other than
 `LICENSE.md`); see
 [Component CI](../../docs/continuous-integration.md#component-ci).
+Changes to shared Component CI infrastructure still select MIOpen, even when
+the accompanying MIOpen changes are documentation-only.
 Component CI does not build the documentation, so check documentation changes
 with a local Sphinx build or a `/docs-preview` comment on the PR.
 
