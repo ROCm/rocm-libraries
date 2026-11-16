@@ -205,6 +205,12 @@ def build_grouped_wgrad_wmma(
     PRE = KH - 1  # dY rows a unit needs before its first input row
     CH8 = BC // 8  # 16-byte chunks per staged pixel
     io_type = _io_type(p.dtype)
+    ab = "bf16" if p.dtype == "bf16" else "f16"
+    from rocke.core.arch import ArchTarget
+
+    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
+        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+    )
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = T
@@ -333,9 +339,7 @@ def build_grouped_wgrad_wmma(
         return b.vec_concat(lo, hi)
 
     def wmma(a: Value, bb: Value, acc: Value) -> Value:
-        if p.dtype == "bf16":
-            return b.wmma_gfx1250_f32_16x16x32_bf16(a, bb, acc)
-        return b.wmma_gfx1250_f32_16x16x32_f16(a, bb, acc)
+        return b.mma(wmma_op, a, bb, acc)
 
     zero_acc = b.zero_vec_f32(8)
     zero_frag = b.zero_vec(io_type, 16)

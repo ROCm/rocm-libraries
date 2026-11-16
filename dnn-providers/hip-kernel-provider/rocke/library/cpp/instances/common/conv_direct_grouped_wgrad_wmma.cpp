@@ -22,6 +22,7 @@
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_direct_wgrad_internal.hpp"
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* rocke_wmma_fwd_op_id */
 
 using namespace rocke_dwg;
 
@@ -293,7 +294,10 @@ rocke_kernel_def_t* build_grouped(rocke_ir_builder_t* b,
     const int CH8 = BC / 8; /* 16-byte chunks per staged pixel */
     const bool bf16 = problem_is_bf16(&p);
     const rocke_type_t* io_type = bf16 ? rocke_bf16() : rocke_f16();
-    const char* wmma_op = bf16 ? "wmma_gfx1250_f32_16x16x32_bf16" : "wmma_gfx1250_f32_16x16x32_f16";
+    const char* wmma_op
+        = rocke_wmma_fwd_op_id(b, p.dtype, arch, "build_grouped_wgrad_wmma");
+    if(wmma_op == NULL)
+        return NULL;
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", T);
     rocke_attr_set_bool(b, &b->kernel->attrs, "lds_alias_scopes", true);
