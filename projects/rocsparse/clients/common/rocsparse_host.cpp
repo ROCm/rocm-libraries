@@ -5208,8 +5208,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -5302,8 +5302,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -7611,12 +7611,15 @@ void host_gpsv_interleaved_batch_qr(rocsparse_int m,
                - dw[batch_stride * (m - 3) + j] * x[batch_stride * (m - 1) + j])
               / d[batch_stride * (m - 3) + j];
 
-        x[batch_stride * (m - 4) + j]
-            = (x[batch_stride * (m - 4) + j]
-               - du[batch_stride * (m - 4) + j] * x[batch_stride * (m - 3) + j]
-               - dw[batch_stride * (m - 4) + j] * x[batch_stride * (m - 2) + j]
-               - r3[batch_count * (m - 4) + j] * x[batch_stride * (m - 1) + j])
-              / d[batch_stride * (m - 4) + j];
+        if(m >= 4)
+        {
+            x[batch_stride * (m - 4) + j]
+                = (x[batch_stride * (m - 4) + j]
+                   - du[batch_stride * (m - 4) + j] * x[batch_stride * (m - 3) + j]
+                   - dw[batch_stride * (m - 4) + j] * x[batch_stride * (m - 2) + j]
+                   - r3[batch_count * (m - 4) + j] * x[batch_stride * (m - 1) + j])
+                  / d[batch_stride * (m - 4) + j];
+        }
     }
 
     for(rocsparse_int i = m - 5; i >= 0; i--)
