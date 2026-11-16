@@ -7442,6 +7442,7 @@ namespace TensileLite
                           && !self.sizeMapping.isPersistentDataParallel()
                           && reductionStrat != origami::reduction_t::parallel;
 
+                    static_assert(StreamKFlagElements == origami::streamk::FLAG_ELEMENTS);
                     grid = origami::streamk::uniform_grid(
                         g0,
                         tiles,

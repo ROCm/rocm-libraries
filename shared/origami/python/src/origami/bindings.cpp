@@ -170,7 +170,9 @@ NB_MODULE(origami, m) {
       .def_rw("prefetch_local_read", &origami::tensile_params_t::prefetch_local_read)
       .def_rw("half_plr", &origami::tensile_params_t::half_plr)
       .def_rw("multicast", &origami::tensile_params_t::multicast)
-      .def_rw("adaptive_gemm", &origami::tensile_params_t::adaptive_gemm);
+      .def_rw("adaptive_gemm", &origami::tensile_params_t::adaptive_gemm)
+      .def_rw("stream_k_per_tile_extra_iters",
+              &origami::tensile_params_t::stream_k_per_tile_extra_iters);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -258,7 +260,8 @@ NB_MODULE(origami, m) {
       .def_rw("d_dtype", &origami::problem_t::d_dtype)
       .def_rw("mi_dtype", &origami::problem_t::mi_dtype)
       .def_rw("a_mx_block_size", &origami::problem_t::a_mx_block_size)
-      .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size);
+      .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size)
+      .def_rw("uniform_summation_order", &origami::problem_t::uniform_summation_order);
 
   nanobind::class_<origami::staggerU_t>(m, "staggerU_t")
       .def(nanobind::init<>())

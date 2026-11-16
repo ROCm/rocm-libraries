@@ -581,6 +581,39 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
     auto config_with_reduction               = config;
     config_with_reduction.reduction_strategy = reduction_strategy;
     num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
+
+    // hipBLASLt's launch of the selected grid (ContractionSolution::getPersistentGridImpl and
+    // resolveStreamKSettings): under uniform summation order, a static two-tile launch
+    // (StreamK=3, or StreamK=5 resolving to its static sub-mode) runs a row-uniform grid; and
+    // parallel reduction needs two workgroups per tile.  Cluster launches keep their own
+    // schedule (spatial_streamk_launch).
+    if (cluster_size(hardware, config) == 1) {
+      const bool static_two_tile =
+          config.stream_k == 3 ||
+          (config.stream_k == 5 &&
+           streamk::select_hybrid_mode(problem, hardware, config, problem.num_cus) ==
+               hybrid_mode_t::static_);
+      if (problem.uniform_summation_order && static_two_tile) {
+        const size_t iters =
+            std::max<size_t>(math::safe_ceil_div(problem.size.k, config.mt.k), 1);
+        // Non-atomic kernels: tree-reduced partial grids use the flag region.
+        const size_t flag_entries =
+            reduction_strategy == reduction_t::parallel ? 0 : streamk::FLAG_ELEMENTS;
+        num_wgs = streamk::uniform_grid(num_wgs,
+                                        num_mts,
+                                        iters,
+                                        reduction_strategy,
+                                        1,
+                                        tparams(config).stream_k_per_tile_extra_iters,
+                                        streamk::partial_tile_bytes(config.mt.m,
+                                                                    config.mt.n,
+                                                                    config.workspace_size_per_elem_c,
+                                                                    1),
+                                        config.workspace_size,
+                                        flag_entries);
+      }
+      reduction_strategy = streamk::reconcile_reduction(reduction_strategy, num_wgs, num_mts);
+    }
   }
 
   // There are cases in which StreamK combines multiple output MTs and assigns to 1 WG.

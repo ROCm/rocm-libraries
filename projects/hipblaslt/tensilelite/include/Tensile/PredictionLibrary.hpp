@@ -223,6 +223,8 @@ namespace TensileLite
                     .mi_dtype    = miDataType,
                     .a_mx_block_size = 0, // MX Data types come from rocroller
                     .b_mx_block_size = 0, // MX Data types come from rocroller
+                    .uniform_summation_order
+                    = problem.getParams().uniformSummationOrder() != 0,
                 };
 
                 auto prediction_result = origami::rank_configs(

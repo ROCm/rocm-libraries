@@ -109,6 +109,10 @@ ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
 /// The K iterations at or above which per-K-split work is worth a workgroup (grid_k_split_aware).
 inline constexpr size_t MIN_ITERS_PER_CU = 8;
 
+/// Entries of the flag region a tree-reduced Stream-K launch indexes per workgroup (hipBLASLt
+/// StreamKFlagElements).
+inline constexpr size_t FLAG_ELEMENTS = 2048;
+
 /**
  * @brief A tile's iterations rounded up to whole K units.
  *

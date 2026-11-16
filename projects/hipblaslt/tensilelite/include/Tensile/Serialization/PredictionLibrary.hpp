@@ -131,8 +131,10 @@ namespace TensileLite
                                 .cache_hints_a             = solution->sizeMapping.cacheHintA(),
                                 .cache_hints_b             = solution->sizeMapping.cacheHintB(),
                                 .cache_hints_d             = solution->sizeMapping.cacheHintD(),
+                                // The per-call workspace is not known here (unbounded); the
+                                // partial-tile size is the kernel's own, as at launch.
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
-                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                                .workspace_size_per_elem_c = solution->sizeMapping.workspaceSizePerElemC,
                                 .stream_k                  = (solution->sizeMapping.isStreamK() ? (solution->sizeMapping.hasDynamicAssignment() ? 4 : solution->sizeMapping.hasHybridAssignment() ? 5 : 3) : 0),
                                 .index                     = local_index,
                                 .grvw_a                    = static_cast<std::size_t>(
@@ -175,6 +177,8 @@ namespace TensileLite
                                     .half_plr             = solution->sizeMapping.HalfPLR,
                                     .multicast = solution->sizeMapping.Multicast != 0,
                                     .adaptive_gemm = solution->sizeMapping.adaptiveGemm,
+                                    .stream_k_per_tile_extra_iters
+                                    = solution->internalArgsSupport.perTileExtraIters,
                                 },
                             };
 

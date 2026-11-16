@@ -713,3 +713,48 @@ TEST_CASE("Origami streamk: launch_terms of a launch", "[origami][streamk][launc
   p.num_cus = 128;
   REQUIRE(origami::streamk::launch_terms(p, sk).timesteps == 2.0 * 300.0 / 256.0);
 }
+
+TEST_CASE("Origami streamk: context_t launches hipBLASLt's uniform-summation-order grid",
+          "[origami][streamk][launch]") {
+  // The grid rank_configs models is the one hipBLASLt launches: select_grid_size, then under
+  // uniform summation order the row-uniform snap, then parallel reduction only at two or more
+  // workgroups per tile.
+  const auto hw = make_hardware(950);
+  using origami::reduction_t;
+  int snapped = 0, unchanged = 0;
+  lcg_t rnd{5};
+  for (int i = 0; i < 4000; ++i) {
+    const size_t mt = size_t{32} << rnd(4), mt_k = size_t{32} << rnd(2);
+    auto p = make_problem(1 + rnd(16384), 1 + rnd(16384), 1 + rnd(16384), origami::transpose_t::N,
+                          origami::transpose_t::T, rnd(4) ? 1 : 1 + rnd(8));
+    auto c = make_config(mt, mt, mt_k, 16, 16, 16, false, 1, 1 + static_cast<int>(rnd(3)), 0, 0,
+                         rnd(2) ? 3 : 5);
+    c.workspace_size            = std::numeric_limits<size_t>::max();
+    c.workspace_size_per_elem_c = 4;
+    c.tensile().stream_k_per_tile_extra_iters = rnd(2) != 0;
+
+    const origami::gemm::context_t off(p, hw, c);
+    p.uniform_summation_order = true;
+    const origami::gemm::context_t on(p, hw, c);
+
+    auto sel             = c;
+    sel.reduction_strategy = origami::streamk::select_reduction(p, hw, c, c.grid_selection);
+    const size_t g0      = origami::streamk::select_grid_size(p, hw, sel, c.grid_selection);
+    const size_t tiles   = on.num_output_tiles;
+    const size_t iters   = std::max<size_t>((p.size.k + mt_k - 1) / mt_k, 1);
+    const size_t want    = origami::streamk::uniform_grid(
+        g0, tiles, iters, sel.reduction_strategy, 1, c.tensile().stream_k_per_tile_extra_iters,
+        mt * mt * 4, c.workspace_size,
+        sel.reduction_strategy == reduction_t::parallel ? 0 : origami::streamk::FLAG_ELEMENTS);
+    REQUIRE(off.num_wgs == g0);
+    REQUIRE(on.num_wgs == want);
+    REQUIRE(on.reduction_strategy ==
+            origami::streamk::reconcile_reduction(sel.reduction_strategy, want, tiles));
+    // Never fewer workgroups than tiles under uniform summation order.
+    REQUIRE(on.num_wgs >= tiles);
+    snapped += on.num_wgs != g0;
+    unchanged += on.num_wgs == g0;
+  }
+  REQUIRE(snapped > 100);
+  REQUIRE(unchanged > 100);
+}

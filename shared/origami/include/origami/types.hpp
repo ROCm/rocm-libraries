@@ -496,6 +496,11 @@ struct tensile_params_t {
   /// allows instead of the scalar edge path.
   int adaptive_gemm = 0;
 
+  /// The Stream-K kernel can hand out a tile's extra iterations within the tile
+  /// (TensileLite InternalArgsSupport::perTileExtraIters); under uniform summation order its
+  /// split factor need not divide the tile's iterations (streamk::uniform_grid).
+  bool stream_k_per_tile_extra_iters = false;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -517,7 +522,8 @@ struct tensile_params_t {
            lds_transpose_read_a == o.lds_transpose_read_a &&
            lds_transpose_read_b == o.lds_transpose_read_b && tdm_inst == o.tdm_inst &&
            prefetch_gl2 == o.prefetch_gl2 && prefetch_local_read == o.prefetch_local_read &&
-           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm;
+           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm &&
+           stream_k_per_tile_extra_iters == o.stream_k_per_tile_extra_iters;
   }
 
   std::size_t hash() const {
@@ -556,7 +562,8 @@ struct tensile_params_t {
                               prefetch_local_read,
                               half_plr,
                               multicast,
-                              adaptive_gemm);
+                              adaptive_gemm,
+                              stream_k_per_tile_extra_iters);
   }
 };
 
@@ -779,6 +786,10 @@ struct problem_t {
   /// MX block size.
   std::size_t a_mx_block_size = 0;
   std::size_t b_mx_block_size = 0;
+
+  /// The launch keeps a uniform summation order (hipBLASLt's default): a static Stream-K grid
+  /// is snapped onto a row-uniform one (streamk::uniform_grid).
+  bool uniform_summation_order = false;
 };
 
 /**
