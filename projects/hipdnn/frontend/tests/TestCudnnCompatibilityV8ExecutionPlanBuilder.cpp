@@ -92,6 +92,7 @@ TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, PlanNotesAndWorkspace)
     const std::vector<std::int64_t> ids = {deterministic, 9};
     installHeuristicResults(ids);
     installBehaviorNotes(9, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    installNumericalNotes(deterministic, {});
     const fe::OperationGraph_v8 graph = convGraph();
 
     const fe::ExecutionPlan_v8 nondeterministic = planFor(graph, denseIndex(ids, 9));
@@ -114,6 +115,104 @@ TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, PlanNotesAndWorkspace)
     EXPECT_EQ(claimed.getNumericNotes().front(), CUDNN_NUMERICAL_NOTE_TYPE_COUNT);
     EXPECT_TRUE(claimed.getAllBehaviorNotes().empty());
     EXPECT_EQ(claimed.getWorkspaceSize(), WORKSPACE_SIZE);
+}
+
+// An older same-major backend answers NOT_SUPPORTED for the numerical-note GET; the plan
+// still builds and reports {NONDETERMINISTIC}, and the other engine properties load.
+TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder,
+       NumericalNotesNotSupportedReadAsNondeterministic)
+{
+    installEngineName(1, "older_backend_engine");
+    installBehaviorNotes(1, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 3U);
+    failNumericalNoteQueries(HIPDNN_STATUS_NOT_SUPPORTED);
+
+    const fe::ExecutionPlan_v8 plan
+        = fe::ExecutionPlanBuilder_v8().setEngineConfig(configs[1], graph.getTag()).build();
+
+    ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
+    EXPECT_EQ(plan.getAllNumericNotes(),
+              std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+    EXPECT_TRUE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(
+        configs[1]->get_backend_descriptor()));
+    EXPECT_EQ(plan.getAllBehaviorNotes(),
+              std::vector<cudnnBackendBehaviorNote_t>{CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    EXPECT_NE(plan.getJsonRepresentation().find(R"("name":"older_backend_engine")"),
+              std::string::npos);
+}
+
+// Only NOT_SUPPORTED reads as unknown; any other failure of the GET still fails the build.
+TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, NumericalNotesOtherFailuresStillFailBuild)
+{
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 3U);
+
+    for(const hipdnnStatus_t status : {HIPDNN_STATUS_BAD_PARAM, HIPDNN_STATUS_INTERNAL_ERROR})
+    {
+        failNumericalNoteQueries(status);
+        EXPECT_THROW(
+            fe::ExecutionPlanBuilder_v8().setEngineConfig(configs[1], graph.getTag()).build(),
+            fe::cudnnException)
+            << "hipDNN status " << status;
+    }
+}
+
+// The second GET answers NOT_SUPPORTED after the count query succeeded: same unknown-notes
+// reading as the first.
+TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder,
+       NumericalNotesNotSupportedOnReadReadAsNondeterministic)
+{
+    installNumericalNotes(1, {HIPDNN_NUMERICAL_NOTE_FFT});
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 3U);
+    failNumericalNoteReads(HIPDNN_STATUS_NOT_SUPPORTED);
+
+    const fe::ExecutionPlan_v8 plan
+        = fe::ExecutionPlanBuilder_v8().setEngineConfig(configs[1], graph.getTag()).build();
+
+    ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
+    EXPECT_EQ(plan.getAllNumericNotes(),
+              std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+}
+
+TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, NumericalNotesOtherReadFailuresStillFailBuild)
+{
+    installNumericalNotes(1, {HIPDNN_NUMERICAL_NOTE_FFT});
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 3U);
+    failNumericalNoteReads(HIPDNN_STATUS_INTERNAL_ERROR);
+
+    EXPECT_THROW(fe::ExecutionPlanBuilder_v8().setEngineConfig(configs[1], graph.getTag()).build(),
+                 fe::cudnnException);
+}
+
+TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, NumericalNotesNegativeCountFailsBuild)
+{
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 3U);
+    reportNumericalNoteCount(-1);
+
+    EXPECT_THROW(fe::ExecutionPlanBuilder_v8().setEngineConfig(configs[1], graph.getTag()).build(),
+                 fe::cudnnException);
+}
+
+// The count query promises two notes and the read returns one.
+TEST_F(TestCudnnCompatibilityV8ExecutionPlanBuilder, NumericalNotesCountMismatchFailsBuild)
+{
+    installNumericalNotes(1, {HIPDNN_NUMERICAL_NOTE_FFT});
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 3U);
+    reportNumericalNoteCount(2);
+
+    EXPECT_THROW(fe::ExecutionPlanBuilder_v8().setEngineConfig(configs[1], graph.getTag()).build(),
+                 fe::cudnnException);
 }
 
 // PyTorch stores plans by value; copies must keep using one descriptor.
