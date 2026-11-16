@@ -642,12 +642,19 @@ class Box:
     def chained(self):
         return "class chained"
 
-    def caller(self):
+    def caller(
+        self,
+        window=-1,
+    ):
+        width = window + 1
+        swa = width > 0
+        unrelated = 7
+
         def helper():
             return chained()
 
         def gate():
-            return helper()
+            return helper() and swa
 
         return gate()
 """
@@ -659,6 +666,10 @@ class Box:
     assert '"outer helper"' not in region
     assert '"module chained"' in region  # followed through the inner helper
     assert '"class chained"' not in region
+    assert "swa = width > 0" in region
+    assert "width = window + 1" in region  # followed through the caller statement
+    assert "window=-1," in region  # the whole multi-line signature
+    assert "unrelated" not in region
 
 
 @pytest.mark.parametrize(
@@ -693,6 +704,7 @@ def test_host_code_change_names_the_archs_the_plan_leaves_alone(
 
     plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx942,gfx950")
     for key in ("gfx942/fmha_v3_fwd", "gfx950/fmha_v3_fwd"):
+        assert kinds(report, key) & sync.HOST_CODE_KINDS
         assert "host_code_shared_with_unplanned_archs" not in kinds(report, key)
 
     # gfx942 already mirrors the target's host code: nothing reaches it.
@@ -738,6 +750,38 @@ def test_new_arch_diffs_the_host_code_the_vendored_archs_share(sync, env, capsys
     apply(sync, env)
     assert run(sync, env, "mark-ported", "--module", new) == 0
     assert pin(kernels)["abi_commit"] == pin(kernels, new)["abi_commit"] == target
+
+
+def test_new_arch_diffs_from_the_oldest_host_code_commit_of_the_others(sync, env):
+    """When the vendored archs record different host-code commits, a new arch is
+    diffed from the oldest, so a change after it is not missed."""
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    aiter.module("gfx950", [ROW_HD128])
+    first = aiter.commit("v0.1.1")
+    plan(sync, env, "v0.1.1", arch="gfx942,gfx950")
+    apply(sync, env)
+    assert run(sync, env, "mark-ported", "--module", KEY) == 0
+    aiter.write(
+        "csrc/include/mha_fwd.h",
+        MHA_FWD_H.replace("p2 _p0;", "p2 _p0;\n    int nsplit;"),
+    )
+    second = aiter.commit("v0.2.0")
+    pins_path = kernels / "aiter_fwd_pins.json"
+    pins = json.loads(pins_path.read_text())
+    assert pins["modules"][KEY]["abi_commit"] == first
+    pins["modules"]["gfx950/fmha_v3_fwd"]["abi_commit"] = second
+    pins_path.write_text(json.dumps(pins))
+    aiter.module("gfx1100", [ROW_HD128])
+    aiter.commit("v0.3.0")
+
+    plan(sync, env, "v0.3.0", arch="gfx1100")
+    new = module_plan(report, "gfx1100/fmha_v3_fwd")
+    assert new["abi_baseline"] == first
+    assert (
+        "+    int nsplit;"
+        in of_kind(report, "reference_changed", "gfx1100/fmha_v3_fwd")[0]["diff"]
+    )
 
 
 def test_renamed_reference_keeps_the_host_code_baseline(sync, env, monkeypatch):

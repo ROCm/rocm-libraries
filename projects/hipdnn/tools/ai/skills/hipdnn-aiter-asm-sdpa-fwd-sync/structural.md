@@ -39,6 +39,7 @@ AITER also decides in Python whether a call reaches the ASM forward kernels: `ca
 
 - The engine mirrors the hd192x128 K/V row-extent decline (2^32 bytes) on gfx942 and gfx950. Both gate copies compute the extent in `_fmha_kv_byte_extent_ge_u32`.
 - The engine does not port the fp8 rule that `nhead_q / nhead_k` be a power of two. The gfx950 fp8 rows are excluded, and the gfx942 fp8 objects divide by the GQA ratio in full. Port the rule before enabling the gfx950 fp8 rows.
+- The region does not hold the conditions at the gate's call site, such as `elif can_impl_fmha_v3_fwd() and seqlen_q > 128` in the batch caller, or the branches before it. At `v0.1.28.post1` those state routing preferences ("prefer CK for decode cases"), not kernel limits. When a release changes the dispatch, read the caller's branch chain by hand for a new kernel limit.
 
 ## New arch (`new_arch`, `cmake_arch_missing`)
 
@@ -49,9 +50,11 @@ AITER also decides in Python whether a call reaches the ASM forward kernels: `ca
 5. Update the tests that name archs: the gfx942 and gfx950 skip guards in `tests/engines/asm_sdpa_engine/TestSdpaFwdPlanBuilder.cpp` and `TestAsmSdpaEngine.cpp`, and the arch strings of the shape-sweep cases in `integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp`.
 6. Add the arch to the forward GPU tests and to the cross-provider claims once it passes ([validation.md](validation.md)).
 
+A new arch of a module the tree already holds, such as `fmha_v3_fwd` for a third arch, also reports `new_module` for its `<arch>/<module>`. It is not new engine work: its host code is the engine's one copy, so its reference diffs run from the host-code commit the other archs record, and `mark-ported` records it with them.
+
 ## New module (`new_module`, `cmake_module_missing`)
 
-A new module, such as gfx1250's `fmha_fwd_bf16` and `fmha_fwd_bf16_varlen`, has its own CSV schema, argument struct and launch. It is new engine work, normally its own PR.
+A new module name, such as gfx1250's `fmha_fwd_bf16` and `fmha_fwd_bf16_varlen`, has its own CSV schema, argument struct and launch. It is new engine work, normally its own PR.
 
 1. **Codegen.** Add a custom command for `-m <module>` to `CMakeLists.txt`, beside the `fmha_v3_fwd` one, and add the header to the `asm_kernel_codegen` target. Every generated header defines the global names `CFG` and `ADD_CFG`, and one `cfg_<csv-name>` per CSV name (see `asm/asm_kernels/codegen.py`). Two module headers in one translation unit therefore collide, so give each module its own names before a source file includes two.
 2. **Host interface.** There is no baseline, so read the module's reference sources in full. For gfx1250 these are `csrc/py_itfs_cu/asm_fmha_fwd_with_sink.cu` or `asm_fmha_fwd_with_sink_varlen.cu`, plus the padding structs in `csrc/include/aiter_hip_common.h`. Note the argument struct and its asserted size, tensor layout and stride rules, required outputs (LSE is mandatory there), optional inputs (sink), and the launch geometry.

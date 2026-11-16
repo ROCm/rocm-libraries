@@ -4,7 +4,7 @@ Run these after `apply`, `verify` and the engine edits.
 
 ## 1. Build
 
-Build the hip-kernel-provider with the `hipdnn-superbuild` skill (`../hipdnn-superbuild/SKILL.md`). Reconfigure first: the engine's CMake finds kernel files with globs that run only at configure time. The build regenerates the kernel registries and the `.kpack` archives; a packing failure stops the build.
+Build the hip-kernel-provider with the `hipdnn-superbuild` skill (`../hipdnn-superbuild/SKILL.md`), configured with `-DHIPDNN_ENABLE_SDPA=ON` and `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON`. Without SDPA the ASM SDPA unit and GPU tests are not built, and a gtest filter that matches no test still exits 0. Without the ingestor `IntegrationGpuAsmSdpaForwardRagged` is not built. Reconfigure first: the engine's CMake finds kernel files with globs that run only at configure time. The build regenerates the kernel registries and the `.kpack` archives; a packing failure stops the build.
 
 ## 2. Unit tests
 
@@ -14,7 +14,7 @@ Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (
 
 ## 3. GPU validation per arch
 
-Every arch whose objects changed, and every arch whose launch code changed, needs the forward GPU tests in `dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp` to pass on a GPU of that arch: `IntegrationGpuSdpaFwdBf16` (instances `Smoke`, `SmokeFp8` and `SmokeStats`, built from the kernel registry) and `IntegrationGpuSdpaFwdShapeSweepBf16`. Filter on `*IntegrationGpuSdpaFwd*`. A port of shared host code (argument struct, packing, grid, dispatch) changes the launch code of every arch that vendors the module.
+Every arch whose objects changed, and every arch whose launch code changed, needs the forward GPU tests to pass on a GPU of that arch. In `dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp` these are `IntegrationGpuSdpaFwdBf16` (instances `Smoke`, `SmokeFp8` and `SmokeStats`, built from the kernel registry) and `IntegrationGpuSdpaFwdShapeSweepBf16`. In `IntegrationGpuSdpaForwardRagged.cpp`, `IntegrationGpuAsmSdpaForwardRagged` runs packed group-mode graphs with unequal lengths and fully masked rows (more query than key tokens under a bottom-right causal mask), which the registry cases do not. Filter on `*IntegrationGpuSdpaFwd*:*IntegrationGpuAsmSdpaForwardRagged*`, and check that the run's test count includes both. A port of shared host code (argument struct, packing, grid, dispatch) changes the launch code of every arch that vendors the module.
 
 - The registry cases check every kept row numerically: batch-mode rows against the CPU reference, group-mode rows against the CPU ragged reference. They use only equal query and key-value head counts, FNUZ fp8 inputs and the attention scale 1/sqrt(hdim_q).
 - A numerical failure on a new kernel is not always a launch bug. Some kernels round intermediate values to bf16 where others keep fp32: the gfx950 hd256 kernels round Q × scale × log2(e) to bf16, so their error grows with the scale. Before changing launch code, emulate the kernel's rounding (read its disassembly) against the reference at the test's shape and scale.

@@ -257,6 +257,15 @@ def module_key(arch: str, module: str) -> str:
     return f"{arch}/{module}"
 
 
+def host_code_sharers(kernels: Path, module: str) -> list[str]:
+    """The <arch>/<module> keys of every arch that vendors module. The engine
+    launches all of them with one copy of the module's host code and builds one
+    registry from their CSVs."""
+    return sorted(
+        module_key(d.parent.name, module) for d in kernels.glob(f"gfx*/{module}")
+    )
+
+
 def split_key(key: str) -> tuple[str, str]:
     arch, _, module = key.partition("/")
     if not arch or not module:
@@ -1243,25 +1252,25 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
             baseline_commit[key], baseline_source[key] = entry["commit"], "pin"
             if entry.get("abi_commit"):
                 abi_commit[key] = entry["abi_commit"]
+            elif explicit_baseline:
+                abi_commit[key] = explicit_baseline
         elif explicit_baseline and (kernels / arch / module).is_dir():
             baseline_commit[key], baseline_source[key] = explicit_baseline, "--baseline"
             abi_commit[key] = explicit_baseline
         if key not in abi_commit:
             # The engine launches every arch of a module with one copy of the host
             # code, so a module without its own host-code commit takes the one
-            # already vendored archs record; the oldest, if they differ, so that no
-            # change since any of them is missed.
+            # already vendored archs record; the oldest in AITER's history, if they
+            # differ, so that no change since any of them is missed.
             shared = {
-                entry["abi_commit"]
-                for other, entry in pins["modules"].items()
-                if split_key(other)[1] == module and entry.get("abi_commit")
+                pins["modules"][other]["abi_commit"]
+                for other in host_code_sharers(kernels, module)
+                if pins["modules"].get(other, {}).get("abi_commit")
             }
             if shared:
                 abi_commit[key] = min(
                     shared,
-                    key=lambda c: int(
-                        run_git(upstream.repo, "log", "-1", "--format=%ct", c)
-                    ),
+                    key=lambda c: int(run_git(upstream.repo, "rev-list", "--count", c)),
                 )
     baseline_files: dict[str, dict[str, bytes]] = {}
     for base in sorted(set(baseline_commit.values()) | set(abi_commit.values())):
@@ -1329,8 +1338,9 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         for name, header in plan["csv_headers"].items():
             headers.setdefault((module, cfg_name(name)), {})[arch] = header
     for module in {split_key(key)[1] for key in planned}:
-        for arch_dir in sorted(kernels.glob(f"gfx*/{module}")):
-            arch = arch_dir.parent.name
+        for other in host_code_sharers(kernels, module):
+            arch = split_key(other)[0]
+            arch_dir = kernels / arch / module
             if module_key(arch, module) in planned:
                 continue
             tree = module_tree(read_dir(arch_dir), module_key(arch, module))
@@ -1354,15 +1364,12 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         # it, so porting a reference change re-targets archs this plan leaves
         # alone. Their objects stay built for the host code they are pinned to.
         if any(f["kind"] in HOST_CODE_KINDS for f in findings.items):
-            unplanned = sorted(
-                arch_dir.parent.name
-                for arch_dir in kernels.glob(f"gfx*/{module}")
-                if module_key(arch_dir.parent.name, module) not in planned
-                and pins["modules"]
-                .get(module_key(arch_dir.parent.name, module), {})
-                .get("abi_commit")
-                != commit
-            )
+            unplanned = [
+                split_key(other)[0]
+                for other in host_code_sharers(kernels, module)
+                if other not in planned
+                and pins["modules"].get(other, {}).get("abi_commit") != commit
+            ]
             if unplanned:
                 findings.add(
                     3,
@@ -1571,10 +1578,7 @@ def cmd_mark_ported(args: argparse.Namespace, root: Path) -> int:
         if entry is None:
             raise SyncError(f"{key} is not pinned; run plan and apply first")
         _, module = split_key(key)
-        sharing = sorted(
-            module_key(arch_dir.parent.name, module)
-            for arch_dir in kernels.glob(f"gfx*/{module}")
-        )
+        sharing = host_code_sharers(kernels, module)
         unpinned = [k for k in sharing if k not in pins["modules"]]
         if unpinned:
             raise SyncError(

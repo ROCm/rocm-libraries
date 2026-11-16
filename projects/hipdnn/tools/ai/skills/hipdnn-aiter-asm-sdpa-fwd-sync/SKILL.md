@@ -86,7 +86,7 @@ python3 <skill-directory>/scripts/aiter_fwd_sync.py plan --ref <aiter-ref> --arc
 
 1. **Branch.** Work on a branch off `develop` named `users/<github-user>/aiter-fwd-<aiter-ref>`, where `<github-user>` is the user's GitHub login. Make sure the checkout has no uncommitted changes under `asm/asm_kernels/`.
 2. **Ref and archs.** Resolve the ref (`latest` if none was given), run `archs`, and ask which archs to update (rule 2).
-3. **Plan.** Run `plan`. Add `--baseline <baseline-commit>` when any chosen module has no pin. Show the user the markdown report.
+3. **Plan.** Run `plan`. Add `--baseline <baseline-commit>` when a chosen module is already vendored but has no pin, or is pinned without a host-code commit while no other arch of the module records one. Show the user the markdown report.
 4. **Decide the scope with the user.** Use [tiers.md](tiers.md). For each row added with a new value, decide whether to keep it or exclude it, and for each excluded row record a reason. Re-run `plan` with `--exclude` and `--include` until the report is what the user wants, then get explicit approval.
 5. **Apply.** Run `apply --report <report-dir>/plan.json`, then `verify`. Both must succeed.
 6. **Engine work.** Work through each finding with its page: tier 0 and 1 in [data-changes.md](data-changes.md), tier 2 in [new-values.md](new-values.md), tier 3 in [structural.md](structural.md). A large tier 3 item, such as a new arch, can go in its own PR; agree that with the user. Once every `reference_changed` diff for a module is ported, run `mark-ported --module <module>` and `verify`.
