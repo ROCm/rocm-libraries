@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "check_matrix_coo_device.h"
+#include "check_matrix_workspace.hpp"
 
 template <typename T, typename I>
 rocsparse_status rocsparse::check_matrix_coo_buffer_size_core(rocsparse_handle       handle,
@@ -45,14 +46,10 @@ rocsparse_status rocsparse::check_matrix_coo_buffer_size_core(rocsparse_handle  
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    if(nnz == 0)
-    {
-        buffer_size[0] = 0;
-    }
-    else
-    {
-        buffer_size[0] = ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
-    }
+    rocsparse::check_matrix_coo_workspace ws;
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::check_matrix_coo_workspace_query<I>(handle, m, n, nnz, idx_base, storage, ws));
+    *buffer_size = ws.total;
     return rocsparse_status_success;
 }
 

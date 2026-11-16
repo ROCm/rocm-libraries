@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -266,6 +266,10 @@ rocsparse_status rocsparse_check_matrix_hyb(rocsparse_handle        handle,
                                                                             data_status,
                                                                             temp_buffer));
 
+    // The COO check writes success into data_status before it looks at the COO
+    // part, including when that part is empty.
+    const rocsparse_data_status ell_data_status = *data_status;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::check_matrix_coo_template_dispatch(hyb->data_type_T,
                                                                             handle,
                                                                             hyb->m,
@@ -280,6 +284,11 @@ rocsparse_status rocsparse_check_matrix_hyb(rocsparse_handle        handle,
                                                                             storage,
                                                                             data_status,
                                                                             temp_buffer));
+
+    if(ell_data_status != rocsparse_data_status_success)
+    {
+        *data_status = ell_data_status;
+    }
 
     return rocsparse_status_success;
 }

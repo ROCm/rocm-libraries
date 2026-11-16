@@ -27,6 +27,93 @@
 #include "rocsparse_utility.hpp"
 
 #include "check_matrix_ell_device.h"
+#include "check_matrix_workspace.hpp"
+
+namespace rocsparse
+{
+    template <typename I>
+    static rocsparse_status check_matrix_ell_unsorted_duplicates(rocsparse_handle       handle,
+                                                                 I                      m,
+                                                                 I                      n,
+                                                                 I                      ell_width,
+                                                                 const I*               ell_col_ind,
+                                                                 rocsparse_index_base   idx_base,
+                                                                 rocsparse_data_status* data_status,
+                                                                 void*                  temp_buffer)
+    {
+        check_matrix_ell_workspace ws;
+        RETURN_IF_ROCSPARSE_ERROR(check_matrix_ell_workspace_query<I>(
+            handle, m, n, ell_width, rocsparse_storage_mode_unsorted, ws));
+
+        const int64_t entries = static_cast<int64_t>(m) * ell_width;
+
+        char* ptr            = reinterpret_cast<char*>(temp_buffer) + ws.status_bytes;
+        void* rocprim_buffer = ptr;
+        ptr += ws.rocprim_slot;
+        int64_t* offsets = reinterpret_cast<int64_t*>(ptr);
+        ptr += ws.offset_bytes;
+        I* gathered = reinterpret_cast<I*>(ptr);
+        ptr += ws.array_bytes;
+        I* gathered_alt = reinterpret_cast<I*>(ptr);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_gather_device<256, I>),
+                                           dim3((m - 1) / 256 + 1),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           m,
+                                           n,
+                                           ell_width,
+                                           ell_col_ind,
+                                           idx_base,
+                                           gathered);
+
+        const int64_t  offset_threads = static_cast<int64_t>(m) + 1;
+        const uint32_t offset_blocks  = static_cast<uint32_t>((offset_threads - 1) / 256 + 1);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_offsets_device<256>),
+                                           dim3(offset_blocks),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           static_cast<int64_t>(m),
+                                           static_cast<int64_t>(ell_width),
+                                           offsets);
+
+        rocsparse::primitives::double_buffer<I> keys(gathered, gathered_alt);
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::segmented_radix_sort_keys<I, int64_t>(
+            handle,
+            keys,
+            static_cast<size_t>(entries),
+            static_cast<size_t>(m),
+            offsets,
+            offsets + 1,
+            0,
+            ws.end_bit,
+            ws.rocprim_bytes,
+            rocprim_buffer)));
+
+        rocsparse_data_status* d_data_status
+            = reinterpret_cast<rocsparse_data_status*>(temp_buffer);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_duplicate_device<256, I>),
+                                           dim3((m - 1) / 256 + 1),
+                                           dim3(256),
+                                           0,
+                                           handle->stream,
+                                           m,
+                                           n,
+                                           ell_width,
+                                           keys.current(),
+                                           d_data_status);
+
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
+                                                     d_data_status,
+                                                     sizeof(rocsparse_data_status),
+                                                     hipMemcpyDeviceToHost,
+                                                     handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+        return rocsparse_status_success;
+    }
+}
 
 template <typename T, typename I>
 rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
@@ -46,11 +133,8 @@ rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
 
     *data_status = rocsparse_data_status_success;
 
-    // Temporary buffer entry points
-    char* ptr = reinterpret_cast<char*>(temp_buffer);
-
-    rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(ptr);
-    ptr += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
+    // The status slot is at the start of the temporary buffer.
+    rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(temp_buffer);
 
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status), handle->stream));
@@ -77,6 +161,13 @@ rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
                                                  hipMemcpyDeviceToHost,
                                                  handle->stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+
+    if(*data_status == rocsparse_data_status_success && storage == rocsparse_storage_mode_unsorted
+       && ell_width > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::check_matrix_ell_unsorted_duplicates<I>(
+            handle, m, n, ell_width, ell_col_ind, idx_base, data_status, temp_buffer));
+    }
 
     if(*data_status != rocsparse_data_status_success)
     {
