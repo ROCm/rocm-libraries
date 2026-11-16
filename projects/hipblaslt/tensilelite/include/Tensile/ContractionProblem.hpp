@@ -837,6 +837,11 @@ namespace TensileLite
             m_outputAmaxD = outputAmaxD;
         }
 
+        void setOutputPeerD(bool outputPeerD)
+        {
+            m_outputPeerD = outputPeerD;
+        }
+
         void setUseBias(int useBias)
         {
             m_useBias = useBias;
@@ -937,6 +942,11 @@ namespace TensileLite
         bool outputAmaxD() const
         {
             return m_outputAmaxD;
+        }
+
+        bool outputPeerD() const
+        {
+            return m_outputPeerD;
         }
 
         int useBias() const
@@ -1736,6 +1746,7 @@ namespace TensileLite
         bool             m_useE                    = false;
         rocisa::DataType m_auxType                 = rocisa::DataType::None;
         bool             m_outputAmaxD             = false;
+        bool             m_outputPeerD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
         int              m_mxScaleFormat           = 0;
@@ -1884,6 +1895,7 @@ namespace TensileLite
         void*       d     = nullptr;
         void*       e     = nullptr;
         void*       amaxD = nullptr;
+        void*       peerD = nullptr; // second D buffer (OutputPeerD)
 
         void const* const* batchA    = nullptr;
         void const* const* batchB    = nullptr;

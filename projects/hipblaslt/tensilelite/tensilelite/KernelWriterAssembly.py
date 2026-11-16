@@ -11449,6 +11449,14 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("SrdGate", 4, 4)
       module.add(RegSet("s", "sgprSrdGate", self.sgprs["SrdGate"]))
 
+    if kernel["ProblemType"]["OutputPeerD"]:
+      # SrdPeerD is rebuilt from SrdD before each peer store: SrdPeerD = SrdD + DeltaPeerD,
+      # where DeltaPeerD = AddressPeerD - AddressD, so it follows every SrdD update.
+      self.defineSgpr("SrdPeerD", 4, 4)
+      module.add(RegSet("s", "sgprSrdPeerD", self.sgprs["SrdPeerD"]))
+      self.defineSgpr("DeltaPeerD", 2, 2)
+      module.add(RegSet("s", "sgprDeltaPeerD", self.sgprs["DeltaPeerD"]))
+
     if kernel["ProblemType"]["UseE"]:
       self.defineSgpr("SrdE", 4, 4)
       module.add(RegSet("s", "sgprSrdE", self.sgprs["SrdE"]))
@@ -20076,6 +20084,9 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VMovB32(dst=vgpr("AmaxOut"), src="0"))
     if self.states.numStoreSgprToLoad or self.states.numStoreSgprToLoad2: # Wait for kernel args
       module.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args."%((self.states.numStoreSgprToLoad+self.states.numStoreSgprToLoad2) * 4)))
+    if kernel["ProblemType"]["OutputPeerD"]:
+      module.add(SSubU32(dst=sgpr("DeltaPeerD+0"), src0=sgpr("AddressPeerD+0"), src1=sgpr("AddressD+0"), comment="peer D - D, low"))
+      module.add(SSubBU32(dst=sgpr("DeltaPeerD+1"), src0=sgpr("AddressPeerD+1"), src1=sgpr("AddressD+1"), comment="peer D - D, high"))
 
     if not noGSUBranch:
       labelMB = Label(self.labels.getNameInc("GW_MB"), comment="Global Write MB")
@@ -22041,7 +22052,8 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
-               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False):
+               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False,
+               peerD: bool = False):
     """
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
@@ -22049,6 +22061,9 @@ class KernelWriterAssembly(KernelWriter):
     CompactLoopStore: elementIdx lets elt0 (rowInc==0) seed incrementToNextRow.
     overrideAfterPrimerRows is the next emitting elt's rowInc (0 = no override).
     forceSlc forces slc on the D store regardless of NonTemporalD; tc == 'D' only.
+    peerD (OutputPeerD): the same D store into the peer D buffer. SrdPeerD is SrdD plus the
+    distance between the two buffers, taken from the SrdD that the regular store just used,
+    with a system-scope store so that another device sees the data.
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
@@ -22070,14 +22085,19 @@ class KernelWriterAssembly(KernelWriter):
         bps = self.states.bpeCexternal * ss.cfg.gwvw
         rpv = self.states.bpeCexternal * ss.cfg.gwvw / self.states.bpr
 
+        if peerD:
+          module.add(SAddU32(dst=sgpr("SrdPeerD+0"), src0=sgpr("SrdD+0"), src1=sgpr("DeltaPeerD+0"), comment="peer SRD = SrdD + delta"))
+          module.add(SAddCU32(dst=sgpr("SrdPeerD+1"), src0=sgpr("SrdD+1"), src1=sgpr("DeltaPeerD+1")))
+          module.add(SMovB64(dst=sgpr("SrdPeerD+2", 2), src=sgpr("SrdD+2", 2), comment="same limit and flags"))
+          scope = CacheScope.SCOPE_SYS
         if kernel["BufferStore"]:
           addr0 = vgpr(addrCalc.addrDVgpr)
-          addr1 = sgpr("SrdD", 4)
+          addr1 = sgpr("SrdPeerD" if peerD else "SrdD", 4)
         else:
           addr0 = vgpr(addrCalc.addrDVgpr,2)
           addr1 = ""
         # CLS: also seed the SRD chain on elt0/batch0 (rowInc==0).
-        if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+        if (not peerD and ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01, forceinitrow0=1,
                                                  overrideAfterPrimerRows=overrideAfterPrimerRows))
 
@@ -22192,6 +22212,9 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
               glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, comment=comment, scope=scope, th=th, nv=nv))
+    if tc == 'D' and not peerD and kernel["ProblemType"]["OutputPeerD"]:
+      module.add(self.addStore(kernel, ss, tc, addrCalc, sumIdx, tmpS01, edge, elementIdx, batchIdx,
+                               wsOffset, overrideAfterPrimerRows, comment + " (peer D)", forceSlc, peerD=True))
     return module
 
   ##############################################################################

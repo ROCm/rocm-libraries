@@ -105,6 +105,7 @@ namespace TensileLite
             bool        m_useGradient      = false;
             bool        m_useGateResidual  = false;
             bool        m_outputAmaxD      = false;
+            bool        m_outputPeerD      = false;
 
             int                              m_sparse;
             KernelLanguage                   m_kernelLanguage;

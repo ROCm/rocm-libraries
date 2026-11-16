@@ -331,6 +331,8 @@ namespace TensileLite
 
             if(args.count("output-amaxD"))
                 m_outputAmaxD = args["output-amaxD"].as<bool>();
+            if(args.count("output-peerD"))
+                m_outputPeerD = args["output-peerD"].as<bool>();
 
             if(args.count("bias-type-args"))
                 m_biasTypeArgs = args["bias-type-args"].as<std::vector<rocisa::DataType>>();
@@ -657,6 +659,7 @@ namespace TensileLite
                                 rv.back().setUseGateResidual(m_useGateResidual);
                                 rv.back().setUseE(m_useE);
                                 rv.back().setOutputAmaxD(m_outputAmaxD);
+                                rv.back().setOutputPeerD(m_outputPeerD);
                                 rv.back().setKernelLanguage(m_kernelLanguage);
                                 rv.back().setPerformanceMetric(m_performanceMetric);
                                 rv.back().setDeterministicMode(m_deterministicMode);

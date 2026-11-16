@@ -54,7 +54,8 @@ def _kernel(**over):
     problem_type = {
         "MXBlockA": False, "MXBlockB": False, "Sparse": False, "UseBeta": True,
         "UseScaleAB": False, "UseScaleCD": False, "UseScaleAlphaVec": 0, "UseE": False,
-        "ActivationType": ActivationType("none"), "OutputAmaxD": False, "UseBias": 0,
+        "ActivationType": ActivationType("none"), "OutputAmaxD": False, "OutputPeerD": False,
+        "UseBias": 0,
         "GroupedGemm": False, "FusedA2A": "Disabled",
     }
     problem_type.update(over.pop("ProblemType", {}))
@@ -262,6 +263,13 @@ def test_amax_output_addresses():
     sems = _sems(_writer(), _kernel(ProblemType={"OutputAmaxD": True}))
     for expected in ["AddressAmaxOut", "AmaxWS", "AmaxSync"]:
         assert expected in sems
+
+
+def test_peer_d_address_follows_the_epilogue_args_and_precedes_amax():
+    sems = _sems(_writer(), _kernel(ProblemType={"OutputPeerD": True, "OutputAmaxD": True}))
+    assert sems.count("AddressPeerD") == 1
+    assert sems.index("AddressPeerD") < sems.index("AddressAmaxOut")
+    assert "AddressPeerD" not in _sems(_writer(), _kernel())
 
 
 def test_mbsk_trailing_args_from_algorithm():

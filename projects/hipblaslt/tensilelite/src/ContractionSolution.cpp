@@ -2049,6 +2049,10 @@ namespace TensileLite
             }
         }
 
+        // After the activation arguments and before the amax ones, as in the kernel signature.
+        if(problemType.outputPeerD)
+            args.template append<const void*>("AddressPeerD", inputs.peerD);
+
         if(problemType.outputAmaxD)
         {
             args.template append<const void*>("AddrAmaxOut", inputs.amaxD);
@@ -3862,6 +3866,9 @@ namespace TensileLite
                                                        problem.useGateResidual() ? gate.strides().at(index) : 0);
                     break;
                 }
+                case CustomArgSemantic::AddressPeerD:
+                    rv.args.template append<void const*>("AddressPeerD", inputs.peerD);
+                    break;
                 case CustomArgSemantic::AddressAmaxOut:
                     rv.args.template append<void const*>("AddressAmaxOut", inputs.amaxD);
                     break;
