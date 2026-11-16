@@ -53,6 +53,14 @@ forwarding; a flag-off build has no forwarding, so they are in no baseline.
       committed baseline. Opt-in because it names ROCm soversions and the
       platform's loader, so it changes with routine ROCm updates.
 
+Both gates also read a Windows build's DLLs (MIOpen.dll and MIOpen_private.dll; the
+wrapper's import table must not name hipdnn_backend.dll). The DLL name in the export
+table stands in for the SONAME and the import tables for DT_NEEDED, matched without
+regard to case as the Windows loader does. A DLL name carries no version, so
+co-versioning (8) instead requires the wrapper to import the private DLL under its own
+name and both version resources to record the same file version. The committed
+DT_NEEDED baseline names Linux libraries and does not apply.
+
 ``check-installed-headers`` -- run on the staged include tree of a flag-on
 build. Fails if the private rename spelling (``miopenFoo_impl``) appears in any
 installed header outside the private include directory. The installed headers
@@ -129,10 +137,53 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
 
-EXPECTED_SONAME = "libMIOpen.so.1"
-PRIVATE_LIB_PREFIX = "libMIOpen_private"
-HIPDNN_BACKEND_PREFIX = "libhipdnn_backend"
+
+@dataclass(frozen=True)
+class Naming:
+    """How one binary format names the libraries and links the checks look at."""
+
+    wrapper_name: str  # the name the wrapper records for itself
+    private_prefix: str
+    backend_prefix: str
+    own_name: str  # what the format calls that self-recorded name
+    needed_on: str  # how a message names one link to another library
+    needed_list: str  # how it names the whole list of them
+    ignore_case: bool  # whether the loader matches library names without case
+
+    def has_prefix(self, name: str, prefix: str) -> bool:
+        if self.ignore_case:
+            return name.lower().startswith(prefix.lower())
+        return name.startswith(prefix)
+
+    def same(self, a: str, b: str) -> bool:
+        return a.lower() == b.lower() if self.ignore_case else a == b
+
+    def private_import(self, needed: list[str]) -> str:
+        """The first of `needed` that names the private library, or ""."""
+        return next((n for n in needed if self.has_prefix(n, self.private_prefix)), "")
+
+
+ELF_NAMING = Naming(
+    wrapper_name="libMIOpen.so.1",
+    private_prefix="libMIOpen_private",
+    backend_prefix="libhipdnn_backend",
+    own_name="SONAME",
+    needed_on="DT_NEEDED on",
+    needed_list="DT_NEEDED list",
+    ignore_case=False,
+)
+
+PE_NAMING = Naming(
+    wrapper_name="MIOpen.dll",
+    private_prefix="MIOpen_private",
+    backend_prefix="hipdnn_backend",
+    own_name="DLL name",
+    needed_on="import of",
+    needed_list="import list",
+    ignore_case=True,
+)
 
 # Public MIOpen C API naming convention: "miopen" followed by an uppercase
 # letter. This deliberately excludes internal exported shims such as
@@ -175,6 +226,8 @@ DT_NULL, DT_NEEDED, DT_SONAME = 0, 1, 14
 
 class Elf:
     """Just enough ELF to read .dynsym and .dynamic from a 32/64-bit object."""
+
+    naming = ELF_NAMING
 
     def __init__(self, path: Path):
         self.path = path
@@ -297,29 +350,218 @@ class Elf:
 
 
 # --------------------------------------------------------------------------
+# Minimal PE reader
+#
+# A Windows build's libraries are DLLs. This answers the same questions as the
+# ELF reader: the export table stands in for .dynsym, the import tables for
+# DT_NEEDED, and the DLL name the export table records for the SONAME. A DLL name
+# carries no version, so the version resource is read as well.
+# --------------------------------------------------------------------------
+
+PE32_MAGIC, PE32_PLUS_MAGIC = 0x10B, 0x20B
+DIR_EXPORT, DIR_IMPORT, DIR_RESOURCE, DIR_DELAY_IMPORT = 0, 1, 2, 13
+IMAGE_SCN_MEM_EXECUTE = 0x20000000
+RT_VERSION = 16
+RESOURCE_SUBDIRECTORY = 0x80000000
+VS_FIXEDFILEINFO_SIGNATURE = 0xFEEF04BD
+
+
+class Pe:
+    """Just enough PE to read the exports, imports and file version of a DLL."""
+
+    naming = PE_NAMING
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.data = path.read_bytes()
+        if self.data[:2] != b"MZ":
+            raise AbiError(f"not a PE file: {path}")
+        (pe_offset,) = self._unpack("I", 0x3C)
+        if self.data[pe_offset : pe_offset + 4] != b"PE\0\0":
+            raise AbiError(f"not a PE file: {path}")
+        (section_count,) = self._unpack("H", pe_offset + 6)
+        (optional_size,) = self._unpack("H", pe_offset + 20)
+        optional = pe_offset + 24
+        (magic,) = self._unpack("H", optional)
+        if magic == PE32_PLUS_MAGIC:
+            (self.image_base,) = self._unpack("Q", optional + 24)
+            (dir_count,) = self._unpack("I", optional + 108)
+            dirs = optional + 112
+        elif magic == PE32_MAGIC:
+            (self.image_base,) = self._unpack("I", optional + 28)
+            (dir_count,) = self._unpack("I", optional + 92)
+            dirs = optional + 96
+        else:
+            raise AbiError(f"unknown PE optional header magic {magic:#x}: {path}")
+        self.directories = [
+            self._unpack("II", dirs + 8 * i) for i in range(min(dir_count, 16))
+        ]
+
+        self.sections = []
+        for i in range(section_count):
+            off = optional + optional_size + 40 * i
+            vsize, va, raw_size, raw_offset = self._unpack("IIII", off + 8)
+            (flags,) = self._unpack("I", off + 36)
+            self.sections.append((va, max(vsize, raw_size), raw_offset, flags))
+
+    def _unpack(self, fmt: str, off: int):
+        try:
+            return struct.unpack_from("<" + fmt, self.data, off)
+        except struct.error:
+            raise AbiError(f"truncated PE file: {self.path}") from None
+
+    def _section(self, rva: int):
+        for section in self.sections:
+            va, size, _raw, _flags = section
+            if va <= rva < va + size:
+                return section
+        raise AbiError(f"RVA {rva:#x} lies in no section of {self.path}")
+
+    def _offset(self, rva: int) -> int:
+        va, _size, raw, _flags = self._section(rva)
+        return rva - va + raw
+
+    def _executable(self, rva: int) -> bool:
+        _va, _size, _raw, flags = self._section(rva)
+        return bool(flags & IMAGE_SCN_MEM_EXECUTE)
+
+    def _cstr(self, rva: int) -> str:
+        off = self._offset(rva)
+        end = self.data.find(b"\x00", off)
+        if end < 0:
+            raise AbiError(f"truncated PE file: {self.path}")
+        return self.data[off:end].decode("utf-8", "replace")
+
+    def _directory(self, index: int) -> tuple[int, int]:
+        """(RVA, size) of data directory `index`; (0, 0) when the DLL has none."""
+        return self.directories[index] if index < len(self.directories) else (0, 0)
+
+    def defined_dynamic_functions(self) -> set[str]:
+        """Names of the exported functions.
+
+        Data exports are left out, as the ELF reader leaves out non-function
+        symbols. A forwarder (an export that points at another DLL's function)
+        counts as a function.
+        """
+        export_rva, export_size = self._directory(DIR_EXPORT)
+        if not export_rva:
+            return set()
+        table = self._offset(export_rva)
+        name_count, functions, names, ordinals = self._unpack("IIII", table + 24)
+        exported: set[str] = set()
+        for i in range(name_count):
+            (name_rva,) = self._unpack("I", self._offset(names) + 4 * i)
+            (index,) = self._unpack("H", self._offset(ordinals) + 2 * i)
+            (target,) = self._unpack("I", self._offset(functions) + 4 * index)
+            forwarder = export_rva <= target < export_rva + export_size
+            if forwarder or self._executable(target):
+                exported.add(self._cstr(name_rva))
+        return exported
+
+    def soname(self) -> str:
+        """The DLL's own name, as its export table records it; "" with no exports."""
+        export_rva, _ = self._directory(DIR_EXPORT)
+        if not export_rva:
+            return ""
+        (name_rva,) = self._unpack("I", self._offset(export_rva) + 12)
+        return self._cstr(name_rva)
+
+    def needed(self) -> list[str]:
+        """The DLLs this one imports from, delay-loaded ones included.
+
+        A delay-loaded DLL is not opened until first use, but the link still binds
+        to it by name, which is what the backend check rules out.
+        """
+        names = []
+        import_rva, _ = self._directory(DIR_IMPORT)
+        if import_rva:
+            off = self._offset(import_rva)
+            while True:
+                (name_rva,) = self._unpack("I", off + 12)
+                if not name_rva:
+                    break
+                names.append(self._cstr(name_rva))
+                off += 20
+        delay_rva, _ = self._directory(DIR_DELAY_IMPORT)
+        if delay_rva:
+            off = self._offset(delay_rva)
+            while True:
+                attributes, name = self._unpack("II", off)
+                if not name:
+                    break
+                # Attribute bit 0 clear marks the old layout, which holds addresses
+                # rather than RVAs.
+                if not attributes & 1:
+                    name -= self.image_base
+                names.append(self._cstr(name))
+                off += 32
+        return sorted(names)
+
+    def file_version(self) -> str:
+        """FILEVERSION from the version resource as "a.b.c.d"; "" without one."""
+        resource_rva, _ = self._directory(DIR_RESOURCE)
+        if not resource_rva:
+            return ""
+        root = self._offset(resource_rva)
+        # Three levels: type, name, language. The first two lead to
+        # subdirectories and the last to the data. Any name and language will
+        # do; a DLL carries one version resource.
+        node = root
+        for level, wanted in enumerate((RT_VERSION, None, None)):
+            named, ids = self._unpack("HH", node + 12)
+            entries = [
+                self._unpack("II", node + 16 + 8 * i) for i in range(named + ids)
+            ]
+            if wanted is not None:
+                entries = [e for e in entries[named:] if e[0] == wanted]
+            if not entries:
+                return ""
+            target = entries[0][1]
+            if bool(target & RESOURCE_SUBDIRECTORY) != (level < 2):
+                return ""
+            node = root + (target & ~RESOURCE_SUBDIRECTORY)
+        (data_rva,) = self._unpack("I", node)
+        info = self._offset(data_rva)
+        # VS_VERSIONINFO opens with three WORDs and the UTF-16 key
+        # "VS_VERSION_INFO\0", padded to a 4-byte boundary: 40 bytes in all.
+        signature, _struct_version, high, low = self._unpack("IIII", info + 40)
+        if signature != VS_FIXEDFILEINFO_SIGNATURE:
+            return ""
+        return f"{high >> 16}.{high & 0xFFFF}.{low >> 16}.{low & 0xFFFF}"
+
+
+Library = Union[Elf, Pe]
+
+
+# --------------------------------------------------------------------------
 # Symbol-list helpers
 # --------------------------------------------------------------------------
 
 
-def open_elf(path_str: str, what: str) -> Elf:
+def open_library(path_str: str, what: str) -> Library:
+    """Open a built library with the reader its format needs."""
     path = Path(path_str)
     if not path.is_file():
         raise AbiError(f"{what} not found: {path}")
+    with path.open("rb") as handle:
+        magic = handle.read(4)
+    if magic[:2] == b"MZ":
+        return Pe(path)
     return Elf(path)
 
 
-def public_api_symbols(elf: Elf) -> set[str]:
-    syms = {n for n in elf.defined_dynamic_functions() if PUBLIC_API_RE.match(n)}
+def public_api_symbols(lib: Library) -> set[str]:
+    syms = {n for n in lib.defined_dynamic_functions() if PUBLIC_API_RE.match(n)}
     if not syms:
         raise AbiError(
-            f"no exported miopen* public API symbols found in {elf.path} "
+            f"no exported miopen* public API symbols found in {lib.path} "
             "(stripped, wrong file, or a link failure?)"
         )
     return syms
 
 
-def impl_symbols(elf: Elf) -> set[str]:
-    return {n for n in elf.defined_dynamic_functions() if IMPL_RE.match(n)}
+def impl_symbols(lib: Library) -> set[str]:
+    return {n for n in lib.defined_dynamic_functions() if IMPL_RE.match(n)}
 
 
 def read_symbol_list(path_str: str, what: str) -> set[str]:
@@ -409,11 +651,12 @@ holds the private declarations -- the exemption is by path so that a leak into a
 similarly-named header elsewhere still trips.""".rstrip()
 
 COVERSION_REMEDY = """
-The wrapper and the private library are two halves of one build and must ship
-the same soversion, with the wrapper's DT_NEEDED edge naming it. A mismatch
-means the two binaries came from different builds -- almost always a stale build
-or install directory holding one half of an earlier configuration. Rebuild both
-from a clean directory rather than adjusting a version to match.""".rstrip()
+The wrapper and the private library are two halves of one build. They must
+carry the same version, and the wrapper must link to the private library under
+the name that library carries. A mismatch means the two binaries came from
+different builds -- almost always a stale build or install directory holding one
+half of an earlier configuration. Rebuild both from a clean directory rather than
+adjusting a version to match.""".rstrip()
 
 SUPERSET_REMEDY = """
 The private library exports a renamed entry point that the wrapper does not
@@ -1002,17 +1245,20 @@ def read_source(path: Path, what: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def check_soname(elf: Elf) -> bool:
-    got = elf.soname()
-    if got == EXPECTED_SONAME:
-        print(f"PASS: SONAME is {got}")
+def check_soname(lib: Library) -> bool:
+    naming = lib.naming
+    got = lib.soname()
+    if naming.same(got, naming.wrapper_name):
+        print(f"PASS: {naming.own_name} is {got}")
         return True
-    print(f"FAIL: SONAME is '{got}', expected '{EXPECTED_SONAME}'")
+    print(f"FAIL: {naming.own_name} is '{got}', expected '{naming.wrapper_name}'")
     return False
 
 
-def check_symbols(elf: Elf, expected: set[str], label: str, remedy: str = "") -> bool:
-    got = public_api_symbols(elf)
+def check_symbols(
+    lib: Library, expected: set[str], label: str, remedy: str = ""
+) -> bool:
+    got = public_api_symbols(lib)
     if got == expected:
         print(f"PASS: {label} ({len(expected)} symbols)")
         return True
@@ -1023,8 +1269,8 @@ def check_symbols(elf: Elf, expected: set[str], label: str, remedy: str = "") ->
     return False
 
 
-def check_no_impl(elf: Elf, where: str) -> bool:
-    leaked = impl_symbols(elf)
+def check_no_impl(lib: Library, where: str) -> bool:
+    leaked = impl_symbols(lib)
     if not leaked:
         print(f"PASS: no *_impl symbols exported from {where}")
         return True
@@ -1034,44 +1280,55 @@ def check_no_impl(elf: Elf, where: str) -> bool:
     return False
 
 
-def check_private_dep(elf: Elf, expect_present: bool) -> bool:
-    present = any(n.startswith(PRIVATE_LIB_PREFIX) for n in elf.needed())
+def check_private_dep(lib: Library, expect_present: bool) -> bool:
+    naming = lib.naming
+    prefix = naming.private_prefix
+    present = bool(naming.private_import(lib.needed()))
     if present == expect_present:
         print(
-            f"PASS: DT_NEEDED on {PRIVATE_LIB_PREFIX} is "
+            f"PASS: {naming.needed_on} {prefix} is "
             f"{'present' if present else 'absent'} as expected"
         )
         return True
     if expect_present:
-        print(f"FAIL: flag-on wrapper has no DT_NEEDED on {PRIVATE_LIB_PREFIX}")
+        print(f"FAIL: flag-on wrapper has no {naming.needed_on} {prefix}")
     else:
         print(
-            f"FAIL: flag-off libMIOpen.so has DT_NEEDED on {PRIVATE_LIB_PREFIX} "
+            f"FAIL: flag-off {lib.path.name} has {naming.needed_on} {prefix} "
             "(not self-contained)"
         )
     return False
 
 
-def check_no_backend_dep(elf: Elf) -> bool:
-    linked = sorted(n for n in elf.needed() if n.startswith(HIPDNN_BACKEND_PREFIX))
+def check_no_backend_dep(lib: Library) -> bool:
+    naming = lib.naming
+    linked = sorted(
+        n for n in lib.needed() if naming.has_prefix(n, naming.backend_prefix)
+    )
     if not linked:
-        print(f"PASS: DT_NEEDED on {HIPDNN_BACKEND_PREFIX} is absent as expected")
+        print(f"PASS: {naming.needed_on} {naming.backend_prefix} is absent as expected")
         return True
     print(
-        f"FAIL: wrapper has DT_NEEDED on {', '.join(linked)}, which makes hipDNN a"
-        " hard install dependency of every MIOpen consumer. Link the frontend's"
+        f"FAIL: wrapper has {naming.needed_on} {', '.join(linked)}, which makes hipDNN"
+        " a hard install dependency of every MIOpen consumer. Link the frontend's"
         " dynamic-loading variant instead"
     )
     return False
 
 
-def check_needed_baseline(elf: Elf, baseline_path: str) -> bool:
+def check_needed_baseline(lib: Library, baseline_path: str) -> bool:
+    naming = lib.naming
+    if naming is PE_NAMING:
+        raise AbiError(
+            "--needed-baseline lists ELF DT_NEEDED entries and cannot be used with "
+            f"a DLL: {lib.path}"
+        )
     expected = read_symbol_list(baseline_path, "DT_NEEDED baseline")
-    got = set(elf.needed())
+    got = set(lib.needed())
     if got == expected:
-        print(f"PASS: DT_NEEDED list matches baseline ({len(expected)} entries)")
+        print(f"PASS: {naming.needed_list} matches baseline ({len(expected)} entries)")
         return True
-    print("FAIL: DT_NEEDED list differs from baseline:")
+    print(f"FAIL: {naming.needed_list} differs from baseline:")
     print(format_set_diff(expected, got))
     return False
 
@@ -1124,7 +1381,7 @@ def check_wrapper_only_not_public(wrapper_only: set[str], header_path: str) -> b
     return False
 
 
-def check_excluded_on_private(excluded: set[str], private: Elf) -> bool:
+def check_excluded_on_private(excluded: set[str], private: Library) -> bool:
     exported = private.defined_dynamic_functions()
     missing = sorted(excluded - exported)
     if not missing:
@@ -1153,7 +1410,7 @@ def soname_major(soname: str) -> str:
     return tail.split(".", 1)[0]
 
 
-def check_coversioned(wrapper: Elf, private: Elf) -> bool:
+def check_coversioned(wrapper: Library, private: Library) -> bool:
     """The wrapper and the private library must be halves of the same build.
 
     Two things have to agree: the major soversion each library declares, and
@@ -1162,12 +1419,11 @@ def check_coversioned(wrapper: Elf, private: Elf) -> bool:
     declared SONAMEs would miss a wrapper linked against an older private
     library that happens to still be on disk.
     """
+    if wrapper.naming is PE_NAMING:
+        return check_dlls_coversioned(wrapper, private)
     wrapper_soname = wrapper.soname()
     private_soname = private.soname()
-    needed = next(
-        (n for n in wrapper.needed() if n.startswith(PRIVATE_LIB_PREFIX)),
-        "",
-    )
+    needed = wrapper.naming.private_import(wrapper.needed())
 
     wrapper_major = soname_major(wrapper_soname)
     private_major = soname_major(private_soname)
@@ -1191,7 +1447,40 @@ def check_coversioned(wrapper: Elf, private: Elf) -> bool:
     return False
 
 
-def check_impl_superset(wrapper: Elf, private: Elf) -> bool:
+def check_dlls_coversioned(wrapper: Library, private: Library) -> bool:
+    """check_coversioned() for Windows DLLs, whose names carry no version.
+
+    The loader binds an import by name alone, so the wrapper must import the
+    private DLL under its own name. Only the version resources say which release
+    each half came from, so the two file versions must agree.
+    """
+    imported = PE_NAMING.private_import(wrapper.needed())
+    private_name = private.soname()
+    wrapper_version = wrapper.file_version()
+    private_version = private.file_version()
+
+    if (
+        imported
+        and PE_NAMING.same(imported, private_name)
+        and wrapper_version
+        and wrapper_version == private_version
+    ):
+        print(
+            f"PASS: wrapper and private library are co-versioned at "
+            f"file version {wrapper_version}"
+        )
+        return True
+
+    print("FAIL: wrapper and private library are not co-versioned:")
+    print(f"  wrapper file version:      {wrapper_version or '(none)'}")
+    print(f"  private file version:      {private_version or '(none)'}")
+    print(f"  private DLL name:          {private_name or '(none)'}")
+    print(f"  wrapper import of it:      {imported or '(none)'}")
+    print(COVERSION_REMEDY)
+    return False
+
+
+def check_impl_superset(wrapper: Library, private: Library) -> bool:
     """Every renamed private entry point must have a wrapper stub.
 
     The baseline check cannot catch this: it compares the wrapper against a
@@ -1441,8 +1730,8 @@ def check_wrapper_only_stubs(
 
 
 def cmd_dump_symbols(args) -> int:
-    elf = open_elf(args.lib, "library")
-    text = "\n".join(sorted(public_api_symbols(elf))) + "\n"
+    lib = open_library(args.lib, "library")
+    text = "\n".join(sorted(public_api_symbols(lib))) + "\n"
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
         print(f"wrote {args.output}")
@@ -1452,51 +1741,51 @@ def cmd_dump_symbols(args) -> int:
 
 
 def cmd_dump(args) -> int:
-    elf = open_elf(args.lib, "library")
+    lib = open_library(args.lib, "library")
     prefix = Path(args.prefix)
     prefix.with_suffix(prefix.suffix + ".symbols").write_text(
-        "\n".join(sorted(public_api_symbols(elf))) + "\n", encoding="utf-8"
+        "\n".join(sorted(public_api_symbols(lib))) + "\n", encoding="utf-8"
     )
     prefix.with_suffix(prefix.suffix + ".soname").write_text(
-        elf.soname() + "\n", encoding="utf-8"
+        lib.soname() + "\n", encoding="utf-8"
     )
     prefix.with_suffix(prefix.suffix + ".needed").write_text(
-        "\n".join(elf.needed()) + "\n", encoding="utf-8"
+        "\n".join(lib.needed()) + "\n", encoding="utf-8"
     )
     prefix.with_suffix(prefix.suffix + ".sha256").write_text(
-        hashlib.sha256(elf.data).hexdigest() + "\n", encoding="utf-8"
+        hashlib.sha256(lib.data).hexdigest() + "\n", encoding="utf-8"
     )
     print(f"wrote {prefix}.{{symbols,soname,needed,sha256}}")
     return 0
 
 
 def cmd_check(args) -> int:
-    elf = open_elf(args.lib, "library")
+    lib = open_library(args.lib, "library")
     baseline = read_symbol_list(args.baseline, "baseline symbols file")
 
-    ok = check_soname(elf)
+    ok = check_soname(lib)
     ok &= check_symbols(
-        elf,
+        lib,
         baseline,
         "exported public API symbol set matches baseline",
         BASELINE_REMEDY,
     )
-    ok &= check_no_impl(elf, "flag-off libMIOpen.so")
-    ok &= check_private_dep(elf, expect_present=False)
+    ok &= check_no_impl(lib, f"flag-off {lib.path.name}")
+    ok &= check_private_dep(lib, expect_present=False)
     if args.needed_baseline:
-        ok &= check_needed_baseline(elf, args.needed_baseline)
+        ok &= check_needed_baseline(lib, args.needed_baseline)
 
     print(f"public-abi symbol check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
 
 def cmd_check_wrapper(args) -> int:
-    elf = open_elf(args.lib, "wrapper library")
+    lib = open_library(args.lib, "wrapper library")
     baseline = read_symbol_list(args.baseline, "baseline symbols file")
     excluded = read_symbol_list(args.excluded, "excluded symbols file")
     wrapper_only = read_symbol_list(args.wrapper_only, "wrapper-only symbols file")
 
-    ok = check_soname(elf)
+    ok = check_soname(lib)
 
     # A stale exclusion entry (a symbol no longer in the baseline at all) would
     # silently mask real drift, so reject it before using the set.
@@ -1517,26 +1806,31 @@ def cmd_check_wrapper(args) -> int:
         ok = False
 
     ok &= check_symbols(
-        elf,
+        lib,
         (baseline - excluded) | wrapper_only,
         "wrapper public API set == (baseline - excluded) + wrapper-only",
         BASELINE_REMEDY,
     )
-    ok &= check_no_impl(elf, "wrapper")
-    ok &= check_private_dep(elf, expect_present=True)
-    ok &= check_no_backend_dep(elf)
+    ok &= check_no_impl(lib, "wrapper")
+    ok &= check_private_dep(lib, expect_present=True)
+    ok &= check_no_backend_dep(lib)
 
     if args.needed_baseline:
-        ok &= check_needed_baseline(elf, args.needed_baseline)
+        ok &= check_needed_baseline(lib, args.needed_baseline)
 
     if args.public_header:
         ok &= check_excluded_not_public(excluded, args.public_header)
         ok &= check_wrapper_only_not_public(wrapper_only, args.public_header)
     if args.private_lib:
-        private = open_elf(args.private_lib, "private library")
+        private = open_library(args.private_lib, "private library")
+        if private.naming is not lib.naming:
+            raise AbiError(
+                "wrapper and private library are different formats (ELF and DLL): "
+                f"{lib.path}, {private.path}"
+            )
         ok &= check_excluded_on_private(excluded, private)
-        ok &= check_coversioned(elf, private)
-        ok &= check_impl_superset(elf, private)
+        ok &= check_coversioned(lib, private)
+        ok &= check_impl_superset(lib, private)
 
     print(f"wrapper public-abi symbol check: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
@@ -1728,12 +2022,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("check", help="gate a flag-off (default) build")
-    p.add_argument("lib", help="path to the built libMIOpen.so")
+    p.add_argument("lib", help="path to the built libMIOpen.so or MIOpen.dll")
     p.add_argument("--baseline", required=True, help="committed public symbol baseline")
     p.add_argument(
         "--needed-baseline",
-        help="optional committed DT_NEEDED baseline; when given, the full "
-        "runtime dependency list must match it exactly",
+        help="optional committed DT_NEEDED baseline (Linux only; an error for a DLL); "
+        "when given, the full runtime dependency list must match it exactly",
     )
     p.set_defaults(func=cmd_check)
 
@@ -1782,7 +2076,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_check_headers)
 
     p = sub.add_parser("check-wrapper", help="gate a flag-on wrapper build")
-    p.add_argument("lib", help="path to the built wrapper libMIOpen.so")
+    p.add_argument("lib", help="path to the built wrapper libMIOpen.so or MIOpen.dll")
     p.add_argument("--baseline", required=True, help="committed public symbol baseline")
     p.add_argument("--excluded", required=True, help="committed excluded symbol list")
     p.add_argument(
@@ -1793,7 +2087,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--private-lib",
-        help="path to libMIOpen_private.so; when given, every excluded symbol "
+        help="path to libMIOpen_private.so or MIOpen_private.dll; when given, "
+        "every excluded symbol "
         "must still be exported from it under its original name, the two "
         "libraries must be co-versioned, and every renamed entry point it "
         "exports must have a wrapper stub",
@@ -1805,9 +2100,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--needed-baseline",
-        help="optional committed DT_NEEDED baseline; when given, the full "
-        "runtime dependency list must match it exactly. The private-library and "
-        "hipDNN-backend entries are checked either way",
+        help="optional committed DT_NEEDED baseline (Linux only; an error for a DLL); "
+        "when given, the full runtime dependency list must match it exactly. The "
+        "private-library and hipDNN-backend entries are checked either way",
     )
     p.set_defaults(func=cmd_check_wrapper)
 
