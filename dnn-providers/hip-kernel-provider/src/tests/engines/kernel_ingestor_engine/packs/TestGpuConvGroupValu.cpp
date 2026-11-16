@@ -45,9 +45,9 @@
  * Every config of the catalog shipped for this device's architecture that serves a case runs on
  * it, in fp32, fp16 and bf16 (a layout no config ships for on the architecture is skipped):
  * groups of 4 and 8 channels (odd batch), both layouts, ragged widths, width stride 2,
- * 3-D 3x3x3 at stride 1 and 2, true convolution, height stride and dilation, an inf in the input
- * at a row's last column (only the outputs the reference reaches it with may be non-finite), and
- * a forward over an input past 2 GiB of small images (sampled).
+ * 3-D 3x3x3 at stride 1 (both layouts) and 2, true convolution, height stride and dilation, an
+ * inf in the input at a row's last column (only the outputs the reference reaches it with may be
+ * non-finite), and a forward over an input past 2 GiB of small images (sampled).
  *
  * Tolerance: fp32 sums over the reduction, so each output is off by at most a few units of fp32
  * rounding of the sum of its terms' magnitudes, plus two units of the element type's rounding.
@@ -310,6 +310,7 @@ std::vector<DeviceCase> deviceCases()
     both("Stride2Nchw", conv(2, 16, 16, 4, {15, 17}, {3, 3}, {1, 1}, {2, 2}, false));
     both("Stride2Nhwc", conv(2, 16, 16, 4, {15, 16}, {3, 3}, {1, 1}, {2, 2}, true));
     both("ThreeD", conv(2, 8, 8, 2, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, false));
+    both("ThreeDNhwc", conv(2, 8, 8, 2, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, true));
     both("ThreeDStride2", conv(2, 8, 16, 2, {7, 8, 9}, {3, 3, 3}, {1, 1, 1}, {2, 2, 2}, false));
     auto convolution = conv(2, 16, 16, 4, {10, 12}, {3, 3}, {1, 1}, {1, 1}, false);
     convolution.mode = ConvMode::CONVOLUTION;
