@@ -102,7 +102,7 @@ std::string buildIdInNotes(const unsigned char* notes, std::size_t size)
             static constexpr std::array<char, 16> DIGITS
                 = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
             std::string hex;
-            hex.reserve(2 * header.n_descsz);
+            hex.reserve(std::size_t{2} * header.n_descsz);
             for(std::size_t i = 0; i < header.n_descsz; ++i)
             {
                 const auto byte = notes[descOffset + i];
@@ -141,9 +141,10 @@ int findBuildId(dl_phdr_info* info, std::size_t /*size*/, void* data)
         const auto& segment = info->dlpi_phdr[i];
         if(segment.p_type == PT_NOTE)
         {
+            const std::uintptr_t address = info->dlpi_addr + segment.p_vaddr;
+            // The loader reports where the segment is mapped as an address.
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            const auto* notes
-                = reinterpret_cast<const unsigned char*>(info->dlpi_addr + segment.p_vaddr);
+            const auto* notes = reinterpret_cast<const unsigned char*>(address);
             search->buildId = buildIdInNotes(notes, segment.p_memsz);
         }
     }

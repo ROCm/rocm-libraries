@@ -5,6 +5,7 @@
 
 #include "ProgramFetchRecording.hpp"
 
+#include <array>
 #include <atomic>
 #include <cstdio>
 
@@ -85,9 +86,9 @@ void countCorruptEntry()
 
 std::string formatCompileCounters(const CompileCounters& counters)
 {
-    char seconds[32];
-    std::snprintf(seconds, sizeof(seconds), "%.2f s", counters.compileSeconds);
-    return "hipRTC: " + std::to_string(counters.compiles) + " compiled (" + seconds + "), "
+    std::array<char, 32> seconds{};
+    std::snprintf(seconds.data(), seconds.size(), "%.2f s", counters.compileSeconds);
+    return "hipRTC: " + std::to_string(counters.compiles) + " compiled (" + seconds.data() + "), "
            + std::to_string(counters.compileFailures) + " failed, "
            + std::to_string(counters.diskHits) + " disk-cache hits, "
            + std::to_string(counters.corruptEntries) + " corrupt entries replaced, "

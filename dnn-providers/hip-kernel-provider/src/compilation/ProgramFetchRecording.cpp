@@ -5,6 +5,7 @@
 
 #include "CompileCounters.hpp"
 
+#include <array>
 #include <cstdio>
 #include <utility>
 
@@ -36,9 +37,9 @@ std::uint64_t& recorded()
 
 std::string milliseconds(double value)
 {
-    char text[32];
-    std::snprintf(text, sizeof(text), "%.1f ms", value);
-    return text;
+    std::array<char, 32> text{};
+    std::snprintf(text.data(), text.size(), "%.1f ms", value);
+    return text.data();
 }
 
 } // namespace

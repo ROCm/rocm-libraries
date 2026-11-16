@@ -33,7 +33,7 @@ struct KeyInputs
 
     std::string key() const
     {
-        std::vector<std::string_view> texts(includeTexts.begin(), includeTexts.end());
+        const std::vector<std::string_view> texts(includeTexts.begin(), includeTexts.end());
         std::vector<const char*> names;
         names.reserve(includeNames.size());
         for(const auto& name : includeNames)
@@ -151,7 +151,7 @@ std::vector<char> sampleCodeObject(std::size_t size, unsigned seed)
     std::vector<char> bytes(size);
     for(std::size_t i = 0; i < size; ++i)
     {
-        bytes[i] = static_cast<char>((i * 131 + seed * 7919) & 0xFF);
+        bytes[i] = static_cast<char>((i * 131 + std::size_t{seed} * 7919) & 0xFF);
     }
     return bytes;
 }

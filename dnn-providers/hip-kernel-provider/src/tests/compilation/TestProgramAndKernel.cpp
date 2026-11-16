@@ -13,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -140,7 +141,8 @@ TEST(TestGpuProgramCache, RecompilesOverATruncatedOrFlippedEntry)
     const auto original = readAll(files[0]);
     ASSERT_GT(original.size(), 256u);
 
-    writeAll(files[0], std::vector<char>(original.begin(), original.begin() + original.size() / 2));
+    const auto half = static_cast<std::ptrdiff_t>(original.size() / 2);
+    writeAll(files[0], std::vector<char>(original.begin(), original.begin() + half));
     {
         const Program rebuilt("vector_add.cpp", {"-O3", "-DFLOAT=float"});
         EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);

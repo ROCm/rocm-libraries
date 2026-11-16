@@ -191,7 +191,7 @@ TEST_F(TestKernelCompileOptions, VerifiesArchOptions)
 }
 
 // Whether the defines after the two base options are in name order.
-bool definesSortedByName(const std::vector<std::string>& options)
+static bool definesSortedByName(const std::vector<std::string>& options)
 {
     std::vector<std::string> names;
     for(size_t i = 2; i < options.size(); ++i)

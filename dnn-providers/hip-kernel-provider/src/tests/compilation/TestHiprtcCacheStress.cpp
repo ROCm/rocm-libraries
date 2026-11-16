@@ -144,6 +144,7 @@ TEST(TestHiprtcCacheStress, ConcurrentProcessesNeverReadATornEntry)
         std::atomic<int> torn{0};
         std::atomic<int> wrong{0};
         std::vector<std::thread> threads;
+        threads.reserve(THREADS);
         for(int thread = 0; thread < THREADS; ++thread)
         {
             threads.emplace_back([&, thread] {
@@ -215,6 +216,7 @@ TEST(TestGpuHiprtcCacheStress, ConcurrentProcessesCompileOncePerProcessAndShareE
         std::vector<std::vector<std::shared_ptr<Program>>> obtained(
             THREADS, std::vector<std::shared_ptr<Program>>(programs.size()));
         std::vector<std::thread> threads;
+        threads.reserve(THREADS);
         for(int thread = 0; thread < THREADS; ++thread)
         {
             threads.emplace_back([&, thread] {
