@@ -156,6 +156,12 @@ namespace TensileLite
                 {
                     return size_t{tiles} * split;
                 }
+
+                // The reduction that sums the parts of the split tiles.
+                origami::reduction_t reduction() const
+                {
+                    return parallel ? origami::reduction_t::parallel : origami::reduction_t::tree;
+                }
             };
 
             struct SplitInputs
