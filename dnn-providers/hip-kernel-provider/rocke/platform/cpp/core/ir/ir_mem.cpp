@@ -337,13 +337,13 @@ static int mem_opts_streaming(rocke_ir_builder_t* b, const rocke_mem_opts_t* opt
 }
 
 /* The `align` a global vector access op of `lanes` `elem` values records
- * (Python core/ir.py::_global_vector_align): the caller's `align`
- * when positive, else rocke_i_vector_access_align. A positive `align` that is
- * not a power of two is refused by checked_global_align. */
+ * (Python core/ir.py::_global_vector_align): rocke_i_vector_access_align
+ * when `align` is 0, else `align` as checked_global_align accepts it (a
+ * negative `align` is refused, not read as the default). */
 static int64_t global_vector_align(
     rocke_ir_builder_t* b, rocke_opcode_t opcode, int lanes, const rocke_type_t* elem, int align)
 {
-    if(align <= 0)
+    if(align == 0)
         return rocke_i_vector_access_align(lanes, elem);
     return checked_global_align(b, opcode, align);
 }

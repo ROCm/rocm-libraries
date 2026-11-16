@@ -293,6 +293,7 @@ def test_the_global_vector_store_builder_defaults_to_the_natural_alignment(
     [
         (6, ValueError, "align=6, expected a positive power of two"),
         (0, ValueError, "align=0, expected a positive power of two"),
+        (-4, ValueError, "align=-4, expected a positive power of two"),
         (True, TypeError, "align=bool, expected an integer"),
         (8.0, TypeError, "align=float, expected an integer"),
     ],

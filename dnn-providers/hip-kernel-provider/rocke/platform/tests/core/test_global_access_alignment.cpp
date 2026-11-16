@@ -376,9 +376,9 @@ struct BuilderCase
     int64_t claim;
 };
 
-/* With `align` 0 or below a global vector load or store records the natural
- * alignment of the access (rocke_i_vector_access_align), not a width of its
- * own; a given power of two is recorded as given. */
+/* With `align` 0 a global vector load or store records the natural alignment
+ * of the access (rocke_i_vector_access_align), not a width of its own; a given
+ * power of two is recorded as given. */
 int test_the_global_vector_builders_default_to_the_natural_alignment()
 {
     const BuilderCase loads[] = {{rocke_f32(), 4, 16},
@@ -394,8 +394,6 @@ int test_the_global_vector_builders_default_to_the_natural_alignment()
         rocke_value_t* c0 = rocke_b_const_i32(&b, 0);
         rocke_value_t* v = rocke_b_global_load_vN(&b, p, c0, load.elem, load.lanes, 0);
         CHECK(v != NULL && recorded_align(v->op) == load.claim);
-        rocke_value_t* negative = rocke_b_global_load_vN(&b, p, c0, load.elem, load.lanes, -4);
-        CHECK(negative != NULL && recorded_align(negative->op) == load.claim);
         rocke_value_t* given = rocke_b_global_load_vN(&b, p, c0, load.elem, load.lanes, 8);
         CHECK(given != NULL && recorded_align(given->op) == 8);
         rocke_ir_builder_free(&b);
@@ -419,42 +417,46 @@ int test_the_global_vector_builders_default_to_the_natural_alignment()
     return 0;
 }
 
-/* A positive `align` that is not a power of two is refused when the op is
- * built, with the lowering's text and status, instead of being recorded. */
+/* A negative `align`, or one that is not a power of two, is refused when the
+ * op is built, with the lowering's text and status, instead of being read as
+ * the default or recorded. */
 int test_the_global_vector_builders_refuse_an_invalid_align()
 {
-    const std::string load_refusal
-        = "memref.global_load_vN failed - align=6, expected a positive power of two";
-    const std::string store_refusal
-        = "memref.global_store_vN failed - align=24, expected a positive power of two";
-    rocke_ir_builder_t b;
-    CHECK(rocke_ir_builder_init(&b, "global_vector_bad_align") == ROCKE_OK);
-    rocke_value_t* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
-    rocke_value_t* v = rocke_b_param(&b, "v", rocke_vector_type(&b, rocke_f32(), 4), NULL);
-    rocke_value_t* c0 = rocke_b_const_i32(&b, 0);
-    const int ops_before = b.kernel->body->num_ops;
-    bool load_refused = false;
-    try
+    for(const int align : {-4, 6, 24})
     {
-        (void)rocke_b_global_load_vN(&b, p, c0, rocke_f32(), 3, 6);
+        const std::string claim
+            = " failed - align=" + std::to_string(align) + ", expected a positive power of two";
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "global_vector_bad_align") == ROCKE_OK);
+        rocke_value_t* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+        rocke_value_t* v = rocke_b_param(&b, "v", rocke_vector_type(&b, rocke_f32(), 4), NULL);
+        rocke_value_t* c0 = rocke_b_const_i32(&b, 0);
+        const int ops_before = b.kernel->body->num_ops;
+        bool load_refused = false;
+        try
+        {
+            (void)rocke_b_global_load_vN(&b, p, c0, rocke_f32(), 3, align);
+        }
+        catch(const ckc::Error& error)
+        {
+            load_refused = error.code() == ROCKE_ERR_VALUE
+                           && error.message() == "memref.global_load_vN" + claim;
+        }
+        CHECK(load_refused);
+        bool store_refused = false;
+        try
+        {
+            rocke_b_global_store_vN(&b, p, c0, v, 4, align);
+        }
+        catch(const ckc::Error& error)
+        {
+            store_refused = error.code() == ROCKE_ERR_VALUE
+                            && error.message() == "memref.global_store_vN" + claim;
+        }
+        CHECK(store_refused);
+        CHECK(b.kernel->body->num_ops == ops_before);
+        rocke_ir_builder_free(&b);
     }
-    catch(const ckc::Error& error)
-    {
-        load_refused = error.code() == ROCKE_ERR_VALUE && error.message() == load_refusal;
-    }
-    CHECK(load_refused);
-    bool store_refused = false;
-    try
-    {
-        rocke_b_global_store_vN(&b, p, c0, v, 4, 24);
-    }
-    catch(const ckc::Error& error)
-    {
-        store_refused = error.code() == ROCKE_ERR_VALUE && error.message() == store_refusal;
-    }
-    CHECK(store_refused);
-    CHECK(b.kernel->body->num_ops == ops_before);
-    rocke_ir_builder_free(&b);
     return 0;
 }
 
