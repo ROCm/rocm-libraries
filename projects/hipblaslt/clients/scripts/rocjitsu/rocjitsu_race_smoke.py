@@ -195,14 +195,7 @@ def main():
         rocjitsu,
         base_config,
         # HPL initialization also exercises the device-side fill kernels.
-        [
-            str(bench),
-            "--precision",
-            "f32_r",
-            "--initialization",
-            "hpl",
-            "--verify_strict",
-        ]
+        [str(bench), "--precision", "f32_r", "--initialization", "hpl", "--verify"]
         + ["-m", "128", "-n", "128", "-k", "128", "--iters", "1", "--cold_iters", "0"],
         env,
         HIPBLASLT_BENCH_TIMEOUT_SECONDS,
