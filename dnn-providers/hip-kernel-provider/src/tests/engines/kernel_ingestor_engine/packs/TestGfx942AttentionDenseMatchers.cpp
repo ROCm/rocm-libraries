@@ -396,12 +396,12 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesARaggedOperand)
 
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey)
 {
-    // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none,
-    // and only the kernel's LSE path zeroes them. One key short of that is served. 4096/512 is
-    // also supports_attention_dense's per-block refusal at 256/64 (the last block's window
-    // starts at key tile 58 of 8): on every tile-divisible shape, which kernel match
-    // checks first, a block-level failure is a row-level one, so the block guard is
-    // reached only through TestGfx942AttentionDenseGeometry.
+    // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none.
+    // The pack declines them (windowLeavesRowsWithoutKeys says why). One key short of that
+    // is served. 4096/512 also fails the per-block guard at 256/64 (the last block's window
+    // starts at key tile 58 of 8): on every tile-divisible shape, which kernel match checks
+    // first, a block-level failure is a row-level one, so the block guard is reached only
+    // through TestGfx942AttentionDenseGeometry.
     for(const auto& [seqLenQ, seqLenKv, served] : {std::tuple{512, 256, false},
                                                    std::tuple{4096, 512, false},
                                                    std::tuple{512, 384, false},
@@ -589,8 +589,8 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesTheRowStatsOutputs)
     }
 }
 
-// The rows such a window leaves keyless are graded only against an infinite LSE, so the
-// empty-row decline stands for a graph that binds stats too.
+// The empty-row decline stands for a graph that binds stats too (windowLeavesRowsWithoutKeys
+// says why).
 TEST(TestGfx942AttentionDenseGraphMatch, KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats)
 {
     auto spec = statsGraph();

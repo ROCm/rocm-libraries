@@ -154,6 +154,7 @@
     "minnum.f64": "llvm.minnum.f64",
     "mov.dpp8.f32": "llvm.amdgcn.mov.dpp8.f32",
     "mov.dpp8.i32": "llvm.amdgcn.mov.dpp8.i32",
+    "raw.ptr.buffer.atomic.fadd.f32": "llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32",
     "raw.ptr.buffer.load.f16": "llvm.amdgcn.raw.ptr.buffer.load.f16",
     "raw.ptr.buffer.load.i16": "llvm.amdgcn.raw.ptr.buffer.load.i16",
     "raw.ptr.buffer.load.i32": "llvm.amdgcn.raw.ptr.buffer.load.i32",
@@ -13721,6 +13722,82 @@
       "gfx950": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.mov.dpp8",
         "status": "arch_absent",
+        "verified_on": "llvm22"
+      }
+    },
+    "raw.ptr.buffer.atomic.fadd.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1154": {
+        "evidence": "invalid target ID",
+        "status": "target_unsupported",
+        "verified_on": "llvm22"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx908": {
+        "evidence": "fatal error: error in backend: Cannot select: 0xADDR: f32,ch = BUFFER_ATOMIC_FADD<(volatile dereferenceable load store (s32) on `ptr addrspace(8) poison`, align 1, addrspace 8)> # D:1 0xADDR, 0xADDR, ",
+        "status": "arch_absent",
+        "verified_on": "llvm22"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm22"
+      },
+      "gfx950": {
+        "status": "ok",
         "verified_on": "llvm22"
       }
     },

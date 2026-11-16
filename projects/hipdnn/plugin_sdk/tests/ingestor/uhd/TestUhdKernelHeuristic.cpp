@@ -604,14 +604,25 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
     EXPECT_EQ(deployed.front()->kernelId, testId(0x02)) << "the deployed model was not used";
 }
 
-/// A model that was read and refused stays refused for the engine's lifetime: it is not
-/// reloaded and re-reported on every ranking. The same policy as uhd::EngineModelBinding.
-TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsLoadedAndReportedOnce)
+/// @p hash with its last character changed: an artifact embedding it is refused (§6.3 check
+/// 3), yet is exactly as large as one embedding @p hash.
+static std::string corruptedHash(std::string hash)
+{
+    hash.back() = hash.back() == '0' ? '1' : '0';
+    return hash;
+}
+
+/// A model that was read and refused is not reloaded or re-reported while its artifact keeps
+/// the modification time and size it had when read; once the artifact changes, the next
+/// ranking loads it again, so a model read while still being written recovers without a
+/// restart.
+TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsReloadedOnlyOnceItsArtifactChanges)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(
         uniqueDirectory("uhd_kernel_heuristic_broken_cached"));
+    const auto artifact = dir.path() / "model.bin";
     // The artifact embeds a features hash its descriptor does not declare (§6.3 check 3).
     (void)writeFixture(dir.path(), preferLargeTiles(), "max", "sha256:not_the_real_hash");
     const auto heuristic
@@ -621,18 +632,47 @@ TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsLoadedAndReportedOnce)
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
-    const auto refused = heuristic->rank(catalogAgainstPriority(2048), context);
-    ASSERT_EQ(refused.size(), 2U);
-    EXPECT_EQ(refused.front()->kernelId, testId(0x01)); // declared order
+    const auto rankedFirst = [&] {
+        const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
+        return ranked.size() == 2U ? ranked.front()->kernelId : DescriptorId{};
+    };
+
+    EXPECT_EQ(rankedFirst(), testId(0x01)); // declared order
     const auto reported = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
     EXPECT_GT(reported, 0U) << "the broken model was not reported";
-
-    // A valid artifact in its place is not read: the refusal was cached.
-    (void)writeFixture(dir.path(), preferLargeTiles());
-    const auto again = heuristic->rank(catalogAgainstPriority(2048), context);
-    ASSERT_EQ(again.size(), 2U);
-    EXPECT_EQ(again.front()->kernelId, testId(0x01)) << "the refused model was loaded again";
+    EXPECT_EQ(rankedFirst(), testId(0x01));
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reported) << "the report repeated";
+
+    // Replaced by another broken model: read once more, reported once more, cached again.
+    // The time is set, not left to the file system: a quick rewrite may keep the old one.
+    const auto firstWrite = std::filesystem::last_write_time(artifact);
+    (void)writeFixture(dir.path(),
+                       preferLargeTiles(),
+                       "max",
+                       corruptedHash(uhd::FeatureExtractor::computeHash(SIGNATURE)));
+    const auto brokenWrite = firstWrite + std::chrono::seconds(1);
+    std::filesystem::last_write_time(artifact, brokenWrite);
+    const auto brokenSize = std::filesystem::file_size(artifact);
+    EXPECT_EQ(rankedFirst(), testId(0x01));
+    const auto reportedAgain = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
+    EXPECT_GT(reportedAgain, reported) << "the changed broken model was not read again";
+    EXPECT_EQ(rankedFirst(), testId(0x01));
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reportedAgain) << "the report repeated";
+
+    // A valid model of the same size and time looks unchanged, so it is not read: an
+    // unchanged broken artifact is not parsed again on every ranking.
+    (void)writeFixture(dir.path(), preferLargeTiles());
+    ASSERT_EQ(std::filesystem::file_size(artifact), brokenSize)
+        << "the fixtures must differ only in the hash's last character";
+    std::filesystem::last_write_time(artifact, brokenWrite);
+    EXPECT_EQ(rankedFirst(), testId(0x01)) << "an artifact that looked unchanged was read";
+
+    // Its time moves on: the next ranking loads it.
+    std::filesystem::last_write_time(artifact, brokenWrite + std::chrono::seconds(1));
+    EXPECT_EQ(rankedFirst(), testId(0x02)) << "the replaced model was not used";
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reportedAgain)
+        << "the model that loaded was reported as failing";
+    EXPECT_TRUE(recorder.hasLogContaining("loaded after its artifact changed"));
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrder)
@@ -1735,6 +1775,10 @@ DescriptorSet engineSetRankingOnTileM(const std::filesystem::path& dir,
     return set;
 }
 
+std::string provenanceOfRanking(
+    IEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>& engine,
+    uint8_t graphTag);
+
 /// Builds the engine @p set describes via makeEngine() and ranks its catalog once, returning
 /// what RFC 0019 §12's trace said decided. makeEngine() moves the UED, so it is where the knobs
 /// must be read.
@@ -1752,15 +1796,23 @@ std::string provenanceOfEngineRanking(DescriptorSet set)
     {
         return "<no engine>";
     }
+    return provenanceOfRanking(*engine, 0x71);
+}
 
+/// Ranks @p engine's catalog once for a graph tagged @p graphTag, returning what RFC 0019
+/// §12's trace said decided.
+std::string provenanceOfRanking(
+    IEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>& engine,
+    uint8_t graphTag)
+{
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const testing::StubHandle handle;
-    const testing::TestGraph graph(testing::makeGraphId(0x71));
+    const testing::TestGraph graph(testing::makeGraphId(graphTag));
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper emptyConfig(nullptr, 0);
     testing::StubContext context;
-    engine->initializeExecutionContext(handle, graph, emptyConfig, context);
+    engine.initializeExecutionContext(handle, graph, emptyConfig, context);
 
     if(recorder.hasLogContaining("decided_by=model"))
     {
@@ -1864,6 +1916,59 @@ TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelIgnoresStil
     EXPECT_EQ(provenanceOfEngineRanking(
                   engineSetRankingOnTileM(dir.path(), fixture, {"tile_m", "split_k"})),
               "model");
+}
+
+TEST(TestIngestorUhdEngineKnobContract, ABrokenModelReplacedIsUsedByTheNextEngineOverTheSameState)
+{
+    // A provider builds the kernel-ingestor state once and wraps it in one engine per
+    // Container, so the UHD resolver -- and a model it refused -- outlives every Container.
+    // A valid model put in place of a broken one must reach the next Container without a
+    // process restart.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_shared_state_broken_replaced"));
+    const auto artifact = dir.path() / "model.bin";
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      "sha256:not_the_real_hash",
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      ENGINE_SIGNATURE);
+    const auto set = engineSetRankingOnTileM(dir.path(), fixture, {"tile_m"});
+
+    const testing::ScopedTestSymbols symbols;
+    const testing::StubWorkspaceHandler handler;
+    const testing::ScopedDispatchRegistration<testing::StubHandle> dispatch(
+        "hipdnn.kernel_ingestor.test.dispatch", handler);
+    const Gfx942DeviceResolver resolver;
+    const auto state
+        = makeStateManager<testing::StubHandle>(
+              set, set.engine.graphMatchNativeSymbol, {}, engineIdentity(set), set.engine.knobs)
+              ->sharedState();
+    const auto containerEngine = [&] {
+        return makeEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>(
+            set, state, resolver);
+    };
+
+    const auto first = containerEngine();
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(provenanceOfRanking(*first, 0x72), "declared_order");
+
+    const auto brokenWrite = std::filesystem::last_write_time(artifact);
+    (void)writeFixture(dir.path(),
+                       preferLargeTiles(),
+                       "max",
+                       {},
+                       /*calibrated=*/true,
+                       "identity",
+                       ENGINE_SIGNATURE);
+    // Set, not left to the file system: a quick rewrite may keep the old time.
+    std::filesystem::last_write_time(artifact, brokenWrite + std::chrono::seconds(1));
+
+    const auto next = containerEngine();
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(provenanceOfRanking(*next, 0x73), "model")
+        << "the next Container kept the refusal of the model it replaced";
 }
 
 TEST(TestIngestorUhdKernelHeuristic, InlineFeaturesReachTheTreeScorer)

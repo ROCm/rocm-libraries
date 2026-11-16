@@ -484,7 +484,10 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
     {
         auto hipblaslt_env = getenv("ROCBLAS_USE_HIPBLASLT");
         if(hipblaslt_env)
+        {
             m_hipblaslt_saved_status = std::string(hipblaslt_env);
+            m_hipblaslt_env_existed  = true;
+        }
         m_hipblaslt_env_set = true;
         setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
     }
@@ -493,7 +496,10 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
     {
         auto stream_order_env = getenv("ROCBLAS_STREAM_ORDER_ALLOC");
         if(stream_order_env)
+        {
             m_stream_order_saved_status = std::string(stream_order_env);
+            m_stream_order_env_existed  = true;
+        }
         m_stream_order_env_set = true;
         setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
     }
@@ -568,14 +574,20 @@ rocblas_local_handle::~rocblas_local_handle()
 
     if(m_hipblaslt_env_set)
     {
-        setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
+        if(m_hipblaslt_env_existed)
+            setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
+        else
+            unsetenv("ROCBLAS_USE_HIPBLASLT");
     }
 
     PRINT_IF_ROCBLAS_ERROR(rocblas_destroy_handle(m_handle));
 
     if(m_stream_order_env_set)
     {
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+        if(m_stream_order_env_existed)
+            setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+        else
+            unsetenv("ROCBLAS_STREAM_ORDER_ALLOC");
     }
 }
 

@@ -48,7 +48,7 @@ AOT
 Batch, spatial extents and the group count are kernargs. The filter, stride,
 padding and the per-group channel counts (``cpg == kpg``) are baked.
 
-C++ twin: ``platform/cpp/instances/common/conv_direct_fwd_gstream_wmma.cpp``
+C++ twin: ``library/cpp/instances/common/conv_direct_fwd_gstream_wmma.cpp``
 (``instance_conv_direct_fwd_gstream_wmma.h``).
 """
 
