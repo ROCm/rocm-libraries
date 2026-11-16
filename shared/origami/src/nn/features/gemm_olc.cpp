@@ -3,7 +3,8 @@
 
 // Feature extractor of OLC: feature schema v4 (c6-4, 161 float64
 // columns; f_nt_gate reads the per-macro-tile non-temporal availability on config_t; the
-// streamk_launch columns sk_* read the caller's Stream-K launch, kernel_fields_t::streamk).
+// streamk_launch columns sk_* are streamk::launch_terms of the caller's Stream-K launch,
+// kernel_fields_t::streamk).
 // Every column outside streamk_launch is a raw problem_t / config_t / kernel field or one of
 // Origami's intermediates (gemm::compute_gemm_intermediates, one evaluation per candidate); the
 // training feature builder reads the same intermediates through the Python bindings. The only
@@ -23,6 +24,7 @@
 
 #include "origami/gemm.hpp"
 #include "origami/gemm_intermediates.hpp"
+#include "origami/streamk.hpp"
 
 namespace origami::nn::features::gemm_olc {
 
@@ -30,7 +32,6 @@ using olc::candidate_t;
 using olc::feature_schema_t;
 using olc::kernel_fields_t;
 using olc::streamk_launch_t;
-using olc::streamk_partials_t;
 
 // Extractor slots, in schema order.
 #define ORIGAMI_OLC_FEATURES(X) \
@@ -437,77 +438,22 @@ bool extract(const problem_t&   p,
 
   // ---- v4: the Stream-K launch (schema v4 streamk_launch) -------------------------------------
   {
-    const double m = num(p.size.m), n = num(p.size.n), batch = I.batch;
-    const double bpe_d = datatype_to_bits(p.d_dtype) / 8.0;
     const streamk_launch_t& sk = kf.streamk;
     if (!sk.valid) {
       if (available)
         for (int j : {sk_grid_over_tiles, sk_split_tiles_frac, sk_fixup_bytes_over_output,
                       sk_num_wgs_launched, sk_timesteps_launched})
           available[j] = 0;
-    } else if (!sk.is_streamk) {
-      f[sk_grid_over_tiles]         = 1.0;
-      f[sk_split_tiles_frac]        = 0.0;
-      f[sk_fixup_bytes_over_output] = 0.0;
-      f[sk_num_wgs_launched]        = 0.0;
-      f[sk_timesteps_launched]      = 0.0;
     } else {
-      const streamk_partials_t pt    = olc::streamk_partials(sk);
-      const double             grid  = static_cast<double>(sk.final_grid);
-      const double             tiles = static_cast<double>(sk.tiles);
-      const std::uint64_t      cus   = (p.num_cus > 0 && p.num_cus < sk.cu_count)
-                                           ? static_cast<std::uint64_t>(p.num_cus)
-                                           : sk.cu_count;
-      const std::uint64_t slots =
-          cus * static_cast<std::uint64_t>(std::max(sk.cu_occupancy, 1));
-      const double waves =
-          slots ? static_cast<double>((sk.final_grid + slots - 1) / slots) : kNaN;
-      const double mt = static_cast<double>(sk.mt_x) * static_cast<double>(sk.mt_y) *
-                        static_cast<double>(sk.workspace_size_per_elem_c);
-      f[sk_grid_over_tiles]         = grid / tiles;
-      f[sk_split_tiles_frac]        = static_cast<double>(pt.split_tiles) / tiles;
-      f[sk_fixup_bytes_over_output] =
-          ((2.0 * static_cast<double>(pt.partials)) * mt) / (m * n * batch * bpe_d);
-      f[sk_num_wgs_launched]   = grid;
-      f[sk_timesteps_launched] = waves * tiles / grid;
+      const streamk::launch_terms_t t = streamk::launch_terms(p, sk);
+      f[sk_grid_over_tiles]         = t.grid_over_tiles;
+      f[sk_split_tiles_frac]        = t.split_tiles_frac;
+      f[sk_fixup_bytes_over_output] = t.fixup_bytes_over_output;
+      f[sk_num_wgs_launched]        = t.num_wgs;
+      f[sk_timesteps_launched]      = t.timesteps;
     }
   }
   return true;
 }
 
 }  // namespace origami::nn::features::gemm_olc
-
-namespace origami::nn::olc {
-
-streamk_partials_t streamk_partials(const streamk_launch_t& d) {
-  if (!d.is_streamk || d.is_dynamic) return {};
-  if (d.reduction == reduction_t::parallel && d.sk_split >= 2)
-    return {d.tiles * d.sk_split, d.tiles};
-  const std::uint64_t sk = d.dp_only ? 0 : d.sk_tiles, iters = d.iters_per_tile, G = d.final_grid;
-  if (G == 0 || sk == 0 || iters == 0) return {};
-  const std::uint64_t T = sk * iters, W = T / G, E = T % G;
-  // Every workgroup owns whole tiles: no start falls inside one.
-  if (E == 0 && W % iters == 0) return {};
-  // Walk s_g = g * W + min(g, E) as (tile, offset) = (s_g / iters, s_g % iters) without dividing:
-  // s_{g+1} - s_g = W + (g < E).
-  streamk_partials_t  out;
-  const std::uint64_t Wq = W / iters, Wr = W % iters;
-  std::uint64_t       tile = 0, off = 0, last = std::numeric_limits<std::uint64_t>::max();
-  for (std::uint64_t g = 1; g < G; ++g) {
-    tile += Wq;
-    off += Wr + (g - 1 < E ? 1 : 0);
-    if (off >= iters) {
-      off -= iters;
-      ++tile;
-    }
-    if (off == 0) continue;
-    ++out.partials;
-    if (tile != last) {
-      ++out.split_tiles;
-      last = tile;
-    }
-  }
-  return out;
-}
-
-}  // namespace origami::nn::olc

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "origami/origami_export.h"
+#include "origami/streamk.hpp"
 #include "origami/types.hpp"
 
 /**
@@ -71,46 +72,18 @@ struct deployment_t {
 };
 
 /**
- * @brief The Stream-K launch the caller makes for one candidate on this problem.
- *
- * hipBLASLt: the fields of ContractionSolution::computeStreamKDecisions(problem, hardware), the
- * snapshot solve() takes its Stream-K launch from, for the problem hipBLASLt builds for the call
- * (CU budget, workspace and Stream-K parameters included), plus the kernel's sizeMapping values.
- * The streamk_launch columns (sk_*) are computed from these; a model that uses them falls back
- * with missing_feature when valid is false.
+ * @brief The Stream-K launch the caller makes for one candidate on this problem
+ * (@see origami::streamk::launch_t). The streamk_launch columns (sk_*) are
+ * origami::streamk::launch_terms of it; a model that uses them falls back with missing_feature
+ * when valid is false.
  */
-struct streamk_launch_t {
-  bool          valid      = false;  ///< false: not provided
-  bool          is_streamk = false;  ///< sizeMapping.isStreamK(); false leaves the rest unused
-  std::uint64_t final_grid = 0;      ///< d.finalGrid
-  std::uint64_t tiles      = 0;      ///< d.tiles
-  std::uint64_t sk_tiles   = 0;      ///< d.skTiles
-  std::uint64_t sk_split   = 0;      ///< d.skSplit
-  reduction_t   reduction  = reduction_t::none;  ///< d.reduction
-  bool          is_dynamic = false;              ///< d.isDynamic
-  bool          dp_only    = false;              ///< d.dpOnly
-  std::uint64_t iters_per_tile = 0;  ///< max(1, problem.getItersPerTile(sizeMapping))
-  std::uint64_t mt_x = 0, mt_y = 0;  ///< sizeMapping.macroTile.{x, y}
-  std::uint64_t workspace_size_per_elem_c = 0;  ///< sizeMapping.workspaceSizePerElemC
-  int           cu_occupancy = 0;               ///< sizeMapping.CUOccupancy
-  std::uint64_t cu_count     = 0;  ///< the device's CU count (AMDGPU::computeUnitCount)
-};
+using streamk_launch_t   = origami::streamk::launch_t;
+using streamk_partials_t = origami::streamk::partials_t;
 
-/// Fixup partial tiles of a Stream-K launch and the output tiles they cut.
-struct streamk_partials_t {
-  std::uint64_t partials    = 0;
-  std::uint64_t split_tiles = 0;
-};
-
-/**
- * @brief Partial tiles a launch writes (feature schema v4, streamk_partials).
- *
- * Dynamic queue: none. Parallel reduction with skSplit >= 2: tiles * skSplit, every tile split.
- * Otherwise the static split: T = skTiles * itersPerTile iterations (0 if dpOnly) over G =
- * finalGrid workgroups under the kernel's global first-E mapping (workgroup g starts at
- * g * (T / G) + min(g, T % G)); each start inside a tile is one partial.
- */
-ORIGAMI_EXPORT streamk_partials_t streamk_partials(const streamk_launch_t& launch);
+/// Partial tiles a launch writes (feature schema v4, streamk_partials; streamk::launch_partials).
+inline streamk_partials_t streamk_partials(const streamk_launch_t& launch) {
+  return origami::streamk::launch_partials(launch);
+}
 
 /**
  * @brief Kernel fields the caller knows that config_t does not carry.
