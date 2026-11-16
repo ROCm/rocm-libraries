@@ -2159,9 +2159,8 @@ struct K1HaloCf
     int delta;
     int chans, cgroup, chanOffset, lin, need;
     long long base; // linear pixel of LDS row 0
-    int uImg[PASSES], uPos[PASSES], uRg[PASSES], uKg[PASSES];
+    int uOff[PASSES], uPos[PASSES], uMask[PASSES], uRg[PASSES], uKg[PASSES];
     bool uVec[PASSES], uLive[PASSES];
-    long long uP0[PASSES];
     long long pixels;
     RawM r[PASSES][KV];
 
@@ -2190,50 +2189,63 @@ struct K1HaloCf
             uRg[p] = u / KG;
             uLive[p] = u < UNITS && uRg[p] * MV < need;
             const long long p0 = base + uRg[p] * MV;
-            uP0[p] = p0;
             // Floor division: pixels before the first have image -1.
             const long long img = p0 >= 0 ? p0 / lin : -((-p0 + lin - 1) / lin);
-            uImg[p] = static_cast<int>(img - img0);
             uPos[p] = static_cast<int>(p0 - img * lin);
+            uOff[p] = static_cast<int>(((img - img0) * chans + chanOffset) * lin + uPos[p]);
+            uMask[p] = 0;
+#pragma unroll
+            for(int i = 0; i < MV; ++i)
+                uMask[p] |= (p0 + i >= 0 && p0 + i < pixels ? 1 : 0) << i;
             uVec[p] = p0 >= 0 && uPos[p] + MV <= lin && p0 + MV <= pixels;
         }
     }
 
     __device__ void load(int c0)
     {
+        // Element offset of channel c's unit pixels: uOff + c lin, plus (chans - 1) lin at each
+        // image boundary the unit crosses (the next image's same channel).
+        const int jump = (chans - 1) * lin;
 #pragma unroll
         for(int p = 0; p < PASSES; ++p)
+        {
+            const int cb = c0 + uKg[p] * KV;
+            if(uVec[p])
+            {
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const bool cOk = uLive[p] & (cb + j < cgroup);
+                    const int off = (uOff[p] + (cb + j) * lin) * static_cast<int>(sizeof(T));
+                    r[p][j] = k1BufferLoad<RawM>(
+                        rsrc, cOk ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+                }
+                continue;
+            }
 #pragma unroll
             for(int j = 0; j < KV; ++j)
             {
-                const int c = c0 + uKg[p] * KV + j;
-                const bool cOk = uLive[p] & (c < cgroup);
-                if(uVec[p])
-                {
-                    const int off = ((uImg[p] * chans + chanOffset + c) * lin + uPos[p])
-                                    * static_cast<int>(sizeof(T));
-                    r[p][j] = k1BufferLoad<RawM>(
-                        rsrc, cOk ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
-                    continue;
-                }
+                const bool cOk = uLive[p] & (cb + j < cgroup);
                 ElemsM e;
-                int img = uImg[p], pos = uPos[p];
+                int o = uOff[p] + (cb + j) * lin, pos = uPos[p];
 #pragma unroll
                 for(int i = 0; i < MV; ++i)
                 {
-                    const bool ok = cOk & (uP0[p] + i >= 0) & (uP0[p] + i < pixels);
-                    const int off = ((img * chans + chanOffset + c) * lin + pos)
-                                    * static_cast<int>(sizeof(T));
-                    e.v[i] = k1BufferLoad<One>(rsrc,
-                                               ok ? static_cast<unsigned>(off) : K1_OUT_OF_RANGE);
+                    const bool ok = cOk & (((uMask[p] >> i) & 1) != 0);
+                    e.v[i] = k1BufferLoad<One>(
+                        rsrc,
+                        ok ? static_cast<unsigned>(o * static_cast<int>(sizeof(T)))
+                           : K1_OUT_OF_RANGE);
+                    ++o;
                     if(++pos == lin)
                     {
                         pos = 0;
-                        ++img;
+                        o += jump;
                     }
                 }
                 r[p][j] = __builtin_bit_cast(RawM, e);
             }
+        }
     }
 
     /// Row-major As[row][k] (ld per row); S is T (no three-bf16 form).
