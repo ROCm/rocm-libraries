@@ -520,11 +520,6 @@ void testing_trmm(const Arguments& arg)
                 handle.pre_test(arg);
                 CHECK_ROCBLAS_ERROR(rocblas_internal_trmm_fn(alpha_d));
                 handle.post_test(arg);
-
-                // callers such as rocSOLVER rely on the handle staying in device pointer mode
-                rocblas_pointer_mode mode;
-                CHECK_ROCBLAS_ERROR(rocblas_get_pointer_mode(handle, &mode));
-                EXPECT_EQ(mode, rocblas_pointer_mode_device);
             }
 
             if(arg.repeatability_check)

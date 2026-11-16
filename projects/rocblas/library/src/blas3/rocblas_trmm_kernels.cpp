@@ -28,42 +28,7 @@
 #include "src64/blas3/rocblas_gemm_64.hpp"
 
 template <typename T>
-static const T beta_1 = T(1);
-
-template <typename T>
 static const T alpha_0 = T(0);
-
-__constant__ float                  rocblas_trmm_device_beta_1_s = 1;
-__constant__ double                 rocblas_trmm_device_beta_1_d = 1;
-__constant__ rocblas_float_complex  rocblas_trmm_device_beta_1_c{1, 0};
-__constant__ rocblas_double_complex rocblas_trmm_device_beta_1_z{1, 0};
-
-// Returns beta = 1 for the gemm sub-calls in the memory space of the handle's pointer mode.
-// Requires the current device to be the handle's device.
-template <typename T>
-rocblas_status rocblas_trmm_get_beta_1(rocblas_handle handle, const T*& beta_one)
-{
-    if(handle->pointer_mode == rocblas_pointer_mode_host)
-    {
-        beta_one = &beta_1<T>;
-        return rocblas_status_success;
-    }
-
-    void* ptr = nullptr;
-    if constexpr(std::is_same_v<T, float>)
-        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_trmm_device_beta_1_s));
-    else if constexpr(std::is_same_v<T, double>)
-        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_trmm_device_beta_1_d));
-    else if constexpr(std::is_same_v<T, rocblas_float_complex>)
-        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_trmm_device_beta_1_c));
-    else if constexpr(std::is_same_v<T, rocblas_double_complex>)
-        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_trmm_device_beta_1_z));
-    else
-        return rocblas_status_not_implemented;
-
-    beta_one = static_cast<const T*>(ptr);
-    return rocblas_status_success;
-}
 
 //-- Innovative Computing Laboratory
 //  -- Electrical Engineering and Computer Science Department
@@ -1256,8 +1221,7 @@ rocblas_status rocblas_trmm_outofplace_template(rocblas_handle   handle,
                                                 int64_t          ldb,
                                                 TPtr*            dC,
                                                 rocblas_stride   offset_c,
-                                                int64_t          ldc,
-                                                const T*         beta_one)
+                                                int64_t          ldc)
 {
     // using template params to indicate transpose type
     // declaring constexpr here for easier use in gemm calls
@@ -1371,6 +1335,9 @@ rocblas_status rocblas_trmm_outofplace_template(rocblas_handle   handle,
         rocblas_stride strideCgemm = k_stride * c_block_stride;
 
         // already zeroed out C, so set beta to 1
+        const T* one = nullptr;
+        RETURN_IF_ROCBLAS_ERROR(rocblas_internal_get_one_ptr(handle, one));
+
         RETURN_IF_ROCBLAS_ERROR(
             rocblas_internal_gemm_64<false>(handle,
                                             LEFT ? transA : rocblas_operation_none,
@@ -1387,7 +1354,7 @@ rocblas_status rocblas_trmm_outofplace_template(rocblas_handle   handle,
                                             LEFT ? offsetBin : offsetAin,
                                             LEFT ? ldb : lda,
                                             LEFT ? strideBgemm : strideAgemm,
-                                            beta_one,
+                                            one,
                                             dC,
                                             offsetCin,
                                             ldc,
@@ -1423,7 +1390,7 @@ rocblas_status rocblas_trmm_outofplace_template(rocblas_handle   handle,
                                                 LEFT ? offsetBin : offsetAin,
                                                 LEFT ? ldb : lda,
                                                 0,
-                                                beta_one,
+                                                one,
                                                 dC,
                                                 offsetCin,
                                                 ldc,
@@ -1453,11 +1420,10 @@ rocblas_status rocblas_internal_trmm_outofplace_template(rocblas_handle    handl
                                                          int64_t           ldb,
                                                          T*                dC,
                                                          rocblas_stride    offset_c,
-                                                         int64_t           ldc,
-                                                         const T*          beta_one)
+                                                         int64_t           ldc)
 {
 #define trmm_out_KARGS \
-    handle, diag, m, n, alpha, dA, offset_a, lda, dB, offset_b, ldb, dC, offset_c, ldc, beta_one
+    handle, diag, m, n, alpha, dA, offset_a, lda, dB, offset_b, ldb, dC, offset_c, ldc
     rocblas_int shape = rocblas_trmm_get_shape(side, uplo, trans_a);
 
     constexpr int STOPPING_NB = ROCBLAS_TRMM_OUTOFPLACE_NB;
@@ -1579,8 +1545,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                         rocblas_stride    offset_c,
                                                         int64_t           ldc,
                                                         rocblas_stride    stride_c,
-                                                        rocblas_int       batch_count,
-                                                        const T*          beta_one)
+                                                        rocblas_int       batch_count)
 {
 
 #define CALC_OFFSET_A(i, j) offset_a + i + j* rocblas_stride(lda)
@@ -1616,6 +1581,14 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                            batch_count);
     }
 
+    // gemm takes a single alpha, so per-batch device alpha is only supported by trmm_small
+    if(handle->pointer_mode == rocblas_pointer_mode_device && stride_alpha != 0 && batch_count > 1)
+        return rocblas_status_not_implemented;
+
+    // gemm accumulates into C
+    const T* one = nullptr;
+    RETURN_IF_ROCBLAS_ERROR(rocblas_internal_get_one_ptr(handle, one));
+
     rocblas_int shape = rocblas_trmm_get_shape(side, uplo, trans_a);
 
     rocblas_status status = rocblas_status_success;
@@ -1647,8 +1620,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(m1, 0),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       rocblas_operation_none,
@@ -1665,7 +1637,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(0, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(m1, 0),
                                                                       ldc,
@@ -1694,8 +1666,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
     }
     else if(shape == 1) // lNU  left, NoTrans, Upper
     {
@@ -1724,8 +1695,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       rocblas_operation_none,
@@ -1742,7 +1712,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(m1, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -1771,8 +1741,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(m1, 0),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
     }
     else if(shape == 2 || shape == 4) // lTL | lCL    left, Trans|ConjTrans, Lower
     {
@@ -1801,8 +1770,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       trans_a,
@@ -1819,7 +1787,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(m1, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -1848,8 +1816,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(m1, 0),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
     }
     else if(shape == 3 || shape == 5) // lTU | lCU     left, Trans|ConjTrans, Upper
     {
@@ -1878,8 +1845,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(m1, 0),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       trans_a,
@@ -1896,7 +1862,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(0, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(m1, 0),
                                                                       ldc,
@@ -1925,8 +1891,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
     }
     else if(shape == 6) // rNL       right, NoTrans, Lower
     {
@@ -1955,8 +1920,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       rocblas_operation_none,
@@ -1973,7 +1937,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(n1, 0),
                                                                       lda,
                                                                       stride_a,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -2002,8 +1966,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(0, n1),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
     }
     else if(shape == 7) // rNU       right, NoTrans, Upper
     {
@@ -2032,8 +1995,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(0, n1),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       rocblas_operation_none,
@@ -2050,7 +2012,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(0, n1),
                                                                       lda,
                                                                       stride_a,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, n1),
                                                                       ldc,
@@ -2079,8 +2041,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
     }
     else if(shape == 8 || shape == 10) // rTL | rCL      right, Trans|ConjTrans, Lower
     {
@@ -2109,8 +2070,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(0, n1),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       rocblas_operation_none,
@@ -2127,7 +2087,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(n1, 0),
                                                                       lda,
                                                                       stride_a,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, n1),
                                                                       ldc,
@@ -2156,8 +2116,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
     }
     else if(shape == 9 || shape == 11) // rTU | rCU      right, Trans|ConjTrans, Upper
     {
@@ -2186,8 +2145,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                                CALC_OFFSET_C(0, 0),
                                                                                ldc,
                                                                                stride_c,
-                                                                               batch_count,
-                                                                               beta_one)));
+                                                                               batch_count)));
 
         RETURN_IF_ROCBLAS_ERROR((rocblas_internal_gemm_64<BATCHED, T>(handle,
                                                                       rocblas_operation_none,
@@ -2204,7 +2162,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(0, n1),
                                                                       lda,
                                                                       stride_a,
-                                                                      beta_one,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -2233,8 +2191,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                               CALC_OFFSET_C(0, n1),
                                                                               ldc,
                                                                               stride_c,
-                                                                              batch_count,
-                                                                              beta_one)));
+                                                                              batch_count)));
     }
     else
     {
@@ -2274,20 +2231,6 @@ rocblas_status rocblas_internal_trmm_launcher(rocblas_handle    handle,
     // rocblas_internal_trmm_outofplace_template() only supports single batches
     bool inplace = (dB == dC) || BATCHED || batch_count != 1;
 
-    rocblas_int k          = side == rocblas_side_left ? m : n;
-    bool        needs_gemm = inplace ? k > NB : k > ROCBLAS_TRMM_OUTOFPLACE_NB;
-
-    const T* beta_one = &beta_1<T>;
-    if(needs_gemm)
-    {
-        // gemm takes a single alpha, so per-batch device alpha is only supported by trmm_small
-        if(handle->pointer_mode == rocblas_pointer_mode_device && stride_alpha != 0
-           && batch_count > 1)
-            return rocblas_status_not_implemented;
-
-        RETURN_IF_ROCBLAS_ERROR(rocblas_trmm_get_beta_1<T>(handle, beta_one));
-    }
-
     if(!inplace)
     {
         // always !BATCHED here so avoiding reference to uninstantiated code
@@ -2317,8 +2260,7 @@ rocblas_status rocblas_internal_trmm_launcher(rocblas_handle    handle,
                                                                 ldb,
                                                                 dC,
                                                                 offset_c,
-                                                                ldc,
-                                                                beta_one);
+                                                                ldc);
         }
     }
     else
@@ -2344,8 +2286,7 @@ rocblas_status rocblas_internal_trmm_launcher(rocblas_handle    handle,
                                                                         offset_c,
                                                                         ldc,
                                                                         stride_c,
-                                                                        batch_count,
-                                                                        beta_one);
+                                                                        batch_count);
     }
 
     return rocblas_status_success;
