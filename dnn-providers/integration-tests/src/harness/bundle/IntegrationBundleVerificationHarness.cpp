@@ -84,7 +84,8 @@ void dumpComparisonTensors(const std::string& testName,
                            Inputs& inputs,
                            Engine& engineOutputs,
                            const Expected& expectedFor,
-                           const Uids& outputUids)
+                           const Uids& outputUids,
+                           hipdnn_data_sdk::utilities::ITensor* philoxMask)
 {
     const char* root = std::getenv("HIPDNN_TEST_DUMP_DIR");
     if(root == nullptr || *root == '\0')
@@ -127,6 +128,11 @@ void dumpComparisonTensors(const std::string& testName,
     for(auto& [uid, tensor] : inputs)
     {
         write("input", uid, *tensor);
+    }
+    if(philoxMask != nullptr)
+    {
+        // The keep mask the harness drew for a Philox dropout graph (1 kept, 0 dropped), the oracle's input.
+        write("philox_mask", 0, *philoxMask);
     }
     for(const auto uid : outputUids)
     {
@@ -1931,8 +1937,15 @@ VerificationOutcome
                                                + e.what() + " (" + _bundlePath.string() + ")")
             .atStage(OutcomeStage::COMPARE);
     }
-    dumpComparisonTensors(
-        currentTestName(), _inputs, engineOutputs, expectedFor, _bundle->outputTensorUids);
+    {
+        const auto* philox = philoxReference();
+        dumpComparisonTensors(currentTestName(),
+                              _inputs,
+                              engineOutputs,
+                              expectedFor,
+                              _bundle->outputTensorUids,
+                              philox != nullptr ? philox->mask.get() : nullptr);
+    }
     const auto mismatches = bundle::compareOutputs(
         wrapper,
         bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
