@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -66,21 +67,30 @@ std::string backendName(Backend backend)
     return backend == Backend::HIPBLASLT ? "Hipblaslt" : "Rocblas";
 }
 
-ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend)
+/// The plan factory of @p backend's engines, or (@p deterministic) of their *_DETERMINISTIC
+/// siblings, as HipblasltContainer.cpp builds them.
+ConvGemmPlanBuilder::PlanFactory factoryFor(Backend backend, bool deterministic = false)
 {
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     if(backend == Backend::HIPBLASLT)
     {
-        return [](const HipdnnEnginePluginHandle& handle, const std::vector<GemmCall>& calls) {
-            return std::make_unique<HipblasltGemmPlan>(handle, calls, false);
+        return [deterministic](const HipdnnEnginePluginHandle& handle,
+                               const std::vector<GemmCall>& calls) {
+            return std::make_unique<HipblasltGemmPlan>(handle, calls, deterministic);
         };
     }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     if(backend == Backend::ROCBLAS)
     {
-        return [](const HipdnnEnginePluginHandle& /*handle*/, const std::vector<GemmCall>& calls) {
-            return std::make_unique<RocblasGemmPlan>(calls);
+        return [deterministic](const HipdnnEnginePluginHandle& /*handle*/,
+                               const std::vector<GemmCall>& calls) {
+            auto plan = std::make_unique<RocblasGemmPlan>(calls);
+            if(deterministic)
+            {
+                plan->requireBitwiseReproducible();
+            }
+            return plan;
         };
     }
 #endif
@@ -256,7 +266,8 @@ template <typename T>
 void runFused(const EpilogueCase& convCase,
               const std::vector<Step>& steps,
               Backend backend,
-              Specials specials = Specials::NONE)
+              Specials specials = Specials::NONE,
+              bool deterministic = false)
 {
     ConvGemmShape shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -274,7 +285,7 @@ void runFused(const EpilogueCase& convCase,
     const auto narrow = backend == Backend::HIPBLASLT
                             ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
                             : ConvGemmPlanBuilder::NarrowPartials::NEVER;
-    const ConvGemmPlanBuilder builder(factoryFor(backend),
+    const ConvGemmPlanBuilder builder(factoryFor(backend, deterministic),
                                       MAX_REPACK_WORKSPACE_BYTES,
                                       false,
                                       false,
@@ -610,6 +621,300 @@ INSTANTIATE_TEST_SUITE_P(,
                                                               menuChains()[14]),
                                             ::testing::ValuesIn(enabledBackends())),
                          caseName);
+
+// Real-model channels-first fp16 convolutions (inception_v3, resnet50) whose fused graphs need an
+// fp32-output GEMM: every engine, the deterministic siblings included, claims the fused graph
+// exactly where it claims the bare convolution, and computes it.
+ConvGemmShape realModel(int64_t n, int64_t c, int64_t k, int64_t hw, int64_t f, int64_t pad)
+{
+    ConvGemmShape shape;
+    shape.n = n;
+    shape.c = c;
+    shape.k = k;
+    shape.input = {hw, hw};
+    shape.filter = {f, f};
+    shape.prePadding = {pad, pad};
+    shape.postPadding = {pad, pad};
+    shape.dataType = DataType::HALF;
+    return shape;
+}
+
+std::vector<EpilogueCase> realModelCases()
+{
+    return {{"InceptionDense", realModel(1, 448, 384, 8, 3, 1)},
+            {"InceptionPointOutput", realModel(16, 128, 768, 5, 5, 0)},
+            {"Resnet50Dense", realModel(1, 512, 512, 14, 3, 1)}};
+}
+
+class TestGpuConvEpilogueClaims
+    : public ::testing::TestWithParam<std::tuple<EpilogueCase, Chain, Backend, bool>>
+{
+};
+
+TEST_P(TestGpuConvEpilogueClaims, FusedWhereBare)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& [convCase, chain, backend, deterministic] = GetParam();
+    hipdnnEnginePluginHandle_t rawHandle = nullptr;
+    HipblasltHandleFactory::createHipblasltHandle(&rawHandle);
+    const std::unique_ptr<HipdnnEnginePluginHandle, void (*)(HipdnnEnginePluginHandle*)> handle(
+        rawHandle, [](HipdnnEnginePluginHandle* owned) {
+            HipblasltHandleFactory::destroyHipblasltHandle(owned);
+            delete owned;
+        });
+    const ConvGemmPlanBuilder builder(factoryFor(backend, deterministic),
+                                      MAX_REPACK_WORKSPACE_BYTES,
+                                      false,
+                                      false,
+                                      false,
+                                      ColumnLayout::FOLLOW_Y,
+                                      backend == Backend::HIPBLASLT
+                                          ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
+                                          : ConvGemmPlanBuilder::NarrowPartials::NEVER,
+                                      std::nullopt,
+                                      backend == Backend::HIPBLASLT);
+    const ConvGemmGraph bare(convCase.shape, ConvDirection::FORWARD);
+    const FusedConvGraph fused(convCase.shape, chain.second);
+    const bool bareClaimed = builder.isApplicable(*handle, bare.graph());
+    const bool fusedClaimed = builder.isApplicable(*handle, fused.graph());
+    if(bareClaimed && !fusedClaimed)
+    {
+        // The one decline fusion may add: every layout's fused plan needs a GEMM with an fp32
+        // output (one rounding), and the backend has no algorithm for one of them. Every layout
+        // must formulate, and every layout must hold a GEMM the backend refuses.
+        const auto problem = parseConvProblem(fused.graph(), ConvDirection::FORWARD);
+        ASSERT_TRUE(problem.has_value());
+        const auto factory = factoryFor(backend, deterministic);
+        for(const auto layout : {ColumnLayout::FOLLOW_Y,
+                                 ColumnLayout::CHANNELS_FIRST,
+                                 ColumnLayout::CHANNELS_LAST,
+                                 ColumnLayout::STAGED_CHANNELS_LAST})
+        {
+            auto calls = convGemmCalls(*problem, MAX_REPACK_WORKSPACE_BYTES, layout);
+            ASSERT_TRUE(calls.has_value());
+            const auto plan
+                = fuseEpilogue(*problem, std::move(*calls), backend == Backend::HIPBLASLT);
+            ASSERT_TRUE(plan.has_value()) << "fusion declined a plan";
+            bool refused = false;
+            for(const auto& stage : plan->stages)
+            {
+                if(stage.calls.empty())
+                {
+                    continue;
+                }
+                try
+                {
+                    static_cast<void>(factory(*handle, stage.calls));
+                }
+                catch(const std::exception&)
+                {
+                    refused = true;
+                }
+            }
+            EXPECT_TRUE(refused) << "the backend runs every GEMM of a layout, yet the graph was "
+                                    "declined";
+        }
+        ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt refuses an fp32-output GEMM";
+        GTEST_SKIP() << "hipBLASLt"
+                     << (deterministic ? " without a workspace (the deterministic engine)" : "")
+                     << " has no algorithm for an fp32-output GEMM of this convolution";
+    }
+    EXPECT_EQ(fusedClaimed, bareClaimed);
+    if(bareClaimed)
+    {
+        runFused<Half>(convCase, chain.second, backend, Specials::NONE, deterministic);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvEpilogueClaims,
+                         ::testing::Combine(::testing::ValuesIn(realModelCases()),
+                                            ::testing::Values(menuChains()[14],
+                                                              menuChains()[0],
+                                                              menuChains()[6],
+                                                              menuChains()[1]),
+                                            ::testing::ValuesIn(enabledBackends()),
+                                            ::testing::Bool()),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first + "_"
+                                    + backendName(std::get<2>(info.param))
+                                    + (std::get<3>(info.param) ? "_Deterministic" : "");
+                         });
+
+// ---------------------------------------------------------------------------
+// Timing (opt-in, HIPBLASLT_CONV_EPILOGUE_PERF=1): bare against fused (bias + relu) plans of
+// real-model shapes, each built as an autotuning run builds it (benchmarking on, the fastest
+// candidate kept), then timed over 20 executes. Run under rocprofv3 --kernel-trace for the
+// per-kernel split.
+// ---------------------------------------------------------------------------
+
+struct PerfShape
+{
+    std::string name;
+    ConvGemmShape shape;
+};
+
+ConvGemmShape nhwc(int64_t n,
+                   int64_t c,
+                   int64_t k,
+                   int64_t hw,
+                   int64_t f,
+                   int64_t pad,
+                   int64_t stride,
+                   DataType type)
+{
+    ConvGemmShape shape;
+    shape.n = n;
+    shape.c = c;
+    shape.k = k;
+    shape.input = {hw, hw};
+    shape.filter = {f, f};
+    shape.prePadding = {pad, pad};
+    shape.postPadding = {pad, pad};
+    shape.stride = {stride, stride};
+    shape.xChannelsLast = shape.wChannelsLast = shape.yChannelsLast = true;
+    shape.dataType = type;
+    return shape;
+}
+
+std::vector<PerfShape> perfShapes()
+{
+    return {{"EfficientnetPointwise", nhwc(16, 64, 256, 60, 1, 0, 1, DataType::HALF)},
+            {"VitPatchify", nhwc(16, 3, 1280, 1024, 16, 0, 16, DataType::BFLOAT16)},
+            {"Sd15Pointwise", nhwc(1, 640, 320, 64, 1, 0, 1, DataType::BFLOAT16)},
+            {"Resnet50Dense", nhwc(128, 512, 512, 16, 3, 1, 1, DataType::HALF)}};
+}
+
+class TestGpuConvEpiloguePerf
+    : public ::testing::TestWithParam<std::tuple<PerfShape, Backend, bool>>
+{
+};
+
+TEST_P(TestGpuConvEpiloguePerf, Time)
+{
+    SKIP_IF_NO_DEVICES();
+    const char* enabled = std::getenv("HIPBLASLT_CONV_EPILOGUE_PERF");
+    if(enabled == nullptr || std::string(enabled) != "1")
+    {
+        GTEST_SKIP() << "timing runs only with HIPBLASLT_CONV_EPILOGUE_PERF=1";
+    }
+    const auto& [perf, backend, fusedGraph] = GetParam();
+    const auto& shape = perf.shape;
+    hipdnnEnginePluginHandle_t rawHandle = nullptr;
+    HipblasltHandleFactory::createHipblasltHandle(&rawHandle);
+    const std::unique_ptr<HipdnnEnginePluginHandle, void (*)(HipdnnEnginePluginHandle*)> handle(
+        rawHandle, [](HipdnnEnginePluginHandle* owned) {
+            HipblasltHandleFactory::destroyHipblasltHandle(owned);
+            delete owned;
+        });
+    const ConvGemmPlanBuilder builder(factoryFor(backend),
+                                      MAX_REPACK_WORKSPACE_BYTES,
+                                      false,
+                                      false,
+                                      false,
+                                      ColumnLayout::FOLLOW_Y,
+                                      backend == Backend::HIPBLASLT
+                                          ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
+                                          : ConvGemmPlanBuilder::NarrowPartials::NEVER,
+                                      std::nullopt,
+                                      backend == Backend::HIPBLASLT);
+    const std::vector<Step> chain{bias(shape.dataType), relu()};
+    const ConvGemmGraph bare(shape, ConvDirection::FORWARD);
+    const FusedConvGraph fused(shape, chain);
+    const auto& graph = fusedGraph ? fused.graph() : bare.graph();
+    if(!builder.isApplicable(*handle, graph))
+    {
+        GTEST_SKIP() << "not applicable";
+    }
+    HipdnnEnginePluginExecutionContext context;
+    context.setBenchmarking(true);
+    builder.buildPlan(*handle, graph, context);
+    const size_t workspaceBytes = context.plan().getWorkspaceSize(*handle);
+
+    const auto bytesOf = [&shape](const std::vector<int64_t>& dims) {
+        int64_t count = 1;
+        for(const auto d : dims)
+        {
+            count *= d;
+        }
+        return static_cast<size_t>(count) * (shape.dataType == DataType::FLOAT ? 4 : 2);
+    };
+    void* x = nullptr;
+    void* w = nullptr;
+    void* y = nullptr;
+    void* b = nullptr;
+    void* workspace = nullptr;
+    ASSERT_EQ(hipMalloc(&x, bytesOf(shape.xDims())), hipSuccess);
+    ASSERT_EQ(hipMalloc(&w, bytesOf(shape.wDims())), hipSuccess);
+    ASSERT_EQ(hipMalloc(&y, bytesOf(shape.yDims())), hipSuccess);
+    ASSERT_EQ(hipMalloc(&b, bytesOf({shape.k})), hipSuccess);
+    ASSERT_EQ(hipMemset(x, 0x11, bytesOf(shape.xDims())), hipSuccess);
+    ASSERT_EQ(hipMemset(w, 0x11, bytesOf(shape.wDims())), hipSuccess);
+    ASSERT_EQ(hipMemset(b, 0x11, bytesOf({shape.k})), hipSuccess);
+    if(workspaceBytes > 0)
+    {
+        ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+    }
+    hipStream_t stream = nullptr;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    handle->setStream(stream);
+    const std::vector<hipdnnPluginDeviceBuffer_t> buffers{
+        {CONV_X_UID, x},
+        {CONV_W_UID, w},
+        {fusedGraph ? epilogueOutputUid(chain.size()) : CONV_Y_UID, y},
+        {EPI_OPERAND_UID, b}};
+    const auto run = [&] {
+        context.plan().execute(
+            *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+    };
+    // The first execute times the candidates; then warm up.
+    for(int i = 0; i < 4; ++i)
+    {
+        run();
+    }
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    hipEvent_t start = nullptr;
+    hipEvent_t stop = nullptr;
+    ASSERT_EQ(hipEventCreate(&start), hipSuccess);
+    ASSERT_EQ(hipEventCreate(&stop), hipSuccess);
+    std::vector<float> times;
+    for(int i = 0; i < 20; ++i)
+    {
+        ASSERT_EQ(hipEventRecord(start, stream), hipSuccess);
+        run();
+        ASSERT_EQ(hipEventRecord(stop, stream), hipSuccess);
+        ASSERT_EQ(hipEventSynchronize(stop), hipSuccess);
+        float ms = 0.0F;
+        ASSERT_EQ(hipEventElapsedTime(&ms, start, stop), hipSuccess);
+        times.push_back(ms);
+    }
+    std::sort(times.begin(), times.end());
+    std::cout << "PERF " << perf.name << " " << backendName(backend) << " "
+              << (fusedGraph ? "fused" : "bare") << " median_ms " << times[times.size() / 2]
+              << " p25_ms " << times[times.size() / 4] << " workspace " << workspaceBytes << "\n";
+    static_cast<void>(hipEventDestroy(start));
+    static_cast<void>(hipEventDestroy(stop));
+    static_cast<void>(hipStreamDestroy(stream));
+    for(void* p : {x, w, y, b, workspace})
+    {
+        if(p != nullptr)
+        {
+            static_cast<void>(hipFree(p));
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvEpiloguePerf,
+                         ::testing::Combine(::testing::ValuesIn(perfShapes()),
+                                            ::testing::ValuesIn(enabledBackends()),
+                                            ::testing::Bool()),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param))
+                                    + (std::get<2>(info.param) ? "_Fused" : "_Bare");
+                         });
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 /// hipBLASLt's solutions for one conv GEMM shape (y^T = w x^T, channels as rows), with and

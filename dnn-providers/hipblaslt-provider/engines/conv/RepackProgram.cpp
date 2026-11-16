@@ -271,6 +271,12 @@ void RepackProgram::launch(const RepackStep& step,
         fused->cast.src = static_cast<const float*>(src);
         fused->cast.dst = dst;
         total = fused->cast.total;
+        // The flat form takes four elements a thread (aligned buffers; else it strides over
+        // the same threads one element at a time).
+        if(fused->epilogue.channelAxis < 0 && total % 4 == 0)
+        {
+            total /= 4;
+        }
     }
     else if(auto* im2col = std::get_if<Im2ColArgs>(&args))
     {

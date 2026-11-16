@@ -133,9 +133,10 @@ __device__ void stridedCast(const StridedCastArgs& args)
 
 // The fused epilogue's steps. fp32 throughout, no fast-math: relu and clamp keep NaN, and a
 // gate that saturates to exactly 0 gives 0 rather than -inf * 0.
-__device__ inline float epilogueLoad(const ConvRepackEpilogue& e, int i, long long channel)
+template <typename Index>
+__device__ inline float epilogueLoad(const ConvRepackEpilogue& e, int i, Index channel)
 {
-    const long long index = e.operandPerChannel[i] != 0 ? channel : 0;
+    const Index index = e.operandPerChannel[i] != 0 ? channel : 0;
     switch(e.operandType[i])
     {
     case 1:
@@ -159,7 +160,8 @@ __device__ inline float epilogueSigmoid(float v)
     return 1.0f / (1.0f + expf(-v));
 }
 
-__device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, long long channel)
+template <typename Index>
+__device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, Index channel)
 {
     for(int i = 0; i < e.ops; ++i)
     {
@@ -228,6 +230,74 @@ __device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, long
     return v;
 }
 
+/// The flat epilogue cast, N elements a thread: 16-byte loads of the fp32 result and one store
+/// of the N outputs. Index is int where every
+/// count and offset fits 32 bits. The channel advances element by element within the N, and by
+/// the grid stride's quotient and remainder between them, worked out once per thread.
+template <typename OutputType, typename Index, int N>
+__device__ void flatEpilogueRuns(const StridedCastEpilogueArgs& a)
+{
+    using Load = float __attribute__((ext_vector_type(4)));
+    using Store = unsigned int __attribute__((ext_vector_type(N * sizeof(OutputType) / 4)));
+    const StridedCastArgs& args = a.cast;
+    const auto runs = static_cast<Index>(args.total / N);
+    const auto first = static_cast<Index>(firstThread());
+    const auto step = static_cast<Index>(threadStride());
+    if(first >= runs)
+    {
+        return;
+    }
+    const auto inner = static_cast<Index>(a.epilogue.flatChannelStride);
+    const auto chans = static_cast<Index>(a.epilogue.flatChannels);
+    const Index start = N * first;
+    const Index q = start / inner;
+    Index rem = start - q * inner;
+    Index channel = q % chans;
+    // Between runs: N * step elements, less the N - 1 the inner loop advanced.
+    const Index gap = N * step - (N - 1);
+    const Index qs = gap / inner;
+    const Index remStep = gap - qs * inner;
+    const Index chStep = qs % chans;
+    const auto* src = reinterpret_cast<const Load*>(args.src);
+    auto* dst = reinterpret_cast<Store*>(args.dst);
+    for(Index i = first; i < runs; i += step)
+    {
+        float in[N];
+#pragma unroll
+        for(int l = 0; l < N / 4; ++l)
+        {
+            const Load v = src[i * (N / 4) + l];
+#pragma unroll
+            for(int e = 0; e < 4; ++e)
+            {
+                in[4 * l + e] = v[e];
+            }
+        }
+        OutputType out[N];
+#pragma unroll
+        for(int e = 0; e < N; ++e)
+        {
+            out[e] = static_cast<OutputType>(applyEpilogue(a.epilogue, in[e], channel));
+            rem += e < N - 1 ? 1 : remStep;
+            const Index jump = e < N - 1 ? 0 : chStep;
+            Index carry = 0;
+            if(rem >= inner)
+            {
+                rem -= inner;
+                carry = 1;
+            }
+            channel += jump + carry;
+            if(channel >= chans)
+            {
+                channel -= chans;
+            }
+        }
+        Store packed;
+        __builtin_memcpy(&packed, out, sizeof(out));
+        dst[i] = packed;
+    }
+}
+
 /// A strided cast whose elements pass through the fused epilogue before the rounding. The
 /// channel is the coordinate along the epilogue's channel axis, read off the index walk the
 /// cast already does.
@@ -236,6 +306,55 @@ __device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
 {
     const StridedCastArgs& args = a.cast;
     auto* dst = static_cast<OutputType*>(args.dst);
+    if(a.epilogue.channelAxis < 0 && args.total % 4 == 0
+       && reinterpret_cast<unsigned long long>(args.src) % 16 == 0
+       && reinterpret_cast<unsigned long long>(args.dst) % (4 * sizeof(OutputType)) == 0)
+    {
+        constexpr long long NARROW = 1LL << 30;
+        const bool narrow = args.total <= NARROW && a.epilogue.flatChannelStride <= NARROW
+                            && a.epilogue.flatChannels <= NARROW
+                            && static_cast<long long>(gridDim.x) * blockDim.x <= NARROW / 8;
+        // Four a thread: eight would inline the run-time menu eight times and spill.
+        narrow ? flatEpilogueRuns<OutputType, int, 4>(a)
+               : flatEpilogueRuns<OutputType, long long, 4>(a);
+        return;
+    }
+    if(a.epilogue.channelAxis < 0)
+    {
+        // Flat: element i of both sides. The channel advances by the step's quotient and
+        // remainder, worked out once per thread.
+        const long long first = firstThread();
+        const long long step = threadStride();
+        if(first >= args.total)
+        {
+            return;
+        }
+        const long long inner = a.epilogue.flatChannelStride;
+        const long long chans = a.epilogue.flatChannels;
+        const long long q = first / inner;
+        long long rem = first - q * inner;
+        long long channel = q % chans;
+        const long long qs = step / inner;
+        const long long remStep = step - qs * inner;
+        const long long chStep = qs % chans;
+        for(long long i = first; i < args.total; i += step)
+        {
+            dst[i] = static_cast<OutputType>(applyEpilogue(a.epilogue, args.src[i], channel));
+            rem += remStep;
+            long long carry = 0;
+            if(rem >= inner)
+            {
+                rem -= inner;
+                carry = 1;
+            }
+            channel += chStep + carry;
+            if(channel >= chans)
+            {
+                channel -= chans;
+            }
+        }
+        return;
+    }
     for(long long index = firstThread(); index < args.total; index += threadStride())
     {
         long long rest = index;

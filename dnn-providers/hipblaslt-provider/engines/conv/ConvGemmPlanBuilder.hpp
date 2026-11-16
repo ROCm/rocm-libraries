@@ -90,6 +90,13 @@ private:
                  bool splitReduction = false,
                  bool wideBackwardWeights = false) const;
 
+    /// The plan calls this builder runs @p opGraph with: callsFor's default; for a fused graph
+    /// whose default the backend cannot run (the deterministic hipBLASLt engines have no
+    /// workspace-free algorithm for some fp32-output GEMMs), the first other column layout it can.
+    std::optional<ConvGemmPlanCalls>
+        buildableCalls(const HipdnnEnginePluginHandle& handle,
+                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+
     /// The backend's plan for @p calls' GEMMs, wrapped in their repack steps when there are any.
     std::unique_ptr<IPlan> planFor(const HipdnnEnginePluginHandle& handle,
                                    ConvGemmPlanCalls calls) const;

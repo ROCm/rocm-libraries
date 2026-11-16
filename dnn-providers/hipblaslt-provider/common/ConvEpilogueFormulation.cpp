@@ -74,17 +74,50 @@ StridedCastEpilogueArgs epilogueCast(const ConvProblem& problem,
                                      const std::vector<int64_t>& dstStrides)
 {
     StridedCastEpilogueArgs args{};
-    args.cast.rank = static_cast<int>(dims.size());
-    args.cast.total = 1;
+    args.cast.batches = 1;
+    int64_t total = 1;
+    int64_t span = 1;
     for(size_t axis = 0; axis < dims.size(); ++axis)
     {
-        args.cast.dims[axis] = dims[axis];
-        args.cast.srcStrides[axis] = srcStrides[axis];
-        args.cast.dstStrides[axis] = dstStrides[axis];
-        args.cast.total *= dims[axis];
+        total *= dims[axis];
+        span += (dims[axis] - 1) * dstStrides[axis];
     }
-    args.cast.batches = 1;
-    args.epilogue = repackEpilogue(problem.epilogue, 1);
+    args.cast.total = total;
+    if(srcStrides == dstStrides && span == total)
+    {
+        // Both sides the same dense layout: one flat walk over memory, coalesced on both, with
+        // the channel of element o, (o / channel stride) % K, carried along without a division.
+        args.cast.rank = 1;
+        args.cast.dims[0] = total;
+        args.cast.srcStrides[0] = 1;
+        args.cast.dstStrides[0] = 1;
+        args.epilogue = repackEpilogue(problem.epilogue, -1);
+        args.epilogue.flatChannelStride = std::max<int64_t>(dstStrides[1], 1);
+        args.epilogue.flatChannels = dims[1];
+        return args;
+    }
+    // Otherwise y's axes, innermost the one y is densest along, so stores coalesce.
+    std::vector<size_t> order(dims.size());
+    for(size_t axis = 0; axis < order.size(); ++axis)
+    {
+        order[axis] = axis;
+    }
+    std::stable_sort(order.begin(), order.end(), [&dstStrides](size_t lhs, size_t rhs) {
+        return dstStrides[lhs] > dstStrides[rhs];
+    });
+    int channelAxis = 0;
+    args.cast.rank = static_cast<int>(dims.size());
+    for(size_t i = 0; i < order.size(); ++i)
+    {
+        args.cast.dims[i] = dims[order[i]];
+        args.cast.srcStrides[i] = srcStrides[order[i]];
+        args.cast.dstStrides[i] = dstStrides[order[i]];
+        if(order[i] == 1)
+        {
+            channelAxis = static_cast<int>(i);
+        }
+    }
+    args.epilogue = repackEpilogue(problem.epilogue, channelAxis);
     return args;
 }
 
