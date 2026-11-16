@@ -948,28 +948,11 @@ FwdResult run_paged_tdm_sched_group(const std::vector<int>& seqlens_q,
     return LaunchGroup<true>(seqlens_q, seqlens_k, hdim, page_block_size, shuffle);
 }
 
-// Gappy group-mode paged launcher: the only path that drives kv_l2p_offset
-// nonzero (see the kv_l2p_offset computation in fmha_fwd_pagedkv_kernel.hpp,
-// gated on kargs.is_gappy). Under is_gappy, seqstart_k_ptr[b] is repurposed
-// (per the fmha_fwd_pagedkv_args contract in fmha_fwd.hpp) to hold each
-// batch's own physical start offset into ITS OWN page pool -- not a running
-// cross-batch prefix sum like the non-gappy convention -- and seqlen_k_ptr[b]
-// carries the real per-batch token count. Each batch's real K/V content is
-// placed starting at physical row l2p_offsets[b] within its own page set; the
-// rows before that (the "gap") carry a NaN sentinel and are provably never
-// read. The TDM affine K/V view is sized by the LOGICAL seqlen_k alone (the
-// l2p shift never widens the descriptor); it is the tracker's reverse offset,
-// folded into the base pointer, that maps a GLOBAL (gap-unaware) window
-// origin in [0, seqlen_k) onto physical rows
-// [l2p_offsets[b], l2p_offsets[b]+seqlen_k) -- see tdm_page_tracker.hpp. A
-// descriptor that instead over-reads into the gap (or the next page) would
-// pull the NaN sentinel through P*V instead of silently agreeing with a zero
-// fill, which is why the gap rows are NaN and not zero.
-//
-// l2p_offsets[b] must be a multiple of kN0 (128, this file's fixed TileRows):
-// the tracker's tile-advance countdown assumes the first token inside a page
-// is tile aligned, same requirement as page_block_size being a TileRows
-// multiple.
+// Gappy group-mode paged launcher (the gappy pipeline variant). Under is_gappy,
+// seqstart_k_ptr[b] holds each batch's offset into its own page sequence (not a prefix
+// sum) and seqlen_k_ptr[b] its key count. Keys start at physical row l2p_offsets[b], which
+// may be any non-negative value; the gap before it holds finite data the kernel must mask,
+// and the rows after the last key hold NaN so an over-read shows in the output.
 template <bool Mask = false>
 FwdResult run_paged_tdm_sched_group_gappy(const std::vector<int>& seqlens_q,
                                           const std::vector<int>& seqlens_k,

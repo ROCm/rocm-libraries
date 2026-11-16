@@ -17,16 +17,15 @@
 namespace ck_tile {
 
 // Paged-KV variant of the hand-scheduled gfx125 TDM pipeline for native 16-bit
-// D64/V64 and D128/D192 x V128. Copied from BlockFmhaPipelineQRKSVSTdmSched and
-// threaded with two page trackers (K and V) that fold paging into the DRAM
-// window base pointer. K runs two kN0 tiles ahead of the tile being computed
-// and V runs one, so the trackers advance independently.
+// D64/V64 and D128/D192 x V128. Copied from BlockFmhaPipelineQRKSVSTdmSched; K and V
+// move through TdmPageTrackers. K runs two kN0 tiles ahead of the tile being computed
+// and V runs one, so the look-ahead passes the last page; the trackers saturate there.
 // Separate template instantiations keep finite virtual-sink normalization out of
 // the generated no-sink kernel's register allocation.
-// SupportsGappy_ selects the variant that accepts any kv_l2p_offset (gappy group mode): its
-// windows use physical rows and it masks the gap. The default variant keeps the windows in
-// logical rows (the kernel folds a kN0-aligned offset into the trackers), so its offset is a
-// compile-time zero here; a runtime offset costs scalar registers this loop cannot spare.
+// SupportsGappy_ selects the variant for gappy group mode (any kv_l2p_offset): its windows
+// are shifted by the offset and it masks the leading gap. The default variant takes the
+// offset as a compile-time zero; a runtime offset costs scalar registers this loop cannot
+// spare.
 template <typename Problem_,
           bool SupportsGappy_     = false,
           typename Policy_        = FmhaTdmSchedPolicyFor<Problem_>,
@@ -202,8 +201,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
     run(const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp, // M0*K0 tile
         const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp, // N0*K0 tile
         const VDramBlockWindowTmp& __restrict__ v_dram_block_window_tmp, // N1*K1 tile
-        KPageTracker k_page_tracker,
-        VPageTracker v_page_tracker,
+        const KPageTracker& k_page_tracker,
+        const VPageTracker& v_page_tracker,
         const BiasDramBlockWindowTmp& __restrict__ bias_dram_block_window_tmp, // M0*N0 tile
         LSEaccDramBlockWindowTmp& __restrict__ lse_acc_dram_window_tmp,        // M0*1 tile
         FmhaMask mask,
@@ -377,7 +376,7 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
         }
 
         // K tile in LDS (sink-aware start)
-        // K/V windows and trackers use PHYSICAL rows (logical + kv_l2p_offset, the page pool's
+        // K/V windows use PHYSICAL rows (logical + kv_l2p_offset, the page pool's
         // coordinates), so tiles start at multiples of kN0 there and never straddle a page. The
         // first window tile starts at the kN0-aligned row at or below physical_seqlen_k_start;
         // its leading columns are gap rows and are masked. The mask takes logical columns.
@@ -400,10 +399,10 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                              {bias_origin.at(number<0>{}), kv_load_start},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
 
-        auto k_dram_window =
-            make_tile_window(k_dram_block_window_tmp,
-                             {kv_load_start, 0},
-                             Policy::template MakeKDramTileDistribution<Problem, true>());
+        auto [i_page_block_k, k_dram_window] = k_page_tracker.make_tile_window(
+            k_dram_block_window_tmp.get_window_lengths(),
+            {kv_load_start, 0},
+            Policy::template MakeKDramTileDistribution<Problem, true>());
 
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType* __restrict__>(smem_ptrk0),
@@ -425,10 +424,10 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                              Policy::template MakeKRegTileDistribution<Problem>());
 
         // V tile in LDS (sink-aware start)
-        auto v_dram_window =
-            make_tile_window(v_dram_block_window_tmp,
-                             {kv_load_start, 0},
-                             Policy::template MakeVDramTileDistribution<Problem>());
+        auto [i_page_block_v, v_dram_window] =
+            v_page_tracker.make_tile_window(v_dram_block_window_tmp.get_window_lengths(),
+                                            {kv_load_start, 0},
+                                            Policy::template MakeVDramTileDistribution<Problem>());
 
         auto v_lds_write_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType* __restrict__>(static_cast<char*>(smem_ptrv0)),
@@ -449,12 +448,6 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                              {0, 0},
                              Policy::template MakeVRegTileDistribution<Problem>());
 
-        // Paging is folded into the base pointer; the window origin stays a
-        // physical row of the whole sequence, not a page-local one.
-        const auto sync_page_ptr = [](auto& dram_window, const auto& tracker) {
-            dram_window.set_bottom_tensor_view_data_ptr(tracker.base_ptr());
-        };
-
         const index_t num_total_loop =
             integer_divide_ceil(physical_seqlen_k_end - window_seqlen_k_start, kN0) + num_sink_loop;
 
@@ -465,15 +458,6 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
         constexpr index_t k1_loops       = kN0 / kK1;
 
         static_assert(1 <= k1_loops);
-
-        // kv_load_start is where the K/V windows actually begin (nonzero for
-        // sliding window, and for the non-sink masked case). The trackers are
-        // constructed at 0 by the kernel, so position them before the first
-        // K/V TDM issue.
-        k_page_tracker.seek(kv_load_start);
-        v_page_tracker.seek(kv_load_start);
-        sync_page_ptr(k_dram_window, k_page_tracker);
-        sync_page_ptr(v_dram_window, v_page_tracker);
 
         // Q tile in LDS
         auto q_dram_window = make_tile_window(
@@ -527,18 +511,16 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
         }
 
-        move_tile_window(k_dram_window, {kN0, 0});
-        k_page_tracker.advance();
+        i_page_block_k = k_page_tracker.move_tile_window(i_page_block_k, k_dram_window, {kN0, 0});
         // K1 is consumed at iteration 1. A one-tile prefix must jump before K1 loads.
         if constexpr(kHasSink)
         {
             if(num_sink_loop == 1 && num_total_loop > 1)
             {
-                move_tile_window(k_dram_window, {sink_to_window_step, 0});
-                k_page_tracker.seek(window_seqlen_k_start);
+                i_page_block_k = k_page_tracker.move_tile_window(
+                    i_page_block_k, k_dram_window, {sink_to_window_step, 0});
             }
         }
-        sync_page_ptr(k_dram_window, k_page_tracker);
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
@@ -676,21 +658,18 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                 // Reuse the V LDS buffer only after the preceding reads have completed.
                 block_sync_lds<k_lds_insts>();
                 // V is prefetched one iteration before its consumer.
-                // The unconditional advance must land first: the sink jump is an
-                // absolute seek() that overrides it, so it must be applied last,
-                // mirroring the prologue's ordering. Doing it the other way around
-                // leaves the window exactly kN0 behind the tracker.
-                move_tile_window(v_dram_window, {kN0, 0});
-                v_page_tracker.advance();
+                // sink_to_window_step assumes the window has already advanced past the
+                // last sink tile, so the sink jump must follow this advance.
+                i_page_block_v =
+                    v_page_tracker.move_tile_window(i_page_block_v, v_dram_window, {kN0, 0});
                 if constexpr(kHasSink)
                 {
                     if(i_total_loops == num_sink_loop - 1 && i_total_loops + 1 < num_total_loop)
                     {
-                        move_tile_window(v_dram_window, {sink_to_window_step, 0});
-                        v_page_tracker.seek(window_seqlen_k_start);
+                        i_page_block_v = v_page_tracker.move_tile_window(
+                            i_page_block_v, v_dram_window, {sink_to_window_step, 0});
                     }
                 }
-                sync_page_ptr(v_dram_window, v_page_tracker);
                 v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
                 if constexpr(kUseCountdownLoop && kN0 == 128 && kN1 == 128 &&
                              std::is_same_v<VDataType, bf16_t>)
@@ -799,7 +778,13 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                     if constexpr(kUseCountdownLoop)
                     {
                         // V's window already points one prefetched tile ahead.
-                        return make_tuple(v_dram_window.get_window_origin().at(I0) - kN0, 0);
+                        return make_tuple(
+                            v_page_tracker
+                                    .to_global_window_origin(i_page_block_v,
+                                                             v_dram_window.get_window_origin())
+                                    .at(I0) -
+                                kN0,
+                            0);
                     }
                     const bool in_sink_phase = (num_sink_loop > i_total_loops);
                     if(in_sink_phase)
@@ -954,21 +939,18 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                 // Fixed boundary: the next K TDM transfer follows softmax.
                 block_sync_lds<v_lds_insts>();
                 // The K transfer here feeds iteration i+2, beyond the already prefetched K1.
-                // The unconditional advance must land first: the sink jump is an
-                // absolute seek() that overrides it, so it must be applied last,
-                // mirroring the prologue's ordering. Doing it the other way around
-                // leaves the window exactly kN0 behind the tracker.
-                move_tile_window(k_dram_window, {kN0, 0});
-                k_page_tracker.advance();
+                // sink_to_window_step assumes the window has already advanced past the
+                // last sink tile, so the sink jump must follow this advance.
+                i_page_block_k =
+                    k_page_tracker.move_tile_window(i_page_block_k, k_dram_window, {kN0, 0});
                 if constexpr(kHasSink)
                 {
                     if(i_total_loops == num_sink_loop - 2 && i_total_loops + 2 < num_total_loop)
                     {
-                        move_tile_window(k_dram_window, {sink_to_window_step, 0});
-                        k_page_tracker.seek(window_seqlen_k_start);
+                        i_page_block_k = k_page_tracker.move_tile_window(
+                            i_page_block_k, k_dram_window, {sink_to_window_step, 0});
                     }
                 }
-                sync_page_ptr(k_dram_window, k_page_tracker);
                 k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
                 load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
             };
@@ -1136,8 +1118,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
     CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
                                         const KDramBlockWindowTmp& k_dram_block_window_tmp,
                                         const VDramBlockWindowTmp& v_dram_block_window_tmp,
-                                        KPageTracker k_page_tracker,
-                                        VPageTracker v_page_tracker,
+                                        const KPageTracker& k_page_tracker,
+                                        const VPageTracker& v_page_tracker,
                                         const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
                                         LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
                                         FmhaMask mask,

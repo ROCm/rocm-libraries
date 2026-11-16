@@ -1383,108 +1383,78 @@ struct FmhaFwdPagedKVKernel
                 static_assert(kIsPagedKV,
                               "qr_pagedkv_tdm_sched is only reachable with paged kv kargs");
 
-                // Two ways to apply kv_l2p_offset (gappy group mode; 0 otherwise):
-                // - default variant: the trackers fold it into the base pointer and the
-                //   windows stay in logical rows. A tile must not straddle a page, so the
-                //   offset must be a multiple of kN0;
-                // - gappy variant: the windows use physical rows and the pipeline masks
-                //   the gap, so any offset works.
-                // The host gate sends gappy mode to the gappy variant; this traps a direct
-                // launch of the default one with a misaligned offset (assert() is compiled
-                // out in Release).
+                // K/V go through TdmPageTrackers over unpadded per-page views (the TDM box
+                // clamp zero-fills past a view). Only the gappy variant applies
+                // kv_l2p_offset; the host gate sends gappy mode there, and this traps a
+                // direct launch of the default one (assert() is compiled out in Release).
                 constexpr bool kPhysicalRows = FmhaPipeline::kSupportsGappy;
                 if constexpr(kIsGroupMode && !kPhysicalRows)
                 {
-                    // is_gappy only exists on the group-mode kargs; batch mode
-                    // never sets kv_l2p_offset away from 0.
-                    if(kargs.is_gappy && (kv_l2p_offset % FmhaPipeline::kN0) != 0)
+                    if(kargs.is_gappy)
                     {
-                        printf(
-                            "%s:%d: error: kv_l2p_offset (%d) must be a multiple of kN0 (%d) for "
-                            "qr_pagedkv_tdm_sched group mode; see TdmPageTracker\n",
-                            __FILE__,
-                            __LINE__,
-                            kv_l2p_offset,
-                            static_cast<int>(FmhaPipeline::kN0));
+                        printf("%s:%d: error: gappy group mode needs the "
+                               "qr_pagedkv_tdm_sched gappy variant\n",
+                               __FILE__,
+                               __LINE__);
                         __builtin_trap();
                     }
                 }
+                const index_t l2p_offset    = kPhysicalRows ? kv_l2p_offset : 0;
+                const index_t kv_global_len = l2p_offset + kargs.seqlen_k;
 
-                // TdmPageTracker::refresh() folds paging into the base pointer, so K/V
-                // are plain affine views over the batch's key rows rather than
-                // page-bounded navigator windows. The view height ends at the last key,
-                // so the TDM zero clamp covers the final partial tile: seqlen_k for
-                // logical rows, kv_l2p_offset + seqlen_k for physical rows. kv_global_len
-                // is also the page count's extent (num_pages_tdm below).
-                const index_t kv_global_len = kv_l2p_offset + kargs.seqlen_k;
-                const index_t kv_view_len   = kPhysicalRows ? kv_global_len : kargs.seqlen_k;
-
-                const auto k_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
-                    static_cast<const KDataType*>(nullptr),
-                    make_tuple(kv_view_len, kargs.hdim_q),
-                    make_tuple(kargs.stride_k, 1),
-                    number<FmhaPipeline::kAlignmentK>{},
-                    number<1>{});
-
-                // V stays row-major (seqlen_k, hdim_v), untransposed -- the
-                // caller contract documented on the pipeline's run() requires
-                // window lengths (kN0, kN1), not the (kN1, kK1) the dense
-                // (non-tdm_sched) kernel path uses a few branches below. That
-                // (kN1, kK1) construction is a known pre-existing bug which
-                // happens to be harmless there only because that path never
-                // reads the window lengths; do not copy it here.
-                const auto v_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
-                    static_cast<const VDataType*>(nullptr),
-                    make_tuple(kv_view_len, kargs.hdim_v),
-                    make_tuple(kargs.stride_v, 1),
-                    number<FmhaPipeline::kAlignmentV>{},
-                    number<1>{});
+                const auto make_k_view = [&](index_t rows) {
+                    return make_naive_tensor_view<address_space_enum::global>(
+                        static_cast<const KDataType*>(nullptr),
+                        make_tuple(rows, kargs.hdim_q),
+                        make_tuple(kargs.stride_k, 1),
+                        number<FmhaPipeline::kAlignmentK>{},
+                        number<1>{});
+                };
+                const auto make_v_view = [&](index_t rows) {
+                    return make_naive_tensor_view<address_space_enum::global>(
+                        static_cast<const VDataType*>(nullptr),
+                        make_tuple(rows, kargs.hdim_v),
+                        make_tuple(kargs.stride_v, 1),
+                        number<FmhaPipeline::kAlignmentV>{},
+                        number<1>{});
+                };
 
                 auto k_dram_window_tdm = make_tile_window(
-                    k_dram_tdm,
+                    make_k_view(kargs.page_block_size),
                     make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
                     {0, 0});
                 auto v_dram_window_tdm = make_tile_window(
-                    v_dram_tdm,
+                    make_v_view(kargs.page_block_size),
                     make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kN1>{}),
                     {0, 0});
 
                 const index_t i_kv_nhead = i_nhead / kargs.nhead_ratio_qk;
-                const long_index_t k_fixed_offset =
-                    static_cast<long_index_t>(i_kv_nhead) * kargs.nhead_stride_k;
-                const long_index_t v_fixed_offset =
-                    static_cast<long_index_t>(i_kv_nhead) * kargs.nhead_stride_v;
-
                 const int32_t* block_indices_tdm =
                     kargs.block_table_ptr +
                     static_cast<long_index_t>(i_batch) * kargs.batch_stride_block_table;
                 const index_t num_pages_tdm =
                     integer_divide_ceil(kv_global_len, kargs.page_block_size);
+                const index_t last_page_rows =
+                    kv_global_len - (num_pages_tdm - 1) * kargs.page_block_size;
 
-                // Constructed with global_seq_start = 0: the kernel cannot see
-                // kv_load_start (the mask computes it inside the pipeline), so
-                // the pipeline's prologue seek(kv_load_start) is what actually
-                // positions these trackers. Do not try to compute it here.
-                auto k_page_tracker = TdmPageTracker<KDataType, FmhaPipeline::kN0>(
-                    reinterpret_cast<const KDataType*>(kargs.k_ptr),
+                const auto k_page_tracker = make_tdm_page_tracker<const KDataType>(
+                    kargs.k_ptr,
                     kargs.batch_stride_k,
-                    k_fixed_offset,
+                    static_cast<long_index_t>(i_kv_nhead) * kargs.nhead_stride_k,
                     block_indices_tdm,
-                    kargs.page_block_size,
-                    kargs.stride_k,
                     num_pages_tdm,
-                    0,
-                    kPhysicalRows ? 0 : kv_l2p_offset);
-                auto v_page_tracker = TdmPageTracker<VDataType, FmhaPipeline::kN0>(
-                    reinterpret_cast<const VDataType*>(kargs.v_ptr),
+                    kargs.page_block_size,
+                    make_k_view(kargs.page_block_size),
+                    make_k_view(last_page_rows));
+                const auto v_page_tracker = make_tdm_page_tracker<const VDataType>(
+                    kargs.v_ptr,
                     kargs.batch_stride_v,
-                    v_fixed_offset,
+                    static_cast<long_index_t>(i_kv_nhead) * kargs.nhead_stride_v,
                     block_indices_tdm,
-                    kargs.page_block_size,
-                    kargs.stride_v,
                     num_pages_tdm,
-                    0,
-                    kPhysicalRows ? 0 : kv_l2p_offset);
+                    kargs.page_block_size,
+                    make_v_view(kargs.page_block_size),
+                    make_v_view(last_page_rows));
 
                 using Policy = typename FmhaPipeline::Policy;
                 static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
