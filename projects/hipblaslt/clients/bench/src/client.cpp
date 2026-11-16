@@ -317,6 +317,10 @@ try
     std::string api_method_str  = "";
     std::string algo_method_str = "";
 
+    int         partitions_opt = 1;
+    std::string split_dim_str  = "N";
+    std::string part_place_str[4] = {"shared", "shared", "shared", "shared"};
+
     bool verify = 0;
     bool ulp    = 0;
 
@@ -708,6 +712,38 @@ try
          "grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. "
          "Options: c, mix, cpp, grouped_gemm_c.")
 
+        ("partitions",
+         value<int>(&partitions_opt)->default_value(1),
+         "Run each GEMM as slices on this many devices (device 0 .. partitions-1), one stream each, "
+         "with hipblaslt_ext::PartitionedGemm. The time is the full span, first launch to last "
+         "partition done. A, B, C and D stay in the device 0 buffers and the other partitions "
+         "reach them over peer access. Needs plain GEMM and the heuristic solution selection; "
+         "1 = off.")
+
+        ("split_dim",
+         value<std::string>(&split_dim_str)->default_value("N"),
+         "With --partitions: the dimension to split, M, N or B (the batch). The first partitions take "
+         "size/partitions and the last takes the rest.")
+
+        ("part_place_a",
+         value<std::string>(&part_place_str[0])->default_value("shared"),
+         "With --partitions: shared (one copy of A in the device 0 buffer, read by every "
+         "partition over peer access) or replicated (a copy on each partition device).")
+
+        ("part_place_b",
+         value<std::string>(&part_place_str[1])->default_value("shared"),
+         "With --partitions: shared or replicated B, as --part_place_a.")
+
+        ("part_place_c",
+         value<std::string>(&part_place_str[2])->default_value("shared"),
+         "With --partitions: shared or replicated C, as --part_place_a.")
+
+        ("part_place_d",
+         value<std::string>(&part_place_str[3])->default_value("shared"),
+         "With --partitions: shared (every partition writes its slice into the device 0 D) or "
+         "replicated (a D on each partition device; the slices are gathered into the device 0 D "
+         "after a verified run, outside the timing).")
+
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
          "Print solution, kernel name and solution index.")
@@ -880,6 +916,31 @@ try
         hipblaslt_cerr << "Invalid api method: " << api_method_str << std::endl;
         return 1;
     }
+
+    if(partitions_opt < 1 || partitions_opt > 255)
+    {
+        hipblaslt_cerr << "Invalid --partitions: " << partitions_opt << std::endl;
+        return 1;
+    }
+    if(split_dim_str.size() != 1
+       || std::string("MNBmnb").find(split_dim_str[0]) == std::string::npos)
+    {
+        hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M, N or B)" << std::endl;
+        return 1;
+    }
+    for(int t = 0; t < 4; t++)
+    {
+        if(part_place_str[t] != "shared" && part_place_str[t] != "replicated")
+        {
+            hipblaslt_cerr << "Invalid --part_place_" << char('a' + t) << ": " << part_place_str[t]
+                           << " (shared or replicated)" << std::endl;
+            return 1;
+        }
+        arg.part_place[t] = part_place_str[t] == "replicated" ? 'R' : 'S';
+    }
+    arg.part_place[4] = 0;
+    arg.partitions = static_cast<uint8_t>(partitions_opt);
+    arg.split_dim     = char(std::toupper(static_cast<unsigned char>(split_dim_str[0])));
 
     if(algo_method_str.compare("heuristic") == 0)
     {
