@@ -38,7 +38,7 @@ constexpr int64_t UID_C = 4;
 
 constexpr float FP32_TOLERANCE = 2e-4f;
 constexpr float FP16_TOLERANCE = 3e-2f;
-constexpr float GUARD_VALUE = 12345.0f;
+constexpr float GUARD_VALUE = 12288.0f;
 constexpr size_t GUARD_ELEMENTS = 16;
 
 struct HipFreeDeleter
