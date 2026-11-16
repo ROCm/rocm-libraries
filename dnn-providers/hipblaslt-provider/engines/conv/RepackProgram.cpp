@@ -271,11 +271,11 @@ void RepackProgram::launch(const RepackStep& step,
         fused->cast.src = static_cast<const float*>(src);
         fused->cast.dst = dst;
         total = fused->cast.total;
-        // The flat form takes four elements a thread (aligned buffers; else it strides over
-        // the same threads one element at a time).
+        // The flat form takes eight elements a thread for 16-bit outputs, four for fp32
+        // (aligned buffers; else it strides over the same threads with fewer at a time).
         if(fused->epilogue.channelAxis < 0 && total % 4 == 0)
         {
-            total /= 4;
+            total /= elementBytes(step.dataType) == 2 && total % 8 == 0 ? 8 : 4;
         }
     }
     else if(auto* im2col = std::get_if<Im2ColArgs>(&args))

@@ -59,11 +59,20 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
 | Fused pass | The plan's existing last pass: the GEMMs write the channels-last staging in fp32, and the copy into y becomes the epilogue's cast | y is staged channels-last (the `STAGED_CHANNELS_LAST` layout candidate for a channels-first y) |
 | Extra pass | Every GEMM (and any fp32 partials sum) writes an fp32 copy of y in the workspace; one cast applies the chain and rounds into y | everything else: rocBLAS, channels-first rows, groups, patterns hipBLASLt has no epilogue for |
 
-- hipBLASLt's relu, clamp, swish and GELU epilogues are not used: its relu and clamp turn NaN into a bound, and its swish and tanh GELU give NaN for -inf where the chain gives 0. Those patterns run in a pass, so every engine gives the same result for the same graph, special values included.
-- The epilogue cast (`StridedCastEpilogue*`) runs the chain as a run-time menu of steps; the channel is the coordinate of the cast's channel axis, read off the index walk the cast already does.
-- Operand pointers and pass-by-value scalars are bound at execution, so a plan serves the graph's values whatever they are.
-- The extra pass adds y's size in fp32 to the workspace, above the repack cap, plus one launch reading 4 bytes and writing y per element.
-- Backward data and backward weights with pointwise nodes are declined.
+- **Known cost.** Outside the native form, a fused plan costs more than its bare convolution by two things:
+  - its GEMM writes y in fp32, twice the bytes of the bare GEMM's 16-bit output;
+  - one cast/epilogue pass reads that fp32 result and writes y.
+
+  On MI325X (bias + relu, channels-last), the GEMM grows 1.0-2.8x by kernel time; output-bound GEMMs grow the most. Both are the price of rounding once and of giving every engine the same result for the same graph. Autotune weighs fused explicit GEMM against the other conv engines, which fuse in their kernels.
+- **Native form.** It covers only a bias alone and sigmoid alone. hipBLASLt's relu, clamp, swish and GELU epilogues change NaN and infinity results: its relu and clamp turn NaN into a bound, and its swish and tanh GELU give NaN for -inf where the chain gives 0.
+- **The pass.** The epilogue cast (`StridedCastEpilogue*`) runs the chain as a run-time menu of steps.
+  - On a dense y, it walks memory flat: 16-byte loads of the fp32 result, 16-byte stores of the outputs (8 elements a thread for 16-bit y, 4 for fp32). The channel is carried along by additions in 32-bit integers.
+  - Otherwise it orders its axes so the axis along which y is densest is innermost, and reads the channel off its index walk.
+- **Values at execution.** Operand pointers and pass-by-value scalars are bound at execution, so a plan serves the graph's values whatever they are.
+- **Workspace.** The extra pass adds y's size in fp32 to the workspace, above the repack cap.
+- **Runnable layout.** A fused plan runs on the first column layout whose GEMMs the backend can run. The default comes first, then staged channels-last, channels-last and channels-first.
+- **Deterministic hipBLASLt declines.** The deterministic hipBLASLt engines give the library no workspace, so they decline a fused graph when no layout's fp32-output GEMM has a workspace-free algorithm. This happens for some small-n, long-k channels-first fp16 layers. The deterministic rocBLAS engine serves those graphs.
+- **Backward directions.** Backward data and backward weights with pointwise nodes are declined.
 
 ## Implementation design
 - **Plan shape:** a plan is a list of stages. Each stage has repack steps, then GEMM calls in order, then repack steps. All stages share one workspace, laid out in 256-byte-aligned regions with their own uids. `ConvRepackPlan` runs the stages. A direct row runs as the backend's GEMM plan alone.

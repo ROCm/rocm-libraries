@@ -133,9 +133,10 @@ __device__ void stridedCast(const StridedCastArgs& args)
 
 // The fused epilogue's steps. fp32 throughout, no fast-math: relu and clamp keep NaN, and a
 // gate that saturates to exactly 0 gives 0 rather than -inf * 0.
-__device__ inline float epilogueLoad(const ConvRepackEpilogue& e, int i, long long channel)
+template <typename Index>
+__device__ inline float epilogueLoad(const ConvRepackEpilogue& e, int i, Index channel)
 {
-    const long long index = e.operandPerChannel[i] != 0 ? channel : 0;
+    const Index index = e.operandPerChannel[i] != 0 ? channel : 0;
     switch(e.operandType[i])
     {
     case 1:
@@ -159,7 +160,8 @@ __device__ inline float epilogueSigmoid(float v)
     return 1.0f / (1.0f + expf(-v));
 }
 
-__device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, long long channel)
+template <typename Index>
+__device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, Index channel)
 {
     for(int i = 0; i < e.ops; ++i)
     {
@@ -228,73 +230,71 @@ __device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, long
     return v;
 }
 
-/// The flat epilogue cast, four elements a thread: 16-byte loads of the fp32 result, one store
-/// of four outputs. Index is int where every count and offset fits 32 bits, which halves the
-/// channel bookkeeping.
-template <typename OutputType, typename Index>
-__device__ void flatEpilogueQuads(const StridedCastEpilogueArgs& a)
+/// The flat epilogue cast, N (4 or 8) elements a thread: 16-byte loads of the fp32 result and
+/// one store of the N outputs (16 bytes for 16-bit outputs at N 8). Index is int where every
+/// count and offset fits 32 bits. The channel advances element by element within the N, and by
+/// the grid stride's quotient and remainder between them, worked out once per thread.
+template <typename OutputType, typename Index, int N>
+__device__ void flatEpilogueRuns(const StridedCastEpilogueArgs& a)
 {
-    const StridedCastArgs& args = a.cast;
-    auto* dst = static_cast<OutputType*>(args.dst);
-    // The channel advances element by element within the four, and by the stride's quotient
-    // and remainder between them.
     using Load = float __attribute__((ext_vector_type(4)));
-    using Bits = unsigned short __attribute__((ext_vector_type(4)));
-    const auto quads = static_cast<Index>(args.total / 4);
+    using Store = unsigned int __attribute__((ext_vector_type(N * sizeof(OutputType) / 4)));
+    const StridedCastArgs& args = a.cast;
+    const auto runs = static_cast<Index>(args.total / N);
     const auto first = static_cast<Index>(firstThread());
     const auto step = static_cast<Index>(threadStride());
-    if(first >= quads)
+    if(first >= runs)
     {
         return;
     }
     const auto inner = static_cast<Index>(a.epilogue.flatChannelStride);
     const auto chans = static_cast<Index>(a.epilogue.flatChannels);
-    const Index start = 4 * first;
+    const Index start = N * first;
     const Index q = start / inner;
     Index rem = start - q * inner;
     Index channel = q % chans;
-    // Between quads: 4 * step elements, less the 3 the inner loop advanced.
-    const Index gap = 4 * step - 3;
+    // Between runs: N * step elements, less the N - 1 the inner loop advanced.
+    const Index gap = N * step - (N - 1);
     const Index qs = gap / inner;
     const Index remStep = gap - qs * inner;
     const Index chStep = qs % chans;
     const auto* src = reinterpret_cast<const Load*>(args.src);
-    for(Index i = first; i < quads; i += step)
+    auto* dst = reinterpret_cast<Store*>(args.dst);
+    for(Index i = first; i < runs; i += step)
     {
-        const Load v = src[i];
-        OutputType out[4];
+        float in[N];
 #pragma unroll
-        for(int e = 0; e < 4; ++e)
+        for(int l = 0; l < N / 4; ++l)
         {
-            out[e] = static_cast<OutputType>(
-                applyEpilogue(a.epilogue, v[e], static_cast<long long>(channel)));
-            const Index advance = e < 3 ? 1 : remStep;
-            const Index jump = e < 3 ? 0 : chStep;
-            rem += advance;
+            const Load v = src[i * (N / 4) + l];
+#pragma unroll
+            for(int e = 0; e < 4; ++e)
+            {
+                in[4 * l + e] = v[e];
+            }
+        }
+        OutputType out[N];
+#pragma unroll
+        for(int e = 0; e < N; ++e)
+        {
+            out[e] = static_cast<OutputType>(applyEpilogue(a.epilogue, in[e], channel));
+            rem += e < N - 1 ? 1 : remStep;
+            const Index jump = e < N - 1 ? 0 : chStep;
             Index carry = 0;
-            while(rem >= inner)
+            if(rem >= inner)
             {
                 rem -= inner;
-                ++carry;
+                carry = 1;
             }
             channel += jump + carry;
-            while(channel >= chans)
+            if(channel >= chans)
             {
                 channel -= chans;
             }
         }
-        if constexpr(sizeof(OutputType) == 4)
-        {
-            Load packed;
-            __builtin_memcpy(&packed, out, sizeof(out));
-            reinterpret_cast<Load*>(dst)[i] = packed;
-        }
-        else
-        {
-            Bits packed;
-            __builtin_memcpy(&packed, out, sizeof(out));
-            reinterpret_cast<Bits*>(dst)[i] = packed;
-        }
+        Store packed;
+        __builtin_memcpy(&packed, out, sizeof(out));
+        dst[i] = packed;
     }
 }
 
@@ -311,15 +311,21 @@ __device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
        && reinterpret_cast<unsigned long long>(args.dst) % (4 * sizeof(OutputType)) == 0)
     {
         constexpr long long NARROW = 1LL << 30;
-        if(args.total <= NARROW && a.epilogue.flatChannelStride <= NARROW
-           && a.epilogue.flatChannels <= NARROW
-           && static_cast<long long>(gridDim.x) * blockDim.x <= NARROW / 4)
+        const bool narrow = args.total <= NARROW && a.epilogue.flatChannelStride <= NARROW
+                            && a.epilogue.flatChannels <= NARROW
+                            && static_cast<long long>(gridDim.x) * blockDim.x <= NARROW / 8;
+        // Eight a thread for 16-bit outputs (a 16-byte store), four for fp32.
+        const bool eight = sizeof(OutputType) == 2 && args.total % 8 == 0
+                           && reinterpret_cast<unsigned long long>(args.dst) % 16 == 0;
+        if(eight)
         {
-            flatEpilogueQuads<OutputType, int>(a);
+            narrow ? flatEpilogueRuns<OutputType, int, 8>(a)
+                   : flatEpilogueRuns<OutputType, long long, 8>(a);
         }
         else
         {
-            flatEpilogueQuads<OutputType, long long>(a);
+            narrow ? flatEpilogueRuns<OutputType, int, 4>(a)
+                   : flatEpilogueRuns<OutputType, long long, 4>(a);
         }
         return;
     }
