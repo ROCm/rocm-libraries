@@ -6,9 +6,13 @@
 //  pre_checkin_partitioned_gemm_ext  run on any single GPU. The "partitions" are extra handles
 //                                    on device 0, which is enough for the argument checks and
 //                                    for a one-partition run.
-//  partitioned_gemm_ext_multi_gpu    need two or more devices (the partitions of a DPX card, or
-//                                    two GPUs); they skip otherwise.
+//  partitioned_gemm_ext_*_multi_gpu  run the two partitions of a GPU in DPX mode when there is one
+//                                    (two HIP devices with the same PCI domain, bus and device),
+//                                    and both partitions on one device otherwise (SPX, or two
+//                                    unrelated cards); the ones that only mean something across
+//                                    two partitions skip without a DPX GPU.
 
+#include "partition_devices.hpp"
 #include "utility.hpp"
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -524,12 +528,11 @@ TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongStreamAndWorkspaceCounts)
 
 TEST(partitioned_gemm_ext_streams_multi_gpu, RejectsAStreamOnAnotherDeviceThanItsHandle)
 {
-    int deviceCount = 0;
-    ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
-    if(deviceCount < 2)
-        GTEST_SKIP() << "needs 2 devices, found " << deviceCount;
+    const auto pair = hipblaslt_partitions::dpxPair();
+    if(!pair)
+        GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
 
-    Partitions        parts({0, 1});
+    Partitions        parts({pair->first, pair->second});
     auto              gemm = makeGemm(parts);
     Operands          op;
     ReplicatedBuffers buffers(parts, op);
@@ -606,28 +609,26 @@ namespace
 
 TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
 {
-    int deviceCount = 0;
-    ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
-    if(deviceCount < 2)
-        GTEST_SKIP() << "needs 2 devices, found " << deviceCount;
-    const Combo cs = GetParam();
+    // The two partitions of a DPX GPU, or both partitions on one device (SPX).
+    const auto  devs = hipblaslt_partitions::partitionDevices(2);
+    const Combo cs   = GetParam();
 
-    Partitions parts({0, 1});
+    Partitions parts(devs);
     auto       gemm = makeGemm(parts);
     Operands   op;
 
-    // Matrix `shared` lives on device 0 and partition 1 reads it across devices.
+    // Matrix `shared` lives on the first partition's device and partition 1 reads it from there.
     std::vector<std::unique_ptr<DeviceBuf>> bufs;
     auto                                    sharedCopy = [&](std::vector<half_t> const& host) {
-        bufs.push_back(std::make_unique<DeviceBuf>(0, host.size() * 2, host.data()));
+        bufs.push_back(std::make_unique<DeviceBuf>(devs[0], host.size() * 2, host.data()));
         return bufs.back()->get();
     };
-    for(int device = 1; device < 2; device++)
+    if(devs[1] != devs[0])
     {
-        ASSERT_EQ(hipSetDevice(device), hipSuccess);
-        hipError_t e = hipDeviceEnablePeerAccess(0, 0);
+        ASSERT_EQ(hipSetDevice(devs[1]), hipSuccess);
+        hipError_t e = hipDeviceEnablePeerAccess(devs[0], 0);
         if(e != hipSuccess && e != hipErrorPeerAccessAlreadyEnabled)
-            GTEST_SKIP() << "no peer access from device " << device << " to device 0";
+            GTEST_SKIP() << "no peer access from device " << devs[1] << " to device " << devs[0];
         static_cast<void>(hipGetLastError());
     }
 
@@ -646,7 +647,7 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
     }
     if(cs.d == Placement::Shared)
     {
-        bufs.push_back(std::make_unique<DeviceBuf>(0, size_t(kLdd) * kN * 2));
+        bufs.push_back(std::make_unique<DeviceBuf>(devs[0], size_t(kLdd) * kN * 2));
         void* d = bufs.back()->get();
         in.d    = {d, d};
     }
@@ -682,7 +683,7 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
     ASSERT_EQ(gemm.run(parts.streams), HIPBLAS_STATUS_SUCCESS);
     parts.sync();
 
-    auto ref = referenceGemm(op, parts.rawHandles()[0], 0);
+    auto ref = referenceGemm(op, parts.rawHandles()[0], devs[0]);
     ASSERT_FALSE(ref.empty());
 
     for(int i = 0; i < 2; i++)
@@ -691,7 +692,7 @@ TEST_P(partitioned_gemm_ext_multi_gpu, MatchesGemmOnOneDevice)
         ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
         const int64_t       rows = kLdd;
         std::vector<half_t> got(size_t(rows) * kN);
-        ASSERT_EQ(hipSetDevice(i), hipSuccess);
+        ASSERT_EQ(hipSetDevice(devs[i]), hipSuccess);
         ASSERT_EQ(hipMemcpy(got.data(), in.d[i], got.size() * 2, hipMemcpyDeviceToHost),
                   hipSuccess);
         size_t bad = 0;
@@ -817,15 +818,15 @@ namespace
 // order the halves are in, each partition must compute the slice on its own device.
 TEST_P(partitioned_gemm_ext_placement_multi_gpu, SlicesFollowThePages)
 {
-    int count = 0;
-    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
-    if(count < 2)
-        GTEST_SKIP() << "needs two devices";
+    const auto pair = hipblaslt_partitions::dpxPair();
+    if(!pair)
+        GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
+    const std::vector<int> dpxDevices = {pair->first, pair->second};
     const bool swapped = GetParam();
 
     // op(A)=T: A is K x M; op(B)=N: B is K x N, so a half of B (N/2 columns) is 2 MiB.
     constexpr int64_t m = 256, n = 2048, k = 1024;
-    const int         owners[2] = {swapped ? 1 : 0, swapped ? 0 : 1};
+    const int         owners[2] = {dpxDevices[swapped ? 1 : 0], dpxDevices[swapped ? 0 : 1]};
     SplitVmm          b;
     std::string       why;
     if(!b.create(size_t(k) * (n / 2) * sizeof(half_t), owners, why))
@@ -840,11 +841,11 @@ TEST_P(partitioned_gemm_ext_placement_multi_gpu, SlicesFollowThePages)
               hipSuccess);
     const std::vector<half_t> ha(size_t(k) * m, half_t(1));
 
-    Partitions parts({0, 1});
+    Partitions parts(dpxDevices);
     auto       gemm = makeGemm(parts);
     // A and D: one copy per partition, on its device.
     std::vector<std::unique_ptr<DeviceBuf>> a, d;
-    for(int dev = 0; dev < 2; dev++)
+    for(int dev : dpxDevices)
     {
         a.push_back(std::make_unique<DeviceBuf>(dev, ha.size() * sizeof(half_t), ha.data()));
         d.push_back(std::make_unique<DeviceBuf>(dev, size_t(m) * n * sizeof(half_t)));
@@ -866,7 +867,7 @@ TEST_P(partitioned_gemm_ext_placement_multi_gpu, SlicesFollowThePages)
     {
         int64_t offset = -1, size = 0;
         ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
-        const int64_t expected = (owners[0] == int(i) ? 0 : 1) * (n / 2);
+        const int64_t expected = (owners[0] == dpxDevices[i] ? 0 : 1) * (n / 2);
         EXPECT_EQ(offset, expected) << "partition " << i;
         EXPECT_EQ(size, n / 2);
     }
@@ -889,7 +890,7 @@ TEST_P(partitioned_gemm_ext_placement_multi_gpu, SlicesFollowThePages)
         int64_t offset = 0, size = 0;
         ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
         std::vector<half_t> got(size_t(m) * n);
-        ASSERT_EQ(hipSetDevice(int(i)), hipSuccess);
+        ASSERT_EQ(hipSetDevice(dpxDevices[i]), hipSuccess);
         ASSERT_EQ(
             hipMemcpy(got.data(), d[i]->get(), got.size() * sizeof(half_t), hipMemcpyDeviceToHost),
             hipSuccess);
@@ -913,11 +914,11 @@ INSTANTIATE_TEST_SUITE_P(partitioned_gemm_ext_placement_multi_gpu,
 // swapped back; lists that disagree are an error.
 TEST(partitioned_gemm_ext_copies_multi_gpu, SwappedCopiesAreMatchedByDevice)
 {
-    int count = 0;
-    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
-    if(count < 2)
-        GTEST_SKIP() << "needs two devices";
-    Partitions        parts({0, 1});
+    const auto pair = hipblaslt_partitions::dpxPair();
+    if(!pair)
+        GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
+    const std::vector<int> dpxDevices = {pair->first, pair->second};
+    Partitions             parts(dpxDevices);
     auto              gemm = makeGemm(parts);
     Operands          op;
     ReplicatedBuffers buffers(parts, op);
@@ -950,11 +951,11 @@ TEST(partitioned_gemm_ext_copies_multi_gpu, SwappedCopiesAreMatchedByDevice)
 
 TEST(partitioned_gemm_ext_copies_multi_gpu, CopiesInDifferentOrdersAreRejected)
 {
-    int count = 0;
-    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
-    if(count < 2)
-        GTEST_SKIP() << "needs two devices";
-    Partitions        parts({0, 1});
+    const auto pair = hipblaslt_partitions::dpxPair();
+    if(!pair)
+        GTEST_SKIP() << "needs a GPU in DPX mode (two HIP devices that are its two partitions)";
+    const std::vector<int> dpxDevices = {pair->first, pair->second};
+    Partitions             parts(dpxDevices);
     auto              gemm = makeGemm(parts);
     Operands          op;
     ReplicatedBuffers buffers(parts, op);
@@ -1027,13 +1028,11 @@ TEST(pre_checkin_partitioned_gemm_ext, BatchSplitSlices)
               HIPBLAS_STATUS_INVALID_VALUE);
 }
 
-// Two devices, 5 batches split 2 + 3: each partition computes its batches into its own D.
+// Two partitions, 5 batches split 2 + 3: each partition computes its batches into its own D.
 TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
 {
-    int count = 0;
-    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess);
-    if(count < 2)
-        GTEST_SKIP() << "needs two devices";
+    // The two partitions of a DPX GPU, or both partitions on one device (SPX).
+    const auto devs = hipblaslt_partitions::partitionDevices(2);
 
     // op(A)=T: A is K x M; op(B)=N: B is K x N. A holds ones and column j of batch b of B holds
     // ((j + 3b) % 8) / 8, so D(i, j) of batch b is k * ((j + 3b) % 8) / 8 exactly.
@@ -1046,10 +1045,10 @@ TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
             for(int64_t r = 0; r < k; r++)
                 hb[b * sb + j * k + r] = half_t(float((j + 3 * b) % 8) / 8.f);
 
-    Partitions                              parts({0, 1});
+    Partitions                              parts(devs);
     auto                                    gemm = makeGemm(parts);
     std::vector<std::unique_ptr<DeviceBuf>> a, b, d;
-    for(int dev = 0; dev < 2; dev++)
+    for(int dev : devs)
     {
         a.push_back(std::make_unique<DeviceBuf>(dev, ha.size() * 2, ha.data()));
         b.push_back(std::make_unique<DeviceBuf>(dev, hb.size() * 2, hb.data()));
@@ -1099,7 +1098,7 @@ TEST(partitioned_gemm_ext_batch_multi_gpu, EachPartitionComputesItsBatches)
         ASSERT_EQ(gemm.getSlice(i, offset, size), HIPBLAS_STATUS_SUCCESS);
         covered += size;
         std::vector<half_t> got(size_t(sd) * batch);
-        ASSERT_EQ(hipSetDevice(int(i)), hipSuccess);
+        ASSERT_EQ(hipSetDevice(devs[i]), hipSuccess);
         ASSERT_EQ(hipMemcpy(got.data(), d[i]->get(), got.size() * 2, hipMemcpyDeviceToHost),
                   hipSuccess);
         size_t bad = 0;

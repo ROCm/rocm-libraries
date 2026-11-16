@@ -44,6 +44,7 @@
 #include "hipblaslt_vector.hpp"
 #include "memory_estimate_check.hpp"
 #include "mx_tile128x4.hpp"
+#include "partition_devices.hpp"
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
@@ -1209,18 +1210,8 @@ inline std::string partitioned_unsupported_reason(const Arguments& arg,
                                                   hipDataType      TiB,
                                                   hipDataType      To)
 {
-    int devices = 0;
-    if(hipGetDeviceCount(&devices) != hipSuccess)
-        devices = 0;
-    if(int(arg.partitions) > devices)
-        return "--partitions " + std::to_string(int(arg.partitions)) + " needs that many devices, found "
-               + std::to_string(devices);
     if(arg.split_dim != 'M' && arg.split_dim != 'N' && arg.split_dim != 'B')
         return "split_dim must be M, N or B";
-    // The partitions are devices 0 .. partitions-1, and partition 0 runs on the current device.
-    int current = 0;
-    if(hipGetDevice(&current) != hipSuccess || current != 0)
-        return "--partitions needs the benchmark on device 0 (the partitions are devices 0 ...)";
     // Every partition needs at least one index of the split dimension.
     const int64_t splitSize = arg.split_dim == 'M'   ? arg.M[0]
                               : arg.split_dim == 'N' ? arg.N[0]
@@ -2202,7 +2193,9 @@ private:
     hipStream_t m_stream = nullptr;
 };
 
-// --partitions N: one GEMM run as slices on devices 0..N-1 with hipblaslt_ext::PartitionedGemm.
+// --partitions N: one GEMM run as N slices with hipblaslt_ext::PartitionedGemm. The slices run on the
+// partitions of a GPU in DPX mode when the current device is one of them (see partition_devices.hpp),
+// and all on the current device otherwise (SPX: the same result, no speed benefit).
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
 // workspace, events). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
 // is read (or written) by the other partitions over peer access; a Replicated one gets a full
@@ -2230,6 +2223,7 @@ public:
             std::begin(m_replicated), std::end(m_replicated), [](bool r) { return !r; });
         int previous = 0;
         check(hipGetDevice(&previous), "hipGetDevice");
+        m_devices = hipblaslt_partitions::partitionDevices(size_t(arg.partitions), previous);
         try
         {
             std::vector<hipblasLtHandle_t> handles{handle0};
@@ -2237,18 +2231,19 @@ public:
             check(hipEventCreate(&m_start), "hipEventCreate");
             for(int i = 1; i < int(arg.partitions); i++)
             {
-                check(hipSetDevice(i), "hipSetDevice");
+                check(hipSetDevice(m_devices[i]), "hipSetDevice");
                 m_handleOwners.push_back(std::make_unique<hipblaslt_local_handle>(arg));
                 handles.push_back(static_cast<hipblasLtHandle_t&>(*m_handleOwners.back()));
                 hipStream_t stream = nullptr;
                 check(hipStreamCreate(&stream), "hipStreamCreate");
                 m_streams.push_back(stream);
-                if(anyShared) // reach the device 0 buffers
+                if(anyShared && m_devices[i] != previous) // reach the caller's buffers
                 {
                     hipError_t peer = hipDeviceEnablePeerAccess(previous, 0);
                     if(peer != hipSuccess && peer != hipErrorPeerAccessAlreadyEnabled)
-                        throw std::runtime_error("no peer access from device " + std::to_string(i)
-                                                 + " to device " + std::to_string(previous));
+                        throw std::runtime_error("no peer access from device "
+                                                 + std::to_string(m_devices[i]) + " to device "
+                                                 + std::to_string(previous));
                     static_cast<void>(hipGetLastError());
                 }
             }
@@ -2280,7 +2275,7 @@ public:
         static_cast<void>(hipGetDevice(&previous));
         for(size_t i = 1; i < m_streams.size(); i++)
         {
-            static_cast<void>(hipSetDevice(int(i)));
+            static_cast<void>(hipSetDevice(m_devices[i]));
             static_cast<void>(hipStreamSynchronize(m_streams[i]));
             static_cast<void>(hipStreamDestroy(m_streams[i]));
             if(i - 1 < m_workspaces.size())
@@ -2338,7 +2333,7 @@ public:
                 continue;
             for(size_t i = 1; i < m_streams.size(); i++)
             {
-                check(hipSetDevice(int(i)), "hipSetDevice");
+                check(hipSetDevice(m_devices[i]), "hipSetDevice");
                 void* ptr = nullptr;
                 check(hipMalloc(&ptr, std::max<size_t>(bytes[t], 1)), "hipMalloc");
                 m_replica[t].push_back(ptr);
@@ -2460,7 +2455,7 @@ public:
             {
                 int previous = 0;
                 check(hipGetDevice(&previous), "hipGetDevice");
-                check(hipSetDevice(int(i)), "hipSetDevice");
+                check(hipSetDevice(m_devices[i]), "hipSetDevice");
                 void* ptr = nullptr;
                 check(hipMalloc(&ptr, std::max<size_t>(bytes, 1)), "hipMalloc");
                 m_workspaces.push_back(ptr);
@@ -2496,6 +2491,7 @@ private:
     size_t                                                 m_bytes[4] = {};
     int64_t m_m = 0, m_n = 0, m_batch = 1, m_ldd = 0, m_strideD = 0;
     std::vector<std::unique_ptr<hipblaslt_local_handle>>   m_handleOwners;
+    std::vector<int>                                       m_devices; // device of each partition
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
     hipEvent_t                                             m_start = nullptr;
