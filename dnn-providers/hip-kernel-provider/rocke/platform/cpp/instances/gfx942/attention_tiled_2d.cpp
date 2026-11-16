@@ -639,8 +639,9 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                                  "use_global_load_lds_k");
             return false;
         }
-        /* The K stub left in LDS is too small for the Q tile that aliases it;
-         * the C++ engine refuses the flag until that sizing is fixed. */
+        /* The C++ engine has no K-from-HBM loader: Python's version aliases Q
+         * into a K stub too small to hold it, so the flag stays refused until
+         * that staging is fixed in both engines. */
         rocke_attn2d_set_err(
             b, ROCKE_ERR_NOTIMPL, "use_k_hbm_direct is not ported to the C++ engine yet");
         return false;

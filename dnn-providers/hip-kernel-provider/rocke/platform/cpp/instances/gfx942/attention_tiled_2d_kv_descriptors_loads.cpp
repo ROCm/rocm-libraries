@@ -962,8 +962,6 @@ void rocke_gfx942_attn2d_issue_k(rocke_gfx942_attn2d_build_ctx_t* ctx,
 {
     if(ctx->K_SLICED_ACTIVE)
         return;
-    if(ctx->K_HBM_DIRECT)
-        return; /* K is streamed HBM -> registers by the QK loop. */
     if(ctx->FP8_MFMA_QK)
         rocke_gfx942_attn2d_issue_k_fp8_mfma_async(ctx, tile_idx, buf_idx);
     else if(ctx->KV_FP8)

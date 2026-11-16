@@ -150,7 +150,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->GROUPED_KV2 = spec->use_grouped_kv2_softmax;
     ctx->CAUSAL_MASK_PHASE_SPLIT = spec->use_causal_mask_phase_split;
     ctx->V_HBM_DIRECT = spec->use_v_hbm_direct;
-    ctx->K_HBM_DIRECT = spec->use_k_hbm_direct;
     ctx->FAST_PAGED_KV_DESC = spec->use_fast_paged_kv_desc;
     ctx->I64_KV_ADDR = spec->use_i64_kv_addr;
     ctx->EARLY_V_SCHEDULE = spec->use_early_v_schedule;
@@ -490,12 +489,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     {
         int shp[3] = {K_BUFS, T, K_SLICE_HD};
         ctx->K_lds = rocke_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "KldsS");
-    }
-    else if(spec->use_k_hbm_direct)
-    {
-        /* K is read straight from HBM by the QK MFMA loop; keep a stub slab. */
-        int shp[3] = {K_BUFS, 1, 1};
-        ctx->K_lds = rocke_b_smem_alloc(b, K_LDS_DTYPE, shp, 3, "KldsStub");
     }
     else
     {

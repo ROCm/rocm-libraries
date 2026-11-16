@@ -236,22 +236,6 @@ static rocke_value_t* fh_read_k8_mfma_operand_frag(rocke_gfx942_attn2d_build_ctx
                                                    rocke_value_t* k_off,
                                                    int frag)
 {
-    if(ctx->K_HBM_DIRECT && !ctx->FP8_MFMA_QK)
-    {
-        /* Straight from HBM via buffer_load (out-of-range voffsets read 0; the
-         * causal mask already zeroes keys past the sequence). */
-        rocke_ir_builder_t* b = ctx->b;
-        rocke_value_t* lin
-            = rocke_b_add(b, rocke_b_mul(b, k_row, rocke_b_const_i32(b, ctx->HD)), k_off);
-        const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
-        rocke_value_t* in_values[3] = {ctx->kv_tile_iv, lin, ctx->kv_head_idx};
-        rocke_value_t* vo = NULL;
-        rocke_value_t* vl = NULL;
-        if(!rocke_transforms_descriptor_offset(b, ctx->kv_desc, in_names, in_values, 3, &vo, &vl))
-            return NULL;
-        return rocke_b_buffer_load_vN(
-            b, ctx->k_rsrc, vo, rocke_b_const_i32(b, 0), ctx->dtype, frag);
-    }
     rocke_value_t* idx[3] = {buf, k_row, k_off};
     return rocke_b_smem_load_vN(ctx->b, ctx->K_lds, idx, 3, ctx->dtype, frag);
 }
