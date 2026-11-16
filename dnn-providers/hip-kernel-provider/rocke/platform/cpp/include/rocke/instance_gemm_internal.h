@@ -469,7 +469,7 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* parity_v,
                                 rocke_value_t** out_accs);
 
-/* emit_compute_and_epilogue(ctx): the prefetch/db/simple K-loop selector +
+/* emit_compute_and_epilogue(ctx): the tdm/prefetch/db/simple K-loop selector +
  * _emit_epilogue. */
 void rocke_gemm_emit_compute_and_epilogue(rocke_gemm_build_ctx_t* ctx);
 
@@ -484,12 +484,10 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx);
  * back to _simple when loads_per_tile > 63). */
 void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx);
 
-/* _emit_kloop_tdm_ring(ctx): TDM depth >= 3 modular-ring K-loop. */
-void rocke_gemm_emit_kloop_tdm_ring(rocke_gemm_build_ctx_t* ctx);
-
-/* _emit_kloop_tdm_early_refill(ctx): depth-2 TDM ping-pong that refills each
- * half as soon as it has been read (trait.tdm_early_refill). */
-void rocke_gemm_emit_kloop_tdm_early_refill(rocke_gemm_build_ctx_t* ctx);
+/* The K-loop of a tdm spec (gemm_build_kloop_tdm.cpp; Python TdmKLoop.emit):
+ * unpipelined, ping-pong, early refill or ring, by tdm_depth. Writes
+ * ctx->for_results / ctx->num_for_results. */
+void rocke_gemm_emit_kloop_tdm(rocke_gemm_build_ctx_t* ctx);
 
 /* _emit_epilogue(ctx): dispatch to the cshuffle or default epilogue using
  * ctx->for_results and the captured warp/lane/offset Values. */
