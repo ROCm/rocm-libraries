@@ -868,8 +868,11 @@ struct BlockFmhaPipelineQRKSVSTdm
                     constexpr auto i      = make_tuple(idx0);
                     const auto merged_m   = max(m[i], sink_m);
                     const auto correction = exp2((m[i] - merged_m) * exponent_scale);
-                    // l carries 2^kPShift (see kPShift); the sink term must join it there.
-                    l(i) = l[i] * correction + exp2((sink_m - merged_m) * exponent_scale + kPShift);
+                    // l carries 2^kPShift (see kPShift); the sink term must join it there. A sink
+                    // setting the max adds exp2(kPShift) exactly (no inf - inf for a +inf sink).
+                    const auto sink_delta =
+                        sink_m == merged_m ? 0.f : (sink_m - merged_m) * exponent_scale;
+                    l(i) = l[i] * correction + exp2(sink_delta + kPShift);
                     m(i) = merged_m;
                     sweep_tile_span(
                         spans[I1], [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= correction; });
