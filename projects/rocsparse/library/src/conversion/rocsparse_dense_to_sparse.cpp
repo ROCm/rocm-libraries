@@ -23,6 +23,7 @@
 
 #include "internal/generic/rocsparse_dense_to_sparse.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -91,7 +92,7 @@ namespace rocsparse
             }
             else if(mat_B->format == rocsparse_format_bell)
             {
-                const int64_t mb = (mat_B->rows + mat_B->block_dim - 1) / mat_B->block_dim;
+                const int64_t mb = rocsparse::ceil_div(mat_B->rows, mat_B->block_dim);
 
                 *buffer_size = sizeof(int64_t) * mb;
             }

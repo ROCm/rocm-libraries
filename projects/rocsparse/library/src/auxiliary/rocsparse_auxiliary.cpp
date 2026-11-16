@@ -23,15 +23,26 @@
 
 #include "rocsparse.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 #include <iomanip>
+#include <limits>
 #include <map>
 
 #include <hip/hip_runtime_api.h>
 
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
+
+namespace rocsparse
+{
+    // a and b are non-negative.
+    static bool size_product_overflows(int64_t a, int64_t b)
+    {
+        return a > 0 && b > std::numeric_limits<int64_t>::max() / a;
+    }
+}
 
 // LCOV_EXCL_START
 template <>
@@ -2614,8 +2625,12 @@ try
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
     ROCSPARSE_CHECKARG_SIZE(5, ell_width);
-    ROCSPARSE_CHECKARG_ARRAY(3, rows * ell_width, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(4, rows * ell_width, ell_val);
+    // rows * ell_width is the array length; it must fit in int64_t.
+    ROCSPARSE_CHECKARG(
+        1, rows, rocsparse::size_product_overflows(rows, ell_width), rocsparse_status_invalid_size);
+    const int64_t ell_nnz = rows * ell_width;
+    ROCSPARSE_CHECKARG_ARRAY(3, ell_nnz, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(4, ell_nnz, ell_val);
     ROCSPARSE_CHECKARG(5, ell_width, (ell_width > cols), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_ENUM(6, idx_type);
     ROCSPARSE_CHECKARG_ENUM(7, idx_base);
@@ -2647,7 +2662,7 @@ try
     // TODO: refactor the descriptors and having a proper design (get_nnz and different implementation for different format).
     // ell_width = nnz / rows.
     //
-    (*descr)->nnz = ell_width * rows;
+    (*descr)->nnz = ell_nnz;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&(*descr)->descr));
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&(*descr)->info));
 
@@ -2699,10 +2714,16 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols > cols), rocsparse_status_invalid_size);
 
-    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+    // rows * ell_cols is the value-array length; it must fit in int64_t.
+    ROCSPARSE_CHECKARG(
+        1, rows, rocsparse::size_product_overflows(rows, ell_cols), rocsparse_status_invalid_size);
+    const int64_t bell_values = rows * ell_cols;
+    // brows <= rows, so brows * ell_cols fits as well.
+    const int64_t brows        = rocsparse::ceil_div(rows, ell_block_dim);
+    const int64_t bell_col_ind = (brows * ell_cols) / ell_block_dim;
 
-    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
+    ROCSPARSE_CHECKARG_ARRAY(6, bell_col_ind, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, bell_values, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -2774,10 +2795,16 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, ell_cols > cols, rocsparse_status_invalid_size);
 
-    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+    // rows * ell_cols is the value-array length; it must fit in int64_t.
+    ROCSPARSE_CHECKARG(
+        1, rows, rocsparse::size_product_overflows(rows, ell_cols), rocsparse_status_invalid_size);
+    const int64_t bell_values = rows * ell_cols;
+    // brows <= rows, so brows * ell_cols fits as well.
+    const int64_t brows        = rocsparse::ceil_div(rows, ell_block_dim);
+    const int64_t bell_col_ind = (brows * ell_cols) / ell_block_dim;
 
-    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
+    ROCSPARSE_CHECKARG_ARRAY(6, bell_col_ind, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, bell_values, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -4238,7 +4265,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
 
-    const int64_t brows = (descr->rows + descr->block_dim - 1) / descr->block_dim;
+    const int64_t brows = rocsparse::ceil_div(descr->rows, descr->block_dim);
 
     ROCSPARSE_CHECKARG(1,
                        bell_col_ind,
@@ -4246,7 +4273,7 @@ try
                        rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(2,
                        bell_val,
-                       brows * descr->ell_cols > 0 && bell_val == nullptr,
+                       descr->rows * descr->ell_cols > 0 && bell_val == nullptr,
                        rocsparse_status_invalid_pointer);
 
     descr->col_data = bell_col_ind;
@@ -4449,12 +4476,33 @@ try
     {
     case rocsparse_format_bell:
     {
-        nnz[0] = descr->ell_cols * descr->rows * descr->block_dim * descr->block_dim;
+        const int64_t rows      = descr->rows;
+        const int64_t ell_cols  = descr->ell_cols;
+        const int64_t block_dim = descr->block_dim;
+        ROCSPARSE_CHECKARG(0,
+                           descr,
+                           rocsparse::size_product_overflows(rows, ell_cols),
+                           rocsparse_status_invalid_size);
+        const int64_t values = rows * ell_cols;
+        ROCSPARSE_CHECKARG(0,
+                           descr,
+                           rocsparse::size_product_overflows(values, block_dim),
+                           rocsparse_status_invalid_size);
+        const int64_t scaled = values * block_dim;
+        ROCSPARSE_CHECKARG(0,
+                           descr,
+                           rocsparse::size_product_overflows(scaled, block_dim),
+                           rocsparse_status_invalid_size);
+        nnz[0] = scaled * block_dim;
         break;
     }
 
     case rocsparse_format_ell:
     {
+        ROCSPARSE_CHECKARG(0,
+                           descr,
+                           rocsparse::size_product_overflows(descr->rows, descr->ell_width),
+                           rocsparse_status_invalid_size);
         nnz[0] = descr->ell_width * descr->rows;
         break;
     }
