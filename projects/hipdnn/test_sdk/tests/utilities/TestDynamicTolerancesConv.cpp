@@ -1183,23 +1183,6 @@ DotProblem makeCancellingProblem(uint64_t k, unsigned seed)
     return p;
 }
 
-// Float partial sums over `block` consecutive products, each rounded to half before they are
-// summed in float: the half-precision intermediates some half kernels keep.
-float blockedHalfDot(const DotProblem& p, uint64_t block)
-{
-    float total = 0.0f;
-    for(uint64_t begin = 0; begin < p.x.size(); begin += block)
-    {
-        float partial = 0.0f;
-        for(uint64_t i = begin; i < std::min<uint64_t>(begin + block, p.x.size()); ++i)
-        {
-            partial += p.x[i] * p.w[i];
-        }
-        total += static_cast<float>(static_cast<half>(partial));
-    }
-    return total;
-}
-
 // Float accumulation in index order, as the CPU reference does.
 float sequentialDot(const DotProblem& p, uint64_t skip = UINT64_MAX)
 {
@@ -1381,26 +1364,25 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, NearZeroOutputsNeedTheSummationOrder
     }
 }
 
-// Half kernels that keep partial sums in half differ from the float reference by about
-// 0.3 * eps * sigma near zero. The lambda term allows that for half; without it (lambda 0, as
-// bfloat16 has) the same implementation fails.
-TEST(TestConvFpropOutputToleranceFp16, HalfPrecisionPartialSumsPass)
+// lambda is the allowance for half outputs of solvers that keep intermediates in half: MIOpen's
+// Winograd solvers (up to 8.09 * eps * sigma near zero, the largest measured) and
+// ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC (5.21), tracked by ALMIOPEN-3243. No solver
+// accumulates the products in a half running sum (the allowance does not cover one at long K).
+// Near zero the band is that allowance: 8.1 * eps * sigma, the measured maximum, passes, and
+// 12.5 * eps * sigma, above lambda = 12, fails. K = 144 and mean squares 1/3 give sigma = 4.
+TEST(TestConvFpropOutputToleranceFp16, AllowanceCoversTheLargestMeasuredWinogradError)
 {
-    // K/2 is not a multiple of the block, so the blocks of the cancelling half do not mirror
-    // those of the first and their rounding errors do not cancel.
-    const uint64_t k = 65528;
-    for(unsigned seed = 0; seed < 8; ++seed)
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto tol = calculateConvFpropOutputTolerance<half>(s);
+    const double epsSigma = std::ldexp(1.0, -10) * 4.0;
+    for(const double sign : {1.0, -1.0})
     {
-        const auto p = makeCancellingProblem<half>(k, seed);
-        const auto tol = calculateConvFpropOutputTolerance<half>(scaleOf(p));
-        const auto ref = static_cast<double>(sequentialDot(p));
-        const auto blocked = static_cast<double>(blockedHalfDot(p, 8));
-        EXPECT_TRUE(withinTolerance<half>(blocked, ref, tol)) << "seed=" << seed;
-
-        // Check on the test itself: the half partial sums really are beyond what float
-        // accumulation order explains, which is all that bfloat16's tolerance holds.
-        const auto floatOnly = calculateConvFpropOutputTolerance<bfloat16>(scaleOf(p));
-        EXPECT_GT(std::abs(blocked - ref), floatOnly.atol) << "seed=" << seed;
+        EXPECT_TRUE(withinTolerance<half>(sign * 8.1 * epsSigma, 0.0, tol));
+        EXPECT_TRUE(withinTolerance<half>(sign * 11.9 * epsSigma, 0.0, tol));
+        EXPECT_FALSE(withinTolerance<half>(sign * 12.5 * epsSigma, 0.0, tol));
     }
 }
 
