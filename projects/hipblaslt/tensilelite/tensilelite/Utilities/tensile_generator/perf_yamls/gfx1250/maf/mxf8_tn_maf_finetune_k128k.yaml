@@ -75,6 +75,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - StaggerU: [0]
         - ScheduleIterAlg: [4]
+        - StinkyTofuRegisterAllocation: ["3,classes=s"]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -99,11 +100,11 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - PreloadKernArgs: [True]
 
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
-        # - PrefetchGL2SAddr: [True]
+        - PrefetchGL2SAddr: [True]
         - PrefetchGL2: [2]
         - ClusterDim: [[4,4]]
+        - InitCIterWmma: [1]
+        - SwInstructionPrefetch: [1]
         - ClusterAIDMapping: [-2]
         - StinkyTofuParameters:
           - {DsReadDrainLatency: 64, DsReadPerCap: 2, DsReadThrottleLatency: 112}

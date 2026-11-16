@@ -137,12 +137,12 @@ static void check_case(const char* gfx, const Case& t)
     if(!op)
         return;
     CHECK(strcmp(op->family, "wmma") == 0, t.op_id);
-    CHECK(strcmp(op->a_dtype, t.a) == 0 && strcmp(op->b_dtype, t.b) == 0
-              && strcmp(op->c_dtype, t.c) == 0,
+    CHECK(strcmp(op->srcs[0].dtype, t.a) == 0 && strcmp(op->srcs[1].dtype, t.b) == 0
+              && strcmp(op->srcs[2].dtype, t.c) == 0 && strcmp(op->dst.dtype, t.c) == 0,
           t.op_id);
     CHECK(op->m == 16 && op->n == 16 && op->k == t.k, t.op_id);
-    CHECK(op->a_frag_len == t.k_per_lane && op->b_frag_len == t.k_per_lane && op->c_frag_len == 8
-              && op->wave_size == 32,
+    CHECK(op->srcs[0].frag_len == t.k_per_lane && op->srcs[1].frag_len == t.k_per_lane
+              && op->srcs[2].frag_len == 8 && op->dst.frag_len == 8 && op->wave_size == 32,
           t.op_id);
 
     /* rocke_b_mma sizes the result from the bare op_id: <8 x c>. */

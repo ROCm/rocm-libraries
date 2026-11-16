@@ -5,6 +5,7 @@ orient-gate)."""
 
 import importlib.util
 import os
+import re
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -476,6 +477,110 @@ def test_packets_drift_lane_follows_the_trigger(part, tmp_path):
     assert "drift.txt" in (rd / "packets" / "DRIFT.md").read_text()
 
 
+def test_impact_scope_is_the_ingestor_paths_and_plugin_sdk_headers(part):
+    inside = (
+        "dnn-providers/hip-kernel-provider/rocke/library/kernels/gfx950/attention_dense.py",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/Descriptors.hpp",
+        "projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h",
+        "projects/hipdnn/plugin_sdk/cmake/GpuGenericTargetsTable.hpp.in",
+        "projects/hipdnn/tools/IngestorGenerator/configs/gfx950_attention_dense.engine.yaml",
+    )
+    outside = (
+        "projects/hipdnn/plugin_sdk/tests/a.cpp",
+        "dnn-providers/miopen-provider/src/a.cpp",
+        "projects/hipdnn/tools/DescriptorGenerator/gen.py",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("IMPACT", rows)} == set(inside)
+
+
+@pytest.mark.parametrize(
+    ("lane", "trigger"),
+    [
+        (
+            "IMPACT",
+            "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
+        ),
+        ("APPL", "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs"),
+    ],
+)
+def test_packets_concern_lane_takes_trigger_files_only(
+    part, tmp_path, capsys, lane, trigger
+):
+    # catches: the lane not registered as a concern lane, or scoped to every changed file
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    other = "projects/hipdnn/backend/a.cpp"
+    rd = make_round(tmp_path / "a", [(3, 1, trigger), (2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    run(part, "packets", rd, "--lanes", lane)
+    packet = (rd / "packets" / f"{lane}.md").read_text()
+    assert trigger in packet and other not in packet
+    rd = make_round(tmp_path / "b", [(2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    capsys.readouterr()
+    run(part, "packets", rd, "--lanes", lane)
+    assert not (rd / "packets" / f"{lane}.md").exists()
+    assert f"{lane}: no changed file in scope, N/A" in capsys.readouterr().out
+
+
+def test_appl_scope_is_providers_engine_headers_and_schemas(part):
+    # catches: a schema or provider change that never reaches APPL, or core code that does
+    inside = (
+        "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs",
+        "dnn-providers/hip-kernel-provider/src/core/GraphSchema.hpp",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp",
+        "dnn-providers/miopen-provider/src/a.cpp",
+        "dnn-providers/hipblaslt-provider/src/a.cpp",
+    )
+    outside = (
+        "projects/hipdnn/flatbuffers_sdk/include/a.hpp",
+        "projects/hipdnn/backend/src/a.cpp",
+        "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp",
+        "projects/hipdnn/plugin_sdk/src/x.cpp",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("APPL", rows)} == set(inside)
+
+
+def test_leak_sweep_allowlist_covers_every_report_lane(part):
+    # catches: a report lane missing from the LEAK sweep's finding-ID allow-list, so its
+    # finding IDs are flagged as leaks
+    leaks = SCRIPT.parent.parent / "lanes" / "leaks.md"
+    match = re.search(
+        r"^\^\(([A-Z|]+)\)\[0-9\]\*-p\?\[0-9\]\+\$$", leaks.read_text(), re.M
+    )
+    assert match, "finding-ID allow-list line not found in leaks.md"
+    assert sorted(match.group(1).split("|")) == sorted(part.REPORT_LANES)
+
+
+@pytest.mark.parametrize("lane", ["APPL", "IMPACT"])
+def test_lane_id_is_a_provisional_id(part, lane):
+    """A finding ID from a concern lane is recognised, like every other report lane."""
+    # catches: the lane dropped from CONCERN_LANES/REPORT_LANES, so its findings are
+    # invisible to the ledger and comment-reference checks.
+    assert lane in part.CONCERN_LANES
+    assert part.PROVISIONAL_ID.findall(f"see {lane}1-p2 and CORR1-p2") == [
+        f"{lane}1-p2",
+        "CORR1-p2",
+    ]
+
+
+def test_runbook_partition_table_lists_exactly_the_concern_lanes(part):
+    """The RUNBOOK lane table names every concern lane and the CORR<k> correctness lanes."""
+    # catches: a lane added to CONCERN_LANES without a RUNBOOK row (or the reverse), so
+    # the host never learns when to run it.
+    runbook = SCRIPT.parent.parent / "RUNBOOK.md"
+    section = re.search(r"^## Partition\n(.*?)^## ", runbook.read_text(), re.M | re.S)
+    assert section, "## Partition section not found in RUNBOOK.md"
+    rows = re.findall(r"^\| `([A-Z]+)(?:<k>)?` \|", section.group(1), re.M)
+    assert sorted(rows) == sorted({"CORR", *part.CONCERN_LANES})
+
+
 def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     part, tmp_path, capsys
 ):
@@ -507,3 +612,23 @@ def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src`.\n")
     run(part, "orient-gate", rd)
     assert capsys.readouterr().out == ""
+
+
+def test_every_ingestor_impact_surface_pattern_triggers_the_impact_lane(part):
+    """IMPACT_PREFIXES must cover each non-outside SURFACE_TABLE pattern's literal prefix,
+    or a change to that surface never reaches the IMPACT lane."""
+    # catches: a SURFACE_TABLE entry added under a path IMPACT_PREFIXES does not list.
+    impact = SCRIPT.parent.parent.parent / "hipdnn-ingestor-impact" / "scripts"
+    spec = importlib.util.spec_from_file_location(
+        "hipdnn_ingestor_impact", impact / "impact.py"
+    )
+    assert spec and spec.loader, f"could not load {impact / 'impact.py'}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    uncovered = [
+        (tag, pattern)
+        for tag, pattern in module.SURFACE_TABLE
+        if tag not in module.OUTSIDE_TAGS
+        and not pattern.split("*", 1)[0].startswith(part.IMPACT_PREFIXES)
+    ]
+    assert uncovered == []

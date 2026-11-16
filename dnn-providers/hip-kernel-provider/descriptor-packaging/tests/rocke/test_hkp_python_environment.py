@@ -47,7 +47,7 @@ result = {
     'path': sys.path,
     'user_site_enabled': site.ENABLE_USER_SITE,
     'env': {key: os.environ.get(key) for key in
-            ('ROCKE_BACKEND', 'ROCKE_CPP_STRICT', 'ROCKE_COMGR_LIB',
+            ('ROCKE_BACKEND', 'ROCKE_CPP_STRICT', 'ROCKE_COMGR_LIB', 'ROCKE_LLVM_FLAVOR',
              'HKP_PACK_JOBS', 'PYTHONPATH', 'PYTHONDONTWRITEBYTECODE')},
 }
 """
@@ -129,7 +129,8 @@ foreach(label first second)
         ROCM_KPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kpack with spaces"
         ENABLE_ROCKE ON ROCKE_INTERP "${interp}" ROCKE_READY "${ready}"
         ROCKE_PYTHON_DIR "${python_dir}" ROCKE_WHEEL_STAMP "${wheel_stamp}"
-        ROCKE_COMGR_LIB "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}" PACK_JOBS 2)
+        ROCKE_COMGR_LIB "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}"
+        ROCKE_LLVM_FLAVOR "${HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR}" PACK_JOBS 2)
 endforeach()
 """,
             encoding="utf-8",
@@ -148,7 +149,7 @@ endforeach()
             {"kernels/__init__.py": f"VALUE = {value!r}\n"},
         )
 
-    def configure(self, *, python=None, success=True):
+    def configure(self, *, python=None, comgr_lib=None, llvm_flavor="", success=True):
         # CMAKE_MAKE_PROGRAM is supplied rather than discovered so the Ninja the
         # surrounding build uses drives this sub-build too.
         return self.run(
@@ -162,7 +163,9 @@ endforeach()
             f"-DCMAKE_MAKE_PROGRAM={self.make_program}",
             f"-DPython3_EXECUTABLE={python or self.python}",
             f"-DROCKE_WHEEL_DIR={self.wheels}",
-            f"-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB={self.root / 'comgr with spaces'}",
+            f"-DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="
+            f"{comgr_lib if comgr_lib is not None else self.root / 'comgr with spaces'}",
+            f"-DHIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR={llvm_flavor}",
             success=success,
         )
 
@@ -312,7 +315,40 @@ def test_execution_time_pythonpath_and_startup_precedence(tmp_path, build_enviro
     assert result["env"]["ROCKE_CPP_STRICT"] == "1"
     assert result["env"]["HKP_PACK_JOBS"] == "2"
     assert Path(result["env"]["ROCKE_COMGR_LIB"]) == tmp_path / "comgr with spaces"
+    # Not passed by this test's configure(): absent downstream too, not an empty string
+    # silently swallowed somewhere in the forwarding.
+    assert not result["env"]["ROCKE_LLVM_FLAVOR"]
     assert Path(result["kpack"]) == env.source / "kpack with spaces"
+
+
+def test_rocke_llvm_flavor_pin_arrives_and_changes_the_input_manifest(
+    tmp_path, build_environment
+):
+    """HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR reaches the pack step's environment as
+    ROCKE_LLVM_FLAVOR, same as ROCKE_COMGR_LIB; changing either -- independently --
+    changes the recorded input manifest (hkp-<name>-inputs.txt), so a repack is not
+    silently skipped when only the LLVM flavor moves."""
+    env = build_environment()
+    env.configure(llvm_flavor="llvm22")
+    env.build()
+    result = env.consumer()
+    assert result["env"]["ROCKE_LLVM_FLAVOR"] == "llvm22"
+
+    manifest_path = env.build_dir / "hkp-first-inputs.txt"
+    base_manifest = manifest_path.read_text(encoding="utf-8")
+    assert "llvm22" in base_manifest
+
+    # Only the flavor changes.
+    env.configure(llvm_flavor="llvm24")
+    flavor_changed = manifest_path.read_text(encoding="utf-8")
+    assert flavor_changed != base_manifest
+    assert "llvm24" in flavor_changed
+
+    # Back to the base flavor, only the COMGR path changes.
+    env.configure(llvm_flavor="llvm22", comgr_lib=tmp_path / "comgr-two")
+    comgr_changed = manifest_path.read_text(encoding="utf-8")
+    assert comgr_changed != base_manifest
+    assert "comgr-two" in comgr_changed
 
 
 @pytest.mark.parametrize("missing", ["interpreter", "pip", "msgpack", "zstandard"])

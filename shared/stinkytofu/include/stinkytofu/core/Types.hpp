@@ -99,15 +99,13 @@ struct PassFeatureConfig {
         int dsReadQueueDepth = 0;
         int dsReadDrainLatency = 0;
         int tensorLoadWmmaSpace = 0;
-        /// WMMA issue queue: max WMMAs outstanding in the matrix pipe (the pipe buffers
-        /// ~8 on gfx1250). A WMMA is appended whenever fewer are outstanding, instead
-        /// of waiting for the previous one to finish. 1 = the single-window model.
-        int wmmaQueueDepth = 1;
         /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
         /// filler, tensor_load) may issue; below it, and with room in the queue, the next
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
         /// to make (a promoted barrier) are not held. < 0 = automatic: one WMMA short of a full
-        /// queue, (wmmaQueueDepth - 1) x the next WMMA's latency. 0 = off; ignored at depth 1.
+        /// queue, (queue depth - 1) x the next WMMA's latency. The queue depth comes from
+        /// each matrix opcode's hardware descriptor. 0 = the queue model is off (the
+        /// single-window model: a WMMA waits for the previous one to finish).
         int wmmaQueueCoverCycles = 0;
         /// How many WMMAs one refill issues once the queue drops below the refill line
         /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
@@ -116,8 +114,12 @@ struct PassFeatureConfig {
         /// Fixed mode: WMMAs per refill. <= 0 is treated as 1.
         int wmmaBatchSize = 1;
         /// Dynamic mode: queued cover (cycles) a refill fills up to. 0 = a full queue
-        /// (wmmaQueueDepth * the WMMA latency).
+        /// (queue depth * the WMMA latency).
         int wmmaRefillToCycles = 0;
+        /// Extra modeled cycles required between a queue-fill-held ds_load's return and its first
+        /// matrix consumer. The production backend supplies the resolved scheduling-policy value;
+        /// direct pass users may leave it at 0 for no additional safety margin.
+        int queueFillSafetyMarginCycles = 0;
         /// Spread ds_loads over the region's WMMA batches: each batch takes the region's even share
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.

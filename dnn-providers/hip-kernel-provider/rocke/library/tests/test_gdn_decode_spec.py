@@ -32,6 +32,8 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
 )
 
+from ._gdn_decode_compile import compiled_scratch_bytes
+
 ARCH = "gfx950"
 
 
@@ -43,39 +45,16 @@ def _lower(spec: GdnDecodeSpec, arch: str = ARCH, flavor: str = "llvm20") -> str
     )
 
 
-def _compiled_scratch_bytes(test: unittest.TestCase, spec: GdnDecodeSpec) -> int:
+def _compiled_scratch_bytes(spec: GdnDecodeSpec) -> int:
     """Compile ``spec`` through comgr and return the scratch bytes it spills to.
 
     Checking the lowered text for ``define amdgpu_kernel`` proves only that the
     lowerer printed something. comgr runs the real pipeline (IR -> bitcode ->
     code object), so invalid IR, an intrinsic the target lacks or a resource
     overflow fails here. It needs no GPU. A compile error is a defect and
-    propagates; only a missing toolchain skips.
+    propagates; only a missing toolchain skips (``_gdn_decode_compile``).
     """
-    import tempfile
-    from pathlib import Path
-
-    try:
-        from rocke.analysis.isa import analyze_hsaco
-        from rocke.helpers.compile import compile_kernel
-    except Exception as e:  # pragma: no cover - env-dependent
-        test.skipTest(f"comgr toolchain unavailable: {e}")
-    try:
-        art = compile_kernel(
-            build_gdn_decode(spec, arch=ARCH), arch=ARCH, capture_ir_text=False
-        )
-    except ImportError as e:  # pragma: no cover - env-dependent
-        test.skipTest(f"comgr toolchain unavailable: {e}")
-    with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:
-        fh.write(bytes(art.hsaco))
-        fh.flush()
-        try:
-            scratch = analyze_hsaco(Path(fh.name)).resources.scratch_bytes
-        except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
-            test.skipTest(f"HSACO introspection tool unavailable: {e}")
-    if scratch is None:  # pragma: no cover - metadata shape drift
-        test.skipTest("could not parse the scratch size from the HSACO")
-    return scratch
+    return compiled_scratch_bytes(build_gdn_decode(spec, arch=ARCH), ARCH)
 
 
 class TestSpecAdmission(unittest.TestCase):
@@ -359,15 +338,15 @@ class TestEmission(unittest.TestCase):
     def test_default_spec_compiles(self):
         spec = GdnDecodeSpec()
         self.assertIn(spec.kernel_name(), _lower(spec))
-        self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
+        self.assertEqual(_compiled_scratch_bytes(spec), 0)
 
     def test_both_builder_paths_compile(self):
-        self.assertEqual(_compiled_scratch_bytes(self, GdnDecodeSpec()), 0)
+        self.assertEqual(_compiled_scratch_bytes(GdnDecodeSpec()), 0)
         # The simple path is the one-thread-per-state-row reference. Dispatch
         # never selects it, and it holds a whole state row in registers, so
         # whether it spills depends on the compiler version (0 B with ROCm 7.1,
         # 1188 B with ROCm 7.13 on gfx950). Require only that it compiles.
-        _compiled_scratch_bytes(self, GdnDecodeSpec(simple=True))
+        _compiled_scratch_bytes(GdnDecodeSpec(simple=True))
 
     def test_registered_tiles_compile(self):
         from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
@@ -403,7 +382,7 @@ class TestEmission(unittest.TestCase):
             self.assertLessEqual(may_spill, registered, "stale may_spill entry")
             for result in results:
                 with self.subTest(spec_id=result.candidate.spec_id):
-                    scratch = _compiled_scratch_bytes(self, result.spec.kernel_spec)
+                    scratch = _compiled_scratch_bytes(result.spec.kernel_spec)
                     if result.candidate.spec_id in may_spill:
                         self.assertLessEqual(scratch, spill_budget_bytes[gate_kind])
                     else:
@@ -439,7 +418,7 @@ class TestEmission(unittest.TestCase):
                 )
                 spec = dispatch_gdn_decode(req).spec
                 with self.subTest(tuning_id=spec.tuning_id, state=state_dtype):
-                    self.assertEqual(_compiled_scratch_bytes(self, spec.kernel_spec), 0)
+                    self.assertEqual(_compiled_scratch_bytes(spec.kernel_spec), 0)
 
     def test_auto_does_not_spill_off_the_measured_head_dims(self):
         # The sweep ran at DK = DV = 128. The fused f32 GDN row's
@@ -461,11 +440,11 @@ class TestEmission(unittest.TestCase):
             )
             spec = dispatch_gdn_decode(req).spec
             with self.subTest(dk=dk, dv=dv, tuning_id=spec.tuning_id):
-                self.assertEqual(_compiled_scratch_bytes(self, spec.kernel_spec), 0)
+                self.assertEqual(_compiled_scratch_bytes(spec.kernel_spec), 0)
 
     def test_default_gdn_tile_compiles_with_an_f32_state(self):
         spec = dc.replace(GdnDecodeSpec(), state_dtype="f32")
-        self.assertEqual(_compiled_scratch_bytes(self, spec), 0)
+        self.assertEqual(_compiled_scratch_bytes(spec), 0)
         # The simple reference path holds a whole f32 state row per thread, so
         # it is register-heavy by construction (never dispatched; its f32
         # numerics are covered on device). Measured on gfx950: 44 B (ROCm 7.1),
@@ -473,7 +452,7 @@ class TestEmission(unittest.TestCase):
         # catches a register-pressure blowup.
         SPILL_BUDGET_BYTES = 2048
         simple = dc.replace(spec, simple=True)
-        self.assertLessEqual(_compiled_scratch_bytes(self, simple), SPILL_BUDGET_BYTES)
+        self.assertLessEqual(_compiled_scratch_bytes(simple), SPILL_BUDGET_BYTES)
 
     def test_distinct_tiles_emit_distinct_code(self):
         # If two tiles produced identical IR the tuning table would be choosing

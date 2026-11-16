@@ -10,6 +10,8 @@ Tests:
     N: *generic_l1_perf_sizes
     incx: 1
     incy: 1
+    iters: 100
+    cold_iters: 20
 
   - name: dot_bench_inc2
     category: bench
@@ -18,6 +20,8 @@ Tests:
     N: *generic_l1_perf_sizes
     incx: 2 # different kernel for non-unit increment
     incy: 2
+    iters: 100
+    cold_iters: 20
 
   - name: dot_bench_algo1
     category: bench
@@ -27,6 +31,8 @@ Tests:
     incx: 1
     incy: 1
     algo: 1 # x dot x
+    iters: 100
+    cold_iters: 20
 
   - name: dot_batched_bench
     category: bench
@@ -36,5 +42,7 @@ Tests:
     batch_count: *l1_batch_count_range
     incx: 1
     incy: 1
+    iters: 100
+    cold_iters: 20
 
 ...

@@ -354,10 +354,6 @@ try
          value<int>(&parallel_devices)->default_value(0),
          "Set number of devices used for parallel runs (device 0 to parallel_devices-1)")
 
-        // ("c_noalias_d",
-        //  bool_switch(&arg.c_noalias_d)->default_value(false),
-        //  "C and D are stored in separate memory")
-
         ("log_function_name",
          bool_switch(&log_function_name)->default_value(false),
          "Function name precedes other itmes.")

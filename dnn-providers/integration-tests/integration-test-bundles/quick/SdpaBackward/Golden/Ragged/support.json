@@ -1,0 +1,56 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "compact_bf16_mha_d128_causal_tl_sq_ne_skv_th",
+          "compact_fp16_gqa2_d64_causal_tl_sq_ne_skv_ht",
+          "compact_fp16_h1_d64_causal_tl_sq_ne_skv_ht",
+          "compact_fp16_mha_d64_nomask_sq_eq_skv_th",
+          "gapped_bf16_gqa2_d128_nomask_sq_eq_skv_ht",
+          "gapped_bf16_gqa_d128_nomask_sq_eq_skv_th",
+          "gapped_bf16_h1_d128_nomask_sq_eq_skv_ht",
+          "gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_ht",
+          "gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_th",
+          "indep_bf16_gqa_d64_nomask_sq_ne_skv_ht",
+          "indep_bf16_gqa_d64_nomask_sq_ne_skv_th",
+          "indep_fp16_mha_d128_causal_tl_sq_ne_skv_th",
+          "tokenmul_fp16_gqa_d64_causal_tl_sq_ne_skv_th"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "compact_bf16_mha_d128_causal_tl_sq_ne_skv_th",
+          "compact_fp16_gqa2_d64_causal_tl_sq_ne_skv_ht",
+          "compact_fp16_h1_d64_causal_tl_sq_ne_skv_ht",
+          "compact_fp16_mha_d64_nomask_sq_eq_skv_th",
+          "gapped_bf16_gqa2_d128_nomask_sq_eq_skv_ht",
+          "gapped_bf16_gqa_d128_nomask_sq_eq_skv_th",
+          "gapped_bf16_h1_d128_nomask_sq_eq_skv_ht",
+          "gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_ht",
+          "gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_th",
+          "indep_bf16_gqa_d64_nomask_sq_ne_skv_ht",
+          "indep_bf16_gqa_d64_nomask_sq_ne_skv_th",
+          "indep_fp16_mha_d128_causal_tl_sq_ne_skv_th",
+          "tokenmul_fp16_gqa_d64_causal_tl_sq_ne_skv_th"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

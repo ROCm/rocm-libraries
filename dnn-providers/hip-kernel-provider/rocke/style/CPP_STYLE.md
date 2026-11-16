@@ -169,8 +169,7 @@ Follow the two-channel model exactly (`include/rocke/error.hpp`, `core/ir/core_b
 - **Public `extern "C"` entry points catch at the boundary** via
   `ckc::guard_builder` / `ckc::guard_status` and translate to the legacy
   `rocke_status_t` + a sticky, `ROCKE_ERR_MSG_CAP`-bounded message on the builder.
-  Never let a C++ exception escape the ABI. (The actual symbols are `ckc::guard_*`; a
-  stale doc comment in `error_boundary.hpp` calls them `rocke_guard_*` — ignore that.)
+  Never let a C++ exception escape the ABI.
 - **Error message text must stay byte-identical to the Python reference** — parity and
   validation reject-reasons are compared verbatim. Format with `ckc::format_error`
   (printf-style, bounded); keep existing format strings unchanged.

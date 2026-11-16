@@ -18,7 +18,6 @@ set(HIPSPARSE_TEST_SOURCES
     test_rot.cpp
     test_scatter.cpp
     test_sddmm_coo.cpp
-    test_sddmm_coo_aos.cpp
     test_sddmm_csc.cpp
     test_sddmm_csr.cpp
     test_sddmm_batched_csr.cpp
@@ -38,7 +37,6 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmm_csc.cpp
     test_spmm_csr.cpp
     test_spmv_coo.cpp
-    test_spmv_coo_aos.cpp
     test_spmv_csr.cpp
     test_spmv_csr_reuse_descr.cpp
     test_spmv_sell.cpp
@@ -65,7 +63,6 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/13/test_rot.yaml
     cuda/13/test_scatter.yaml
     cuda/13/test_sddmm_coo.yaml
-    cuda/13/test_sddmm_coo_aos.yaml
     cuda/13/test_sddmm_csc.yaml
     cuda/13/test_sddmm_csr.yaml
     cuda/13/test_sddmm_batched_csr.yaml
@@ -84,7 +81,6 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/13/test_spmm_csc.yaml
     cuda/13/test_spmm_csr.yaml
     cuda/13/test_spmv_coo.yaml
-    cuda/13/test_spmv_coo_aos.yaml
     cuda/13/test_spmv_csr.yaml
     cuda/13/test_spmv_csr_reuse_descr.yaml
     cuda/13/test_spmv_sell.yaml

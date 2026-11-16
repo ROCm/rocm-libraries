@@ -162,6 +162,14 @@ typedef struct rocke_lower rocke_lower_t;
  * ISABackend._require_catalog_lists, same text). */
 const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id);
 
+/* Check the complete operand form without recording declarations or emitting
+ * IR. Used to preflight every scaled operand before the first form renders. */
+void rocke_ll_check_matrix_operand(rocke_lower_t* L,
+                                   const rocke_op_t* op,
+                                   const char* op_id,
+                                   rocke_matrix_arg_kind_t kind,
+                                   const rocke_matrix_form_t* form);
+
 /* MMA operand `kind` (A, B or C) of `op`, whose op_id is `op_id`, rendered
  * in the register type of `form` (Python AsIs / ZeroPadded /
  * EvenHalves.operand); returns its LLVM value name. A form that widens or

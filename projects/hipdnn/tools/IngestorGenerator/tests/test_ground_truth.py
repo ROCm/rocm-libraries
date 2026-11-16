@@ -72,7 +72,7 @@ def test_ingest_maps_columns_to_request_fields(tmp_path, capsys):
 
 
 def _bshd(dims):
-    """Gfx950AttentionDenseNative.cpp hasBshdStrides: [B,H,S,D] -> [S*H*D, D, H*D, 1]."""
+    """AttentionDenseNative.cpp hasBshdStrides: [B,H,S,D] -> [S*H*D, D, H*D, 1]."""
     _, heads, seq, hdim = dims
     return [seq * heads * hdim, hdim, heads * hdim, 1]
 

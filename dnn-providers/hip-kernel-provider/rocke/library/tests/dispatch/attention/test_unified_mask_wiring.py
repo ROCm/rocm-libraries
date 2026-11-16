@@ -22,13 +22,13 @@ import kernels.common.attention_unified as au
 from dispatch.attention import (
     AttentionMaskType,
     AttentionRequest,
-    _problem,
+    attention_problem,
     dispatch_attention,
 )
 from dispatch.attention.common import (
     Alignment,
     AttentionBand,
-    _attention_band,
+    attention_band,
     normalize_band,
 )
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
@@ -238,8 +238,10 @@ class TestAttentionBand(unittest.TestCase):
                 continue
             with self.subTest(case=name):
                 req = _req(**kw)
+                band = attention_band(req)
                 self.assertEqual(
-                    _attention_band(req), (want.top_left, want.kernel_right_bound)
+                    (band.top_left, band.kernel_right_bound),
+                    (want.top_left, want.kernel_right_bound),
                 )
                 feats = req.features()
                 self.assertEqual("band" in feats, want.is_real_band)
@@ -316,16 +318,16 @@ class TestBandInputRules(unittest.TestCase):
         for arch in ("gfx1151", "gfx1201", "gfx11-generic", "gfx12-generic"):
             with self.subTest(arch=arch):
                 self.assertEqual(
-                    _attention_band(
+                    attention_band(
                         _req(arch=arch, mask_type=SLIDING_WINDOW, window_left=31)
                     ),
-                    (False, 0),
+                    AttentionBand(None, 0, BR),
                 )
         self.assertEqual(
-            _attention_band(
+            attention_band(
                 _req(mask_type=SLIDING_WINDOW, window_left=31, window_right=0)
             ),
-            (False, 0),
+            AttentionBand(None, 0, BR),
         )
 
     def test_explicit_window_fields_cannot_be_mixed_with_the_trio(self):
@@ -403,7 +405,8 @@ class TestBandNormalization(unittest.TestCase):
     """request -> (causal_top_left, right_bound) the unified kernels compute."""
 
     def _band(self, **kw):
-        return _attention_band(_req(**kw))
+        band = attention_band(_req(**kw))
+        return band.top_left, band.kernel_right_bound
 
     def test_causal_kinds(self):
         self.assertEqual(self._band(mask_type=BOTTOM_RIGHT), (False, 0))
@@ -493,10 +496,12 @@ class TestBandNormalization(unittest.TestCase):
                 self.assertFalse(moving)
 
     def test_problem_carries_the_band(self):
-        p = _problem(_req(mask_type=NO_MASK, sliding_window=256, right_bound=64))
+        p = attention_problem(
+            _req(mask_type=NO_MASK, sliding_window=256, right_bound=64)
+        )
         self.assertTrue(p.causal_top_left)
         self.assertEqual((p.right_bound, p.sliding_window), (64, 256))
-        d = _problem(_req(mask_type=BOTTOM_RIGHT))
+        d = attention_problem(_req(mask_type=BOTTOM_RIGHT))
         self.assertTrue(d.default_mask)
 
     def test_invalid_bands_are_rejected_with_a_reason(self):
@@ -599,7 +604,8 @@ class TestBandDistinctIdentity(unittest.TestCase):
             dtype="fp16",
             mask_type=TOP_LEFT,
         )
-        self.assertEqual(_attention_band(req), (True, 0))
+        band = attention_band(req)
+        self.assertEqual((band.top_left, band.kernel_right_bound), (True, 0))
         self.assertTrue(dispatch_attention(req).spec.causal_top_left)
 
     def test_no_mask_is_its_own_kernel_on_every_unified_candidate(self):
@@ -646,7 +652,7 @@ class TestBandDistinctIdentity(unittest.TestCase):
             "causal_br": dict(mask_type=BOTTOM_RIGHT),
         }
         with _GfxArch("gfx950"):
-            problems = {k: _problem(_req(**v)) for k, v in bands.items()}
+            problems = {k: attention_problem(_req(**v)) for k, v in bands.items()}
             for name, key in (
                 ("_tiled_cache_key", lambda p: au._tiled_cache_key(p, "gfx950")),
                 ("_cache_key", lambda p: au._cache_key(p, "gfx950")),
@@ -671,7 +677,9 @@ class TestBandDistinctIdentity(unittest.TestCase):
     def test_3d_cache_key_separates_masks(self):
         with _GfxArch("gfx950"):
             keys = {
-                au._tiled_3d_cache_key(_problem(_req(seqlen_q=2, **kw)), "gfx950")
+                au._tiled_3d_cache_key(
+                    attention_problem(_req(seqlen_q=2, **kw)), "gfx950"
+                )
                 for kw in (
                     dict(mask_type=BOTTOM_RIGHT),
                     dict(mask_type=TOP_LEFT),
@@ -728,7 +736,7 @@ class TestBandDistinctIdentity(unittest.TestCase):
         # The suffix only appears for a non-default band, so existing keys are
         # identical to before the fields existed.
         with _GfxArch("gfx950"):
-            p = _problem(_req(mask_type=BOTTOM_RIGHT))
+            p = attention_problem(_req(mask_type=BOTTOM_RIGHT))
             self.assertTrue(p.default_mask)
             for marker in ("top-left", "right_bound"):
                 self.assertNotIn(marker, au._tiled_cache_key(p, "gfx950"))
@@ -764,8 +772,8 @@ class TestBandLowering(unittest.TestCase):
             dict(mask_type=NO_MASK, sliding_window=128, right_bound=16),
         ]
         with _GfxArch("gfx950"):
-            p2 = [_problem(_req(**b)) for b in bands]
-            p3 = [_problem(_req(seqlen_q=2, **b)) for b in bands]
+            p2 = [attention_problem(_req(**b)) for b in bands]
+            p3 = [attention_problem(_req(seqlen_q=2, **b)) for b in bands]
             s2 = [bld._spec_gfx950_generic(p, "gfx950") for p in p2]
             s3 = [bld._spec_generic_3d(p, "gfx950") for p in p3]
         builders = [
@@ -790,7 +798,9 @@ class TestBandLowering(unittest.TestCase):
         from builders.common import attention_spec_builder as bld
 
         with _GfxArch("gfx950"):
-            spec = bld._spec_gfx950_generic(_problem(_req(mask_type=NO_MASK)), "gfx950")
+            spec = bld._spec_gfx950_generic(
+                attention_problem(_req(mask_type=NO_MASK)), "gfx950"
+            )
         self.assertEqual(spec.right_bound, -1)
         for over in (dict(use_alibi=True), dict(use_qq_bias=True)):
             with self.subTest(**over), self.assertRaises(ValueError):
@@ -834,12 +844,12 @@ class TestMaskGates(unittest.TestCase):
             ):
                 self.assertTrue(
                     au.supports_native_unified_attention_tiled(
-                        _problem(_req(**kw)), "gfx950"
+                        attention_problem(_req(**kw)), "gfx950"
                     )[0]
                 )
                 self.assertTrue(
                     au.supports_native_unified_attention_3d_tiled(
-                        _problem(_req(seqlen_q=2, **kw)), arch="gfx950"
+                        attention_problem(_req(seqlen_q=2, **kw)), arch="gfx950"
                     )[0]
                 )
 
@@ -853,10 +863,12 @@ class TestBandOffGfx950(unittest.TestCase):
         for arch in ("gfx942", "gfx1250"):
             with self.subTest(arch=arch):
                 self.assertTrue(
-                    _problem(_req(mask_type=NO_MASK, arch=arch)).default_mask
+                    attention_problem(_req(mask_type=NO_MASK, arch=arch)).default_mask
                 )
                 # Legacy convention: a window on the default mask is a causal window.
-                p = _problem(_req(mask_type=NO_MASK, sliding_window=256, arch=arch))
+                p = attention_problem(
+                    _req(mask_type=NO_MASK, sliding_window=256, arch=arch)
+                )
                 self.assertTrue(p.default_mask)
                 self.assertEqual(p.sliding_window, 256)
 

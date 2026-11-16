@@ -23,7 +23,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
 | `arith.fdot2`          | `fdot2`                           | `llvm.amdgcn.fdot2` (f16) / `llvm.amdgcn.fdot2.f32.bf16` (bf16), clamp off; f32 accumulator |
 | `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne`, `cmp_ult` | `icmp {slt,sle,sgt,sge,eq,ne,ult}` |
-| `arith.assume_range`   | (private `_assume_range`, for checked callers only) | nothing: uses of the result print the marked value; the attrs record a range and congruence for the tiling layer's range walk |
+| `arith.assume_range`   | (private `_assume_range`, for checked callers only; written by `gpu_checked_value`) | nothing: uses of the result print the marked value; the attrs (`ge` or a `ge` operand plus `ge_plus`; `lt` or an `lt` operand plus `lt_plus`; `multiple_of`, `residue`; `by`, the writer) record a range and congruence for `stated_facts_of` and the tiling layer's range walk |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
 | `arith.and`            | `land`                            | `and`                                  |
 | `arith.or`             | `lor`                             | `or`                                   |
@@ -154,12 +154,25 @@ that range-checks every access. Its offset is i64 and is never widened implicitl
 | `tile.buffer_store_vN`           | `buffer_store_vN`                | `bitcast` + `raw.ptr.buffer.store.{i8,i16,i32,v2i32,v4i32}`  |
 | `tile.async_buffer_load_lds`     | `async_buffer_load_lds`          | `llvm.amdgcn.raw.ptr.buffer.load.lds`                        |
 | `tile.async_buffer_load_lds_addr`| `async_buffer_load_lds_addr`     | same as above; explicit LDS i64 address                       |
+| `tile.buffer_atomic_fadd_f32`    | `buffer_atomic_fadd_f32`         | `raw.ptr.buffer.atomic.fadd.f32` (pre-add result unused)     |
 
 `buffer_load_vN` / `buffer_store_vN` take any scalar whose width is whole bytes (i8, u8, fp8, bf8,
 i16, f16, bf16, i32, f32, i64, f64); one access moves 1, 2, 4, 8 or 16 bytes. The hardware checks an
 access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: a load past
 `num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
 i64 elements, so those two lower through LLVM only.
+
+`buffer_atomic_fadd_f32(rsrc, voffset, soffset, value, cachepolicy=0)` adds an f32 into global
+memory through a buffer resource; `voffset` and `soffset` are byte offsets. The returned pre-add value
+is discarded, so the backend selects the no-return atomic. Guard an invalid offset with `scf_if`
+instead of steering it out of range: a load at the out-of-range sentinel reads 0, but an atomic there
+faults on gfx1250. `cachepolicy` is the intrinsic's raw immediate, an int in 0..31 that both engines
+check in the builder and again in the lowering. On gfx12 and later its bits [2:0] are `th` and [4:3]
+`scope`. `rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV` (C++: `ROCKE_CPOL_ATOMIC_CASCADE_DEV`) is
+`th = TH_ATOMIC_CASCADE (4)` with `scope = SCOPE_DEV (2)`, i.e. 20. With it, the WGP and L2 caches add
+locally and write the sum back once, which removes most of the global read-modify-write traffic of a
+cross-workgroup reduction. The destination must be zeroed first. The encoding is gfx12+, so callers
+pass 0 on gfx9 and gfx11. The op has no HIP lowering.
 
 `buffer_rsrc` takes a global pointer: the intrinsic's overload names `ptr addrspace(1)`, so a
 parameter declared `addr_space="constant"` (`ptr addrspace(4)` in the kernel header) is refused by
@@ -209,14 +222,27 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
-| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`; gfx11: simulated trap); HIP `__builtin_trap()` |
+| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`, or the simulated trap: see below); HIP `__builtin_trap()` |
+| `tile.gpu_check_failed` | (emitted by `gpu_checked_value`) | store 1 to `@rocke_gpu_check_failed_<kernel>`, then `ret void`; HIP `__hip_atomic_store` + `return;`. The launch completes, `rocke.runtime` raises `GpuCheckFailed`, and every output of the launch is undefined |
 
-`trap()` ends the wave at a trap instruction. The AMDGPU backend emits `s_trap 2`; on gfx11 it emits
-its simulated trap instead (`s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop). What the host
-sees depends on the platform:
+`trap()` ends the wave at a trap instruction. Which instruction depends on the processor the code
+object is compiled for. The docs state it here only; the docstrings and comments point here.
+
+| Compiled for | The AMDGPU backend emits |
+|---|---|
+| gfx1100, gfx1101, gfx1102, gfx1103, gfx11-generic | its simulated trap: `s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop |
+| any other processor, gfx1150-gfx1154 included | `s_trap 2` |
+
+A target whose compiler does not accept its name is compiled for the generic target its catalog row
+points at (`compiler_target_for_llvm_major`), and gets that target's trap: gfx1154, compiled as
+gfx11-generic by compilers before LLVM 24, gets the simulated trap. `tests/core/test_trap.py` holds
+the same table as its expectation and checks it on every catalogued gfx11 target.
+
+What the host sees when a trap is taken depends on the platform:
 
 - Linux (ROCr): the queue reports an error and the runtime aborts the process.
-- Windows: the HIP runtime never turns the trap into an error; the launch never returns.
+- Windows: on gfx110X GPUs the HIP runtime has been seen not to turn the trap into an error; the
+  launch never returned.
 - Under a debugger: the wave stops at the trap.
 
 None of these lets the process carry on, so a trap is a last resort: put it under an `scf_if` on a
