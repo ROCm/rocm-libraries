@@ -1236,17 +1236,24 @@ using CLayout = {ns_name}::CLayout;
 
     // Kernel arguments for `args` with the Stream-K workgroup budget at `budget_pct`
     // percent of the default (CUs x occupancy, budget_pct 100). A smaller budget leaves
-    // more of the GPU to the data-parallel tiles. Never above the default: linear and
-    // tree reduction would wait on workgroups that cannot be resident.
+    // more of the GPU to the data-parallel tiles while keeping physical `num_cu` intact
+    // for CU-balanced Full-DP checks. Never above the default: linear and tree reduction
+    // would wait on workgroups that cannot be resident.
     using SkKernelArgs = decltype(StreamKGemmKernel::MakeKernelArgs(
         std::declval<const ck_tile::StreamKHostArgs&>()));
-    static SkKernelArgs MakeKargs(const ck_tile::StreamKHostArgs& args, int budget_pct) {{
-        if (budget_pct > 0 && budget_pct < 100) {{
-            const int full = static_cast<int>(
-                StreamKGemmKernel::MakeKernelArgs(args).tile_partitioner.get_max_active_wgs());
-            return StreamKGemmKernel::MakeKernelArgs(args, std::max(1, full * budget_pct / 100), 1);
+    static SkKernelArgs MakeKargs(const ck_tile::StreamKHostArgs& args, int budget_pct = 100) {{
+        if (budget_pct < 1 || budget_pct > 100) {{
+            throw std::invalid_argument("Stream-K budget_pct must be in [1, 100]");
         }}
-        return StreamKGemmKernel::MakeKernelArgs(args);
+        auto kargs = StreamKGemmKernel::MakeKernelArgs(args);
+        if (budget_pct == 100) {{
+            return kargs;
+        }}
+        const auto full = kargs.tile_partitioner.get_max_active_wgs();
+        const auto budget_wgs = std::max<ck_tile::index_t>(1, full * budget_pct / 100);
+        const auto num_cu = static_cast<ck_tile::index_t>(
+            ck_tile::get_available_compute_units(ck_tile::stream_config{{}}));
+        return SkKernelArgs(args, budget_wgs, kargs.num_xccs, num_cu);
     }}
 
     // Device workspace (bytes) this kernel needs for `args`. 0 for Atomic;
@@ -1279,6 +1286,9 @@ using CLayout = {ns_name}::CLayout;
         auto kargs = MakeKargs(args, budget_pct);
         if (workspace != nullptr) {{
             StreamKGemmKernel::SetWorkSpacePointer(kargs, workspace);
+        }} else if (StreamKGemmKernel::GetWorkSpaceSize(kargs) > 0) {{
+            throw std::invalid_argument(
+                "stream-k: workspace pointer must not be null when GetWorkSpaceSize > 0");
         }}
 
         if (!StreamKGemmKernel::IsSupportedArgument(kargs)) {{
@@ -1289,8 +1299,9 @@ using CLayout = {ns_name}::CLayout;
         const dim3 blocks = StreamKGemmKernel::BlockSize();
 
         // Reset before every run: Atomic adds the partial tiles into C; Linear and Tree
-        // wait on the per-workgroup flags at the start of the workspace. Their partial
-        // tiles are always written before they are read, so only the flags are reset.
+        // wait on the per-workgroup flags at the start of the workspace when Stream-K
+        // CTAs are active (flags_bytes == 0 on Full-DP fallback). Their partial tiles
+        // are always written before they are read, so only the flags are reset.
         const auto flags_bytes = kargs.tile_partitioner.get_flags_buffer_size();
         auto reset_data_buffers = [&]() {{
             if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
@@ -1305,7 +1316,7 @@ using CLayout = {ns_name}::CLayout;
                     throw std::runtime_error(
                         "stream-k: hipMemset2DAsync failed to reset C between iterations");
                 }}
-            }} else {{
+            }} else if (flags_bytes > 0) {{
                 if(hipMemsetAsync(kargs.workspace_ptr, 0, flags_bytes, stream.stream_id_) !=
                    hipSuccess) {{
                     throw std::runtime_error(

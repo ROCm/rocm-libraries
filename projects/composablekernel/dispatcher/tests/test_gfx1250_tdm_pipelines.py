@@ -1432,6 +1432,10 @@ class TestCompTdmV3(unittest.TestCase):
             self.assertIn("ck_tile::StreamKKernel<SkStreamKTilePartitioner, SkGemmPipeline", text)
             self.assertIn("GemmPipelineAgBgCrCompTDMV3<SkUniversalGemmProblem>", text)
             self.assertIn("MakeKargs(args, budget_pct)", text)
+            self.assertIn("budget_pct < 1 || budget_pct > 100", text)
+            self.assertIn("SkKernelArgs(args, budget_wgs, kargs.num_xccs, num_cu)", text)
+            self.assertIn("else if (StreamKGemmKernel::GetWorkSpaceSize(kargs) > 0)", text)
+            self.assertIn("else if (flags_bytes > 0)", text)
 
 
 class TestGemmUtilsSweepGate(unittest.TestCase):
