@@ -61,6 +61,7 @@ from .ir import (
     _scf_for_region_error,
     _scf_for_value_names,
     _smem_store_vN_op_error,
+    _smem_vN_f32_op_error,
     KernelDef,
     Op,
     Region,
@@ -507,6 +508,10 @@ class _Verifier:
             self._check_sync_attrs(op, orderings)
         elif name == "tile.smem_store_vN":
             error = _smem_store_vN_op_error(op)
+            if error:
+                self.err(error, op)
+        elif name in ("tile.smem_load_vN_f32", "tile.smem_store_vN_f32"):
+            error = _smem_vN_f32_op_error(op)
             if error:
                 self.err(error, op)
         elif name == "tile.global_ptr_offset":

@@ -49,6 +49,7 @@ from .ir import (
     _if_else_yields,
     _ldexp_op_error,
     _smem_store_vN_op_error,
+    _smem_vN_f32_op_error,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -2486,6 +2487,9 @@ class _Lowerer:
         # so we always emit the ``f32xN`` vector store (the prologue
         # provides ``f32x1``). For n>1 the reinterpret-cast lets the
         # backend coalesce into ``ds_write_b{64,128}``.
+        contract_error = _smem_vN_f32_op_error(op)
+        if contract_error:
+            raise ValueError(contract_error)
         smem = op.operands[0]
         value = op.operands[-1]
         indices = op.operands[1:-1]
@@ -2499,6 +2503,9 @@ class _Lowerer:
         )
 
     def _op_tile_smem_load_vN_f32(self, op: Op) -> None:
+        contract_error = _smem_vN_f32_op_error(op)
+        if contract_error:
+            raise ValueError(contract_error)
         smem = op.operands[0]
         indices = op.operands[1:]
         n = int(op.attrs["vec"])

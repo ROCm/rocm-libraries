@@ -334,25 +334,72 @@ def _smem_store_lanes_error(
     (``width_param``); the C++ engine (``rocke_i_smem_store_lanes_error``)
     reports the same texts.
     """
-    lanes = value_type.count if isinstance(value_type, VectorType) else 1
+    lanes = lane_count(value_type)
     if lanes != width:
         return f"{store} failed - lanes={lanes}, expected {width_param}={width}"
     return None
 
 
 def _smem_store_vN_op_error(op: Op) -> str | None:
-    """:func:`_smem_store_lanes_error` for a built ``tile.smem_store_vN`` op,
-    whose last operand is the stored value and whose ``vec`` attribute is its
-    width: serialized IR reaches the verifier and the lowerings without passing
-    the builder, so they all use this rule. An op without operands or without
-    an integer ``vec`` has no width to compare here (C++ engine:
-    ``rocke_i_smem_store_vN_op_error``)."""
+    """:func:`_smem_store_lanes_error` for a built ``tile.smem_store_vN`` or
+    ``tile.smem_store_vN_f32`` op, whose last operand is the stored value and
+    whose ``vec`` attribute is its width: serialized IR reaches the verifier
+    and the lowerings without passing the builder, so they all use this rule.
+    An op without operands or without an integer ``vec`` has no width to
+    compare here (C++ engine: ``rocke_i_smem_store_vN_op_error``)."""
     width = op.attrs.get("vec")
     if not op.operands or not isinstance(width, int) or isinstance(width, bool):
         return None
-    return _smem_store_lanes_error(
-        "tile.smem_store_vN", op.operands[-1].type, width, "vec"
+    return _smem_store_lanes_error(op.name, op.operands[-1].type, width, "vec")
+
+
+def _element_type_error(
+    access: str, param: str, operand_type: Type, expected: str
+) -> str | None:
+    """The error for an ``access`` whose operand ``param`` (a scalar, a vector
+    or an LDS tile, of type ``operand_type``) does not hold ``expected``
+    elements, or None when it does. The C++ engine
+    (``rocke_i_element_type_error``) reports the same texts."""
+    elem = (
+        operand_type.elem
+        if isinstance(operand_type, (VectorType, SmemType))
+        else operand_type
     )
+    if elem.name != expected:
+        return f"{access} failed - {param}={elem.name}, expected {expected}"
+    return None
+
+
+def _smem_f32_access_error(
+    access: str, tile_type: Type, value_type: Type | None
+) -> str | None:
+    """The error for an f32 epilogue LDS ``access`` (``smem_load_vN_f32`` or
+    ``smem_store_vN_f32``) of an LDS tile of type ``tile_type`` that does not
+    hold f32, or, for a store, whose stored value (``value_type``; None for a
+    load) is not f32; None when both are f32. Both lowerings emit, and the
+    alignment rule sizes, an f32 access whatever the operand types are. The C++
+    engine (``rocke_i_smem_f32_access_error``) reports the same texts."""
+    error = _element_type_error(access, "tile_elem", tile_type, "f32")
+    if error or value_type is None:
+        return error
+    return _element_type_error(access, "value_elem", value_type, "f32")
+
+
+def _smem_vN_f32_op_error(op: Op) -> str | None:
+    """The contract of a built ``tile.smem_load_vN_f32`` or
+    ``tile.smem_store_vN_f32`` op: :func:`_smem_f32_access_error` for its tile
+    (the first operand) and, for the store, its value (the last operand), then
+    the store's :func:`_smem_store_vN_op_error`. Serialized IR reaches the
+    verifier and the lowerings without passing the builder, so they all use
+    this rule (C++ engine: ``rocke_i_smem_vN_f32_op_error``)."""
+    if not op.operands:
+        return None
+    is_store = op.name == "tile.smem_store_vN_f32"
+    value_type = op.operands[-1].type if is_store else None
+    error = _smem_f32_access_error(op.name, op.operands[0].type, value_type)
+    if error or not is_store:
+        return error
+    return _smem_store_vN_op_error(op)
 
 
 def _is_flag_ptr(t: "Type") -> bool:
@@ -4413,6 +4460,16 @@ class IRBuilder:
     def smem_store_f16(
         self, smem: Value, indices: Sequence[Value], value: Value
     ) -> None:
+        """Store ``value``, which holds f16, whole at ``indices`` of ``smem``.
+
+        A value of any other element type is refused with ValueError: the op
+        records ``elem_type`` f16.
+        """
+        element_error = _element_type_error(
+            "smem_store_f16", "value_elem", value.type, "f16"
+        )
+        if element_error:
+            raise ValueError(element_error)
         self._op(
             "tile.smem_store",
             [smem, *indices, value],
@@ -7471,8 +7528,17 @@ class IRBuilder:
     def smem_store_vN_f32(
         self, smem: Value, indices: Sequence[Value], value: Value, n: int
     ) -> None:
+        """Store ``value``, ``n`` f32 lanes (n in {1, 2, 4}; a scalar for
+        ``n=1``), at ``indices`` of ``smem``, an f32 tile. A tile or value that
+        does not hold f32, or a value of another lane count, is refused with
+        ValueError."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_store_vN_f32 n must be 1, 2, or 4 (got {n})")
+        contract_error = _smem_f32_access_error(
+            "smem_store_vN_f32", smem.type, value.type
+        ) or _smem_store_lanes_error("smem_store_vN_f32", value.type, n, "n")
+        if contract_error:
+            raise ValueError(contract_error)
         self._op(
             "tile.smem_store_vN_f32",
             [smem, *indices, value],
@@ -7480,10 +7546,15 @@ class IRBuilder:
         )
 
     def smem_load_vN_f32(self, smem: Value, *indices, n: int = 0) -> Value:
+        """Load ``n`` f32 lanes (n in {1, 2, 4}) at ``indices`` of ``smem``, an
+        f32 tile; a tile that does not hold f32 is refused with ValueError."""
         if n not in (1, 2, 4):
             raise ValueError(f"smem_load_vN_f32 n must be 1, 2, or 4 (got {n})")
         if not indices:
             raise ValueError("smem_load_vN_f32 needs at least one index")
+        tile_error = _smem_f32_access_error("smem_load_vN_f32", smem.type, None)
+        if tile_error:
+            raise ValueError(tile_error)
         return self._op(
             "tile.smem_load_vN_f32",
             [smem, *indices],

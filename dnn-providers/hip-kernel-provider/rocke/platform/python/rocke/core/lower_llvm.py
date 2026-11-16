@@ -73,6 +73,7 @@ from .ir import (
     _is_unsigned,
     _ldexp_op_error,
     _smem_store_vN_op_error,
+    _smem_vN_f32_op_error,
     _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -6657,6 +6658,9 @@ class _Lowerer:
     # ----- f32 LDS ops (cshuffle epilogue) -----
 
     def _op_tile_smem_store_vN_f32(self, op: Op) -> None:
+        contract_error = _smem_vN_f32_op_error(op)
+        if contract_error:
+            raise ValueError(contract_error)
         smem = op.operands[0]
         indices = op.operands[1:-1]
         value = op.operands[-1]
@@ -6693,6 +6697,9 @@ class _Lowerer:
             )
 
     def _op_tile_smem_load_vN_f32(self, op: Op) -> None:
+        contract_error = _smem_vN_f32_op_error(op)
+        if contract_error:
+            raise ValueError(contract_error)
         smem = op.operands[0]
         indices = list(op.operands[1:])
         vec = int(op.attrs["vec"])

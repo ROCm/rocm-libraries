@@ -859,6 +859,12 @@ static void op_tile_smem_store_distributed(rocke_lower_t* L, const rocke_op_t* o
 
 static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
+    char contract_error[ROCKE_ERR_MSG_CAP];
+    if(const char* error = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
     const rocke_value_t* smem = op->operands[0];
     const rocke_value_t* value = op->operands[op->num_operands - 1];
     int64_t vec = ll_attr_int(op, "vec", 0);
@@ -910,6 +916,12 @@ static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 
 static void op_tile_smem_load_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
+    char contract_error[ROCKE_ERR_MSG_CAP];
+    if(const char* error = rocke_i_smem_vN_f32_op_error(op, contract_error, sizeof contract_error))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
     const rocke_value_t* smem = op->operands[0];
     int64_t vec = ll_attr_int(op, "vec", 0);
     const rocke_type_t* stype = NULL;

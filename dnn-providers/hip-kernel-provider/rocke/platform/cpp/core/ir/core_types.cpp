@@ -643,8 +643,7 @@ const char* rocke_i_smem_store_lanes_error(const char* store,
                                            char* buf,
                                            size_t cap)
 {
-    const int64_t lanes
-        = value_type && value_type->kind == ROCKE_TYPE_VECTOR ? value_type->count : 1;
+    const int64_t lanes = rocke_i_count_of(value_type);
     if(lanes != width)
     {
         snprintf(buf,
@@ -667,8 +666,65 @@ const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size
     {
         return NULL;
     }
-    return rocke_i_smem_store_lanes_error(
-        "tile.smem_store_vN", op->operands[op->num_operands - 1]->type, width, "vec", buf, cap);
+    return rocke_i_smem_store_lanes_error(rocke_opcode_name(op->opcode),
+                                          op->operands[op->num_operands - 1]->type,
+                                          width,
+                                          "vec",
+                                          buf,
+                                          cap);
+}
+
+/* Python core/ir.py::_element_type_error; the texts are the Python engine's. */
+const char* rocke_i_element_type_error(const char* access,
+                                       const char* param,
+                                       const rocke_type_t* operand_type,
+                                       const char* expected,
+                                       char* buf,
+                                       size_t cap)
+{
+    const rocke_type_t* elem
+        = operand_type->kind == ROCKE_TYPE_VECTOR || operand_type->kind == ROCKE_TYPE_SMEM
+              ? operand_type->elem
+              : operand_type;
+    if(strcmp(elem->name, expected) != 0)
+    {
+        snprintf(buf, cap, "%s failed - %s=%s, expected %s", access, param, elem->name, expected);
+        return buf;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_smem_f32_access_error; the texts are the Python engine's. */
+const char* rocke_i_smem_f32_access_error(const char* access,
+                                          const rocke_type_t* tile_type,
+                                          const rocke_type_t* value_type,
+                                          char* buf,
+                                          size_t cap)
+{
+    const char* error = rocke_i_element_type_error(access, "tile_elem", tile_type, "f32", buf, cap);
+    if(error || !value_type)
+    {
+        return error;
+    }
+    return rocke_i_element_type_error(access, "value_elem", value_type, "f32", buf, cap);
+}
+
+/* Python core/ir.py::_smem_vN_f32_op_error; the texts are the Python engine's. */
+const char* rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands == 0)
+    {
+        return NULL;
+    }
+    const bool is_store = op->opcode == ROCKE_OP_TILE_SMEM_STORE_VN_F32;
+    const rocke_type_t* value_type = is_store ? op->operands[op->num_operands - 1]->type : NULL;
+    const char* error = rocke_i_smem_f32_access_error(
+        rocke_opcode_name(op->opcode), op->operands[0]->type, value_type, buf, cap);
+    if(error || !is_store)
+    {
+        return error;
+    }
+    return rocke_i_smem_store_vN_op_error(op, buf, cap);
 }
 
 const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)

@@ -338,12 +338,42 @@ const char* rocke_i_smem_store_lanes_error(const char* store,
                                            char* buf,
                                            size_t cap);
 
-/* rocke_i_smem_store_lanes_error for a built tile.smem_store_vN op, whose last
- * operand is the stored value and whose `vec` attribute is its width (Python
- * core/ir.py::_smem_store_vN_op_error). An op without operands or without an
- * integer `vec` has no width to compare here. The verifier and both lowerings
- * use it. */
+/* rocke_i_smem_store_lanes_error for a built tile.smem_store_vN or
+ * tile.smem_store_vN_f32 op, whose last operand is the stored value and whose
+ * `vec` attribute is its width (Python core/ir.py::_smem_store_vN_op_error). An
+ * op without operands or without an integer `vec` has no width to compare
+ * here. The verifier and both lowerings use it. */
 const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
+/* The error for an `access` whose operand `param` (a scalar, a vector or an
+ * LDS tile, of type `operand_type`) does not hold `expected` elements, or NULL
+ * when it does (Python core/ir.py::_element_type_error, same texts). A
+ * returned error is written to `buf`. */
+const char* rocke_i_element_type_error(const char* access,
+                                       const char* param,
+                                       const rocke_type_t* operand_type,
+                                       const char* expected,
+                                       char* buf,
+                                       size_t cap);
+
+/* The error for an f32 epilogue LDS `access` (smem_load_vN_f32 or
+ * smem_store_vN_f32) of a tile of type `tile_type` that does not hold f32 or,
+ * for a store, whose value (`value_type`; NULL for a load) is not f32; NULL
+ * when both are f32 (Python core/ir.py::_smem_f32_access_error, same texts).
+ * Both lowerings emit, and the alignment rule sizes, an f32 access whatever
+ * the operand types are. A returned error is written to `buf`. */
+const char* rocke_i_smem_f32_access_error(const char* access,
+                                          const rocke_type_t* tile_type,
+                                          const rocke_type_t* value_type,
+                                          char* buf,
+                                          size_t cap);
+
+/* The contract of a built tile.smem_load_vN_f32 or tile.smem_store_vN_f32 op:
+ * rocke_i_smem_f32_access_error for its tile (the first operand) and, for the
+ * store, its value (the last operand), then the store's
+ * rocke_i_smem_store_vN_op_error (Python core/ir.py::_smem_vN_f32_op_error).
+ * The verifier and both lowerings use it. */
+const char* rocke_i_smem_vN_f32_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* The code-object symbol of `kernel_name`'s GPU-check word, allocated in
  * `arena` (Python core/ir.py::gpu_check_word_symbol, same spelling). A wave
