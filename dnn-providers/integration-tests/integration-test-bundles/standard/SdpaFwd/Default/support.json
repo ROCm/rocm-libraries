@@ -422,7 +422,31 @@
         ],
         "support": {
           "gfx1151": [
-            "linux"
+            "linux",
+            "windows"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_4_4096_256_bfp16_nhwc_attn_scale_value0p0625_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_4_64_64_fp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_8_1024_128_fp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_8_16384_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmenttop_left",
+          "1_8_1_128_bfp16_nhwc_decode_hkv2_skv512_causal_tl",
+          "2_16_1_128_fp16_nhwc_decode_hkv16_skv512_nomask",
+          "2_16_4096_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "2_1_1024_64_bfp16_nchw_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "2_4_1024_256_fp16_nhwc_attn_scale_value0p0625_nocausal_mask_diagonal_alignmentbottom_right",
+          "2_4_4096_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "4_8_16384_64_fp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "4_8_512_128_fp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "8_1_512_128_fp16_nchw_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "8_8_64_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
           ]
         }
       }
@@ -470,7 +494,31 @@
         ],
         "support": {
           "gfx1151": [
-            "linux"
+            "linux",
+            "windows"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "1_4_4096_256_bfp16_nhwc_attn_scale_value0p0625_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_4_64_64_fp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_8_1024_128_fp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "1_8_16384_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmenttop_left",
+          "1_8_1_128_bfp16_nhwc_decode_hkv2_skv512_causal_tl",
+          "2_16_1_128_fp16_nhwc_decode_hkv16_skv512_nomask",
+          "2_16_4096_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "2_1_1024_64_bfp16_nchw_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "2_4_1024_256_fp16_nhwc_attn_scale_value0p0625_nocausal_mask_diagonal_alignmentbottom_right",
+          "2_4_4096_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "4_8_16384_64_fp16_nhwc_attn_scale_value0p125_nocausal_mask_diagonal_alignmentbottom_right",
+          "4_8_512_128_fp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "8_1_512_128_fp16_nchw_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right",
+          "8_8_64_128_bfp16_nhwc_attn_scale_value0p08839_nocausal_mask_diagonal_alignmentbottom_right"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
           ]
         }
       }

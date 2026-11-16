@@ -54,6 +54,9 @@
           "runtime_epsilon_momentum"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx942": [
             "linux"
           ]

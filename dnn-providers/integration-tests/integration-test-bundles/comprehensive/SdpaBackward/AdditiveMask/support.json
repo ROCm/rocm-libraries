@@ -18,6 +18,9 @@
           "ap039_b2h6k2v2_56x56_d192_bfp16_none_bshd_biasfullio_tolp"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],
@@ -41,6 +44,9 @@
         "support": {
           "gfx1100": [
             "linux"
+          ],
+          "gfx1151": [
+            "windows"
           ],
           "gfx90a": [
             "linux"

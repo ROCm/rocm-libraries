@@ -12,6 +12,11 @@
       "gfx942": [
         "linux"
       ]
+    },
+    "hipkernel:flydsl_sdpa_rdna": {
+      "gfx1151": [
+        "windows"
+      ]
     }
   },
   "version": 1

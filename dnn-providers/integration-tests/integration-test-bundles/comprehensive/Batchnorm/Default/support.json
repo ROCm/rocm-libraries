@@ -96,6 +96,9 @@
           "4_8_56_fp32_nlc"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx942": [
             "linux"
           ]
