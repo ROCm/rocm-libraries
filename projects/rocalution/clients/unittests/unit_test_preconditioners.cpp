@@ -2402,53 +2402,47 @@ TYPED_TEST(preconditioners, multicolored_blocks_apply_in_every_format)
         = multicoloring(this->backend(), pattern_matrix<T>(power_pattern(ref, 2), ref.n));
 
     // The off-diagonal color blocks of the ILU(1) factors are rectangular
-    const auto check = [&](const Format& f, bool sgs_case, bool ilu_case) {
+    const auto check = [&](const Format& f) {
         SCOPED_TRACE(format_name(f) + " " + std::to_string(f.blockdim));
-        if(sgs_case)
-        {
-            rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> sgs;
-            sgs.SetPrecondMatrixFormat(f.id, f.blockdim);
-            sgs.SetOperator(*A);
-            sgs.Build();
-            expect_near(apply(sgs, *A, r),
-                        permuted_solve(ref, colors.perm, r, symmetric_gauss_seidel<T>),
-                        scaled_tol<T>(1e-14));
-        }
-        if(ilu_case)
-        {
-            rocalution::MultiColoredILU<Matrix<T>, Vector<T>, T> ilu;
-            ilu.Set(1);
-            ilu.SetPrecondMatrixFormat(f.id, f.blockdim);
-            ilu.SetOperator(*A);
-            ilu.Build();
-            expect_near(apply(ilu, *A, r),
-                        permuted_solve(ref,
-                                       colors2.perm,
-                                       r,
-                                       [](const Csr<T>& B, const std::vector<T>& b) {
-                                           return lu_solve(ilu_levels(B, 1), b);
-                                       }),
-                        tol<T>());
-        }
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> sgs;
+        sgs.SetPrecondMatrixFormat(f.id, f.blockdim);
+        sgs.SetOperator(*A);
+        sgs.Build();
+        expect_near(apply(sgs, *A, r),
+                    permuted_solve(ref, colors.perm, r, symmetric_gauss_seidel<T>),
+                    scaled_tol<T>(1e-14));
+
+        rocalution::MultiColoredILU<Matrix<T>, Vector<T>, T> ilu;
+        ilu.Set(1);
+        ilu.SetPrecondMatrixFormat(f.id, f.blockdim);
+        ilu.SetOperator(*A);
+        ilu.Build();
+        expect_near(apply(ilu, *A, r),
+                    permuted_solve(ref,
+                                   colors2.perm,
+                                   r,
+                                   [](const Csr<T>& B, const std::vector<T>& b) {
+                                       return lu_solve(ilu_levels(B, 1), b);
+                                   }),
+                    tol<T>());
     };
 
     const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
         const bool ignores_output = hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE);
-        check(f, !ignores_output, !ignores_output && f.id != rocalution::DIA);
+        if(!ignores_output)
+        {
+            check(f);
+        }
     }
 
     if(hip)
     {
         KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1}, true, true);
-        check(Format{rocalution::DENSE, 1}, true, true);
+        check(Format{rocalution::HYB, 1});
+        check(Format{rocalution::DENSE, 1});
     }
-
-    KNOWN_BUG("csr_to_dia writes past the values of a matrix with more rows than columns; on the "
-              "host, DIA Apply also drops the columns from nrow on");
-    check(Format{rocalution::DIA, 1}, false, true);
 }
 
 TYPED_TEST(preconditioners, multicolored_preconditioners_rebuild_from_new_values)
