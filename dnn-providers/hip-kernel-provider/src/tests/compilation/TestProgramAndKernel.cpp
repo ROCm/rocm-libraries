@@ -9,11 +9,14 @@
 
 #include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -111,6 +114,117 @@ TEST(TestGpuProgramCache, RecompilesOverACorruptEntry)
     const Program rebuilt("vector_add.cpp", {"-O3", "-DFLOAT=float"});
     EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);
     EXPECT_EQ(std::filesystem::file_size(files[0]), size);
+}
+
+// A truncated entry and one with a changed byte inside the code object both read as corrupt:
+// the program is recompiled and the entry restored, rather than the damaged bytes loaded.
+TEST(TestGpuProgramCache, RecompilesOverATruncatedOrFlippedEntry)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "program-cache-damaged", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+
+    {
+        const Program first("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    }
+    const auto files = cachedCodeObjects();
+    ASSERT_EQ(files.size(), 1u);
+    const auto readAll = [](const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        return std::vector<char>((std::istreambuf_iterator<char>(file)),
+                                 std::istreambuf_iterator<char>());
+    };
+    const auto writeAll = [](const std::filesystem::path& path, const std::vector<char>& bytes) {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    const auto original = readAll(files[0]);
+    ASSERT_GT(original.size(), 256u);
+
+    const auto half = static_cast<std::ptrdiff_t>(original.size() / 2);
+    writeAll(files[0], std::vector<char>(original.begin(), original.begin() + half));
+    {
+        const Program rebuilt("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+        EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);
+    }
+    EXPECT_EQ(readAll(files[0]), original);
+
+    auto flipped = original;
+    flipped[flipped.size() - 64] = static_cast<char>(flipped[flipped.size() - 64] ^ 0x01);
+    writeAll(files[0], flipped);
+    {
+        const Program rebuilt("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+        EXPECT_NE(rebuilt.getKernel("vector_add"), nullptr);
+    }
+    EXPECT_EQ(readAll(files[0]), original);
+}
+
+// The test hook fails a matching program with a real HIPRTC error, ahead of any cache entry,
+// and leaves the cache untouched.
+TEST(TestGpuProgramCache, InjectedCompileFailureBypassesTheCache)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "program-cache-injected", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+    {
+        const Program first("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    }
+    ASSERT_EQ(cachedCodeObjects().size(), 1u);
+
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter inject(
+            TEST_FAIL_COMPILE_ENV, "vector_add");
+        try
+        {
+            const Program failed("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+            ADD_FAILURE() << "the injected failure did not fail the compile";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            EXPECT_NE(std::string(error.what()).find("compile failure injected by"),
+                      std::string::npos)
+                << error.what();
+        }
+        // A name the pattern does not match compiles.
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter other(
+            TEST_FAIL_COMPILE_ENV, "some_other_program");
+        const Program compiled("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+        EXPECT_NE(compiled.getKernel("vector_add"), nullptr);
+    }
+    EXPECT_EQ(cachedCodeObjects().size(), 1u);
+}
+
+// With HIPRTC disabled a program the disk cache holds still loads, and any other fails with
+// NOT_APPLICABLE rather than compiling.
+TEST(TestGpuProgramCache, WithHiprtcDisabledACachedProgramLoadsAndAMissDeclines)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir(
+        "program-cache-no-hiprtc", hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST);
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+            DISABLE_HIPRTC_ENV, "1");
+        try
+        {
+            const Program missing("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+            ADD_FAILURE() << "a program with no cache entry was built with HIPRTC disabled";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+            EXPECT_NE(std::string(error.what()).find(DISABLE_HIPRTC_ENV), std::string::npos)
+                << error.what();
+        }
+        EXPECT_TRUE(cachedCodeObjects().empty());
+    }
+    {
+        const Program compiled("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    }
+    ASSERT_EQ(cachedCodeObjects().size(), 1u);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(DISABLE_HIPRTC_ENV,
+                                                                               "1");
+    const Program cached("vector_add.cpp", {"-O3", "-DFLOAT=float"});
+    EXPECT_NE(cached.getKernel("vector_add"), nullptr);
 }
 
 TEST(TestKernel, LaunchesVectorAdd)

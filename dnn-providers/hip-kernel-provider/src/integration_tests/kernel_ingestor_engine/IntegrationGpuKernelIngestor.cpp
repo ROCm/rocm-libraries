@@ -544,6 +544,10 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
     buildAndCompileWithKnobs(*graph, engineId(), knobSettings);
 
+    // The plan build says the config is left to autotune.
+    EXPECT_TRUE(recorder.hasLogContaining("config chosen by autotune at first execution"))
+        << recorder.getRecordedLogsAsString();
+
     // The benchmarking branch ran with more than one candidate.
     EXPECT_TRUE(recorder.hasLogContaining("will benchmark"))
         << "buildPlan() did not take the benchmarking branch. Captured logs:\n"
@@ -562,6 +566,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
     // HIP event timing is reliable here, so a sweep without a usable candidate is a bug.
     EXPECT_TRUE(recorder.hasLogContaining("benchmarking selected kernel"))
         << "the sampling sweep did not resolve a winner. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
+    // The selection names the winner's config, so a benchmark tool can record it.
+    EXPECT_TRUE(recorder.hasLogContaining("candidate(s), config 'pointwise_add.f32_block"))
         << recorder.getRecordedLogsAsString();
 #endif
 

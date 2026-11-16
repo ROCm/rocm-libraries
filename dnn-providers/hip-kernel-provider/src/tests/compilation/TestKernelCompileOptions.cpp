@@ -2,6 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #include "compilation/KernelCompileOptions.hpp"
+
+#include <algorithm>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
@@ -182,6 +188,67 @@ TEST_F(TestKernelCompileOptions, VerifiesArchOptions)
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX115X=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX120X=0"));
     EXPECT_TRUE(hasOption(options, "--offload-arch=gfx110"));
+}
+
+// Whether the defines after the two base options are in name order.
+static bool definesSortedByName(const std::vector<std::string>& options)
+{
+    std::vector<std::string> names;
+    for(size_t i = 2; i < options.size(); ++i)
+    {
+        names.push_back(options[i].substr(0, options[i].find('=')));
+    }
+    return std::is_sorted(names.begin(), names.end());
+}
+
+// The defines come out sorted by name, whatever order they went in: the option vector, and the
+// code-object cache key digesting it, is a function of the define set alone.
+TEST(TestKernelCompileOptionsOrder, SameDefinesInAnyOrderGiveTheSameOptions)
+{
+    KernelCompileOptions forward("gfx942");
+    KernelCompileOptions backward("gfx942");
+    const std::vector<std::pair<std::string, std::string>> defines
+        = {{"CONV_BM", "128"}, {"CONV_BN", "64"}, {"A_FIRST", "1"}, {"Z_LAST", "0"}};
+    for(const auto& [name, value] : defines)
+    {
+        forward.add(name, value);
+    }
+    for(auto it = defines.rbegin(); it != defines.rend(); ++it)
+    {
+        backward.add(it->first, it->second);
+    }
+    const std::vector<std::string> forwardOptions = forward;
+    const std::vector<std::string> backwardOptions = backward;
+    EXPECT_EQ(forwardOptions, backwardOptions);
+
+    // The base options first, as added; then every define in name order.
+    ASSERT_GE(forwardOptions.size(), 2u);
+    EXPECT_EQ(forwardOptions[0], "-std=c++17");
+    EXPECT_EQ(forwardOptions[1], "--offload-arch=gfx942");
+    EXPECT_TRUE(definesSortedByName(forwardOptions));
+}
+
+TEST(TestKernelCompileOptionsOrder, OrderSurvivesRehashAndRemoval)
+{
+    // Enough defines to rehash the map several times, inserted in opposite orders, with
+    // extras added and removed in between.
+    constexpr int DEFINES = 64;
+    KernelCompileOptions ascending("gfx1151");
+    KernelCompileOptions descending("gfx1151");
+    for(int i = 0; i < DEFINES; ++i)
+    {
+        ascending.add("DEFINE_" + std::to_string(i), i);
+        descending.add("DEFINE_" + std::to_string(DEFINES - 1 - i), DEFINES - 1 - i);
+        descending.add("TRANSIENT_" + std::to_string(i), i);
+    }
+    for(int i = 0; i < DEFINES; ++i)
+    {
+        descending.remove("TRANSIENT_" + std::to_string(i));
+    }
+    const std::vector<std::string> ascendingOptions = ascending;
+    const std::vector<std::string> descendingOptions = descending;
+    EXPECT_EQ(ascendingOptions, descendingOptions);
+    EXPECT_TRUE(definesSortedByName(ascendingOptions));
 }
 
 };
