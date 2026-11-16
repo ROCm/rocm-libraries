@@ -153,7 +153,10 @@ namespace
          * l_i is the length associated with s_i. This is decided as follows (dimensions
          * being sorted by increasing strides):
          *
-         * 1. The coefficients d_i are enumerated by decreasing strides, except for the two
+         * 1. Pigeonhole principle: if the array has more elements than there are flattened
+         *    indices in [0, span], at least two of its elements collide.
+         *
+         * 2. The coefficients d_i are enumerated by decreasing strides, except for the two
          *    smallest-stride dimensions (see solve). Each d_i is restricted to the values
          *    leaving a target reachable by the dimensions of smaller strides, and branches
          *    are cut when the target is not a multiple of the gcd of their strides. The
@@ -162,7 +165,7 @@ namespace
          *    length times its stride), only zero coefficients remain at every level, so
          *    they are decided without branching.
          *
-         * 2. The two smallest-stride dimensions are not enumerated: all integer solutions
+         * 3. The two smallest-stride dimensions are not enumerated: all integer solutions
          *    of d_0*s_0 + d_1*s_1 == target follow from the extended Euclidean algorithm,
          *    so checking whether one of them is in range takes O(log) operations (see
          *    solve_two_dimensions).
@@ -178,6 +181,11 @@ namespace
                 return false;
             }
 
+            // 1. pigeonhole principle
+            if(has_more_elements_than_indices())
+                return true;
+
+            // 2. and 3.
             constexpr bool nontrivial_required = true;
             return solve(size() - 1, 0, nontrivial_required);
         }
@@ -197,6 +205,21 @@ namespace
         std::vector<ptrdiff_t> reach;
         // stride_gcd[k]: greatest common divisor of s_0, ..., s_k
         std::vector<ptrdiff_t> stride_gcd;
+
+        // true iff the array has more elements than there are flattened indices in [0, span]
+        bool has_more_elements_than_indices() const
+        {
+            const size_t n_indices  = static_cast<size_t>(reach.back()) + 1;
+            size_t       n_elements = 1;
+            for(const auto& dim : dimensions)
+            {
+                // n_elements * dim.length() > n_indices, without overflow
+                if(n_elements > n_indices / dim.length())
+                    return true;
+                n_elements *= dim.length();
+            }
+            return false;
+        }
 
         /**
          * @brief searches for a solution of d_0*s_0 + ... + d_k*s_k == target with
