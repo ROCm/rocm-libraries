@@ -584,6 +584,16 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap);
 
+/* Mirrors ir._lshr_element_error: the error for a logical right shift `op_name`
+ * (arith.lshr or vector.lshr) of operands of type `operand_type`, or NULL when
+ * its element type is an integer or i1 (the types LLVM's lshr is defined on).
+ * A formatted message is written into `buf`, which the result then points to.
+ * The builders throw it as a TypeError; the verifier reports it. */
+const char* rocke_i_lshr_element_error(const char* op_name,
+                                       const rocke_type_t* operand_type,
+                                       char* buf,
+                                       size_t cap);
+
 /* ------------------------------------------------------- parameter facts */
 
 /* Receives one message from rocke_param_fact_errors. */

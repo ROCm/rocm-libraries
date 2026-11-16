@@ -284,6 +284,7 @@ static int is_binary_same_type(rocke_opcode_t o)
     case ROCKE_OP_ARITH_XOR:
     case ROCKE_OP_ARITH_SHL:
     case ROCKE_OP_ARITH_LSHR:
+    case ROCKE_OP_VECTOR_LSHR:
         return 1;
     default:
         return 0;
@@ -460,6 +461,17 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         if(wrap_error)
         {
             v_errf(v, op, "%s", wrap_error);
+        }
+        /* LLVM's lshr takes integers only: a float shift lowers to IR the
+         * compiler rejects. */
+        char lshr_buf[ROCKE_ERR_MSG_CAP];
+        const char* lshr_error
+            = o == ROCKE_OP_ARITH_LSHR || o == ROCKE_OP_VECTOR_LSHR
+                  ? rocke_i_lshr_element_error(name, a, lshr_buf, sizeof lshr_buf)
+                  : NULL;
+        if(lshr_error)
+        {
+            v_errf(v, op, "%s", lshr_error);
         }
     }
     else if(is_unary_same_type(o))

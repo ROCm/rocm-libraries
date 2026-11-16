@@ -11,6 +11,11 @@ HIP source (the C++ engine's must equal the Python engine's) and its refusal
 of a non-integer shift, that hipcc accepts the source, and, when a GPU is
 present, that the LLVM route and hipcc on the HIP source compute the same
 values as numpy, on negative and positive values alike.
+
+LLVM's ``lshr`` takes two integers of one width, so IRBuilder refuses a shift
+of a float and a shift amount of another type when the op is built, and the
+verifier reports both for IR written past the builder (the C++ engine's builder
+and verifier, with the same texts, are checked by test_unsigned_int_ops.cpp).
 """
 
 from __future__ import annotations
@@ -21,7 +26,19 @@ from typing import NamedTuple
 
 import numpy as np
 import pytest
-from rocke.core.ir import F32, I8, I16, I32, I64, IRBuilder, PtrType, Type
+from rocke.core.ir import (
+    F32,
+    I1,
+    I8,
+    I16,
+    I32,
+    I64,
+    IRBuilder,
+    PtrType,
+    Type,
+    VectorType,
+)
+from rocke.core.verify import verify
 from rocke.tests.engines import (
     ENGINES,
     assert_engine_rejects_hip,
@@ -113,19 +130,23 @@ def test_hip_shifts_through_the_unsigned_type_of_the_width(engine):
             assert re.fullmatch(case.shift_line(lane), line), (_id(case), line)
 
 
-def _f32_shift_kernel(op_name):
-    """One ``op_name`` (``arith.lshr`` or ``vector.lshr``) of f32 values."""
-    b = IRBuilder(op_name.replace(".", "_") + "_f32")
-    x = b.param("X", PtrType(F32, "global"))
-    zero = b.const_i32(0)
-    if op_name == "arith.lshr":
-        value = b.global_load(x, zero, F32)
-        b.lshr(value, value)
-    else:
-        value = b.buffer_load_vN(b.buffer_rsrc(x, b.const_i32(8)), zero, zero, F32, 2)
-        b.vector_lshr(value, value)
+def _shift_kernel_past_the_builder(op_name, value_type, amount_type):
+    """One ``op_name`` (``arith.lshr`` or ``vector.lshr``) of a ``value_type``
+    parameter by an ``amount_type`` parameter, written past IRBuilder (which
+    refuses both a non-integer shift and a mismatched shift amount), as
+    hand-assembled or deserialized IR can reach the verifier and the lowerings."""
+    b = IRBuilder(op_name.replace(".", "_") + "_past_the_builder")
+    value = b.param("value", value_type)
+    amount = b.param("amount", amount_type)
+    b._op(op_name, [value, amount], [value_type])
     b.ret()
     return b.kernel
+
+
+def _f32_shift_kernel(op_name):
+    """One ``op_name`` of f32 values: an f32 scalar, or two f32 lanes."""
+    f32_type = F32 if op_name == "arith.lshr" else VectorType(F32, 2)
+    return _shift_kernel_past_the_builder(op_name, f32_type, f32_type)
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -144,6 +165,77 @@ def test_hip_refuses_a_shift_of_a_non_integer(op_name, engine):
             "integer type, one of ('i1', 'i8', 'u8', 'i16', 'i32', 'i64')"
         ),
     )
+
+
+@pytest.mark.parametrize("op_name", ["arith.lshr", "vector.lshr"])
+def test_builder_refuses_a_shift_of_a_non_integer(op_name):
+    """LLVM's ``lshr`` has no float form: IRBuilder refuses an f32 shift,
+    scalar or lane by lane, with a ``TypeError`` naming the op and the
+    element type, instead of building IR the compiler rejects."""
+    b = IRBuilder("lshr_f32")
+    if op_name == "arith.lshr":
+        value = b.param("value", F32)
+        shift = b.lshr
+    else:
+        value = b.param("value", VectorType(F32, 2))
+        shift = b.vector_lshr
+    with pytest.raises(TypeError) as refusal:
+        shift(value, value)
+    assert str(refusal.value) == (
+        f"{op_name} failed - element type='f32', expected an integer type"
+    )
+
+
+def test_builder_refuses_a_shift_amount_of_another_width():
+    """``lshr`` shifts two integers of one width: IRBuilder refuses an i64
+    shifted by an i32 with a ``TypeError`` naming both types."""
+    b = IRBuilder("lshr_mixed_widths")
+    value = b.param("value", I64)
+    amount = b.param("amount", I32)
+    with pytest.raises(TypeError) as refusal:
+        b.lshr(value, amount)
+    assert str(refusal.value) == (
+        "arith.lshr failed - shift amount type='i32', expected the shifted "
+        "value's type 'i64'"
+    )
+
+
+def test_builder_accepts_an_i1_shift():
+    """``i1`` is an LLVM integer, so a shift of it is built (and verifies)."""
+    b = IRBuilder("lshr_i1")
+    flag = b.param("flag", I1)
+    b.lshr(flag, flag)
+    b.ret()
+    assert verify(b.kernel) == []
+
+
+@pytest.mark.parametrize("op_name", ["arith.lshr", "vector.lshr"])
+def test_verifier_refuses_a_shift_of_a_non_integer(op_name):
+    """IR written past the builder still meets the rule: the verifier reports
+    an f32 shift with the builder's text."""
+    messages = [diagnostic.message for diagnostic in verify(_f32_shift_kernel(op_name))]
+    assert messages == [
+        f"{op_name} failed - element type='f32', expected an integer type"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("op_name", "value_type", "amount_type"),
+    [
+        ("arith.lshr", I64, I32),
+        ("vector.lshr", VectorType(I32, 2), VectorType(I16, 2)),
+    ],
+)
+def test_verifier_refuses_a_shift_amount_of_another_width(
+    op_name, value_type, amount_type
+):
+    """The verifier reports a shift amount whose type differs from the
+    shifted value's, scalar or lane by lane."""
+    kernel = _shift_kernel_past_the_builder(op_name, value_type, amount_type)
+    messages = [diagnostic.message for diagnostic in verify(kernel)]
+    assert messages == [
+        f"{op_name}: operand types differ ({value_type.name} vs {amount_type.name})"
+    ]
 
 
 def _compile_via_hipcc(kernel, arch):

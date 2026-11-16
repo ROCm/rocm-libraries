@@ -287,8 +287,25 @@ rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
     return rocke_i_binop(b, ROCKE_OP_ARITH_SHL, a, c, "shl");
 }
 
+/* IRBuilder.lshr: LLVM's lshr takes two integers of one width, so a value
+ * that is not an integer or i1, or a shift amount of another type, is refused
+ * as a TypeError with the Python engine's text. */
 rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(!rocke_i_live(b))
+        return NULL;
+    if(a && c)
+    {
+        char err[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_lshr_element_error("arith.lshr", a->type, err, sizeof err))
+            throw ckc::TypeError(err);
+        if(!rocke_type_eq(a->type, c->type))
+            throw ckc::TypeError(
+                ckc::format_error("arith.lshr failed - shift amount type='%s', expected the "
+                                  "shifted value's type '%s'",
+                                  c->type->name,
+                                  a->type->name));
+    }
     return rocke_i_binop(b, ROCKE_OP_ARITH_LSHR, a, c, "lshr");
 }
 

@@ -33,7 +33,7 @@ from math import gcd as _gcd
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
-from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
+from .dtypes import UNSIGNED_INTEGER_DTYPES, DTypeCategory, dtype_info, dtype_names
 from .intexpr import IntExpr, relation_json
 from .param_facts import (
     FACT_WORDS,
@@ -455,6 +455,29 @@ def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
     if pred == "ult" and operand_type not in ("i32", "i64"):
         return f"arith.cmp: pred 'ult' needs i32 or i64 operands, got {operand_type}"
     return None
+
+
+# The element types a logical right shift (``arith.lshr``, ``vector.lshr``)
+# takes: the integers and ``i1``, the types LLVM's ``lshr`` is defined on.
+_LSHR_ELEMENT_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
+    DTypeCategory.PREDICATE
+)
+
+
+def _lshr_element_error(op_name: str, operand_type: Type) -> str | None:
+    """The error for a logical right shift ``op_name`` (``arith.lshr`` or
+    ``vector.lshr``) of operands of ``operand_type``, or None when its element
+    type is an integer or ``i1``.
+
+    LLVM's ``lshr`` takes integers only, so a float shift would lower to IR
+    the compiler rejects. IRBuilder refuses it when the op is built and the
+    verifier reports it for IR that did not come through IRBuilder; the C++
+    engine's ``rocke_i_lshr_element_error`` reports the same text.
+    """
+    element = element_type(operand_type)
+    if element.name in _LSHR_ELEMENT_TYPES:
+        return None
+    return f"{op_name} failed - element type={element.name!r}, expected an integer type"
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
@@ -3764,7 +3787,18 @@ class IRBuilder:
     def lshr(self, a: Value, b_v: Value) -> Value:
         """Logical right shift ``a >> b_v`` (zero-fill). Lowers to
         LLVM ``lshr``; AMDGPU folds to ``v_lshrrev_b{32,64}``.
+
+        Raises ``TypeError`` unless ``a`` is an integer or ``i1`` and ``b_v``
+        has the same type: LLVM's ``lshr`` takes two integers of one width.
         """
+        element_error = _lshr_element_error("arith.lshr", a.type)
+        if element_error:
+            raise TypeError(element_error)
+        if b_v.type != a.type:
+            raise TypeError(
+                f"arith.lshr failed - shift amount type={b_v.type.name!r}, "
+                f"expected the shifted value's type {a.type.name!r}"
+            )
         return self._op(
             "arith.lshr", [a, b_v], [a.type], result_name_hint="lshr"
         ).result
@@ -4331,11 +4365,16 @@ class IRBuilder:
 
     def vector_binary(self, op_name: str, a: Value, b: Value) -> Value:
         """Lane-wise ``vector.<op_name>`` of two matching vectors. The signed ops
-        (``smax``, ``smin``) refuse an unsigned element type."""
+        (``smax``, ``smin``) refuse an unsigned element type, and ``lshr`` one
+        that is not an integer or ``i1`` (``TypeError``)."""
         if not isinstance(a.type, VectorType) or a.type != b.type:
             raise ValueError("vector_binary expects matching vector operands")
         if op_name in ("smax", "smin"):
             _refuse_unsigned(f"vector_{op_name}", a.type)
+        if op_name == "lshr":
+            element_error = _lshr_element_error("vector.lshr", a.type)
+            if element_error:
+                raise TypeError(element_error)
         return self._op(
             f"vector.{op_name}", [a, b], [a.type], result_name_hint=f"v{op_name}"
         ).result

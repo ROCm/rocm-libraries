@@ -8,7 +8,9 @@
  * Run with no argument it checks, through the C API: the LLVM and HIP text of
  * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
  * through the unsigned type of the operand's own width) and its refusal of a
- * non-integer operand, the HIP refusal of a pred the verifier refuses, the
+ * non-integer operand, the builders' and the verifier's lshr rule (an integer
+ * or i1 element, a shift amount of the value's type; texts identical to the
+ * Python engine's), the HIP refusal of a pred the verifier refuses, the
  * builders' operand-type refusals, the verifier's acceptance of the new attrs
  * and its refusals of bad marker attrs (texts identical to the Python
  * verifier), and the constant folder (unsigned compare at the operand width;
@@ -167,6 +169,21 @@ void case_hip_text()
     rocke_ir_builder_free(&b);
 }
 
+/* One `opcode` (arith.lshr or vector.lshr) of a `value_type` parameter by an
+ * `amount_type` parameter, built directly: the builders refuse both a
+ * non-integer shift and a mismatched shift amount, and hand-assembled or
+ * deserialized IR can still reach the verifier and the lowerings. */
+void build_shift_past_the_builder(rocke_ir_builder_t* b,
+                                  rocke_opcode_t opcode,
+                                  const rocke_type_t* value_type,
+                                  const rocke_type_t* amount_type)
+{
+    rocke_value_t* operands[2] = {rocke_b_param(b, "value", value_type, nullptr),
+                                  rocke_b_param(b, "amount", amount_type, nullptr)};
+    rocke_i_op1(b, opcode, operands, 2, value_type, nullptr, "lshr");
+    rocke_b_ret(b);
+}
+
 /* lshr reads its operand through the unsigned type of the operand's own width,
  * as LLVM's lshr does: a negative i8 or i16 shifts in no sign bits and an i64
  * keeps its high word. The same text as the Python engine (test_lshr.py). */
@@ -208,12 +225,8 @@ void case_lshr_hip_text()
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_f32");
         const rocke_type_t* type = vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
-        rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
-        if(vector)
-            rocke_b_vector_lshr(&b, a, a);
-        else
-            rocke_b_lshr(&b, a, a);
-        rocke_b_ret(&b);
+        build_shift_past_the_builder(
+            &b, vector ? ROCKE_OP_VECTOR_LSHR : ROCKE_OP_ARITH_LSHR, type, type);
         std::string hip;
         const rocke_status_t status = lower_hip_status(&b, &hip);
         const char* msg = rocke_ir_builder_error(&b);
@@ -224,6 +237,113 @@ void case_lshr_hip_text()
         EXPECT(status == ROCKE_ERR_TYPE && msg && want == msg,
                "want status " + std::to_string((int)ROCKE_ERR_TYPE) + " '" + want + "', got status "
                    + std::to_string((int)status) + " '" + (msg ? msg : "") + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* The builder must throw a TypeError with exactly `want` from `build`. */
+template <typename Build>
+void expect_lshr_builder_type_error(Build build, const std::string& want)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_refusal");
+    bool refused = false;
+    std::string got = "no refusal";
+    try
+    {
+        build(&b);
+    }
+    catch(const ckc::Error& error)
+    {
+        got = error.what();
+        refused = error.code() == ROCKE_ERR_TYPE && want == got;
+    }
+    EXPECT(refused, "want TypeError '" + want + "', got '" + got + "'");
+    rocke_ir_builder_free(&b);
+}
+
+/* LLVM's lshr takes two integers of one width: the builders refuse an f32
+ * shift, scalar or lane by lane, and a shift amount of another type, and
+ * accept an i1 shift. */
+void case_lshr_builder_rule()
+{
+    expect_lshr_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* a = rocke_b_param(b, "a", rocke_f32(), nullptr);
+            rocke_b_lshr(b, a, a);
+        },
+        "arith.lshr failed - element type='f32', expected an integer type");
+    expect_lshr_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* a = rocke_b_param(b, "a", rocke_vector_type(b, rocke_f32(), 2), nullptr);
+            rocke_b_vector_lshr(b, a, a);
+        },
+        "vector.lshr failed - element type='f32', expected an integer type");
+    expect_lshr_builder_type_error(
+        [](rocke_ir_builder_t* b) {
+            rocke_value_t* a = rocke_b_param(b, "a", rocke_i64(), nullptr);
+            rocke_value_t* s = rocke_b_param(b, "s", rocke_i32(), nullptr);
+            rocke_b_lshr(b, a, s);
+        },
+        "arith.lshr failed - shift amount type='i32', expected the shifted value's type 'i64'");
+
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_i1");
+    rocke_value_t* flag = rocke_b_param(&b, "flag", rocke_i1(), nullptr);
+    EXPECT(rocke_b_lshr(&b, flag, flag) != nullptr, "an i1 lshr is built");
+    rocke_b_ret(&b);
+    const std::string errors = verify_errors(&b);
+    EXPECT(errors.empty(), "verifier rejected an i1 lshr: " + errors);
+    rocke_ir_builder_free(&b);
+}
+
+/* IR written past the builders still meets the rule: the verifier reports an
+ * f32 shift and a mismatched shift amount, scalar or lane by lane, with the
+ * Python verifier's texts. */
+void case_lshr_verifier_rule()
+{
+    struct VerifierCase
+    {
+        rocke_opcode_t opcode;
+        bool vector;
+        const rocke_type_t* value_element;
+        const rocke_type_t* amount_element;
+        const char* want;
+    };
+    const VerifierCase cases[] = {
+        {ROCKE_OP_ARITH_LSHR,
+         false,
+         rocke_f32(),
+         rocke_f32(),
+         "arith.lshr failed - element type='f32', expected an integer type"},
+        {ROCKE_OP_VECTOR_LSHR,
+         true,
+         rocke_f32(),
+         rocke_f32(),
+         "vector.lshr failed - element type='f32', expected an integer type"},
+        {ROCKE_OP_ARITH_LSHR,
+         false,
+         rocke_i64(),
+         rocke_i32(),
+         "arith.lshr: operand types differ (i64 vs i32)"},
+        {ROCKE_OP_VECTOR_LSHR,
+         true,
+         rocke_i32(),
+         rocke_i16(),
+         "vector.lshr: operand types differ (vec<i32x2> vs vec<i16x2>)"},
+    };
+    for(const VerifierCase& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_verify");
+        const rocke_type_t* value_type
+            = c.vector ? rocke_vector_type(&b, c.value_element, 2) : c.value_element;
+        const rocke_type_t* amount_type
+            = c.vector ? rocke_vector_type(&b, c.amount_element, 2) : c.amount_element;
+        build_shift_past_the_builder(&b, c.opcode, value_type, amount_type);
+        const std::string errors = verify_errors(&b);
+        EXPECT(errors == std::string(c.want) + "\n",
+               std::string("want '") + c.want + "', got '" + errors + "'");
         rocke_ir_builder_free(&b);
     }
 }
@@ -665,6 +785,8 @@ int main(int argc, char** argv)
     case_llvm_text();
     case_hip_text();
     case_lshr_hip_text();
+    case_lshr_builder_rule();
+    case_lshr_verifier_rule();
     case_hip_refuses_a_bad_pred();
     case_builder_refusals();
     case_verifier_accepts();
