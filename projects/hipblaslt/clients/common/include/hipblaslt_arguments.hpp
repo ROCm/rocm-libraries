@@ -260,7 +260,7 @@ struct Arguments
     int  tensile_solution_selection_method;
     // Kernel names the first solutions must contain, separated by newlines.
     // Empty means the case does not care which kernel ran.
-    char expected_kernel[768];
+    char expected_kernel[256];
 
     /*************************************************************************
      *                     End Of Arguments                                  *
