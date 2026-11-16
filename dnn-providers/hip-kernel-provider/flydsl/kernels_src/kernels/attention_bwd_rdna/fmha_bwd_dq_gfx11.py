@@ -10,7 +10,7 @@
 # and `fmha_bwd_dq_gfx950.py` (the runtime ABI). The loop dataflow follows AOTriton's gfx1201 `bwd_kernel_dq` port
 # (`fmha_bwd_dq_gfx1201_kernel.py`, MIT; reference only), re-expressed over `rdna_layout_gfx11`.
 
-"""FlyDSL backward dQ (and dB) for the generic RDNA targets (`gfx11-generic`; the WMMA ABI switch also covers `gfx12-generic`).
+"""FlyDSL backward dQ (and dB) for the generic RDNA targets (`gfx11-generic`; the layout ABI switch also covers `gfx12-generic` and the MFMA16 `gfx90a` / `gfx942`).
 
     P  = exp2(qk_scale * S - lse2')       S  = Q.K^T,  qk_scale = sm_scale * log2e,  lse2' = LSE' * log2e (LSE' = +inf for an empty row)
     dP = dO . V^T
@@ -21,18 +21,19 @@ ABI = the gfx950 dQ launcher's (argument names, order and annotations): Q, K, V,
 keeps its gfx950 name. A `dump=1` object has one extra `dump: fx.Pointer` immediately before `stream` and is a separate nested launcher.
 
 Orientation (`rdna_layout_gfx11.KV_ROWS`, S^T form): every accumulator tile has rows = kv, columns = q, so LSE' and Delta are per lane (column
-`l16`), one value for all 8 elements:
+`l16`), one value for all `acc_elems` elements:
 
     GEMM1  S^T[kv][q]  = K[kv][:] . Q[q][:]      A = K (LDS, row-major), B = Q (register preload)
     GEMM2  dP^T[kv][q] = V[kv][:] . dO[q][:]     A = V (LDS, row-major), B = dO (register preload)
     GEMM3  dQ^T[d][q] += K^T[d][kv] . dS^T[kv][q]   A = K^T (`kt_lds_layout`), B = dS^T through `acc_to_operand` (xor-16 exchange on gfx11)
 
-The dQ accumulator holds dQ^T (rows = head dim, cols = q); the epilogue trades it once (`acc_to_rows8`) into 8 contiguous head-dim values per lane.
-Every operand width, accumulator coordinate, exchange and epilogue goes through `rdna_layout_gfx11` with `V8 = wmma_v8_for_arch(arch)`: gfx11 passes
-16 K values per lane (`v16`), gfx12 passes 8. The gfx12 path is validated only by the numpy lane model until a gfx12 device job exists.
+The dQ accumulator holds dQ^T (rows = head dim, cols = q); the epilogue trades it once (`acc_to_rows8`) into `acc_elems` contiguous head-dim values per lane (8 on WMMA, 4 on MFMA16).
+Every operand width, accumulator coordinate, exchange and epilogue goes through `rdna_layout_gfx11` with `ABI = abi_for(arch)`: gfx11 passes
+16 K values per lane (`v16`), gfx12 passes 8 (`v8`), gfx90a / gfx942 4 on a wave64 (`mfma16`: the accumulator registers of dS^T are the GEMM3 operand, no exchange). The
+gfx12 path is validated only by the numpy lane model until a gfx12 device job exists.
 
 Head-dim shards (`contraction_shards` Qs): Qs waves cooperate on one 16-row Q tile, each holding `tile / Qs` columns of Q, dO and the dQ
-accumulator. The partial S and dP are summed across the shards through LDS (`fmha.reduce_s_across_shards`, f32 slots, arch-neutral); the shards'
+accumulator. The partial S and dP are summed across the shards through LDS (`fmha_common_gfx11.reduce_s_across_shards`, f32 slots, `acc_elems` per accumulator tile); the shards'
 dQ stores are disjoint. `kt_lds_layout`: `scalar` reads K^T out of the row-major K tile with one 16-bit LDS read per element; `staged` writes a
 transposed K^T copy to LDS at staging time (scalar 16-bit stores through registers; gfx11 has no `global_load_tr`) and reads one vector per operand.
 
@@ -55,7 +56,7 @@ mask through the forward's O: gfx950 and gfx1201 order). The mask is the shared 
 randoms per call, 64-bit counter): plane = `block_idx.z * num_head_q + head_q` (the grid's sequence, not the packed batch index),
 `Philox.grid_plane(offset, plane, max_seqlen_q, max_seqlen_k)` (the max lengths, not the sequence's own, so a varlen mask is a function of the
 element coordinates and the call's two maxima), element (q, kv) at counter `grid_offset(.., q, kv)` slot `kv % 4`. A `KV_ROWS` tile holds a lane's
-8 kv rows of one q column as `rdna_layout_gfx11.dropout_kv_rows_call` says: on gfx11 four Philox calls per 16-kv accumulator, each serving the
+`acc_elems` kv rows of one q column as `rdna_layout_gfx11.dropout_kv_rows_call` says: on gfx11 four Philox calls per 16-kv accumulator, each serving the
 lane's two elements of one counter (the klane pair draws the same calls and keeps different slots, so the work is duplicated 2x); on gfx12 two
 calls. The counter offset of kv column `kv_block_start` is a 64-bit quantity formed once per row (`grid_offset(.., q, 0)`); a block start is a multiple of
 `block_n` (>= 16), so `kv // 4` splits exactly.
@@ -70,8 +71,8 @@ Class `bias` (no mask; the exponent is `(sm_scale * S + bias - LSE') * log2e`, t
                  (there is no `bias_chunk_contract_ok`). A row-broadcast bias (`stride_b_seq_q == 0`) reads the one `(1, Sk)` row for every q; a head or
                  batch broadcast is a zero stride. In the ragged-tail tile a column past `seqlen_k` reads column 0 (the mask discards it), so no read leaves
                  the bias allocation; a row past `seqlen_q` reads the tile's first row.
-    dB store     `store_db` builds only. `dB[batch, head, q, kv] = dS` (unscaled, narrowed exactly as the GEMM3 operand): the lane's 8 contiguous kv of
-                 its q column (rows of the `KV_ROWS` tile after the xor-16 trade, `kv0 + 8 klane + j`) are 16-bit stores, one per element, because
+    dB store     `store_db` builds only. `dB[batch, head, q, kv] = dS` (unscaled, narrowed exactly as the GEMM3 operand): the lane's `acc_elems` contiguous kv of
+                 its q column (rows of the `KV_ROWS` tile after the xor-16 trade, `kv0 + acc_elems klane + j`) are 16-bit stores, one per element, because
                  `stride_db_seq_q` has no alignment contract. A store is issued only when `stride_db_seq_q != 0`, the q row is `< seqlen_q` and the kv column
                  is `< seqlen_k`: every issued store lies in `[0, (seqlen_q - 1) stride_db_seq_q + seqlen_k)` of the (batch, head) slab, and a dB that is
                  not requested (all dB strides zero, or the `store_db=0` twin, which has no store at all) is never touched; the DB pointer is not read.
@@ -89,6 +90,7 @@ from types import SimpleNamespace as _WireArgs
 
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
 from kernels.attention_bwd_rdna import rdna_layout_gfx11 as L
+from kernels.attention_bwd_rdna import mfma16_gfx9 as mfma16
 from kernels.attention_bwd_rdna.fmha_common_gfx11 import (
     _guarded_batches,
     _if_then,
@@ -120,7 +122,6 @@ from flydsl.expr.typing import Vector as Vec
 
 KERNEL_NAME = "fmha_bwd_dq_gfx11_kernel"
 _LOG2E = 1.4426950408889634
-WARP_SIZE = 32
 WMMA = 16
 VEC_WIDTH = 8  # elements per cooperative global load (16 bytes)
 DUMP_HEADER_WORDS = 64
@@ -202,8 +203,13 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             f"hdim ({meta.hdim_qk}, {meta.hdim_vo}) exceeds the tile {BLOCK_DMODEL}"
         )
 
-    V8 = L.wmma_v8_for_arch(knobs.arch)
-    OW = L.op_width(V8)  # K values a lane passes per operand
+    ABI = L.abi_for(
+        knobs.arch
+    )  # layout ABI token: "v16" (gfx11 WMMA), "v8" (gfx12 WMMA), "mfma16" (gfx90a / gfx942 MFMA)
+    OW = L.op_width(ABI)  # K values a lane passes per operand
+    WARP_SIZE = L.warp_size(ABI)
+    ACC = L.acc_elems(ABI)  # f32 accumulator elements per lane of a 16x16 tile
+    KLS = L.acc_klane_step(ABI)  # rows `klane` adds to `acc_row(r, 0)`
     NUM_WAVES = knobs.num_waves
     QK_SHARDS = knobs.contraction_shards
     BLOCK_M = knobs.BLOCK_M
@@ -240,7 +246,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
     fastmath_e = fmha.FastMath("safe")
     fastmath_e.flags = fx.arith.FastMathFlags.contract
     NUM_S_ACCS = BLOCK_N // WMMA
-    NUM_S_VALS = NUM_S_ACCS * 8
+    NUM_S_VALS = NUM_S_ACCS * ACC
     K_STEPS = QK_SLICE // WMMA
     D_CHUNKS = QK_SLICE // WMMA
     assert BLOCK_M == WMMA * Q_TILES_PER_BLOCK
@@ -271,8 +277,8 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
     # ---- dump geometry (words of f32) ----
     DUMP_NG = BLOCK_M // WMMA
     DUMP_ND = _ceil16(meta.hdim_qk) // WMMA
-    DUMP_S_WORDS = DUMP_NG * NUM_S_ACCS * WARP_SIZE * 8
-    DUMP_ACC_WORDS = DUMP_NG * DUMP_ND * WARP_SIZE * 8
+    DUMP_S_WORDS = DUMP_NG * NUM_S_ACCS * WARP_SIZE * ACC
+    DUMP_ACC_WORDS = DUMP_NG * DUMP_ND * WARP_SIZE * ACC
     DUMP_SLOT_WORDS = 4 * DUMP_S_WORDS + DUMP_ACC_WORDS
     BLOCK_N_LOG2 = BLOCK_N.bit_length() - 1
 
@@ -281,7 +287,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         dtype_str,
         BLOCK_DMODEL,
         PADDED_HEAD,
-        V8,
+        ABI,
         NUM_WAVES,
         QK_SHARDS,
         BLOCK_N,
@@ -348,20 +354,26 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         do_ptr = fmha.pointer_to_llvm_ptr(DO)
         dq_ptr = fmha.pointer_to_llvm_ptr(DQ)
 
-        wmma_atom = fx.make_mma_atom(
-            fx.rocdl.WMMA(WMMA, WMMA, WMMA, elem_dtype, fx.Float32)
-        )
+        if const_expr(ABI == L.ABI_MFMA16):
 
-        def wmma_acc(a_op, b_op, c8):
-            # gfx11: 16 K values per lane for A and B; gfx12: 8. Eight f32 accumulators either way.
-            a_frag = fx.make_rmem_tensor(OW, elem_dtype)
-            b_frag = fx.make_rmem_tensor(OW, elem_dtype)
-            c_frag = fx.make_rmem_tensor(8, fx.Float32)
-            a_frag.store(Vec(a_op))
-            b_frag.store(Vec(b_op))
-            c_frag.store(Vec(c8))
-            fx.gemm(wmma_atom, c_frag, a_frag, b_frag, c_frag)
-            return Vec(c_frag.load()).ir_value()
+            def wmma_acc(a_op, b_op, c8):
+                return mfma16.mfma_acc(dtype_str, a_op, b_op, c8)
+
+        else:
+            wmma_atom = fx.make_mma_atom(
+                fx.rocdl.WMMA(WMMA, WMMA, WMMA, elem_dtype, fx.Float32)
+            )
+
+            def wmma_acc(a_op, b_op, c8):
+                # gfx11: 16 K values per lane for A and B; gfx12: 8. Eight f32 accumulators either way.
+                a_frag = fx.make_rmem_tensor(OW, elem_dtype)
+                b_frag = fx.make_rmem_tensor(OW, elem_dtype)
+                c_frag = fx.make_rmem_tensor(ACC, fx.Float32)
+                a_frag.store(Vec(a_op))
+                b_frag.store(Vec(b_op))
+                c_frag.store(Vec(c8))
+                fx.gemm(wmma_atom, c_frag, a_frag, b_frag, c_frag)
+                return Vec(c_frag.load()).ir_value()
 
         def exchange(v):
             return fx.Float32(v).shuffle_xor(fx.Int32(16), fx.Int32(WARP_SIZE))
@@ -508,9 +520,10 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 vx_type, fmha.split_ptr(base_ptr, base64, off32, elem_type)
             )
 
-        def load_global_v8(base_ptr, base64, off32):
+        def load_global_v8(base_ptr, base64, off32, n=8):
             return _pointer_load(
-                v8_type, fmha.split_ptr(base_ptr, base64, off32, elem_type)
+                Vec.make_type(n, elem_dtype),
+                fmha.split_ptr(base_ptr, base64, off32, elem_type),
             )
 
         def store_global_v8(base_ptr, base64, off32, val):
@@ -529,11 +542,11 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         q_tile_base = q_tbase(_q_start_addr)
         do_tile_base = do_tbase(_q_start_addr)
 
-        def fetch_q(row, col):
-            return load_global_v8(q_ptr, q_tile_base, q_toff(row, col))
+        def fetch_q(row, col, n=8):
+            return load_global_v8(q_ptr, q_tile_base, q_toff(row, col), n)
 
-        def fetch_do(row, col):
-            return load_global_v8(do_ptr, do_tile_base, do_toff(row, col))
+        def fetch_do(row, col, n=8):
+            return load_global_v8(do_ptr, do_tile_base, do_toff(row, col), n)
 
         _q_in, _q_safe = q_ap.rows.gate(q_row, q_row_in_tile)
 
@@ -552,7 +565,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             )
             b_tile_base = b_tbase(_q_start_addr)
             b_row_off = b_toff(_q_safe, fx.Index(0))
-            kl_off = fx.Int32(klane) * fx.Int32(8 if V8 else 1)
+            kl_off = fx.Int32(klane) * fx.Int32(KLS)
         if const_expr(STORE_DB):
             # dB is stored only for a requested dB (`stride_db_seq_q != 0`; all three strides zero is "not requested") and a live q row.
             db_ptr = fmha.pointer_to_llvm_ptr(a.DB)
@@ -576,22 +589,12 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         q_packs = []
         do_packs = []
         for ks in range_constexpr(K_STEPS):
-            _c = L.op_origin(shard_qk_off + fx.Index(ks * WMMA), klane, V8)
+            _c = L.op_origin(shard_qk_off + fx.Index(ks * WMMA), klane, ABI)
             q_packs.append(
-                _cat(
-                    [
-                        q_ap.read_v8(fetch_q, _q_safe, _c + fx.Index(8 * h), _q_in)
-                        for h in range_constexpr(OW // 8)
-                    ]
-                )
+                _cat(cmn.read_operand_parts(q_ap, fetch_q, _q_safe, _c, _q_in, ABI))
             )
             do_packs.append(
-                _cat(
-                    [
-                        do_ap.read_v8(fetch_do, _q_safe, _c + fx.Index(8 * h), _q_in)
-                        for h in range_constexpr(OW // 8)
-                    ]
-                )
+                _cat(cmn.read_operand_parts(do_ap, fetch_do, _q_safe, _c, _q_in, ABI))
             )
 
         # ---- LSE' and Delta: one scalar per Q row (per lane, `KV_ROWS`) ----
@@ -641,9 +644,9 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             _drop_thr = fx.Int32(a.idropout_p)
 
         c_neg_inf = fx.Float32(float("-inf"))
-        c_zero_v8f32 = Vec.filled(8, 0.0, fx.Float32)
+        c_zero_v8f32 = Vec.filled(ACC, 0.0, fx.Float32)
         sm_scale_vec = (
-            Vec.from_elements([sm_scale], fx.Float32).broadcast_to(8).ir_value()
+            Vec.from_elements([sm_scale], fx.Float32).broadcast_to(ACC).ir_value()
         )
 
         # ---- the KV range: full tiles, then the ragged tail tile ----
@@ -673,7 +676,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 common_utils.smin(q_row_i32 + _wr + fx.Int32(1), seqlen_k_i32) - _first,
                 fx.Int32(0),
             )
-            _rel_lane = fx.Int32(klane) * fx.Int32(8 if V8 else 1) - _first
+            _rel_lane = fx.Int32(klane) * fx.Int32(KLS) - _first
             # The Q tile's KV block runs: [masked][full][masked]; a block no row reaches is not walked, a Q tile with no visible key walks none.
             _reg = fmha.decompose_causal_regions(
                 start_q, seqlen_q_i32, seqlen_k_i32, _wl, _wr, BLOCK_M, BLOCK_N, _alive
@@ -797,11 +800,11 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 * fx.Int64(WARP_SIZE)
                                 + fx.Int64(lane)
                             )
-                            * fx.Int64(8)
+                            * fx.Int64(ACC)
                         )
                         _pointer_store(
                             Vec.from_elements(
-                                tiles[_t][_a * 8 : _a * 8 + 8], fx.Float32
+                                tiles[_t][_a * ACC : _a * ACC + ACC], fx.Float32
                             ).ir_value(),
                             buffer_ops.get_element_ptr(
                                 dump_ptr, _idx, elem_type=f32_ty
@@ -822,7 +825,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                             * fx.Int64(WARP_SIZE)
                             + fx.Int64(lane)
                         )
-                        * fx.Int64(8)
+                        * fx.Int64(ACC)
                     )
                     _pointer_store(
                         fx.as_ir_value(accs[_dc]),
@@ -884,7 +887,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         lane16 + fx.Index(a_idx * WMMA),
                         shard_qk_off + fx.Index(ks * WMMA),
                         klane,
-                        V8,
+                        ABI,
                     )
                     s_accs[a_idx] = wmma_acc(
                         _lds_load_vec(lds_kv, _kidx, OW, v4_type),
@@ -904,7 +907,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         lane16 + fx.Index(a_idx * WMMA),
                         shard_qk_off + fx.Index(ks * WMMA),
                         klane,
-                        V8,
+                        ABI,
                     )
                     dp_accs[a_idx] = wmma_acc(
                         _lds_load_vec(lds_kv, _vidx, OW, v4_type),
@@ -916,8 +919,9 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             if const_expr(QK_SHARDS > 1):
                 if const_expr(RED_ALIASES_V):
                     gpu.barrier()  # the partials land on the V tile: every wave must be past its GEMM2 reads
-                _red = fmha.reduce_s_across_shards(
+                _red = cmn.reduce_s_across_shards(
                     s_accs + dp_accs,
+                    ACC,
                     lds_byte_base=_lds_byte_base,
                     byte0=RED_BYTE0,
                     wave_id=wave_id,
@@ -935,7 +939,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             s_raw = []
             dp_raw = []
             for st in range_constexpr(NUM_S_ACCS):
-                for r in range_constexpr(8):
+                for r in range_constexpr(ACC):
                     s_raw.append(Vec(s_accs[st])[r])
                     dp_raw.append(Vec(dp_accs[st])[r])
             s_acc_raw = list(s_raw)  # the unscaled accumulators (the dump's S)
@@ -954,7 +958,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 for _i in range_constexpr(NUM_S_VALS):
                     _bcol = (
                         _kv_i32
-                        + fx.Int32((_i // 8) * WMMA + L.acc_row(_i % 8, 0, V8))
+                        + fx.Int32((_i // ACC) * WMMA + L.acc_row(_i % ACC, 0, ABI))
                         + kl_off
                     )
                     if const_expr(_MASK_STEPS):
@@ -983,7 +987,8 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 _rel0 = _kv_i32 + _rel_lane
                 _vis = [
                     fx.Uint32(
-                        _rel0 + fx.Int32((_i // 8) * WMMA + L.acc_row(_i % 8, 0, V8))
+                        _rel0
+                        + fx.Int32((_i // ACC) * WMMA + L.acc_row(_i % ACC, 0, ABI))
                     )
                     < fx.Uint32(_span)
                     for _i in range_constexpr(NUM_S_VALS)
@@ -992,8 +997,8 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 for _i in range_constexpr(NUM_S_VALS):
                     _col = (
                         _kv_i32
-                        + fx.Int32((_i // 8) * WMMA + L.acc_row(_i % 8, 0, V8))
-                        + fx.Int32(klane) * fx.Int32(8 if V8 else 1)
+                        + fx.Int32((_i // ACC) * WMMA + L.acc_row(_i % ACC, 0, ABI))
+                        + fx.Int32(klane) * fx.Int32(KLS)
                     )
                     _dead = _col >= seqlen_k_i32
                     s_raw[_i] = c_neg_inf if _dead else s_raw[_i]
@@ -1020,9 +1025,9 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 _tile_ctr = _ph_row + (fx.Int64(kv_block_start) >> fx.Int64(2))
                 for _st in range_constexpr(NUM_S_ACCS):
                     _calls = {}
-                    for _r in range_constexpr(8):
-                        _g0, _s0 = L.dropout_kv_rows_call(_r, 0, V8)
-                        _g1, _s1 = L.dropout_kv_rows_call(_r, 1, V8)
+                    for _r in range_constexpr(ACC):
+                        _g0, _s0 = L.dropout_kv_rows_call(_r, 0, ABI)
+                        _g1, _s1 = L.dropout_kv_rows_call(_r, 1, ABI)
                         if const_expr((_g0, _g1) not in _calls):
                             _grp = fx.Int64(_st * (WMMA // 4) + _g0)
                             if const_expr(_g1 != _g0):
@@ -1036,7 +1041,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 fx.Int32(_w[_s0]), fx.Int32(_w[_s1])
                             )
                         _keep = fx.Int32(_word) > _drop_thr
-                        _i = _st * 8 + _r
+                        _i = _st * ACC + _r
                         dp_raw[_i] = _keep.select(
                             fastmath.mul(fx.Float32(dp_raw[_i]), _drop_scale),
                             fx.Float32(0.0),
@@ -1063,8 +1068,8 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     else:
                         _colv = (
                             _kv_i32
-                            + fx.Int32((_i // 8) * WMMA + L.acc_row(_i % 8, 0, V8))
-                            + fx.Int32(klane) * fx.Int32(8 if V8 else 1)
+                            + fx.Int32((_i // ACC) * WMMA + L.acc_row(_i % ACC, 0, ABI))
+                            + fx.Int32(klane) * fx.Int32(KLS)
                         )
                         _kv_ok = _colv < seqlen_k_i32
                     _sd = fastmath.mul(fx.Float32(s_acc_raw[_i]), sm_scale)
@@ -1100,23 +1105,22 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             ds_halves = []
             ds_full = []
             for _acc in range_constexpr(NUM_S_ACCS):
-                _own = [fx.Float32(ds_vals[_acc * 8 + j]) for j in range_constexpr(8)]
-                _full = L.acc_to_operand(_own, exchange, klane_is_zero, V8)
-                _halves = []
-                for _h in range_constexpr(OW // 8):
-                    _sl = _full[_h * 8 : (_h + 1) * 8]
-                    if const_expr(dtype_str == "bf16"):
-                        _halves.append(
-                            (cmn.bf16_rne_pack_v8 if RNE else fmha.bf16_trunc_pack_v8)(
-                                _sl, elem_dtype
-                            )
-                        )
-                    else:
+                _own = [
+                    fx.Float32(ds_vals[_acc * ACC + j]) for j in range_constexpr(ACC)
+                ]
+                _full = L.acc_to_operand(_own, exchange, klane_is_zero, ABI)
+                if const_expr(dtype_str == "bf16"):
+                    _halves = cmn.bf16_pack_parts(_full, elem_dtype, RNE, ABI)
+                else:
+                    _halves = []
+                    _PW = L.read_width(ABI)
+                    for _h in range_constexpr(L.read_count(ABI)):
+                        _sl = _full[_h * _PW : (_h + 1) * _PW]
                         _halves.append(
                             Vec.from_elements(
                                 [
                                     fx.Float32(_sl[j]).to(elem_dtype)
-                                    for j in range_constexpr(8)
+                                    for j in range_constexpr(_PW)
                                 ],
                                 elem_dtype,
                             ).ir_value()
@@ -1126,13 +1130,13 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 ds_full.append(_full)
 
             if const_expr(DB_F32):
-                # f32 dB = dS as computed, no narrowing: the lane's 8 contiguous kv of its q column are `_full[0:8]` (gfx12) or `_full[0:8]` /
+                # f32 dB = dS as computed, no narrowing: the lane's `ACC` contiguous kv of its q column are `_full[0:ACC]` (gfx12, MFMA16) or `_full[0:8]` /
                 # `_full[8:16]` by klane (gfx11), the f32 values the packs are narrowed from.
                 with _if_then(_scf.IfOp(fx.as_ir_value(db_on))):
                     for _acc in range_constexpr(NUM_S_ACCS):
                         _ff = ds_full[_acc]
-                        for _j in range_constexpr(8):
-                            if const_expr(V8):
+                        for _j in range_constexpr(ACC):
+                            if const_expr(ABI != L.ABI_V16):
                                 _dv = fx.Float32(_ff[_j])
                             else:
                                 _dv = klane_is_zero.select(
@@ -1141,7 +1145,7 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                             _dcol = (
                                 _kv_i32
                                 + fx.Int32(_acc * WMMA + _j)
-                                + fx.Int32(klane) * fx.Int32(8)
+                                + fx.Int32(klane) * fx.Int32(ACC)
                             )
                             _dptr = fmha.split_ptr(
                                 db_ptr,
@@ -1158,19 +1162,19 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 _pointer_store(fx.as_ir_value(_dv), _dptr)
             if const_expr(STORE_DB and not DB_F32):
                 # dB = dS, narrowed exactly as the GEMM3 operand (the packs). `_halves[0]` / `[1]` hold tile rows 0-7 / 8-15 of the lane's q column
-                # (gfx11; gfx12 holds rows 8 klane + j in `_halves[0]`), so the lane's 8 contiguous kv are `kv0 + 8 klane + j`.
+                # (gfx11; gfx12 holds rows 8 klane + j in `_halves[0]`, MFMA16 rows 4 klane + j), so the lane's `ACC` contiguous kv are `kv0 + ACC klane + j`.
                 with _if_then(_scf.IfOp(fx.as_ir_value(db_on))):
                     for _acc in range_constexpr(NUM_S_ACCS):
                         _hh = ds_halves[_acc]
-                        if const_expr(V8):
+                        if const_expr(ABI != L.ABI_V16):
                             _rows8 = _hh[0]
                         else:
                             _rows8 = klane_is_zero.select(Vec(_hh[0]), Vec(_hh[1]))
-                        for _j in range_constexpr(8):
+                        for _j in range_constexpr(ACC):
                             _dcol = (
                                 _kv_i32
                                 + fx.Int32(_acc * WMMA + _j)
-                                + fx.Int32(klane) * fx.Int32(8)
+                                + fx.Int32(klane) * fx.Int32(ACC)
                             )
                             _dptr = fmha.split_ptr(
                                 db_ptr,
@@ -1198,13 +1202,13 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                             d_pos,
                             fx.Index(acc_idx * WMMA),
                             klane,
-                            V8,
+                            ABI,
                         ),
                         OW,
                         v4_type,
                     )
                 _offs = L.lds_transposed_operand(
-                    0, K_STRIDE, d_pos, fx.Index(acc_idx * WMMA), klane, V8
+                    0, K_STRIDE, d_pos, fx.Index(acc_idx * WMMA), klane, ABI
                 )
                 return Vec.from_elements(
                     [fx.ptr_load(lds_kv + fx.Int32(_o)) for _o in _offs], elem_dtype
@@ -1264,13 +1268,15 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             if const_expr(not PADDED_HEAD):
                 write_dq(row, col, val)
                 return
-            with _if_then(_scf.IfOp(fx.as_ir_value(qk_cols.valid(col + fx.Index(7))))):
+            with _if_then(
+                _scf.IfOp(fx.as_ir_value(qk_cols.valid(col + fx.Index(ACC - 1))))
+            ):
                 write_dq(row, col, val)
             straddle = qk_cols.valid(col) & (
-                fx.Int64(col + fx.Index(7)) >= fx.Int64(hdim_qk)
+                fx.Int64(col + fx.Index(ACC - 1)) >= fx.Int64(hdim_qk)
             )
             with _if_then(_scf.IfOp(fx.as_ir_value(straddle))):
-                for j in range_constexpr(8):
+                for j in range_constexpr(ACC):
                     with _if_then(
                         _scf.IfOp(fx.as_ir_value(qk_cols.valid(col + fx.Index(j))))
                     ):
@@ -1279,17 +1285,17 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         if _q_in:
             for dc in range_constexpr(D_CHUNKS):
                 _own = [
-                    fx.Float32(Vec(loop_results[dc])[r]) for r in range_constexpr(8)
+                    fx.Float32(Vec(loop_results[dc])[r]) for r in range_constexpr(ACC)
                 ]
-                _rows = L.acc_to_rows8(_own, exchange, klane_is_zero, V8)
+                _rows = L.acc_to_rows8(_own, exchange, klane_is_zero, ABI)
                 _trunc = Vec.from_elements(
                     [
                         fx.Float32(fastmath.mul(_rows[j], sm_scale)).to(elem_dtype)
-                        for j in range_constexpr(8)
+                        for j in range_constexpr(ACC)
                     ],
                     elem_dtype,
                 ).ir_value()
-                _col = shard_qk_off + fx.Index(dc * WMMA) + L.rows8_origin(klane)
+                _col = shard_qk_off + fx.Index(dc * WMMA) + L.rows8_origin(klane, ABI)
                 store_dq_chunk(q_row_in_tile, _col, _trunc)
 
     # ---- kernel + launcher -------------------------------------------------------------------------------------------------------
