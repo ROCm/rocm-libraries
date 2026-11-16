@@ -160,27 +160,31 @@ void checkTensorVirtuality1Node(
             "Batchnorm training tensors must be non-virtual for 1-node graph");
     }
 
-    // Optional mean/variance tensors must be non-virtual if present
-    if(bnAttr.mean_tensor_uid().has_value())
+    // Optional mean/variance tensors must be non-virtual if present, unless both are virtual and
+    // nothing consumes them (saved statistics not requested).
+    if(!hasUnrequestedSavedPair(bnAttr, tensorMap))
     {
-        const auto& bnTensorMean
-            = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
-        if(bnTensorMean.virtual_())
+        if(bnAttr.mean_tensor_uid().has_value())
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
+            const auto& bnTensorMean
+                = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
+            if(bnTensorMean.virtual_())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
+            }
         }
-    }
 
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorInvVar = miopen_utils::findTensorAttributes(
-            tensorMap, bnAttr.inv_variance_tensor_uid().value());
-        if(bnTensorInvVar.virtual_())
+        if(bnAttr.inv_variance_tensor_uid().has_value())
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm inv_variance tensor must be non-virtual");
+            const auto& bnTensorInvVar = miopen_utils::findTensorAttributes(
+                tensorMap, bnAttr.inv_variance_tensor_uid().value());
+            if(bnTensorInvVar.virtual_())
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "Batchnorm inv_variance tensor must be non-virtual");
+            }
         }
     }
 

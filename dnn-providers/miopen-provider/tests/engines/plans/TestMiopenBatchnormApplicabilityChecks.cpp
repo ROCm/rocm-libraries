@@ -4433,6 +4433,35 @@ TEST(TestCheckBatchnormBufferRoles, AcceptsRuntimeEpsilonAndMomentumScalars)
     EXPECT_NO_THROW(checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap()));
 }
 
+TEST(TestCheckBatchnormBufferRoles, RejectsBakedValueBufferTensor)
+{
+    const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(), [](fb::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->name == "scale")
+                {
+                    tensor->value.Set(fb::Float64Value(2.0));
+                }
+            }
+        });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto* attrs = graph.getNode(0).attributes_as_BatchnormAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    bool isSupported = true;
+    try
+    {
+        checkBatchnormFwdTrainingTensorConfigSupported(*attrs, graph.getTensorMap());
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException&)
+    {
+        isSupported = false;
+    }
+    EXPECT_FALSE(isSupported);
+}
+
 TEST(TestCheckBatchnormBufferRoles, FusedTrainingDeclinesPassByValueBuffer)
 {
     const auto builder = hipdnn_test_sdk::utilities::mutateGraph(

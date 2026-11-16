@@ -82,7 +82,7 @@ void HipblasltEngine::initializeExecutionContext(
     }
 
     throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "No hipBLASLt plan builder applies to the graph");
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "No hipBLASLt plan builder applies to the graph");
 }
 
 void HipblasltEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)

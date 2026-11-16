@@ -126,7 +126,7 @@ TEST_F(TestAsmSdpaEngine, IsApplicableReturnsTrueForRaggedSdpaGraph)
     EXPECT_TRUE(_engine.isApplicable(_handle, graphWrapper));
 }
 
-TEST_F(TestAsmSdpaEngine, InitializeExecutionContextThrowsBadParamIfNoBuilderApplies)
+TEST_F(TestAsmSdpaEngine, InitializeExecutionContextThrowsInternalErrorIfNoBuilderApplies)
 {
     // A graph no builder accepts must not yield a context that has no plan.
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
@@ -142,7 +142,25 @@ TEST_F(TestAsmSdpaEngine, InitializeExecutionContextThrowsBadParamIfNoBuilderApp
     }
     catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
     {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
+}
+
+TEST_F(TestAsmSdpaEngine, GetMaxWorkspaceSizeThrowsInternalErrorIfNoBuilderApplies)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_test_sdk::utilities::MockEngineConfig engineConfig;
+
+    try
+    {
+        static_cast<void>(_engine.getMaxWorkspaceSize(_handle, graphWrapper, engineConfig));
+        FAIL() << "a workspace query with no applicable builder must throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 

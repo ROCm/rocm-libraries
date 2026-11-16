@@ -214,17 +214,8 @@ inline std::pair<int32_t, int32_t> computeMaskCoordinates(
 }
 
 // =============================================================================
-// Kernarg range primitives
+// Operand shape consistency
 // =============================================================================
-//
-// Dimensions and strides reach the kernels through 32-bit fields: the kernarg
-// structs store them as uint32_t, the launch grid takes unsigned int, and the
-// kernel registries are keyed on int. A value that does not fit its field
-// truncates silently and the kernel then runs on a different shape than the
-// graph asked for, so the plan builders check every one of them in
-// isApplicable, ahead of the first narrowing cast. Each predicate logs the
-// offending field and returns false (rather than returning early) so a caller
-// can report every violation of a tensor in one pass.
 
 // The forward kernel's head-group arithmetic and tensor addressing assume the shapes of Q,
 // K, V and O describe one attention problem: Q [B, Hq, Sq, Dqk], K [B, Hkv, Skv, Dqk],
@@ -257,6 +248,19 @@ inline bool hasConsistentFwdShapes(const hipdnn_flatbuffers_sdk::data_objects::T
            && od->Get(0) == qd->Get(0) && od->Get(1) == headsQ && od->Get(2) == qd->Get(2)
            && od->Get(3) == vd->Get(3);
 }
+
+// =============================================================================
+// Kernarg range primitives
+// =============================================================================
+//
+// Dimensions and strides reach the kernels through 32-bit fields: the kernarg
+// structs store them as uint32_t, the launch grid takes unsigned int, and the
+// kernel registries are keyed on int. A value that does not fit its field
+// truncates silently and the kernel then runs on a different shape than the
+// graph asked for, so the plan builders check every one of them in
+// isApplicable, ahead of the first narrowing cast. Each predicate logs the
+// offending field and returns false (rather than returning early) so a caller
+// can report every violation of a tensor in one pass.
 
 // For dimensions whose only 32-bit narrowing is the uint32_t kernarg field or
 // the unsigned grid dimension that carries them: batch and the head counts.

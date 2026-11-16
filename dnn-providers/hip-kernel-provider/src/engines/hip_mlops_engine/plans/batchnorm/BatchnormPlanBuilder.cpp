@@ -204,9 +204,18 @@ void checkOneNodeOperandsNotVirtual(
                 attr.y_tensor_uid(),
                 attr.scale_tensor_uid(),
                 attr.bias_tensor_uid()};
-        for(const auto& optionalUid : {attr.mean_tensor_uid(),
-                                       attr.inv_variance_tensor_uid(),
-                                       attr.prev_running_mean_tensor_uid(),
+        // A saved pair that is virtual in both tensors is not requested and is left out.
+        if(!hasUnrequestedSavedPair(attr, tensorMap))
+        {
+            for(const auto& savedUid : {attr.mean_tensor_uid(), attr.inv_variance_tensor_uid()})
+            {
+                if(savedUid.has_value())
+                {
+                    uids.push_back(savedUid.value());
+                }
+            }
+        }
+        for(const auto& optionalUid : {attr.prev_running_mean_tensor_uid(),
                                        attr.prev_running_variance_tensor_uid(),
                                        attr.next_running_mean_tensor_uid(),
                                        attr.next_running_variance_tensor_uid()})

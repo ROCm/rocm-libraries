@@ -198,7 +198,7 @@ void MiopenEngine::initializeExecutionContext(
     if(applicableBuilder == _planBuilders.end())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "No MIOpen plan builder is applicable to the graph for engine " + std::to_string(_id));
     }
 

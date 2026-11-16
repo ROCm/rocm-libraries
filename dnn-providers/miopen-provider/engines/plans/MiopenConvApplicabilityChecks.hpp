@@ -22,11 +22,19 @@ using TensorMap
 bool hasPassByValueTensor(const TensorMap& tensorMap);
 
 // Layout checks for conv -> [bias add] -> activation graphs. Throws BAD_PARAM when:
-//  - the bias is not a per-channel tensor: dims [1, C, 1, ...] with C equal to the convolution
-//    output channels, the same rank as the convolution output, and a unit channel stride;
+//  - the bias is not a per-channel tensor: of rank at most the convolution output's (a lower-rank
+//    bias is right-aligned against the output, its missing leading dimensions being units), dims
+//    [1, C, 1, ...] once so aligned, with C equal to the convolution output channels and a unit
+//    channel stride;
 //  - the final activation output differs from the descriptor MIOpen derives for the fused
 //    convolution: the input data type and dims equal to the convolution output, in the same
-//    packed memory layout as the input.
+//    packed memory layout as the input. MIOpen derives that layout from the input strides
+//    (TensorDescriptor::find_permutation, GetLayout and GetLayout_str in
+//    projects/miopen/src/tensor.cpp; ConvolutionDescriptor::GetForwardOutputTensor[WithLayout] in
+//    projects/miopen/src/convolution.cpp) and FusionPlanDescriptor::Execute rejects a mismatching
+//    output ("The output descriptors dont match.", projects/miopen/src/fusion.cpp). No public API
+//    returns the fused output strides, so the check reproduces them; MIOpen's rejection of a
+//    layout it does not name is left to the device check.
 // `biasAttr` is null for conv -> activation graphs.
 void checkConvFwdBiasActivLayouts(
     const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes& convAttr,

@@ -480,6 +480,36 @@ void checkSavedStatsPair(const BatchnormAttrs& bnAttr)
 }
 } // namespace
 
+namespace batchnorm
+{
+
+bool hasUnrequestedSavedPair(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!bnAttr.mean_tensor_uid().has_value() || !bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    if(bnAttr.prev_running_mean_tensor_uid().has_value()
+       || bnAttr.prev_running_variance_tensor_uid().has_value()
+       || bnAttr.next_running_mean_tensor_uid().has_value()
+       || bnAttr.next_running_variance_tensor_uid().has_value()
+       || bnAttr.momentum_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    return core::utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value()).virtual_()
+           && core::utils::findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value())
+                  .virtual_();
+}
+
+} // namespace batchnorm
+
 void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr)
 {
@@ -497,14 +527,20 @@ void BatchnormValidator::checkFwdTrainingTensorConfigSupported(
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
     const std::vector<int64_t> affineTensorIds
         = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
+    // A saved pair that is virtual in both tensors is not requested: the plan never reads or
+    // writes it, so the role-specific checks skip it.
+    const bool unrequestedSavedPair = batchnorm::hasUnrequestedSavedPair(bnAttr, _tensorMap);
     std::vector<int64_t> statTensorIds;
-    if(bnAttr.mean_tensor_uid().has_value())
+    if(!unrequestedSavedPair)
     {
-        statTensorIds.push_back(bnAttr.mean_tensor_uid().value());
-    }
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
+        if(bnAttr.mean_tensor_uid().has_value())
+        {
+            statTensorIds.push_back(bnAttr.mean_tensor_uid().value());
+        }
+        if(bnAttr.inv_variance_tensor_uid().has_value())
+        {
+            statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
+        }
     }
 
     addRunningStats(bnAttr, _tensorMap, statTensorIds);

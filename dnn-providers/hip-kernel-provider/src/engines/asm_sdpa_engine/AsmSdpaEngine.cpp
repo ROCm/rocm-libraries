@@ -74,8 +74,9 @@ size_t AsmSdpaEngine::getMaxWorkspaceSize(
         }
     }
 
-    HIPDNN_PLUGIN_LOG_ERROR("AsmSdpaEngine::getMaxWorkspaceSize: no supporting engine found");
-    return 0;
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "AsmSdpaEngine::getMaxWorkspaceSize: no plan builder applies to the graph");
 }
 
 void AsmSdpaEngine::initializeExecutionContext(
@@ -95,10 +96,8 @@ void AsmSdpaEngine::initializeExecutionContext(
         }
     }
 
-    HIPDNN_PLUGIN_LOG_ERROR(
-        "AsmSdpaEngine::initializeExecutionContext: no supporting engine found");
     throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
         "AsmSdpaEngine::initializeExecutionContext: no plan builder applies to the graph");
 }
 

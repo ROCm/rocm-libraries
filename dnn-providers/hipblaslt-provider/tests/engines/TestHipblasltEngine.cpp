@@ -234,7 +234,7 @@ TEST(TestHipblasltEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.initializeExecutionContext(dummyHandle, mockGraph, ctx);
 }
 
-TEST(TestHipblasltEngine, InitializeExecutionContextThrowsBadParamIfNoApplicableBuilders)
+TEST(TestHipblasltEngine, InitializeExecutionContextThrowsInternalErrorIfNoApplicableBuilders)
 {
     auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
@@ -261,13 +261,13 @@ TEST(TestHipblasltEngine, InitializeExecutionContextThrowsBadParamIfNoApplicable
     }
     catch(const HipdnnPluginException& e)
     {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }
 
 // A legal graph the real plan builder does not serve (batchnorm) must not yield a
 // planless context that only fails later, when the plan is requested.
-TEST(TestHipblasltEngine, InitializeExecutionContextThrowsBadParamForUnservedGraph)
+TEST(TestHipblasltEngine, InitializeExecutionContextThrowsInternalErrorForUnservedGraph)
 {
     HipblasltEngine engine(1);
     engine.addPlanBuilder(std::make_unique<HipblasltMatmulPlanBuilder>());
@@ -284,6 +284,6 @@ TEST(TestHipblasltEngine, InitializeExecutionContextThrowsBadParamForUnservedGra
     }
     catch(const HipdnnPluginException& e)
     {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
     }
 }

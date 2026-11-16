@@ -944,6 +944,16 @@ flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(Gra
     });
 }
 
+// The training graph without running statistics: x, y, scale, bias, epsilon and the saved mean
+// and inv_variance (uids 6 and 7).
+flatbuffers::FlatBufferBuilder
+    noRunningStatsTrainingGraph(const std::function<void(GraphT&)>& mutate)
+{
+    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {588, 196, 14, 1}, {1, 3, 14, 14}, /*withMeanVariance=*/true);
+    return hipdnn_test_sdk::utilities::mutateGraph(base, mutate);
+}
+
 std::vector<TrainingGraphMutation> trainingGraphMutations()
 {
     std::vector<TrainingGraphMutation> rows;
@@ -965,6 +975,10 @@ std::vector<TrainingGraphMutation> trainingGraphMutations()
                             tensorByUid(graph, tensorUid).virtual_ = true;
                         }});
     }
+    rows.push_back({"VirtualSaveMeanAndInvVariance", [](GraphT& graph) {
+                        tensorByUid(graph, 6).virtual_ = true;
+                        tensorByUid(graph, 7).virtual_ = true;
+                    }});
 
     rows.push_back({"SaveMeanWithoutInvVariance",
                     [](GraphT& g) { batchnormAttrs(g).inv_variance_tensor_uid.reset(); }});
@@ -1018,6 +1032,41 @@ TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedB
 
     EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
     EXPECT_TRUE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormTrainingGraphDecline, BothSavedStatisticsVirtualIsAcceptedByBothBuilders)
+{
+    auto builder = noRunningStatsTrainingGraph([](GraphT& g) {
+        tensorByUid(g, 6).virtual_ = true;
+        tensorByUid(g, 7).virtual_ = true;
+    });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_TRUE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedMeanVirtualIsDeclinedByBothBuilders)
+{
+    auto builder
+        = noRunningStatsTrainingGraph([](GraphT& g) { tensorByUid(g, 6).virtual_ = true; });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_trainingBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedInvVarianceVirtualIsDeclinedByBothBuilders)
+{
+    auto builder
+        = noRunningStatsTrainingGraph([](GraphT& g) { tensorByUid(g, 7).virtual_ = true; });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_batchnormBuilder.isApplicable(_dummyHandle, graph));
+    EXPECT_FALSE(_trainingBuilder.isApplicable(_dummyHandle, graph));
 }
 
 TEST_F(TestBatchnormTrainingGraphDecline, RuntimeEpsilonGraphIsAcceptedByBothBuilders)
