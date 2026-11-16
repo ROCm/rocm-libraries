@@ -28,6 +28,7 @@
 
 #include <Tensile/Activation.hpp>
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/Tensile.hpp>
 
@@ -76,16 +77,17 @@ namespace TensileLite
             bool        m_highPrecisionAccumulate;
             bool        m_deterministicMode;
             bool        m_cEqualsD;
-            int         m_useBias;
-            int         m_biasSrc;
+            bool        m_deviceScalarAlpha;
+            int         m_uniformSummationOrder;
+            int         m_useBias = 0;
+            int         m_biasSrc = static_cast<int>(ContractionProblemGemm::TENSOR::D);
             std::string m_useScaleAB;
-            bool        m_useScaleCD;
-            int         m_useScaleAlphaVec;
-            bool        m_useSynchronizer;
-            bool        m_useE;
-            bool        m_useGradient     = false;
-            bool        m_useGateResidual = false;
-            bool        m_outputAmaxD;
+            bool        m_useScaleCD       = false;
+            int         m_useScaleAlphaVec = 0;
+            bool        m_useE             = false;
+            bool        m_useGradient      = false;
+            bool        m_useGateResidual  = false;
+            bool        m_outputAmaxD      = false;
 
             int                              m_sparse;
             KernelLanguage                   m_kernelLanguage;
@@ -113,10 +115,14 @@ namespace TensileLite
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
-            bool                             m_fusedGemmA2A;
+            FusedA2A                         m_fusedA2A;
+            std::vector<int>                 m_worlds;
+            std::vector<int>                 m_fusedA2AExtents;
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;
+            int                              m_mxBlockFreeA;
+            int                              m_mxBlockFreeB;
             bool                             m_padMXScaleTensorFreeDim;
 
             TensorOps m_aOps;

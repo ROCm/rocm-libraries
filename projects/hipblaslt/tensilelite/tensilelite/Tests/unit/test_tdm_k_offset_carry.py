@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from rocisa.container import sgpr, vgpr
 from rocisa.instruction import (
     SAddCU32, SAddU32, SMulHIU32, SMulI32, SSubU32, VReadfirstlaneB32,

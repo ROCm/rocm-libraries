@@ -22,12 +22,12 @@
 #
 ################################################################################
 
+import argparse
 import os
 
 import pandas as pd
 import numpy as np
 import yaml
-import subprocess
 import glob
 
 from shutil import copyfile
@@ -36,11 +36,11 @@ from copy import deepcopy
 from . import LibraryIO
 
 from . import ClientWriter
-from .TensileCreateLibrary import tensileLibraryFile
+from .create_library import tensileLibraryFile, main as createLibrary
 from .Common import ensurePath, printExit
 from .Common.Architectures import gfxToSwCodename, detectGlobalCurrentArch, gfxToIsa
 from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from .Common.GlobalParameters import assignGlobalParameters
+from .Common.GlobalParameters import assignGlobalParameters, preserveGlobalParameters
 from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import ToolchainDefaults, validateToolchain
 
@@ -57,15 +57,15 @@ def createLibraryForBenchmark(logicPath, libraryPath, currentPath, gfxName):
     where this then reads the result back from.
     """
 
-    pythonExePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bin", "TensileCreateLibrary")
-    args = [pythonExePath, \
+    args = [
         "--new-client-only", "--no-short-file-names", \
         f"--architecture={gfxName}", "--code-object-version=default", "--library-format=yaml", \
-        logicPath, libraryPath, "HIP"]
+        os.path.abspath(logicPath), os.path.abspath(libraryPath), "HIP"]
 
     try:
-        subprocess.run(args, check=True, cwd=currentPath)
-    except (subprocess.CalledProcessError, OSError) as e:
+        with preserveGlobalParameters():
+            createLibrary(args)
+    except (RuntimeError, OSError, SystemExit) as e:
         printExit("ClientWriter Benchmark Process exited with error: {}".format(e))
 
 def GenerateSummations(userArgs):
@@ -204,3 +204,14 @@ def GenerateSummations(userArgs):
         finalLogic = os.path.join(outputFinal, logicFileBaseName)
 
         copyfile(localFinalLogic, finalLogic)
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="tensilelite generate-summations",
+        description="Generate summation models for existing library logic.",
+    )
+    parser.add_argument("logic_path", help="directory containing input library logic")
+    parser.add_argument("output_path", help="directory for generated models and artifacts")
+    args = parser.parse_args(argv)
+    GenerateSummations([args.logic_path, args.output_path])
+    return 0

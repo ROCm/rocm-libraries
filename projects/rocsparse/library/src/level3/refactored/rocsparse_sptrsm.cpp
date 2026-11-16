@@ -34,9 +34,7 @@
 
 #include "../rocsparse_sptrsm_descr.hpp"
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 #include "../level2/rocsparse_diagonal_solve.hpp"
-#endif
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_stage value)
@@ -331,7 +329,6 @@ namespace rocsparse
             alpha->data_type    = sptrsm_descr->get_compute_datatype();
         }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         if(sptrsm_descr->get_solve_mode() != rocsparse_solve_mode_triangular)
         {
 
@@ -417,7 +414,6 @@ namespace rocsparse
             }
             }
         }
-#endif
 
         _rocsparse_dnmat_descr Z_st{true,
                                     Y->rows,

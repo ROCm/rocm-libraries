@@ -15,7 +15,7 @@ from dispatch.attention import (
     attention_execution_candidates,
 )
 from dispatch.attention import bindings as attention_bindings
-from dispatch.attention.common import AttentionTuningSpec, _problem
+from dispatch.attention.common import AttentionTuningSpec, attention_problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 
 
@@ -246,7 +246,7 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertNotIn("sinks", captured)
 
     def test_explicit_binding_validates_every_paged_input_class(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         valid = _paged_tensors()
         self.assertEqual(
             attention_bindings.validate_tuning_attention_tensors(problem, valid),
@@ -309,7 +309,7 @@ class TestRegistrySplit(unittest.TestCase):
             attention_bindings.validate_tuning_attention_tensors(problem, tensors)
 
     def test_explicit_binding_can_skip_only_metadata_content_sync(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         tensors = _paged_tensors()
         tensors["block_table"] = _Tensor(
             (1, 64), "torch.int32", [[999] + list(range(1, 64))]
@@ -322,7 +322,7 @@ class TestRegistrySplit(unittest.TestCase):
         )
 
     def test_explicit_binding_ignores_invalid_unused_table_columns(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         tensors = _paged_tensors()
         tensors["seqused_k"] = _Tensor((1,), "torch.int32", [16])
         tensors["block_table"] = _Tensor(
@@ -337,7 +337,7 @@ class TestRegistrySplit(unittest.TestCase):
 
     def test_explicit_binding_rejects_cpu_and_semantic_mismatches(self):
         request = _req()
-        problem = _problem(request)
+        problem = attention_problem(request)
         tensors = _paged_tensors()
         for tensor in tensors.values():
             tensor.device = "cpu"
@@ -384,7 +384,95 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertTrue(runtime_spec.kernel_spec.use_i64_kv_addr)
         self.assertEqual(runtime_spec.num_kv_blocks, 65537)
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
-        self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
+        self.assertEqual(binding.grid, runtime_spec.launch_grid(attention_problem(req)))
+
+    def test_explicit_binding_rejects_additive_bias(self):
+        candidate = next(
+            c
+            for c in attention_execution_candidates()
+            if c.name.startswith("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        )
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        spec = candidate.select_spec(req)
+        captured = {}
+
+        def fake_run(**kwargs):
+            captured.update(kwargs)
+            return "ok"
+
+        with mock.patch(
+            "kernels.common.attention_unified.run_unified_attention_torch",
+            side_effect=fake_run,
+        ):
+            tensors = _paged_tensors()
+            tensors["problem"] = replace(attention_problem(req), use_additive_bias=True)
+            with self.assertRaisesRegex(ValueError, "do not support additive bias"):
+                candidate.bound_torch(req, spec, tensors)
+
+            for name in (
+                "additive_bias",
+                "additive_bias_batch_stride",
+                "additive_bias_head_stride",
+                "additive_bias_sq_stride",
+            ):
+                with self.subTest(where="tensors", name=name):
+                    tensors = _paged_tensors()
+                    tensors[name] = 0
+                    with self.assertRaisesRegex(ValueError, f"{name} in tensors"):
+                        candidate.bound_torch(req, spec, tensors)
+
+            binding = candidate.bound_torch(req, spec, _paged_tensors())
+            with self.assertRaisesRegex(ValueError, "additive_bias in launch kwargs"):
+                binding.launch(additive_bias=object())
+            self.assertEqual(captured, {})
+
+            binding.launch()
+        self.assertFalse(any(k.startswith("additive_bias") for k in captured))
+
+    def test_runner_rejects_tuning_spec_bias_mismatch(self):
+        """``run_unified_attention_torch(tuning_spec=...)`` is a public entry too.
+        A spec and problem that disagree on ``use_additive_bias`` would misalign
+        the positional kernargs, so the runner refuses them before launch."""
+        from kernels.common import attention_unified as au
+
+        for prefix in (
+            "attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm",
+            "attention_gfx950_u3d_splitkv_seg16_t1xb",
+        ):
+            candidate = next(
+                c for c in attention_execution_candidates() if c.name.startswith(prefix)
+            )
+            req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+            spec = candidate.select_spec(req)
+            bias_spec = replace(
+                spec, kernel_spec=replace(spec.kernel_spec, use_additive_bias=True)
+            )
+            problem = attention_problem(req)
+            for case, prob, tspec in (
+                (
+                    "bias_problem_plain_spec",
+                    replace(problem, use_additive_bias=True),
+                    spec,
+                ),
+                ("plain_problem_bias_spec", problem, bias_spec),
+            ):
+                with self.subTest(candidate=prefix, case=case), mock.patch.object(
+                    au, "_resolve_attention_arch", return_value="gfx950"
+                ):
+                    with self.assertRaisesRegex(ValueError, "disagrees with problem"):
+                        au.run_unified_attention_torch(
+                            problem=prob,
+                            q=None,
+                            k=None,
+                            v=None,
+                            out=None,
+                            cu_seqlens_q=None,
+                            seqused_k=None,
+                            softmax_scale=1.0,
+                            block_table=None,
+                            softcap=0.0,
+                            tuning_spec=tspec,
+                        )
 
 
 if __name__ == "__main__":

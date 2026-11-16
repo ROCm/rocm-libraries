@@ -455,7 +455,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
@@ -464,8 +464,9 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
     if(!loader.IsLoaded())
         return false;
 
-    return loader.IsArgsSupported(
-        CKSolverType::GrpConvWrw, problem, kernel_id, problem.GetInDataType(), problem.UseTF32());
+    // Recompute TF32 from the problem with an FP32 fallback: passing a bare problem.UseTF32() would
+    // check only the TF32 instance set and drop FP32-only kernel_ids when TF32 is requested.
+    return loader.IsArgsSupportedTf32Aware(CKSolverType::GrpConvWrw, problem, kernel_id);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::operator==(
@@ -553,8 +554,7 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

@@ -268,7 +268,9 @@ struct AutotuneResult
     std::string errorMessage; ///< Empty if no error; describes the benchmarking failure otherwise
 
     int64_t workspaceSize = 0; ///< Workspace bytes used by this engine
-    int64_t estimatedWorkspaceSize = 0; ///< Pre-compile workspace estimate from engine config
+    int64_t estimatedWorkspaceSize
+        = 0; ///< Pre-compile workspace estimate from engine config; covers the priming configuration
+    ///< for engines that expose the benchmarking knob
     int compiledPlanIndex = -1; ///< Index into compiled plans vector; used for winner selection
 
     TuneMode modeUsed = TuneMode::STANDARD; ///< Which mode was used for this engine

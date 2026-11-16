@@ -1166,136 +1166,149 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvn_kernel_calc(rocblas_int                   
 
 //Optimized kernel for GEMV transpose case when m or n is less than gemvt_threshold
 template <bool CONJ, int NB_X, typename Ti, typename Tex, typename To>
-ROCBLAS_KERNEL_ILF void rocblas_gemvt_kernel_calc(rocblas_int m,
-                                                  rocblas_int n,
-                                                  Tex         alpha,
-                                                  const Ti*   A,
-                                                  rocblas_int lda,
-                                                  const Ti*   x,
-                                                  rocblas_int incx,
-                                                  Tex         beta,
-                                                  To*         y,
-                                                  rocblas_int incy)
+ROCBLAS_KERNEL_ILF void rocblas_gemvt_xs_kernel_calc(rocblas_int m,
+                                                     rocblas_int n,
+                                                     Tex         alpha,
+                                                     const Ti*   A,
+                                                     rocblas_int lda,
+                                                     const Ti*   x,
+                                                     rocblas_int incx,
+                                                     Tex         beta,
+                                                     To*         y,
+                                                     rocblas_int incy)
 {
-    rocblas_int tx  = threadIdx.x;
-    rocblas_int col = blockIdx.x;
+    rocblas_int tx = threadIdx.x;
 
+    // grid.x is clamped so grid.x * NB_X stays under 2^32 work-items. Each block
+    // owns every gridDim.x-th column, which is a single column when n fits.
     if(!alpha)
     {
         if(tx == 0)
-            y[col * int64_t(incy)] = beta ? (To)(beta * y[col * int64_t(incy)]) : (To)0;
+        {
+            for(int64_t col = blockIdx.x; col < n; col += gridDim.x)
+                y[col * int64_t(incy)] = beta ? (To)(beta * y[col * int64_t(incy)]) : (To)0;
+        }
         return;
     }
 
     if(tx < m)
         A += tx;
-
-    A += col * size_t(lda);
-
-    Tex res = 0;
 
     __shared__ Tex sdata[NB_X];
 
     // partial sums
     rocblas_int m_full = (m / NB_X) * NB_X;
 
-    for(rocblas_int i = 0; i < m_full; i += NB_X)
-        res += Tex((CONJ ? conj(A[i]) : A[i])) * Tex(x[(tx + i) * int64_t(incx)]);
-
-    if(tx + m_full < m)
-        res += Tex((CONJ ? conj(A[m_full]) : A[m_full])) * Tex(x[(tx + m_full) * int64_t(incx)]);
-
-    sdata[tx] = res;
-
-    // tree reduction of partial sums,
-    if(NB_X > 16)
+    for(int64_t col = blockIdx.x; col < n; col += gridDim.x)
     {
-        rocblas_sum_reduce<NB_X>(tx, sdata);
-    }
-    else
-    {
-        __syncthreads();
+        const Ti* A_col = A + col * size_t(lda);
+
+        Tex res = 0;
+
+        for(rocblas_int i = 0; i < m_full; i += NB_X)
+            res += Tex((CONJ ? conj(A_col[i]) : A_col[i])) * Tex(x[(tx + i) * int64_t(incx)]);
+
+        if(tx + m_full < m)
+            res += Tex((CONJ ? conj(A_col[m_full]) : A_col[m_full]))
+                   * Tex(x[(tx + m_full) * int64_t(incx)]);
+
+        sdata[tx] = res;
+
+        // tree reduction of partial sums,
+        if(NB_X > 16)
+        {
+            rocblas_sum_reduce<NB_X>(tx, sdata);
+        }
+        else
+        {
+            __syncthreads();
+
+            if(tx == 0)
+            {
+                for(rocblas_int i = 1; i < m && i < NB_X; i++)
+                    sdata[0] += sdata[i];
+            }
+
+            __syncthreads();
+        }
 
         if(tx == 0)
         {
-            for(rocblas_int i = 1; i < m && i < NB_X; i++)
-                sdata[0] += sdata[i];
+            // !alpha handled earlier by early return
+            y[col * int64_t(incy)] = beta ? (To)(alpha * sdata[0] + beta * y[col * int64_t(incy)])
+                                          : (To)(alpha * sdata[0]);
         }
-
+        // The next column reuses sdata. Wait until every thread has finished
+        // reading this column's reduction.
         __syncthreads();
-    }
-
-    if(tx == 0)
-    {
-        // !alpha handled earlier by early return
-        y[col * int64_t(incy)] = beta ? (To)(alpha * sdata[0] + beta * y[col * int64_t(incy)])
-                                      : (To)(alpha * sdata[0]);
     }
 }
 
 template <bool CONJ, int NB_X, typename T_Index, typename Ti, typename Tex, typename To>
-ROCBLAS_KERNEL_ILF void rocblas_gemvt_reduce_kernel_calc(rocblas_int m,
-                                                         rocblas_int n,
-                                                         Tex         alpha,
-                                                         const Ti* __restrict__ A,
-                                                         T_Index lda,
-                                                         const Ti* __restrict__ x,
-                                                         T_Index incx,
-                                                         Tex     beta,
-                                                         To* __restrict__ y,
-                                                         T_Index incy)
+ROCBLAS_KERNEL_ILF void rocblas_gemvt_xs_reduce_kernel_calc(rocblas_int m,
+                                                            rocblas_int n,
+                                                            Tex         alpha,
+                                                            const Ti* __restrict__ A,
+                                                            T_Index lda,
+                                                            const Ti* __restrict__ x,
+                                                            T_Index incx,
+                                                            Tex     beta,
+                                                            To* __restrict__ y,
+                                                            T_Index incy)
 {
-    rocblas_int tx  = threadIdx.x;
-    rocblas_int col = blockIdx.x;
+    rocblas_int tx = threadIdx.x;
 
+    // incx, and incy are int64_t when i64_indices are required
+
+    // grid.x is clamped so grid.x * NB_X stays under 2^32 work-items. Each block
+    // owns every gridDim.x-th column, which is a single column when n fits.
     if(!alpha)
     {
         if(tx == 0)
-            y[col * (incy)] = beta ? (To)(beta * y[col * (incy)]) : (To)0;
+        {
+            for(int64_t col = blockIdx.x; col < n; col += gridDim.x)
+                y[col * (incy)] = beta ? (To)(beta * y[col * (incy)]) : (To)0;
+        }
         return;
     }
 
     if(tx < m)
         A += tx;
 
-    //Each BlockIdx.x takes care of each column of matrix A
-    A += col * (lda);
-
-    Tex res = 0;
-
     // partial sums
     rocblas_int m_full = (m / NB_X) * NB_X;
 
-    //Each column of Matrix A is multiplied with vector x and the resultant value is stored in res.
-    //If m > NB_X, then the threads are reused and the multiplied values will be accumalated.
-    for(rocblas_int i = 0; tx + i < m_full; i += NB_X)
-        res += Tex((CONJ ? conj(A[i]) : A[i])) * Tex(x[(tx + i) * (incx)]);
-
-    if(tx + m_full < m)
-        res += Tex((CONJ ? conj(A[m_full]) : A[m_full])) * Tex(x[(tx + m_full) * (incx)]);
-
     static_assert(NB_X > WARP_32);
 
-    // if ever use smaller NB_X then call directly a faster warp only reduce
-    // if(NB_X <= warpSize)
-    // {
-    //     // shuffle warp reduction if NB_X is less than or equal warpSize
-    //     rocblas_wavefront_reduce<NB_X>(res);
-    // }
-    // else
-    // {
-
-    //block shuffle warp reduction
-    if(warpSize == WARP_32)
-        res = rocblas_dot_block_reduce<WARP_32, NB_X>(res);
-    else
-        res = rocblas_dot_block_reduce<WARP_64, NB_X>(res);
-    //}
-
-    if(tx == 0)
+    for(int64_t col = blockIdx.x; col < n; col += gridDim.x)
     {
-        // !alpha handled earlier by early return
-        y[col * (incy)] = beta ? (To)(alpha * res + beta * y[col * (incy)]) : (To)(alpha * res);
+        //Each block takes care of columns blockIdx.x, blockIdx.x + gridDim.x, ...
+        const Ti* A_col = A + col * int64_t(lda);
+
+        Tex res = 0;
+
+        //Each column of Matrix A is multiplied with vector x and the resultant value is stored in res.
+        //If m > NB_X, then the threads are reused and the multiplied values will be accumalated.
+        for(rocblas_int i = 0; tx + i < m_full; i += NB_X)
+            res += Tex((CONJ ? conj(A_col[i]) : A_col[i])) * Tex(x[(tx + i) * (incx)]);
+
+        if(tx + m_full < m)
+            res += Tex((CONJ ? conj(A_col[m_full]) : A_col[m_full]))
+                   * Tex(x[(tx + m_full) * (incx)]);
+
+        //block shuffle warp reduction
+        if(warpSize == WARP_32)
+            res = rocblas_dot_block_reduce<WARP_32, NB_X>(res);
+        else
+            res = rocblas_dot_block_reduce<WARP_64, NB_X>(res);
+
+        if(tx == 0)
+        {
+            // !alpha handled earlier by early return
+            y[col * (incy)] = beta ? (To)(alpha * res + beta * y[col * (incy)]) : (To)(alpha * res);
+        }
+        // The next column reuses the reduction shared memory.
+        __syncthreads();
     }
 }
 
@@ -1793,25 +1806,25 @@ rocblas_gemvn_sm_reduce(rocblas_int    m,
 //Optimized kernel for GEMV transpose case when m or n is less than gemvt_threshold
 template <bool CONJ, int NB_X, typename Ti, typename Tex, typename To>
 ROCBLAS_KERNEL(NB_X)
-rocblas_gemvt_kernel(rocblas_int    m,
-                     rocblas_int    n,
-                     Tex            alpha_device_host,
-                     rocblas_stride stride_alpha,
-                     const Ti*      Aa,
-                     rocblas_stride shifta,
-                     rocblas_int    lda,
-                     rocblas_stride strideA,
-                     const Ti*      xa,
-                     rocblas_stride shiftx,
-                     rocblas_int    incx,
-                     rocblas_stride stridex,
-                     Tex            beta_device_host,
-                     rocblas_stride stride_beta,
-                     To*            ya,
-                     rocblas_stride shifty,
-                     rocblas_int    incy,
-                     rocblas_stride stridey,
-                     rocblas_int    batch_count)
+rocblas_gemvt_xs_kernel(rocblas_int    m,
+                        rocblas_int    n,
+                        Tex            alpha_device_host,
+                        rocblas_stride stride_alpha,
+                        const Ti*      Aa,
+                        rocblas_stride shifta,
+                        rocblas_int    lda,
+                        rocblas_stride strideA,
+                        const Ti*      xa,
+                        rocblas_stride shiftx,
+                        rocblas_int    incx,
+                        rocblas_stride stridex,
+                        Tex            beta_device_host,
+                        rocblas_stride stride_beta,
+                        To*            ya,
+                        rocblas_stride shifty,
+                        rocblas_int    incy,
+                        rocblas_stride stridey,
+                        rocblas_int    batch_count)
 {
     uint32_t batch = blockIdx.z;
 
@@ -1831,7 +1844,7 @@ rocblas_gemvt_kernel(rocblas_int    m,
 
         auto* y = load_ptr_batch(ya, batch, shifty, stridey);
 
-        rocblas_gemvt_kernel_calc<CONJ, NB_X>(m, n, alpha, A, lda, x, incx, beta, y, incy);
+        rocblas_gemvt_xs_kernel_calc<CONJ, NB_X>(m, n, alpha, A, lda, x, incx, beta, y, incy);
     }
 }
 
@@ -1874,7 +1887,7 @@ rocblas_gemvt_warp_reduce_kernel(rocblas_int    m,
 
         auto* y = load_ptr_batch(ya, batch, shifty, stridey);
 
-        rocblas_gemvt_reduce_kernel_calc<CONJ, NB_X, T_Index>(
+        rocblas_gemvt_xs_reduce_kernel_calc<CONJ, NB_X, T_Index>(
             m, n, alpha, A, lda, x, incx, beta, y, incy);
     }
 }

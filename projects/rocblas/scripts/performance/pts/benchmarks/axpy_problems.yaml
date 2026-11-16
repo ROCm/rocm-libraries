@@ -11,6 +11,8 @@ Tests:
     N: *generic_l1_perf_sizes
     incx: 1 # using special unit-inc kernel for fp32, generic for fp64
     incy: 1
+    iters: 100
+    cold_iters: 20
 
   - name: axpy_batched_bench
     category: bench
@@ -21,6 +23,8 @@ Tests:
     incx: 1
     incy: 1
     batch_count: *l1_batch_count_range
+    iters: 100
+    cold_iters: 20
 
   - name: axpy_fma8_bench
     category: bench
@@ -30,4 +34,6 @@ Tests:
     N: *generic_l1_perf_sizes
     incx: 1 # using special unit-inc kernel for fp16
     incy: 1
+    iters: 100
+    cold_iters: 20
 ...

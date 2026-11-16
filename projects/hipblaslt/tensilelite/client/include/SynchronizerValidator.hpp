@@ -13,6 +13,14 @@
  * and clears it so it is reported once. Buffers declared too narrow to scan
  * in full produce a warning and are skipped.
  *
+ * The check covers every launch of a solution: main calls beginRunIteration()
+ * (which takes each device's current inputs) before each run iteration's
+ * launches and calls
+ * checkRunIteration() at its end (GuardPageAll solutions run two iterations,
+ * and the second one places the buffer at a different address), and
+ * postSolution() checks launches an exception left unchecked, then reports
+ * the solution's verdict.
+ *
  * On by default (GlobalParameters CheckSynchronizer); --check-synchronizer=0
  * turns it off. A default must not change what a config does, so the listener
  * is passive and skips solutions known not to use the Synchronizer.
@@ -20,6 +28,7 @@
 
 #pragma once
 
+#include "DeviceContext.hpp"
 #include "RunListener.hpp"
 
 #include "ProgramOptions.hpp"
@@ -29,6 +38,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace TensileLite
 {
@@ -62,15 +74,26 @@ namespace TensileLite
             virtual void postProblem() override {}
 
             virtual void preSolution(ContractionSolution* const solution) override;
+            // Checks launches the end-of-iteration check missed (an exception
+            // ended the iteration), then reports. Never throws.
             virtual void postSolution() override;
+
+            /// Takes the inputs the run iteration's kernels are solved with (each
+            /// device's inputArr: one per rotating buffer), before its launches.
+            void beginRunIteration();
+
+            /// Checks the buffers after the launches of one run iteration,
+            /// before the next iteration's input reset. Does nothing if nothing
+            /// launched since the last check. Throws on a HIP error (e.g. a
+            /// kernel fault surfacing in the readback), after marking the
+            /// solution failed.
+            void checkRunIteration();
 
             // Passive: inspect launches other listeners drive, never request
             // one. Configs with NumElementsToValidate 0 and SyncsPerBenchmark 0
             // launch no kernels by design; requesting a run there would cost
             // NumWarmups launches per solution and observe nothing. Where
             // nothing launches there is no residue, so this costs no coverage.
-            // Configs that do launch already drive a warmup via
-            // ReferenceValidator, so validateWarmups still fires.
             virtual bool needMoreRunsInSolution() const override
             {
                 return false;
@@ -80,17 +103,28 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumWarmupRuns(size_t count) override {}
-            virtual void preWarmup() override {}
+            virtual void preWarmup() override
+            {
+                m_launchedSinceCheck = true;
+            }
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
             }
-            // Runs after the first warmup launch; later warmups are not
-            // observed, so a check covers the launches since the previous one.
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override;
+            // Not a check point: later launches of the iteration would go
+            // unobserved (see checkRunIteration()).
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override
+            {
+            }
+
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+            virtual void preProfiler() override
+            {
+                m_launchedSinceCheck = true;
+            }
+#endif
 
             virtual size_t numSyncs() override
             {
@@ -105,19 +139,20 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override
+            {
+                m_launchedSinceCheck = true;
+            }
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
-            // Deliberately unchecked: the readback synchronizes the stream,
-            // perturbing the back-to-back cadence these enqueues exercise.
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
-            {
-            }
+            // Checked only with validate-after-enqueues (off by default: the readback
+            // synchronizes the stream, perturbing the back-to-back cadence these
+            // enqueues exercise). The run iteration's check covers these launches anyway.
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override;
 
             virtual void finalizeReport() override {}
 
@@ -127,32 +162,98 @@ namespace TensileLite
             }
 
         private:
-            /// Checks every Synchronizer buffer reachable from *inputs*.
+            // Each enclosing phase needs its own family. TimingRec retains the name pointer,
+            // so all names have static storage rather than being assembled during the check.
+            struct CheckTimers
+            {
+                char const* check;
+                char const* readback;
+                char const* scan;
+                char const* inactive;
+                char const* noBuffer;
+            };
+            inline static constexpr CheckTimers runIterationTimers{"synchronizer_check",
+                                                                   "synchronizer_readback",
+                                                                   "synchronizer_scan",
+                                                                   "synchronizer_inactive",
+                                                                   "synchronizer_no_buffer"};
+            inline static constexpr CheckTimers afterEnqueuesTimers{
+                "synchronizer_check_after_enqueues",
+                "synchronizer_readback_after_enqueues",
+                "synchronizer_scan_after_enqueues",
+                "synchronizer_inactive_after_enqueues",
+                "synchronizer_no_buffer_after_enqueues"};
+            inline static constexpr CheckTimers postSolutionTimers{
+                "synchronizer_check_post_solution",
+                "synchronizer_readback_post_solution",
+                "synchronizer_scan_post_solution",
+                "synchronizer_inactive_post_solution",
+                "synchronizer_no_buffer_post_solution"};
+            inline static constexpr CheckTimers flagBlockTimers{
+                "synchronizer_flag_check_post_solution",
+                "synchronizer_flag_readback_post_solution",
+                "synchronizer_flag_scan_post_solution",
+                nullptr,
+                nullptr};
+
+            /// Checks the launches since the last check, if any (with the
+            /// iteration's inputs); marks the solution failed if dirty or if
+            /// the check throws, and rethrows.
+            void checkLaunches(char const* stage, CheckTimers const& timers);
+
+            /// Checks the iteration's inputs after launches, marking the solution
+            /// failed and rethrowing if the check throws. A launch with no captured
+            /// inputs is an error: beginRunIteration() was not called.
+            void checkAfterLaunch(char const* stage, CheckTimers const& timers);
+
+            /// Checks every distinct Synchronizer buffer reachable from the
+            /// iteration's inputs (rotating buffers may share it or not).
             /// `stage` names the launch phase, for the diagnostic.
-            void checkInputs(std::shared_ptr<ProblemInputs> inputs, char const* stage);
+            void checkInputs(char const* stage, CheckTimers const& timers);
 
             /// Reads back one buffer, re-zeroing it only when dirty.
             /// Returns false when dirty.
-            bool checkBuffer(ContractionProblemGemm const& problem,
+            bool checkBuffer(int                           deviceId,
+                             ContractionProblemGemm const& problem,
                              void*                         deviceSynchronizer,
                              char const*                   stage,
-                             size_t                        gemmIdx);
+                             size_t                        gemmIdx,
+                             CheckTimers const&            timers);
+
+            /// Reads back *bytes* at *device*, re-zeroing them only when dirty.
+            /// Returns false when dirty.
+            bool checkRegion(int                deviceId,
+                             void*              device,
+                             size_t             bytes,
+                             std::string const& what,
+                             CheckTimers const& timers);
 
             /// Pinned host staging buffer of at least *bytes*, grown on demand
             /// and reused across launches.
             uint8_t* stagingBuffer(size_t bytes);
 
             bool                m_enabled      = false;
+            bool                m_validateAfterEnqueues = false;
             // One narrow-alpha warning per run, not one per solution.
             bool                m_narrowAlphaWarned = false;
             ContractionProblem* m_problem      = nullptr;
             uint8_t*            m_staging      = nullptr;
             size_t              m_stagingBytes = 0;
+            // The current run iteration's inputs per device: their buffer addresses
+            // depend on the iteration (GuardPageFront / GuardPageBack).
+            struct DeviceInputs
+            {
+                int                                         deviceId = 0;
+                std::vector<std::shared_ptr<ProblemInputs>> inputs;
+            };
+            std::vector<DeviceInputs> m_iterationInputs;
+            // Set by the pre-launch hooks, cleared by a check.
+            bool m_launchedSinceCheck = false;
 
         protected:
             // Keep device transfers overridable for host-only lifecycle tests.
-            virtual uint8_t* readBuffer(void* device, size_t bytes);
-            virtual void clearBuffer(void* device, size_t bytes);
+            virtual uint8_t* readBuffer(int deviceId, void* device, size_t bytes);
+            virtual void     clearBuffer(int deviceId, void* device, size_t bytes);
 
             /// Whether the check should do anything right now: switched on, and
             /// the solution in hand may use the Synchronizer.

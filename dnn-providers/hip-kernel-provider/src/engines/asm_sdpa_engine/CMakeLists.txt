@@ -88,7 +88,7 @@ target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDP
 # ============================================================================
 #
 # The runtime loads kernels exclusively from .kpack archives (AsmKpackArchive).
-# Loose .co files are no longer installed or loaded. Packing failures are fatal.
+# Loose .co files are neither installed nor loaded. Packing failures are fatal.
 
 include(KpackPython)
 

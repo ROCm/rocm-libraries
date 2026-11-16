@@ -2,6 +2,65 @@
 
 Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/projects/rocALUTION/en/latest/](https://rocm.docs.amd.com/projects/rocALUTION/en/latest/).
 
+## (Unreleased) rocALUTION
+
+### Added
+* Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+
+### Changed
+* `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.
+* The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
+* ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
+* GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
+* CMake 3.21 or later is now required to build rocALUTION (previously 3.5).
+* If the upper eigenvalue bound is positive, `Chebyshev::Set()` now replaces a real lower bound that is not positive, such as the lower bound of `LocalMatrix::Gershgorin()`, which is at most 0, by the upper bound divided by 30 and prints a warning. Likewise, a real upper bound of 0 with a negative lower bound is replaced by the lower bound divided by 30. With such bounds, the Chebyshev iteration does not converge. The bounds are replaced also if they are given in reverse order. If a bound has a nonzero imaginary part, neither bound is replaced.
+* `Chebyshev::Set()` now terminates the program if a bound is not finite or if the segment between the bounds still contains 0, such as for the bounds `0` and `0`. Previously, the solver wrote Inf or NaN into the solution or did not converge.
+* On Linux, the HIP library is now built with CMake's HIP language support instead of the `FindHIP` module and hipcc. The HIP compiler is `amdclang++` from `ROCM_PATH`, unless `CMAKE_HIP_COMPILER` or `HIPCXX` selects another one. The host sources can still be built with any C++ compiler. `GPU_TARGETS` sets the GPU architectures of the HIP sources.
+
+### Removed
+* Removed the `USE_HIPCXX` option. CMake's HIP language support is now always used on Linux.
+* Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
+
+### Resolved issues
+* Fixed the HIP backend ignoring the errors returned by rocPRIM calls, such as too small temporary storage, which could lead to allocations of undefined size and to undefined scan, reduction, sort and nonzero count results.
+* Fixed the HIP backend ignoring the errors returned by HIP runtime calls for allocations, frees, memsets, copies, synchronizations and device queries, and not checking several kernel launches for errors.
+* Fixed the ILU0 factorization and the triangular solve analysis of CSR and BCSR matrices on the accelerator ignoring errors from the rocSPARSE buffer size queries.
+* Fixed `info_rocalution()` printing uninitialized memory when the rocBLAS or rocSPARSE version query fails.
+* Fixed `LocalMatrix::ReadFileRSIO()` not checking the element size query when the index or value type of the file differs from the type of the matrix, and leaking temporary buffers when a read fails.
+* Fixed `LocalMatrix::WriteFileRSIO()` reporting success when closing the file fails, for example on a full disk, leaving an incomplete file.
+* Fixed `LocalMatrix::ExtractDiagonal()` and `LocalMatrix::ExtractInverseDiagonal()` aborting on CSR matrices with more rows than columns.
+* Fixed `LocalMatrix::DiagonalMatrixMultL()` rejecting a vector with one entry per row on non-square CSR matrices, and reading out of bounds on CSR matrices with more rows than columns.
+* Fixed `init_rocalution()` reporting an accelerator after `stop_rocalution()` when the accelerator was disabled with `disable_accelerator_rocalution()`.
+* Fixed a HIP stream leak in `init_rocalution()` in multi-node builds when creating the HIP streams fails.
+* Fixed the `Chebyshev` solver using a recurrence that is not the Chebyshev iteration and depends on the scale of the operator. It converged more slowly than the Chebyshev iteration and, depending on the scale of the operator, could diverge even with exact eigenvalue bounds, for example with FSAI preconditioning.
+* Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
+* Fixed `LocalVector::Sync()` and `LocalMatrix::Sync()` deleting both the host and the accelerator copy of an object after `MoveToHostAsync()`, which lost its data and crashed on the next access.
+* Fixed `LocalMatrix::MoveToAcceleratorAsync()` and `LocalMatrix::MoveToHostAsync()` leaking a full copy of the matrix for each additional call before `Sync()`. Additional calls before `Sync()` now do nothing, so changes made to the matrix between the first call and `Sync()` are not transferred.
+* Fixed `LocalVector::Amax()` on the accelerator returning the index and value of the entry after the largest one, and reading past the end of the vector when the largest entry is the last one. This also affected the Linf residual norm and `GetAmaxResidualIndex()` of the iterative solvers on the accelerator.
+* Fixed wrong results of the iterative triangular solves on the accelerator when both `LocalMatrix::ItLAnalyse()` and `LocalMatrix::ItUAnalyse()` are called on the same matrix, as the SGS preconditioner does with `TriSolverAlg_Iterative`.
+* Fixed `ItILU0::GetConvergenceHistory()` on the accelerator returning an unwritten history and an undefined iteration count when rocSPARSE rejects the history query. The history is now empty in this case. Also fixed a memory leak when building ItILU0 with a convergence history in single precision.
+* Fixed `ItILU0Algorithm::SyncSplit` on the accelerator stopping after the first sweep and returning zero factors, so the preconditioner is the identity, when `ItILU0Option::StoppingCriteria` or `ItILU0Option::ConvergenceHistory` is set without a norm option. `ItILU0Algorithm::AsyncSplit` failed with an illegal memory access in that case. The residual norm is now computed whenever the stopping criteria or the convergence history is requested, or when a history buffer is passed to `LocalMatrix::ItILU0Factorize()`. With only `ItILU0Option::ComputeNrmCorrection` set, the SyncSplit stopping test now also takes the residual into account.
+* Fixed `init_rocalution()` making every host OpenMP parallel region, including those of the application, run on a single thread when rocALUTION is built with OpenMP 5.0 or newer, which is the default with `amdclang++`.
+* Fixed `stop_rocalution()` aborting when nested parallelism was enabled before `init_rocalution()`, for example with `OMP_MAX_ACTIVE_LEVELS`, `OMP_NESTED` or a nested `OMP_NUM_THREADS` list, in builds with OpenMP 5.0 or newer. In builds with older OpenMP versions, such as with GCC, it restored a different maximum number of active parallel levels.
+* Fixed a data race in the host `LocalVector::Amax()` with more than one OpenMP thread, which could return the index of a later entry when the largest magnitude occurs more than once. It now returns the first one, as the sequential code and the HIP backend do.
+* Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
+* Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
+* Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
+* Fixed `LocalMatrix::SymbolicPower()` computing the pattern of A^(p+1) instead of A^p for p above 8. FSAI with a matrix power above 8 and ILU(p) without level control for p of 8 or more got larger patterns than requested, and multi-colored ILU was colored from the larger pattern for q above 8, which `MultiColoredILU::Set(p)` uses for p of 8 or more.
+* Fixed `LocalMatrix::LLSolve()` on the host taking the last entry of each row as the diagonal of factors that store zeros above the diagonal, such as IC with a BCSR operator on the host. Without the inverse diagonal this gave NaN. With it, which the IC preconditioner passes, the results depended on the previous contents of the output vector. Without the inverse diagonal, `LLSolve()` now ends the program for a row that does not store its diagonal.
+* Fixed the `ExtPI` interpolation of `RugeStuebenAMG`, with and without `SetInterpolationFF1Limit(true)`, for a strong coupling to an F point that has no couplings to distribute it through. The coupling was dropped, or gave infinite or NaN weights for negative diagonals and in the ghost part of a distributed matrix. It is now lumped into the diagonal, as in hypre, so the interpolation reproduces constants for zero row sums. A row whose diagonal is zero, for example after this lumping, is now left without interpolation instead of getting infinite or NaN weights.
+* Fixed the scaled coarse-grid correction of the multigrid cycles using the right-hand side instead of the residual on the coarse levels. With four or more levels, this changes the convergence of `MultiGrid`, which scales by default, and of the AMG solvers with `BaseMultiGrid::SetScaling(true)`.
+* Fixed the host conversion of non-square matrices to DIA writing past the end of the values when the matrix has more rows than columns, for example in `LocalMatrix::ExtractSubMatrices()` and in the multicolored preconditioners. When the matrix has more columns than rows, `LocalMatrix::LeaveDataPtrDIA()` aborted on the result. The host now sizes the DIA values and decides whether the conversion succeeds as the accelerator does, so some non-square matrices that the host converted to DIA before now stay in CSR, with the fallback warning.
+* Fixed the host `LocalMatrix::Apply()` and `LocalMatrix::ApplyAdd()` of non-square DIA matrices ignoring the entries in the columns at or past the number of rows, and reading past the end of the input vector when the matrix has more rows than columns. They also skipped diagonals in the last rows, for square matrices too, when the offsets set with `LocalMatrix::SetDataPtrDIA()` were not in ascending order.
+* Fixed the conversion to DIA of matrices with more than 2^31 - 1 DIA entries, which overflowed the number of entries or the index into the values. These matrices now stay in CSR, with the fallback warning.
+* Fixed `LocalMatrix::Check()` accepting CSR column indices equal to the number of columns, values of minus infinity and complex values with an infinite part, rejecting complex matrices with a stored zero, and reading past the column indices of a matrix whose last row has no entries.
+* Fixed `LocalVector::Check()` rejecting integer and complex vectors with a zero entry, and accepting complex vectors with an infinite entry.
+* Fixed `LocalVector::SetRandomUniform()` on the host setting every entry of an integer vector to the lower bound and of a bool vector to the upper bound. Integer and bool vectors now get values uniformly distributed from the lower to the upper bound.
+* Fixed `LocalMatrix::ItLUSolve()` and `LocalMatrix::ItLLSolve()` on the host limiting the second triangular solve to the iterations of the first one, and `LocalMatrix::ItLLSolve()` stopping the transposed solve before it reaches the tolerance.
+* Fixed `LocalMatrix::CreateFromMap()` doing nothing when the matrix has no entries yet, and losing entries and leaving values at zero for maps with unassigned nodes, which also affected the restriction of `PairwiseAMG`.
+* Fixed `LocalMatrix::Transpose()` of a matrix without entries not swapping the sizes, and leaving the output matrix unchanged when it transposes into another matrix. `LocalMatrix::Transpose()` into a matrix that is not in CSR format no longer aborts, which made FSAI abort when it was built again with a preconditioner matrix format other than CSR. The output matrix gets the format of the transposed matrix, or CSR if the conversion to that format fails.
+* Fixed `LocalStencil::ApplyAdd()` overwriting the output instead of adding to it, and the Laplace stencil on the host ignoring the scalar.
+
 ## (Unreleased) rocALUTION 4.1.1
 
 ### Added
@@ -28,6 +87,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the Smoothed-Aggregation AMG preconditioner not falling back to the host when the prolongation fill failed on the accelerator or in a non-CSR format.
 * Fixed the FCG and QMRCGStab solvers returning NaN when the initial residual is already below the absolute tolerance, for example a zero right-hand side on the coarsest AMG level.
 * Fixed `init_rocalution()` reporting the HIP backend as available when creating the rocBLAS or rocSPARSE handle failed on a device selected with `set_device_rocalution()`, which caused `info_rocalution()` to crash. rocALUTION now falls back to the host backend in this case.
+* Fixed a crash or out-of-bounds access in the SA-AMG, UA-AMG and Ruge-Stueben AMG setup with MPI when a process sets only the local part of a `GlobalMatrix` with `SetLocalDataPtrCSR()` or `SetLocalDataPtrCOO()` and its neighbors reference its columns. Such a matrix now has an empty ghost part with one row per local row.
 
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 

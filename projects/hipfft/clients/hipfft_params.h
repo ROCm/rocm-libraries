@@ -500,6 +500,11 @@ public:
     {
         validate_brick_volume();
 
+        auto is_nonzero = [](size_t offset) { return offset != 0; };
+        if(std::any_of(ioffset.begin(), ioffset.end(), is_nonzero)
+           || std::any_of(ooffset.begin(), ooffset.end(), is_nonzero))
+            throw std::runtime_error("hipFFT does not support non-zero offsets");
+
         // multi-process only works with batch-1 FFTs, as hipFFT has
         // no place in the API to communicate batch indexes for
         // bricks

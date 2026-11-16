@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "SynchronizerValidator.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "ResultReporter.hpp"
 
+#include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <algorithm>
 #include <cassert>
 #include <sstream>
+#include <stdexcept>
 
 namespace TensileLite
 {
@@ -48,6 +51,8 @@ namespace TensileLite
 
         SynchronizerValidator::SynchronizerValidator(po::variables_map const& args)
             : m_enabled(args["check-synchronizer"].as<bool>())
+            , m_validateAfterEnqueues(args.count("validate-after-enqueues")
+                                      && args["validate-after-enqueues"].as<bool>())
         {
         }
 
@@ -98,63 +103,170 @@ namespace TensileLite
                                 || a.semantic == CustomArgSemantic::AmaxSync;
                      });
             m_mayUseSynchronizer = partialReduction || customStreamK || mbsk || customArg
-                                   || solution->problemType.outputAmaxD;
+                                   || solution->problemType.outputAmaxD
+                                   || solution->problemType.fusedA2A != FusedA2A::Disabled;
         }
 
         void SynchronizerValidator::postSolution()
         {
+            // Guard 2: an exception ended the solution's last run iteration
+            // before its check. A usable device is checked as normal; a lost
+            // one fails the readback, which only fails the solution: nothing
+            // may throw out of postSolution.
+            auto guarded = [&](auto&& check) {
+                try
+                {
+                    check();
+                }
+                catch(std::exception const& err)
+                {
+                    m_reporter->log(LogLevel::Error,
+                                    concatenate("Synchronizer check failed: ", err.what(), "\n"));
+                    m_failedInSolution = true;
+                }
+                catch(...)
+                {
+                    m_reporter->log(LogLevel::Error, "Synchronizer check failed.\n");
+                    m_failedInSolution = true;
+                }
+            };
+            guarded([&] { checkLaunches("interrupted run iteration", postSolutionTimers); });
+            // The fused-A2A flag blocks are not tied to a launch: checked here regardless.
+            guarded([&] {
+                for(auto const& device : *m_devices)
+                    if(active() && device->commFlags != nullptr)
+                    {
+                        ScopedTimer timer(flagBlockTimers.check);
+                        if(!checkRegion(device->deviceId,
+                                        device->commFlags,
+                                        device->commFlagsBytes,
+                                        concatenate("fused-A2A flag block left dirty (device ",
+                                                    device->deviceId,
+                                                    ")"),
+                                        flagBlockTimers))
+                            m_failedInSolution = true;
+                    }
+            });
+
             if(m_failedInSolution)
             {
                 m_errorsReported++;
                 // Overrides the reference verdict so the CSV and library logic
-                // fed from it cannot crown a solution that corrupts the buffer.
+                // fed from it cannot crown a solution that corrupts the buffer
+                // (also main's INVALID: the exception is still logged and counted).
                 m_reporter->report(ResultKey::Validation, "FAILED");
             }
 
             m_failedInSolution = false;
+            m_iterationInputs.clear();
         }
 
-        void SynchronizerValidator::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                                    TimingEvents const&            startEvents,
-                                                    TimingEvents const&            stopEvents)
+        void SynchronizerValidator::beginRunIteration()
+        {
+            m_iterationInputs.clear();
+            for(auto const& device : *m_devices)
+                m_iterationInputs.push_back({device->deviceId, device->inputArr});
+        }
+
+        void SynchronizerValidator::checkRunIteration()
+        {
+            checkLaunches("run iteration", runIterationTimers);
+        }
+
+        void SynchronizerValidator::validateEnqueues(std::vector<size_t> const& slots,
+                                                     TimingEvents const&        startEvents,
+                                                     TimingEvents const&        stopEvents)
+        {
+            // Opt-in check right after the group of enqueues, never between its launches;
+            // the run iteration's check covers them in any case.
+            if(!m_validateAfterEnqueues)
+                return;
+            m_launchedSinceCheck = false;
+            checkAfterLaunch("enqueues", afterEnqueuesTimers);
+        }
+
+        void SynchronizerValidator::checkLaunches(char const* stage, CheckTimers const& timers)
+        {
+            // Guard 1: nothing launched, nothing to check (postSolution also
+            // runs for rejected and never-run solutions).
+            if(!m_launchedSinceCheck)
+                return;
+            m_launchedSinceCheck = false;
+            checkAfterLaunch(stage, timers);
+        }
+
+        void SynchronizerValidator::checkAfterLaunch(char const* stage, CheckTimers const& timers)
         {
             try
             {
-                checkInputs(inputs, "warmup");
+                ScopedTimer timer(timers.check);
+                // A launch with no captured inputs means beginRunIteration() was not called.
+                // Skipping the check there would turn the protection off silently.
+                if(active() && m_problem != nullptr && m_iterationInputs.empty())
+                    throw std::runtime_error(
+                        "Synchronizer check: kernels launched but no run iteration inputs were "
+                        "captured (beginRunIteration() was not called)");
+                checkInputs(stage, timers);
             }
             catch(...)
             {
-                // main catches checker exceptions and continues to postSolution.
                 // Preserve failure even when the buffer's contents could not be checked.
                 m_failedInSolution = true;
                 throw;
             }
         }
 
-        void SynchronizerValidator::checkInputs(std::shared_ptr<ProblemInputs> inputs,
-                                                char const*                    stage)
+        void SynchronizerValidator::checkInputs(char const* stage, CheckTimers const& timers)
         {
-            if(!active() || m_problem == nullptr || inputs == nullptr)
+            if(!active() || m_problem == nullptr)
+            {
+                // Solution cannot use the Synchronizer (or the check is off): nothing to read.
+                ScopedTimer timer(timers.inactive);
                 return;
+            }
 
-            if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
-            {
-                auto const& result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
-                for(size_t j = 0; j < problems->gemms.size(); j++)
-                {
-                    if(!checkBuffer(problems->gemms[j], result.grouped[j].Synchronizer, stage, j))
-                        m_failedInSolution = true;
-                }
-            }
-            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
-            {
-                auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
-                if(!checkBuffer(*problem, result.Synchronizer, stage, 0))
+            // Rotating-buffer inputs usually share the Synchronizer, but they are
+            // built once per problem, so under GuardPageAll they keep the first
+            // iteration's address while the reset inputs move: read each buffer once.
+            std::vector<void const*> checked;
+
+            auto checkOnce = [&](int                           deviceId,
+                                 ContractionProblemGemm const& problem,
+                                 void*                         buffer,
+                                 size_t                        gemmIdx) {
+                if(std::find(checked.begin(), checked.end(), buffer) != checked.end())
+                    return;
+                checked.push_back(buffer);
+                if(!checkBuffer(deviceId, problem, buffer, stage, gemmIdx, timers))
                     m_failedInSolution = true;
-            }
-            else
+            };
+
+            for(auto const& device : m_iterationInputs)
             {
-                throw std::runtime_error("Failed to cast to any ContractionProblem.");
+                for(auto const& inputs : device.inputs)
+                {
+                    if(inputs == nullptr)
+                        continue;
+
+                    if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                    {
+                        auto const& result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
+                        for(size_t j = 0; j < problems->gemms.size(); j++)
+                            checkOnce(device.deviceId,
+                                      problems->gemms[j],
+                                      result.grouped[j].Synchronizer,
+                                      j);
+                    }
+                    else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                    {
+                        auto const& result = dynamic_cast<ContractionInputs const&>(*inputs);
+                        checkOnce(device.deviceId, *problem, result.Synchronizer, 0);
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Failed to cast to any ContractionProblem.");
+                    }
+                }
             }
         }
 
@@ -180,25 +292,32 @@ namespace TensileLite
             return m_staging;
         }
 
-        uint8_t* SynchronizerValidator::readBuffer(void* device, size_t bytes)
+        uint8_t* SynchronizerValidator::readBuffer(int deviceId, void* device, size_t bytes)
         {
-            auto host = stagingBuffer(bytes);
+            ScopedDevice guard(deviceId);
+            auto         host = stagingBuffer(bytes);
             HIP_CHECK_EXC(hipMemcpy(host, device, bytes, hipMemcpyDeviceToHost));
             return host;
         }
 
-        void SynchronizerValidator::clearBuffer(void* device, size_t bytes)
+        void SynchronizerValidator::clearBuffer(int deviceId, void* device, size_t bytes)
         {
+            ScopedDevice guard(deviceId);
             HIP_CHECK_EXC(hipMemset(device, 0, bytes));
         }
 
-        bool SynchronizerValidator::checkBuffer(ContractionProblemGemm const& problem,
+        bool SynchronizerValidator::checkBuffer(int                           deviceId,
+                                                ContractionProblemGemm const& problem,
                                                 void*                         deviceSynchronizer,
                                                 char const*                   stage,
-                                                size_t                        gemmIdx)
+                                                size_t                        gemmIdx,
+                                                CheckTimers const&            timers)
         {
             if(deviceSynchronizer == nullptr)
+            {
+                ScopedTimer timer(timers.noBuffer);
                 return true;
+            }
 
             auto const&  tensor = problem.tensors()[ContractionProblemGemm::TENSOR::Synchronizer];
             size_t const bytes  = tensor.totalAllocatedBytes();
@@ -225,25 +344,47 @@ namespace TensileLite
                 return true;
             }
 
-            // Once per solution, so the copy is hot: pinned staging avoids the
-            // pageable bounce buffer.
-            uint8_t* host = readBuffer(deviceSynchronizer, bytes);
+            return checkRegion(
+                deviceId,
+                deviceSynchronizer,
+                bytes,
+                concatenate("Synchronizer left dirty after ", stage, " (gemm ", gemmIdx, ")"),
+                timers);
+        }
+
+        bool SynchronizerValidator::checkRegion(int                deviceId,
+                                                void*              device,
+                                                size_t             bytes,
+                                                std::string const& what,
+                                                CheckTimers const& timers)
+        {
+            // Once per run iteration, so the copy is hot: pinned staging avoids
+            // the pageable bounce buffer.
+            uint8_t* host;
+            {
+                ScopedTimer timer(timers.readback);
+                host = readBuffer(deviceId, device, bytes);
+            }
 
             SynchronizerResidue residue;
-            if(!scanSynchronizerResidue(host, bytes, residue))
+            bool                dirty;
+            {
+                ScopedTimer timer(timers.scan);
+                dirty = scanSynchronizerResidue(host, bytes, residue);
+            }
+            if(!dirty)
                 return true;
 
             std::ostringstream msg;
-            msg << "Synchronizer left dirty after " << stage << " (gemm " << gemmIdx
-                << "): " << residue.nonzeroInts << "/" << residue.totalInts
+            msg << what << ": " << residue.nonzeroInts << "/" << residue.totalInts
                 << " ints nonzero, first at int offset " << residue.firstInt
-                << " -- the kernel did not reset the shared Synchronizer buffer on exit.\n";
+                << " -- the kernel did not reset it on exit.\n";
             m_reporter->log(LogLevel::Error, msg.str());
 
             // resetOutput skips the Synchronizer (it is not an output tensor),
             // so clear the residue here to report it once rather than for every
             // solution that follows.
-            clearBuffer(deviceSynchronizer, bytes);
+            clearBuffer(deviceId, device, bytes);
 
             return false;
         }

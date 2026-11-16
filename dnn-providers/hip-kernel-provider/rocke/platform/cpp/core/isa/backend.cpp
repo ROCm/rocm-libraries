@@ -10,52 +10,21 @@
  */
 #include "rocke/isa_backend.h"
 
+#include <stdio.h>
 #include <string.h>
 
-/* The shared LLVM constants are owned by lower_llvm in Python (pulled lazily to
- * avoid an import cycle). In C there is no cycle: we hold the canonical strings
- * here as static data, byte-identical to lower_llvm._TRIPLE / _DATALAYOUT. When
- * the lower_llvm port lands, these may be moved there and referenced; until
- * then this is the single C-side source. */
-static const char ROCKE_TRIPLE[] = "amdgcn-amd-amdhsa";
-/* The AMDGPU datalayout is FLAVOR-KEYED (Python _DATALAYOUT_LLVM20 /
- * _DATALAYOUT_LLVM22 / _DATALAYOUT_LLVM23): two fields drift across flavors --
- * the buffer-resource address space p8 (the 128-bit buffer descriptor, not the
- * p7 fat pointer) gained an index-width field in LLVM 22 (...-p8:128:128-... ->
- * ...-p8:128:128:128:48-...), and the ELF symbol-mangling spec m:e (absent in
- * LLVM 20 / 22) is present in LLVM 23 (ROCm 7.13+): e-p:64:64-... ->
- * e-m:e-p:64:64-.... The triple is unchanged across flavors. Must stay
- * byte-identical with the Python constants. */
-static const char ROCKE_DATALAYOUT_LLVM20[]
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-      "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-static const char ROCKE_DATALAYOUT_LLVM22[]
-    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
-/* Layout emitted for rocKE's llvm23 flavor: the llvm22 layout plus the ELF
- * symbol-mangling spec m:e and address spaces p10-p15 (upstream 5bf967cb132b).
- * Older compiler builds may omit p10-p15; see Python _DATALAYOUT_LLVM23 for the
- * full rationale. Must stay byte-identical with it. Kept as its own constant
- * rather than folded into the `else` arm below so the next divergence is a
- * one-line edit, not a silent wrong-datalayout bug. */
-static const char ROCKE_DATALAYOUT_LLVM23[]
-    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
-      "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
-      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-      "-n32:64-S32-A5-G1-ni:7:8:9";
+#include "rocke/arch_target.h"
+#include "rocke/llvm_profile_internal.h"
 
 /* ================================ registry ============================== */
 
-/* gfx -> backend descriptor. Adding a CDNA gfx is one row here (Python
- * BACKEND_REGISTRY). vmcnt_bits records arch.vmcnt_bits, the hardware width of
- * the s_waitcnt VMCNT field; the lowerer keys future divergence on it. The
- * wired CDNA targets all share the gfx9/10 split waitcnt layout and its 6-bit
- * VMCNT field. */
+/* gfx -> backend descriptor, one row per target whose arch_specs.json row holds
+ * facts of its own (Python BACKEND_REGISTRY). A target whose row takes its facts
+ * from a generic target resolves through that generic's row under its own name
+ * (registry_row_for). Adding a CDNA gfx is one row here. vmcnt_bits records
+ * arch.vmcnt_bits, the hardware width of the s_waitcnt VMCNT field; the lowerer
+ * keys future divergence on it. The wired CDNA targets all share the gfx9/10
+ * split waitcnt layout and its 6-bit VMCNT field. */
 typedef struct registry_row
 {
     const char* gfx;
@@ -71,8 +40,6 @@ static const registry_row_t REGISTRY[] = {
     {"gfx90a", ROCKE_ISA_GFX9_MFMA, 6, ROCKE_BUFFER_RSRC_WORD3_CDNA, ROCKE_WAITCNT_GFX9_10, 64},
     {"gfx942", ROCKE_ISA_GFX9_MFMA, 6, ROCKE_BUFFER_RSRC_WORD3_CDNA, ROCKE_WAITCNT_GFX9_10, 64},
     {"gfx950", ROCKE_ISA_GFX950, 6, ROCKE_BUFFER_RSRC_WORD3_CDNA, ROCKE_WAITCNT_GFX9_10, 64},
-    {"gfx1151", ROCKE_ISA_GFX11_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
-    {"gfx1201", ROCKE_ISA_GFX12_RDNA, 6, ROCKE_BUFFER_RSRC_WORD3_RDNA, ROCKE_WAITCNT_GFX11, 32},
     {"gfx11-generic",
      ROCKE_ISA_GFX11_RDNA,
      6,
@@ -111,6 +78,53 @@ static const registry_row_t* registry_find(const char* gfx)
     return NULL;
 }
 
+/* The row gfx lowers through: its own, else the row of the generic target its
+ * arch_specs.json row points at (Python _backend_class / listed_arch_for). */
+static const registry_row_t* registry_row_for(const char* gfx)
+{
+    const registry_row_t* own = registry_find(gfx);
+    return own != NULL ? own : registry_find(rocke_arch_facts_of(gfx));
+}
+
+static bool has_backend_row(const char* gfx)
+{
+    return registry_row_for(gfx) != NULL;
+}
+
+/* Python _no_backend: "no ISA backend registered for '<gfx>'; known: [...]",
+ * where known lists every known arch registry_row_for resolves, in
+ * rocke_known_arches order.
+ *
+ * The text goes in a per-thread buffer because *err hands the caller a pointer
+ * that must stay valid until it reads it; a shared buffer would let a miss on
+ * another thread rewrite it first. It stays valid until this thread's next miss.
+ * 1024 bytes holds the message for every known arch with room to spare; only an
+ * absurdly long `gfx` would be cut. The ctest rocke_isa_backend_targets compares
+ * the whole text with Python's, so a known list that outgrew the buffer fails
+ * there instead of being cut silently. */
+static const char* no_backend_message(const char* gfx)
+{
+    static thread_local char message[1024];
+    int wrote;
+    size_t pos;
+
+    if(gfx != NULL)
+    {
+        wrote = snprintf(
+            message, sizeof(message), "no ISA backend registered for '%s'; known: ", gfx);
+    }
+    else
+    {
+        wrote = snprintf(message, sizeof(message), "no ISA backend registered for None; known: ");
+    }
+    pos = wrote > 0 ? (size_t)wrote : 0;
+    if(pos < sizeof(message))
+    {
+        rocke_known_arch_list_repr(message + pos, sizeof(message) - pos, has_backend_row);
+    }
+    return message;
+}
+
 rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err)
 {
     rocke_isa_backend_t be;
@@ -119,23 +133,19 @@ rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err)
     memset(&be, 0, sizeof(be));
     be.valid = false;
 
-    row = registry_find(gfx);
+    row = registry_row_for(gfx);
     if(row == NULL)
     {
         if(err != NULL)
         {
-            /* Static message; matches the spirit of the Python KeyError
-             * ("no ISA backend registered for ...; known: ..."). The exact
-             * sorted-list suffix is reproducible from rocke_backend_is_known if
-             * a caller wants it, so we keep this allocation-free. */
-            *err = "no ISA backend registered for the given gfx target; known: "
-                   "gfx11-generic, gfx1151, gfx12-generic, gfx1201, gfx1250, gfx908, gfx90a, "
-                   "gfx942, gfx950";
+            *err = no_backend_message(gfx);
         }
         return be;
     }
     be.kind = row->kind;
-    be.gfx = row->gfx; /* interned static string */
+    /* The target's own name, in static storage: the row's for a registered
+     * target, the arch registry's for one resolved through its generic. */
+    be.gfx = strcmp(row->gfx, gfx) == 0 ? row->gfx : rocke_arch_target_from_gfx(gfx)->gfx;
     be.vmcnt_bits = row->vmcnt_bits;
     be.buffer_rsrc_word3 = row->word3;
     be.waitcnt_layout = row->waitcnt;
@@ -150,7 +160,7 @@ rocke_isa_backend_t rocke_backend_for(const char* gfx, const char** err)
 
 bool rocke_backend_is_known(const char* gfx)
 {
-    return registry_find(gfx) != NULL;
+    return registry_row_for(gfx) != NULL;
 }
 
 /* ============================ module preamble =========================== */
@@ -158,23 +168,17 @@ bool rocke_backend_is_known(const char* gfx)
 const char* rocke_isa_triple(const rocke_isa_backend_t* be)
 {
     (void)be; /* shared across all wired targets */
-    return ROCKE_TRIPLE;
+    return ckc::ROCKE_LL_TRIPLE;
 }
 
-/* Python backend.datalayout(llvm_flavor) -> _datalayout_for_flavor, branch for
- * branch: LLVM20 gets the legacy p8 layout, LLVM23 its own m:e constant, and
- * anything else -- including an unexpected value -- the modern LLVM22 form.
- * Mirrors rocke_ll_datalayout_for_flavor in lower_llvm/data.cpp;
- * the two are held together by test_isa_and_lower_llvm_datalayouts_agree. */
+/* Python backend.datalayout(llvm_flavor) -> _datalayout_for_flavor. The ISA
+ * adapter delegates to the shared profile resolver; an unknown lane returns
+ * NULL rather than silently choosing a structural profile. */
 const char* rocke_isa_datalayout_for_flavor(const rocke_isa_backend_t* be,
                                             rocke_llvm_flavor_t flavor)
 {
-    (void)be; /* shared across all wired targets; only the flavor drives p8 */
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM20)
-        return ROCKE_DATALAYOUT_LLVM20;
-    if(flavor == ROCKE_LLVM_FLAVOR_LLVM23)
-        return ROCKE_DATALAYOUT_LLVM23;
-    return ROCKE_DATALAYOUT_LLVM22;
+    (void)be; /* shared across all wired targets; only the profile drives it */
+    return ckc::rocke_ll_datalayout_for_flavor(flavor);
 }
 
 const char* rocke_isa_datalayout(const rocke_isa_backend_t* be)
@@ -195,9 +199,14 @@ int rocke_isa_module_preamble_for_flavor(const rocke_isa_backend_t* be,
         return -1;
     }
     rocke_strbuf_clear(out);
+    const char* datalayout = rocke_isa_datalayout_for_flavor(be, flavor);
+    if(datalayout == NULL)
+    {
+        return -1;
+    }
     if(rocke_strbuf_appendf(out,
                             "target datalayout = \"%s\"\ntarget triple = \"%s\"",
-                            rocke_isa_datalayout_for_flavor(be, flavor),
+                            datalayout,
                             rocke_isa_triple(be))
        != 0)
     {
@@ -284,21 +293,6 @@ static const rocke_wmma_spec_t RDNA_WMMA[] = {
 };
 static const int RDNA_WMMA_N = (int)(sizeof(RDNA_WMMA) / sizeof(RDNA_WMMA[0]));
 
-/* _RDNA_WMMA_INT: RDNA3/3.5 integer WMMA (iu8/iu4). */
-static const rocke_wmma_int_spec_t RDNA_WMMA_INT[] = {
-    {"tile.wmma_i32_16x16x16_iu8",
-     "wmma.i32.16x16x16.iu8",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
-     4,
-     8},
-    {"tile.wmma_i32_16x16x16_iu4",
-     "wmma.i32.16x16x16.iu4",
-     "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
-     2,
-     8},
-};
-static const int RDNA_WMMA_INT_N = (int)(sizeof(RDNA_WMMA_INT) / sizeof(RDNA_WMMA_INT[0]));
-
 /* _RDNA_GFX12_WMMA: RDNA4 float WMMA. frag_width = 8 (no cross-half dup). */
 static const rocke_wmma_spec_t RDNA_GFX12_WMMA[] = {
     {"tile.wmma_gfx12_f32_16x16x16_f16",
@@ -380,23 +374,6 @@ const rocke_wmma_spec_t* rocke_isa_wmma_lookup(const char* op_name)
         if(strcmp(RDNA_WMMA[i].op_name, op_name) == 0)
         {
             return &RDNA_WMMA[i];
-        }
-    }
-    return NULL;
-}
-
-const rocke_wmma_int_spec_t* rocke_isa_wmma_int_lookup(const char* op_name)
-{
-    int i;
-    if(op_name == NULL)
-    {
-        return NULL;
-    }
-    for(i = 0; i < RDNA_WMMA_INT_N; ++i)
-    {
-        if(strcmp(RDNA_WMMA_INT[i].op_name, op_name) == 0)
-        {
-            return &RDNA_WMMA_INT[i];
         }
     }
     return NULL;
@@ -582,42 +559,6 @@ int rocke_isa_emit_wmma_call(rocke_strbuf_t* out,
     return 0;
 }
 
-int rocke_isa_emit_wmma_int_call(rocke_strbuf_t* out,
-                                 const rocke_wmma_int_spec_t* spec,
-                                 const char* result_name,
-                                 const char* a_name,
-                                 const char* b_name,
-                                 const char* c_name)
-{
-    if(out == NULL || spec == NULL || result_name == NULL || a_name == NULL || b_name == NULL
-       || c_name == NULL)
-    {
-        return -1;
-    }
-    /* signedA=1, signedB=1 (our quantized data is signed), clamp=0 (values stay
-     * within i32 range). a_name and b_name already name <op_vec x i32> values;
-     * the lowerer reinterprets an operand of another shape before the call. */
-    if(rocke_strbuf_appendf(out,
-                            "  %s = call <%d x i32> @%s("
-                            "i1 1, <%d x i32> %s, "
-                            "i1 1, <%d x i32> %s, "
-                            "<%d x i32> %s, i1 0)\n",
-                            result_name,
-                            spec->acc_vec,
-                            spec->intrinsic,
-                            spec->op_vec,
-                            a_name,
-                            spec->op_vec,
-                            b_name,
-                            spec->acc_vec,
-                            c_name)
-       != 0)
-    {
-        return -1;
-    }
-    return 0;
-}
-
 /* ---------------------------------------------------------------------------
  * emit_mma / emit_wmma full lowerer dispatch -- ported in lower_llvm.
  *
@@ -641,6 +582,6 @@ int rocke_isa_emit_wmma_int_call(rocke_strbuf_t* out,
  *
  * What is self-contained and therefore lives HERE -- the byte-identical WMMA
  * call text and its bf16 bitcast prologue given SSA operand name strings -- is
- * rocke_isa_emit_wmma_call / rocke_isa_emit_wmma_int_call above, and the full
+ * rocke_isa_emit_wmma_call above, and the full
  * op.name -> spec resolution is rocke_isa_resolve_wmma / the lookup functions.
  * --------------------------------------------------------------------------- */

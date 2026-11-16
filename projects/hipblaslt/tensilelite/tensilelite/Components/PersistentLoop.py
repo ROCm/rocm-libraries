@@ -6,7 +6,7 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from rocisa.code import Module, Label
-from rocisa.container import sgpr, vgpr, MemTokenData
+from rocisa.container import sgpr, vgpr
 from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative
 from ..ExecutionPolicy import isPersistent
 from math import ceil, log2
@@ -336,11 +336,12 @@ class PersistentKernelState:
 
       The runtime gate in globalReadDo zeroes the descriptor when the loop counter
       has PrefetchGlobalRead or fewer k-tiles left. Section i (1-based) only runs
-      when K covers it, and it sees the counter at (K / DepthU) - (i - 1), so it is
-      silenced exactly when i >= K / DepthU - PrefetchGlobalRead + 1. K / DepthU
-      ranges up to the count the kernel holds, so the sections silenced for *every*
-      K it serves are the last PrefetchGlobalRead of the block, and only those: with
-      8 resident k-tiles and PGR 2, section 6 is live at K = 8 tiles and cannot go.
+      when K reaches it, and it sees the counter at ceil(K / DepthU) - (i - 1), so
+      it is silenced exactly when i >= ceil(K / DepthU) - PrefetchGlobalRead + 1.
+      ceil(K / DepthU) ranges up to the count the kernel holds, so the sections
+      silenced for *every* K it serves are the last PrefetchGlobalRead of the block,
+      and only those: with 8 resident k-tiles and PGR 2, section 6 is live at
+      K = 8 tiles and cannot go.
 
       For those last sections the descriptor writes and the transfer are dead weight
       rather than a runtime decision, so the load need not be issued at all. This is
@@ -421,10 +422,10 @@ class PersistentLoop(Component):
           # reuses them. Only the compute half is duplicated -- the store is the bulk
           # of the kernel and stays shared, which keeps the instruction cache footprint
           # roughly unchanged.
-          # Record which batch the fill below loads A for. Read here, at the loop head,
-          # because tile activation advances the cursor past this tile and PAP goes on to
-          # overwrite WorkGroup2 with the next tile's, so neither survives the section.
-          module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, "RAPResidentBatch"))
+          # Record which A the fill below loads. Read here, at the loop head, because
+          # tile activation advances the cursor past this tile and PAP goes on to
+          # overwrite WorkGroup* with the next tile's, so neither survives the section.
+          module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, "RAPResidentBatch", "RAPResidentMTile"))
           snapshot = writer.rapSnapshotEmitterState(kernel, tensorParametersA, tensorParametersB)
           writer.states.rapDeferSgprUndef = True
           pack = writer._persistentComputeSection(kernel, tensorParametersA, tensorParametersB, module, expand, tPM)
@@ -440,19 +441,29 @@ class PersistentLoop(Component):
           module.add(SCBranchSCC1(labelName=storeJoin.getLabelName(),
                                   comment="RAP: first tile skips the reuse copy"))
           module.add(Label("RAP_IterN", ""))
-          # A is indexed by the batch, so the resident copy only serves tiles in the
-          # batch it was filled from. This copy has no A loads to supply any other, so
-          # send a tile that crossed a batch boundary through the fill copy instead --
-          # it pays one tile's worth of reloads and leaves A resident for the tiles
-          # after it. Ahead of everything else in the section: the cursor still names
-          # this tile and nothing has claimed WorkGroup* for it, so the loop head can
-          # take it from the top.
-          with writer.allocTmpSgpr(1, tag="RAPBatchGuard") as sBatch:
-            module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, sBatch.idx))
-            module.add(SCmpEQU32(src0=sgpr(sBatch.idx), src1=sgpr("RAPResidentBatch"),
+          # A is indexed by M and by the batch, so the resident copy only serves tiles
+          # sharing both with the one it was filled from. This copy has no A loads to
+          # supply any other, so send a tile that changed either through the fill copy
+          # instead -- it pays one tile's worth of reloads and leaves A resident for
+          # the tiles after it. Ahead of everything else in the section: the cursor
+          # still names this tile and nothing has claimed WorkGroup* for it, so the
+          # loop head can take it from the top.
+          #
+          # Two compares each branching to the same target, rather than one combined
+          # condition: the combining would itself write SCC, and there is nothing to
+          # gain from it here -- the second compare is only reached when the first
+          # found a match, which is the common case in either arrangement.
+          with writer.allocTmpSgpr(2, tag="RAPTileGuard") as sGuard:
+            sBatch, sMTile = sGuard.idx, sGuard.idx + 1
+            module.add(Component.WorkAssignment.find(writer).peekTileBatch(writer, kernel, sBatch, sMTile))
+            module.add(SCmpEQU32(src0=sgpr(sBatch), src1=sgpr("RAPResidentBatch"),
                                  comment="RAP: is the resident A this tile's batch?"))
             module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
                                            comment="RAP: batch changed, refill A"))
+            module.add(SCmpEQU32(src0=sgpr(sMTile), src1=sgpr("RAPResidentMTile"),
+                                 comment="RAP: is the resident A this tile's M-tile?"))
+            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1,
+                                           comment="RAP: M-tile changed, refill A"))
           module.add(self.reinitWaveIdx(writer, kernel))
           writer.rapRestoreEmitterState(kernel, tensorParametersA, tensorParametersB, snapshot)
           # From here on A and its scales come from the resident registers, so the
@@ -647,19 +658,11 @@ class PersistentLoopOn(PersistentLoop):
     def closePersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop closePersistentLoop")
         module.add(Label("PersistentLoopClose", ""))
-        if kernel.get("_PersistentVectorEpilogueLds", False) and not kernel["PrefetchAcrossPersistent"]:
-            # PAP0 has no live successor tile in LDS. Keep the original shared
-            # layout and hand it back to compute only after every wave finishes
-            # its vector reads. Emit after GW (and the main-loop barrier pass),
-            # so this protects the persistent back edge without an early drain.
-            module.add(SWaitCnt(dscnt=0, comment="finish vector epilogue before compute LDS reuse"))
-            barrier = SBarrier(comment="hand epilogue LDS back to persistent compute")
-            barrier.setMemToken(MemTokenData([writer.states.memTokenEpilogue]))
-            module.add(barrier)
-        module.add(Component.WorkAssignment.find(writer).persistentClusterNextTileArrive(writer, kernel))
+        assignment = Component.WorkAssignment.find(writer)
         if kernel.get("DebugPersistentKernelLoopForever", False):
+            module.add(assignment.persistentTileHandoff(writer, kernel))
             with writer.allocTmpSgpr(3, tag="PersistentLoop_close") as tmp:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmp))
         else:
-            module.add(Component.WorkAssignment.find(writer).closeLoop(writer, kernel))
+            module.add(assignment.closeLoop(writer, kernel))
         return module

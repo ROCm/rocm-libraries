@@ -7,7 +7,7 @@
 //
 // Header-only, and therefore hsakmt-DEPENDENT: including it requires the
 // hsakmt/hsa headers on the include path. Only TUs in tensilelite-client-common
-// have that (the dependency is PRIVATE to that target), and the sole includer
+// have that (the dependency is PRIVATE to that target), and each includer
 // gates itself on TENSILELITE_ENABLE_SDMA.
 
 #pragma once
@@ -209,10 +209,18 @@ namespace TensileLite
             return 0;
         }
 
+        inline uint32_t sdmaXgmiEngineCount(uint32_t node)
+        {
+            detail::ensureHsaKfd();
+            HsaNodeProperties props{};
+            CHK_KMT(hsaKmtGetNodeProperties(node, &props));
+            return props.NumSdmaXgmiEngines;
+        }
+
         // One SDMA queue: owns a 256KB Uncached ring and the KFD queue resource.
         // Non-copyable (owns HW resources). The two software cursors are not
         // here: they are a u64 pair in the client's counter buffer
-        // (FusedA2ACounterSentinel.hpp).
+        // (DeviceContext.cpp).
         //
         // localNode / engineId are KFD topology ids; use sdmaNodeIdForDevice()
         // and sdmaSelectEngine() above to derive them from a HIP device id.

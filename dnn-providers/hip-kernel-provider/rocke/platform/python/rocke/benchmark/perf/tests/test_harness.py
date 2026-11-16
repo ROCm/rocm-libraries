@@ -400,6 +400,8 @@ class TestPickTarget(unittest.TestCase):
 class TestProfileDegradation(unittest.TestCase):
     """Wall-only paths, exercised by forcing the profiler branches off."""
 
+    ARCH = "gfx950"
+
     def setUp(self):
         self._orig_disc = harness._counters.discover
         self._orig_run = harness._run_rocprofv3
@@ -435,7 +437,7 @@ class TestProfileDegradation(unittest.TestCase):
         harness._run_rocprofv3 = lambda *a, **k: (False, "")  # (ok, stdout)
         warns = []
         rec = harness.profile(
-            ["x"], "gfx950", op="op", shape={"M": 1}, warn=warns.append
+            ["x"], self.ARCH, op="op", shape={"M": 1}, warn=warns.append
         )
         self.assertEqual(rec["counters"], {})
         self.assertTrue(any("rocprofv3 failed" in w for w in warns))
@@ -475,7 +477,7 @@ class TestProfileDegradation(unittest.TestCase):
                 "Counter_Value": "500",
             }
         ]
-        rec = harness.profile(["x"], "gfx950", op="op", shape={"M": 1})
+        rec = harness.profile(["x"], self.ARCH, op="op", shape={"M": 1})
         self.assertEqual(rec["counters"], {"l2_hit": 500})
         self.assertNotIn("l2_hit_rate", rec["derived"])
 
@@ -508,6 +510,8 @@ class TestDurationMsMedian(unittest.TestCase):
 
 class TestProfileTimingSource(unittest.TestCase):
     """A launcher with no PerfJSON is measured from the profiler's own timestamps."""
+
+    ARCH = "gfx950"
 
     _ROWS = [
         {
@@ -556,7 +560,7 @@ class TestProfileTimingSource(unittest.TestCase):
         harness._run_rocprofv3 = lambda *a, **k: (True, "kernel ran, no PerfJSON\n")
         warns = []
         rec = harness.profile(
-            ["x"], "gfx950", op="gemm", shape={"M": 1}, warn=warns.append
+            ["x"], self.ARCH, op="gemm", shape={"M": 1}, warn=warns.append
         )
         self.assertEqual(rec["timing_source"], "rocprofv3_duration")
         self.assertEqual(rec["profiled"]["ms_median"], 3.0)  # median(2ms, 4ms)
@@ -567,7 +571,7 @@ class TestProfileTimingSource(unittest.TestCase):
 
     def test_perfjson_still_wins_and_keeps_the_wall_run(self):
         harness._run_rocprofv3 = lambda *a, **k: (True, 'PerfJSON: {"ms": 2.5}\n')
-        rec = harness.profile(["x"], "gfx950", op="gemm", shape={"M": 1})
+        rec = harness.profile(["x"], self.ARCH, op="gemm", shape={"M": 1})
         self.assertEqual(rec["timing_source"], "perfjson")
         self.assertEqual(rec["profiled"]["ms_median"], 2.5)  # not the 3.0 duration
         self.assertEqual(rec["wall"]["ms_median"], 1.0)
@@ -585,7 +589,7 @@ class TestProfileTimingSource(unittest.TestCase):
             }
         ]
         harness._run_rocprofv3 = lambda *a, **k: (True, "no PerfJSON\n")
-        rec = harness.profile(["x"], "gfx950", op="gemm", shape={"M": 1})
+        rec = harness.profile(["x"], self.ARCH, op="gemm", shape={"M": 1})
         self.assertEqual(rec["timing_source"], "perfjson")
         self.assertEqual(rec["wall"]["ms_median"], 1.0)
         self.assertEqual(self.wall_calls, [["x"]])
@@ -594,17 +598,23 @@ class TestProfileTimingSource(unittest.TestCase):
 class TestProfileArtifacts(unittest.TestCase):
     """Retained workspaces preserve profiler bytes, including partial captures."""
 
+    ARCH = "gfx950"
+
     _CSV = (
         b"Kernel_Name,Dispatch_Id,Counter_Name,Counter_Value\r\n"
         b"gemm,1,GRBM_GUI_ACTIVE,9000\r\n"
         b"gemm,2,GRBM_GUI_ACTIVE,1000\r\n"
         b"other,3,GRBM_GUI_ACTIVE,7000\r\n"
     )
-    _RAW_FILES = {
-        "prof/pmc_1/host_counter_collection.csv": _CSV,
-        "prof/pmc_1/agent_info.csv": b'"Agent_Id","Name"\r\n"0","gfx950"\r\n',
-        "prof/diagnostics.bin": b"\x00\xffpartial\r\n",
-    }
+
+    @property
+    def _raw_files(self):
+        agent_info = f'"Agent_Id","Name"\r\n"0","{self.ARCH}"\r\n'
+        return {
+            "prof/pmc_1/host_counter_collection.csv": self._CSV,
+            "prof/pmc_1/agent_info.csv": agent_info.encode(),
+            "prof/diagnostics.bin": b"\x00\xffpartial\r\n",
+        }
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -630,7 +640,7 @@ class TestProfileArtifacts(unittest.TestCase):
 
     def _produce_capture(self, cmd, pmc_input, outdir, env, timeout):
         self.workspace = outdir.parent
-        for relative, contents in self._RAW_FILES.items():
+        for relative, contents in self._raw_files.items():
             path = self.workspace / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(contents)
@@ -641,13 +651,13 @@ class TestProfileArtifacts(unittest.TestCase):
         self.assertEqual(
             (self.artifacts / "pmc.txt").read_bytes(), b"pmc: GRBM_GUI_ACTIVE\n"
         )
-        for relative, contents in self._RAW_FILES.items():
+        for relative, contents in self._raw_files.items():
             with self.subTest(file=relative):
                 self.assertEqual((self.artifacts / relative).read_bytes(), contents)
 
     def test_success_retains_unfiltered_original_bytes(self):
         record = harness.profile(
-            ["x"], "gfx950", match="gemm", warmup=1, artifacts_dir=self.artifacts
+            ["x"], self.ARCH, match="gemm", warmup=1, artifacts_dir=self.artifacts
         )
         self.assertEqual(record["counters"], {"busy_cycles": 1000})
         self.assertEqual(
@@ -666,7 +676,7 @@ class TestProfileArtifacts(unittest.TestCase):
 
     def test_profiler_failure_retains_partial_output(self):
         self.profiler_ok = False
-        record = harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        record = harness.profile(["x"], self.ARCH, artifacts_dir=self.artifacts)
         self.assertEqual(record["profile_capture"]["status"], "failed")
         self.assertEqual(record["counters"], {})
         self.assertEqual(record["wall"], {"ms_median": 1.0})
@@ -677,7 +687,7 @@ class TestProfileArtifacts(unittest.TestCase):
             harness, "_read_counter_csvs", side_effect=ValueError("malformed CSV")
         )
         with self.assertRaisesRegex(ValueError, "malformed CSV"):
-            harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+            harness.profile(["x"], self.ARCH, artifacts_dir=self.artifacts)
         self._assert_raw_retained()
         self.wall.assert_not_called()
 
@@ -686,7 +696,7 @@ class TestProfileArtifacts(unittest.TestCase):
         sentinel = self.artifacts / "previous.bin"
         sentinel.write_bytes(b"previous capture\x00\xff")
         with self.assertRaises(FileExistsError):
-            harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+            harness.profile(["x"], self.ARCH, artifacts_dir=self.artifacts)
         self.assertEqual(sentinel.read_bytes(), b"previous capture\x00\xff")
         self.assertEqual(list(self.artifacts.iterdir()), [sentinel])
         self.discover.assert_not_called()
@@ -694,7 +704,7 @@ class TestProfileArtifacts(unittest.TestCase):
         self.wall.assert_not_called()
 
     def test_default_omits_artifact_metadata_and_removes_workspace(self):
-        record = harness.profile(["x"], "gfx950", match="gemm", warmup=1)
+        record = harness.profile(["x"], self.ARCH, match="gemm", warmup=1)
         self.assertNotIn("profile_capture", record)
         self.assertEqual(record["counters"], {"busy_cycles": 1000})
         self.assertIsNotNone(self.workspace)
@@ -702,7 +712,7 @@ class TestProfileArtifacts(unittest.TestCase):
 
     def test_no_profiler_reports_unavailable_capture(self):
         self.discover.return_value = {}
-        record = harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        record = harness.profile(["x"], self.ARCH, artifacts_dir=self.artifacts)
         self.assertEqual(record["profile_capture"]["status"], "unavailable")
         self.assertEqual(record["profile_capture"]["counter_map"], {})
         self.assertEqual(record["profile_capture"]["counter_groups"], [])
@@ -711,6 +721,18 @@ class TestProfileArtifacts(unittest.TestCase):
         self.assertTrue(self.artifacts.is_dir())
         self.assertEqual(list(self.artifacts.iterdir()), [])
         self.run.assert_not_called()
+
+
+class TestProfileDegradationGfx942(TestProfileDegradation):
+    ARCH = "gfx942"
+
+
+class TestProfileTimingSourceGfx942(TestProfileTimingSource):
+    ARCH = "gfx942"
+
+
+class TestProfileArtifactsGfx942(TestProfileArtifacts):
+    ARCH = "gfx942"
 
 
 if __name__ == "__main__":
