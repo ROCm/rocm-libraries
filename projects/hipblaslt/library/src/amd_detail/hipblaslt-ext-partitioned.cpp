@@ -225,14 +225,26 @@ namespace hipblaslt_ext
         {
             if(!sized(streams))
                 return HIPBLAS_STATUS_INVALID_VALUE;
-            std::set<int> devices;
-            for(auto stream : streams)
+            std::set<int> seen;
+            for(size_t i = 0; i < streams.size(); i++)
             {
                 int device = -1;
-                if(hipStreamGetDevice(stream, &device) != hipSuccess)
+                if(hipStreamGetDevice(streams[i], &device) != hipSuccess)
                     return HIPBLAS_STATUS_INVALID_VALUE;
-                if(!devices.insert(device).second)
+                if(!seen.insert(device).second)
                     return HIPBLAS_STATUS_INVALID_VALUE;
+                // Stream i runs partition i, whose kernels are loaded for its handle's device.
+                if(device != devices[i])
+                {
+                    log_error(__func__,
+                              "stream",
+                              i,
+                              "is on device",
+                              device,
+                              "but its handle is on device",
+                              devices[i]);
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
             }
             return HIPBLAS_STATUS_SUCCESS;
         }
