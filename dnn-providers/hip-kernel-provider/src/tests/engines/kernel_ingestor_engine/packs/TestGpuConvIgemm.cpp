@@ -428,11 +428,13 @@ bool matches(float got, float want, float tolerance)
     return std::fabs(got - want) <= tolerance;
 }
 
-/// Which configs a case must run: any, or at least one patch config (and only those).
+/// Which configs a case must run: any, or at least one patch config (and only those), or at least
+/// one channels-first-input config (and only those).
 enum class Configs
 {
     ANY,
     PATCH,
+    CFX,
 };
 
 template <typename T>
@@ -514,7 +516,8 @@ void runCase(ConvShape shape,
         {
             continue;
         }
-        if(configs == Configs::PATCH && kernel.getIntMetadata("patch") == 0)
+        if((configs == Configs::PATCH && kernel.getIntMetadata("patch") == 0)
+           || (configs == Configs::CFX && kernel.getIntMetadata("cfx") == 0))
         {
             continue;
         }
@@ -635,6 +638,101 @@ std::vector<DeviceCase> servedPatchCases()
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvIgemmPatch,
                          ::testing::Combine(::testing::ValuesIn(servedPatchCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// 1-D channels-first (N C L) graphs: PyTorch's only conv1d layout, read in place by the
+/// channels-first-input configs (cfx). Lengths that 8 does not divide (vectors straddling the
+/// row end, unaligned rows), two images (blocks crossing an image boundary), "same", "valid" and
+/// strided geometry, dilation, groups, a pointwise layer, an output of extent 1, a row shorter
+/// than a vector, true convolution.
+std::vector<DeviceCase> channelsFirst1dCases()
+{
+    std::vector<DeviceCase> cases;
+    cases.push_back({"NclK3Same", dense(24, 40, {100}, {3}, {1}, false)});
+    // The same layer as a 2-D graph of height 1 (how cuDNN-style callers send conv1d).
+    cases.push_back({"Nchw1xLK3Same", dense(24, 40, {1, 100}, {1, 3}, {0, 1}, false)});
+    auto dilated = dense(32, 32, {128}, {11}, {15}, false);
+    dilated.dilation = {3};
+    cases.push_back({"NclK11Dilation3", dilated});
+    cases.push_back({"NclK7Valid", dense(16, 24, {64}, {7}, {0}, false)});
+    auto stride2 = dense(16, 24, {101}, {3}, {1}, false);
+    stride2.stride = {2};
+    cases.push_back({"NclK3Stride2", stride2});
+    auto k2s2 = dense(32, 16, {99}, {2}, {0}, false);
+    k2s2.stride = {2};
+    cases.push_back({"NclK2Stride2", k2s2});
+    cases.push_back({"NclPointwise", dense(64, 32, {200}, {1}, {0}, false)});
+    auto grouped = dense(32, 48, {50}, {5}, {2}, false);
+    grouped.groups = 4;
+    cases.push_back({"NclK5Groups4", grouped});
+    auto toOne = dense(16, 24, {4}, {3}, {0}, false);
+    toOne.stride = {2};
+    cases.push_back({"NclStride2OutputOne", toOne});
+    cases.push_back({"NclShortRow", dense(8, 16, {3}, {3}, {1}, false)});
+    auto convolution = dense(24, 40, {40}, {3}, {1}, false);
+    convolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"NclK3ConvolutionMode", convolution});
+    return cases;
+}
+
+class TestGpuConvIgemmChannelsFirst1d
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvIgemmChannelsFirst1d, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, Configs::CFX);
+}
+
+TEST_P(TestGpuConvIgemmChannelsFirst1d, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, Configs::CFX);
+}
+
+TEST_P(TestGpuConvIgemmChannelsFirst1d, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, false, Configs::CFX);
+}
+
+// +inf and -inf in the gathered input: every output they reach is that infinity (NaN where both
+// meet), as the reference gives; padding and the zeroed halo rows never multiply into them.
+TEST_P(TestGpuConvIgemmChannelsFirst1d, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, Configs::CFX);
+}
+
+TEST_P(TestGpuConvIgemmChannelsFirst1d, HalfInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, Configs::CFX);
+}
+
+TEST_P(TestGpuConvIgemmChannelsFirst1d, BFloat16Infinities)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true, Configs::CFX);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvIgemmChannelsFirst1d,
+                         ::testing::Combine(::testing::ValuesIn(channelsFirst1dCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {
@@ -1362,6 +1460,196 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
             }
             EXPECT_GT(checked, 1);
         }
+    }
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstInputIsTheTransposedInputOfTheDirection)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const bool forward = direction == ConvDirection::FORWARD;
+        conv_igemm::IgemmProblem problem;
+        problem.direction = direction;
+        auto& input = forward ? problem.x : problem.y;
+        auto& output = forward ? problem.y : problem.x;
+        output.needed = output.transpose = true;
+        EXPECT_FALSE(conv_igemm::inputChannelsFirst(problem));
+        input.needed = true; // staged by the strided copy: not packed channels-first
+        EXPECT_FALSE(conv_igemm::inputChannelsFirst(problem));
+        input.transpose = true;
+        EXPECT_TRUE(conv_igemm::inputChannelsFirst(problem));
+    }
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstInputProblemsStageNoInput)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        conv_igemm::IgemmProblem problem;
+        problem.direction = direction;
+        problem.x.needed = problem.x.transpose = true;
+        problem.x.bytes = 1000;
+        problem.w.needed = true;
+        problem.w.bytes = 5000;
+        problem.y.needed = problem.y.transpose = true;
+        problem.y.bytes = 300;
+        const auto direct
+            = conv_igemm::withoutInputStaging(conv_igemm::withoutOutputStaging(problem));
+        EXPECT_FALSE(direct.x.needed);
+        EXPECT_FALSE(direct.y.needed);
+        EXPECT_TRUE(direct.w.needed);
+        EXPECT_EQ(direct.w.workspaceOffset, 0u);
+        EXPECT_EQ(direct.workspaceBytes, 5120u); // the filter alone
+    }
+}
+
+conv_igemm::CfxTile cfxTile(int64_t bm, int64_t halo, long long ldsBytes = 64 * 1024)
+{
+    conv_igemm::CfxTile tile;
+    tile.bm = bm;
+    tile.bn = 128;
+    tile.bk = 32;
+    tile.wm = tile.wn = 2;
+    tile.halo = halo;
+    tile.ldsBytes = ldsBytes;
+    return tile;
+}
+
+ConvShape ncl(int64_t length, int64_t filter, int64_t pad, int64_t stride, int64_t dilation)
+{
+    auto shape = dense(64, 64, {length}, {filter}, {pad}, false);
+    shape.stride = {stride};
+    shape.dilation = {dilation};
+    return shape;
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstInputFitsOneDimensionalGathersItsHaloHolds)
+{
+    const auto fwd = ConvDirection::FORWARD;
+    const auto bwd = ConvDirection::BACKWARD_DATA;
+    // Stride 1: one staged pixel a row.
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(100, 3, 1, 1, 1), fwd), cfxTile(128, 1)));
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(100, 3, 1, 1, 1), bwd), cfxTile(128, 1)));
+    // Stride 2 forward reaches two pixels a row: halo 2, not halo 1. Backward data gathers dy at
+    // unit stride in each phase, so halo 1 holds it.
+    EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(100, 3, 1, 2, 1), fwd), cfxTile(128, 1)));
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(100, 3, 1, 2, 1), fwd), cfxTile(128, 2)));
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(100, 3, 1, 2, 1), bwd), cfxTile(128, 1)));
+    // Taps reaching 70 pixels: 127 + 70 + 1 + 7 = 205 rows, past halo 1's 200 (reach 60: 195).
+    EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(400, 11, 35, 1, 7), fwd), cfxTile(128, 1)));
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(400, 11, 30, 1, 6), fwd), cfxTile(128, 1)));
+    // Outputs past the input's end (a 1-wide filter padded by 2): the rows' pixel run is not
+    // monotonic across images.
+    EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(100, 1, 2, 1, 1), fwd), cfxTile(128, 1)));
+    // LDS: 256 rows at halo 2 and 64-deep k-steps need 100 KiB (gfx950's 160 KiB only).
+    auto deep = cfxTile(256, 2);
+    deep.bk = 64;
+    EXPECT_FALSE(conv_igemm::cfxFits(parsedProblem(ncl(1000, 3, 1, 2, 1), fwd), deep));
+    deep.ldsBytes = 160 * 1024;
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(1000, 3, 1, 2, 1), fwd), deep));
+    // The FMA kernel's in-place tile (no halo) serves any stride.
+    EXPECT_TRUE(conv_igemm::cfxFits(parsedProblem(ncl(100, 10, 0, 5, 1), fwd), cfxTile(64, 0)));
+    // 2-D and 3-D problems are not served.
+    EXPECT_FALSE(conv_igemm::cfxFits(
+        parsedProblem(dense(64, 64, {12, 13}, {3, 3}, {1, 1}, false), fwd), cfxTile(128, 1)));
+    EXPECT_FALSE(conv_igemm::cfxFits(
+        parsedProblem(dense(16, 24, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false), fwd),
+        cfxTile(128, 1)));
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstInputConfigsServeOnlyOneDimensionalChannelsFirstGraphs)
+{
+    struct Graph
+    {
+        const char* name;
+        ConvShape shape;
+        bool served;
+    };
+    auto stride5 = ncl(300, 5, 0, 5, 1);
+    std::vector<Graph> graphs{
+        {"ncl", ncl(300, 3, 1, 1, 1), true},
+        {"nchw height 1", dense(64, 64, {1, 300}, {1, 3}, {0, 1}, false), true},
+        {"nlc", dense(64, 64, {300}, {3}, {1}, true), false},
+        {"nchw 3x3", dense(64, 64, {12, 13}, {3, 3}, {1, 1}, false), false},
+        {"ncdhw", dense(16, 24, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false), false},
+    };
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(auto graph : graphs)
+        {
+            graph.shape.dataType = DataType::HALF;
+            const GraphFixture fixture(buildGraph(specFor(graph.shape, direction)),
+                                       deviceOf("gfx942:sramecc+:xnack-", 304));
+            const auto pack = packFor(direction);
+            const auto bound = matchesGraph(pack, fixture.context());
+            ASSERT_TRUE(bound.has_value());
+            int served = 0;
+            for(const auto& kernel : catalog(direction))
+            {
+                if(kernel.getIntMetadata("cfx") != 0
+                   && matchesKernel(pack, fixture.context(), kernel, *bound))
+                {
+                    ++served;
+                }
+            }
+            SCOPED_TRACE(graph.name);
+            EXPECT_EQ(served > 0, graph.served);
+        }
+    }
+    // Forward stride 5 reaches five pixels a row, past every halo tile: only the FMA kernel's
+    // in-place tile.
+    stride5.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(stride5, ConvDirection::FORWARD)),
+                               deviceOf("gfx942:sramecc+:xnack-", 304));
+    const auto pack = packFor(ConvDirection::FORWARD);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    int served = 0;
+    for(const auto& kernel : catalog(ConvDirection::FORWARD))
+    {
+        if(kernel.getIntMetadata("cfx") != 0
+           && matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            EXPECT_EQ(kernel.getStringMetadata("atom"), "fma") << kernel.name;
+            ++served;
+        }
+    }
+    EXPECT_GT(served, 0);
+}
+
+TEST(TestConvIgemmCatalog, ChannelsFirstInputConfigsArePlainHaloTilesOrFma)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        int count = 0;
+        for(const auto& kernel : catalog(direction))
+        {
+            if(kernel.getIntMetadata("cfx") == 0)
+            {
+                continue;
+            }
+            SCOPED_TRACE(kernel.name);
+            ++count;
+            EXPECT_EQ(kernel.getStringMetadata("math"), "native");
+            EXPECT_EQ(kernel.getIntMetadata("swz"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("dma"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("pack"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("wdirect"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("fuse"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("large"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("patch"), 0);
+            if(kernel.getStringMetadata("atom") == "fma")
+            {
+                EXPECT_EQ(kernel.getIntMetadata("halo"), 0);
+            }
+            else
+            {
+                EXPECT_EQ(kernel.getIntMetadata("cf"), 1);
+                const auto halo = kernel.getIntMetadata("halo");
+                EXPECT_TRUE(halo == 1 || (halo == 2 && direction == ConvDirection::FORWARD));
+            }
+        }
+        EXPECT_GT(count, 0);
     }
 }
 
