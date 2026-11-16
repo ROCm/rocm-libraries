@@ -109,13 +109,15 @@ def _off_route_specs():
 
 
 def test_routed_specs_cover_every_body():
-    specs = _routed_specs()
-    names = {build_gfx942_4warp_gqa(s, arch=_ARCH).name for s in specs}
-    assert any(s.head_size == 256 for s in specs)
-    assert any(s.head_size == 128 and s.block_size == 64 for s in specs)
-    assert any(n.endswith("_4wgqa_fold") for n in names)
+    built = [(s, build_gfx942_4warp_gqa(s, arch=_ARCH).name) for s in _routed_specs()]
+    assert any(s.head_size == 256 for s, _ in built)
+    assert any(s.head_size == 128 and s.block_size == 64 for s, _ in built)
+    assert any(n.endswith("_4wgqa_fold") for _, n in built)
+    # The unfolded double-buffer D128 pipe: block_size 64 takes the
+    # single-buffer body instead.
     assert any(
-        s.head_size == 128 and n.endswith("_4wgqa") for s, n in zip(specs, names)
+        s.head_size == 128 and s.block_size <= 32 and n.endswith("_4wgqa")
+        for s, n in built
     )
 
 

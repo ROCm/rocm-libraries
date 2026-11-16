@@ -127,6 +127,7 @@ test_categories:
       - "rocke_attention_unified_selectors"
       - "rocke_attention_unified_routing"
       - "rocke_attention_tiled_2d_gfx942_spec_guards"
+      - "rocke_gfx942_attention_4warp_gqa_lower_to_llvm"
       - "rocke_engine_import"
       - "rocke_attention_cpp_parity_pytest"
       # Registered only in the build tree: they read engine sources the
@@ -227,6 +228,7 @@ test_categories:
       - "rocke_attention_unified_selectors"
       - "rocke_attention_unified_routing"
       - "rocke_attention_tiled_2d_gfx942_spec_guards"
+      - "rocke_gfx942_attention_4warp_gqa_lower_to_llvm"
       - "rocke_engine_import"
       - "rocke_attention_cpp_parity_pytest"
       # Registered only in the build tree: they read engine sources the

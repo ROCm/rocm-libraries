@@ -8,10 +8,10 @@ inputs -- covering the selectors and gate predicates that route a problem
 into the correct kernel variant.  No GPU, no subprocess, no rocke_engine .so
 required.
 
-Primary motivation: PR #9220 changed routing without a test, by removing the
-bias-exclusion guard from Python ``_enable_combo_2d``. These tests encode the
-expected routing decisions so that kind of change is caught immediately on any
-developer machine.
+Primary motivation: an earlier change altered routing without a test, by
+removing the bias-exclusion guard from Python ``_enable_combo_2d``. These tests
+encode the expected routing decisions so that kind of change is caught
+immediately on any developer machine.
 
 Bias admission is deliberate: biased combo-geometry problems ride the transposed
 combo path (without the mask-once / mask-limit sub-flags), and the C++ selectors
@@ -220,7 +220,7 @@ class TestCombo2dRouting(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Bias x geometry cohort matrix (covers the #9220 class of divergence)
+# Bias x geometry cohort matrix (covers the bias-guard class of divergence)
 # ---------------------------------------------------------------------------
 
 
@@ -925,6 +925,33 @@ class TestKvAddrLimit(unittest.TestCase):
         # an i64 branch: an i64 problem gets no cache limit.
         p = _cfvst_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx942"), _clear_launch_memos():
+            spec = _asb._tiled_spec_from_problem(p, "gfx942")
+            self.assertTrue(spec.use_i64_kv_addr)
+            self.assertTrue(spec.use_conflict_free_v_store)
+            meta = _au._get_2d_launch_meta(
+                p, _au._tiled_cache_key(p, "gfx942"), arch="gfx942"
+            )
+        self.assertIsNone(meta.kv_addr_limit)
+
+    def test_gfx942_decode_refused_by_3d_falls_back_to_i64_cfvst(self):
+        # fp16 D64 decode with equal head counts on a cache past 2 GiB: the 3D
+        # gate refuses i64 on gfx942, so this launches 2D, and that spec must be
+        # an i64 kernel with no cache limit rather than an i32 one that refuses.
+        block_bytes = 32 * 32 * 64 * 2
+        p = _prob(
+            64,
+            32,
+            32,
+            32,
+            dtype="fp16",
+            max_seqlen_q=1,
+            num_seqs=8,
+            total_q=8,
+            num_kv_blocks=2**31 // block_bytes + 1,
+        )
+        with _patch_arch("gfx942"), _clear_launch_memos():
+            ok, _ = _au.supports_native_unified_attention_3d_tiled(p, "gfx942")
+            self.assertFalse(ok)
             spec = _asb._tiled_spec_from_problem(p, "gfx942")
             self.assertTrue(spec.use_i64_kv_addr)
             self.assertTrue(spec.use_conflict_free_v_store)

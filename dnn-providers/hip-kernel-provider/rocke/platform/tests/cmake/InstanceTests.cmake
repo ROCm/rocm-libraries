@@ -72,7 +72,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/unified_attention_scalar_lower_
 endif()
 
 # UnifiedAttentionProblem C port: field defaults, the @property helpers, and
-# the explicit-arch save/restore in the tiled-2D spec-from-problem selector.
+# the selectors' explicit arch argument.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_unified_problem_test.cpp")
   add_executable(rocke_attention_unified_problem
                  instances/attention_unified_problem_test.cpp)
@@ -136,6 +136,28 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/attention_unified_routing_test.
           RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_attention_unified_routing)
+endif()
+
+# The gfx942 4-warp GQA lower-to-LLVM entry: output, ownership and refusals.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942_attention_4warp_gqa_lower_to_llvm.cpp")
+  add_executable(rocke_gfx942_attention_4warp_gqa_lower_to_llvm
+                 instances/gfx942_attention_4warp_gqa_lower_to_llvm.cpp)
+  target_link_libraries(rocke_gfx942_attention_4warp_gqa_lower_to_llvm PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_gfx942_attention_4warp_gqa_lower_to_llvm PRIVATE m)
+  endif()
+  add_test(NAME rocke_gfx942_attention_4warp_gqa_lower_to_llvm
+           COMMAND rocke_gfx942_attention_4warp_gqa_lower_to_llvm)
+  set_tests_properties(rocke_gfx942_attention_4warp_gqa_lower_to_llvm
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name
+                                rocke_gfx942_attention_4warp_gqa_lower_to_llvm)
+  set_target_properties(rocke_gfx942_attention_4warp_gqa_lower_to_llvm
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_gfx942_attention_4warp_gqa_lower_to_llvm
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_gfx942_attention_4warp_gqa_lower_to_llvm)
 endif()
 
 # Spec-validation parity for the two C++ fused-MoE mega builders: the
@@ -336,7 +358,9 @@ if(ROCKE_BUILD_PYBIND
     set_tests_properties(rocke_engine_import rocke_attention_cpp_parity_pytest
                          PROPERTIES LABELS "ckc;python;attention;host"
                                     ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:rocke_engine>")
-    set_tests_properties(rocke_attention_cpp_parity_pytest PROPERTIES TIMEOUT 600)
+    set_tests_properties(rocke_engine_import PROPERTIES FIXTURES_SETUP rocke_engine_module)
+    set_tests_properties(rocke_attention_cpp_parity_pytest
+                         PROPERTIES TIMEOUT 600 FIXTURES_REQUIRED rocke_engine_module)
   else()
     message(STATUS "rocKE: ${Python3_EXECUTABLE} cannot import pytest; "
                    "rocke_attention_cpp_parity_pytest is not registered")
