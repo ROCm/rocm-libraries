@@ -23,6 +23,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "common/ConvolutionCommon.hpp"
 #include "engines/plans/MiopenConvApplicabilityChecks.hpp"
 
 using namespace miopen_plugin;
@@ -39,6 +40,7 @@ using miopen_plugin::conv_applicability::validateConvBwdDataIoTensors;
 using miopen_plugin::conv_applicability::validateConvBwdDataSize;
 using miopen_plugin::conv_applicability::validateConvFwdIoTensors;
 using miopen_plugin::conv_applicability::validateConvWrwIoTensors;
+using test_conv_common::packedStrides;
 
 namespace
 {
@@ -81,12 +83,12 @@ TensorSpec withStrides(const std::vector<int64_t>& dims,
 
 TensorSpec channelsFirst(const std::vector<int64_t>& dims, DataType dataType = DataType::FLOAT)
 {
-    return withStrides(dims, generateStrides(dims), dataType);
+    return withStrides(dims, packedStrides(dims, false), dataType);
 }
 
 TensorSpec channelsLast(const std::vector<int64_t>& dims, DataType dataType = DataType::FLOAT)
 {
-    return withStrides(dims, generateStrides(dims, strideOrderNhwc(dims.size())), dataType);
+    return withStrides(dims, packedStrides(dims, true), dataType);
 }
 
 flatbuffers::FlatBufferBuilder buildTensor(int64_t uid, const TensorSpec& spec)
@@ -171,10 +173,10 @@ std::vector<RankShapes> rankShapes()
             RankShapes{{2, 8, 8, 8, 8}, {4, 8, 3, 3, 3}, {2, 4, 6, 6, 6}}};
 }
 
-// Shapes shared by the 2D layout, dtype and packing cases.
-const std::vector<int64_t> X_DIMS = {2, 4, 8, 8};
-const std::vector<int64_t> W_DIMS = {4, 4, 3, 3};
-const std::vector<int64_t> Y_DIMS = {2, 4, 6, 6};
+// Shapes shared by the 2D layout, dtype and packing cases (and by the plan builder tests).
+const std::vector<int64_t>& X_DIMS = test_conv_common::CONV_2D_X_DIMS;
+const std::vector<int64_t>& W_DIMS = test_conv_common::CONV_2D_W_DIMS;
+const std::vector<int64_t>& Y_DIMS = test_conv_common::CONV_2D_Y_DIMS;
 
 // ---------------------------------------------------------------------------------------------
 // Backward data and backward weights

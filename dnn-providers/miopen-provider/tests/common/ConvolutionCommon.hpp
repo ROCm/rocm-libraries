@@ -7,6 +7,7 @@
 #include <ostream>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
@@ -215,5 +216,20 @@ inline std::vector<ConvTestCase> getDeterministicConvTestCases5D()
         {{1, 8, 8, 8, 8}, {1, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
     };
 }
+
+// Packed strides of `dims` in channels-last or channels-first order.
+inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool channelsLastLayout)
+{
+    return channelsLastLayout ? hipdnn_data_sdk::utilities::generateStrides(
+                                    dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
+                              : hipdnn_data_sdk::utilities::generateStrides(dims);
+}
+
+// One 2D convolution (unit stride, no padding, no dilation) shared by the tests of the plan
+// builders and of the applicability checks: x [2, 4, 8, 8] with w [4, 4, 3, 3] gives
+// y [2, 4, 6, 6].
+inline const std::vector<int64_t> CONV_2D_X_DIMS = {2, 4, 8, 8};
+inline const std::vector<int64_t> CONV_2D_W_DIMS = {4, 4, 3, 3};
+inline const std::vector<int64_t> CONV_2D_Y_DIMS = {2, 4, 6, 6};
 
 } // namespace test_conv_common

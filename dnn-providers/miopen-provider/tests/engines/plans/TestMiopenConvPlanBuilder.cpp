@@ -31,6 +31,11 @@ using namespace miopen_plugin;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 
+using test_conv_common::CONV_2D_W_DIMS;
+using test_conv_common::CONV_2D_X_DIMS;
+using test_conv_common::CONV_2D_Y_DIMS;
+using test_conv_common::packedStrides;
+
 class TestMiopenConvPlanBuilder : public ::testing::Test
 {
 protected:
@@ -235,14 +240,6 @@ static bool miopenReportsForwardSolution(const HipdnnMiopenHandle& handle, const
     }
 }
 
-// Packed strides of `dims` in channels-last or channels-first order.
-static std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool channelsLastLayout)
-{
-    return channelsLastLayout ? hipdnn_data_sdk::utilities::generateStrides(
-                                    dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
-                              : hipdnn_data_sdk::utilities::generateStrides(dims);
-}
-
 // The graph builders give all three tensors one data type; this sets them individually, in the
 // order the tensors appear in the graph.
 static void setConvTensorTypes(const flatbuffers::FlatBufferBuilder& builder,
@@ -262,10 +259,6 @@ static void setConvTensorTypes(const flatbuffers::FlatBufferBuilder& builder,
 // all channels-last) stays applicable.
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForwardTensors)
 {
-    const std::vector<int64_t> xDims = {2, 4, 8, 8};
-    const std::vector<int64_t> wDims = {4, 4, 3, 3};
-    const std::vector<int64_t> yDims = {2, 4, 6, 6};
-
     // MIOpen offers no solution for some of these combinations on some architectures; such a
     // combination says nothing about the provider and is left out (the test is skipped only when
     // every combination is).
@@ -281,12 +274,12 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForw
                          + hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
 
             auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
-                xDims,
-                packedStrides(xDims, channelsLast),
-                wDims,
-                packedStrides(wDims, channelsLast),
-                yDims,
-                packedStrides(yDims, channelsLast),
+                CONV_2D_X_DIMS,
+                packedStrides(CONV_2D_X_DIMS, channelsLast),
+                CONV_2D_W_DIMS,
+                packedStrides(CONV_2D_W_DIMS, channelsLast),
+                CONV_2D_Y_DIMS,
+                packedStrides(CONV_2D_Y_DIMS, channelsLast),
                 {0, 0},
                 {0, 0},
                 {1, 1},
@@ -342,11 +335,11 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutForwa
 // uniform) next to packed w and y.
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedForward)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph({2, 4, 8, 8},
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(CONV_2D_X_DIMS,
                                                                        {512, 128, 16, 1},
-                                                                       {4, 4, 3, 3},
+                                                                       CONV_2D_W_DIMS,
                                                                        {36, 9, 3, 1},
-                                                                       {2, 4, 6, 6},
+                                                                       CONV_2D_Y_DIMS,
                                                                        {144, 36, 6, 1},
                                                                        {0, 0},
                                                                        {0, 0},
@@ -368,11 +361,11 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedForward
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeForward)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
-        {2, 4, 8, 8},
+        CONV_2D_X_DIMS,
         {256, 64, 8, 1},
-        {4, 4, 3, 3},
+        CONV_2D_W_DIMS,
         {36, 9, 3, 1},
-        {2, 4, 6, 6},
+        CONV_2D_Y_DIMS,
         {144, 36, 6, 1},
         {0, 0},
         {0, 0},
@@ -425,13 +418,9 @@ struct BackwardGraphSpec
 static BackwardGraphSpec uniformPackedSpec(bool channelsLastLayout,
                                            ConvDataType dataType = ConvDataType::FLOAT)
 {
-    const std::vector<int64_t> dyDims = {2, 4, 6, 6};
-    const std::vector<int64_t> wDims = {4, 4, 3, 3};
-    const std::vector<int64_t> dxDims = {2, 4, 8, 8};
-
-    return {{dyDims, packedStrides(dyDims, channelsLastLayout)},
-            {wDims, packedStrides(wDims, channelsLastLayout)},
-            {dxDims, packedStrides(dxDims, channelsLastLayout)},
+    return {{CONV_2D_Y_DIMS, packedStrides(CONV_2D_Y_DIMS, channelsLastLayout)},
+            {CONV_2D_W_DIMS, packedStrides(CONV_2D_W_DIMS, channelsLastLayout)},
+            {CONV_2D_X_DIMS, packedStrides(CONV_2D_X_DIMS, channelsLastLayout)},
             dataType};
 }
 
@@ -447,18 +436,18 @@ static BackwardGraphSpec mixedLayoutSpec()
 // All channels-last, dx with padded rows.
 static BackwardGraphSpec channelsLastNonPackedSpec()
 {
-    return {{{2, 4, 6, 6}, {144, 1, 24, 4}},
-            {{4, 4, 3, 3}, {36, 1, 12, 4}},
-            {{2, 4, 8, 8}, {320, 1, 40, 4}},
+    return {{CONV_2D_Y_DIMS, {144, 1, 24, 4}},
+            {CONV_2D_W_DIMS, {36, 1, 12, 4}},
+            {CONV_2D_X_DIMS, {320, 1, 40, 4}},
             ConvDataType::FLOAT};
 }
 
 // All channels-first, dx with padded rows.
 static BackwardGraphSpec channelsFirstNonPackedSpec()
 {
-    return {{{2, 4, 6, 6}, {144, 36, 6, 1}},
-            {{4, 4, 3, 3}, {36, 9, 3, 1}},
-            {{2, 4, 8, 8}, {512, 128, 16, 1}},
+    return {{CONV_2D_Y_DIMS, {144, 36, 6, 1}},
+            {CONV_2D_W_DIMS, {36, 9, 3, 1}},
+            {CONV_2D_X_DIMS, {512, 128, 16, 1}},
             ConvDataType::FLOAT};
 }
 
