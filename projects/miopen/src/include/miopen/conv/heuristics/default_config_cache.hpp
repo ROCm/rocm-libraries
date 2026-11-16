@@ -59,10 +59,12 @@ inline std::string DefaultConfigKey(std::string_view solver,
 /// Process-wide memo of default configurations (bounded and switchable, see CKProblemCache): the
 /// default depends only on the key, and computing it asks CK about every instance for the full
 /// valid-kernel list, which would otherwise happen on every perf-db miss. Tuning and the AI
-/// heuristics build their own lists and do not use it. A config set from a cached default has an
-/// empty valid_kernels (index 0), so its IsValidValue() is false; only tuning iterates the list,
-/// and SetNextValue() fills it. kernel_ids are stored once each and kept when the cache starts
-/// over: there are at most as many as the plugin has instances.
+/// heuristics build their own lists and do not use it. A cache hit sets only kernel_id, use_tf32
+/// and split_k; valid_kernels and index keep what HeuristicInit left (empty, unless the AI
+/// heuristics ran first and then fell back), so they need not match kernel_id and IsValidValue()
+/// can be false. Nothing reads them before tuning, which starts from a default-constructed config.
+/// kernel_ids are stored once each and kept when the cache starts over: there are at most as many
+/// as the plugin has instances.
 class DefaultConfigCache
 {
 public:

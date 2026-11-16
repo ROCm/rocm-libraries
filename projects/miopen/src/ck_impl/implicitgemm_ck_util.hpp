@@ -632,6 +632,10 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 /// MIOPEN_DEBUG_CK_PROBLEM_CACHE=0): every solution query asks it, and otherwise each query
 /// re-runs CK's argument check on instance after instance. Only the yes/no answer is kept.
 ///
+/// The memo is a static of this template, so each instantiation (direction and CK instance list:
+/// 2D backward-weights and backward-data, each for half, bf16, int8, fp32 and fp32 with TF32) has
+/// its own memo and its own bound; a plugin holds up to 10 of them.
+///
 /// CK's argument check reads the arch of the calling thread's current HIP device
 /// (ck::get_device_name()), which can differ from the device of the handle that selected this
 /// plugin, so the key holds the current device ordinal: a query made on another device never

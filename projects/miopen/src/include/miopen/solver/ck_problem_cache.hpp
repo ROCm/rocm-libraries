@@ -30,8 +30,10 @@ public:
     using Key   = typename Map::key_type;
     using Value = typename Map::mapped_type;
 
-    /// Problems remembered before starting over. An entry takes a few hundred bytes, so a full
-    /// cache stays within a few hundred MB even for the largest workloads.
+    /// Problems remembered before starting over, per cache. An entry takes a few hundred bytes
+    /// (about 370 B in the CK applicability memo), so one full cache stays within a few hundred
+    /// MB; the bound is per cache object, and the applicability memo has one per direction and CK
+    /// instance list in each plugin.
     static constexpr std::size_t DefaultCapacity = 500000;
 
     explicit CKProblemCache(std::size_t capacity_ = DefaultCapacity) : capacity(capacity_) {}
