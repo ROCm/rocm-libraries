@@ -322,6 +322,16 @@ def _gh_quiet(cmd):
     return result.stdout if result.returncode == 0 else None
 
 
+def _json_or_none(out):
+    """Parsed JSON of gh output; None when it is empty or not valid JSON."""
+    if not out:
+        return None
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+
 def effective_tiers(run_id):
     """{configure job name: description} for the run's "Configure test matrix"
     jobs. Those jobs decide the tier the test jobs use; the setup job's
@@ -329,10 +339,11 @@ def effective_tiers(run_id):
     out = _gh_quiet(
         ["gh", "run", "view", str(run_id), "--repo", REPO_ARG, "--json", "jobs"]
     )
-    if not out:
+    data = _json_or_none(out)
+    if not isinstance(data, dict):
         return {}
     tiers = {}
-    for job in json.loads(out).get("jobs") or []:
+    for job in data.get("jobs") or []:
         name = job.get("name", "")
         if "Configure test matrix (" not in name:
             continue
@@ -382,8 +393,8 @@ def newest_run_id(workflow_file, ref):
             "databaseId",
         ]
     )
-    runs = json.loads(out) if out else []
-    return runs[0]["databaseId"] if runs else None
+    runs = _json_or_none(out)
+    return runs[0]["databaseId"] if isinstance(runs, list) and runs else None
 
 
 def resolve_branch(args):

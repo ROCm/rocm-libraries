@@ -63,6 +63,10 @@ class FakeGh:
         self.last_dispatch_id = 100
         self.jobs = []
         self.job_log = ""
+        # Raw stdout of "gh run view --json jobs"; None serves self.jobs.
+        self.run_view_out = None
+        # Raw stdout of the plain "gh run list" newest_run_id makes.
+        self.branch_runs_out = ""
         # Workflow file name -> text served instead of the checkout's copy.
         self.workflows = {}
         self.auth_error = ""
@@ -109,9 +113,13 @@ class FakeGh:
             return json.dumps([{"databaseId": self.last_dispatch_id}])
         if cmd[:3] == ["gh", "run", "list"] and "--status" in cmd:
             return json.dumps([{"databaseId": 7, "workflowName": "CI"}])
-        if cmd[:3] in (["gh", "run", "list"], ["gh", "pr", "checks"]):
+        if cmd[:3] == ["gh", "run", "list"]:
+            return self.branch_runs_out
+        if cmd[:3] == ["gh", "pr", "checks"]:
             return ""
         if cmd[:3] == ["gh", "run", "view"] and "jobs" in cmd:
+            if self.run_view_out is not None:
+                return self.run_view_out
             return json.dumps({"jobs": self.jobs})
         if cmd[:3] == ["gh", "run", "watch"]:
             return ""
@@ -652,6 +660,21 @@ def test_effective_tier_comes_from_configure_job_log(trigger_mod, gh):
         ", overridden from standard",
         "Configure test matrix (gfx950)": "not known yet (in_progress)",
     }
+
+
+def test_effective_tiers_treats_non_json_output_as_unknown(trigger_mod, gh):
+    gh.run_view_out = "<html>502 Bad Gateway</html>"
+    assert trigger_mod.effective_tiers(42) == {}
+
+
+def test_newest_run_id_reads_the_first_run(trigger_mod, gh):
+    gh.branch_runs_out = json.dumps([{"databaseId": 77}])
+    assert trigger_mod.newest_run_id("therock-multi-arch-ci.yml", "main") == 77
+
+
+def test_newest_run_id_treats_non_json_output_as_no_run(trigger_mod, gh):
+    gh.branch_runs_out = "<html>502 Bad Gateway</html>"
+    assert trigger_mod.newest_run_id("therock-multi-arch-ci.yml", "main") is None
 
 
 # --------------------------------------------------------------------------- #
