@@ -130,7 +130,11 @@ public:
         const auto axis
             = attributes->axis() ? std::make_optional(attributes->axis().value()) : std::nullopt;
         return !hipdnn_gpu_ref::GpuFpReferenceBlockScale::checkQuantize(
-            xDims, yDims, scaleDims, attributes->block_size(), axis);
+                   xDims, yDims, scaleDims, attributes->block_size(), axis)
+               && !anyOperandIsRuntimePassByValue(tensorMap,
+                                                  {attributes->x_tensor_uid(),
+                                                   attributes->y_tensor_uid(),
+                                                   attributes->scale_tensor_uid()});
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>
@@ -201,7 +205,11 @@ public:
         const std::vector<int32_t> blockSize(attributes->block_size()->begin(),
                                              attributes->block_size()->end());
         return !hipdnn_gpu_ref::GpuFpReferenceBlockScale::checkDequantize(
-            xDims, yDims, scaleDims, blockSize);
+                   xDims, yDims, scaleDims, blockSize)
+               && !anyOperandIsRuntimePassByValue(tensorMap,
+                                                  {attributes->x_tensor_uid(),
+                                                   attributes->y_tensor_uid(),
+                                                   attributes->scale_tensor_uid()});
     }
 
     std::unique_ptr<IGpuGraphNodePlanExecutor>

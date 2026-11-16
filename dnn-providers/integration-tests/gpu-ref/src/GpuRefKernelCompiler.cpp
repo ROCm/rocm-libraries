@@ -4,6 +4,7 @@
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 
 #include "GpuRefKernelSources.hpp"
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -151,6 +152,12 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
         headersData.emplace_back(includeStrings.back().c_str());
     }
 
+    const auto includeOption
+        = std::find(compileDefines.begin(), compileDefines.end(), "-DGPU_REF_USE_HIP_MX")
+                  != compileDefines.end()
+              ? std::make_optional(std::string("-I") + hipIncludeDir().string())
+              : std::nullopt;
+
     // Create program
     hiprtcProgram prog;
     GPU_REF_RTC_CHECK(hiprtcCreateProgram(&prog,
@@ -160,14 +167,16 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
                                           headersData.data(),
                                           includeNames.data()));
 
-    const auto includeOption = std::string("-I") + hipIncludeDir().string();
     std::vector<const char*> optPtrs;
     optPtrs.reserve(compileDefines.size() + 1);
     for(const auto& define : compileDefines)
     {
         optPtrs.push_back(define.c_str());
     }
-    optPtrs.push_back(includeOption.c_str());
+    if(includeOption)
+    {
+        optPtrs.push_back(includeOption->c_str());
+    }
 
     auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
     if(result != HIPRTC_SUCCESS)

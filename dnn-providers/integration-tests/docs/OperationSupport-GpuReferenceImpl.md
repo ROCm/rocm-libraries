@@ -95,6 +95,18 @@ but are not reachable through graph-level verification.
 | Convolution Backward Weights | `GpuConvolutionWrwPlanBuilder` | `GpuConvolutionWrwSignatureKey` | Weight gradient (wgrad) |
 | Matmul | `GpuMatmulPlanBuilder` | `GpuMatmulSignatureKey` | Generic matrix multiplication |
 
+### BlockScale Operations
+
+Quantize and dequantize support matching input/output dimensions of rank 1 to 5,
+with independent input, output and scale strides. Block sizes must be positive;
+scale dimensions must match the block partition. Quantize defaults to the last
+axis when `axis` is absent. Dequantize aligns its block-size vector to the trailing
+dimensions and supports `is_negative_scale`.
+
+Both GPU plans decline runtime pass-by-value operands, which are host pointers
+rather than device buffers. HIP FP4/FP6/FP8 headers are needed at run time only for
+block-scale kernels; other GPU reference kernels remain self-contained.
+
 ### BatchNormalization Operations
 
 | Operation | Plan Builder | Signature Key | Description |

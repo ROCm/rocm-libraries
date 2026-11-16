@@ -124,7 +124,8 @@ private:
               typename ComputeDataType>
     static std::vector<std::string> buildDefines()
     {
-        return {std::string("-DX_TYPE=") + detail::HipRtcTypeName<XDataType>::VALUE,
+        return {"-DGPU_REF_USE_HIP_MX",
+                std::string("-DX_TYPE=") + detail::HipRtcTypeName<XDataType>::VALUE,
                 std::string("-DY_TYPE=") + detail::HipRtcTypeName<YDataType>::VALUE,
                 std::string("-DSCALE_TYPE=") + detail::HipRtcTypeName<ScaleDataType>::VALUE,
                 std::string("-DCOMPUTE_TYPE=") + detail::HipRtcTypeName<ComputeDataType>::VALUE};

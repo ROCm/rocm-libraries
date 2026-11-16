@@ -3,16 +3,19 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn-gpu-ref/GpuFpReferenceBlockScale.hpp>
+#include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleDequantize.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleQuantize.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::fp4_e2m1;
 using hipdnn_data_sdk::types::fp6_e2m3;
 using hipdnn_data_sdk::types::fp6_e3m2;
 using hipdnn_data_sdk::types::fp8_e4m3;
 using hipdnn_data_sdk::types::fp8_e5m2;
 using hipdnn_data_sdk::types::fp8_e8m0;
+using hipdnn_data_sdk::types::half;
 using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_gpu_ref::GpuFpReferenceBlockScale;
 using hipdnn_test_sdk::utilities::CpuFpReferenceBlockScaleDequantize;
@@ -198,21 +201,25 @@ TEST(TestGpuFpReferenceBlockScale, DequantizeNegativeScaleHasExpectedValue)
     EXPECT_EQ(gpuY.getHostValue(0), cpuY.getHostValue(0));
 }
 
-template <typename QuantizedType>
-static void runCompactE8M0RoundTrip()
+template <typename QuantizedType, typename RealType = float, typename ScaleType = fp8_e8m0>
+static void runBlockScaleRoundTrip()
 {
-    Tensor<float> cpuX({1, 8});
+    Tensor<RealType> cpuX({1, 8});
     Tensor<QuantizedType> cpuQuantized({1, 8});
-    Tensor<fp8_e8m0> cpuScale({1, 2});
-    Tensor<float> cpuDequantized({1, 8});
-    Tensor<float> gpuX({1, 8});
+    Tensor<ScaleType> cpuScale({1, 2});
+    Tensor<RealType> cpuDequantized({1, 8});
+    Tensor<RealType> gpuX({1, 8});
     Tensor<QuantizedType> gpuQuantized({1, 8});
-    Tensor<fp8_e8m0> gpuScale({1, 2});
-    Tensor<float> gpuDequantized({1, 8});
+    Tensor<ScaleType> gpuScale({1, 2});
+    Tensor<RealType> gpuDequantized({1, 8});
 
     const std::vector<float> values{-8.0f, -3.0f, -1.0f, 0.0f, 0.5f, 2.0f, 5.0f, 9.0f};
-    cpuX.fillWithData(values.data(), values.size() * sizeof(float));
-    gpuX.fillWithData(values.data(), values.size() * sizeof(float));
+    for(int64_t column = 0; column < 8; ++column)
+    {
+        const auto value = static_cast<RealType>(values[static_cast<size_t>(column)]);
+        cpuX.setHostValue(value, 0, column);
+        gpuX.setHostValue(value, 0, column);
+    }
     CpuFpReferenceBlockScaleQuantize::quantize(cpuX, cpuQuantized, cpuScale, 4, 1);
     gpuX.memory().hostData();
     GpuFpReferenceBlockScale::quantize(gpuX, gpuQuantized, gpuScale, 4, 1);
@@ -221,12 +228,13 @@ static void runCompactE8M0RoundTrip()
 
     for(int64_t column = 0; column < 8; ++column)
     {
-        EXPECT_EQ(gpuQuantized.getHostValue(0, column).data,
-                  cpuQuantized.getHostValue(0, column).data);
+        EXPECT_EQ(static_cast<float>(gpuQuantized.getHostValue(0, column)),
+                  static_cast<float>(cpuQuantized.getHostValue(0, column)));
     }
     for(int64_t block = 0; block < 2; ++block)
     {
-        EXPECT_EQ(gpuScale.getHostValue(0, block).data, cpuScale.getHostValue(0, block).data);
+        EXPECT_EQ(static_cast<float>(gpuScale.getHostValue(0, block)),
+                  static_cast<float>(cpuScale.getHostValue(0, block)));
     }
 
     CpuFpReferenceBlockScaleDequantize::dequantize(
@@ -235,8 +243,8 @@ static void runCompactE8M0RoundTrip()
     gpuDequantized.memory().hostData();
     for(int64_t column = 0; column < 8; ++column)
     {
-        EXPECT_FLOAT_EQ(gpuDequantized.getHostValue(0, column),
-                        cpuDequantized.getHostValue(0, column));
+        EXPECT_FLOAT_EQ(static_cast<float>(gpuDequantized.getHostValue(0, column)),
+                        static_cast<float>(cpuDequantized.getHostValue(0, column)));
     }
 }
 
@@ -244,9 +252,134 @@ TEST(TestGpuFpReferenceBlockScale, CompactE8M0RoundTripsMatchCpu)
 {
     SKIP_IF_NO_DEVICES();
 
-    runCompactE8M0RoundTrip<fp4_e2m1>();
-    runCompactE8M0RoundTrip<fp6_e2m3>();
-    runCompactE8M0RoundTrip<fp6_e3m2>();
-    runCompactE8M0RoundTrip<fp8_e4m3>();
-    runCompactE8M0RoundTrip<fp8_e5m2>();
+    runBlockScaleRoundTrip<fp4_e2m1>();
+    runBlockScaleRoundTrip<fp6_e2m3>();
+    runBlockScaleRoundTrip<fp6_e3m2>();
+    runBlockScaleRoundTrip<fp8_e4m3>();
+    runBlockScaleRoundTrip<fp8_e5m2>();
+}
+
+TEST(TestGpuFpReferenceBlockScaleFp16, RoundTripMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    runBlockScaleRoundTrip<half, half, float>();
+}
+
+TEST(TestGpuFpReferenceBlockScaleBfp16, RoundTripMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    runBlockScaleRoundTrip<bfloat16, bfloat16, float>();
+}
+
+TEST(TestGpuFpReferenceBlockScaleFp16, CompactE8M0RoundTripMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    runBlockScaleRoundTrip<fp4_e2m1, half>();
+}
+
+TEST(TestGpuFpReferenceBlockScaleBfp16, CompactE8M0RoundTripMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    runBlockScaleRoundTrip<fp4_e2m1, bfloat16>();
+}
+
+TEST(TestGpuFpReferenceBlockScale, DequantizeWithPermutedOutputStridesMatchesCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> x({2, 3, 5}, {15, 5, 1});
+    Tensor<float> scale({2, 2, 3}, {1, 6, 2});
+    Tensor<float> cpuY({2, 3, 5}, {1, 10, 2});
+    Tensor<float> gpuY({2, 3, 5}, {1, 10, 2});
+    for(int64_t batch = 0; batch < 2; ++batch)
+    {
+        for(int64_t row = 0; row < 3; ++row)
+        {
+            for(int64_t column = 0; column < 5; ++column)
+            {
+                x.setHostValue(
+                    static_cast<float>(batch * 15 + row * 5 + column - 12), batch, row, column);
+            }
+        }
+        for(int64_t row = 0; row < 2; ++row)
+        {
+            for(int64_t column = 0; column < 3; ++column)
+            {
+                scale.setHostValue(
+                    static_cast<float>(batch * 6 + row * 3 + column + 1), batch, row, column);
+            }
+        }
+    }
+    CpuFpReferenceBlockScaleDequantize::dequantize(x, scale, cpuY, {2, 2});
+    GpuFpReferenceBlockScale::dequantize(x, scale, gpuY, {2, 2});
+    gpuY.memory().hostData();
+    for(int64_t batch = 0; batch < 2; ++batch)
+    {
+        for(int64_t row = 0; row < 3; ++row)
+        {
+            for(int64_t column = 0; column < 5; ++column)
+            {
+                EXPECT_FLOAT_EQ(gpuY.getHostValue(batch, row, column),
+                                cpuY.getHostValue(batch, row, column));
+            }
+        }
+    }
+}
+
+TEST(TestGpuFpReferenceBlockScale, InvalidQuantizeArgumentsThrow)
+{
+    using hipdnn_gpu_ref::ShallowGpuTensor;
+    ShallowGpuTensor<float> x(nullptr, {2, 3, 5}, {15, 5, 1});
+    ShallowGpuTensor<float> y(nullptr, {2, 3, 5}, {15, 5, 1});
+    ShallowGpuTensor<float> scale(nullptr, {2, 3, 3}, {9, 3, 1});
+    for(const auto blockSize : {0, -1})
+    {
+        EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, y, scale, blockSize),
+                     std::invalid_argument);
+    }
+    for(const int64_t axis : {-1, 3})
+    {
+        EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, y, scale, 2, axis),
+                     std::invalid_argument);
+    }
+    ShallowGpuTensor<float> wrongDims(nullptr, {2, 3, 4}, {12, 4, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, wrongDims, scale, 2), std::invalid_argument);
+    ShallowGpuTensor<float> wrongRank(nullptr, {2, 3}, {3, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, y, wrongRank, 2), std::invalid_argument);
+    ShallowGpuTensor<float> wrongScale(nullptr, {2, 3, 2}, {6, 2, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, y, wrongScale, 2), std::invalid_argument);
+    ShallowGpuTensor<float> wrongStrides(nullptr, {2, 3, 5}, {15, 5, 1, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::quantize(wrongStrides, y, scale, 2),
+                 std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, wrongStrides, scale, 2),
+                 std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceBlockScale::quantize(x, y, wrongStrides, 2), std::invalid_argument);
+}
+
+TEST(TestGpuFpReferenceBlockScale, InvalidDequantizeArgumentsThrow)
+{
+    using hipdnn_gpu_ref::ShallowGpuTensor;
+    ShallowGpuTensor<float> x(nullptr, {2, 3, 5}, {15, 5, 1});
+    ShallowGpuTensor<float> y(nullptr, {2, 3, 5}, {15, 5, 1});
+    ShallowGpuTensor<float> scale(nullptr, {2, 2, 3}, {6, 3, 1});
+    for(const auto& blockSize : std::vector<std::vector<int32_t>>{{0, 2}, {-1, 2}, {1, 1, 2, 2}})
+    {
+        EXPECT_THROW(GpuFpReferenceBlockScale::dequantize(x, scale, y, blockSize),
+                     std::invalid_argument);
+    }
+    ShallowGpuTensor<float> wrongDims(nullptr, {2, 3, 4}, {12, 4, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::dequantize(x, scale, wrongDims, {2, 2}),
+                 std::invalid_argument);
+    ShallowGpuTensor<float> wrongRank(nullptr, {2, 3}, {3, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::dequantize(x, wrongRank, y, {2, 2}),
+                 std::invalid_argument);
+    ShallowGpuTensor<float> wrongScale(nullptr, {2, 2, 2}, {4, 2, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::dequantize(x, wrongScale, y, {2, 2}),
+                 std::invalid_argument);
+    ShallowGpuTensor<float> wrongStrides(nullptr, {2, 3, 5}, {15, 5, 1, 1});
+    EXPECT_THROW(GpuFpReferenceBlockScale::dequantize(wrongStrides, scale, y, {2, 2}),
+                 std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceBlockScale::dequantize(x, wrongStrides, y, {2, 2}),
+                 std::invalid_argument);
+    EXPECT_THROW(GpuFpReferenceBlockScale::dequantize(x, scale, wrongStrides, {2, 2}),
+                 std::invalid_argument);
 }

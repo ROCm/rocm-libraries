@@ -8,9 +8,11 @@
 
 #pragma once
 
+#ifdef GPU_REF_USE_HIP_MX
 #include <hip/hip_fp4.h>
 #include <hip/hip_fp6.h>
 #include <hip/hip_fp8.h>
+#endif
 
 #include "GpuRefBatchnormArgs.h"
 #include "GpuRefBlockScaleArgs.h"
@@ -241,6 +243,7 @@ __device__ inline float roundScaleUp<float>(double value)
     return rounded;
 }
 
+#ifdef GPU_REF_USE_HIP_MX
 template <>
 __device__ inline __hip_fp8_e8m0 roundScaleUp<__hip_fp8_e8m0>(double value)
 {
@@ -251,6 +254,7 @@ __device__ inline __hip_fp8_e8m0 roundScaleUp<__hip_fp8_e8m0>(double value)
     }
     return rounded;
 }
+#endif
 
 // --- safeConvert ---
 
