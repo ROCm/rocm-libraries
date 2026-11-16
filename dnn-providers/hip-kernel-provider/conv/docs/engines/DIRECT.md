@@ -15,7 +15,7 @@ SPDX-License-Identifier:  MIT
 - **Arches:** MFMA on gfx908 to gfx950 and WMMA on gfx11/gfx12, both on the implicit-GEMM core's atoms. FMA micro-tiles everywhere, gfx906 included, as the floor and the exact-fp32 path on RDNA. `rows` runs on gfx950 (16-byte LDS DMA) and on gfx908, gfx90a and gfx942 (dword LDS DMA); its channels-first form `cf` on gfx950 only.
 - **Wins when:** dense stride-1 3x3 and 3x3x3 layers with 16-bit channels-last data (diffusion VAEs and UNets, video VAEs). On RDNA it also wins exact-fp32 3-D layers, where MIOpen falls back to naive or GEMM kernels.
 - **Loses when:**
-  - large-map NHWC bf16 VAE layers on gfx950 trail `ConvHipConv` by 1.08-1.14x;
+  - the largest NHWC bf16 VAE maps on gfx950 (384² to 1024², 4-8 images) trail `ConvHipConv` by 1.01-1.03x;
   - 384-channel 3x3x3 layers on gfx90a and gfx942 trail CK's 3-D grouped forward by 1.09-1.16x;
   - NCHW 16-bit 3x3 usually goes to `CONV_WINOGRAD`;
   - anything strided, dilated or grouped goes to `CONV_IGEMM`.
@@ -66,6 +66,8 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
   - Rows, block shape: `WP x WQ x WK` waves.
   - Rows, LDS: the halo is stored in 16-byte granules rotated per column, so 16-byte reads are conflict-free. A DMA instruction writes 64 consecutive granules; without 16-byte DMA it takes four dword sub-instructions with the same fetch addresses.
   - Rows, ping-pong (`pp 1`): the two channel halves run as two wave groups one barrier apart, and each step is "memory phase | barrier | MMAs at raised priority | barrier".
+  - Rows, ping-pong halo fill on gfx950 (16-byte DMA, no unfold): the first `XG` waves each own one 8-column strip of the halo and fill all its rows. A lane's offset within a row is computed once per chunk, so each DMA row costs one scalar offset; a step's memory phase is about 26 VALU and 53 SALU instructions. Every other config deals the halo's DMA instructions round-robin over all waves: without ping-pong, strips leave the DMA on fewer waves, which measured 1-2% slower.
+  - Rows, ping-pong staged epilogue (same configs): each wave stages through two slots at the end of the stage the last chunk read, double-buffered by output row, and no barrier follows. The next tile's DMA into that stage starts with the step-0 rows, which lie below the slots; every later DMA step comes after a barrier that the lagging wave group reaches only after its epilogue.
   - Rows, epilogue: `epi 1` (16-bit output) transposes through LDS so 8 lanes store 16 channels of a pixel as 16-byte pieces, with XOR-keyed slots for conflict-free writes. `epi 0` stores directly.
   - Rows, batch unfold (`un` 2 or 4, 2-D): an MFMA's 16 columns hold 16/un columns of un consecutive images, so narrow maps (24², 40²) fill the atom.
   - Rows, gfx908: 8-wave blocks run two waves per SIMD at 128 VGPRs and 128 AGPRs, so its tiles keep 8-12 accumulator sets per wave; bf16 runs on the 16x16x8 atom.
@@ -144,8 +146,8 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - nnU-Net fp32 NCHW 3-D on RDNA (50-100x, against MIOpen's naive kernels).
   - `rows` measured 1.28x over the halo tile on gfx950 (Flux c256 768²), and its gfx90a ping-pong tiles 1.04-1.12x over the halo tile from 256 channels.
 - **Weak:**
-  - gfx950 large-map VAE bf16 against `ConvHipConv` (192²-384², c256-c512, 1.08-1.14x);
-  - 40² c1280 tiles that fill a persistent round badly (the 4-image unfold brings them to 1.13-1.18x behind `ConvHipConv`);
+  - gfx950's largest-map VAE bf16 layers against `ConvHipConv` (384²-1024², c256-c512, 4-8 images, 1.01-1.03x);
+  - 40² c1280 tiles that fill a persistent round badly (with the 4-image unfold they trail `ConvHipConv`'s batch-packed `direct` tile by about 1.1x);
   - gfx90a/gfx942 384-channel 3x3x3 forward against CK (1.09-1.16x);
   - gfx908 bf16, which runs on the half-rate 16x16x8 atom: `rows` reaches 60-66 TFLOP/s (65-72% of the atom's peak) against CK's 72-78%, so CK keeps most large bf16 layers. gfx908 fp32 is mixed.
   - On gfx942, the 16-bit `rows` tiles (no ping-pong) take most 2-D 3x3 layers from the halo tile in a kernel-only sweep, but for only about 7% of the weighted time. 3x3x3 `rows` tiles measure slower there and do not ship.
@@ -159,7 +161,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 - **Reduced precision:** the three-bf16 form computes xh·wh + xh·wl + xl·wh on bf16 atoms over 3C reduction channels, with fp32 output. Its error is about 2^-16 of each product. It is admitted only for fp32 graphs, and only the `CONV_DIRECT_FWD/BWD_TF32` siblings list it; they report `TENSOR_CORE`, by which a caller excludes them (`deselect_numeric_notes`).
 
 ## Comparison with MIOpen
-- **`ConvHipConv`** (hipconv; MIOpen's pick on gfx950 in our sweeps) uses the same `direct` / `direct_l1` design as K2's `rows`, NHWC 16-bit only. K2 trails it by 1.08-1.14x on large-map NHWC VAE layers. hipconv serves NCHW through three transposes; K2's `cf` configs read NCHW in place. Its remaining tricks are in-workgroup channel split and dynamic per-XCD tile claiming, estimated at under about 20 ms of weighted time per architecture. Kernel-argument preload does not apply: LLVM preloads only scalar kernel arguments, and every K2 kernel takes one argument block.
+- **`ConvHipConv`** (hipconv; MIOpen's pick on gfx950 in our sweeps) uses the same `direct` / `direct_l1` design as K2's `rows`, NHWC 16-bit only. On the 70 subset graphs where hipconv runs `direct_l1`, K2 is 1.05x faster usage-weighted (MI355X, autotuned, alternating with exhaustively tuned hipconv on one GPU). The graphs it trails are the largest VAE maps (384²-1024²) and a 96² c1280 UNet layer, each by at most 1.03x. Its main ping-pong tile matches hipconv's 16 x 32 x 128 `direct_l1` tile, including the strip-owned halo DMA and the barrier-free staged epilogue. hipconv serves NCHW through three transposes; K2's `cf` configs read NCHW in place. Not adopted: in-workgroup channel split, dynamic per-XCD tile claiming, and the K-partitioned L2 grid (a slice-major K walk measured within 1% on c512-c1280 layers). Kernel-argument preload does not apply: LLVM preloads only scalar kernel arguments, and every K2 kernel takes one argument block.
 - **CK `ConvHipImplicitGemm{,3D}Group{Fwd,Bwd}Xdlops`** (gfx908-gfx942; the same solver names cover CK's WMMA instances on RDNA): an implicit GEMM, NHWC only. K2 beats it on most 3x3 / 3x3x3 layers by reusing the staged halo across taps. It loses on the 384-channel 3-D shapes above.
 - **Winograd** (`ConvBinWinograd*`, `ConvWinoRage/Fury`) serves NCHW fp16 3x3. Our matching engine is `CONV_WINOGRAD`.
 - **GEMM / naive fallbacks** (`GemmFwdRest`, `ConvDirectNaiveConv*`): exact fp32 3-D on RDNA has no optimized MIOpen solver. K2's FMA kernels are 50-100x faster there.
@@ -173,7 +175,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 No code was copied.
 
 ## Next steps and deferred ideas
-1. **gfx950 large-map VAE gap vs `ConvHipConv`** (1.08-1.14x, the top gfx950 K2 loss): wider tile and walk options, and the unported hipconv pieces (csplit, dynamic XCD claiming). The expected payoff is small: under about 20 ms weighted, by estimate.
+1. **gfx950's largest VAE maps vs `ConvHipConv`** (1.01-1.03x behind on 384²-1024² layers). Measured and not adopted: a row-fastest tile walk (no gain) and hipconv's DMA spread over every step with the drain after the last step's MMAs (0.2-0.3% faster, within run-to-run spread). csplit and dynamic XCD claiming remain unported.
 2. **3x3x3 on gfx90a/gfx942 against CK at 384 channels.** On gfx90a, rows3d measured 1.07-1.14x over the halo tile on 96-channel Wan VAE layers and 1.08x on one 384-channel layer. Wider rows3d tiles, or K-fill tiles for 384, are the candidates. Dense 3x3x3 is the largest single block of our CDNA time.
 3. **Generic tier** (runtime filter for other sizes, 1-D): low priority, because `CONV_IGEMM` already serves those graphs.
 4. **Images past 2 GiB:** a block-based-buffer variant on the generic tier only, so normal graphs gain no candidates. `CONV_IGEMM` serves these today.

@@ -386,7 +386,13 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
     constexpr int XPI = WAVE / G; // columns per DMA instruction
     constexpr int XG = (HW + XPI - 1) / XPI; // instructions per halo row
     constexpr int NI = HH * XG; // instructions per stage
-    constexpr int IPW = (NI + NW - 1) / NW; // per wave (the last one only for some waves)
+    // Column strips (ping-pong, 16-byte DMA, UN 1): wave xg < XG owns the halo's xg-th XPI-column
+    // strip and fills all HH rows of it, so a lane's offset within a row is fixed for the chunk and
+    // a row costs one scalar offset. Without ping-pong the strips leave the DMA on fewer waves, which
+    // measured 1-2% slower; there, and elsewhere, the NI instructions are dealt round-robin over the
+    // waves.
+    constexpr bool STRIP = K2R_DMA16 != 0 && UN == 1 && XG <= NW && PP == 1;
+    constexpr int IPW = STRIP ? HH : (NI + NW - 1) / NW; // per wave (the last only for some)
     // DMA per step over steps 0..NQ-2 (step 0 alone when a chunk is one step).
     constexpr int DSTEPS = NQ > 1 ? NQ - 1 : 1;
     constexpr int DPS = (IPW + DSTEPS - 1) / DSTEPS;
@@ -470,10 +476,68 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
     // This wave's DMA instructions [i0, i1) of chunk cc of tile tc into stage st. Lane l takes
     // column x = XPI xg + l / G and slot l % G, so its granule g = (l % G - x) mod G is the same
     // for every instruction. Out-of-image pixels and channels past c read as zero.
+    // Column strips (STRIP): a lane's offset within a halo row, computed once per chunk (its column
+    // and granule are fixed for the chunk); dmaRows then costs one scalar row offset per row. An
+    // out-of-image column or a channel past c reads zero through the out-of-range offset, and a row
+    // outside the image through the same offset (it adds nothing to soffset).
+#if K2R_DMA16
+    auto dmaPrep = [&](const Tile& tc, int cc) __attribute__((always_inline))
+    {
+        const int ln = olane();
+        const int lx = ln / G;
+        const int gofs = static_cast<int>(static_cast<unsigned>(ln % G - lx) & (G - 1)) * GE;
+        const int iw = tc.ow0 - a.pw + wave * XPI + lx;
+        const bool vok
+            = (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & (gofs < a.c - cc * BC);
+        return vok ? static_cast<unsigned>((iw * a.c + gofs) * static_cast<int>(sizeof(T)))
+                   : K1_OUT_OF_RANGE;
+    };
+    // Rows [i0, i1) of this wave's strip (waves past the XG strips issue none).
+    auto dmaRows = [&](Raw16 * st, const Tile& tc, int cc, unsigned voff, int i0, int i1)
+        __attribute__((always_inline))
+    {
+        if(wave >= XG)
+            return;
+        const __amdgpu_buffer_rsrc_t xr
+            = k1Rsrc(static_cast<const T*>(a.x) + tc.img * imgElems, imgBytes);
+        const int rowBytes = a.wi * a.c * static_cast<int>(sizeof(T));
+        const int cbytes = cc * BC * static_cast<int>(sizeof(T));
+        const bool lok = HW % XPI == 0 || wave * XPI + olane() / G < HW;
+#pragma unroll
+        for(int h = 0; h < IPW; ++h)
+        {
+            if(h < i0 || h >= i1)
+                continue;
+            const int ih = tc.oh0 - a.ph + h;
+            const bool hok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi);
+            if(lok)
+                __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                    xr,
+                    (__attribute__((address_space(3))) void*)(st + h * ROWG + wave * WAVE),
+                    16,
+                    hok ? voff : K1_OUT_OF_RANGE,
+                    (hok ? ih * rowBytes : 0) + cbytes,
+                    0,
+                    0);
+        }
+    };
+#else
+    auto dmaPrep = [&](const Tile&, int) __attribute__((always_inline))
+    {
+        return 0u;
+    };
+    auto dmaRows
+        = [&](Raw16*, const Tile&, int, unsigned, int, int) __attribute__((always_inline)){};
+#endif
 #if K2R_DMA16
     auto dma
         = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
     {
+        if constexpr(STRIP)
+        {
+            dmaRows(st, tc, cc, dmaPrep(tc, cc), i0, i1);
+            return;
+        }
         const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
         // UN > 1: the tile's images in one buffer (the planner keeps UN images under 2 GiB);
         // the last group's missing images read as zero.
@@ -662,6 +726,9 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
         constexpr int cs = decltype(CUR)::value;
         const Raw16* cur = cs ? st1 : st0;
         Raw16* nxt = cs ? st0 : st1;
+        unsigned voff = 0;
+        if constexpr(STRIP)
+            voff = dmaPrep(dmaTile, dmaCc);
         k2StaticFor<0, NQ>([&](auto Q) __attribute__((always_inline)) {
             constexpr int q = decltype(Q)::value;
             constexpr int s = q / KK, kk = (q % KK) * KA;
@@ -673,7 +740,12 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
                 loadW(wfr[r], r, nb, cc, q);
             if constexpr(q < DSTEPS)
             {
-                if(pf)
+                if constexpr(STRIP)
+                {
+                    if(pf)
+                        dmaRows(nxt, dmaTile, dmaCc, voff, q * DPS, (q + 1) * DPS);
+                }
+                else if(pf)
                     dma(nxt, dmaTile, dmaCc, q * DPS, (q + 1) * DPS);
             }
             Frag xin[NR];
@@ -698,7 +770,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
                 // waits a little longer).
                 constexpr int i0 = q * DPS;
                 constexpr int i1 = (q + 1) * DPS < IPW ? (q + 1) * DPS : IPW;
-                constexpr int full = NI / NW;
+                constexpr int full = STRIP ? IPW : NI / NW;
                 constexpr int dmin = i1 <= full ? i1 - i0 : (i0 < full ? full - i0 : 0);
                 // K2R_DMA_SUB instructions per issue slot; vmcnt holds at most 63.
                 constexpr int dmi = (dmin > 0 ? dmin : 0) * K2R_DMA_SUB;
@@ -845,6 +917,71 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
         }
     };
 
+    // Ping-pong with column-strip DMA: the staged epilogue without barriers. Each wave owns two
+    // slots at the end of the stage the last chunk consumed and stages row p + 1 while row p is
+    // read back. The next tile's DMA into that stage starts with the step-0 rows [0, DPS), which
+    // the slots lie past; the only wave that can issue them before another wave's last slot read
+    // is a lead-group wave at step 0, and every later step follows a barrier the lagging group
+    // reaches only after its epilogue.
+    constexpr int NSLOT = NW * 2 * DIM * GP;
+    constexpr bool EPINB = STRIP && PP == 1 && STAGED && NG - NSLOT >= DPS * ROWG;
+    auto storeStagedNb = [&](Raw16 * stage, const Tile& tc, int nb) __attribute__((always_inline))
+    {
+        constexpr int XR = GP < 8 ? 8 / GP : 1;
+        Raw16* slots = stage + (NG - NSLOT) + wave * 2 * DIM * GP;
+        TO* y = static_cast<TO*>(a.y);
+        const int l = olane();
+        const int x = l % DIM, g = l / DIM;
+        const int px = l / GP, c8 = l % GP; // reader: pixel, granule
+        constexpr int PPI = WAVE / GP; // pixels per store instruction
+        auto stageRow = [&](int p, Raw16* slot) __attribute__((always_inline))
+        {
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+            {
+                typedef TO v4 __attribute__((ext_vector_type(4)));
+                const v4 o = k2rPack4<TO>(acc[p][j]);
+                const int gi = (j * DIM + g * 4) * static_cast<int>(sizeof(TO)) / 16;
+                const int half = ((g * 4 * static_cast<int>(sizeof(TO))) % 16) ^ ((x >> 3) * 8);
+                *reinterpret_cast<v4*>(
+                    reinterpret_cast<char*>(slot + x * GP + (gi ^ ((x / XR) & (GP - 1)))) + half)
+                    = o;
+            }
+        };
+        stageRow(0, slots);
+#pragma unroll
+        for(int p = 0; p < PW; ++p)
+        {
+            // Lanes read other lanes' writes of row p and overwrite the slot read two rows back:
+            // keep the compiler from moving LDS accesses across rows (the LDS keeps a wave's order).
+            __builtin_amdgcn_wave_barrier();
+            Raw16* slot = slots + (p & 1) * DIM * GP;
+            Raw16 v[DIM / PPI > 0 ? DIM / PPI : 1]; // an unstaged config (GP < 4) never runs it
+#pragma unroll
+            for(int k = 0; k < DIM / PPI; ++k)
+            {
+                const int xx = px + k * PPI;
+                v[k] = slot[xx * GP + (c8 ^ ((xx / XR) & (GP - 1)))];
+            }
+            if(p + 1 < PW)
+                stageRow(p + 1, slots + ((p + 1) & 1) * DIM * GP);
+            const int oh = tc.oh0 + wp * PW + p;
+#pragma unroll
+            for(int k = 0; k < DIM / PPI; ++k)
+            {
+                const int xx = px + k * PPI;
+                if((xx >> 3) & 1)
+                    v[k] = __builtin_shufflevector(v[k], v[k], 2, 3, 0, 1);
+                const int ow = tc.ow0 + wq * DIM + xx;
+                const int n = nb + c8 * (16 / static_cast<int>(sizeof(TO)));
+                if(oh < a.ho && ow < a.wo && n < a.k)
+                    *reinterpret_cast<Raw16*>(
+                        y + ((static_cast<long long>(tc.img) * a.ho + oh) * a.wo + ow) * a.k + n)
+                        = v[k];
+            }
+        }
+    };
+
     // The block's chunks as one stream over its tiles, two per iteration (stage 0, then stage
     // 1), so the chunk body exists twice whatever the parity of the chunk count. A tile's last
     // chunk prefetches the first chunk of the block's next tile, then the epilogue writes it.
@@ -890,7 +1027,15 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a CONV_E
         // Once per tile, ahead of whichever store runs.
         epilogue(nb);
 #endif
-        if constexpr(STAGED && PP == 1)
+        if constexpr(EPINB)
+        {
+            // As below, without the two barriers (storeStagedNb).
+            if((a.k & (16 / static_cast<int>(sizeof(TO)) - 1)) == 0)
+                storeStagedNb(sc ? st1 : st0, tc, nb);
+            else
+                store(tc, nb);
+        }
+        else if constexpr(STAGED && PP == 1)
         {
             // Ping-pong: a group's last post-MMA barrier pairs with the other group's pre-MMA
             // barrier, which follows that group's last reads of stage sc, so each group stages its
