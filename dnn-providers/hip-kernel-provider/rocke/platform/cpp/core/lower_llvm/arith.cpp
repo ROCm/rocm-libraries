@@ -428,7 +428,9 @@ static void _op_arith_fmin3(rocke_lower_t* L, const rocke_op_t* op)
     ll_fminmax3(L, op, "minnum", "fmin3.bc");
 }
 
-/* Python _op_arith_cmp. */
+/* Python _op_arith_cmp: the pred is checked by the IR rule first
+ * (rocke_i_cmp_pred_error, ROCKE_ERR_VALUE: "ult" takes i32 or i64 operands,
+ * and a pred that is not a known string is refused, not read as "lt"). */
 static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
@@ -436,13 +438,19 @@ static void _op_arith_cmp(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    char pred_buf[128];
+    const char* pred_error = rocke_i_cmp_pred_error(&op->attrs, a->type, pred_buf, sizeof pred_buf);
+    if(pred_error)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", pred_error);
+    }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     if(pred == NULL)
     {
         pred = "lt";
     }
-    const rocke_value_t* a = op->operands[0];
-    const rocke_value_t* b = op->operands[1];
     const char* llvm_pred = rocke_ll_icmp_predicate(L, "arith.cmp", pred, a->type);
     rocke_ll_emitf(L,
                    "  %s = icmp %s %s %s, %s",

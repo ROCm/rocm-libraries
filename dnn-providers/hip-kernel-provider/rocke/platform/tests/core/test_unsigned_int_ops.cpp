@@ -10,14 +10,14 @@
  * through the unsigned type of the operand's own width) and its refusal of a
  * non-integer operand, the builders' and the verifier's integer-element rule
  * for the bitwise ops and shifts (an integer or i1 element) and lshr's shift
- * amount of the value's type (texts identical to the Python engine's), the HIP
- * refusal of a pred the verifier refuses, the builders' operand-type
- * refusals, the verifier's acceptance of the new attrs
- * and its refusals of bad marker attrs (texts identical to the Python
- * verifier), and the constant folder (unsigned compare at the operand width;
- * constants read at their width; a marker on a constant folds to the constant;
- * signed div / mod rounded toward zero, undefined ones left unfolded), and the
- * verifier's i32 / i64 rule for the nuw and ult forms.
+ * amount of the value's type (texts identical to the Python engine's), the
+ * LLVM and HIP refusals of a pred the verifier refuses, the builders'
+ * operand-type refusals, the verifier's acceptance of the new attrs and its
+ * refusals of bad marker attrs (texts identical to the Python verifier), and
+ * the constant folder (unsigned compare at the operand width; constants read
+ * at their width; a marker on a constant folds to the constant; signed div /
+ * mod rounded toward zero, undefined ones left unfolded), and the verifier's
+ * i32 / i64 rule for the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -69,17 +69,31 @@ void build_two_op(rocke_ir_builder_t* b, const rocke_type_t* type)
     rocke_b_ret(b);
 }
 
-std::string lower_llvm(rocke_ir_builder_t* b)
+/* Lower b's kernel to LLVM IR (llvm20, gfx942); the text on success, else ""
+ * with the status returned and the lowerer's message in *error. */
+rocke_status_t lower_llvm_status(rocke_ir_builder_t* b, std::string* llvm, std::string* error)
 {
     char* text = nullptr;
-    std::string out;
-    if(rocke_lower_kernel_to_llvm(
-           rocke_ir_builder_kernel(b), ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &text)
-           == ROCKE_OK
-       && text)
-        out = text;
+    char message[ROCKE_ERR_MSG_CAP];
+    message[0] = '\0';
+    const rocke_status_t status = rocke_lower_kernel_to_llvm_ex(rocke_ir_builder_kernel(b),
+                                                                ROCKE_LLVM_FLAVOR_LLVM20,
+                                                                "gfx942",
+                                                                &text,
+                                                                message,
+                                                                sizeof message);
+    llvm->assign(status == ROCKE_OK && text ? text : "");
+    error->assign(message);
     free(text);
-    return out;
+    return status;
+}
+
+std::string lower_llvm(rocke_ir_builder_t* b)
+{
+    std::string llvm;
+    std::string error;
+    lower_llvm_status(b, &llvm, &error);
+    return llvm;
 }
 
 /* Lower b's kernel to HIP for gfx942; the text on success, else "" with the
@@ -572,11 +586,12 @@ void case_unsigned_forms_need_i32_or_i64()
     }
 }
 
-/* The HIP lowering checks an arith.cmp pred against the verifier's rule before
- * reading it and refuses it with ROCKE_ERR_VALUE in the verifier's words: ult
- * takes i32 or i64 operands, and an unknown or non-string pred is not read as
- * lt. The same cases and texts as test_unsigned_int_ops.py. */
-void case_hip_refuses_a_bad_pred()
+/* The LLVM and HIP lowerings check an arith.cmp pred against the verifier's
+ * rule before reading it and refuse it with ROCKE_ERR_VALUE in the verifier's
+ * words: ult takes i32 or i64 operands (an f32 ult is not lowered to an integer
+ * compare), and an unknown or non-string pred is not read as lt. The same
+ * cases and texts as test_unsigned_int_ops.py. */
+void case_lowerings_refuse_a_bad_pred()
 {
     struct PredCase
     {
@@ -607,20 +622,29 @@ void case_hip_refuses_a_bad_pred()
         }
         rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &attrs, "cmp");
         rocke_b_ret(&b);
+        const auto status_text = [](rocke_status_t status, const std::string& message) {
+            return "status " + std::to_string((int)status) + " '" + message + "'";
+        };
+        const std::string want = status_text(ROCKE_ERR_VALUE, c.want);
+
+        std::string llvm;
+        std::string llvm_error;
+        const rocke_status_t llvm_status = lower_llvm_status(&b, &llvm, &llvm_error);
+        const std::string llvm_got = status_text(llvm_status, llvm_error);
+        EXPECT(llvm_got == want, "LLVM: want " + want + ", got " + llvm_got);
+
         std::string hip;
-        const rocke_status_t status = lower_hip_status(&b, &hip);
-        const char* msg = rocke_ir_builder_error(&b);
-        EXPECT(status == ROCKE_ERR_VALUE && msg && std::string(c.want) == msg,
-               "want status " + std::to_string((int)ROCKE_ERR_VALUE) + " '" + c.want
-                   + "', got status " + std::to_string((int)status) + " '" + (msg ? msg : "")
-                   + "'");
+        const rocke_status_t hip_status = lower_hip_status(&b, &hip);
+        const char* hip_error = rocke_ir_builder_error(&b);
+        const std::string hip_got = status_text(hip_status, hip_error ? hip_error : "");
+        EXPECT(hip_got == want, "HIP: want " + want + ", got " + hip_got);
         rocke_ir_builder_free(&b);
     }
 }
 
 /* A wrap or pred of another attr kind is refused, not read as the default
- * (nsw, lt): by the verifier, and for the wrap by both lowerers (the HIP
- * lowerer's refusal of such a pred is case_hip_refuses_a_bad_pred). */
+ * (nsw, lt): by the verifier, and for the wrap by both lowerers (the
+ * lowerers' refusal of such a pred is case_lowerings_refuse_a_bad_pred). */
 void case_non_string_wrap_and_pred()
 {
     const char* wrap_error = "arith.add: wrap must be the string 'nsw' or 'nuw'";
@@ -842,7 +866,7 @@ int main(int argc, char** argv)
     case_lshr_hip_text();
     case_integer_element_builder_rule();
     case_integer_element_verifier_rule();
-    case_hip_refuses_a_bad_pred();
+    case_lowerings_refuse_a_bad_pred();
     case_builder_refusals();
     case_verifier_accepts();
     case_verifier_rejects_marker_attrs();
