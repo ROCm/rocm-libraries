@@ -157,6 +157,37 @@ __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
                                                KPad};
 }
 
+__host__ __device__ constexpr auto make_conv_fwd_data_in_transform(index_t N,
+                                                                   index_t Hi,
+                                                                   index_t Wi,
+                                                                   index_t C,
+                                                                   index_t Y,
+                                                                   index_t X,
+                                                                   index_t Ho,
+                                                                   index_t Wo,
+                                                                   index_t ConvStrideH,
+                                                                   index_t ConvStrideW,
+                                                                   index_t ConvDilationH,
+                                                                   index_t ConvDilationW,
+                                                                   index_t InLeftPadH,
+                                                                   index_t InLeftPadW)
+{
+    return ConvFwdDataImplicitGemmInTransform{N,
+                                              Hi,
+                                              Wi,
+                                              C,
+                                              Y,
+                                              X,
+                                              Ho,
+                                              Wo,
+                                              ConvStrideH,
+                                              ConvStrideW,
+                                              ConvDilationH,
+                                              ConvDilationW,
+                                              InLeftPadH,
+                                              InLeftPadW};
+}
+
 template <typename LowerIndex>
 __host__ __device__ constexpr auto make_freeze_transform(const LowerIndex& low_idx)
 {
