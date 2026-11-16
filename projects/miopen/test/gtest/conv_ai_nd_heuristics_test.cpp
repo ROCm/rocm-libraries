@@ -1165,8 +1165,17 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
 // failure this guards against.
 TEST(CPU_ConvNDTunaNet_NONE, Gfx1250ModelRunsAndWidthMatches)
 {
-    if(!immed_mode::HasBundledTunaNetModels("gfx1250"))
-        GTEST_SKIP() << "gfx1250 TunaNet models not installed";
+    // Gate on the actual shipped files at GetSystemDbPath(), not HasBundledTunaNetModels (an
+    // arch-support predicate that is true for gfx1250 even on a runner that deploys only the host
+    // arch's models, where GetNDModel would then return a model whose metadata failed to load).
+    // Mirrors the candidate-selection CPU suite: run a dim only if its assets ship here, skip the
+    // whole test if neither does.
+    const auto db          = miopen::GetSystemDbPath();
+    const auto dim_present = [&](int dim) {
+        const std::string sfx = (dim == 3) ? "_3d" : "";
+        return miopen::fs::exists(db / ("gfx1250" + sfx + ".tn.model")) &&
+               miopen::fs::exists(db / ("gfx1250" + sfx + "_metadata.tn.model"));
+    };
 
     const auto make_problem = [](int dim) {
         if(dim == 3)
@@ -1193,8 +1202,12 @@ TEST(CPU_ConvNDTunaNet_NONE, Gfx1250ModelRunsAndWidthMatches)
             in, wei, out, conv, miopen::conv::Direction::Forward);
     };
 
+    int ran = 0;
     for(int dim : {2, 3})
     {
+        if(!dim_present(dim))
+            continue;
+        ++ran;
         auto model = immed_mode::GetNDModel("gfx1250", dim);
         ASSERT_NE(model, nullptr) << "GetNDModel returned null for gfx1250 " << dim << "D";
         const auto problem = make_problem(dim);
@@ -1206,6 +1219,8 @@ TEST(CPU_ConvNDTunaNet_NONE, Gfx1250ModelRunsAndWidthMatches)
             << "gfx1250 " << dim << "D: expected one probability per solver";
         EXPECT_FALSE(probs.empty());
     }
+    if(ran == 0)
+        GTEST_SKIP() << "gfx1250 TunaNet model assets not installed at " << db;
 }
 
 } // namespace
