@@ -3,7 +3,9 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -15,11 +17,14 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
@@ -36,7 +41,11 @@ using namespace hipdnn_frontend::graph;
  * @brief The conv engines' failure paths through the public API:
  *        - a HIPRTC compile failure costs only its engine: the graph is served by the next one;
  *        - with HIPRTC disabled, a program the disk cache holds still serves and any other plan
- *          declines at plan build.
+ *          declines at plan build;
+ *        - a workspace limit below an engine's need declines that engine at plan build, through
+ *          the frontend's deselect_workspace_greater_than() and through the backend knob
+ *          global.workspace_size_limit as the plugin receives it; and the workspace a plan
+ *          reports is all it uses.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -175,6 +184,21 @@ int64_t engineId(std::string_view name)
     return hipdnn_data_sdk::utilities::engineNameToId(std::string(name));
 }
 
+std::string engineName(hipdnnHandle_t handle, int64_t id)
+{
+    size_t length = 0;
+    if(hipdnnGetEngineNameById_ext(handle, id, nullptr, &length) != HIPDNN_STATUS_SUCCESS)
+    {
+        return std::to_string(id);
+    }
+    std::vector<char> name(length);
+    if(hipdnnGetEngineNameById_ext(handle, id, name.data(), &length) != HIPDNN_STATUS_SUCCESS)
+    {
+        return std::to_string(id);
+    }
+    return name.data();
+}
+
 /// One case: an engine, and a graph for it.
 struct ConvCase
 {
@@ -216,6 +240,116 @@ ConvSpec spec(Direction direction,
 void PrintTo(const ConvCase& value, std::ostream* out)
 {
     *out << value.name;
+}
+
+/// The families whose plans can take workspace, each with a small graph that makes its engine
+/// stage, split or transform through it. The depthwise VALU, rows and matrix-core forward and
+/// backward-data engines and the naive engines take none.
+std::vector<ConvCase> workspaceCases()
+{
+    const auto fwd = Direction::FWD;
+    const auto bwd = Direction::BWD;
+    const auto wrw = Direction::WRW;
+    const auto half = DataType::HALF;
+    return {
+        {"WinogradFwd", "hipkernel:CONV_WINOGRAD_FWD", spec(fwd, 16, 16, 1, 16, 3, 1, 1, false)},
+        {"WinogradWrw", "hipkernel:CONV_WINOGRAD_WRW", spec(wrw, 16, 16, 1, 16, 3, 1, 1, false)},
+        // Above the FFT engines' arithmetic floor: a large filter on a 64x64 image.
+        {"FftFwd",
+         "hipkernel:CONV_FFT_FWD",
+         spec(fwd, 32, 32, 1, 64, 11, 5, 1, false, DataType::FLOAT, 1)},
+        {"FftWrw",
+         "hipkernel:CONV_FFT_WRW",
+         spec(wrw, 32, 32, 1, 64, 11, 5, 1, false, DataType::FLOAT, 1)},
+        {"Wrw", "hipkernel:CONV_WRW", spec(wrw, 32, 32, 1, 14, 3, 1, 1, true, half, 4)},
+        {"IgemmFwd", "hipkernel:CONV_IGEMM_FWD", spec(fwd, 32, 32, 1, 14, 3, 1, 1, false, half)},
+        {"IgemmBwd", "hipkernel:CONV_IGEMM_BWD", spec(bwd, 32, 32, 1, 14, 3, 1, 2, true, half)},
+        // A long reduction over few rows, which the native-NCHW engine splits.
+        {"IgemmNchwBwd",
+         "hipkernel:CONV_IGEMM_NCHW_BWD",
+         spec(bwd, 32, 256, 1, 4, 3, 1, 1, false, half, 1)},
+        {"GroupFwd", "hipkernel:CONV_GROUP_FWD", spec(fwd, 32, 32, 4, 14, 3, 1, 1, false, half)},
+        {"GroupWrw", "hipkernel:CONV_GROUP_WRW", spec(wrw, 32, 32, 4, 14, 3, 1, 1, true, half, 4)},
+        {"GroupValuFwd", "hipkernel:CONV_GROUP_VALU_FWD", spec(fwd, 32, 32, 8, 14, 3, 1, 1, false)},
+        {"GroupValuWrw",
+         "hipkernel:CONV_GROUP_VALU_WRW",
+         spec(wrw, 32, 32, 8, 28, 3, 1, 1, false, DataType::FLOAT, 8)},
+        {"DepthwiseValuWrw",
+         "hipkernel:CONV_DEPTHWISE_VALU_WRW",
+         spec(wrw, 16, 16, 16, 16, 3, 1, 1, false, DataType::FLOAT, 4)},
+        {"DirectFwd", "hipkernel:CONV_DIRECT_FWD", spec(fwd, 16, 16, 1, 14, 3, 1, 1, false)},
+        {"SmallcFwd", "hipkernel:CONV_SMALLC_FWD", spec(fwd, 3, 16, 1, 32, 3, 1, 1, false, half)},
+        {"StemBwd", "hipkernel:CONV_STEM_BWD", spec(bwd, 3, 16, 1, 32, 7, 3, 2, false, half)},
+    };
+}
+
+/// The provider's plugin ABI, resolved from the copy the harness loaded.
+struct PluginAbi
+{
+    void* library = nullptr;
+    decltype(&hipdnnEnginePluginCreate) create = nullptr;
+    decltype(&hipdnnEnginePluginDestroy) destroy = nullptr;
+    decltype(&hipdnnEnginePluginCreateExecutionContext) createContext = nullptr;
+    decltype(&hipdnnEnginePluginDestroyExecutionContext) destroyContext = nullptr;
+    decltype(&hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext) workspaceSize = nullptr;
+
+    PluginAbi()
+    {
+        library = hipdnn_data_sdk::utilities::openLoadedLibrary(detail::loadedProviderPluginPath());
+        if(library == nullptr)
+        {
+            return;
+        }
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+        create = reinterpret_cast<decltype(create)>(
+            hipdnn_data_sdk::utilities::getSymbol(library, "hipdnnEnginePluginCreate"));
+        destroy = reinterpret_cast<decltype(destroy)>(
+            hipdnn_data_sdk::utilities::getSymbol(library, "hipdnnEnginePluginDestroy"));
+        createContext
+            = reinterpret_cast<decltype(createContext)>(hipdnn_data_sdk::utilities::getSymbol(
+                library, "hipdnnEnginePluginCreateExecutionContext"));
+        destroyContext
+            = reinterpret_cast<decltype(destroyContext)>(hipdnn_data_sdk::utilities::getSymbol(
+                library, "hipdnnEnginePluginDestroyExecutionContext"));
+        workspaceSize
+            = reinterpret_cast<decltype(workspaceSize)>(hipdnn_data_sdk::utilities::getSymbol(
+                library, "hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext"));
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    }
+
+    ~PluginAbi()
+    {
+        if(library != nullptr)
+        {
+            hipdnn_data_sdk::utilities::closeLibrary(library);
+        }
+    }
+
+    PluginAbi(const PluginAbi&) = delete;
+    PluginAbi& operator=(const PluginAbi&) = delete;
+    PluginAbi(PluginAbi&&) = delete;
+    PluginAbi& operator=(PluginAbi&&) = delete;
+
+    bool complete() const
+    {
+        return create != nullptr && destroy != nullptr && createContext != nullptr
+               && destroyContext != nullptr && workspaceSize != nullptr;
+    }
+};
+
+/// An engine config for @p engine carrying global.workspace_size_limit = @p limit.
+std::vector<uint8_t> engineConfigWithWorkspaceLimit(int64_t engine, int64_t limit)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<data_objects::KnobSetting>> knobs;
+    knobs.push_back(data_objects::CreateKnobSettingDirect(
+        builder,
+        hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
+        data_objects::KnobValue::IntValue,
+        data_objects::CreateIntValue(builder, limit).Union()));
+    builder.Finish(data_objects::CreateEngineConfig(builder, engine, builder.CreateVector(knobs)));
+    return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
 }
 
 } // namespace
@@ -339,6 +473,112 @@ TEST_F(IntegrationGpuConvRobustness, WithHiprtcDisabledCachedProgramsServeAndMis
     verify(*graph, conv);
     ASSERT_EQ(detail::resetProviderHiprtcModules(), "");
 }
+
+// One case per family: the plan's reported workspace is all it uses, and a limit one byte
+// below it declines the engine at plan build -- through the frontend and through the backend
+// knob -- never at execute.
+TEST_P(IntegrationGpuConvRobustness, WorkspaceLimitBelowTheNeedDeclinesAtPlanBuild)
+{
+    const auto& param = GetParam();
+    const auto engine = engineId(param.engine);
+
+    auto graph = buildGraph(param.spec);
+    auto result = buildPreferring(*graph, engine);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    if(servingEngine(*graph) != engine)
+    {
+        GTEST_SKIP() << param.engine << " does not serve this graph on this device";
+    }
+    int64_t need = 0;
+    ASSERT_EQ(graph->get_workspace_size(need).code, ErrorCode::OK);
+    if(need == 0)
+    {
+        GTEST_SKIP() << param.engine << " needs no workspace for this graph on this device";
+    }
+
+    // The reported workspace is all the plan touches: a guard band past it stays intact.
+    {
+        hip_kernel_provider::test_utilities::GraphVerificationContext context(*graph);
+        registerValidatorsForOutputs(context, toleranceEpsilons(param.spec));
+        hip_kernel_provider::test_utilities::VerificationRun run;
+        ASSERT_NO_FATAL_FAILURE(prepareVerification(context, 0, run));
+
+        constexpr size_t GUARD = 64 * 1024;
+        constexpr unsigned char PATTERN = 0xA5;
+        void* workspace = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, static_cast<size_t>(need) + GUARD), hipSuccess);
+        auto* guard = static_cast<unsigned char*>(workspace) + need;
+        ASSERT_EQ(hipMemset(guard, PATTERN, GUARD), hipSuccess);
+        auto variantPack = run.gpuBundle.toDeviceVariantPack();
+        result = graph->execute(_handle, variantPack, workspace);
+        EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_EQ(hipStreamSynchronize(stream()), hipSuccess);
+        std::vector<unsigned char> band(GUARD);
+        ASSERT_EQ(hipMemcpy(band.data(), guard, GUARD, hipMemcpyDeviceToHost), hipSuccess);
+        ASSERT_EQ(hipFree(workspace), hipSuccess);
+        EXPECT_TRUE(std::all_of(
+            band.begin(), band.end(), [](unsigned char byte) { return byte == PATTERN; }))
+            << param.engine << " wrote past the " << need << " workspace bytes it reported";
+
+        // And the result is right.
+        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, *graph, _handle));
+    }
+
+    // The frontend's limit: the engine's plan is never the one that runs. Either the graph is
+    // served within the limit, or the build fails at plan time.
+    {
+        auto limited = buildGraph(param.spec);
+        result = buildPreferring(*limited, engine, need - 1);
+        if(result.code == ErrorCode::OK)
+        {
+            int64_t used = 0;
+            ASSERT_EQ(limited->get_workspace_size(used).code, ErrorCode::OK);
+            EXPECT_LE(used, need - 1)
+                << "served by " << engineName(_handle, servingEngine(*limited));
+            verify(*limited, param.spec);
+        }
+        else
+        {
+            EXPECT_TRUE(result.code == ErrorCode::INVALID_VALUE
+                        || result.code == ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED)
+                << result.err_msg;
+        }
+    }
+
+    // The backend knob, as the plugin receives it: the engine builds within the limit or
+    // declines at plan build.
+    {
+        const PluginAbi abi;
+        ASSERT_TRUE(abi.complete()) << "the provider's plugin ABI is not resolvable";
+        auto [serialized, error] = graph->to_binary();
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        hipdnnEnginePluginHandle_t plugin = nullptr;
+        ASSERT_EQ(abi.create(&plugin), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        for(const int64_t limit : {need - 1, int64_t{0}})
+        {
+            const auto config = engineConfigWithWorkspaceLimit(engine, limit);
+            const hipdnnPluginConstData_t configData{config.data(), config.size()};
+            const hipdnnPluginConstData_t graphData{serialized.data(), serialized.size()};
+            hipdnnEnginePluginExecutionContext_t context = nullptr;
+            if(abi.createContext(plugin, &configData, &graphData, &context)
+               != HIPDNN_PLUGIN_STATUS_SUCCESS)
+            {
+                continue; // Declined at plan build.
+            }
+            size_t used = 0;
+            EXPECT_EQ(abi.workspaceSize(plugin, context, &used), HIPDNN_PLUGIN_STATUS_SUCCESS);
+            EXPECT_LE(used, static_cast<size_t>(limit))
+                << param.engine << " built a plan over global.workspace_size_limit";
+            EXPECT_EQ(abi.destroyContext(plugin, context), HIPDNN_PLUGIN_STATUS_SUCCESS);
+        }
+        EXPECT_EQ(abi.destroy(plugin), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         IntegrationGpuConvRobustness,
+                         ::testing::ValuesIn(workspaceCases()),
+                         [](const auto& info) { return info.param.name; });
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::integration
 

@@ -227,6 +227,7 @@ not.
 
 - **Compilation.** Every conv config compiles its programs through HIPRTC when its plan is built, never at execution. Code objects are cached on disk and in the process ([HIPRTC code-object cache](../README.md#hiprtc-code-object-cache)); [Seeing what ran](../README.md#seeing-what-ran) shows the config each plan chose and where each program came from.
 - **Failures.** A config whose program fails to compile, or cannot be compiled because HIPRTC is unavailable or disabled (`HIP_KERNEL_PROVIDER_DISABLE_HIPRTC`), costs only that config: the engine logs a warning naming the program and tries its next candidate. An engine none of whose candidates builds declines at plan build, and hipDNN finalizes the next engine.
+- **Workspace.** Each plan reports, at plan build, the workspace its config needs (staged operands, split partials, transforms), and uses no more. A caller's limit below that need declines the config at plan build: `global.workspace_size_limit` on the engine config (backend API) removes the configs that need more before any is built, and an engine left with none declines; the frontend's `deselect_workspace_greater_than()` compares each built plan's reported workspace with its limit, so a plan over it is never executed (`Graph::build_plans()` documents which plans it then tries).
 
 ## Building
 
