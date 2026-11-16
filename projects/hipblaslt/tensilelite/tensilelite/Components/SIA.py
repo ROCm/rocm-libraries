@@ -814,9 +814,15 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
     if kernel["PrefetchGlobalRead"] and not kernel["NoLdsWriteCode"]:
         # do we need a module here? That would prevent these from being scheduled
         imod = writer.codes.perIterLocalWrite[localWriteEndIter][1].add(Module())
-        imod.add(
-            writer._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, \
-            "1wait for global read"))
+        if writer.states.vmemLoadsAfterGlobalRead:
+            # the cache-warming load issued after the reads stays in flight
+            imod.add(writer._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, -1,
+                                  "wait for the global reads being written",
+                                  skipGlobalReadInst=writer.states.vmemLoadsAfterGlobalRead))
+        else:
+            imod.add(
+                writer._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, \
+                "1wait for global read"))
         imod.addComment1("local write A")
         imod.add(writer.codes.localWriteA)
         imod.addComment1("local write MXSA")
@@ -990,6 +996,11 @@ def getReadsToWait(writer, kernel):
     lwMXBcnt = len(list(writer.codes.localWriteMXSB.items()))
     readsToWait = lwAcnt + lwBcnt + lwMXAcnt + lwMXBcnt
     readsToWaitNGLL = readsToWait
+    if kernel.get("ScalarLoadBPrefetch") and kernel["PrefetchGlobalRead"] >= 2:
+        # The cache-warming load is issued at the top of the main loop, behind the global reads
+        # of the previous iteration that the local writes wait for. The no-global-load loop does
+        # not issue one; waiting for one load more there is harmless.
+        readsToWait += 1
     return readsToWait, readsToWaitNGLL
 
 def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
