@@ -190,6 +190,27 @@ namespace
             return solve(size() - 1, 0, nontrivial_required);
         }
 
+        /**
+         * @brief checks if an element of the array is located at a given flattened index, i.e.,
+         * if there is a multi-index (x_0, x_1, ..., x_n) with 0 <= x_i < l_i such that
+         * x_0*s_0 + x_1*s_1 + ... + x_n*s_n == index. Coefficients x_i are searched for as in
+         * is_self_aliasing (steps 2 and 3), with non-negative coefficients and index as target.
+         *
+         * @param[in] index flattened index
+         * @return true if an element is located at index, false otherwise
+         */
+        bool reaches(size_t index) const
+        {
+            if(size() == 0)
+                return index == 0; // single element, at flattened index 0
+            if(index > static_cast<size_t>(reach.back()))
+                return false;
+            constexpr bool signed_coefficients = false;
+            constexpr bool nontrivial_required = false;
+            return solve<signed_coefficients>(
+                size() - 1, static_cast<ptrdiff_t>(index), nontrivial_required);
+        }
+
         inline size_t size() const
         {
             return dimensions.size();
@@ -223,35 +244,44 @@ namespace
 
         /**
          * @brief searches for a solution of d_0*s_0 + ... + d_k*s_k == target with
-         * lo_i <= d_i <= hi_i, wherein hi_i = l_i - 1 and lo_i = -hi_i, by enumerating d_k,
-         * d_{k-1}, ..., d_2 (decreasing strides).
+         * lo_i <= d_i <= hi_i, wherein hi_i = l_i - 1, and lo_i = -hi_i for signed coefficients
+         * (lo_i = 0 otherwise), by enumerating d_k, d_{k-1}, ..., d_2 (decreasing strides).
          *
-         * @param[in] k index of the dimension of largest stride involved (k >= 1)
+         * @tparam signed_coefficients true for signed coefficients, false for non-negative ones
+         * @param[in] k index of the dimension of largest stride involved
          * @param[in] target right-hand side of the equation
          * @param[in] nontrivial_required true iff a nontrivial solution of the homogeneous
-         * equation is required (target == 0), i.e., when searching for a nonzero solution of (E)
-         * with all coefficients of the larger-stride dimensions being 0. d and -d being both
-         * solutions then, the first nonzero coefficient (by decreasing strides) is kept positive
+         * equation is required (target == 0, signed coefficients), i.e., when searching for a
+         * nonzero solution of (E) with all coefficients of the larger-stride dimensions being 0.
+         * d and -d being both solutions then, the first nonzero coefficient (by decreasing
+         * strides) is kept positive
          * @return true if a solution was found, false otherwise
          */
+        template <bool signed_coefficients = true>
         bool solve(size_t k, ptrdiff_t target, bool nontrivial_required) const
         {
-            assert(0 < k && k < size());
-            assert(!nontrivial_required || target == 0);
+            assert(k < size());
+            assert(!nontrivial_required || (signed_coefficients && target == 0));
             // range of d_0*s_0 + ... + d_k*s_k
-            const ptrdiff_t sum_min = -reach[k];
+            const ptrdiff_t sum_min = signed_coefficients ? -reach[k] : 0;
             const ptrdiff_t sum_max = reach[k];
             if(target < sum_min || target > sum_max || target % stride_gcd[k] != 0)
                 return false;
+            if(k == 0)
+            {
+                // target being a multiple of s_0 within [sum_min, sum_max], d_0 = target/s_0 is
+                // the only solution; it is nonzero iff target != 0
+                return target != 0 || !nontrivial_required;
+            }
             if(k == 1)
-                return solve_two_dimensions(target, nontrivial_required);
+                return solve_two_dimensions<signed_coefficients>(target, nontrivial_required);
 
             // d_k is restricted to values leaving a target that the dimensions of smaller
             // strides can reach: rest_min <= target - d_k*s_k <= rest_max
             const auto      s_k      = static_cast<ptrdiff_t>(dimensions[k].stride());
             const ptrdiff_t hi_k     = static_cast<ptrdiff_t>(dimensions[k].length()) - 1;
-            const ptrdiff_t lo_k     = -hi_k;
-            const ptrdiff_t rest_min = -reach[k - 1];
+            const ptrdiff_t lo_k     = signed_coefficients ? -hi_k : 0;
+            const ptrdiff_t rest_min = signed_coefficients ? -reach[k - 1] : 0;
             const ptrdiff_t rest_max = reach[k - 1];
             ptrdiff_t       d_min    = std::max(lo_k, divUp(target - rest_max, s_k));
             const ptrdiff_t d_max    = std::min(hi_k, divDown(target - rest_min, s_k));
@@ -259,7 +289,8 @@ namespace
                 d_min = std::max<ptrdiff_t>(d_min, 0);
             for(ptrdiff_t d_k = d_min; d_k <= d_max; d_k++)
             {
-                if(solve(k - 1, target - d_k * s_k, nontrivial_required && d_k == 0))
+                if(solve<signed_coefficients>(
+                       k - 1, target - d_k * s_k, nontrivial_required && d_k == 0))
                     return true;
             }
             return false;
@@ -278,18 +309,20 @@ namespace
          * for any integer j, wherein c = p*(target/g) mod (s_1/g). The values of j keeping
          * either coefficient in range form two intervals, which only need to intersect.
          *
+         * @tparam signed_coefficients see solve
          * @param[in] target right-hand side of the equation
          * @param[in] nontrivial_required see solve
          * @return true if a solution was found, false otherwise
          */
+        template <bool signed_coefficients>
         bool solve_two_dimensions(ptrdiff_t target, bool nontrivial_required) const
         {
             const size_t    s0  = dimensions[0].stride();
             const size_t    s1  = dimensions[1].stride();
             const ptrdiff_t hi0 = static_cast<ptrdiff_t>(dimensions[0].length()) - 1;
             const ptrdiff_t hi1 = static_cast<ptrdiff_t>(dimensions[1].length()) - 1;
-            const ptrdiff_t lo0 = -hi0;
-            const ptrdiff_t lo1 = -hi1;
+            const ptrdiff_t lo0 = signed_coefficients ? -hi0 : 0;
+            const ptrdiff_t lo1 = signed_coefficients ? -hi1 : 0;
             ptrdiff_t       p, q; // Bezout's coefficients
             const auto      g = static_cast<ptrdiff_t>(ext_euclide_gcd(s0, s1, p, q));
             // period of d_0 (resp. d_1) along the family of solutions
