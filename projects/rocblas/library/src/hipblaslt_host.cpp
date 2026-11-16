@@ -451,8 +451,9 @@ namespace
                 rocblas_internal_ostream msg;
                 print_if_verbose(msg << "rocBLAS warning: hipBLASLt algo not supported due to "
                                         "insufficient workspace.");
+                return rocblas_status_memory_error;
             }
-            return rocblas_status_invalid_value;
+            return rocblas_status_invalid_value; // solution queries report success or invalid value
         }
         gemmPref.setMaxWorkspaceBytes(max_workspace_size - extra_malloc);
 
