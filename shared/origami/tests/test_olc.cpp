@@ -816,6 +816,9 @@ struct parity_table_t {
     REQUIRE(it != header.end());
     return static_cast<std::size_t>(it - header.begin());
   }
+  bool has(const std::string& name) const {
+    return std::find(header.begin(), header.end(), name) != header.end();
+  }
 };
 
 parity_table_t read_parity(const fs::path& p) {
@@ -892,11 +895,12 @@ problem_t problem_from_row(const parity_table_t& t, const std::vector<double>& r
                              v("transB") != 0 ? transpose_t::T : transpose_t::N,
                              static_cast<size_t>(v("batch")));
   p.num_cus = static_cast<size_t>(v("num_cus"));
-  if (std::find(t.header.begin(), t.header.end(), "ab_dtype") != t.header.end()) {
+  if (t.has("ab_dtype")) {
     p.a_dtype = p.b_dtype = dtype_code(v("ab_dtype"));
     p.c_dtype = p.d_dtype = dtype_code(v("cd_dtype"));
     p.mi_dtype            = dtype_code(v("mi_dtype"));
   }
+  p.uniform_summation_order = v("uniform_summation_order") != 0;
   return p;
 }
 
@@ -919,7 +923,7 @@ config_t config_from_record(const parity_table_t& t, const std::vector<double>& 
   c.non_temporal_a_available  = v("nt_tile_a") != 0;  // per macro tile (memoize_non_temporal_availability)
   c.non_temporal_b_available  = v("nt_tile_b") != 0;
   c.workspace_size            = std::numeric_limits<size_t>::max();
-  c.workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+  c.workspace_size_per_elem_c = static_cast<size_t>(v("ws_per_elem_c"));
   c.stream_k                  = static_cast<int>(v("stream_k_mode"));
   c.grvw_a                    = static_cast<size_t>(v("grvw_a"));
   c.grvw_b                    = static_cast<size_t>(v("grvw_b"));
@@ -944,7 +948,8 @@ config_t config_from_record(const parity_table_t& t, const std::vector<double>& 
   tp.unroll_major_lds_b   = static_cast<int>(v("ulds_b"));
   tp.lds_transpose_read_a = v("ldstr_a") != 0;
   tp.lds_transpose_read_b = v("ldstr_b") != 0;
-  c.backend               = tp;
+  tp.stream_k_per_tile_extra_iters = v("per_tile_extra_iters") != 0;
+  c.backend                        = tp;
   return c;
 }
 

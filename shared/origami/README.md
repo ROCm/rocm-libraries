@@ -369,13 +369,13 @@ Measured on MI350X (gfx950) on the held-out test set (plain shapes), OLC off vs 
 
 | dtype | shapes | speedup | slower beyond noise | worst shape |
 |-------|-------:|---------|--------------------:|------------:|
-| BF16 | 715 | 1.0208 [1.0150, 1.0271] | 6.7% | 0.77× |
-| TF32 | 573 | 1.0298 [1.0230, 1.0370] | 4.4% | 0.61× |
-| FP8 | 713 | 1.0478 [1.0399, 1.0560] | 4.9% | 0.72× |
+| BF16 | 715 | 1.0225 [1.0165, 1.0287] | 5.6% | 0.69× |
+| TF32 | 573 | 1.0281 [1.0213, 1.0349] | 4.2% | 0.61× |
+| FP8 | 713 | 1.0487 [1.0411, 1.0570] | 2.8% | 0.71× |
 
 The test shapes were never trained on: no training shape matches one in M, N, K and batch, or comes within 5% of it in all of M, N and K. The models were trained at 256 CUs; a CU budget (`--sm_count_target`) reaches them through their features.
 
-OLC adds about +108–127 µs (BF16), +113–119 µs (TF32) and +126–157 µs (FP8) to a warm `hipblasLtMatmulAlgoGetHeuristic` call (hipblaslt-bench "Solution selection time", uniform summation order on, the default), and +0.2–0.45 s once, to a process's first call, which loads the model and checks it against the kernel library. Host-only on one core, the warm extra is +96 / +86 / +111 µs with uniform summation order on and +63 / +55 / +58 µs with it off.
+OLC adds about +103 µs (BF16), +112 µs (TF32) and +133 µs (FP8) to a warm `hipblasLtMatmulAlgoGetHeuristic` call (hipblaslt-bench "Solution selection time", uniform summation order on, the default), and +0.1–0.26 s once, to a process's first call, which loads the model and checks it against the kernel library. Host-only on one core, the warm extra is +96 / +86 / +111 µs with uniform summation order on and +63 / +55 / +58 µs with it off.
 
 Most of the difference comes from develop's uniform-summation-order predicate, which OLC evaluates on about 10 candidates per call (stock stops at the first valid one). Its ResolvedStaggerU clause (`uniformSummationOrderLaunchObstacle` in `ContractionSolution.cpp`) recomputes AutoWGM and AutoStaggerU, two Origami predictions, for every candidate, although under uniform summation order `calculateAutoStaggerU()` leaves only mapping 1 or StaggerU 0, so the clause cannot refuse. Fixing that clause in develop will remove most of the extra.
 
