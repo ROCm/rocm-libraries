@@ -969,12 +969,24 @@ namespace detail {
 //   double K/V LDS buffer: Q/K0=0, K1=17408, V0=34816, V1=53248, end=71680
 //   single-V/double-K LDS buffer: Q/K0=0, K1=17408, S=34816, V0=34832, end=53248
 // Region alignment follows one gfx1250 LDS bank row.
+// Problem::kHasDropout, false for a problem without one (the split-KV problem: no dropout).
+template <typename Problem, typename = void>
+struct qr_tdm_problem_has_dropout : std::false_type
+{
+};
+
+template <typename Problem>
+struct qr_tdm_problem_has_dropout<Problem, std::void_t<decltype(Problem::kHasDropout)>>
+    : std::bool_constant<Problem::kHasDropout>
+{
+};
+
 // The LDS of dropout's randval shuffle (BlockDropout::Run) with the policy's QK gemm, 0
 // without dropout: the TDM arenas end with it.
 template <typename Problem, typename Policy>
 CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_randval_lds_bytes()
 {
-    if constexpr(Problem::kHasDropout)
+    if constexpr(qr_tdm_problem_has_dropout<Problem>::value)
         return BlockDropout::MakeRandValLdsBlockDescriptor<
                    remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>>()
             .get_element_space_size();
