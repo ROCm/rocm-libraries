@@ -5,6 +5,7 @@
 // DPX card). It owns one hipblaslt_ext::Gemm per partition and uses the public Gemm API, plus
 // the device of each handle to give every partition the slice whose memory is on its device.
 
+#include "hipblaslt-ext-inputs.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_internal.hpp"
 #include "utility.hpp"
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -335,6 +337,21 @@ namespace hipblaslt_ext
                 return HIPBLAS_STATUS_INVALID_VALUE;
         if(inputs.alpha == nullptr || inputs.beta == nullptr)
             return HIPBLAS_STATUS_INVALID_VALUE;
+        // storePeerD: partition i also writes the other partition's D. Two partitions and two
+        // different D buffers only.
+        if(inputs.storePeerD)
+        {
+            if(parts != 2)
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            // Two separate buffers of the whole D: the same pointer or overlapping extents would
+            // have a partition write the other one's slice.
+            const uint64_t extent
+                = uint64_t((batch_count - 1) * std::abs(strideD) + (n - 1) * ldd + m) * bytes[3];
+            const auto d0 = reinterpret_cast<uintptr_t>(inputs.d[0]);
+            const auto d1 = reinterpret_cast<uintptr_t>(inputs.d[1]);
+            if((d0 > d1 ? d0 - d1 : d1 - d0) < extent)
+                return HIPBLAS_STATUS_INVALID_VALUE;
+        }
 
         // A matrix passed as different pointers (copies) is matched to the partitions by device:
         // partition p uses the copy on its device, whatever the order of the list. All copied
@@ -565,6 +582,10 @@ namespace hipblaslt_ext
             slice.setD(ptr[3]);
             slice.setAlpha(inputs.alpha);
             slice.setBeta(inputs.beta);
+            // The peer is the other partition's D, at this partition's slice offset.
+            if(inputs.storePeerD)
+                slice.pimpl->dPeer
+                    = const_cast<void*>(advance(dPointers[1 - i], elems[3], bytes[3]));
 
             GemmEpilogue    epilogue;
             GemmProblemType type(s.opA, s.opB, s.typeA, s.typeB, s.typeC, s.typeD, s.typeCompute);

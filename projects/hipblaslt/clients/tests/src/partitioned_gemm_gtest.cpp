@@ -363,6 +363,35 @@ TEST(pre_checkin_partitioned_gemm_ext, GetSliceNeedsAProblem)
     EXPECT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
+TEST(pre_checkin_partitioned_gemm_ext, StorePeerDNeedsTwoDifferentDs)
+{
+    auto              parts = onDeviceZero(2);
+    auto              gemm  = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+
+    // Two partitions with their own D: accepted. Whether a kernel exists is up to the heuristic.
+    auto in       = buffers.inputs();
+    in.storePeerD = true;
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+
+    // The D list in the other order: the peer of each partition is found by device.
+    std::swap(in.d[0], in.d[1]);
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
+
+    // Overlapping Ds: one partition would overwrite the other's slice.
+    in            = buffers.inputs();
+    in.storePeerD = true;
+    in.d[1]       = static_cast<char*>(in.d[0]) + 64;
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
+
+    in            = buffers.inputs();
+    in.storePeerD = true;
+    // The same D twice: there is no peer to write to.
+    in.d[1] = in.d[0];
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_INVALID_VALUE);
+}
+
 TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongPointerCounts)
 {
     auto              parts = onDeviceZero(2);

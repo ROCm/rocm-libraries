@@ -41,6 +41,7 @@ namespace hipblaslt_ext
     class GemmInstance;
     class Gemm;
     class GroupedGemm;
+    class PartitionedGemm;
 
     using HipBufferDeleter = hipError_t (*)(void*);
     using HipBufferPtr     = std::unique_ptr<void, HipBufferDeleter>;
@@ -381,6 +382,7 @@ namespace hipblaslt_ext
     private:
         friend Gemm;
         friend GroupedGemm;
+        friend PartitionedGemm; // sets the second D of a storePeerD slice
         class GemmInputsImpl;
         std::unique_ptr<GemmInputsImpl> pimpl;
     };
@@ -1147,6 +1149,16 @@ namespace hipblaslt_ext
         std::vector<const void*> b; //!< B matrix pointers.
         std::vector<const void*> c; //!< C matrix pointers.
         std::vector<void*>       d; //!< D matrix pointers.
+        /// Every partition also stores its slice into the D of the other partition, so that both
+        /// Ds are complete once the run has finished (the partitions are joined, see run()).
+        /// It needs exactly 2 partitions and a replicated D (two different pointers, in any
+        /// order: the peer of each partition is found by device), and the backend needs
+        /// kernels that store a second D; without them setProblem succeeds and algoGetHeuristic
+        /// returns nothing (also with a device library built before this feature). The peer D
+        /// is written with system-scope stores. Ordering a later kernel that reads D after the
+        /// run (including under graph capture) is up to the caller. When it is false, the
+        /// backend uses the plain kernels.
+        bool                     storePeerD = false;
         const void*              alpha = nullptr; //!< Host pointer to alpha.
         const void*              beta  = nullptr; //!< Host pointer to beta.
     };
