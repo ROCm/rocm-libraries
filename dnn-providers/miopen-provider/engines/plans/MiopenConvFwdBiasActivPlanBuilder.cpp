@@ -11,7 +11,6 @@
 #include "Workarounds.hpp"
 #include "engines/plans/MiopenConvApplicabilityChecks.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
-#include "engines/plans/MiopenConvTensorChecks.hpp"
 
 namespace miopen_plugin
 {
@@ -279,11 +278,6 @@ void nodeAttrsCheckTensors(
                 "Bias node input from convolution must be virtual, other input must be "
                 "non-virtual, output must be virtual");
         }
-
-        // The bias operand must be a per-channel bias of io data type (ALMIOPEN-3014,
-        // ALMIOPEN-3016); see conv_applicability::validateFusedConvBiasOperand.
-        conv_applicability::validateFusedConvBiasOperand(
-            convTensorAttrX, convTensorAttrY, biasOtherInputAttr);
 
         // Activation: input from bias must be virtual, output must be non-virtual
         const auto& activInAttr

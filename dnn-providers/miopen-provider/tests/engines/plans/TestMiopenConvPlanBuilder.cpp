@@ -235,6 +235,14 @@ static bool miopenReportsForwardSolution(const HipdnnMiopenHandle& handle, const
     }
 }
 
+// Packed strides of `dims` in channels-last or channels-first order.
+static std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool channelsLastLayout)
+{
+    return channelsLastLayout ? hipdnn_data_sdk::utilities::generateStrides(
+                                    dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
+                              : hipdnn_data_sdk::utilities::generateStrides(dims);
+}
+
 // The graph builders give all three tensors one data type; this sets them individually, in the
 // order the tensors appear in the graph.
 static void setConvTensorTypes(const flatbuffers::FlatBufferBuilder& builder,
@@ -265,13 +273,6 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForw
 
     for(const bool channelsLast : {false, true})
     {
-        const auto strides = [channelsLast](const std::vector<int64_t>& dims) {
-            return channelsLast
-                       ? hipdnn_data_sdk::utilities::generateStrides(
-                             dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
-                       : hipdnn_data_sdk::utilities::generateStrides(dims);
-        };
-
         for(const auto dataType : {hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                    hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
                                    hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16})
@@ -279,17 +280,18 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForw
             SCOPED_TRACE(std::string(channelsLast ? "channels-last " : "channels-first ")
                          + hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
 
-            auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(xDims,
-                                                                               strides(xDims),
-                                                                               wDims,
-                                                                               strides(wDims),
-                                                                               yDims,
-                                                                               strides(yDims),
-                                                                               {0, 0},
-                                                                               {0, 0},
-                                                                               {1, 1},
-                                                                               {1, 1},
-                                                                               dataType);
+            auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+                xDims,
+                packedStrides(xDims, channelsLast),
+                wDims,
+                packedStrides(wDims, channelsLast),
+                yDims,
+                packedStrides(yDims, channelsLast),
+                {0, 0},
+                {0, 0},
+                {1, 1},
+                {1, 1},
+                dataType);
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
 
@@ -419,13 +421,6 @@ struct BackwardGraphSpec
     BackwardTensor dx;
     ConvDataType dataType = ConvDataType::FLOAT;
 };
-
-static std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool channelsLastLayout)
-{
-    return channelsLastLayout ? hipdnn_data_sdk::utilities::generateStrides(
-                                    dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
-                              : hipdnn_data_sdk::utilities::generateStrides(dims);
-}
 
 static BackwardGraphSpec uniformPackedSpec(bool channelsLastLayout,
                                            ConvDataType dataType = ConvDataType::FLOAT)

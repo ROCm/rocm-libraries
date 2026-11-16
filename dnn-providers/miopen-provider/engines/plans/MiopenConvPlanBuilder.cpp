@@ -15,7 +15,6 @@
 #include "engines/plans/MiopenConvApplicabilityChecks.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
-#include "engines/plans/MiopenConvTensorChecks.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
 
 namespace miopen_plugin

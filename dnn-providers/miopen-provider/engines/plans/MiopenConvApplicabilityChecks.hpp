@@ -24,6 +24,8 @@ bool hasPassByValueTensor(const TensorMap& tensorMap);
 // Layout checks for conv -> [bias add] -> activation graphs. Throws BAD_PARAM when:
 //  - the bias is not a per-channel tensor: dims [1, C, 1, ...] with C equal to the convolution
 //    output channels, the same rank as the convolution output, and a unit channel stride;
+//  - the bias data type differs from the convolution input data type, which is the io data type
+//    of the fused graph (the fused MIOpen solver does not validate it and computes garbage);
 //  - the final activation output differs from the descriptor MIOpen derives for the fused
 //    convolution: the input data type and dims equal to the convolution output, in the same
 //    packed memory layout as the input.
@@ -33,5 +35,53 @@ void checkConvFwdBiasActivLayouts(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activAttr,
     const TensorMap& tensorMap);
+
+// Declines convolution tensor combinations that MIOpen accepts (it reports a solution) but then
+// computes wrongly, writes out of bounds or faults on. Each rule is a workaround for a MIOpen
+// defect and is documented at its check in MiopenConvApplicabilityChecks.cpp together with the
+// tickets that remove it.
+//
+// Forward convolution: x, w and y must
+//   - share one data type, one of FLOAT, HALF, BFLOAT16;
+//   - share one layout class: all channels-first or all channels-last (see the .cpp for how a
+//     tensor is classified, including tensors with extent-1 dimensions);
+//   - all be packed.
+//
+// Backward data (dy, w, dx) and backward weights (x, dy, dw): the three tensors must
+//   - share one data type, one of FLOAT, HALF, BFLOAT16;
+//   - share one layout class, classified as for forward;
+//   - none be both channels-last and non-packed. Unlike forward, a channels-first non-packed
+//     tensor is accepted: MIOpen computes it correctly.
+// Backward data additionally has a size limit: dy and dx must each have at most 2^31 - 1 elements.
+//
+// Throws hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason) when the
+// tensors must be declined; `reason` names the operation, the offending tensor and the rule. Also
+// throws when a tensor has null dims() or strides(), differing dims()/strides() lengths, rank
+// below 3, a negative dim, or dims whose product (a zero dim counted as 1, so a zero extent does
+// not hide dims that overflow) reaches INT64_MAX, so no check computes strides or extents from
+// dims that could overflow (the size check only needs non-null, non-negative dims()). The tensors
+// are the graph's own (unpadded rank 3, 4 or 5), not the padded MIOpen descriptors.
+
+// Forward convolution: data type, layout and packing rules above.
+void validateConvFwdIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x,
+                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& w,
+                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& y);
+
+// Backward data: data type, layout and channels-last packing rules for dy, w and dx.
+void validateConvBwdDataIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dy,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& w,
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dx);
+
+// Backward weights: data type, layout and channels-last packing rules for x, dy and dw.
+void validateConvWrwIoTensors(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x,
+                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dy,
+                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dw);
+
+// Backward data size limit: dy and dx must each have at most 2^31 - 1 elements. Reads only dims(),
+// with an overflow-safe product, so it is safe on any dims. It runs before the io-tensor
+// validators because it enforces the 2^31 - 1 limit, which the io validators' overflow guard (a
+// far larger bound) does not.
+void validateConvBwdDataSize(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dy,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dx);
 
 } // namespace miopen_plugin::conv_applicability
