@@ -921,20 +921,25 @@ TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16From
     EXPECT_FALSE(admits(f32, "gfx942", baseShape(), "HALF"));
 }
 
-TEST(TestConvWinogradKernelMatch, CooperativeCdna3ConfigsRunFromGfx940AndSingleBufferOnlyOnCdna)
+TEST(TestConvWinogradKernelMatch, CooperativePerChipConfigsRunOnTheirChipAndSingleBufferOnlyOnCdna)
 {
-    auto cdna3 = coop("cdna3", 1);
-    cdna3.pf = 1;
-    EXPECT_TRUE(admits(cdna3, "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
-    EXPECT_TRUE(admits(cdna3, "gfx950", baseShape(), "HALF"));
-    EXPECT_FALSE(admits(cdna3, "gfx90a", baseShape(), "HALF"));
-    EXPECT_FALSE(admits(cdna3, "gfx908", baseShape(), "HALF"));
-    EXPECT_FALSE(admits(cdna3, "gfx1201", baseShape(), "HALF"));
+    auto mi300 = coop("gfx942", 1);
+    mi300.pf = 1;
+    EXPECT_TRUE(admits(mi300, "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(mi300, "gfx940", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx950", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx90a", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx908", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx1201", baseShape(), "HALF"));
+    auto mi355 = coop("gfx950", 1);
+    mi355.pf = 1;
+    EXPECT_TRUE(admits(mi355, "gfx950", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi355, "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi355, "gfx90a", baseShape(), "HALF"));
     // One transformed-input buffer (sb 1): the CDNA transform-row layout only.
-    auto single = cdna3;
+    auto single = mi300;
     single.sb = 1;
     EXPECT_TRUE(admits(single, "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
-    EXPECT_TRUE(admits(single, "gfx950", baseShape(), "HALF"));
     auto rdna = coop("gfx12", 1);
     rdna.sb = 1;
     EXPECT_FALSE(conv_winograd::configOf(kernelOf(rdna, "HALF")).has_value());
@@ -1346,7 +1351,7 @@ TEST(TestConvWinogradPlan, CooperativeCdnaGridIsWhatTheUnitsHold)
         = [&](int64_t bk, int64_t bt, int64_t waves, const char* arch, int64_t sb = 0) {
               auto device = countedDevice(32);
               device.gcnArchName = arch;
-              auto fields = coop(sb != 0 ? "cdna3" : "gfx9", 1);
+              auto fields = coop(sb != 0 ? "gfx942" : "gfx9", 1);
               fields.bk = bk;
               fields.bt = bt;
               fields.waves = waves;
@@ -1373,7 +1378,6 @@ TEST(TestConvWinogradPlan, CooperativeCdnaGridIsWhatTheUnitsHold)
     // One transformed-input buffer: 16 KiB of LDS for 2 x 2 tiles, so the registers (3 a SIMD)
     // bound it on the 64 KiB parts too.
     EXPECT_EQ(gridOn(32, 32, 4, "gfx942", 1), 32U * 3);
-    EXPECT_EQ(gridOn(32, 32, 4, "gfx950", 1), 32U * 3);
 }
 
 TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)

@@ -105,7 +105,7 @@ struct Config
     int m = 2; ///< output tile: F(m,3), or F(3,2) (m = 3) on stride 2's phase sub-filters
     Layout layout = Layout::NCHW; ///< what the kernels read; the fused variants read NCHW
     /// "any", or the matrix-core family: "gfx11", "gfx12" (WMMA), "gfx9" (MFMA, gfx908 and later
-    /// CDNA), "cdna3" (MFMA, gfx940 and later CDNA)
+    /// CDNA), "gfx942" (MFMA, gfx940-942), "gfx950" (MFMA, gfx950)
     std::string arch;
     bool llcPlan = false; ///< multipass: slice the batch to fit the last-level cache
     int gemmBm = 0, gemmBn = 0, gemmBk = 0; ///< multipass GEMM tile
@@ -129,10 +129,10 @@ struct Config
 /// The config @p kernel describes, or nullopt for metadata the pack does not know.
 std::optional<Config> configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel);
 
-/// Whether @p config runs on CDNA MFMA (arch "gfx9" or "cdna3").
+/// Whether @p config runs on CDNA MFMA (arch "gfx9", "gfx942" or "gfx950").
 inline bool isCdna(const Config& config)
 {
-    return config.arch == "gfx9" || config.arch == "cdna3";
+    return config.arch == "gfx9" || config.arch == "gfx942" || config.arch == "gfx950";
 }
 
 /// Whether the device @p gcnArchName (suffix intact) runs @p config's instructions.

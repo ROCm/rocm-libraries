@@ -623,7 +623,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             }
             const int kw = config.waves / 4;
             const int mt = kw > 0 && config.bk % (16 * kw) == 0 ? config.bk / (16 * kw) : 0;
-            // CDNA ("gfx9", "cdna3") runs wave64 MFMA: at most 16 waves in a 1024-thread block.
+            // CDNA ("gfx9", "gfx942", "gfx950") runs wave64 MFMA: at most 16 waves in a 1024-thread block.
             // F(2,3), or F(3,2) for stride 2 by phases. The single input buffer (sb) is CDNA's.
             const bool cdna = isCdna(config);
             if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
@@ -679,10 +679,14 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
         }
         return true;
     case Variant::COOP:
-        if(config.arch == "cdna3")
+        // Per-chip configs, tuned for their LDS, register files and clocks.
+        if(config.arch == "gfx942")
         {
-            // MI300 and later: the configs tuned for their LDS and register files.
-            return arch == "gfx940" || arch == "gfx941" || arch == "gfx942" || arch == "gfx950";
+            return arch == "gfx940" || arch == "gfx941" || arch == "gfx942";
+        }
+        if(config.arch == "gfx950")
+        {
+            return arch == "gfx950";
         }
         if(config.arch == "gfx9")
         {
