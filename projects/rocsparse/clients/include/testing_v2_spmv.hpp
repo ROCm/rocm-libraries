@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -449,9 +449,9 @@ public:
         device_dense_matrix<Y> dy(hy);
 
         // Create extra vector
-        host_dense_matrix<X> h_extra((trans == rocsparse_operation_none) ? M : N, 1);
+        host_dense_matrix<T> h_extra((trans == rocsparse_operation_none) ? M : N, 1);
         rocsparse_matrix_utils::init_exact(h_extra);
-        device_dense_matrix<X> d_extra(h_extra);
+        device_dense_matrix<T> d_extra(h_extra);
 
         rocsparse_local_spmat matA(dA);
         rocsparse_local_dnvec x(dx);
@@ -564,7 +564,7 @@ public:
 
             for(size_t i = 0; i < hy_size; ++i)
             {
-                hy[i] += gamma_val * h_extra[i];
+                hy[i] = static_cast<Y>(static_cast<T>(hy[i]) + gamma_val * h_extra[i]);
             }
 
             hy.near_check(dy);
@@ -952,17 +952,17 @@ public:
         device_dense_matrix<Y> dy(hy);
 
         // Create multiple extra vectors
-        host_dense_matrix<X> h_extra[num_extra] = {host_dense_matrix<X>(hy.m, 1),
-                                                   host_dense_matrix<X>(hy.m, 1),
-                                                   host_dense_matrix<X>(hy.m, 1)};
+        host_dense_matrix<T> h_extra[num_extra] = {host_dense_matrix<T>(hy.m, 1),
+                                                   host_dense_matrix<T>(hy.m, 1),
+                                                   host_dense_matrix<T>(hy.m, 1)};
         for(int64_t i = 0; i < num_extra; ++i)
         {
             rocsparse_matrix_utils::init_exact(h_extra[i]);
         }
 
-        device_dense_matrix<X> d_extra[num_extra] = {device_dense_matrix<X>(h_extra[0]),
-                                                     device_dense_matrix<X>(h_extra[1]),
-                                                     device_dense_matrix<X>(h_extra[2])};
+        device_dense_matrix<T> d_extra[num_extra] = {device_dense_matrix<T>(h_extra[0]),
+                                                     device_dense_matrix<T>(h_extra[1]),
+                                                     device_dense_matrix<T>(h_extra[2])};
 
         // Create the dnvec descriptors directly without assignment to avoid destructor issues
         rocsparse_local_dnvec extra0(d_extra[0]);
@@ -1115,7 +1115,8 @@ public:
                 {
                     for(size_t j = 0; j < hy_size; ++j)
                     {
-                        hy[j] += gamma_vals[i] * h_extra[i][j];
+                        hy[j]
+                            = static_cast<Y>(static_cast<T>(hy[j]) + gamma_vals[i] * h_extra[i][j]);
                     }
                 }
 

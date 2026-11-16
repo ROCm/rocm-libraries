@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -865,6 +865,30 @@ Tests:
   precision: *single_double_precisions
   M: [50]
   N: [10, 300]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_nnzsplit]
+
+- name: v2_spmv_csr_res
+  category: quick
+  function: v2_spmv_csr_res
+  precision: [*float16_float16_float16_float32_axyt_precision, *bfloat16_bfloat16_bfloat16_float32_axyt_precision]
+  M: [50]
+  N: [10, 300]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_lrb, rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_nnzsplit]
+
+- name: v2_spmv_csr_res_multiple
+  category: quick
+  function: v2_spmv_csr_res_multiple
+  precision: [*float16_float16_float16_float32_axyt_precision, *bfloat16_bfloat16_bfloat16_float32_axyt_precision]
+  M: [50]
+  N: [50]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
