@@ -83,9 +83,11 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  \note
 *  If \p source and \p target have different data types, only the conversions
 *  \ref rocsparse_datatype_f32_r <-> \ref rocsparse_datatype_f64_r,
+*  \ref rocsparse_datatype_f16_r or \ref rocsparse_datatype_bf16_r -> \ref rocsparse_datatype_f32_r,
+*  \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c or \ref rocsparse_datatype_f64_c,
 *  \ref rocsparse_datatype_f32_r or \ref rocsparse_datatype_f64_r -> \ref rocsparse_datatype_f32_c
-*  and \ref rocsparse_datatype_f32_c <-> \ref rocsparse_datatype_f64_c are supported, depending on
-*  the format of \p target:
+*  or \ref rocsparse_datatype_f64_c, and \ref rocsparse_datatype_f32_c <-> \ref rocsparse_datatype_f64_c
+*  are supported, depending on the format of \p target:
 *  - same format as \p source: the values are converted.
 *  - \ref rocsparse_format_coo or \ref rocsparse_format_coo_aos target: the values are converted.
 *    From the CSC, ELL and BSR formats, this needs \ref rocsparse_sparse_to_sparse_permissive, and

@@ -410,14 +410,28 @@ namespace rocsparse
     };
 
     //
-    // Specialized conversion from float to float complex.
+    // Exact widenings of a real value: f16 and bf16 into f32 and f64, and real into complex
+    // with an imaginary part of zero, where every source value is exactly representable (f32
+    // into either complex type, f64 into f64 complex, f16 and bf16 into either complex type).
+    // f64 into f32 complex stays the specialization below, which records the rounding error.
     //
-    template <>
-    struct copy_farray_mix_safe_kernel_t<rocsparse_float_complex, float>
-    {
-        using SOURCE = float;
-        using TARGET = rocsparse_float_complex;
+    template <typename TARGET, typename SOURCE>
+    static constexpr bool is_exact_real_widening_v
+        = ((std::is_same<TARGET, float>{} || std::is_same<TARGET, double>{}
+            || std::is_same<TARGET, rocsparse_float_complex>{})
+           && (std::is_same<SOURCE, _Float16>{} || std::is_same<SOURCE, rocsparse_bfloat16>{}))
+          || (std::is_same<TARGET, rocsparse_float_complex>{} && std::is_same<SOURCE, float>{})
+          || (std::is_same<TARGET, rocsparse_double_complex>{}
+              && (std::is_same<SOURCE, float>{} || std::is_same<SOURCE, double>{}
+                  || std::is_same<SOURCE, _Float16>{}
+                  || std::is_same<SOURCE, rocsparse_bfloat16>{}));
 
+    template <typename TARGET, typename SOURCE>
+    struct copy_farray_mix_safe_kernel_t<
+        TARGET,
+        SOURCE,
+        std::enable_if_t<rocsparse::is_exact_real_widening_v<TARGET, SOURCE>>>
+    {
         template <uint32_t BLOCKSIZE>
         __launch_bounds__(BLOCKSIZE) __global__
             static void run(const size_t             nitems_,
@@ -425,11 +439,6 @@ namespace rocsparse
                             const SOURCE*            source_,
                             floating_data_t<SOURCE>* conversion_error_)
         {
-            // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic, so
-            // it wrapped at 2^32 before it was ever assigned to a size_t, and there
-            // was no grid-stride loop behind a clamped grid.x. Block-uniform bound:
-            // hipBlockIdx_x, hipGridDim_x, a kernel argument and a compile-time
-            // constant only.
             const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
             for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
                 base += stride)
@@ -437,8 +446,16 @@ namespace rocsparse
                 const size_t tid = base + hipThreadIdx_x;
                 if(tid < nitems_)
                 {
-                    target_[tid] = {static_cast<floating_data_t<TARGET>>(source_[tid]),
-                                    static_cast<floating_data_t<TARGET>>(0)};
+                    const floating_data_t<TARGET> value
+                        = static_cast<floating_data_t<TARGET>>(source_[tid]);
+                    if constexpr(std::is_same<TARGET, floating_data_t<TARGET>>{})
+                    {
+                        target_[tid] = value;
+                    }
+                    else
+                    {
+                        target_[tid] = {value, static_cast<floating_data_t<TARGET>>(0)};
+                    }
                 }
             }
         }
