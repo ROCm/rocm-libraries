@@ -6,6 +6,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Conv] Fixed an out-of-bounds shared-memory (LDS) read in the CK depthwise forward kernel
+  (`ConvDepthwiseFwd2D`, and `ConvDepthwiseBwdData2D` which reuses it) for the FP16/BF16 instances
+  whose output tile is not a multiple of the subtile size (for example 14x14 and 28x28 tiles with a
+  5x5 filter). The extra output rows are masked on store, so results are not expected to have been
+  affected; the LDS tile is now sized to hold every input row the subtiles read, which adds up to
+  640 B of LDS for the affected instances.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
   with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the

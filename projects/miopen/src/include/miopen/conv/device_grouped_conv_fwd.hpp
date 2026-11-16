@@ -150,14 +150,21 @@ struct GridwiseGroupedConv2DFwd
     static constexpr index_t TileIn_Pack_W     = GetAlignedPackW<Tile_W, InVectorWidth>();
     static constexpr index_t TileIn_Pack_Group = WaveSize / TileIn_Pack_W;
     static constexpr index_t TileIn_Pack_H = math::integer_divide_ceil(Tile_H, TileIn_Pack_Group);
-    static constexpr index_t TileIn_Align_H =
-        math::max(TileIn_Pack_H * TileIn_Pack_Group + Pad_H, TileIn_H);
 
     // constants for internal subtile
     static constexpr index_t HSubtileRepeat    = math::integer_divide_ceil(TileOut_H, SubTileH);
     static constexpr index_t WSubtileRepeat    = math::integer_divide_ceil(TileOut_W, SubTileW);
     static constexpr index_t SubtilesPerWave   = WaveSize / (HSubtileRepeat * WSubtileRepeat);
     static constexpr index_t ThreadsPerSubtile = WaveSize / SubtilesPerWave;
+
+    // The subtile grid covers HSubtileRepeat * SubTileH output rows, which can exceed TileOut_H.
+    // run_conv_fwd reads every input row those subtiles need (the stores of the extra output
+    // rows are masked, the LDS reads are not), so the LDS tile must hold all of them.
+    static constexpr index_t TileIn_Subtile_H =
+        (HSubtileRepeat * SubTileH - 1) * Stride_H + Dilation_Y * (Filter_Y - 1) + 1;
+
+    static constexpr index_t TileIn_Align_H =
+        math::max(math::max(TileIn_Pack_H * TileIn_Pack_Group + Pad_H, TileIn_H), TileIn_Subtile_H);
     static_assert(NBatch % SubtilesPerWave == 0); // only support aligned N
 
     static constexpr index_t TileIn_Max_W =
