@@ -12,7 +12,9 @@
  * lowering cases parse serialized IR. They mirror
  * tests/core/test_global_access_alignment.py and the HIP refusals of
  * tests/core/test_mma_io.py and tests/core/test_tf32.py, whose C++ halves
- * otherwise run only where the pybind engine is built.
+ * otherwise run only where the pybind engine is built. The scalar global loads
+ * and stores read their `align` through the same rule; without one they keep
+ * their own claims.
  */
 
 #include "rocke/error.hpp"
@@ -98,6 +100,28 @@ std::string store_of_a_parameter(const std::string& elem)
              "    cf.return (  )\n"
              "  }\n"
              "}\n";
+}
+
+/* Serialized IR that loads an f16 and an f32 from global memory and stores them
+ * back through the four scalar global ops, none of them carrying an `align`
+ * attribute. */
+std::string scalar_copy_without_align()
+{
+    return "ckdsl.ir v1\n"
+           "kernel @global_scalar_copy_without_align {\n"
+           "  params {\n"
+           "    %h : ptr<f16,global>\n"
+           "    %f : ptr<f32,global>\n"
+           "  }\n"
+           "  region @entry {\n"
+           "    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n"
+           "    %x : f16 = memref.global_load ( %h, %c0 )\n"
+           "    %y : f32 = memref.global_load_typed ( %f, %c0 ) { elem_type = s:\"f32\" }\n"
+           "    memref.global_store ( %h, %c0, %x ) { elem_type = s:\"f16\" }\n"
+           "    memref.global_store_typed ( %f, %c0, %y )\n"
+           "    cf.return (  )\n"
+           "  }\n"
+           "}\n";
 }
 
 /* Rewrites the `align` attribute of the kernel's op `opcode`, as serialized or
@@ -274,6 +298,66 @@ int test_the_hip_lowering_refuses_an_invalid_align()
     return 0;
 }
 
+/* Without `align` the f16 load and store claim 2 bytes and the typed load and
+ * store claim 1, as each did before it read the shared rule. */
+int test_an_llvm_scalar_global_access_without_align_keeps_its_claim()
+{
+    const Lowering lowering = lower_llvm(scalar_copy_without_align());
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(contains(lowering.text, " = load half, ptr addrspace(1) %gep.1, align 2\n"));
+    CHECK(contains(lowering.text, " = load float, ptr addrspace(1) %gep.2, align 1\n"));
+    CHECK(contains(lowering.text, "  store half %x, ptr addrspace(1) %gep.3, align 2\n"));
+    CHECK(contains(lowering.text, "  store float %y, ptr addrspace(1) %gep.4, align 1\n"));
+    return 0;
+}
+
+/* A scalar global load or store refuses an `align` that is not a positive power
+ * of two with the vector ops' text and status, instead of printing it or
+ * reading a bool or a float as missing. */
+int test_an_llvm_scalar_global_access_refuses_an_invalid_align()
+{
+    struct InvalidAlign
+    {
+        AlignOverwrite overwrite;
+        rocke_status_t status;
+        const char* refusal;
+    };
+    const InvalidAlign invalid_aligns[] = {
+        {[](rocke_ir_builder_t* b, rocke_attr_map_t* attrs) {
+             rocke_attr_set_bool(b, attrs, "align", true);
+         },
+         ROCKE_ERR_TYPE,
+         "align=bool, expected an integer"},
+        {[](rocke_ir_builder_t* b, rocke_attr_map_t* attrs) {
+             rocke_attr_set_float(b, attrs, "align", 8.0);
+         },
+         ROCKE_ERR_TYPE,
+         "align=float, expected an integer"},
+        {[](rocke_ir_builder_t* b, rocke_attr_map_t* attrs) {
+             rocke_attr_set_int(b, attrs, "align", 24);
+         },
+         ROCKE_ERR_VALUE,
+         "align=24, expected a positive power of two"},
+    };
+    const rocke_opcode_t scalar_accesses[] = {ROCKE_OP_MEMREF_GLOBAL_LOAD,
+                                              ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+                                              ROCKE_OP_MEMREF_GLOBAL_STORE,
+                                              ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED};
+    for(const rocke_opcode_t opcode : scalar_accesses)
+    {
+        for(const InvalidAlign& invalid : invalid_aligns)
+        {
+            const Lowering lowering
+                = lower_llvm(scalar_copy_without_align(), opcode, invalid.overwrite);
+            CHECK(lowering.status == invalid.status);
+            CHECK(lowering.text.empty());
+            CHECK(lowering.error
+                  == std::string(rocke_opcode_name(opcode)) + " failed - " + invalid.refusal);
+        }
+    }
+    return 0;
+}
+
 /* The int `align` attribute the builder recorded on `op`, or -1 when absent. */
 int64_t recorded_align(const rocke_op_t* op)
 {
@@ -382,6 +466,8 @@ int main()
        || test_a_sub_byte_vector_store_without_align_is_refused()
        || test_an_llvm_vector_load_refuses_an_invalid_align()
        || test_the_hip_lowering_refuses_an_invalid_align()
+       || test_an_llvm_scalar_global_access_without_align_keeps_its_claim()
+       || test_an_llvm_scalar_global_access_refuses_an_invalid_align()
        || test_the_global_vector_builders_default_to_the_natural_alignment()
        || test_the_global_vector_builders_refuse_an_invalid_align())
     {

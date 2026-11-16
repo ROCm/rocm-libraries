@@ -11,8 +11,10 @@ hand-written IR reaches the lowerers' default; these tests feed such IR to the
 LLVM and HIP lowerers. Each case runs per engine: the Python engine
 everywhere, the C++ engine where its binding is built, emitting the same text
 or refusing with the same message and status. The builder cases check the
-``align`` the builders record. ``test_global_access_alignment.cpp`` runs the
-same cases through the C API.
+``align`` the builders record. The scalar global loads and stores read their
+``align`` through the same rule (``core.ir.align_attr``); without one they keep
+their own claims. ``test_global_access_alignment.cpp`` runs the same cases
+through the C API.
 """
 
 from __future__ import annotations
@@ -68,6 +70,30 @@ kernel @global_store_without_align {{
     cf.return (  )
   }}
 }}
+"""
+    )
+
+
+def _scalar_copy() -> KernelDef:
+    """Serialized IR that loads an ``f16`` and an ``f32`` from global memory and
+    stores them back through the four scalar global ops, none of them carrying
+    an ``align`` attribute."""
+    return parse(
+        """ckdsl.ir v1
+kernel @global_scalar_copy_without_align {
+  params {
+    %h : ptr<f16,global>
+    %f : ptr<f32,global>
+  }
+  region @entry {
+    %c0 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %x : f16 = memref.global_load ( %h, %c0 )
+    %y : f32 = memref.global_load_typed ( %f, %c0 ) { elem_type = s:"f32" }
+    memref.global_store ( %h, %c0, %x ) { elem_type = s:"f16" }
+    memref.global_store_typed ( %f, %c0, %y )
+    cf.return (  )
+  }
+}
 """
     )
 
@@ -148,6 +174,62 @@ def test_an_llvm_vector_load_refuses_an_invalid_align(
         engine=engine,
         error_type=error_type,
         message=f"memref.global_load_vN failed - {refusal}",
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_llvm_scalar_global_access_without_align_keeps_its_claim(engine):
+    """Without ``align`` the ``f16`` load and store claim 2 bytes and the typed
+    load and store claim 1, as each did before it read the shared rule."""
+    ll = lower_with_engine(
+        _scalar_copy(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
+    assert re.search(r"= load half, ptr addrspace\(1\) \S+, align 2$", ll, re.MULTILINE)
+    assert re.search(
+        r"= load float, ptr addrspace\(1\) \S+, align 1$", ll, re.MULTILINE
+    )
+    assert re.search(
+        r"store half \S+, ptr addrspace\(1\) \S+, align 2$", ll, re.MULTILINE
+    )
+    assert re.search(
+        r"store float \S+, ptr addrspace\(1\) \S+, align 1$", ll, re.MULTILINE
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "op_name",
+    [
+        "memref.global_load",
+        "memref.global_load_typed",
+        "memref.global_store",
+        "memref.global_store_typed",
+    ],
+)
+@pytest.mark.parametrize(
+    ("align", "error_type", "refusal"),
+    [
+        (True, TypeError, "align=bool, expected an integer"),
+        (8.0, TypeError, "align=float, expected an integer"),
+        (24, ValueError, "align=24, expected a positive power of two"),
+    ],
+)
+def test_an_llvm_scalar_global_access_refuses_an_invalid_align(
+    engine, op_name, align, error_type, refusal
+):
+    """A scalar global load or store refuses an ``align`` that is not a
+    positive power of two with the vector ops' text, instead of printing
+    ``align 24`` or reading ``True`` or ``8.0`` as another alignment."""
+    kernel = _scalar_copy()
+    (access,) = [op for op in kernel.body.ops if op.name == op_name]
+    access.attrs["align"] = align
+    assert_engine_rejects(
+        kernel,
+        _ARCH,
+        engine=engine,
+        error_type=error_type,
+        message=f"{op_name} failed - {refusal}",
         llvm_flavor=LLVM_FLAVOR_LLVM20,
     )
 
