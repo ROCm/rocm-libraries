@@ -71,6 +71,14 @@ admitted    <=> perLane <= 5000
 
 **Launch:** 256-thread blocks; at most 2^20 blocks, the kernels stride over the rest. No workspace, one launch.
 
+## Fusion
+
+`CONV_NAIVE_FWD` applies any fused pointwise epilogue the generator emits
+([conv README](../../README.md#fused-pointwise-epilogues)) at its single store, on the fp32
+accumulator, with the output channel in scope. It claims a fused graph exactly when it claims
+the graph's convolution alone: the workload gate and every other gate read the convolution, so
+fusion never widens the engine's coverage. Backward data and backward weights take no epilogue.
+
 ## Strengths and weaknesses
 
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X.

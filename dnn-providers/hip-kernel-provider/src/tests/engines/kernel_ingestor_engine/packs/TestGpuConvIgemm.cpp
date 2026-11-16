@@ -28,6 +28,8 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
@@ -1885,6 +1887,149 @@ TEST(TestConvIgemmComputeType, ServesCudnnsComputeTypesPerElementType)
                 return conv_igemm::parseIgemmProblem(fixture.context(), direction).has_value();
             });
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): every code path that writes y -- the LDS-staged and
+// channels-first epilogues, the FMA store, the split-K reduce, group fusion, halo, tap packing,
+// the TF32 forms -- once per distinct path among the configs the kernel match admits.
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+/// The config fields that select a different store path.
+const std::vector<std::string>& fusedPathFields()
+{
+    static const std::vector<std::string> s_fields{
+        "atom", "math", "cf", "pack", "halo", "fuse", "dma", "swz", "wdirect", "large"};
+    return s_fields;
+}
+
+struct FusedShape
+{
+    std::string name;
+    ConvShape shape;
+};
+
+std::vector<FusedShape> fusedShapes()
+{
+    std::vector<FusedShape> shapes;
+    shapes.push_back({"NhwcEdge", dense(24, 40, {9, 7}, {3, 3}, {1, 1}, true)});
+    shapes.push_back({"NchwEdge", dense(24, 40, {9, 7}, {3, 3}, {1, 1}, false)});
+    // A long reduction over few rows: the split-K plan splits, and the reduce writes y.
+    ConvShape split = dense(512, 48, {4, 4}, {3, 3}, {1, 1}, true);
+    split.n = 1;
+    shapes.push_back({"SplitK", split});
+    ConvShape splitCf = split;
+    splitCf.channelsLast = false;
+    shapes.push_back({"SplitKChannelsFirst", splitCf});
+    ConvShape grouped = dense(32, 32, {6, 6}, {3, 3}, {1, 1}, true);
+    grouped.groups = 4;
+    shapes.push_back({"Grouped", grouped});
+    shapes.push_back({"OneD", dense(16, 24, {13}, {3}, {1}, true)});
+    shapes.push_back({"ThreeD", dense(8, 16, {3, 5, 6}, {3, 3, 3}, {1, 1, 1}, true)});
+    return shapes;
+}
+
+template <typename T>
+void runFused(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), fusedPathFields());
+    // The TF32 forms (three-bf16, xf32) carry their own error: 2^-11 relative per product.
+    const auto tolerance = [](int64_t reduction) {
+        return (std::is_same_v<T, float> ? 1e-3 : 1e-6) * static_cast<double>(reduction);
+    };
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials, tolerance), 1)
+        << "no catalog config serves this fused case";
+}
+
+class TestGpuConvIgemmFused : public ::testing::TestWithParam<std::tuple<FusedShape, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvIgemmFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvIgemmFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvIgemmFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> fusedChainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvIgemmFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(fusedChainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvIgemmFused,
+                         ::testing::Combine(::testing::Values(fusedShapes()[0], fusedShapes()[1]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvIgemmFusedSpecials : public ::testing::TestWithParam<FusedShape>
+{
+};
+
+TEST_P(TestGpuConvIgemmFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(GetParam().shape,
+                    {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                    Specials::NAN_INF);
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvIgemmFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+        Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvIgemmFusedSpecials,
+                         ::testing::ValuesIn(fusedShapes()),
+                         [](const auto& info) { return info.param.name; });
+
+// Opt-in: each config's time with and without a fused bias + relu (shapes in $K1_EPI_TIMING).
+TEST(TestGpuConvIgemmFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), "K1_EPI_TIMING");
 }
 
 } // namespace

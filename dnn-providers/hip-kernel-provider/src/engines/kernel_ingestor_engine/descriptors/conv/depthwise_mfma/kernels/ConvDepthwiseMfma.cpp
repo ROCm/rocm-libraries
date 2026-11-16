@@ -37,8 +37,12 @@
 //   CONV_DWM_FOLD    images sharing the output columns (32 channels-last: 1, 2 or 4; 128
 //                    channels-first: 1, 2, 4 or 8)
 //   CONV_DWM_FLIP    1 reads the filter reflected
+//   CONV_EPI         1: forward applies the fused pointwise epilogue to the fp32 accumulators
+//                    before they round into the LDS output row (ConvDepthwiseEpilogue.h), and
+//                    takes ConvEpiArgs as a second argument
 
 // Embedded headers are keyed by bare file name (src/cmake/KernelEmbedding.cmake).
+#include "ConvDepthwiseEpilogue.h"
 #include "ConvDepthwiseMfmaArgs.h"
 
 #ifndef CONV_DWM_TYPE
@@ -169,7 +173,7 @@ __device__ inline void ldsBarrier()
 }
 
 template <class T, int KA, int KH, int KW, int S, int WB, int D, int F, bool FLIP>
-__device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
+__device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a DW_EPI_PARAM)
 {
     using Am = Atom<T, KA>;
     typedef typename Am::frag frag;
@@ -307,6 +311,13 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
     // The accumulator lane holds channels 4 (g % 2) .. + 3 of output column 2j + g / 2.
     const int opx = 2 * j + (g >> 1);
     const int oSlot = (opx * WB + (wave ^ ((opx >> 1) & KM))) * 8 + 4 * (g & 1);
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue's operands of the lane's 4 accumulator channels.
+    ConvEpiGen::Chan dwEc[4];
+#pragma unroll
+    for(int v = 0; v < 4; ++v)
+        dwEc[v] = dwEpi.chan(c0 + 4 * (g & 1) + v, true);
+#endif
     unsigned oOff[NO];
     int oRd[NO];
     bool oOn[NO];
@@ -387,7 +398,7 @@ __device__ void depthwiseMfma(const ConvDepthwiseMfmaArgs& a)
                 v4 o;
 #pragma unroll
                 for(int v = 0; v < 4; ++v)
-                    o[v] = (T)acc[done][v];
+                    o[v] = (T)DW_EPI_APPLY(acc[done][v], dwEc[v]);
                 *reinterpret_cast<v4*>(&outL[parity][oSlot]) = o;
                 acc[done] = f4{0.0f, 0.0f, 0.0f, 0.0f};
             }
@@ -421,7 +432,7 @@ drained:
 // past c, columns past the row and rows past the image read zero through masks and
 // out-of-range offsets; outputs past them store to an out-of-range offset.
 template <class T, int KA, int KH, int KW, int S, int D, int F, bool FLIP>
-__device__ void depthwiseMfmaNchw(const ConvDepthwiseMfmaArgs& a)
+__device__ void depthwiseMfmaNchw(const ConvDepthwiseMfmaArgs& a DW_EPI_PARAM)
 {
     using Am = Atom<T, KA>;
     typedef typename Am::frag frag;
@@ -568,12 +579,13 @@ __device__ void depthwiseMfmaNchw(const ConvDepthwiseMfmaArgs& a)
                   : CONV_DWM_OOB;
     }
     const unsigned oRowB = (unsigned)((long)a.wo * (long)sizeof(T));
+    DW_EPI_DECL(dwEc, c0 + cOut, c0 + cOut < a.c)
     auto ostore = [&](const f4& acc, int oy) {
         const bool ok = oy >= oy0 && oy < oy1;
 #pragma unroll
         for(int v = 0; v < 4; ++v)
         {
-            const T o = (T)acc[v];
+            const T o = (T)DW_EPI_APPLY(acc[v], dwEc);
             __builtin_amdgcn_raw_buffer_store_b16(
                 __builtin_bit_cast(unsigned short, o),
                 yr,
@@ -629,8 +641,11 @@ __device__ void depthwiseMfmaNchw(const ConvDepthwiseMfmaArgs& a)
 using ElementType = CONV_DWM_TYPE;
 
 extern "C" __global__ void __launch_bounds__(64 * CONV_DWM_WAVES)
-    ConvDepthwiseMfma(ConvDepthwiseMfmaArgs args)
+    ConvDepthwiseMfma(ConvDepthwiseMfmaArgs args CONV_EPI_PARAM)
 {
+#if defined(CONV_EPI) && CONV_EPI
+    const ConvEpiGen dwEpi = convEpiGen(epiArgs);
+#endif
 #if CONV_DWM_LAYOUT == 0
     conv_depthwise_mfma::depthwiseMfma<ElementType,
                                        CONV_DWM_ATOM,
@@ -640,7 +655,7 @@ extern "C" __global__ void __launch_bounds__(64 * CONV_DWM_WAVES)
                                        CONV_DWM_WAVES,
                                        CONV_DWM_DEPTH,
                                        CONV_DWM_FOLD,
-                                       CONV_DWM_FLIP != 0>(args);
+                                       CONV_DWM_FLIP != 0>(args DW_EPI_ARG);
 #else
     conv_depthwise_mfma::depthwiseMfmaNchw<ElementType,
                                            CONV_DWM_ATOM,
@@ -649,6 +664,6 @@ extern "C" __global__ void __launch_bounds__(64 * CONV_DWM_WAVES)
                                            CONV_DWM_STRIDE,
                                            CONV_DWM_DEPTH,
                                            CONV_DWM_FOLD,
-                                           CONV_DWM_FLIP != 0>(args);
+                                           CONV_DWM_FLIP != 0>(args DW_EPI_ARG);
 #endif
 }

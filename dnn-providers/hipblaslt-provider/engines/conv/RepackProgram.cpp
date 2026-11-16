@@ -26,7 +26,7 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 65> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 68> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
                                                       "StridedTranspose2",
                                                       "StridedTranspose4",
@@ -38,6 +38,9 @@ constexpr std::array<const char*, 65> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCastWideFloatToFloat",
                                                       "StridedCastWideFloatToHalf",
                                                       "StridedCastWideFloatToBfloat16",
+                                                      "StridedCastEpilogueFloatToFloat",
+                                                      "StridedCastEpilogueFloatToHalf",
+                                                      "StridedCastEpilogueFloatToBfloat16",
                                                       "Im2Col2",
                                                       "Im2Col4",
                                                       "Im2ColDisjointOutputs2V1",
@@ -212,8 +215,15 @@ std::string RepackProgram::entryName(const RepackStep& step)
     {
         return "Im2Col" + bytes;
     }
-    const std::string prefix
-        = std::holds_alternative<StridedCastArgs>(step.args) ? "StridedCastFloatTo" : "Col2Im";
+    std::string prefix = "Col2Im";
+    if(std::holds_alternative<StridedCastArgs>(step.args))
+    {
+        prefix = "StridedCastFloatTo";
+    }
+    else if(std::holds_alternative<StridedCastEpilogueArgs>(step.args))
+    {
+        prefix = "StridedCastEpilogueFloatTo";
+    }
     switch(step.dataType)
     {
     case data_objects::DataType::FLOAT:
@@ -254,6 +264,19 @@ void RepackProgram::launch(const RepackStep& step,
         total = cast->total;
         // Many partials into few outputs: one 64-thread block per output (castLaunch).
         launch = castLaunch(*cast, entryName(step));
+    }
+    else if(auto* fused = std::get_if<StridedCastEpilogueArgs>(&args))
+    {
+        // One thread per element (grid-stride, below): a fused epilogue's cast sums no partials.
+        fused->cast.src = static_cast<const float*>(src);
+        fused->cast.dst = dst;
+        total = fused->cast.total;
+        // The flat form takes four elements a thread (aligned buffers; else it strides over
+        // the same threads one element at a time).
+        if(fused->epilogue.channelAxis < 0 && total % 4 == 0)
+        {
+            total /= 4;
+        }
     }
     else if(auto* im2col = std::get_if<Im2ColArgs>(&args))
     {

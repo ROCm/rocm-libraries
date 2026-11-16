@@ -328,13 +328,14 @@ std::optional<Tile>
 } // namespace
 
 std::optional<DirectProblem> parseDirectProblem(const MatchContext& context,
-                                                ConvDirection direction)
+                                                ConvDirection direction,
+                                                conv_naive::Fusion fusion)
 {
     if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA)
     {
         return std::nullopt;
     }
-    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    auto base = conv_naive::parseConvNaiveProblem(context, direction, fusion);
     if(!base.has_value())
     {
         return std::nullopt;
@@ -880,7 +881,8 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
 
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_direct::parseDirectProblem(context, direction);
+    const auto problem
+        = conv_direct::parseDirectProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value())
     {
         return std::nullopt;
@@ -930,7 +932,8 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    auto problem = conv_direct::parseDirectProblem(context, *direction);
+    auto problem
+        = conv_direct::parseDirectProblem(context, *direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value() || *dtypeName != data_objects::EnumNameDataType(problem->base.dataType)
        || !conv_direct::configRunsOn(*config, context.deviceProperties.gcnArchName))
     {
@@ -981,6 +984,17 @@ const std::vector<KernelArgument>& signatureOf()
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(Args)), 0, ""}};
     return s_signature;
+}
+
+/// The convolution's or the reduce's arguments, and a ConvEpiArgs after them when an epilogue is
+/// fused. Only consulted for a pre-built kernel.
+template <class Args>
+const std::vector<KernelArgument>& signatureOf(bool fused)
+{
+    static const std::vector<KernelArgument> s_fused{
+        {"by_value", static_cast<uint32_t>(sizeof(Args)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fused : signatureOf<Args>();
 }
 
 std::string elementTypeFor(data_objects::DataType dataType)
@@ -1153,10 +1167,23 @@ public:
             return buildIngestorKernelCode(
                 _kernelCompiler, _kpackLoader, context, aux, options, signature);
         };
+        // The fused epilogue: in the convolution, and in the split-C reduce that writes the
+        // output when the reduction is split. Fusion off adds no option, so the code is that of
+        // an unfused build; the pre-passes and staging copies never take it.
+        const bool fused = !run->problem.base.epilogue.empty();
+        conv_epilogue::addEpilogueDefines(options, run->problem.base.epilogue);
         auto conv = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K2Args>());
+            _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<K2Args>(fused));
         conv.setBlockSize(static_cast<unsigned int>(config.blockThreads()), 1, 1);
         conv.setGridSize(plan.grid[0], plan.grid[1], plan.grid[2]);
+        std::optional<IngestorKernelCode> reduce;
+        if(config.split != 0)
+        {
+            reduce.emplace(build(REDUCE_ENTRY_POINT, signatureOf<K2ReduceArgs>(fused)));
+            reduce->setBlockSize(AUX_BLOCK, 1, 1);
+            reduce->setGridSize(auxBlocks(plan.outElems), 1, 1);
+        }
+        conv_epilogue::removeEpilogueDefines(options);
 
         auto format = build(FORMAT_ENTRY_POINT, signatureOf<K2FormatArgs>());
         format.setBlockSize(AUX_BLOCK, 1, 1);
@@ -1187,13 +1214,6 @@ public:
             splitInput->setBlockSize(AUX_BLOCK, 1, 1);
             splitInput->setGridSize(
                 auxBlocks(static_cast<long long>(a.n) * a.di * a.hi * a.wi * a.c), 1, 1);
-        }
-        std::optional<IngestorKernelCode> reduce;
-        if(config.split != 0)
-        {
-            reduce.emplace(build(REDUCE_ENTRY_POINT, signatureOf<K2ReduceArgs>()));
-            reduce->setBlockSize(AUX_BLOCK, 1, 1);
-            reduce->setGridSize(auxBlocks(plan.outElems), 1, 1);
         }
         std::array<std::optional<IngestorKernelCode>, 2> copies;
         const std::array<const Staging*, 2> stagings{&run->problem.in, &run->problem.out};
@@ -1336,11 +1356,27 @@ public:
             args.x = split.xs;
         }
         args.ws = config.split != 0 ? reinterpret_cast<float*>(base + plan.partialOffset) : nullptr;
-        dispatch.conv(stream).launch(stream, args);
-        if(config.split != 0)
+        const bool fused = !problem.base.epilogue.empty();
+        if(fused)
         {
-            K2ReduceArgs reduce{args.ws, operand[1], plan.outElems, args.splits, 0};
-            dispatch.reduce(stream).launch(stream, reduce);
+            // The reduce writes the channels-last output: channel = offset % k.
+            const ConvEpiArgs epiArgs = conv_epilogue::epilogueArgs(
+                problem.base.epilogue, deviceBuffers, numDeviceBuffers, 1, problem.args.k);
+            dispatch.conv(stream).launch(stream, args, epiArgs);
+            if(config.split != 0)
+            {
+                K2ReduceArgs reduce{args.ws, operand[1], plan.outElems, args.splits, 0};
+                dispatch.reduce(stream).launch(stream, reduce, epiArgs);
+            }
+        }
+        else
+        {
+            dispatch.conv(stream).launch(stream, args);
+            if(config.split != 0)
+            {
+                K2ReduceArgs reduce{args.ws, operand[1], plan.outElems, args.splits, 0};
+                dispatch.reduce(stream).launch(stream, reduce);
+            }
         }
         if(staged && stagings[1]->needed)
         {

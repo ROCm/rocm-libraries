@@ -76,6 +76,19 @@ Engine bench: every admitted config of every hip-kernel-provider engine, autotun
   - **64x64 tiles** are limited by VGPRs at 256 threads.
   - **MI325X perf** has not been measured. The gfx942 numbers above come from an MI300X and are indicative only.
 
+## Fusion
+
+`CONV_FFT_FWD` claims a forward convolution followed by a chain of pointwise nodes (scale, bias,
+relu / clipped relu / clamp / leaky relu, gelu, gelu-tanh, swish / silu, sigmoid, tanh, elu, abs,
+softplus; per-channel, one-element and pass-by-value operands) under its own engine id. The
+pass that writes y applies the chain to each point's fp32 value (the inverse transform's output
+times its scale) before the single rounding: `ConvFftOutput`, and `ConvFftDepthwise` for the
+depthwise path. A block works on one output channel, so the chain's per-channel operands load
+once a block, with no per-element channel arithmetic. The transforms and the product compile and
+run as unfused, and an unfused graph's kernels are unchanged. The chain is compiled into the
+output pass as generated code that depends on the pattern only; operand pointers and values are
+a second kernel argument. Backward data and backward weights decline fused graphs.
+
 ## Numerical precision
 - **Arithmetic:** transforms and products run in fp32 for every tensor type. Inputs are converted once on load and outputs are rounded once on store. There is no reduced-precision product, so no TF32 or RPR sibling exists.
 - **Error model:** FFT error is absolute, about c·log2(n)·ε times the transform's rms. It is not relative to each output. An output much smaller than its neighbours therefore carries a large relative error, which is why the engine reports the `FFT` note.

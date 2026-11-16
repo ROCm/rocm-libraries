@@ -194,6 +194,28 @@ __device__ void k2SplitReduce(const K2ReduceArgs& a)
     }
 }
 
+#if defined(CONV_EPI) && CONV_EPI
+/// The fused split-C reduce: the epilogue applied once to each summed element. y is channels-last,
+/// so the flat walk (ConvEpiFlatChannel, chanStride 1, chans k) gives each element's channel with
+/// no division per element.
+template <class TO>
+__device__ void k2SplitReduceEpi(const K2ReduceArgs& a, const ConvEpiGen& epi)
+{
+    TO* y = static_cast<TO*>(a.y);
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    const long long first = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    ConvEpiFlatChannel flat(epi.e, first, step);
+    for(long long i = first; i < a.count; i += step)
+    {
+        float v = 0.0f;
+        for(int z = 0; z < a.splits; ++z)
+            v += a.ws[z * a.count + i];
+        y[i] = K1Elem<TO>::store(epi(v, epi.chan(flat.ch, true), i, true));
+        flat.advance();
+    }
+}
+#endif
+
 // Three-bf16 fp32 (TF32-class): x * w ~= xh wh + xh wl + xl wh, run as one bf16 conv with 3C
 // reduction channels, x' = [xh | xh | xl] and w' = [wh | wl | wh] along the reduction, fp32 out.
 __device__ inline void k2SplitBf16(float v, unsigned short& hi, unsigned short& lo)
@@ -619,7 +641,7 @@ template <class T,
           class TO = T,
           int SPLIT = 0,
           int HALO = k2HaloMax(BM, R, S)>
-__device__ void k2ConvMma(const K2Args& a)
+__device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -959,6 +981,20 @@ __device__ void k2ConvMma(const K2Args& a)
         typedef typename K1Raw<16>::type Raw;
         __syncthreads();
         TS* strip = reinterpret_cast<TS*>(lds + (stage ^ 1) * SLOT) + wave * STRIP;
+#if defined(CONV_EPI) && CONV_EPI
+        // The fused epilogue's per-channel operands of the lane's output columns, loaded per
+        // store so they hold no registers through the main loop: the column goes through an
+        // empty asm, so the loop-invariant loads are not hoisted to the kernel's start.
+        int col = n0 + wn * WTN + lane % DIM;
+        asm volatile("" : "+v"(col));
+        ConvEpiGen::Chan chans[FN];
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+        {
+            const int en = col + j * DIM;
+            chans[j] = epi.chan(en, en < a.k);
+        }
+#endif
 #pragma unroll
         for(int i = 0; i < FM; ++i)
         {
@@ -966,8 +1002,18 @@ __device__ void k2ConvMma(const K2Args& a)
             for(int j = 0; j < FN; ++j)
 #pragma unroll
                 for(int e = 0; e < Atom::ACC; ++e)
+#if defined(CONV_EPI) && CONV_EPI
+                {
+                    // Split partials stay raw: the reduce applies the epilogue to their sum.
+                    float v = acc[set][i][j][e];
+                    if constexpr(SPLIT == 0)
+                        v = epi(v, chans[j], 0, true);
+                    strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM] = K1Elem<TS>::store(v);
+                }
+#else
                     strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
                         = K1Elem<TS>::store(acc[set][i][j][e]);
+#endif
             __builtin_amdgcn_wave_barrier();
             __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -1036,7 +1082,7 @@ template <class T,
           int RING = 1,
           int PIPE = 0,
           int HALO = k2HaloMax((THREADS / NT) * TM, R, S)>
-__device__ void k2ConvFma(const K2Args& a)
+__device__ void k2ConvFma(const K2Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int BN = NT * TN;
     constexpr int LDH = HALO + 1;
@@ -1055,6 +1101,18 @@ __device__ void k2ConvFma(const K2Args& a)
     const int n0 = blockIdx.y * BN;
     const int tid = threadIdx.x;
     const int tn = tid % NT, tq = tid / NT;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue's per-channel operands of the thread's columns, loaded before the
+    // reduction so their latency hides behind it (a stem's short reduction otherwise waits on
+    // them at the store).
+    ConvEpiGen::Chan chans[TN];
+#pragma unroll
+    for(int j = 0; j < TN; ++j)
+    {
+        const int en = n0 + tn * TN + j;
+        chans[j] = epi.chan(en, en < a.k);
+    }
+#endif
     const int runs = a.tw / TM;
     const int ohl = tq / runs, owl = (tq - ohl * runs) * TM;
     const bool rowOk = ohl < a.th;
@@ -1224,6 +1282,16 @@ __device__ void k2ConvFma(const K2Args& a)
     T* out = static_cast<T*>(a.y);
     auto store = [&](int set, int od, int) {
         const int nb = n0 + tn * TN;
+#if defined(CONV_EPI) && CONV_EPI
+        // The fused epilogue on the accumulators in place.
+#pragma unroll
+        for(int j = 0; j < TN; ++j)
+        {
+#pragma unroll
+            for(int i = 0; i < TM; ++i)
+                acc[set][i][j] = epi(acc[set][i][j], chans[j], 0, true);
+        }
+#endif
 #pragma unroll
         for(int i = 0; i < TM; ++i)
         {

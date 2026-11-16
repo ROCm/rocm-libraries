@@ -241,6 +241,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
     target_sources(hip_kernel_provider_impl PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNaiveNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNaiveProblem.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvEpilogue.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuWrwNative.cpp
@@ -282,6 +283,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValu.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValuArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseValuCores.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu/kernels/ConvDepthwiseEpilogue.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrw.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrwArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseHankelWrw.h"
@@ -296,6 +298,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmCore.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmPatch.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvEpilogue.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvEpilogueArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvArchFamily.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchw.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchwArgs.h"
@@ -339,6 +343,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         kernels/ConvDepthwiseValu.cpp
         ConvDepthwiseValuArgs.h
         ConvDepthwiseValuCores.h
+        ConvDepthwiseEpilogue.h
         kernels/ConvDepthwiseValuWrw.cpp
         ConvDepthwiseValuWrwArgs.h
         ConvDepthwiseHankelWrw.h
@@ -353,6 +358,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvIgemmArgs.h
         ConvIgemmCore.h
         ConvIgemmPatch.h
+        ConvEpilogue.h
+        ConvEpilogueArgs.h
         ConvArchFamily.h
         kernels/ConvIgemmNchw.cpp
         ConvIgemmNchwArgs.h

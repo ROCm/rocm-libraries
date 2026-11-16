@@ -34,6 +34,7 @@
 typedef _Float16 k1_half;
 typedef unsigned short k1_bf16; // bf16 bits
 
+#include "ConvEpilogue.h"
 #include "ConvIgemmArgs.h"
 
 // ---------------------------------------------------------------------------------------------
@@ -1930,7 +1931,7 @@ template <class T,
           int CF = 0,
           int SWZ = 0,
           int DMA = 0>
-__device__ void k1ConvMma(const K1Args& a)
+__device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -2000,6 +2001,21 @@ __device__ void k1ConvMma(const K1Args& a)
     const int lane = tid % WAVE;
     const int wave = tid / WAVE;
     const int wm = wave % WM, wn = wave / WM;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: each output column's per-channel operands, loaded before the
+    // reduction so their latency hides behind it (a short reduction otherwise waits on them at
+    // the store).
+    // Patch backward data's columns are filter elements, not channels: it takes no epilogue
+    // (the graph parse declines fused backward data).
+    static_assert(K1_PATCH == 0 || DIR == K1_FORWARD, "patch backward data fuses no epilogue");
+    ConvEpiGen::Chan chans[FN];
+#pragma unroll
+    for(int j = 0; j < FN; ++j)
+    {
+        const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+        chans[j] = epi.chan(g * ncols + en, en < ncols);
+    }
+#endif
 
     K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
@@ -2412,6 +2428,10 @@ __device__ void k1ConvMma(const K1Args& a)
         walk.template init<DIR>(a, gather);
 #pragma unroll
         for(int j = 0; j < FN; ++j)
+#if defined(CONV_EPI) && CONV_EPI
+        {
+            const ConvEpiGen::Chan& chan = chans[j];
+#endif
 #pragma unroll
             for(int rc = 0; rc < WTM / CFR; ++rc)
             {
@@ -2420,7 +2440,11 @@ __device__ void k1ConvMma(const K1Args& a)
 #pragma unroll
                     for(int e = 0; e < Atom::ACC; ++e)
                         strip[(lane % DIM) * OLDC + i * DIM + Atom::dRow(lane, e)]
+#if defined(CONV_EPI) && CONV_EPI
+                            = K1Elem<T>::store(epi(acc[rc * (CFR / DIM) + i][j][e], chan, 0, true));
+#else
                             = K1Elem<T>::store(acc[rc * (CFR / DIM) + i][j][e]);
+#endif
                 __builtin_amdgcn_wave_barrier();
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -2461,6 +2485,9 @@ __device__ void k1ConvMma(const K1Args& a)
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
                 __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
             }
+#if defined(CONV_EPI) && CONV_EPI
+        }
+#endif
         return;
     }
 
@@ -2477,7 +2504,11 @@ __device__ void k1ConvMma(const K1Args& a)
 #pragma unroll
             for(int e = 0; e < Atom::ACC; ++e)
                 strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
+#if defined(CONV_EPI) && CONV_EPI
+                    = K1Elem<T>::store(epi(acc[i][j][e], chans[j], 0, true));
+#else
                     = K1Elem<T>::store(acc[i][j][e]);
+#endif
         __builtin_amdgcn_wave_barrier();
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
@@ -2518,7 +2549,7 @@ __device__ void k1ConvMma(const K1Args& a)
 #endif
 
 template <class T, int BM, int BN, int BK, int THREADS, int VEC, int DIR, int WD = 0, int PACK = 0>
-__device__ void k1ConvFma(const K1Args& a)
+__device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int TX = 16, TY = THREADS / TX; // threads along n, along m
     constexpr int TM = BM / TY, TN = BN / TX;
@@ -2545,6 +2576,18 @@ __device__ void k1ConvFma(const K1Args& a)
     const int n0 = blockIdx.y * BN;
     const int tid = threadIdx.x;
     const int tx = tid % TX, ty = tid / TX;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue: each output column's per-channel operands, loaded before the
+    // reduction so their latency hides behind it.
+    static_assert(K1_PATCH == 0 || DIR == K1_FORWARD, "patch backward data fuses no epilogue");
+    ConvEpiGen::Chan chans[TN];
+#pragma unroll
+    for(int j = 0; j < TN; ++j)
+    {
+        const int nn = n0 + ((j / 4) * TX + tx) * 4 + j % 4;
+        chans[j] = epi.chan(g * ncols + nn, nn < ncols);
+    }
+#endif
 
     K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
@@ -2659,7 +2702,11 @@ __device__ void k1ConvFma(const K1Args& a)
                 if(splits > 1)
                     partial[o] = acc[i][j];
                 else
+#if defined(CONV_EPI) && CONV_EPI
+                    out[o] = K1Elem<T>::store(epi(acc[i][j], chans[j], o, true));
+#else
                     out[o] = K1Elem<T>::store(acc[i][j]);
+#endif
             }
         }
     }
@@ -2845,6 +2892,27 @@ __device__ inline void k1ReduceSplits(const K1ReduceArgs& a)
         out[i] = K1Elem<T>::store(sum);
     }
 }
+
+#if defined(CONV_EPI) && CONV_EPI
+// The fused split-K reduce: the epilogue applied once to each summed element. The channel comes
+// from the flat walk (ConvEpiFlatChannel), with no division per element.
+template <class T>
+__device__ inline void k1ReduceSplitsEpi(const K1ReduceArgs& a, const ConvEpiGen& epi)
+{
+    T* out = static_cast<T*>(a.out);
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    const long long first = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    ConvEpiFlatChannel flat(epi.e, first, step);
+    for(long long i = first; i < a.elems; i += step)
+    {
+        float sum = 0.0f;
+        for(int sp = 0; sp < a.splits; ++sp)
+            sum += a.partial[static_cast<long long>(sp) * a.elems + i];
+        out[i] = K1Elem<T>::store(epi(sum, epi.chan(flat.ch, true), i, true));
+        flat.advance();
+    }
+}
+#endif
 
 // ---------------------------------------------------------------------------------------------
 // Three-bf16 channel split (K1Split3Args): the pre-pass of the engines' TF32 forms. A config

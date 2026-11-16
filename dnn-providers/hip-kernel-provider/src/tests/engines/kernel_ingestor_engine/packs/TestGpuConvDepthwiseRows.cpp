@@ -26,6 +26,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -561,6 +562,142 @@ TEST(TestConvDepthwiseRowsCatalog, EveryConfigServesADeviceCase)
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): the channel-row variants (plane tile and band, compile-time
+// and runtime filter), channels-first 1-D and 2-D, any stride and dilation.
+// ---------------------------------------------------------------------------
+
+namespace fused_rows
+{
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+struct FusedShape
+{
+    std::string name;
+    ConvShape shape;
+};
+
+/// The config fields that select a different code path.
+const std::vector<std::string>& distinctPaths()
+{
+    static const std::vector<std::string> s_fields{"variant", "kh", "kw", "rh", "rw"};
+    return s_fields;
+}
+
+std::vector<FusedShape> shapes()
+{
+    std::vector<FusedShape> shapes;
+    shapes.push_back({"Nchw3x3", depthwise(10, {19, 37}, {3, 3}, {1, 1}, {1, 1})});
+    shapes.push_back({"Nchw5x5", depthwise(6, {17, 35}, {5, 5}, {2, 2}, {1, 1})});
+    shapes.push_back({"Nchw7x7", depthwise(6, {15, 34}, {7, 7}, {3, 3}, {1, 1})});
+    ConvShape strided = depthwise(7, {21, 23}, {3, 3}, {1, 1}, {1, 1});
+    strided.stride = {2, 2};
+    shapes.push_back({"Nchw3x3Stride2", strided});
+    shapes.push_back({"Nchw3x3Dilated", depthwise(5, {16, 18}, {3, 3}, {2, 2}, {2, 2})});
+    shapes.push_back({"OneD", depthwise(12, {67}, {3}, {1}, {1})});
+    return shapes;
+}
+
+/// Every forward shape has a channel-row config.
+void expectRan(int ran)
+{
+    EXPECT_GE(ran, 1) << "no config serves this fused case";
+}
+
+template <typename T>
+int run(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), distinctPaths());
+    return conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials);
+}
+
+class TestGpuConvDepthwiseRowsFused
+    : public ::testing::TestWithParam<std::tuple<FusedShape, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseRowsFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(
+        run<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE));
+}
+
+TEST_P(TestGpuConvDepthwiseRowsFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(
+        run<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE));
+}
+
+TEST_P(TestGpuConvDepthwiseRowsFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(run<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE));
+}
+
+std::vector<FusedChain> chainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvDepthwiseRowsFused,
+                         ::testing::Combine(::testing::ValuesIn(shapes()),
+                                            ::testing::ValuesIn(chainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvDepthwiseRowsFused,
+                         ::testing::Combine(::testing::Values(shapes()[0], shapes()[1]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvDepthwiseRowsFusedSpecials : public ::testing::TestWithParam<FusedShape>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseRowsFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(run<float>(GetParam().shape,
+                         {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu()},
+                         Specials::NAN_INF));
+    expectRan(run<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF));
+}
+
+TEST_P(TestGpuConvDepthwiseRowsFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    expectRan(
+        run<Half>(GetParam().shape,
+                  {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+                  Specials::CLIP_BOUNDARY));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDepthwiseRowsFusedSpecials,
+                         ::testing::ValuesIn(shapes()),
+                         [](const auto& info) { return info.param.name; });
+
+} // namespace fused_rows
 
 } // namespace
 

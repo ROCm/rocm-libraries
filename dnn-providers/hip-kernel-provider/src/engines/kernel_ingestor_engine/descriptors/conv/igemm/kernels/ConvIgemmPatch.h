@@ -21,7 +21,7 @@
 #include "ConvIgemmCore.h"
 
 template <class T, class Atom, int BM, int BN, int BK, int WM, int WN, int VEC, int DIR, int WD>
-__device__ void k1PatchMma(const K1Args& a)
+__device__ void k1PatchMma(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = Atom::WAVE;
     constexpr int THREADS = WM * WN * WAVE;
@@ -78,6 +78,19 @@ __device__ void k1PatchMma(const K1Args& a)
     const int n0 = blockIdx.y * BN;
     if(m0 >= rows)
         return;
+#if defined(CONV_EPI) && CONV_EPI
+    // The fused epilogue (forward only: backward data takes none, and its columns are filter
+    // elements rather than channels): each output column's per-channel operands, loaded before
+    // the reduction so their latency hides behind it.
+    static_assert(DIR == K1_FORWARD, "the patch tile fuses forward epilogues only");
+    ConvEpiGen::Chan chans[FN];
+#pragma unroll
+    for(int j = 0; j < FN; ++j)
+    {
+        const int en = n0 + wn * WTN + j * DIM + lane % DIM;
+        chans[j] = epi.chan(en, en < cols);
+    }
+#endif
 
     const T* src = static_cast<const T*>(fwd ? a.x : a.y);
     const T* w = static_cast<const T*>(a.w);
@@ -355,7 +368,11 @@ __device__ void k1PatchMma(const K1Args& a)
 #pragma unroll
             for(int e = 0; e < Atom::ACC; ++e)
                 strip[Atom::dRow(lane, e) * OLD + j * DIM + lane % DIM]
+#if defined(CONV_EPI) && CONV_EPI
+                    = K1Elem<T>::store(epi(acc[i][j][e], chans[j], 0, true));
+#else
                     = K1Elem<T>::store(acc[i][j][e]);
+#endif
         __builtin_amdgcn_wave_barrier();
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");

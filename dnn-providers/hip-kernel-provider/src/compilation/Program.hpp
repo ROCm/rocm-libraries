@@ -14,6 +14,12 @@ class Program
 {
 public:
     Program(std::string kernelFileName, const std::vector<std::string>& options);
+
+    /// The key the code object of @p kernelFileName compiled with @p options is cached under:
+    /// a digest of the compiler version, the source, every embedded include and every option.
+    /// Two compiles share a code object exactly when their keys are equal.
+    static std::string codeObjectKey(const std::string& kernelFileName,
+                                     const std::vector<std::string>& options);
     hipFunction_t getKernel(const std::string& kernelName) const;
 
     ~Program();

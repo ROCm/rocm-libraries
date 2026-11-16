@@ -83,6 +83,23 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 
 **Catalog:** per atom family a handful of tiles (for example MFMA 32x32: 128x128, 256x128, 128x64, 64x128, 256x256; MFMA 16x16: 128x64, 64x64, 128x32, 256x16 and a `vec` 1 tile; WMMA: 13 tiles plus direct-filter and tap-packing variants; FMA: 3 per dtype), then generated twins: `flat`, `fuse`, `swz`, `cf`, `large`. Each config is admitted on correctness alone; priority (larger matrix-core tiles first, FMA last) is the declared order out of the box, and autotune picks.
 
+## Fusion
+
+`CONV_IGEMM_FWD` and `CONV_IGEMM_FWD_TF32` apply a fused pointwise epilogue
+([conv README](../../README.md#fused-pointwise-epilogues)) in every path that writes y:
+
+- the LDS-staged row epilogue and the channels-first (`cf`) epilogue, at the accumulator, before
+  the strip; the strip and the staging transposes stay bitwise copies of the rounded value;
+- the FMA kernels' direct store;
+- split-K: the main kernel writes its fp32 partials unchanged and `ConvIgemmReduce` applies the
+  chain once to each sum, walking the output's channels (channels-last, or the in-place
+  channels-first output) with additions only;
+- group fusion, halo, tap packing, DMA, large-image and three-bf16 / xf32 configs alike: the
+  channel is `g * (K / groups) + column`.
+
+The per-channel operands load once per output column a thread owns; columns past K load
+nothing. Backward data takes no epilogue.
+
 ## Strengths and weaknesses
 
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. Counted over the graphs where K1 is our autotuned best; W/L = faster / slower by more than 5%; factor = call-weighted MIOpen time / K1 time.

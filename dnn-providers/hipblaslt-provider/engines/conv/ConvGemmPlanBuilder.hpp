@@ -56,6 +56,8 @@ public:
     /// candidate, and @p layout does the same for a layout candidate; tests use them to check
     /// those plans. @p narrowPartials: see NarrowPartials. @p maxBackwardWeightsRepackBytes, when
     /// set, bounds a further backward weights benchmarking candidate's repack workspace.
+    /// @p nativeEpilogue: the backend applies a fused graph's epilogue in its GEMM where the
+    /// pattern and the GEMM allow (hipBLASLt; fuseEpilogue), instead of in a repack pass.
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
                                  bool tf32 = false,
@@ -63,8 +65,8 @@ public:
                                  bool splitReduction = false,
                                  ColumnLayout layout = ColumnLayout::FOLLOW_Y,
                                  NarrowPartials narrowPartials = NarrowPartials::NEVER,
-                                 std::optional<size_t> maxBackwardWeightsRepackBytes
-                                 = std::nullopt);
+                                 std::optional<size_t> maxBackwardWeightsRepackBytes = std::nullopt,
+                                 bool nativeEpilogue = false);
 
     bool isApplicable(
         const HipdnnEnginePluginHandle& handle,
@@ -88,6 +90,13 @@ private:
                  bool splitReduction = false,
                  bool wideBackwardWeights = false) const;
 
+    /// The plan calls this builder runs @p opGraph with: callsFor's default; for a fused graph
+    /// whose default the backend cannot run (the deterministic hipBLASLt engines have no
+    /// workspace-free algorithm for some fp32-output GEMMs), the first other column layout it can.
+    std::optional<ConvGemmPlanCalls>
+        buildableCalls(const HipdnnEnginePluginHandle& handle,
+                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+
     /// The backend's plan for @p calls' GEMMs, wrapped in their repack steps when there are any.
     std::unique_ptr<IPlan> planFor(const HipdnnEnginePluginHandle& handle,
                                    ConvGemmPlanCalls calls) const;
@@ -100,6 +109,7 @@ private:
     ColumnLayout _layout;
     NarrowPartials _narrowPartials;
     std::optional<size_t> _maxBackwardWeightsRepackBytes;
+    bool _nativeEpilogue;
 };
 
 } // namespace hipblaslt_plugin
