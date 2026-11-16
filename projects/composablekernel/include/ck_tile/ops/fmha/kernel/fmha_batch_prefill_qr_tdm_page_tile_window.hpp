@@ -19,7 +19,8 @@ namespace ck_tile {
 // window holds only this wave's owned page metadata, never all fragments.
 
 // KV cache layout of a page-tile window: linear [page][token][D] rows, or the vectorized
-// (16-bit, 8-wide) K page-head [D/8][P][8] / V page-head [P/8][D][8].
+// K page-head [D/x][P][x] / V page-head [P/x][D][x] with x = VectorSize_ elements per 16-byte
+// vector (the problem's kVectorSize: 8 for 16-bit elements).
 struct FmhaPageTileKVKind
 {
     static constexpr index_t kLinear      = 0;
@@ -33,6 +34,9 @@ template <typename DataType_,
           index_t Alignment_,
           index_t PageSize_,
           index_t HeadDim_,
+          // x of the vectorized layout, the problem's kVectorSize. No default: a default of 8 would
+          // compile for 8-bit elements too and misread their x = 16 pages.
+          index_t VectorSize_,
           index_t KVKind_           = FmhaPageTileKVKind::kLinear,
           index_t ScalarRowClamp_   = 0,     // see FmhaTdmSchedTuningOptions
           bool DrainLdsBeforeIssue_ = false> // see kDrainLdsBeforeTdmIssue of the TDM-sched policy
@@ -44,9 +48,10 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     using BottomTensorIndex = array<index_t, 2>;
     using PageIds           = FmhaBatchPrefillPageTileIds<PageSize_>;
 
-    static constexpr index_t kPageSize = PageSize_;
-    static constexpr index_t kHeadDim  = HeadDim_;
-    static constexpr index_t kKVKind   = KVKind_;
+    static constexpr index_t kPageSize   = PageSize_;
+    static constexpr index_t kHeadDim    = HeadDim_;
+    static constexpr index_t kVectorSize = VectorSize_;
+    static constexpr index_t kKVKind     = KVKind_;
     static constexpr index_t kWaves = FmhaBatchPrefillPageTileTraits<PageSize_, HeadDim_>::kWaves;
     static constexpr index_t kFragmentsPerWave = PageIds::kFragmentsPerWave;
     static constexpr index_t kFragmentRows =
@@ -501,12 +506,12 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             s_wait_dscnt<0>();
     }
 
-    // ---- vectorized KV layout issue (16-bit, x = 8) ----
+    // ---- vectorized KV layout issue (x = kVectorSize) ----
     // One descriptor per wave slice (two per P16 wave).
-    //   K rank 2: dims (rows*8, D/8), stride P*8: copies the page's column vectors of the
-    //     fragment as they are, into the [D/8][G][8] K LDS tile of the vectorized layout.
-    //   V rank 2: dims (D*8, groups of 8 rows), stride D*8: copies the page's groups as they
-    //     are, into the [rows/8][D][8] V LDS tile of the vectorized layout (plain b128 reads).
+    //   K rank 2: dims (rows*x, D/x), stride P*x: copies the page's column vectors of the
+    //     fragment as they are, into the [D/x][G][x] K LDS tile of the vectorized layout.
+    //   V rank 2: dims (D*x, groups of x rows), stride D*x: copies the page's groups as they
+    //     are, into the [rows/x][D][x] V LDS tile of the vectorized layout.
     // V rows past the valid count never reach LDS: a partial last group is copied by a second,
     // serialized descriptor (see the V branch).
     template <typename TDMConfig, typename LdsWindow>
@@ -516,9 +521,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         static_assert(KVKind_ == FmhaPageTileKVKind::kVectorizedK ||
                       KVKind_ == FmhaPageTileKVKind::kVectorizedV);
         static_assert(!std::is_void_v<Distribution>);
-        static_assert(sizeof(DataType) == 2, "the vectorized layout is 8 x 16-bit wide");
         using Writer           = FmhaBatchPrefillLinearPageTileWriter<PageSize_, HeadDim_>;
-        constexpr index_t kVec = 8;
+        constexpr index_t kVec = kVectorSize;
         constexpr auto raw_box =
             to_sequence(Distribution{}.get_ys_to_d_descriptor().get_lengths()).reverse();
         static_assert(raw_box.size() == 2);
@@ -560,8 +564,8 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                 pool_ptr_ + static_cast<long_index_t>(physical_page) * page_stride_;
             if constexpr(KVKind_ == FmhaPageTileKVKind::kVectorizedK)
             {
-                // [D/8][rows][8]: per column vector, the fragment's tokens are contiguous in the
-                // page (rows*8 elements), so each descriptor row is a long contiguous run.
+                // [D/x][rows][x]: per column vector, the fragment's tokens are contiguous in the
+                // page (rows*x elements), so each descriptor row is a long contiguous run.
                 const uint32_t dims[2]    = {static_cast<uint32_t>(rows * kVec),
                                              static_cast<uint32_t>(HeadDim_ / kVec)};
                 const uint64_t strides[2] = {static_cast<uint64_t>(PageSize_) * kVec, 1};
@@ -578,7 +582,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             }
             else
             {
-                // Whole groups of 8 rows: [groups][D][8] in LDS (the V LDS tile of the
+                // Whole groups of x rows: [groups][D][x] in LDS (the V LDS tile of the
                 // vectorized layout). A partial last group (tail tile only) cannot be bounded by
                 // this descriptor: it is left out here (zero filled as out of bounds) and, once
                 // that transfer has landed, copied by a rank-3 descriptor whose token extent
@@ -667,11 +671,11 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                                   const State& state) const
     {
         static_assert(PageSize_ >= 64 && kFragmentsPerWave == 1);
-        static_assert(sizeof(DataType) == 2, "the vectorized layout is 8 x 16-bit wide");
         using Writer           = FmhaBatchPrefillLinearPageTileWriter<PageSize_, HeadDim_>;
-        constexpr index_t kVec = 8;
-        const index_t wave     = state.wave_row0;
-        const index_t rows     = [&]() {
+        constexpr index_t kVec = kVectorSize;
+        static_assert(HeadDim_ % kVec == 0 && PageSize_ % kVec == 0 && kFragmentRows % kVec == 0);
+        const index_t wave = state.wave_row0;
+        const index_t rows = [&]() {
             // P >= 128: from the scalar tile origin (no sinks on the lean loop); reading the queue
             // value into a scalar instead spills on P128 D64. A
             // look-ahead past the loop end can get rows > 0 here while its queue entry is empty;
@@ -960,6 +964,7 @@ template <typename T,
           index_t Alignment,
           index_t PageSize,
           index_t HeadDim,
+          index_t VectorSize,
           index_t KVKind,
           index_t ScalarRowClamp,
           bool DrainLdsBeforeIssue,
@@ -971,6 +976,7 @@ make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                            Alignment,
                                                            PageSize,
                                                            HeadDim,
+                                                           VectorSize,
                                                            KVKind,
                                                            ScalarRowClamp,
                                                            DrainLdsBeforeIssue>& source,
@@ -983,6 +989,7 @@ make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                Alignment,
                                                PageSize,
                                                HeadDim,
+                                               VectorSize,
                                                KVKind,
                                                ScalarRowClamp,
                                                DrainLdsBeforeIssue>{source.pool_ptr_,
@@ -1000,6 +1007,7 @@ template <typename T,
           index_t Alignment,
           index_t PageSize,
           index_t HeadDim,
+          index_t VectorSize,
           index_t KVKind,
           index_t ScalarRowClamp,
           bool DrainLdsBeforeIssue>
@@ -1010,6 +1018,7 @@ move_tile_window(FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                      Alignment,
                                                      PageSize,
                                                      HeadDim,
+                                                     VectorSize,
                                                      KVKind,
                                                      ScalarRowClamp,
                                                      DrainLdsBeforeIssue>& window,
@@ -1026,6 +1035,7 @@ template <typename TDMConfig,
           index_t Alignment,
           index_t PageSize,
           index_t HeadDim,
+          index_t VectorSize,
           index_t KVKind,
           index_t ScalarRowClamp,
           bool DrainLdsBeforeIssue>
@@ -1038,6 +1048,7 @@ load_tile_tdm(const TDMConfig& config,
                                                         Alignment,
                                                         PageSize,
                                                         HeadDim,
+                                                        VectorSize,
                                                         KVKind,
                                                         ScalarRowClamp,
                                                         DrainLdsBeforeIssue>& source)
@@ -1048,6 +1059,7 @@ load_tile_tdm(const TDMConfig& config,
                                                            Alignment,
                                                            PageSize,
                                                            HeadDim,
+                                                           VectorSize,
                                                            KVKind,
                                                            ScalarRowClamp,
                                                            DrainLdsBeforeIssue>;

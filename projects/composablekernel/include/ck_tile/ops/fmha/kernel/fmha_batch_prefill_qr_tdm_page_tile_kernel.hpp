@@ -116,7 +116,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     static constexpr index_t kBlockSize  = Base::kBlockSize;
 
     static_assert(kIsGroupMode);
-    // Vectorized KV cache: K page-head [D/8][P][8], V page-head [P/8][D][8] (16-bit, 8 wide).
+    // Vectorized KV cache: K page-head [D/x][P][x], V page-head [P/x][D][x] with
+    // x = FmhaPipeline::kVectorSize elements per 16-byte vector (8 for 16-bit elements).
     static constexpr bool kVectorizedKV =
         FmhaPipeline::kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
     static constexpr index_t kKWindowKind =
@@ -260,9 +261,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                         static_cast<long_index_t>(kargs.batch_stride_v) >=
                             static_cast<long_index_t>(FmhaPipeline::kPageBlockSize) * kargs.hdim_v,
                     "page stride smaller than one vectorized page-head");
-            require(kargs.batch_stride_k % 8 == 0 && kargs.batch_stride_v % 8 == 0 &&
-                        kargs.nhead_stride_k % 8 == 0 && kargs.nhead_stride_v % 8 == 0,
-                    "vectorized K/V page or head stride not a multiple of 8 elements");
+            constexpr index_t kVec = FmhaPipeline::kVectorSize;
+            require(kargs.batch_stride_k % kVec == 0 && kargs.batch_stride_v % kVec == 0 &&
+                        kargs.nhead_stride_k % kVec == 0 && kargs.nhead_stride_v % kVec == 0,
+                    ("vectorized K/V page or head stride not a multiple of " +
+                     std::to_string(kVec) + " elements")
+                        .c_str());
         }
         else
         {
@@ -444,6 +448,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                                                   FmhaPipeline::kAlignmentK,
                                                                   FmhaPipeline::kPageBlockSize,
                                                                   FmhaPipeline::kQKHeaddim,
+                                                                  FmhaPipeline::kVectorSize,
                                                                   kKWindowKind,
                                                                   Policy::Options::kScalarRowClamp,
                                                                   Policy::kDrainLdsBeforeTdmIssue>{
@@ -460,6 +465,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                                                   FmhaPipeline::kAlignmentV,
                                                                   FmhaPipeline::kPageBlockSize,
                                                                   FmhaPipeline::kN1,
+                                                                  FmhaPipeline::kVectorSize,
                                                                   kVWindowKind,
                                                                   Policy::Options::kScalarRowClamp,
                                                                   Policy::kDrainLdsBeforeTdmIssue>{
