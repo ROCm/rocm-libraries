@@ -15,7 +15,8 @@ Hq / Hkv up to 8), a V head count different from the K head count (both
 directions), runtime head widths inside a bucket, buckets 64 / 128 / 256, causal
 top-left / bottom-right, sliding and two-sided windows, rows without visible keys,
 key ranges shorter than the split count, softcap (both tanh forms), sinks, ALiBi,
-QQ-bias, FP8 (OCP E4M3FN) K/V, the additive f32 / Q-dtype bias with broadcast,
+QQ-bias, FP8 (OCP E4M3FN) K/V, the additive f32 / Q-dtype bias with broadcast
+(and a causal, left-padding mask stored in it as the dtype's lowest finite value),
 ragged sequences (with empty queries and keys, a trailing empty query) and paged
 caches (pages larger and smaller than a key tile), and the ``num_waves`` values
 only the tuned candidates select.
@@ -133,6 +134,56 @@ CASES = {
         bias=("q", (1, 1, 0, 1)),
         bias_lead=1,
         bias_tail=True,
+    ),
+    # A causal mask carried by the bias as the dtype's lowest finite value, not -inf
+    # (bias_lowest; bias_pad left-padding keys masked too): a wave whose first tile
+    # holds only masked keys keeps a max near -3.4e38 (bf16 / f32), and a padding query
+    # row sees no other key, so its softmax is uniform over its finite scores (O is
+    # the mean of V, as in eager attention). The fp16 lowest value is an ordinary shift.
+    "bias_lowest_leftpad_q_d64_sq17": _case(
+        1,
+        4,
+        4,
+        4,
+        17,
+        17,
+        64,
+        64,
+        br=0,
+        wr=-1,
+        bias=("q", (0, 0, 1, 1)),
+        bias_lowest=True,
+        bias_pad=3,
+    ),
+    "bias_lowest_leftpad_f32_d128_sq33": _case(
+        1,
+        8,
+        2,
+        2,
+        33,
+        33,
+        128,
+        128,
+        br=0,
+        wr=-1,
+        bias=("f32", (0, 0, 1, 1)),
+        bias_lowest=True,
+        bias_pad=5,
+    ),
+    "bias_lowest_leftpad_q_d128_sq1": _case(
+        2,
+        8,
+        2,
+        2,
+        1,
+        50,
+        128,
+        128,
+        br=0,
+        wr=-1,
+        bias=("q", (1, 0, 1, 1)),
+        bias_lowest=True,
+        bias_pad=20,
     ),
     "fp8_d64": _case(2, 64, 8, 8, 1, 1500, 64, 64, fp8=True),
     "fp8_d128_sq2": _case(1, 32, 8, 8, 2, 1000, 128, 128, fp8=True, xsplits=_XSPLITS),
@@ -319,6 +370,11 @@ class _Inputs:
             )
             if c.get("bias_tail"):
                 self.bias[..., -1] = 4.0  # every row prefers its last key
+            if c.get("bias_lowest"):
+                keys = np.arange(self.sk_max)[None, :]
+                diag = np.arange(self.sq_max)[:, None] + self.sk_max - self.sq_max
+                masked = (keys > diag) | (keys < c.get("bias_pad", 0))
+                self.bias[..., masked] = ml_dtypes.finfo(self.bias.dtype).min
         self.scale = c["dq"] ** -0.5
 
     def seq(self, i):
@@ -654,9 +710,10 @@ def test_decode_matches_reference(case, dtype):
             # at the poison).
             assert np.array_equal(np.isneginf(got_lse), np.isneginf(ref_lse)), where
             if fin.any():
-                lse_tol = 1e-2 + 1e-5 * float(np.abs(ref_lse[fin]).max())
+                # Per row: a row whose LSE sits near a lowest-value mask (about -3.4e38)
+                # must not loosen the bound on the ordinary rows of the same case.
                 np.testing.assert_allclose(
-                    got_lse[fin], ref_lse[fin], rtol=0, atol=lse_tol, err_msg=where
+                    got_lse[fin], ref_lse[fin], rtol=1e-5, atol=1e-2, err_msg=where
                 )
         for ptr in ws_cache.values():
             rt.free(ptr)
