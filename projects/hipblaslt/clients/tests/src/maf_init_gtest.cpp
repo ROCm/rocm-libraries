@@ -83,6 +83,24 @@ namespace
         }
     }
 
+    // An interleaved layout gets a single lda * N buffer from testing_matmul, though its batches
+    // reach past it: M = lda = N = 8, stride = 4, batch_count = 2 spans 68 elements. The fills
+    // stop at 64, so the cells after the buffer stay NaN.
+    TEST(MafInitDevice_pre_checkin, interleaved_batches_stay_in_the_buffer)
+    {
+        const size_t M = 8, N = 8, lda = 8, stride = 4, batches = 2, allocated = lda * N;
+        const size_t total = M + lda * (N - 1) + (batches - 1) * stride;
+        for(auto init : {hipblaslt_initialization::maf1_0,
+                         hipblaslt_initialization::maf2_0,
+                         hipblaslt_initialization::maf2_0_unit_scale})
+        {
+            const auto h = fillFloat(ABC_dims::A, init, M, N, lda, stride, batches, total);
+            for(size_t k = 0; k < total; k++)
+                EXPECT_EQ(std::isnan(h[k]), k >= allocated)
+                    << hipblaslt_initialization2string(init) << " offset " << k;
+        }
+    }
+
     // maf1_0: element (i, j) of batch b holds sin (A) or cos (B, C) of the logical index
     // i + j * M + b * M * N, so ld padding and the batch stride do not shift it; padding cells
     // inside the filled extent are 0. A pointer-array batch passes its index as batch_index.

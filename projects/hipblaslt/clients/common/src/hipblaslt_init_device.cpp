@@ -35,6 +35,7 @@
 #include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <limits>
 #include <omp.h>
 #include <random>
@@ -187,6 +188,16 @@ static T maf1_0_round(double v)
         return T(v);
 }
 
+// The elements a MAF fill may copy: its extent, capped at what testing_matmul allocates for the
+// layout (rotating_tensor_elements). A batch stride below lda gets a single lda * N buffer, which
+// is shorter than the extent once the interleaved batches reach past column N - 1.
+static size_t maf_copy_elements(size_t extent, size_t lda, size_t N, size_t batches, size_t stride)
+{
+    const int64_t allocated = hipblaslt_bench::rotating_tensor_elements(
+        int64_t(lda), int64_t(N), int64_t(batches), int64_t(stride));
+    return std::min(extent, size_t(allocated));
+}
+
 // MAF1.0 trig data: A = sin(idx), B and C = cos(idx), idx = i + j*M + b*M*N with b the batch
 // (batch_index + the batch within this call, so pointer-array batches differ too). The index is
 // logical, so ld padding does not shift it; padding cells are set to 0. Values are computed in
@@ -205,7 +216,8 @@ static void maf1_0_fill_trig(T*       A,
         return;
     // Same extent as maf2_0_fill_normal below. Stride 0 broadcasts one matrix; any other stride,
     // including one below lda (interleaved batches), has batch_count matrices. Batches that share
-    // memory are written in order, so the last one wins.
+    // memory are written in order, so the last one wins. Only the part the caller allocated is
+    // copied (maf_copy_elements).
     const size_t   batches = stride != 0 ? batch_count : 1;
     const size_t   extent  = M + lda * (N - 1);
     const size_t   size_64 = extent + (batches - 1) * stride;
@@ -224,7 +236,10 @@ static void maf1_0_fill_trig(T*       A,
                     = maf1_0_round<T>(use_cos ? std::cos(arg) : std::sin(arg));
             }
         }
-    CHECK_HIP_ERROR(hipMemcpy(A, h.data(), size_64 * sizeof(T), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(A,
+                              h.data(),
+                              maf_copy_elements(size_64, lda, N, batches, stride) * sizeof(T),
+                              hipMemcpyHostToDevice));
 }
 
 // maf2_0 seeding mirrors mxDataGenerator (DataGenerator.hpp) so runs are reproducible: a fixed
@@ -245,7 +260,7 @@ static uint32_t maf2_0_seed(ABC_dims abc, size_t batch_index)
 // Fills every element up to the last one used, ld padding between columns and batches included:
 // M + lda*(N-1) + (batch_count-1)*stride (stride 0 broadcasts one matrix; a stride below lda
 // interleaves the batches). This is the extent TensileLite fills, so both projects draw the same
-// data.
+// data; only the part the caller allocated is copied (maf_copy_elements).
 // Values are N(0, 1) drawn in double precision on the host, then copied to the device.
 // T(double) rounds to nearest even (FP16 and FP8 directly from double, FP8 saturating finite values
 // to the largest finite value); hip_bfloat16 has no double constructor, so it rounds to float
@@ -267,7 +282,11 @@ static void maf2_0_fill_normal(
         for(size_t i = 0; i < size_64; i++)
             h[i] = T(dist(gen));
     }
-    CHECK_HIP_ERROR(hipMemcpy(A, h.data(), size_64 * sizeof(T), hipMemcpyHostToDevice));
+    const size_t batches = stride != 0 ? batch_count : 1;
+    CHECK_HIP_ERROR(hipMemcpy(A,
+                              h.data(),
+                              maf_copy_elements(size_64, lda, N, batches, stride) * sizeof(T),
+                              hipMemcpyHostToDevice));
 }
 
 __host__ __device__ uint32_t pseudo_random_device(size_t idx)
