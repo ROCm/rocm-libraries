@@ -13,15 +13,15 @@ namespace hipblaslt_plugin
 
 /// The most workspace the repack steps of one plan take by default. A column matrix that needs
 /// more is built a slice of images at a time; a single image that needs more is a poor fit for
-/// explicit GEMM and is declined. Measured with dnnb autotune on the 134 2K conv-kpi subset graphs
-/// near the cap (gfx950, MI325X, gfx906): unsliced column matrices of several GiB run the
-/// explicit-GEMM engines 0.81x (gfx950, MI325X) to 0.94x (gfx906) as fast, down to 0.08x at 9 GiB,
-/// and a 256 MiB cap 0.96x (MI325X).
+/// explicit GEMM and is declined. Measured with dnnb autotune on 134 graphs near the cap from a
+/// real-model convolution corpus (gfx950, MI325X, gfx906): unsliced column matrices of several
+/// GiB run the explicit-GEMM engines 0.81x (gfx950, MI325X) to 0.94x (gfx906) as fast, down to
+/// 0.08x at 9 GiB, and a 256 MiB cap 0.96x (MI325X).
 inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 30;
 
 /// The cap of the explicit-GEMM engines' further backward weights benchmarking candidate
 /// (ConvGemmPlanBuilder): slicing backward weights costs an accumulating GEMM per slice (and an
-/// fp32 accumulator for 16-bit w). Measured with dnnb autotune on the 2K conv-kpi subset backward
+/// fp32 accumulator for 16-bit w). Measured with dnnb autotune on the real-model corpus's backward
 /// weights graphs whose explicit-GEMM plan is within 2x of the best engine, every plan at 2 GiB:
 /// gfx906 explicit GEMM 1.19x geomean, best engine 3.05x on a 7x7 fp32 stem and 1.17x on a 1x1
 /// fp16 layer; MI325X explicit GEMM 1.02x, but that stem 0.88x (it was best). 4 GiB measured no
