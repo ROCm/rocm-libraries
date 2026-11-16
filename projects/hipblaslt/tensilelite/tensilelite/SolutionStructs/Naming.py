@@ -26,7 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
-from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, printWarning
+from ..Common.Utilities import isMxf4SubtilePath, plsinStoreDataTypes, printWarning
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
@@ -254,9 +254,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     # defaultSolution (True) before derivation, so a solution rejected ahead of
     # assignPostLoopStoreInNll keeps a stale True it never earned. Re-test the two
     # datatype/path conditions the gate itself requires, which no default can forge.
+    #
+    # The datatype test is plsinStoreDataTypes, not plsinDataTypes: the fused store
+    # now reaches MXFP8 as well as MXF4, and an MXFP8 kernel carrying it would
+    # otherwise hash to the same name as one without.
     plsinReachable = (bool(state.get("PostLoopStoreInNll", False))
                       and bool(state.get("UseSubtileImpl", False))
-                      and plsinDataTypes(state))
+                      and plsinStoreDataTypes(state))
     if not isMxf4SubtilePath(state) and not plsinReachable:
       requiredParametersTemp.discard("PostLoopStoreInNll")
 
