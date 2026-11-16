@@ -1387,6 +1387,7 @@
     'CompactLoopStore',
     'ConvertAfterDS',
     'CustomKernel',
+    'DebugDisableInstrMask',
     'DebugPersistentKernelLoopForever',
     'DebugStreamK',
     'DepthU',
@@ -1762,6 +1763,15 @@
     'CustomKernel': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'DebugDisableInstrMask': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 32,
+      'type': 'list',
     }),
     'DebugPersistentKernelLoopForever': dict({
       'head': list([

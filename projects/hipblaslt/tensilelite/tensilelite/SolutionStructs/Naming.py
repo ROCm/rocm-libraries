@@ -307,7 +307,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.discard("SpaceFillingAlgo")
 
     # Non-default debug modes replace or remove generated control flow.
-    for key in ("DebugStreamK", "StreamKAtomic", "MbskPrefetchMethod", "DebugPersistentKernelLoopForever"):
+    for key in ("DebugStreamK", "StreamKAtomic", "MbskPrefetchMethod", "DebugPersistentKernelLoopForever",
+                "DebugDisableInstrMask"):
       if state.get(key, 0) != 0:
         requiredParametersTemp.add(key)
 
