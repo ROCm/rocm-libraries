@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""The SDPA backward build schema: a ``Spec`` names one backward object (gfx950 or a generic gfx11 target).
+"""The SDPA backward build schema: a ``Spec`` names one backward object (gfx950, a generic gfx11/gfx12 target, gfx942 or gfx90a).
 
 No FlyDSL import: the string grammar, the key, the hash and the validation are pure Python,
 shared by ``_sdpa_bwd_cdna_build`` (which turns a Spec into an object) and its callers.
@@ -30,7 +30,9 @@ Canonical string (``Spec.key()``, parsed by ``Spec.parse``):
   knobs   : perf knobs, listed only when set, in KNOBS order. Unset = the FlyDSL policy value.
             dkdv: num_waves mfma_rows dkv_shards block_q waves_per_eu tight_registers num_stream_buffers gqa_pack bias_f32 u2
             dq  : num_waves block_m block_n mfma_rows waves_per_eu store_db bias_stage bias_f32 u2
-            prep: sink (``sink=1``: the sink twin, a different object with a different ABI)
+            prep: sink vec_tail (``sink=1``: the sink twin, a different object with a different ABI; gfx950 only. ``vec_tail=1``:
+                  a padded build loads each column vector whole and masks the tail, instead of one element at a time; gfx942 and
+                  gfx90a only. gfx11 and gfx12 take neither)
             merged: num_waves mfma_rows dkv_shards role_order store_db gqa_pack (num_waves, mfma_rows and
             dkv_shards are the dK/dV role's grid-fill knobs, with the split dK/dV meaning; the dQ role follows the
             wave count; role_order is concat | lpt)
@@ -38,19 +40,27 @@ Canonical string (``Spec.key()``, parsed by ``Spec.parse``):
             dQ object without the dB store; ``bias_stage=direct`` loads the bias directly instead of staging it in LDS.
 
   arch    : not a field of the head: ``;arch=<arch>`` follows the head when the arch is not gfx950 (``gfx11-generic``,
-            ``gfx12-generic``), before any knob, so every gfx950 key and hash is unchanged. A generic arch builds prep, dkdv,
-            dq and dbias_reduce only; its tiles are ``GENERIC_LADDER`` for every dtype; its floor is ``g1`` for a padded dkdv
-            or dq and ``tail`` for every other kernel; its knobs are ``KNOBS_GENERIC`` (fp32: ``KNOBS_GENERIC_F32``).
+            ``gfx12-generic``, ``gfx942``, ``gfx90a``), before any knob, so every gfx950 key and hash is unchanged. ``family(arch,
+            dtype, kernel)`` names the builder: ``cdna`` (gfx950; the fp32 rows of gfx942 and gfx90a except ``dbias_reduce``: ``KNOBS``,
+            the native MFMA family) or ``rdna`` (the generic arches; the 16-bit rows and the fp32 ``dbias_reduce`` of gfx942 and gfx90a,
+            the generic family over the MFMA16 layer). An arch
+            other than gfx950 builds prep, dkdv, dq and dbias_reduce only. Tiles per ``ladder(arch, dtype)``: ``GENERIC_LADDER`` on
+            the generic arches (every dtype); gfx942 and gfx90a add the padded 512 rung to the 16-bit ladder (``CDNA9_LADDER``) and
+            fp32 takes ``FP32_LADDER``. An ``rdna`` row's floor is ``g1`` for a padded dkdv or dq and ``tail`` for every other
+            kernel; its knobs are ``KNOBS_GENERIC`` (``KNOBS_CDNA9`` on gfx942 and gfx90a; fp32 on a
+            generic arch: ``KNOBS_GENERIC_F32``).
             dkdv: num_waves block_q waves_per_eu split_head_dim contraction_shards transposed_source sched_strategy dump rne bias_f32 u2
+                  (gfx942, gfx90a: grid_order before bias_f32)
             dq  : num_waves block_m block_n waves_per_eu store_db bias_stage contraction_shards kt_lds_layout lpt_tile_order dump rne bias_f32 u2
             fp32 dkdv: num_waves block_q block_kv waves_per_eu sched_strategy dump
             fp32 dq  : num_waves block_m block_n waves_per_eu store_db lpt_tile_order dump
             A knob is listed only when it is not the policy value: ``split_head_dim=1``, ``contraction_shards=<2^n>``,
             ``transposed_source=derived``, ``sched_strategy=<non-default>``, ``lpt_tile_order=0``, ``kt_lds_layout=staged``,
-            ``dump=1``. ``rne=1`` (bf16 dkdv and dq only) narrows P and dS to bf16 round-to-nearest-even instead of
-            truncating; it is a spelled pin, so an RNE object and its truncating twin have different keys.
+            ``dump=1``, ``grid_order=<the order other than the arch's default>`` (``GRID_ORDER_DEFAULT``). ``rne=1`` (bf16 dkdv and
+            dq only) narrows P and dS to bf16 round-to-nearest-even instead of truncating; it is a spelled pin, so an RNE object and
+            its truncating twin have different keys.
 
-  feature knobs (``FEATURE_KNOBS``; dkdv and dq of f16 and bf16 on either arch, last in every knob order; they select a different
+  feature knobs (``FEATURE_KNOBS``; dkdv and dq of f16 and bf16, last in every knob order; fp32 has none; they select a different
             object and the policy resolution never takes them):
             ``bias_f32=1`` (``cls=bias``): the bias is FLOAT beside the 16-bit Q/K/V, and bias and dB strides are in elements of the
             bias dtype; a gfx950 dQ also needs ``bias_stage=direct`` (the f32 bias is never staged in LDS).
@@ -69,8 +79,46 @@ LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)  # the 16-bit ladder
 # fp32 rides tile 512 for head dims 257..512: no 384 rung, so ``rung_below(512, "fp32")`` is 256.
 FP32_LADDER = tuple(t for t in LADDER if t != 384)
 KERNELS = ("prep", "dkdv", "dq", "dbias_reduce", "dsink_reduce", "merged")
-ARCHES = ("gfx950", "gfx11-generic", "gfx12-generic")
 GFX950 = "gfx950"
+# MFMA16, wave64, 64 KiB LDS: 16-bit rows are built by the RDNA-family builder (ABI ``mfma16``), fp32 rows by the CDNA-family builder.
+CDNA9_ARCHES = ("gfx942", "gfx90a")
+RDNA_ARCHES = ("gfx11-generic", "gfx12-generic")
+ARCHES = (GFX950, *RDNA_ARCHES, *CDNA9_ARCHES)
+# Lanes per wave: a workgroup is ``num_waves * WAVE_SIZE`` threads.
+WAVE_SIZE = {
+    GFX950: 64,
+    "gfx11-generic": 32,
+    "gfx12-generic": 32,
+    "gfx942": 64,
+    "gfx90a": 64,
+}
+# LDS one workgroup may allocate. The compiler reports an object over it as an error, yet still emits the object, which then fails
+# to launch.
+LDS_LIMIT_BYTES = {
+    GFX950: 163840,
+    "gfx11-generic": 65536,
+    "gfx12-generic": 65536,
+    "gfx942": 65536,
+    "gfx90a": 65536,
+}
+
+
+def family(arch: str, dtype: str | None = None, kernel: str | None = None) -> str:
+    """The builder family of (@p arch, @p dtype, @p kernel): ``cdna`` (``_sdpa_bwd_cdna_build``) or ``rdna`` (``_sdpa_bwd_rdna_build``).
+
+    gfx950 is all ``cdna``; the generic arches are all ``rdna``; gfx942 and gfx90a split by dtype: fp32 is the native CDNA family,
+    16-bit the RDNA family over the MFMA16 layer. The fp32 ``dbias_reduce`` of gfx942 and gfx90a is the exception: the f32 dB of a
+    16-bit row is reduced by the gfx11 kernel, so it is ``rdna`` (@p kernel names it; without a kernel the rule is the dtype's).
+    ``_instances._sdpa_bwd_row_is_cdna`` spells the same rule (it cannot import this module); ``tests/test_sdpa_bwd_spec.py`` holds
+    the two equal.
+    """
+    if arch == GFX950 or (
+        arch in CDNA9_ARCHES and dtype == "fp32" and kernel != "dbias_reduce"
+    ):
+        return "cdna"
+    return "rdna"
+
+
 # The generic arches build these kernels (from the gfx11 sources; gfx12-generic shares them).
 GENERIC_KERNELS = ("prep", "dkdv", "dq", "dbias_reduce")
 # The generic arches' native head-dim rungs: no 384 or 512, one ladder for every dtype.
@@ -89,11 +137,13 @@ DTYPES = ("f16", "bf16")  # the 16-bit dtypes
 FP32 = "fp32"
 ALL_DTYPES = DTYPES + (FP32,)
 LADDERS = {"f16": LADDER, "bf16": LADDER, FP32: FP32_LADDER}
+# gfx942 and gfx90a: the generic rungs plus one padded 512 rung for head dims 257..512 (16-bit); fp32 has the CDNA-family ladder.
+CDNA9_LADDER = GENERIC_LADDER + (512,)
 CLASSES = ("plain", "causal", "bias")
 DFORMS = ("rt", "bk")
 # Perf knobs per kernel, in canonical order. Values are ints; tight_registers is 0/1.
 KNOBS = {
-    "prep": ("sink",),
+    "prep": ("sink", "vec_tail"),
     "dbias_reduce": (),
     "dsink_reduce": (),
     "dkdv": (
@@ -188,6 +238,29 @@ KNOBS_GENERIC_F32 = {
 # The feature knobs: they select a different object (the FLOAT-bias and value-head families) and no tuning resolves them, so a
 # row that sets none of them is a policy-default row, and a table row may stop before them.
 FEATURE_KNOBS = ("bias_f32", "u2")
+# The trailing columns a table row may leave out when it sets none of them: the feature knobs, and prep's ``vec_tail`` (the gfx950 prep
+# rows end before it; it is a gfx942 and gfx90a knob).
+OPTIONAL_TABLE_KNOBS = (*FEATURE_KNOBS, "vec_tail")
+# The knobs an instance row leaves out when unset: the op's KMD gives them their unset value (``gen_descriptors.KMD_DEFAULTS``), so a
+# row of an arch that never sets one (gfx950, gfx11-generic) carries no trace of it.
+ABSENT_WHEN_UNSET = ("vec_tail",)
+# gfx942 and gfx90a build their 16-bit rows with the generic family over the MFMA16 layer: its knobs plus ``grid_order`` (before the
+# feature knobs), the order of dK/dV's launch grid (dQ's grid has one order). The engine's grid names are ``kvblocks_by_kheads_by_seqs``
+# (kv_fastest) and ``kheads_by_kvblocks_by_seqs`` (head_fastest); a Spec spells ``grid_order`` only when it is not its arch's default.
+GRID_ORDERS = ("kv_fastest", "head_fastest")
+GRID_ORDER_DEFAULT = {  # the RDNA-family arches' (gfx950's dK/dV is a different family and always launches head-fastest)
+    "gfx11-generic": "kv_fastest",
+    "gfx12-generic": "kv_fastest",
+    "gfx942": "head_fastest",
+    "gfx90a": "kv_fastest",
+}
+KNOBS_CDNA9 = {
+    "prep": ("vec_tail",),
+    "dbias_reduce": (),
+    "dkdv": tuple(k for k in KNOBS_GENERIC["dkdv"] if k not in FEATURE_KNOBS)
+    + ("grid_order", *FEATURE_KNOBS),
+    "dq": tuple(KNOBS_GENERIC["dq"]),
+}
 
 # The columns of a generic arch's instance-table row after the ten head fields (``tools/sdpa_bwd_tables_from_sweep.py``): the
 # knobs of both dtype families, the 16-bit list first, then the fp32-only knobs, then the feature knobs.
@@ -234,8 +307,13 @@ FP32_KNOBS = {
     },
 }
 FP32_KNOBS["gfx12-generic"] = FP32_KNOBS["gfx11-generic"]
-# The arches with an fp32 family: gfx12-generic has none.
-FP32_ARCHES = (GFX950, "gfx11-generic")
+# gfx942 and gfx90a: the gfx950 fp32 knobs, and prep's ``vec_tail``.
+FP32_KNOBS["gfx942"] = FP32_KNOBS["gfx90a"] = {
+    **FP32_KNOBS[GFX950],
+    "prep": {"vec_tail": (1,)},
+}
+# The arches with an fp32 family: gfx12-generic has none. gfx942 and gfx90a use the gfx950 (native MFMA) family and its knobs.
+FP32_ARCHES = (GFX950, "gfx11-generic", *CDNA9_ARCHES)
 # Knob values only the gfx950 fp32 family has (the gfx950 16-bit policies never take them): rejected on a gfx950 16-bit Spec.
 FP32_ONLY_VALUES = {
     "dkdv": {"block_q": (16,)},
@@ -250,15 +328,17 @@ U2_SYMBOLS = {
     ("gfx11-generic", "dkdv"): "bwd_dkdv_u2_kernel_0",
     ("gfx11-generic", "dq"): "fmha_bwd_dq_u2_gfx11_kernel_0",
 }
-U2_SYMBOLS["gfx12-generic", "dkdv"] = U2_SYMBOLS["gfx11-generic", "dkdv"]
-U2_SYMBOLS["gfx12-generic", "dq"] = U2_SYMBOLS["gfx11-generic", "dq"]
+# The 16-bit rows of gfx12-generic, gfx942 and gfx90a are built from the gfx11 kernels.
+for _arch in ("gfx12-generic", *CDNA9_ARCHES):
+    U2_SYMBOLS[_arch, "dkdv"] = U2_SYMBOLS["gfx11-generic", "dkdv"]
+    U2_SYMBOLS[_arch, "dq"] = U2_SYMBOLS["gfx11-generic", "dq"]
 
 ALL_KNOBS = tuple(dict.fromkeys(k for ks in KNOBS.values() for k in ks))
 # Every knob field of a Spec, either arch.
 KNOB_FIELDS = tuple(
     dict.fromkeys(
         ALL_KNOBS
-        + tuple(k for ks in KNOBS_GENERIC.values() for k in ks)
+        + tuple(k for ks in KNOBS_CDNA9.values() for k in ks)
         + tuple(k for ks in KNOBS_GENERIC_F32.values() for k in ks)
     )
 )
@@ -269,21 +349,40 @@ STR_KNOBS = {
     "kt_lds_layout": ("staged",),
     "sched_strategy": SCHED_STRATEGIES,
     "u2": ("dk", "dv", "dq"),
+    "grid_order": GRID_ORDERS,
 }  # knobs whose value is one of these words rather than an int
 # Boolean knobs, spelled ``<knob>=1`` only.
-ONE_KNOBS = ("gqa_pack", "sink", "split_head_dim", "dump", "rne", "bias_f32")
+ONE_KNOBS = (
+    "gqa_pack",
+    "sink",
+    "vec_tail",
+    "split_head_dim",
+    "dump",
+    "rne",
+    "bias_f32",
+)
 
 
 def knobs_of(kernel: str, arch: str = GFX950, dtype: str | None = None) -> tuple:
     """The knobs @p kernel takes on @p arch, in canonical order (a generic arch's fp32 family has its own list)."""
-    if arch == GFX950:
+    if family(arch, dtype, kernel) == "cdna":
         return KNOBS.get(kernel, ())
+    if arch in CDNA9_ARCHES:
+        return KNOBS_CDNA9.get(kernel, ())
     return (KNOBS_GENERIC_F32 if dtype == FP32 else KNOBS_GENERIC).get(kernel, ())
 
 
 def ladder(arch: str = GFX950, dtype: str | None = None) -> tuple:
-    """The head-dim tiles of @p arch for @p dtype (None: the 16-bit ladder); a generic arch has one ladder for every dtype."""
-    return LADDERS.get(dtype, LADDER) if arch == GFX950 else GENERIC_LADDER
+    """The head-dim tiles of @p arch for @p dtype (None: the 16-bit ladder).
+
+    gfx950: ``LADDER`` (16-bit) or ``FP32_LADDER``. A generic arch has one ladder for every dtype. gfx942 and gfx90a: ``CDNA9_LADDER``
+    for 16-bit (12 rungs), ``FP32_LADDER`` for fp32 (8 rungs and the half-head 512 rung).
+    """
+    if arch == GFX950:
+        return LADDERS.get(dtype, LADDER)
+    if arch in CDNA9_ARCHES:
+        return FP32_LADDER if dtype == FP32 else CDNA9_LADDER
+    return GENERIC_LADDER
 
 
 def rung_below(t, dtype=None, arch=GFX950):
@@ -317,6 +416,7 @@ class Spec:
     bias_stage: str | None = None
     role_order: str | None = None
     sink: int | None = None
+    vec_tail: int | None = None
     split_head_dim: int | None = None
     contraction_shards: int | None = None
     transposed_source: str | None = None
@@ -328,6 +428,7 @@ class Spec:
     rne: int | None = None
     bias_f32: int | None = None
     u2: str | None = None
+    grid_order: str | None = None
     arch: str = GFX950
 
     def __post_init__(self):
@@ -336,10 +437,10 @@ class Spec:
 
         if self.arch not in ARCHES:
             bad("arch")
-        generic = self.arch != GFX950
+        generic = family(self.arch, self.dtype, self.kernel) == "rdna"
         if self.kernel not in KERNELS:
             bad("kernel")
-        if generic and self.kernel not in GENERIC_KERNELS:
+        if self.arch != GFX950 and self.kernel not in GENERIC_KERNELS:
             bad(f"{self.kernel} is not built on {self.arch}")
         if self.dtype not in ALL_DTYPES:
             bad("dtype")
@@ -418,6 +519,10 @@ class Spec:
                         bad(f"u2={v} does not apply to {self.kernel}")
                     if self.cls == "bias" or self.bias_f32 is not None:
                         bad("u2 applies to plain and causal objects without bias_f32")
+                if k == "grid_order" and v == GRID_ORDER_DEFAULT[self.arch]:
+                    bad(
+                        f"grid_order is spelled only when it is not the default of {self.arch} ({v})"
+                    )
                 continue
             if k == "tight_registers":
                 object.__setattr__(self, k, int(bool(v)))
@@ -440,6 +545,12 @@ class Spec:
                         and self.bias_stage != "direct"
                     ):
                         bad("a gfx950 bias_f32 dQ object needs bias_stage=direct")
+                if k == "vec_tail" and (
+                    self.arch not in CDNA9_ARCHES or not self.padded
+                ):
+                    bad(
+                        "vec_tail applies to padded prep objects of gfx942 and gfx90a only"
+                    )
             elif k == "lpt_tile_order":
                 if v != 0:
                     bad(
@@ -578,8 +689,8 @@ ROW_FIELDS = (
 NON_KEY_FIELDS = {"merged": ("reduce_symbol",), "dq": ("reduce_symbol",)}
 
 
-def to_spec(instance) -> Spec:
-    """The Spec an ``_instances.Instance`` row of a ``sdpa_bwd_<kernel>`` op names.
+def to_spec(instance, arch: str) -> Spec:
+    """The Spec an ``_instances.Instance`` row of a ``sdpa_bwd_<kernel>`` op of @p arch names (a ``cdna``-family row: ``family(arch, dtype)``).
 
     ``head_dim_v`` is the resolved V head dim (the tile when it equals it); the Spec
     spells that 0. ``causal`` and ``has_bias`` are the exclusive class.
@@ -592,15 +703,13 @@ def to_spec(instance) -> Spec:
         raise ValueError(f"causal and has_bias are exclusive: {instance!r}")
     cls = "bias" if knobs["has_bias"] else "causal" if knobs["causal"] else "plain"
     set_knobs = {}
-    for name in KNOBS[kernel]:
-        value = knobs[name]
+    names = knobs_of(kernel, arch, instance.dtype)
+    for name in names:
+        value = knobs.get(name, UNSET_INT) if name in ABSENT_WHEN_UNSET else knobs[name]
         if value not in (UNSET_INT, UNSET_WORD):
             set_knobs[name] = value
     extra = (
-        set(knobs)
-        - set(ROW_FIELDS)
-        - set(KNOBS[kernel])
-        - set(NON_KEY_FIELDS.get(kernel, ()))
+        set(knobs) - set(ROW_FIELDS) - set(names) - set(NON_KEY_FIELDS.get(kernel, ()))
     )
     if extra:
         raise ValueError(f"{instance.op}: knobs {sorted(extra)} do not belong to it")
@@ -615,5 +724,6 @@ def to_spec(instance) -> Spec:
         knobs["floor"],
         knobs["head_dim_v"],
         knobs["hints"],
+        arch=arch,
         **set_knobs,
     )
