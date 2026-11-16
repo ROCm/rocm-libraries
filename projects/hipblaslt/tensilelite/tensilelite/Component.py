@@ -72,6 +72,7 @@ import abc
 from collections.abc import Mapping
 import inspect
 from dataclasses import dataclass
+from .Components import TDMSplit as _tdm_split
 
 @dataclass
 class LraTileProperties:
@@ -218,10 +219,18 @@ class LocalRead(Component):
     """
     Local read block.
     """
-    def _getLdsReadMemToken(self, writer, kernel, tP, ldsByteOffset=None, bothHalves=False):
+    def _getLdsReadMemToken(self, writer, kernel, tP, ldsByteOffset=None, bothHalves=False,
+                            memToken=None):
         from rocisa.container import MemTokenData
-        useSplit = (kernel["TDMSplit"]
-                    and ldsByteOffset is not None and not tP.get("isM", False))
+        if memToken is not None:
+            toks = [int(t) for t in memToken]
+            return MemTokenData(toks), toks[0]
+        # Per operand: `TDMSplitA`/`TDMSplitB` are independent, and the byte-offset half
+        # classifier only means anything for a tensor that actually has two regions.
+        # Offset first: with nothing to classify the operand is never consulted, so a caller
+        # that has no byte offset to give need not name a tensor either.
+        useSplit = (ldsByteOffset is not None
+                    and _tdm_split.split_of(kernel, tP["tensorChar"])[0] > 1)
         if useSplit:
             parity = writer.states.ldsReadTokenIdx
             if bothHalves:
@@ -244,8 +253,11 @@ class LocalRead(Component):
             tok = writer.states.ldsReadTokenIdx
         return MemTokenData([tok]), tok
 
-    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, ldsByteOffset=None, bothHalves=False, comment=""):
-        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP, ldsByteOffset, bothHalves)
+    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, ldsByteOffset=None, bothHalves=False, comment="", memToken=None):
+        # Only GIR states the token; the scaffold path calls exactly as it always did.
+        tokenArg = () if memToken is None else (memToken,)
+        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(
+            writer, kernel, tP, ldsByteOffset, bothHalves, *tokenArg)
         tokenList = list(getattr(ldsMemToken, "tokens", []))
         if len(tokenList) == 1:
             syncComment = "sync LDS%u" % tokenList[0]

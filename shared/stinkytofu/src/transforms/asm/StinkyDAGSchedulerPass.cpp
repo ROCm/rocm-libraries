@@ -44,6 +44,7 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
+#include "stinkytofu/transforms/asm/GirFencePlacementPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
@@ -430,7 +431,9 @@ static int matrixInputKindOfValu(const StinkyInstruction& matrix, const StinkyIn
 static void scheduleRegionWithMovableSideEffects(
     IRList::iterator regionStart, IRList::iterator regionEnd, IRList::iterator blockBegin,
     std::vector<IRBase*>& scheduled, ReadyQueue& readyQueue,
-    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex, int& fillerCount) {
+    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex,
+    const GirFrameHazardAnalysis::Result& girHazards, const GirFrameAnalysis::Result& girFrames,
+    const GirPlanFenceCoverage& girFenceCoverage, int& fillerCount) {
     if (regionStart == regionEnd) {
         return;  // Empty region, nothing to schedule.
     }
@@ -444,6 +447,8 @@ static void scheduleRegionWithMovableSideEffects(
 
     // Map each instruction to an unique id [0..n-1] and build register deps.
     dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(regionStart, regionEnd);
+    // Only GIR places the fences these edges order, so a region with no frames has none to order.
+    if (!girFrames.empty()) dag::addGirFrameHazardEdges(regionDag, girHazards, girFenceCoverage);
     dag::DAGNodeList& dagNodes = regionDag.nodes;
     std::vector<std::unordered_set<unsigned>>& dagGraph = regionDag.graph;
     std::unordered_map<StinkyInstruction*, unsigned>& instToId = regionDag.instToId;
@@ -461,9 +466,14 @@ static void scheduleRegionWithMovableSideEffects(
     // co-issue window; otherwise issueCycles): where the terminator that follows it sits, which
     // DAGNode::earliestClock is built from.
     int regionCycles = 0;
+    // Prefix sum of the same cost, for the rules that need the SPAN between two nodes rather
+    // than the region total: cumCycles[k] is the cycles before node k, so the last element IS
+    // regionCycles.
+    std::vector<int> cumCycles(regionSize + 1, 0);
     for (unsigned k = 0; k < regionSize; ++k) {
         const StinkyInstruction* inst = dagNodes[k].inst;
         regionCycles += isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles;
+        cumCycles[k + 1] = regionCycles;
     }
 
     if (readyQueue.clusterBarrierEnabled())
@@ -617,7 +627,18 @@ static void scheduleRegionWithMovableSideEffects(
                     continue;
                 }
                 auto it = wmmaIndex.find(u);
-                if (it != wmmaIndex.end()) affinity = std::min(affinity, it->second);
+                if (it != wmmaIndex.end()) {
+                    unsigned candidate = it->second;
+                    BasicBlock* producerBlock = dagNodes[i].inst->getParent();
+                    BasicBlock* consumerBlock = u->getParent();
+                    if (readyQueue.getPassContext()
+                            .getPassFeatureConfig()
+                            .dagFeatures.girFramePipeline &&
+                        producerBlock != nullptr && consumerBlock != nullptr &&
+                        girFrames.isBackEdge(producerBlock, consumerBlock))
+                        candidate += static_cast<unsigned>(wmmaIndex.size());
+                    affinity = std::min(affinity, candidate);
+                }
                 auto uit = instToId.find(u);
                 if (uit != instToId.end() && dagNodes[uit->second].feedsWmma &&
                     !isMatrixInstruction(*u))
@@ -827,7 +848,6 @@ static void scheduleRegionWithMovableSideEffects(
 
     assert(readyQueue.empty() && "Ready queue must be empty before scheduling a region");
 
-    // Initialize the ready queue with instructions that have in-degree 0.
     for (unsigned i = 0; i < regionSize; ++i) {
         if (dagNodes[i].inDegree == 0) readyQueue.push(&dagNodes[i]);
     }
@@ -882,7 +902,10 @@ static void scheduleRegionWithMovableSideEffects(
 // In the end, the instructions will be reordered in the block
 // to reflect the scheduling order.
 static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
-                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
+                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex,
+                          const GirFrameHazardAnalysis::Result& girHazards,
+                          const GirFrameAnalysis::Result& girFrames,
+                          const GirPlanFenceCoverage& girFenceCoverage) {
     PASS_DEBUG(std::cerr << "*** Scheduling Instructions in DAG: ***\n");
 
     if (bb.empty()) return;
@@ -909,7 +932,8 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
             // Non-instruction IR (e.g. AsmDirective): treat as non-movable
             // side-effect boundary so its position is strictly preserved.
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex, fillerCount);
+                                                 wmmaIndex, girHazards, girFrames, girFenceCoverage,
+                                                 fillerCount);
             scheduled.push_back(irNode);
             regionStart = std::next(it);
             continue;
@@ -918,7 +942,8 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
         StinkyInstruction& inst = *instPtr;
         if (hasSideEffect(inst)) {
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex, fillerCount);
+                                                 wmmaIndex, girHazards, girFrames, girFenceCoverage,
+                                                 fillerCount);
 
             scheduled.push_back(&inst);
             readyQueue.onScheduled(inst);
@@ -932,7 +957,8 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
     }
     // Flush the last region if it has not been flushed yet.
     scheduleRegionWithMovableSideEffects(regionStart, endIt, beginIt, scheduled, readyQueue,
-                                         wmmaIndex, fillerCount);
+                                         wmmaIndex, girHazards, girFrames, girFenceCoverage,
+                                         fillerCount);
 
     assert(scheduled.size() == bb.size() + static_cast<size_t>(fillerCount) &&
            "Scheduled instructions size must match original plus filler insts");
@@ -1006,6 +1032,38 @@ std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx) {
     return std::make_unique<ReadyQueueByDAGid>(passCtx);
 }
 
+// Checked on both sides of scheduling: the INCOMING order is the topological witness that keeps
+// the same-trip frame hazard edges acyclic, the SCHEDULED order is what the scheduler owes.
+void validateGirFrameHazardOrder(const GirFrameHazardAnalysis::Result& hazards, const char* when) {
+    std::unordered_map<const StinkyInstruction*, size_t> orderIndex;
+    std::unordered_map<const StinkyInstruction*, const BasicBlock*> orderBlock;
+    std::unordered_set<const BasicBlock*> visited;
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        for (BasicBlock* block : {hazard.producerBlock, hazard.consumerBlock}) {
+            if (!block || !visited.insert(block).second) continue;
+            size_t index = 0;
+            for (IRBase& node : *block) {
+                auto* inst = dyn_cast<StinkyInstruction>(&node);
+                if (!inst) continue;
+                orderIndex[inst] = index++;
+                orderBlock[inst] = block;
+            }
+        }
+    }
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        if (hazard.gap != 0 || hazard.producer == hazard.consumer) continue;
+        auto producer = orderIndex.find(hazard.producer);
+        auto consumer = orderIndex.find(hazard.consumer);
+        if (producer == orderIndex.end() || consumer == orderIndex.end()) continue;
+        if (orderBlock[hazard.producer] == orderBlock[hazard.consumer] &&
+            producer->second >= consumer->second)
+            STINKY_UNREACHABLE((std::string("GIR frame hazard: the ") + when +
+                                " order inverts a required same-trip edge in " +
+                                orderBlock[hazard.producer]->getLabel())
+                                   .c_str());
+    }
+}
+
 class StinkyDAGSchedulerPass : public StinkyInstPass {
    public:
     static char ID;
@@ -1043,6 +1101,15 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         }
 
         const auto& loops = AM.getResult<LoopAnalysis>(func);
+        const GirFrameAnalysis::Result girFrames = AM.getResult<GirFrameAnalysis>(func);
+        const GirFrameHazardAnalysis::Result girHazards =
+            AM.getResult<GirFrameHazardAnalysis>(func);
+        // Built once, on the incoming order: that is the order GirFencePlacementPass elected each
+        // fence against, so it names the windows this schedule owes rather than the ones it makes.
+        const GirPlanFenceCoverage girFenceCoverage =
+            girHazards.empty() ? GirPlanFenceCoverage{}
+                               : buildGirPlanFenceCoverage(girFrames, girHazards);
+        validateGirFrameHazardOrder(girHazards, "incoming");
 
         PASS_DEBUG(for (const Loop& loop
                         : loops) {
@@ -1078,7 +1145,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq) {
             AsmIRBuilder builder(*bb, archId);
             collapseExecMaskedRegions(*bb, builder, wavefrontSize);
-            scheduleInDAG(*bb, rq, wmmaIndex);
+            scheduleInDAG(*bb, rq, wmmaIndex, girHazards, girFrames, girFenceCoverage);
             expandExecMaskedGroups(*bb);
             auto candidates = rq.takeLayer2BarrierOverlapCandidates();
             layer2BarrierOverlapCandidates.insert(layer2BarrierOverlapCandidates.end(),
@@ -1104,6 +1171,11 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 rq->setAnalysisCache(&analysisCache);
                 scheduleBlock(bb, *rq);
             }
+        }
+        validateGirFrameHazardOrder(girHazards, "scheduled");
+        if (!girHazards.empty()) {
+            AM.invalidate(func, preserveCFGAnalyses());
+            (void)AM.getResult<GirFrameHazardAnalysis>(func);
         }
         AM.getResult<Layer2BarrierOverlapAnalysis>(func) =
             validateLayer2BarrierOverlaps(func, layer2BarrierOverlapCandidates);

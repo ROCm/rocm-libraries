@@ -79,6 +79,7 @@ struct StinkyAsmModule::Impl {
     // Plugin data: opaque key-value stores for pass plugins.
     std::unordered_map<std::string, int64_t> pluginDataI64;
     std::unordered_map<std::string, std::string> pluginDataStr;
+    std::shared_ptr<const GirFrameContract> girFrameContract;
 
     // Per-module pass builder for plugin pass registration.
     PassBuilder passBuilder;
@@ -96,12 +97,40 @@ struct StinkyAsmModule::Impl {
 
 StinkyAsmModule::StinkyAsmModule(const std::string& name, const std::array<int, 3>& arch,
                                  const ModuleOptions& moduleOptions)
-    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {}
+    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {
+    // Group endpoints are raw list nodes. Any pass may erase the instruction one lands on, and
+    // nothing told us -- leaving a freed pointer whose `++` reads as "end of block", which a
+    // region extractor then takes as licence to swallow the rest of the kernel. Slide the
+    // endpoint onto a surviving neighbour instead: forward for a `first`, backward for a `last`.
+    installEraseObserver();
+}
 
-StinkyAsmModule::~StinkyAsmModule() = default;
+/// The observer captures `this`, so it must be re-bound after a move and dropped before the
+/// Function it lives on is destroyed -- otherwise an erase during teardown or on a moved-from
+/// shell calls back into freed state.
+void StinkyAsmModule::installEraseObserver() {
+    pImpl->function.setEraseObserver([this](IRBase* node, IRBase* next, IRBase* prev) {
+        retargetGroupEndpoint(node, next, prev);
+    });
+}
 
-StinkyAsmModule::StinkyAsmModule(StinkyAsmModule&&) noexcept = default;
-StinkyAsmModule& StinkyAsmModule::operator=(StinkyAsmModule&&) noexcept = default;
+StinkyAsmModule::~StinkyAsmModule() {
+    if (pImpl) pImpl->function.setEraseObserver(nullptr);
+}
+
+StinkyAsmModule::StinkyAsmModule(StinkyAsmModule&& other) noexcept
+    : pImpl(std::move(other.pImpl)), moduleOptions(std::move(other.moduleOptions)) {
+    if (pImpl) installEraseObserver();
+}
+
+StinkyAsmModule& StinkyAsmModule::operator=(StinkyAsmModule&& other) noexcept {
+    if (this == &other) return *this;
+    if (pImpl) pImpl->function.setEraseObserver(nullptr);
+    pImpl = std::move(other.pImpl);
+    moduleOptions = std::move(other.moduleOptions);
+    if (pImpl) installEraseObserver();
+    return *this;
+}
 
 std::string StinkyAsmModule::getName() const {
     return pImpl->name;
@@ -329,6 +358,15 @@ void StinkyAsmModule::retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBas
     }
 }
 
+bool StinkyAsmModule::isGroupEndpoint(const IRBase* node) const {
+    if (!node) return false;
+    for (const auto& [groupName, range] : pImpl->instructionGroups) {
+        (void)groupName;
+        if (range.first.getNodePtr() == node || range.last.getNodePtr() == node) return true;
+    }
+    return false;
+}
+
 const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const {
     return this->moduleOptions;
 }
@@ -352,6 +390,14 @@ void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {
 int64_t StinkyAsmModule::getPluginDataI64(const std::string& key, int64_t defaultVal) const {
     auto it = pImpl->pluginDataI64.find(key);
     return it != pImpl->pluginDataI64.end() ? it->second : defaultVal;
+}
+
+void StinkyAsmModule::setGirFrameContract(std::shared_ptr<const GirFrameContract> contract) {
+    pImpl->girFrameContract = std::move(contract);
+}
+
+std::shared_ptr<const GirFrameContract> StinkyAsmModule::getGirFrameContract() const {
+    return pImpl->girFrameContract;
 }
 
 void StinkyAsmModule::setPluginDataStr(const std::string& key, const std::string& value) {

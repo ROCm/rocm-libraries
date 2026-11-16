@@ -159,7 +159,9 @@ _HALFPLR_CELLS = {
     # One wave keeps no copy.
     ("no_mx", 0, 1, 1, 0, _ONE): (),
     ("no_mx", 0, 1, 3, 32, _ONE): (),
-    # MX on one tensor: the lone scale on TDMFuse=0, the data tensor beside the scale's set on 1-3.
+    # MX on one tensor: the lone scale on TDMFuse=0, the data tensor beside the scale's set on 1.
+    # Rows 2-4 are declined with one scale, so the halfPLR shapes they carried ride row 1,
+    # whose lone data set is B beside MXSA and A beside MXSB.
     ("mx_a", 0, 2, 1, 0, _ONE): ("MXSA",),
     ("mx_b", 0, 2, 1, 32, _ONE): ("MXSB",),
     ("mx_a", 0, 4, 3, 32, _ONE): ("MXSA",),
@@ -169,14 +171,14 @@ _HALFPLR_CELLS = {
     ("mx_b", 1, 2, 1, 0, _ONE): ("A",),
     ("mx_a", 1, 4, 1, 32, _ONE): ("B",),
     ("mx_b", 1, 4, 3, 16, _ONE): ("A",),
-    ("mx_a", 2, 2, 3, 0, _ONE): ("B",),
-    ("mx_b", 2, 2, 2, 32, _ONE): ("B",),
-    ("mx_a", 2, 4, 1, 0, _ONE): ("B",),
-    ("mx_b", 2, 4, 1, 0, _ONE): ("B",),
-    ("mx_a", 3, 2, 1, 32, _ONE): ("A",),
-    ("mx_b", 3, 2, 3, 0, _ONE): ("A",),
-    ("mx_a", 3, 4, 2, 0, _ONE): ("A",),
-    ("mx_b", 3, 4, 2, 32, _ONE): ("A",),
+    ("mx_a", 1, 2, 3, 0, _ONE): ("B",),
+    ("mx_a", 1, 2, 2, 32, _ONE): ("B",),
+    ("mx_a", 1, 4, 1, 0, _ONE): ("B",),
+    ("mx_a", 1, 4, 3, 0, _ONE): ("B",),
+    ("mx_b", 1, 2, 1, 32, _ONE): ("A",),
+    ("mx_b", 1, 2, 3, 0, _ONE): ("A",),
+    ("mx_b", 1, 4, 2, 0, _ONE): ("A",),
+    ("mx_b", 1, 4, 2, 32, _ONE): ("A",),
 }
 _HALFPLR_IDS = ["%s-tdmfuse%d-w%d-halfplr%d-staggeru%d-cluster%dx%d" % (cell[:5] + cell[5])
                 for cell in _HALFPLR_CELLS]

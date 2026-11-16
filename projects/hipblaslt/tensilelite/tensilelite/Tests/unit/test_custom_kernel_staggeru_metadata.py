@@ -69,6 +69,16 @@ OBJDUMP = _findTool("llvm-objdump")
 
 _PROBE_KERNEL = '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n.text\ns_endpgm\n'
 
+# What the shipped kernels actually need on top of a working AMDGPU backend.
+_INST_PREF_SIZE_PROBE = (
+    '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n'
+    '.text\n.globl probe\nprobe:\ns_endpgm\n.Lfunc_end0:\n'
+    '.rodata\n.p2align 6\n.amdhsa_kernel probe\n'
+    '  .amdhsa_next_free_vgpr 4\n  .amdhsa_next_free_sgpr 8\n'
+    '  .amdhsa_inst_pref_size ((instprefsize(.Lfunc_end0-probe)<<4)&1008)>>4\n'
+    '.end_amdhsa_kernel\n'
+)
+
 
 def _rocRollerDeclaresNoStagger(name: str) -> bool:
     """rocRoller kernels that declare StaggerU: 0 do not implement the in-loop wrap.
@@ -216,6 +226,22 @@ def _toolchainHandlesAmdgcn() -> bool:
         return False
 
 
+def _toolchainHandlesInstPrefSize() -> bool:
+    """Does the assembler provide the ``instprefsize`` builtin the shipped kernels use?
+
+    Ten of them size ``.amdhsa_inst_pref_size`` with it. An LLVM older than the builtin
+    parses the whole ``.amdhsa_kernel`` block wrong, which is a toolchain age, not a
+    broken kernel -- so it is a skip, and a named one.
+    """
+    if not _TOOLCHAIN_USABLE:
+        return False
+    try:
+        with tempfile.TemporaryDirectory(prefix="staggeru-probe-") as workDir:
+            return "s_endpgm" in _disassemble(_INST_PREF_SIZE_PROBE, "gfx942", workDir, "ipsprobe")
+    except (OSError, AssertionError):
+        return False
+
+
 def _whyDisassemblyRequired() -> Optional[str]:
     """Why an unusable toolchain is an error here rather than a reason to skip.
 
@@ -239,6 +265,7 @@ def _whyDisassemblyRequired() -> Optional[str]:
 
 _TOOLCHAIN_USABLE = _toolchainHandlesAmdgcn()
 _REQUIRED_BECAUSE = None if _TOOLCHAIN_USABLE else _whyDisassemblyRequired()
+_INST_PREF_SIZE_OK = _toolchainHandlesInstPrefSize()
 
 if _REQUIRED_BECAUSE is not None:
     raise RuntimeError(
@@ -259,6 +286,27 @@ pytestmark = [
         "on PATH",
     ),
 ]
+
+
+@lru_cache(maxsize=None)
+def _unassemblableHere() -> FrozenSet[str]:
+    """Kernels this LLVM cannot assemble because it lacks the `instprefsize` builtin.
+
+    Ten of them size `.amdhsa_inst_pref_size` with it. Gating PER KERNEL rather than
+    per module keeps the other 250 under inspection on an older toolchain.
+    """
+    if _INST_PREF_SIZE_OK:
+        return frozenset()
+    return frozenset(name for name in KERNEL_NAMES
+                     if "instprefsize(" in "".join(getCustomKernelContents(name)))
+
+
+def _kernelCode(name: str) -> KernelCode:
+    """This kernel's analysis, or a skip when this LLVM cannot assemble it."""
+    if name in _unassemblableHere():
+        pytest.skip(f"{name} sizes .amdhsa_inst_pref_size with the `instprefsize` builtin, "
+                    f"which this LLVM does not provide")
+    return analyzeAllKernels()[name]
 
 
 def _parseInstructions(disassembly: str) -> List[Instruction]:
@@ -413,7 +461,8 @@ def analyzeAllKernels() -> Dict[str, KernelCode]:
             return _analyzeSource(name, getCustomKernelContents(name), workDir)
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            return {code.name: code for code in pool.map(analyze, KERNEL_NAMES)}
+            usable = [n for n in KERNEL_NAMES if n not in _unassemblableHere()]
+            return {code.name: code for code in pool.map(analyze, usable)}
 
 
 @lru_cache(maxsize=None)
@@ -454,7 +503,7 @@ def clampCannotReach(code: KernelCode, metadata: KernelMetadata) -> Optional[str
 @pytest.mark.parametrize("name", KERNEL_NAMES)
 def test_every_custom_kernel_disassembles(name):
     """Coverage guard: no kernel may quietly drop out of the checks below."""
-    code = analyzeAllKernels()[name]
+    code = _kernelCode(name)
     assert code.numInstructions > 0
     assert code.arch.startswith("gfx"), f"{name}: unexpected target {code.arch}"
 
@@ -467,7 +516,7 @@ def test_declared_stagger_is_present_in_the_machine_code(name):
     but the gate would refuse solutions it never needed to, and the
     declaration can no longer be trusted in the other direction either.
     """
-    code = analyzeAllKernels()[name]
+    code = _kernelCode(name)
     metadata = readAllMetadata()[name]
     if metadata.effectiveStaggerU == 0:
         return
@@ -489,7 +538,7 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
     """Direction two, the one the gate's correctness rests on: a kernel that
     staggers either reads StaggerU from the packed argument the host clamps, or
     declares a non-zero StaggerU so the gate refuses it outright."""
-    code = analyzeAllKernels()[name]
+    code = _kernelCode(name)
     metadata = readAllMetadata()[name]
     unreachable = clampCannotReach(code, metadata)
     assert unreachable is None, unreachable
@@ -593,7 +642,7 @@ def test_kernels_that_stagger_despite_declaring_zero_are_the_known_ones():
     observed = {
         name
         for name, meta in metadata.items()
-        if meta.declaredStaggerU == 0 and codes[name].staggers
+        if meta.declaredStaggerU == 0 and name in codes and codes[name].staggers
     }
     assert observed == STAGGERS_DESPITE_DECLARING_ZERO, (
         f"the set of kernels that declare StaggerU: 0 and stagger anyway changed: "
@@ -627,7 +676,8 @@ def test_wrap_detector_goes_quiet_when_the_wrap_is_ablated():
     candidates = [
         name
         for name in KERNEL_NAMES
-        if codes[name].staggers and _ablate(getCustomKernelContents(name))[1] > 0
+        if name in codes and codes[name].staggers
+        and _ablate(getCustomKernelContents(name))[1] > 0
     ]
     assert candidates, (
         "no shipped kernel has both a detected wrap and readable wrap selects to "

@@ -136,7 +136,7 @@ class InstructionEmitter:
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
-            'gl2_prefetch':     lambda em, ui: self.emit_gl2_prefetch(),
+            'gl2_prefetch':     lambda em, ui: self.emit_gl2_prefetch(em.source),
             'gl2_prefetch_inc': lambda em, ui: self.emit_gl2_prefetch_inc(),
         }
 
@@ -422,13 +422,20 @@ class InstructionEmitter:
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_gl2_prefetch(self):
-        """Emit GL2 prefetch loads (global_prefetch_b8) for all tensors."""
+    def emit_gl2_prefetch(self, at=None):
+        """Emit GL2 prefetch loads (global_prefetch_b8) for the mark's movement.
+
+        One mark per movement, so each emits only that movement's tensors; a mark that names no
+        movement (no global read to key on) keeps the whole-tensor emission.
+        """
         writer = self.writer
         kernel = self.kernel
         tPA = self.tensorParametersMap['A']
         tPB = self.tensorParametersMap['B']
-        mod = writer.gl2PrefetchIssueLoad(kernel, tPA, tPB)
+        # The GIR mark's fields arrive as a dict; the Subtile scheduler's own node does not
+        # name a movement, and keeps the whole-tensor emission.
+        unit = tuple(at.get('unit') or ()) if isinstance(at, dict) else ()
+        mod = writer.gl2PrefetchIssueLoad(kernel, tPA, tPB, set(unit) if unit else None)
         return list(mod.flatitems())
 
     def emit_gl2_prefetch_inc(self):

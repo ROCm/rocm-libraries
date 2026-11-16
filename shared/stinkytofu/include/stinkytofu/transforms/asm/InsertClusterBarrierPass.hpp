@@ -74,6 +74,9 @@ class Pass;
 /// was inserted for.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false);
+    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false,
+    // Rule 3's tensor-drain hard stop reads a FrameMap publication point, so it only
+    // applies under the GIR frame pipeline; off, legacy signal placement is unchanged.
+    bool girFramePipeline = false);
 
 }  // namespace stinkytofu

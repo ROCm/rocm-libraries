@@ -31,6 +31,17 @@ const Function* BasicBlock::getParentFunc() const {
     return getParent();
 }
 
+IRList::iterator BasicBlock::eraseIR(IRList::iterator pos) {
+    // The node is about to be FREED. Anything holding it as a raw pointer -- the module's
+    // instruction-group endpoints -- has to move off it first, or it keeps a dangling pointer
+    // whose `++` is indistinguishable from "this was the last node".
+    if (Function* parent = getParent(); parent && parent->eraseObserver()) {
+        IRBase* node = pos.getNodePtr();
+        if (node) parent->eraseObserver()(node, node->getNext(), node->getPrev());
+    }
+    return ir.erase(pos);
+}
+
 void BasicBlock::remove() {
     Function* p = getParent();
     if (p) p->removeBasicBlock(this);
