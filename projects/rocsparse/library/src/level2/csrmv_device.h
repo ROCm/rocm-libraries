@@ -580,8 +580,16 @@ namespace rocsparse
             if(gid == first_wg_in_row && lid == 0)
             {
                 // The first workgroup handles the output initialization.
-                const Y out_val = y[row];
-                temp_sum        = (beta - static_cast<T>(1)) * out_val;
+                // y is not read when beta is 0, so that a NaN in y does not reach the result.
+                temp_sum = static_cast<T>(0);
+                if(beta != static_cast<T>(0))
+                {
+                    temp_sum = (beta - static_cast<T>(1)) * static_cast<T>(y[row]);
+                }
+                else
+                {
+                    y[row] = static_cast<Y>(0);
+                }
                 // Add contributions from all extra vectors
                 for(rocsparse_int i = 0; i < num_extra; ++i)
                 {
@@ -1310,8 +1318,16 @@ namespace rocsparse
             if(gid == first_wg_in_row && lid == 0)
             {
                 // The first workgroup handles the output initialization.
-                const Y out_val = y[row];
-                temp_sum        = (beta - static_cast<T>(1)) * out_val;
+                // y is not read when beta is 0, so that a NaN in y does not reach the result.
+                temp_sum = static_cast<T>(0);
+                if(beta != static_cast<T>(0))
+                {
+                    temp_sum = (beta - static_cast<T>(1)) * static_cast<T>(y[row]);
+                }
+                else
+                {
+                    y[row] = static_cast<Y>(0);
+                }
 
                 // All inter thread communication is done using atomics, therefore cache flushes or
                 // invalidates should not be needed (thus __threadfence() has been removed to regain
