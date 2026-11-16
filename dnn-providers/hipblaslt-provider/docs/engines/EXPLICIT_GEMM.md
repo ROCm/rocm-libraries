@@ -64,7 +64,7 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
   - one cast/epilogue pass reads that fp32 result and writes y.
 
   On MI325X (bias + relu, channels-last), the GEMM grows 1.0-2.8x by kernel time; output-bound GEMMs grow the most. Both are the price of rounding once and of giving every engine the same result for the same graph. Autotune weighs fused explicit GEMM against the other conv engines, which fuse in their kernels.
-- **Native form.** It covers only a bias alone. Activations run in the pass with the convolution engines' functions and accuracy rule (below): hipBLASLt's activation epilogues have their own accuracy, and change NaN and infinity results (its relu and clamp turn NaN into a bound, its swish and tanh GELU give NaN for -inf where the chain gives 0).
+- **Native form.** It covers only a bias alone. Activations run in the pass with the hip-kernel-provider convolution engines' functions and accuracy rule (`kernels/ConvRepackActivations.h`: the few-ulp form for an fp32 output, the faster form for a 16-bit output): hipBLASLt's activation epilogues have their own accuracy, and change NaN and infinity results (its relu and clamp turn NaN into a bound, its swish and tanh GELU give NaN for -inf where the chain gives 0).
 - **The pass.** The epilogue cast (`StridedCastEpilogue*`) runs the chain as a run-time menu of steps.
   - On a dense y, it walks memory flat: four elements a thread, one 16-byte load of the fp32 result and one store of the four outputs. The channel is carried along by additions in 32-bit integers.
   - Otherwise it orders its axes so the axis along which y is densest is innermost, and reads the channel off its index walk.

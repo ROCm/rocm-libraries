@@ -86,7 +86,7 @@ __device__ inline float repackEpiSigmoid(float v)
     return __builtin_amdgcn_rcpf(1.0f + repackEpiExp<P>(-v));
 }
 
-/// x * sigmoid(beta x): swish, silu at beta 1. Error at beta 1: P 1 3.2 ulp for |x| <= 8; P 0 8.9
+/// x * sigmoid(beta x): swish, silu at beta 1. Error at beta 1: P 1 3.2 ulp for |x| <= 8 and 3.7 above -80; P 0 8.9
 /// for |x| <= 8 and 63 above -80. Another beta adds the rounding of beta x, relative
 /// |beta x| 2^-24 in the tail (at 1.702, |x| <= 8: P 1 13 ulp, P 0 20). Below -88 / beta the gate
 /// underflows and the result (magnitude under 1e-36) flushes to zero.

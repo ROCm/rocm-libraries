@@ -141,7 +141,11 @@ double preciseBound(int f, float x)
     case 3:
         return 10.0;
     case 4:
-        return std::fabs(x) <= 8.0F ? 100.0 : (x > -10.0F ? 200.0 : 0.0);
+        if(std::fabs(x) <= 8.0F)
+        {
+            return 100.0;
+        }
+        return x > -10.0F ? 200.0 : 0.0;
     case 5:
     case 6:
         return 2.0;
@@ -199,7 +203,7 @@ protected:
         EXPECT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
         std::string arch(prop.gcnArchName);
         arch = arch.substr(0, arch.find(':'));
-        hip_kernel_provider::compilation::KernelCompileOptions options(arch);
+        const hip_kernel_provider::compilation::KernelCompileOptions options(arch);
         const std::vector<std::string> optionStrings = options;
         std::vector<const char*> optionPointers;
         optionPointers.reserve(optionStrings.size());
@@ -253,11 +257,13 @@ protected:
         EXPECT_EQ(hipMalloc(&dy, outCount * sizeof(float)), hipSuccess);
         EXPECT_EQ(hipMemcpy(dx, x.data(), x.size() * sizeof(float), hipMemcpyHostToDevice),
                   hipSuccess);
-        void* args[] = {&dx, &dy, const_cast<int*>(&n)};
-        const unsigned blocks = static_cast<unsigned>((n + 255) / 256);
-        EXPECT_EQ(
-            hipModuleLaunchKernel(function, blocks, 1, 1, 256, 1, 1, 0, nullptr, args, nullptr),
-            hipSuccess);
+        int count = n;
+        std::array<void*, 3> args{
+            static_cast<void*>(&dx), static_cast<void*>(&dy), static_cast<void*>(&count)};
+        const auto blocks = static_cast<unsigned>((n + 255) / 256);
+        EXPECT_EQ(hipModuleLaunchKernel(
+                      function, blocks, 1, 1, 256, 1, 1, 0, nullptr, args.data(), nullptr),
+                  hipSuccess);
         std::vector<float> y(outCount);
         EXPECT_EQ(hipMemcpy(y.data(), dy, outCount * sizeof(float), hipMemcpyDeviceToHost),
                   hipSuccess);
@@ -276,6 +282,7 @@ TEST_F(TestGpuConvEpilogueActivations, BothFormsWithinTheirBounds)
     const size_t n = x.size();
     for(int f = 0; f < FUNCTIONS; ++f)
     {
+        const char* name = NAMES[static_cast<size_t>(f)];
         double worstPrecise = 0.0;
         double worstHalf = 0.0;
         double worstBf16 = 0.0;
@@ -293,8 +300,8 @@ TEST_F(TestGpuConvEpilogueActivations, BothFormsWithinTheirBounds)
                                       || (!std::isnan(r) && static_cast<double>(got) == r);
                     if(!same && failures++ < 10)
                     {
-                        ADD_FAILURE() << NAMES[f] << " form " << form << " x " << x[i] << " got "
-                                      << got << " want " << r;
+                        ADD_FAILURE() << name << " form " << form << " x " << x[i] << " got " << got
+                                      << " want " << r;
                     }
                     continue;
                 }
@@ -304,13 +311,13 @@ TEST_F(TestGpuConvEpilogueActivations, BothFormsWithinTheirBounds)
                     if(failures++ < 10)
                     {
                         ADD_FAILURE()
-                            << NAMES[f] << " form " << form << " x " << x[i] << ": sign of zero";
+                            << name << " form " << form << " x " << x[i] << ": sign of zero";
                     }
                 }
                 const double err = std::fabs(static_cast<double>(got) - r);
                 if(std::fabs(r) < 0x1p-122)
                 {
-                    EXPECT_LT(err, 2e-36) << NAMES[f] << " form " << form << " x " << x[i];
+                    EXPECT_LT(err, 2e-36) << name << " form " << form << " x " << x[i];
                     continue;
                 }
                 if(form == 1)
@@ -322,7 +329,7 @@ TEST_F(TestGpuConvEpilogueActivations, BothFormsWithinTheirBounds)
                         worstPrecise = std::max(worstPrecise, ulps);
                         if(ulps > bound && failures++ < 10)
                         {
-                            ADD_FAILURE() << NAMES[f] << " few-ulp form x " << x[i] << ": " << ulps
+                            ADD_FAILURE() << name << " few-ulp form x " << x[i] << ": " << ulps
                                           << " ulp, bound " << bound;
                         }
                     }
@@ -335,12 +342,12 @@ TEST_F(TestGpuConvEpilogueActivations, BothFormsWithinTheirBounds)
                 worstBf16 = std::max(worstBf16, bf16Ulps);
                 if((halfUlps > 0.1 || bf16Ulps > 0.1) && failures++ < 10)
                 {
-                    ADD_FAILURE() << NAMES[f] << " fast form x " << x[i] << ": " << halfUlps
+                    ADD_FAILURE() << name << " fast form x " << x[i] << ": " << halfUlps
                                   << " fp16 ulp, " << bf16Ulps << " bf16 ulp";
                 }
             }
         }
-        std::cout << NAMES[f] << ": few-ulp form " << worstPrecise << " fp32 ulp; fast form "
+        std::cout << name << ": few-ulp form " << worstPrecise << " fp32 ulp; fast form "
                   << worstHalf << " fp16 ulp, " << worstBf16 << " bf16 ulp\n";
     }
 }

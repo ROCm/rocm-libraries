@@ -175,9 +175,8 @@ void addEpilogueDefines(compilation::KernelCompileOptions& options, const ConvEp
                 + std::to_string(index) + "]," + (operand.perChannel ? "ok?ch:0" : "0") + ");";
     }
     // The activations' form: few-ulp for an fp32 output, the faster form for a 16-bit output.
-    const std::string form
-        = epilogue.outputType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? "<1>"
-                                                                                       : "<0>";
+    const std::string precision
+        = epilogue.outputType == data_objects::DataType::FLOAT ? "<1>" : "<0>";
     std::string code;
     for(const auto& op : epilogue.ops)
     {
@@ -220,28 +219,28 @@ void addEpilogueDefines(compilation::KernelCompileOptions& options, const ConvEp
             break;
         }
         case OpCode::GELU:
-            code += "v=convEpiGelu" + form + "(v);";
+            code += "v=convEpiGelu" + precision + "(v);";
             break;
         case OpCode::GELU_TANH:
-            code += "v=convEpiGeluTanh" + form + "(v);";
+            code += "v=convEpiGeluTanh" + precision + "(v);";
             break;
         case OpCode::SWISH:
-            code += "v=convEpiSwish" + form + "(v," + slot(op.slot) + ");";
+            code += "v=convEpiSwish" + precision + "(v," + slot(op.slot) + ");";
             break;
         case OpCode::SIGMOID:
-            code += "v=convEpiSigmoid" + form + "(v);";
+            code += "v=convEpiSigmoid" + precision + "(v);";
             break;
         case OpCode::TANH:
-            code += "v=convEpiTanh" + form + "(v);";
+            code += "v=convEpiTanh" + precision + "(v);";
             break;
         case OpCode::ELU:
-            code += "v=convEpiElu" + form + "(v," + slot(op.slot) + ");";
+            code += "v=convEpiElu" + precision + "(v," + slot(op.slot) + ");";
             break;
         case OpCode::ABS:
             code += "v=fabsf(v);";
             break;
         case OpCode::SOFTPLUS:
-            code += "v=convEpiSoftplus" + form + "(v," + slot(op.slot) + ");";
+            code += "v=convEpiSoftplus" + precision + "(v," + slot(op.slot) + ");";
             break;
         default:
             break;
