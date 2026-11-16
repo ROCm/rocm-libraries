@@ -20,10 +20,12 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -242,6 +244,39 @@ TEST(CPU_CKProblemCache_NONE, SwitchedOffComputesEveryTime)
     Query(cache, 1, computed);
     Query(cache, 1, computed);
     EXPECT_EQ(computed, 3);
+}
+
+// Solution queries run from several threads at once. Overlapping keys across threads, with a
+// capacity small enough that the cache keeps starting over while others read it, must still give
+// every caller its own key's answer and never let the cache grow past its capacity.
+TEST(CPU_CKProblemCache_NONE, ConcurrentQueriesGetTheirOwnAnswers)
+{
+    const CacheSwitch on{true};
+    constexpr std::size_t capacity = 16;
+    IntCache cache{capacity};
+    std::atomic<int> wrong{0};
+    std::atomic<std::size_t> max_size{0};
+    std::vector<std::thread> threads;
+    for(int t = 0; t < 8; ++t)
+    {
+        threads.emplace_back([&, t] {
+            int computed = 0;
+            for(int i = 0; i < 5000; ++i)
+            {
+                const int key = (i * 7 + t * 13) % 64;
+                if(Query(cache, key, computed) != key * 10)
+                    ++wrong;
+                const auto size = cache.Size();
+                auto seen       = max_size.load();
+                while(size > seen && !max_size.compare_exchange_weak(seen, size)) {}
+            }
+        });
+    }
+    for(auto& thread : threads)
+        thread.join();
+    EXPECT_EQ(wrong.load(), 0);
+    EXPECT_LE(max_size.load(), capacity);
+    EXPECT_LE(cache.Size(), capacity);
 }
 
 TEST(CPU_DefaultConfigKey_NONE, SameProblemSameKey)
