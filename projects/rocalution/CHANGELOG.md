@@ -50,6 +50,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `AIChebyshev` building a wrong approximate inverse: the series started from the matrix instead of the identity, the shifted matrix was scaled only on its diagonal, and all coefficients were halved.
 * Fixed `AS` and `RAS` leaving the last rows in no block when the number of rows is not a multiple of the number of blocks, `AS` weighting the overlaps of a block between two others wrongly, and not clipping to the matrix a block whose overlap reaches before the first or past the last row. `AS` now weights each row by 1 / (number of blocks that hold it).
 * Fixed `MultiColoredGS` and `MultiColoredSGS` applying a wrong relaxation for `SetRelaxation()` values other than 1, and `MultiColoredSGS` without decomposition ignoring the relaxation.
+* Fixed `MultiColoredSGS::ReBuildNumeric()` crashing without decomposition, where it deleted the blocks that only the decomposition allocates. Without decomposition, it now also analyses the new triangular factors for the solves, and with decomposition it frees the permuted copy of the matrix as `Build()` does.
 
 ## (Unreleased) rocALUTION 4.1.1
 

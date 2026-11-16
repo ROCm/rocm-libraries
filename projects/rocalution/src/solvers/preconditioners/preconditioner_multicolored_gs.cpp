@@ -91,24 +91,27 @@ namespace rocalution
             delete this->preconditioner_;
         }
 
-        for(int i = 0; i < this->num_blocks_; ++i)
+        if(this->decomp_ == true)
         {
-            delete this->x_block_[i];
-            delete this->diag_block_[i];
-            delete this->diag_solver_[i];
-
-            for(int j = 0; j < this->num_blocks_; ++j)
+            for(int i = 0; i < this->num_blocks_; ++i)
             {
-                delete this->preconditioner_block_[i][j];
+                delete this->x_block_[i];
+                delete this->diag_block_[i];
+                delete this->diag_solver_[i];
+
+                for(int j = 0; j < this->num_blocks_; ++j)
+                {
+                    delete this->preconditioner_block_[i][j];
+                }
+
+                delete[] this->preconditioner_block_[i];
             }
 
-            delete[] this->preconditioner_block_[i];
+            delete[] this->preconditioner_block_;
+            delete[] this->x_block_;
+            delete[] this->diag_block_;
+            delete[] this->diag_solver_;
         }
-
-        delete[] this->preconditioner_block_;
-        delete[] this->x_block_;
-        delete[] this->diag_block_;
-        delete[] this->diag_solver_;
 
         this->preconditioner_ = new OperatorType;
         this->preconditioner_->CloneFrom(*this->op_);
@@ -116,6 +119,15 @@ namespace rocalution
         this->Permute_();
         this->Factorize_();
         this->Decompose_();
+
+        if(this->decomp_ == true)
+        {
+            this->preconditioner_->Clear();
+        }
+        else
+        {
+            this->PostAnalyse_();
+        }
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
