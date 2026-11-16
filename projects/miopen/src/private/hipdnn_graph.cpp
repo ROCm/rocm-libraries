@@ -137,12 +137,16 @@ private:
 std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle,
                                                            hipStream_t stream)
 {
+    // Declared before the lock so that a hipDNN handle this call fails to keep is
+    // destroyed after the lock is released; see ReleaseHandle.
+    fe::HipdnnHandlePtr unused;
     const std::lock_guard<std::mutex> lock(HandleMapMutex());
     auto& slot = HandleMap()[handle];
     if(slot == nullptr)
     {
         auto [created, error] = fe::createHipdnnHandle(stream);
-        if(!error.is_good() || created == nullptr)
+        unused                = std::move(created);
+        if(!error.is_good() || unused == nullptr)
         {
             HandleMap().erase(handle);
             return {nullptr,
@@ -156,7 +160,7 @@ std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle
                     RecordFailure(miopenStatusInternalError,
                                   "could not create the HIP event that orders hipDNN work")};
         }
-        state->hipdnnHandle = std::move(created);
+        state->hipdnnHandle = std::move(unused);
         state->stream       = stream;
         slot                = std::move(state);
     }
@@ -510,15 +514,31 @@ bool IsAvailable()
 
 void ReleaseHandle(miopenHandle_t handle) noexcept
 {
+    // The graphs and the handle state are destroyed only after their lock is
+    // released. Destroying them runs hipDNN and its plugins, and a plugin built
+    // against MIOpen may call miopenDestroy on its own handle, which lands back
+    // here and would wait forever on a lock this thread still held.
     try
     {
         {
-            const std::lock_guard<std::mutex> lock(PlanMutex());
-            PlanCache().EraseIf([handle](const PlanKey& key) { return key.handle == handle; });
+            std::vector<GraphPtr> graphs;
+            {
+                const std::lock_guard<std::mutex> lock(PlanMutex());
+                graphs = PlanCache().EraseIf(
+                    [handle](const PlanKey& key) { return key.handle == handle; });
+            }
         }
 
-        const std::lock_guard<std::mutex> lock(HandleMapMutex());
-        HandleMap().erase(handle);
+        std::unique_ptr<HandleState> state;
+        {
+            const std::lock_guard<std::mutex> lock(HandleMapMutex());
+            const auto found = HandleMap().find(handle);
+            if(found != HandleMap().end())
+            {
+                state = std::move(found->second);
+                HandleMap().erase(found);
+            }
+        }
     }
     catch(...)
     {

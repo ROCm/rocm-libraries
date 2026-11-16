@@ -12,6 +12,7 @@
 #include <list>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace miopen {
 namespace wrapper {
@@ -48,13 +49,17 @@ public:
         }
     }
 
+    // Hands the removed values back instead of destroying them, so a caller can
+    // let them go after releasing its lock.
     template <class Predicate>
-    void EraseIf(Predicate predicate)
+    std::vector<Value> EraseIf(Predicate predicate)
     {
+        std::vector<Value> removed;
         for(auto it = entries_.begin(); it != entries_.end();)
         {
             if(predicate(it->first))
             {
+                removed.push_back(std::move(it->second));
                 index_.erase(it->first);
                 it = entries_.erase(it);
             }
@@ -63,6 +68,7 @@ public:
                 ++it;
             }
         }
+        return removed;
     }
 
     std::size_t Size() const { return entries_.size(); }

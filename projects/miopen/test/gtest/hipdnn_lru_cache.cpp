@@ -8,6 +8,10 @@
 
 #include "../../src/private/lru_cache.hpp"
 
+#include <algorithm>
+#include <memory>
+#include <vector>
+
 namespace {
 
 using Cache = miopen::wrapper::LruCache<int, int>;
@@ -73,4 +77,34 @@ TEST(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
     EXPECT_EQ(cache.Find(2), nullptr);
     EXPECT_NE(cache.Find(1), nullptr);
     EXPECT_NE(cache.Find(3), nullptr);
+}
+
+TEST(CPU_HipdnnLruCache_NONE, EraseIfHandsBackTheRemovedValues)
+{
+    // The caller, not EraseIf, destroys what is removed, so it can do that after
+    // releasing its lock.
+    miopen::wrapper::LruCache<int, std::shared_ptr<int>> cache(4);
+    std::vector<std::weak_ptr<int>> watched;
+    for(int key = 0; key < 4; ++key)
+    {
+        auto value = std::make_shared<int>(key);
+        watched.push_back(value);
+        cache.Insert(key, std::move(value));
+    }
+
+    auto removed = cache.EraseIf([](int key) { return key % 2 == 0; });
+    ASSERT_EQ(removed.size(), 2u);
+    EXPECT_FALSE(watched[0].expired());
+    EXPECT_FALSE(watched[2].expired());
+    std::vector<int> removedKeys;
+    for(const auto& value : removed)
+        removedKeys.push_back(*value);
+    std::sort(removedKeys.begin(), removedKeys.end());
+    EXPECT_EQ(removedKeys, (std::vector<int>{0, 2}));
+
+    removed.clear();
+    EXPECT_TRUE(watched[0].expired());
+    EXPECT_TRUE(watched[2].expired());
+    EXPECT_FALSE(watched[1].expired());
+    EXPECT_FALSE(watched[3].expired());
 }
