@@ -15,13 +15,14 @@ and in a loop) or before the end of a branch of one with results, directly or
 in an scf.if within the branch, of an LDS allocation or a packed-only type as a
 result, of a result or yielded value with no type (the Python engine only;
 serialized IR cannot carry one to the C++ engine), of an if/else without one
-condition and two branches, of a yield in the kernel body or in an scf.if in a
-loop body, and of a malformed if/else in an unrolled loop of zero trips,
-directly in its body or in an scf.if there; a loop in a branch keeps its own
-yield; and, when a GPU is present, a kernel whose lanes take both branches on
-the LLVM and the hipcc route. The refusals run the verifier and the Python
-lowerings everywhere, and the C++ lowerings where the ``rocke_engine`` binding
-is built.
+condition and two branches, of an scf.if without exactly one then region
+(also in an unrolled loop of zero trips), of a yield in the kernel body or in
+an scf.if in a loop body, and of a malformed if/else in an unrolled loop of
+zero trips, directly in its body or in an scf.if there; a loop in a branch
+keeps its own yield; and, when a GPU is present, a kernel whose lanes take
+both branches on the LLVM and the hipcc route. The refusals run the verifier
+and the Python lowerings everywhere, and the C++ lowerings where the
+``rocke_engine`` binding is built.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from rocke.core.ir import (
     Value,
     VectorType,
 )
+from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.tests.engines import (
@@ -724,6 +726,56 @@ def test_a_malformed_if_else_is_refused_not_lowered(operands, regions, result_ty
         f"scf.if_else: expected 1 condition / 2 branches, got {operands} / {regions}"
     )
     _assert_refused(b.kernel, ValueError, message)
+
+
+def _scf_if_kernel(name):
+    """A kernel with one ``scf.if`` on ``lane < SPLIT`` and an empty then
+    region."""
+    b = IRBuilder(name)
+    with b.scf_if(b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT))):
+        pass
+    b.ret()
+    return b.kernel
+
+
+_EMPTY_THEN_TEXT = "      region @then {\n      }\n"
+
+
+@pytest.mark.parametrize(
+    "regions_text,count",
+    [
+        pytest.param("", 0, id="no_region"),
+        pytest.param(_EMPTY_THEN_TEXT * 2, 2, id="two_regions"),
+    ],
+)
+def test_an_scf_if_without_exactly_one_then_region_is_refused(regions_text, count):
+    """The lowerings read only an scf.if's first region, so serialized IR with
+    no then region or a second one (which would be dropped unchecked) is
+    refused: the parser accepts it, and the verifier and every lowering refuse
+    the parsed scf.if."""
+    text = serialize(_scf_if_kernel("if_regions"))
+    assert _EMPTY_THEN_TEXT in text
+    kernel = parse(text.replace(_EMPTY_THEN_TEXT, regions_text))
+    (if_op,) = [op for op in kernel.body.ops if op.name == "scf.if"]
+    assert len(if_op.regions) == count
+    _assert_refused(kernel, ValueError, f"scf.if: expected 1 then region, got {count}")
+
+
+@pytest.mark.parametrize("count", [0, 2], ids=["no_region", "two_regions"])
+def test_an_unrolled_loop_of_zero_trips_refuses_an_scf_if_without_one_region(count):
+    """An unrolled loop of zero trips lowers no body, yet its scf.if with no
+    then region or a second one is refused, as it is wherever the body is
+    lowered."""
+
+    def fill(b, _k):
+        with b.scf_if(b.cmp_lt(b.thread_id_x(), b.const_i32(SPLIT))):
+            pass
+
+    kernel = _carrying_loop_kernel("zero_trip_if_regions", 0, fill, unroll=True)
+    (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
+    (if_op,) = [op for op in loop.regions[0].ops if op.name == "scf.if"]
+    if_op.regions[:] = [Region("then") for _ in range(count)]
+    _assert_refused(kernel, ValueError, f"scf.if: expected 1 then region, got {count}")
 
 
 # --------------------------------------------------------------------------

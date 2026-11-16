@@ -407,6 +407,14 @@ const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops
  * reads the body; rocke_i_scf_for_error checks it first. */
 const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap);
 
+/* The refusal for the scf.if `op` when it does not hold exactly one region,
+ * its then region, written into `buf`, or NULL when it does (Python
+ * core/ir.py::_scf_if_region_error, same text). A NULL region counts as
+ * missing. The verifier and both lowerings check it before they read the
+ * region, so a second one is not dropped unchecked and a missing one is not
+ * read. */
+const char* rocke_i_scf_if_region_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
  * is sound (Python core/ir.py::_scf_for_error, same text): it holds exactly
  * one region, its body (rocke_i_scf_for_region_error); its num_iter_args,
@@ -421,7 +429,8 @@ const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t
  * both lowerings use it. */
 const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
 
-/* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else
+/* Apply the rule of every scf.for (rocke_i_scf_for_error), every scf.if
+ * (rocke_i_scf_if_region_error) and every scf.if_else
  * (rocke_i_if_else_yields) in `region` and nested in it (Python
  * core/ir.py::_refuse_malformed_control_flow). Returns ROCKE_OK, or the status
  * of the Python engine's exception with its refusal written to `err`. The LLVM
