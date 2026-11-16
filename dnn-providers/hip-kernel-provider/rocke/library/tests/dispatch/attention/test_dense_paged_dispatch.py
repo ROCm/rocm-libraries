@@ -82,7 +82,7 @@ def test_persistent_variants_decline_paged(spec_id):
         (dict(kv_block_size=8), "must be >= 16"),
         (
             dict(mask_type=2, seqlen_q=1024, sliding_window=0),
-            "causal_bottom_right is not supported with paged",
+            "causal_bottom_right is not yet supported with paged",
         ),
     ],
     ids=["multi_seq", "non_causal", "partial_kv_tile", "page_8", "bottom_right"],

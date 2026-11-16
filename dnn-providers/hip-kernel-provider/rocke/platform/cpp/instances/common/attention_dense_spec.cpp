@@ -656,7 +656,7 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
             ROCKE_SPEC_FAIL(reason, cap, "paged attention is causal-only");
         /* The shifted diagonal is untested with paged K/V on both arches. */
         if(s->causal_bottom_right)
-            ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right is not supported with paged=True");
+            ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right is not yet supported with paged KV");
     }
     if(s->use_sinks && s->paged)
         ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
