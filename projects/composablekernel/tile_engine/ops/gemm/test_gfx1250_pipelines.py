@@ -5,6 +5,8 @@
 pipelines in the Tile Engine: trait parsing, validation rules and generated
 kernel instances. No GPU is required."""
 
+import concurrent.futures
+import importlib.util
 import json
 import os
 import subprocess
@@ -769,6 +771,172 @@ class TestCompTdmRa(_BuilderCase):
         self.assertFalse(
             ok("comp_tdm_ra_s3r3", "tdm", "intrawave", False, "gemm_universal")
         )
+
+    def test_trait_rules_arch(self):
+        # A mixed GPU_TARGETS build filters traits per target: comp_tdm_ra (and its
+        # rings) must not survive for the non-gfx1250 ones. An empty target keeps
+        # the arch-agnostic result.
+        ok = vu.is_trait_combination_valid
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2"):
+            for arch in ("gfx950", "gfx942", "gfx942:sramecc+:xnack-"):
+                self.assertFalse(
+                    ok(
+                        pipeline,
+                        "tdm",
+                        "intrawave",
+                        False,
+                        "gemm_universal",
+                        "rcr",
+                        False,
+                        False,
+                        False,
+                        gpu_target=arch,
+                    ),
+                    (pipeline, arch),
+                )
+            for arch in ("gfx1250", "gfx1250:xnack-", ""):
+                self.assertTrue(
+                    ok(
+                        pipeline,
+                        "tdm",
+                        "intrawave",
+                        False,
+                        "gemm_universal",
+                        "rcr",
+                        False,
+                        False,
+                        False,
+                        gpu_target=arch,
+                    ),
+                    (pipeline, arch),
+                )
+        # The legacy pipelines keep their result on every target.
+        self.assertTrue(
+            ok(
+                "compv3",
+                "cshuffle",
+                "intrawave",
+                False,
+                "gemm_universal",
+                gpu_target="gfx950",
+            )
+        )
+
+    def _gen_tile(self, pipeline, arch="gfx1250", validate=False, **tile):
+        b = self._builder("gemm_universal", _config([pipeline], ["tdm"]), arch)
+        combo = (pipeline, "tdm", "intrawave", False, False, False, False)
+        return b._generate_kernel_instance({**_TILE, **tile}, combo, validate)[1]
+
+    def test_instance_rejected_without_validate(self):
+        # The arch and warp_k rules hold on every generation path, not only
+        # --gen_single (validate=True).
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2"):
+            for validate in (False, True):
+                for arch in ("gfx950", "gfx942"):
+                    with self.assertRaisesRegex(ValueError, "requires gfx1250"):
+                        self._gen_tile(pipeline, arch, validate)
+                with self.assertRaisesRegex(ValueError, "warp_k=1"):
+                    self._gen_tile(pipeline, validate=validate, warp_m=1, warp_k=2)
+            self.assertIn("RunAhead", self._gen_tile(pipeline))
+
+    def test_instance_dtype_rules_without_validate(self):
+        # The dtype and layout rules of is_tile_config_valid hold on every
+        # generation path too: fp32 TDM is wrong for every layout but rcr.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "cfg.json")
+        with open(path, "w") as f:
+            json.dump(_config(["comp_tdm_ra"], ["tdm"]), f)
+        combo = ("comp_tdm_ra", "tdm", "intrawave", False, False, False, False)
+        for layout, ok in (("rrr", False), ("rcr", True)):
+            b = GemmKernelBuilder(
+                "gemm_universal", tmp, "gfx1250", "fp32", layout, path
+            )
+            tile = {**_TILE, "warp_tile_k": 4}
+            if ok:
+                self.assertIn("RunAhead", b._generate_kernel_instance(tile, combo)[1])
+            else:
+                with self.assertRaisesRegex(ValueError, "layout=rcr"):
+                    b._generate_kernel_instance(tile, combo)
+
+    def test_instance_declares_gfx125_requirement(self):
+        # TileKernelInstance gates on the struct-scope flag; launch() pins it to
+        # ck_tile::pipeline_requires_gfx125_v<GemmPipeline>.
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2"):
+            code = self._gen_tile(pipeline)
+            self.assertIn("static constexpr bool kRequiresGfx125 = true;", code)
+            self.assertIn("pipeline_requires_gfx125_v<GemmPipeline>", code)
+        code = self._gen("gemm_universal", "compv3", "cshuffle", arch="gfx950")
+        self.assertIn("static constexpr bool kRequiresGfx125 = false;", code)
+        self.assertIn("pipeline_requires_gfx125_v<GemmPipeline>", code)
+
+    def test_legacy_streamk_builder_rejects_ra(self):
+        # tile_engine/ops/gemm_streamk can only instantiate mem/compv3/compv4. A
+        # gfx1250 pipeline in its config must be filtered out, not built as
+        # CompV3 under the comp_tdm_ra name.
+        spec = importlib.util.spec_from_file_location(
+            "gemm_streamk_validation_utils_ra",
+            os.path.join(
+                _HERE, "..", "gemm_streamk", "gemm_streamk_validation_utils.py"
+            ),
+        )
+        sk = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sk)
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2", "comp_tdm_pc"):
+            self.assertFalse(
+                sk.is_trait_combination_valid(
+                    pipeline, "cshuffle", "intrawave", "atomic"
+                )
+            )
+        self.assertTrue(
+            sk.is_trait_combination_valid("compv3", "cshuffle", "intrawave", "atomic")
+        )
+
+    def test_gen_all_individual_skips_rejected(self):
+        # --gen_all_individual pairs every tile with every trait and passes no
+        # validate flag; a warp_k=2 tile and a non-gfx1250 target must emit no
+        # comp_tdm_ra header.
+        spec = importlib.util.spec_from_file_location(
+            "gemm_universal_builder_ra",
+            os.path.join(_HERE, "gemm_universal", "gemm_universal_instance_builder.py"),
+        )
+        gub = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gub)
+        cfg = _config(
+            ["compv3", "comp_tdm_ra", "comp_tdm_ra_s3r2"], ["tdm", "cshuffle"]
+        )
+        cfg["tile_config"]["warp_m"]["values"] = [1, 2]
+        cfg["tile_config"]["warp_k"]["values"] = [1, 2]
+        # gemm_universal's own fp16 warp-tile rows have no 16x16x16.
+        cfg["tile_config"]["warp_tile_k"]["values"] = [32]
+        for arch, want_ra in (("gfx1250", True), ("gfx950", False)):
+            tmp = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, tmp, True)
+            path = os.path.join(tmp, "cfg.json")
+            with open(path, "w") as f:
+                json.dump(cfg, f)
+            b = gub.GemmUniversalKernelBuilder(
+                "gemm_universal", tmp, arch, "fp16", "rcr", path
+            )
+            with (
+                mock.patch.object(
+                    concurrent.futures,
+                    "ProcessPoolExecutor",
+                    concurrent.futures.ThreadPoolExecutor,
+                ),
+                mock.patch("builtins.print"),
+            ):
+                b._generate_all_individual(num_workers=1)
+            headers = [n for n in os.listdir(tmp) if n.endswith(".hpp")]
+            ra = [n for n in headers if "_comp_tdm_ra" in n]
+            self.assertTrue([n for n in headers if "_compv3_" in n], arch)
+            if not want_ra:
+                self.assertEqual(ra, [], arch)
+                continue
+            self.assertTrue(ra, arch)
+            for name in ra:
+                self.assertIn("x1_16x16x32", name, name)
+            self.assertTrue([n for n in ra if "_comp_tdm_ra_s3r2_" in n])
 
     def test_wave_rules(self):
         v = vu.validate_gemm_gfx1250_pipeline

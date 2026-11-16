@@ -948,6 +948,19 @@ def is_trait_combination_valid(
         return True
     else:
         if kernel_name_prefix != "mx_gemm":
+            # Without this the gfx1250-only pipelines pass the trait filter for any
+            # other --gpu_target and only fail in is_tile_config_valid, which the
+            # --gen_all_individual path does not run. Same predicate as there.
+            if (
+                gpu_target
+                and _base_gfx_arch(gpu_target) != GFX1250_ONLY_PIPELINE_ARCH
+                and _uses_gfx1250_gemm_pipeline(pipeline, kernel_name_prefix)
+            ):
+                logging.debug(
+                    f"pipeline {pipeline!r} requires {GFX1250_ONLY_PIPELINE_ARCH}, "
+                    f"got {_base_gfx_arch(gpu_target)!r}"
+                )
+                return False
             if pipeline in GEMM_TDM_PIPELINES:
                 # TDM: intrawave only, one of the pipeline's own epilogues (a TDM
                 # epilogue; CShuffle for comp_tdm_v3, see tdm_pipeline_epilogues) or
@@ -1472,6 +1485,76 @@ def _uses_gfx1250_gemm_pipeline(pipeline: str, kernel_name_prefix: str) -> bool:
     return pipeline in GEMM_ASYNC_PIPELINES and kernel_name_prefix != ""
 
 
+def gfx1250_gemm_pipeline_reject_reason(
+    pipeline,
+    kernel_name_prefix,
+    gpu_target,
+    tile_m,
+    tile_n,
+    tile_k,
+    warp_m,
+    warp_n,
+    warp_k,
+    warp_tile_m,
+    warp_tile_n,
+    warp_tile_k,
+    a_datatype,
+    b_datatype,
+    c_datatype,
+    layout,
+):
+    """Why a non-MX comp_async / comp_tdm* instance is rejected, else "".
+
+    The one copy of the gfx1250 GEMM pipeline rules for a concrete instance:
+    arch, waves and warp_k (validate_gemm_gfx1250_pipeline), the 8-bit warp
+    tile, fp32 layout and comp_tdm_v3 rules, and the fp32 VGPR tile cap.
+    is_tile_config_valid applies it on --gen_single, and the instance builder
+    applies it on every generation path, so the two cannot drift. ``pipeline``
+    is the base name (split_pipeline_ring); callers check the ring first.
+    """
+    if kernel_name_prefix == "gemm_aquant":
+        # The quant pipeline problem has no async / TDM variant.
+        return f"gemm_aquant does not support pipeline {pipeline!r}"
+    _, reason = validate_gemm_gfx1250_pipeline(
+        tile_m,
+        tile_n,
+        warp_m,
+        warp_n,
+        warp_k,
+        c_datatype,
+        pipeline,
+        gpu_target,
+        layout,
+    )
+    return (
+        reason
+        or gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
+            pipeline, a_datatype, b_datatype, warp_tile_k
+        )
+        or gfx1250_comp_async_8bit_warp_tile_mn_reject_reason(
+            pipeline, a_datatype, b_datatype, warp_tile_m, warp_tile_n
+        )
+        or gfx1250_tdm_fp32_layout_reject_reason(
+            pipeline, a_datatype, b_datatype, layout
+        )
+        or gfx1250_tdm_v3_reject_reason(
+            pipeline,
+            a_datatype,
+            b_datatype,
+            warp_m,
+            warp_n,
+            warp_k,
+            kernel_name_prefix,
+            layout,
+            tile_k,
+            warp_tile_k,
+        )
+        or gfx1250_fp32_tile_reject_reason(
+            gpu_target, a_datatype, tile_m, tile_n, warp_m * warp_n * warp_k
+        )
+    )
+
+
 def validate_gemm_gfx1250_pipeline(
     tile_m: int,
     tile_n: int,
@@ -1675,49 +1758,26 @@ def is_tile_config_valid(
     if _uses_gfx1250_gemm_pipeline(pipeline, kernel_name_prefix):
         # Non-MX comp_async / comp_tdm*: route on the op, not on the pipeline
         # string, so these never reach the MX-only validate_gemm_mx rules.
-        if kernel_name_prefix == "gemm_aquant":
-            # The quant pipeline problem has no async / TDM variant.
-            logging.debug(f"gemm_aquant does not support pipeline {pipeline!r}")
-            return False
-        gfx1250_valid, gfx1250_error = validate_gemm_gfx1250_pipeline(
+        gfx1250_error = gfx1250_gemm_pipeline_reject_reason(
+            pipeline,
+            kernel_name_prefix,
+            gpu_target,
             tile_m,
             tile_n,
+            tile_k,
             warp_m,
             warp_n,
             warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
             c_datatype,
-            pipeline,
-            gpu_target,
             layout,
         )
-        if not gfx1250_valid:
+        if gfx1250_error:
             logging.debug(f"gfx1250 pipeline validation failed: {gfx1250_error}")
-            return False
-        dtype_reason = (
-            gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
-                pipeline, a_datatype, b_datatype, warp_tile_k
-            )
-            or gfx1250_comp_async_8bit_warp_tile_mn_reject_reason(
-                pipeline, a_datatype, b_datatype, warp_tile_m, warp_tile_n
-            )
-            or gfx1250_tdm_fp32_layout_reject_reason(
-                pipeline, a_datatype, b_datatype, layout
-            )
-            or gfx1250_tdm_v3_reject_reason(
-                pipeline,
-                a_datatype,
-                b_datatype,
-                warp_m,
-                warp_n,
-                warp_k,
-                kernel_name_prefix,
-                layout,
-                tile_k,
-                warp_tile_k,
-            )
-        )
-        if dtype_reason:
-            logging.debug(f"gfx1250 pipeline validation failed: {dtype_reason}")
             return False
 
         gemm_valid, gemm_valid_error = validate_gemm(

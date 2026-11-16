@@ -1523,6 +1523,90 @@ class TestCompTdmRaRing(unittest.TestCase):
         self.assertEqual([(c.num_slots, c.run_ahead) for c in got], [(3, 2)])
 
 
+class TestCtypesValidateCompTdmRa(unittest.TestCase):
+    """ctypes_utils.validate_kernel_config applies the codegen's gfx1250 gate, so a
+    comp_tdm_ra KernelConfig outside the plain gfx1250 GEMM it is validated with is
+    rejected with the gate's own reason instead of validating as True."""
+
+    def _validate(self, **kw):
+        import ctypes_utils
+
+        fields = dict(
+            dtype_a="fp16",
+            dtype_b="fp16",
+            dtype_c="fp16",
+            tile_m=256,
+            tile_n=256,
+            tile_k=64,
+            wave_m=2,
+            wave_n=2,
+            wave_k=1,
+            warp_m=16,
+            warp_n=16,
+            warp_k=32,
+            pipeline="comp_tdm_ra",
+            scheduler="intrawave",
+            epilogue="tdm",
+            pad_m=False,
+            pad_n=False,
+            pad_k=False,
+            gfx_arch="gfx1250",
+        )
+        fields.update(kw)
+        return ctypes_utils.validate_kernel_config(ctypes_utils.KernelConfig(**fields))
+
+    def assertRejected(self, reason, **kw):
+        result = self._validate(**kw)
+        self.assertFalse(result.is_valid, kw)
+        self.assertIn(reason, result.errors, kw)
+
+    def test_plain_gfx1250_accepted(self):
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2"):
+            for arch in ("gfx1250", "gfx1250:xnack-"):
+                result = self._validate(pipeline=pipeline, gfx_arch=arch)
+                self.assertTrue(result.is_valid, (pipeline, arch, result.errors))
+
+    def test_other_arch_rejected(self):
+        for arch in ("gfx942", "gfx950"):
+            for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2"):
+                self.assertRejected(
+                    f"pipeline=comp_tdm_ra requires gfx1250, got {arch}",
+                    gfx_arch=arch,
+                    pipeline=pipeline,
+                )
+
+    def test_non_plain_variants_rejected(self):
+        self.assertRejected(COMP_TDM_RA_BATCHED_REJECT_REASON, variant="batched")
+        for variant in ("grouped", "multi_d", "multi_abd", "stream_k"):
+            self.assertRejected(
+                f"pipeline=comp_tdm_ra is not supported for {variant}", variant=variant
+            )
+        result = self._validate(variant="preshuffle")
+        self.assertFalse(result.is_valid)
+        self.assertIn("gemm_preshuffle has no comp_tdm_ra kernel", result.errors)
+
+    def test_warp_k_rejected(self):
+        self.assertRejected(
+            COMP_TDM_RA_WARP_K_REJECT_REASON, wave_m=1, wave_n=2, wave_k=2
+        )
+
+    def test_ring_and_traits_rejected(self):
+        # The ring is split once, as the codegen's traits carry it: an out-of-range
+        # RunAhead is the ring rule's reason, not a stray pipeline name.
+        self.assertRejected(
+            comp_tdm_ra_ring_reject_reason("comp_tdm_ra", 2, 2),
+            pipeline="comp_tdm_ra_s2r2",
+        )
+        self.assertRejected(TDM_PAD_REJECT_REASON, pad_m=True)
+        self.assertRejected(
+            "pipeline=comp_tdm_ra does not support the persistent kernel",
+            persistent=True,
+        )
+        self.assertRejected(
+            "pipeline=comp_tdm_ra requires epilogue=tdm", epilogue="cshuffle"
+        )
+
+
 class TestStreamKCodegen(unittest.TestCase):
     """comp_tdm_pc Stream-K kernels: the epilogue follows the reduction strategy."""
 

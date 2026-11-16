@@ -90,6 +90,10 @@ struct StreamKKernel
         TilePartitioner::PERSISTENT == PersistentDP,
         "Persistent flag from TilePartitioner must match Persistent flag from UniversalGemm.");
 
+    static_assert(!UniversalGemmKernel::kIsGemmKernelOnlyPipeline,
+                  "Stream-K GEMM does not support this pipeline (validated with the plain GEMM "
+                  "kernel only)");
+
     /// The named barriers this kernel arms for GemmPipeline; void when it uses none. Declared here
     /// because the launched kernel, not the wrapped UniversalGemmKernel, owns the barriers.
     using barrier_pipeline = typename UniversalGemmKernel::barrier_pipeline;

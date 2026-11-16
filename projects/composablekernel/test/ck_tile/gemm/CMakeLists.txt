@@ -262,6 +262,15 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             ck_tile_restrict_archs(test_ck_tile_gemm_pipeline_tdm_run_ahead_wmma "^gfx125")
             set_tests_properties(test_ck_tile_gemm_pipeline_tdm_run_ahead_wmma
                 PROPERTIES TIMEOUT 900)
+            # A gfx125-only build is only run on gfx1250, so a device that does not report gfx125
+            # is a broken runner: fail instead of letting every case skip as a pass. Mixed-target
+            # builds may run on other GPUs, where the skip is correct.
+            set(_ra_non_gfx125_targets ${GPU_TARGETS})
+            list(FILTER _ra_non_gfx125_targets EXCLUDE REGEX "^gfx125")
+            if(NOT _ra_non_gfx125_targets AND TEST test_ck_tile_gemm_pipeline_tdm_run_ahead_wmma)
+                set_property(TEST test_ck_tile_gemm_pipeline_tdm_run_ahead_wmma
+                    APPEND PROPERTY ENVIRONMENT "CK_TILE_REQUIRE_GFX125=1")
+            endif()
             # Joined to CK_TILE_GEMM_TEST_TARGETS after the relabel loop below, to keep SMOKE_TEST.
             add_gtest_executable(test_ck_tile_gemm_pipeline_comp_async_wmma test_gemm_pipeline_comp_async_wmma.cpp)
             target_compile_options(test_ck_tile_gemm_pipeline_comp_async_wmma PRIVATE ${EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS})

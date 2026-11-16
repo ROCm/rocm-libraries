@@ -9,6 +9,21 @@ template <typename T>
 class TestCkTileGemmPipelineCompTDMRunAheadWmma
     : public TestCkTileGemmPipelineWmmaBase<T, TestCkTileGemmPipelineCompTDMRunAheadWmma<T>>
 {
+    using Base = TestCkTileGemmPipelineWmmaBase<T, TestCkTileGemmPipelineCompTDMRunAheadWmma<T>>;
+
+    // The gate below is only right for the run-ahead pipeline, which exists on gfx1250 alone.
+    static_assert(Base::PipelineType == GemmPipelineType::CompTDMRunAhead);
+
+    protected:
+    // gfx1250-only explicitly, so the suite does not depend on the shared fixture's TDM list or
+    // on the kernel's runtime rejection. It also covers the host-only cases, whose kernels are
+    // only built for gfx125. CK_TILE_REQUIRE_GFX125=1 (set by CMake for gfx125-only builds)
+    // turns the skip into a failure on a runner that misreports its device.
+    void SetUp() override
+    {
+        CK_TILE_SKIP_UNLESS_GFX125();
+        Base::SetUp();
+    }
 };
 
 #define TEST_SUITE_NAME TestCkTileGemmPipelineCompTDMRunAheadWmma
