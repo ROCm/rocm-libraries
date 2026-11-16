@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // calculateAutoStaggerU on gfx1151: when the caller pads an A/B leading dimension that would
-// alias DRAM channels (multiple of 2048 B) when packed, the solution's StaggerU mapping is
-// replaced by 4 (all workgroups in phase). Host-only, no device library required.
+// alias DRAM channels (multiple of 2048 B) when packed, the solution's StaggerU is disabled.
+// Host-only, no device library required.
 
 #include <gtest/gtest.h>
 
@@ -15,8 +15,11 @@ using namespace TensileLite;
 
 namespace
 {
-    constexpr size_t kTunedMapping = StaggerUMapping::WG1;
-    constexpr size_t kTunedStagger = 16;
+    using StaggerParams = std::tuple<size_t, size_t, size_t>; // mapping, StaggerU, stride shift
+
+    constexpr size_t        kTunedStagger = 16;
+    constexpr StaggerParams kTuned{StaggerUMapping::WG1, kTunedStagger, 2};
+    constexpr StaggerParams kNoStagger{StaggerUMapping::WG0, 0, 0};
 
     hip::HipAMDGPU makeDevice(AMDGPU::Processor processor)
     {
@@ -30,8 +33,8 @@ namespace
     {
         solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::None;
         solution.sizeMapping.staggerU               = staggerU;
-        solution.sizeMapping.staggerUMapping        = kTunedMapping;
-        solution.sizeMapping.staggerStrideShift     = 2;
+        solution.sizeMapping.staggerUMapping        = std::get<0>(kTuned);
+        solution.sizeMapping.staggerStrideShift     = std::get<2>(kTuned);
     }
 
     // Float GEMM, n = 256. TN: packed lda = ldb = k. NN: packed lda = m, ldb = k.
@@ -44,51 +47,52 @@ namespace
         return problem;
     }
 
-    size_t mappingFor(ContractionProblemGemm const& problem,
-                      AMDGPU::Processor             processor = AMDGPU::Processor::gfx1151,
-                      size_t                        staggerU  = kTunedStagger)
+    StaggerParams staggerFor(ContractionProblemGemm const& problem,
+                             AMDGPU::Processor             processor = AMDGPU::Processor::gfx1151,
+                             size_t                        staggerU  = kTunedStagger)
     {
         auto                device = makeDevice(processor);
         ContractionSolution solution;
         initSolution(solution, staggerU);
-        return std::get<0>(solution.calculateAutoStaggerU(problem, &device, 0, 1));
+        return solution.calculateAutoStaggerU(problem, &device, 0, 1);
     }
 }
 
-TEST(StaggerUStrideTest, PackedAliasedStridesKeepTunedMapping)
+TEST(StaggerUStrideTest, PackedAliasedStridesKeepTunedStagger)
 {
     // 512 floats = 2048 B: aliased, as tuned.
-    EXPECT_EQ(mappingFor(makeProblem(512, 512, 512)), kTunedMapping);
+    EXPECT_EQ(staggerFor(makeProblem(512, 512, 512)), kTuned);
 }
 
-TEST(StaggerUStrideTest, PaddedAwayAliasingStartsInPhase)
+TEST(StaggerUStrideTest, PaddedAwayAliasingDisablesStagger)
 {
-    EXPECT_EQ(mappingFor(makeProblem(512, 528, 528)), StaggerUMapping::InPhase);
+    EXPECT_EQ(staggerFor(makeProblem(512, 528, 528)), kNoStagger);
     // NN, m = 500: only B would alias when packed.
-    EXPECT_EQ(mappingFor(makeProblem(512, 500, 528, false, 500)), StaggerUMapping::InPhase);
+    EXPECT_EQ(staggerFor(makeProblem(512, 500, 528, false, 500)), kNoStagger);
 }
 
-TEST(StaggerUStrideTest, RemainingAliasedStrideKeepsTunedMapping)
+TEST(StaggerUStrideTest, RemainingAliasedStrideKeepsTunedStagger)
 {
-    EXPECT_EQ(mappingFor(makeProblem(512, 528, 512)), kTunedMapping);
-    EXPECT_EQ(mappingFor(makeProblem(512, 512, 528)), kTunedMapping);
+    EXPECT_EQ(staggerFor(makeProblem(512, 528, 512)), kTuned);
+    EXPECT_EQ(staggerFor(makeProblem(512, 512, 528)), kTuned);
 }
 
-TEST(StaggerUStrideTest, PaddingUnaliasedPackedStrideKeepsTunedMapping)
+TEST(StaggerUStrideTest, PaddingUnaliasedPackedStrideKeepsTunedStagger)
 {
     // 500 floats = 2000 B is not aliased when packed, so padding changes nothing.
-    EXPECT_EQ(mappingFor(makeProblem(500, 516, 516)), kTunedMapping);
+    EXPECT_EQ(staggerFor(makeProblem(500, 516, 516)), kTuned);
 }
 
-TEST(StaggerUStrideTest, TTLayoutKeepsTunedMapping)
+TEST(StaggerUStrideTest, TTLayoutKeepsTunedStagger)
 {
     // TT: packed lda = k = 512 floats = 2048 B, padded; ldb = n = 256 is packed.
-    EXPECT_EQ(mappingFor(makeProblem(512, 528, 256, true, 256, true)), kTunedMapping);
+    EXPECT_EQ(staggerFor(makeProblem(512, 528, 256, true, 256, true)), kTuned);
 }
 
 TEST(StaggerUStrideTest, RuleLimitedToGfx1151AndStaggeredSolutions)
 {
     auto padded = makeProblem(512, 528, 528);
-    EXPECT_EQ(mappingFor(padded, AMDGPU::Processor::gfx950), kTunedMapping);
-    EXPECT_EQ(mappingFor(padded, AMDGPU::Processor::gfx1151, 0), kTunedMapping);
+    EXPECT_EQ(staggerFor(padded, AMDGPU::Processor::gfx950), kTuned);
+    EXPECT_EQ(std::get<1>(staggerFor(padded, AMDGPU::Processor::gfx1151, 0)), 0u);
+    EXPECT_EQ(std::get<0>(staggerFor(padded, AMDGPU::Processor::gfx1151, 0)), std::get<0>(kTuned));
 }
