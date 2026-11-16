@@ -30,6 +30,7 @@
 // All transform arithmetic is fp32; the GEMM accumulates in fp32.
 #pragma once
 
+#include "ConvEpilogue.h"
 #include "ConvWinogradArgs.h"
 
 typedef _Float16 k5_half;
@@ -516,9 +517,24 @@ __device__ inline bool k5LiveBwd2(const K5Args& a, int h, int w)
 
 /// Stores one forward-form output (virtual channel kk over all groups, virtual position oh < ho,
 /// ow < wo): in place (stride 1, stride-2 forward) or phase-scattered into dx (stride-2
-/// backward data), with outputs whose window is all padding exactly 0.
+/// backward data), with outputs whose window is all padding exactly 0. Fused (forward), the
+/// epilogue runs on that value, the exact 0 included, before the single rounding.
+#if defined(CONV_EPI) && CONV_EPI
+// Fused, the caller loads the output channel's operands once (chan) for all of its outputs.
+#define K5_EPI_CHAN_PARAM , const ConvEpiGen::Chan& chan
+#define K5_EPI_CHAN_ARG , chan
+#else
+#define K5_EPI_CHAN_PARAM
+#define K5_EPI_CHAN_ARG
+#endif
 template <class T, int LAYOUT>
-__device__ inline void k5StoreOut(const K5Args& a, T* out, int img, int kk, int oh, int ow, float v)
+__device__ inline void k5StoreOut(const K5Args& a,
+                                  T* out,
+                                  int img,
+                                  int kk,
+                                  int oh,
+                                  int ow,
+                                  float v CONV_EPI_FN_PARAM K5_EPI_CHAN_PARAM)
 {
     int ch = kk, channels = a.co, h = oh, w = ow, hs = a.ho, ws = a.wo;
     bool live;
@@ -540,7 +556,11 @@ __device__ inline void k5StoreOut(const K5Args& a, T* out, int img, int kk, int 
     const long long off = LAYOUT == K5_NCHW
                               ? ((static_cast<long long>(img) * channels + ch) * hs + h) * ws + w
                               : ((static_cast<long long>(img) * hs + h) * ws + w) * channels + ch;
+#if defined(CONV_EPI) && CONV_EPI
+    out[off] = K5Elem<T>::store(epi(live ? v : 0.0f, chan, 0, true));
+#else
     out[off] = K5Elem<T>::store(live ? v : 0.0f);
+#endif
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -549,7 +569,7 @@ __device__ inline void k5StoreOut(const K5Args& a, T* out, int img, int kk, int 
 // channel-fast.
 
 template <class T, int M, int LAYOUT>
-__device__ void k5OutputTransform(const K5Args& a)
+__device__ void k5OutputTransform(const K5Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int A = K5Wino<M>::A, P = A * A;
     typedef K5XformBlock<LAYOUT> B;
@@ -584,6 +604,9 @@ __device__ void k5OutputTransform(const K5Args& a)
             const int tw = t % a.tw, r = t / a.tw;
             const int th = r % a.th, img = r / a.th;
             const int kk = g * cgo + k;
+#if defined(CONV_EPI) && CONV_EPI
+            const ConvEpiGen::Chan chan = epi.chan(kk, true);
+#endif
 #pragma unroll
             for(int i = 0; i < M; ++i)
             {
@@ -595,7 +618,8 @@ __device__ void k5OutputTransform(const K5Args& a)
                 {
                     const int ow = tw * M + j;
                     if(ow < a.wo)
-                        k5StoreOut<T, K5_NCHW>(a, out, img, kk, oh, ow, y[i * M + j]);
+                        k5StoreOut<T, K5_NCHW>(
+                            a, out, img, kk, oh, ow, y[i * M + j] CONV_EPI_FN_ARG K5_EPI_CHAN_ARG);
                 }
             }
         }
@@ -614,6 +638,9 @@ __device__ void k5OutputTransform(const K5Args& a)
             const int tw = t2 % a.tw, r = t2 / a.tw;
             const int th = r % a.th, img = r / a.th;
             const int kk = g * cgo + k2;
+#if defined(CONV_EPI) && CONV_EPI
+            const ConvEpiGen::Chan chan = epi.chan(kk, true);
+#endif
 #pragma unroll
             for(int i = 0; i < M; ++i)
             {
@@ -631,7 +658,8 @@ __device__ void k5OutputTransform(const K5Args& a)
                                                kk,
                                                oh,
                                                ow,
-                                               s[((i * M + j) * B::TB + tl2) * (B::CB + 1) + kl2]);
+                                               s[((i * M + j) * B::TB + tl2) * (B::CB + 1)
+                                                 + kl2] CONV_EPI_FN_ARG K5_EPI_CHAN_ARG);
                 }
             }
         }

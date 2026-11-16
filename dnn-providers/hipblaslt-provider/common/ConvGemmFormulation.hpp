@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -45,7 +46,8 @@ struct WorkspaceTensor
 /// and filled at execution from `srcUid` and `dstUid`, advanced by the byte offsets.
 struct RepackStep
 {
-    std::variant<StridedCopyArgs, StridedCastArgs, Im2ColArgs, Col2ImArgs> args;
+    std::variant<StridedCopyArgs, StridedCastArgs, Im2ColArgs, Col2ImArgs, StridedCastEpilogueArgs>
+        args;
     /// The element type moved (strided copy, im2col) or written (cast, col2im).
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
@@ -53,6 +55,21 @@ struct RepackStep
     int64_t dstUid = 0;
     int64_t srcByteOffset = 0;
     int64_t dstByteOffset = 0;
+};
+
+/// Where a fused plan runs its convolution's pointwise epilogue.
+enum class EpilogueForm
+{
+    /// No epilogue: a single-node graph.
+    NONE,
+    /// In the GEMM kernel that writes y (hipBLASLt's native epilogues).
+    NATIVE,
+    /// In the plan's existing last pass, which writes y (the staged channels-last copy, now a
+    /// cast of the fp32 staged result).
+    FUSED_PASS,
+    /// In one extra pass: the GEMMs write y's fp32 result to the workspace and a cast applies
+    /// the epilogue and rounds once into y.
+    EXTRA_PASS,
 };
 
 /// Repack steps, then GEMM calls in order, then more repack steps.
@@ -75,6 +92,11 @@ struct ConvGemmPlanCalls
     size_t workspaceBytes = 0;
     /// IM2COL: the column matrix is laid out channels-first (positions innermost).
     bool columnsFirst = false;
+    /// Where the epilogue of a fused graph runs.
+    EpilogueForm epilogueForm = EpilogueForm::NONE;
+    /// The epilogue whose operand pointers and runtime values fill each StridedCastEpilogueArgs
+    /// step's argument block at execution.
+    std::shared_ptr<const hipdnn_plugin_sdk::conv_epilogue::ConvEpilogue> epilogue;
 
     bool hasRepack() const
     {

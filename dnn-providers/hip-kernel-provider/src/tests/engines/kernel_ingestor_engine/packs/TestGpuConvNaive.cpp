@@ -18,6 +18,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -476,6 +477,88 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"
                                     + directionTag(std::get<1>(info.param));
+                         });
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): the menu chains on the forward cases, against the CPU
+// convolution followed by the chain on the host (one rounding).
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::checkFusedCase;
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+template <typename T>
+void runFused(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD),
+        {naiveKernel(conv_epilogue_test::elementTypeOf<T>(), ConvDirection::FORWARD)});
+    EXPECT_EQ(checkFusedCase<T>(shape, steps, runner, specials), 1);
+}
+
+class TestGpuConvNaiveFused : public ::testing::TestWithParam<std::tuple<DeviceCase, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvNaiveFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvNaiveFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvNaiveFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvNaiveFused, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvNaiveFused, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::CLIP_BOUNDARY);
+}
+
+std::vector<DeviceCase> fusedShapes()
+{
+    // Forward-relevant cases: channels-first and -last, 1-D, 3-D, grouped, depthwise.
+    std::vector<DeviceCase> cases;
+    for(const auto& c : deviceCases())
+    {
+        if(c.name == "Nchw2d" || c.name == "Nhwc2dPadded" || c.name == "OneD"
+           || c.name == "ThreeDChannelsLast" || c.name == "Grouped"
+           || c.name == "DepthwiseMultiplier2")
+        {
+            cases.push_back(c);
+        }
+    }
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvNaiveFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
                          });
 
 } // namespace

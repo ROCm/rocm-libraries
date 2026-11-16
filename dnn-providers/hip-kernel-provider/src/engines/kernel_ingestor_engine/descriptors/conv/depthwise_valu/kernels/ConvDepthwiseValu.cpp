@@ -21,6 +21,8 @@
 //   CONV_DW_FLIP      1 reflects the filter
 //   CONV_DW_WSTRIP, CONV_DW_KD/KH/KW, CONV_DW_TH/TW, CONV_DW_BD/BH/BW/BK, CONV_DW_RD/RH/RW
 //                     the variant's tile and compile-time filter extents
+//   CONV_EPI          1: a forward config applies the fused pointwise epilogue at its stores
+//                     (ConvDepthwiseEpilogue.h) and takes ConvEpiArgs as a second argument
 //
 // The defines carry a CONV_DW_ prefix because the cores are templates over parameters named
 // KH, KW, TH, ...; an unprefixed -DKH=3 would rewrite their parameter lists.
@@ -111,7 +113,7 @@
 using ElementType = CONV_DW_TYPE;
 
 extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
-    ConvDepthwiseValu(ConvDepthwiseValuArgs args)
+    ConvDepthwiseValu(ConvDepthwiseValuArgs args CONV_EPI_PARAM)
 {
     namespace dw = conv_depthwise_valu;
     dw::ValuParams p;
@@ -135,6 +137,9 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
     p.pd = args.pd;
     p.sd = args.sd;
     p.dd = args.dd;
+#if defined(CONV_EPI) && CONV_EPI
+    p.epi = convEpiGen(epiArgs);
+#endif
 
     const auto* in = static_cast<const ElementType*>(args.in);
     const auto* filter = static_cast<const ElementType*>(args.filter);

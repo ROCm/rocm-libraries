@@ -68,6 +68,18 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 - 3x3 s1 fp16 NCHW stems trail `ConvWinoRageRxS` on gfx942 (1.3x, three graphs) and marginally on gfx950; NHWC bf16 c4 stems (sdxl) trail CK by 1.1-1.4x on gfx950, gfx942 and RDNA.
 - gfx906 and gfx103x get only the fp32 FMA path; their 16-bit stems fall to K1.
 
+## Fusion
+
+`CONV_SMALLC_FWD` claims a forward convolution followed by a chain of pointwise nodes (scale, bias,
+relu / clipped relu / clamp / leaky relu, gelu, gelu-tanh, swish / silu, sigmoid, tanh, elu, abs,
+softplus; per-channel, one-element and pass-by-value operands) under its own engine id. Every
+store applies the chain to the fp32 accumulator before the single rounding: the LDS-slot
+epilogue (ep 0) before the slot, the register epilogue (ep 1) and the FMA kernel's vector and
+scalar stores. A thread's channels are fixed, so their per-channel operands load once, before the
+stores. The weight pre-pass compiles as unfused, and an unfused graph's kernels are unchanged.
+The chain is compiled in as generated code that depends on the pattern only; operand pointers and
+values are a second kernel argument. The backward-data configs decline fused graphs.
+
 ## Numerical precision
 
 - fp32 accumulation (fp16/bf16 products exact in fp32 on the 16x16 atoms, fp32 on the 16x16x4 atom or FMA); the whole reduction runs inside one block in a fixed order; one rounding at the store. No split, no atomics. The device suite relaunches every config and compares bits.

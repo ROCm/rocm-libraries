@@ -151,7 +151,8 @@ std::optional<DepthwiseTile> tileOf(const KernelDefinition& kernel)
 
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_depthwise_valu::parseDepthwiseValuProblem(context, direction);
+    const auto problem = conv_depthwise_valu::parseDepthwiseValuProblem(
+        context, direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value())
     {
         return std::nullopt;
@@ -195,7 +196,8 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    const auto problem = conv_depthwise_valu::parseDepthwiseValuProblem(context, direction);
+    const auto problem = conv_depthwise_valu::parseDepthwiseValuProblem(
+        context, direction, conv_naive::Fusion::EPILOGUE);
     const auto tile = tileOf(kernel);
     if(!problem.has_value() || !tile.has_value())
     {
@@ -247,20 +249,24 @@ bool kernelMatches(const MatchContext& context,
     return conv_depthwise_valu::launchFor(*problem, *tile).has_value();
 }
 
-/// The single argument the kernel takes. Only consulted for a pre-built kernel.
-const std::vector<KernelArgument>& kernelSignature()
+/// The argument the kernel takes, and a ConvEpiArgs after it when an epilogue is fused. Only
+/// consulted for a pre-built kernel.
+const std::vector<KernelArgument>& kernelSignature(bool fused)
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(ConvDepthwiseValuArgs)), 0, ""}};
-    return s_signature;
+    static const std::vector<KernelArgument> s_fusedSignature{
+        {"by_value", static_cast<uint32_t>(sizeof(ConvDepthwiseValuArgs)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fusedSignature : s_signature;
 }
 
 class PreparedConvDepthwiseValu : public IngestorPreparedDispatch
 {
 public:
-    PreparedConvDepthwiseValu(IngestorKernelCode code, const DepthwiseValuProblem& problem)
+    PreparedConvDepthwiseValu(IngestorKernelCode code, DepthwiseValuProblem problem)
         : _code(std::move(code))
-        , _problem(problem)
+        , _problem(std::move(problem))
     {
     }
 
@@ -305,8 +311,8 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        const auto problem
-            = conv_depthwise_valu::parseDepthwiseValuProblem(context, directionFor(kernel));
+        const auto problem = conv_depthwise_valu::parseDepthwiseValuProblem(
+            context, directionFor(kernel), conv_naive::Fusion::EPILOGUE);
         const auto tile = tileOf(kernel);
         const auto in = tryGetBoundInt(bound, IN_TOKEN);
         const auto filter = tryGetBoundInt(bound, FILTER_TOKEN);
@@ -365,8 +371,11 @@ public:
             }
         }
 
+        // The fused epilogue (forward only): fusion off adds no option.
+        const bool fused = !problem->base.epilogue.empty();
+        conv_epilogue::addEpilogueDefines(options, problem->base.epilogue);
         auto code = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, kernelSignature());
+            _kernelCompiler, _kpackLoader, context, kernel, options, kernelSignature(fused));
         code.setBlockSize(static_cast<unsigned int>(launch->block), 1, 1);
         code.setGridSize(static_cast<unsigned int>(launch->grid),
                          static_cast<unsigned int>(launch->gridY),
@@ -397,7 +406,17 @@ public:
         args.out
             = hipdnn_plugin_sdk::findDeviceBuffer(problem.outUid, deviceBuffers, numDeviceBuffers)
                   .ptr;
-        dispatch.kernelForStream(handle.getStream()).launch(handle.getStream(), args);
+        auto& runnable = dispatch.kernelForStream(handle.getStream());
+        if(problem.base.epilogue.empty())
+        {
+            runnable.launch(handle.getStream(), args);
+        }
+        else
+        {
+            const ConvEpiArgs epiArgs = conv_epilogue::epilogueArgs(
+                problem.base.epilogue, deviceBuffers, numDeviceBuffers);
+            runnable.launch(handle.getStream(), args, epiArgs);
+        }
     }
 
 private:

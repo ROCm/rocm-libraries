@@ -332,13 +332,15 @@ bool atomRunsOn(std::string_view atom, std::string_view gcnArchName)
            && !arch.empty();
 }
 
-std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvDirection direction)
+std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context,
+                                              ConvDirection direction,
+                                              conv_naive::Fusion fusion)
 {
     if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA)
     {
         return std::nullopt;
     }
-    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    auto base = conv_naive::parseConvNaiveProblem(context, direction, fusion);
     if(!base.has_value())
     {
         return std::nullopt;
@@ -833,7 +835,8 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
 
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_igemm::parseIgemmProblem(context, direction);
+    const auto problem
+        = conv_igemm::parseIgemmProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value())
     {
         return std::nullopt;
@@ -977,7 +980,7 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    auto problem = conv_igemm::parseIgemmProblem(context, *direction);
+    auto problem = conv_igemm::parseIgemmProblem(context, *direction, conv_naive::Fusion::EPILOGUE);
     if(problem.has_value() && tile->fuse != 0)
     {
         // Group fusion serves small groups (fused groups of at most 64 channels each way) whose
@@ -1091,7 +1094,7 @@ bool kernelMatches(const MatchContext& context,
 std::optional<IgemmProblem>
     problemFor(const MatchContext& context, ConvDirection direction, const Tile& tile)
 {
-    auto problem = conv_igemm::parseIgemmProblem(context, direction);
+    auto problem = conv_igemm::parseIgemmProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(problem.has_value() && tile.fuse != 0)
     {
         // The expanded filter is the staged operand, direct filter or not.
@@ -1108,19 +1111,26 @@ std::optional<IgemmProblem>
     return problem;
 }
 
-/// The single argument both kernels take. Only consulted for a pre-built kernel.
-const std::vector<KernelArgument>& convSignature()
+/// The argument the kernels take, and a ConvEpiArgs after it when an epilogue is fused. Only
+/// consulted for a pre-built kernel.
+const std::vector<KernelArgument>& convSignature(bool fused)
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(K1Args)), 0, ""}};
-    return s_signature;
+    static const std::vector<KernelArgument> s_fusedSignature{
+        {"by_value", static_cast<uint32_t>(sizeof(K1Args)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fusedSignature : s_signature;
 }
 
-const std::vector<KernelArgument>& reduceSignature()
+const std::vector<KernelArgument>& reduceSignature(bool fused)
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(K1ReduceArgs)), 0, ""}};
-    return s_signature;
+    static const std::vector<KernelArgument> s_fusedSignature{
+        {"by_value", static_cast<uint32_t>(sizeof(K1ReduceArgs)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fusedSignature : s_signature;
 }
 
 long long divUpBlocks(long long elements)
@@ -1174,7 +1184,7 @@ public:
                       long long rowTiles,
                       std::optional<IngestorKernelCode> reduce,
                       std::array<std::optional<IngestorKernelCode>, 3> copies,
-                      const IgemmProblem& problem,
+                      IgemmProblem problem,
                       const conv_igemm::SplitPlan& plan)
         : _conv(std::move(conv))
         , _convTail(std::move(convTail))
@@ -1182,7 +1192,7 @@ public:
         , _rowTiles(rowTiles)
         , _reduce(std::move(reduce))
         , _copies(std::move(copies))
-        , _problem(problem)
+        , _problem(std::move(problem))
         , _plan(plan)
     {
     }
@@ -1354,8 +1364,14 @@ public:
 
         const auto plan = conv_igemm::splitPlanFor(
             *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);
+        // The fused epilogue: in the convolution, and in the split-K reduce that writes the
+        // output when the reduction is split. Fusion off adds no option, so the code is that of
+        // an unfused build.
+        const auto& epilogue = problem->base.epilogue;
+        const bool fused = !epilogue.empty();
+        conv_epilogue::addEpilogueDefines(options, epilogue);
         auto conv = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, convSignature());
+            _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused));
         const auto threads = static_cast<unsigned int>(tile->blockThreads());
         const unsigned int gridZ = grid->z * static_cast<unsigned int>(plan.splits);
         // One dispatch addresses at most 2^32 - 1 work items along x: more row tiles than that
@@ -1368,7 +1384,7 @@ public:
         if(rowTiles % launchTiles != 0)
         {
             convTail.emplace(buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, kernel, options, convSignature()));
+                _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused)));
             convTail->setBlockSize(threads, 1, 1);
             convTail->setGridSize(
                 static_cast<unsigned int>(rowTiles % launchTiles), grid->y, gridZ);
@@ -1378,8 +1394,12 @@ public:
         {
             KernelDefinition reduceKernel = kernel;
             reduceKernel.source.entryPoint = std::string(REDUCE_ENTRY_POINT);
-            reduce.emplace(buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature()));
+            reduce.emplace(buildIngestorKernelCode(_kernelCompiler,
+                                                   _kpackLoader,
+                                                   context,
+                                                   reduceKernel,
+                                                   options,
+                                                   reduceSignature(fused)));
             reduce->setBlockSize(COPY_BLOCK, 1, 1);
             reduce->setGridSize(static_cast<unsigned int>(std::clamp<long long>(
                                     divUpBlocks(plan.outElems), 1, COPY_MAX_BLOCKS)),
@@ -1387,6 +1407,8 @@ public:
                                 1);
         }
 
+        // The staging copies are bitwise and take no epilogue.
+        conv_epilogue::removeEpilogueDefines(options);
         std::array<std::optional<IngestorKernelCode>, 3> copies;
         const std::array<const Staging*, 3> stagings{&problem->x, &problem->w, &problem->y};
         for(size_t i = 0; i < stagings.size(); ++i)
@@ -1522,18 +1544,49 @@ public:
         args.outElems = plan.outElems;
         args.partial
             = plan.splits > 1 ? reinterpret_cast<float*>(base + plan.partialOffset) : nullptr;
+        const bool fused = !problem.base.epilogue.empty();
+        ConvEpiArgs epiArgs{};
+        if(fused)
+        {
+            // The split-K reduce walks the output flat: packed channels-last unless the config
+            // writes the graph's channels-first output in place.
+            const auto& a = problem.args;
+            const bool channelsFirstOutput
+                = !problem.y.needed && problem.base.args.yStrides[1] != 1 && a.k > 1;
+            const long long pixels = static_cast<long long>(a.dout) * a.ho * a.wo;
+            epiArgs = conv_epilogue::epilogueArgs(problem.base.epilogue,
+                                                  deviceBuffers,
+                                                  numDeviceBuffers,
+                                                  channelsFirstOutput ? pixels : 1,
+                                                  a.k);
+        }
         for(long long first = 0; first < dispatch.rowTiles(); first += dispatch.launchTiles())
         {
             args.tileBase = static_cast<int>(first);
             const bool whole = dispatch.rowTiles() - first >= dispatch.launchTiles();
-            (whole ? dispatch.convForStream(stream) : dispatch.convTailForStream(stream))
-                .launch(stream, args);
+            auto& conv
+                = whole ? dispatch.convForStream(stream) : dispatch.convTailForStream(stream);
+            if(fused)
+            {
+                conv.launch(stream, args, epiArgs);
+            }
+            else
+            {
+                conv.launch(stream, args);
+            }
         }
         if(plan.splits > 1)
         {
             K1ReduceArgs reduce{
                 args.partial, forward ? operand[2] : operand[0], plan.outElems, plan.splits, 0};
-            dispatch.reduceForStream(stream).launch(stream, reduce);
+            if(fused)
+            {
+                dispatch.reduceForStream(stream).launch(stream, reduce, epiArgs);
+            }
+            else
+            {
+                dispatch.reduceForStream(stream).launch(stream, reduce);
+            }
         }
         for(size_t i = 0; i < stagings.size(); ++i)
         {

@@ -17,6 +17,7 @@
 // has one owner and a fixed order.
 #pragma once
 
+#include "ConvEpilogue.h"
 #include "ConvFftArgs.h"
 #include "ConvFftTwiddles.h"
 
@@ -561,6 +562,49 @@ struct FftOutStorer
     }
 };
 
+#if defined(CONV_EPI) && CONV_EPI
+/// The output tiles of a fused build: FftOutStorer's points with the epilogue applied to each
+/// kept point's scaled value before its rounding. The block's tiles share one output channel, so
+/// the epilogue's per-channel operands load once (chan).
+template <class T, int TH, int TW>
+struct FftOutStorerEpi
+{
+    T* dst;
+    long long chanOff;
+    const ConvFftArgs* a;
+    const FftTile* tiles;
+    const ConvEpiGen* epi;
+    ConvEpiGen::Chan chan;
+
+    template <int TH_, int TW_, int PB, int RS>
+    __device__ void store(const float* real) const
+    {
+        for(int idx = threadIdx.x; idx < PB * TH * TW; idx += blockDim.x)
+        {
+            const int t = idx / (TH * TW);
+            const int r = (idx / TW) % TH;
+            const int i = idx % TW;
+            value(t, r, i, real[(t * TH + r) * RS + i]);
+        }
+    }
+
+    __device__ void value(int t, int row, int i, float v) const
+    {
+        const FftTile tile = tiles[t];
+        const int h = tile.h0 + row;
+        const int w = tile.w0 + i;
+        if(!tile.live || row >= a->oh || i >= a->ow || h >= a->dstH || w >= a->dstW)
+        {
+            return;
+        }
+        constexpr float scale = 1.0f / static_cast<float>(TH * TW);
+        dst[chanOff + static_cast<long long>(tile.image) * a->dstStr[0]
+            + static_cast<long long>(h) * a->dstStr[2] + static_cast<long long>(w) * a->dstStr[3]]
+            = FftElem<T>::store((*epi)(v * scale, chan, 0, true));
+    }
+};
+#endif
+
 /// Weight gradient: tap (r, s) of instance t (x channel c0 + t) is lag (r * dilH, s * dilW),
 /// written reflected when flip. Gathered tap by tap (r s of them, not th tw).
 template <class T, int TH, int TW>
@@ -653,7 +697,7 @@ __device__ void fftFilterTransform(const ConvFftArgs& a)
 
 /// Inverse to the output: block = PB tiles of one (group, output channel b).
 template <class T, int TH, int TW, int PB>
-__device__ void fftOutputInverse(const ConvFftArgs& a)
+__device__ void fftOutputInverse(const ConvFftArgs& a CONV_EPI_FN_PARAM)
 {
     constexpr int F = FftShape<TH, TW, PB>::F;
     __shared__ cfx spec[PB * F];
@@ -677,8 +721,18 @@ __device__ void fftOutputInverse(const ConvFftArgs& a)
                   : cfxMake(0.0f, 0.0f);
     }
     __syncthreads();
+#if defined(CONV_EPI) && CONV_EPI
+    // gb is the output channel (group g's channel b).
+    FftOutStorerEpi<T, TH, TW> storer{static_cast<T*>(a.dst),
+                                      static_cast<long long>(gb) * a.dstStr[1],
+                                      &a,
+                                      tiles,
+                                      &epi,
+                                      epi.chan(gb, true)};
+#else
     FftOutStorer<T, TH, TW> storer{
         static_cast<T*>(a.dst), static_cast<long long>(gb) * a.dstStr[1], &a, tiles};
+#endif
     fft2dInverse<TH, TW, PB>(spec, storer);
 }
 
@@ -711,7 +765,7 @@ __device__ void fftWgradInverse(const ConvFftArgs& a)
 /// over channels): block = PB tiles of channel g; forward transform, multiply by the filter
 /// spectrum (wsB[g][F], conjugated by the filter transform), inverse to the output tiles.
 template <class T, int TH, int TW, int PB>
-__device__ void fftDepthwise(const ConvFftArgs& a)
+__device__ void fftDepthwise(const ConvFftArgs& a CONV_EPI_FN_PARAM)
 {
     constexpr int F = FftShape<TH, TW, PB>::F;
     __shared__ cfx spec[PB * F];
@@ -729,8 +783,18 @@ __device__ void fftDepthwise(const ConvFftArgs& a)
         spec[t * F + f] = cfxMul(spec[t * F + f], filter[f]);
     }
     __syncthreads();
+#if defined(CONV_EPI) && CONV_EPI
+    // Channel g is the output channel.
+    FftOutStorerEpi<T, TH, TW> storer{static_cast<T*>(a.dst),
+                                      static_cast<long long>(g) * a.dstStr[1],
+                                      &a,
+                                      tiles,
+                                      &epi,
+                                      epi.chan(g, true)};
+#else
     FftOutStorer<T, TH, TW> storer{
         static_cast<T*>(a.dst), static_cast<long long>(g) * a.dstStr[1], &a, tiles};
+#endif
     fft2dInverse<TH, TW, PB>(spec, storer);
 }
 

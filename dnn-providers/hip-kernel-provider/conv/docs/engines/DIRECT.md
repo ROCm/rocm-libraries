@@ -98,6 +98,31 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
   - Rows use `s_barrier` without fences, so DMA into the next stage stays in flight. Each stage is its own `__shared__` object, so waits track the right DMA.
   - gfx950 rounds bf16 pairs with the hardware convert, which is bit-identical to the software round for every non-NaN input (checked exhaustively).
 
+## Fusion
+
+`CONV_DIRECT_FWD` and `CONV_DIRECT_FWD_TF32` also claim a forward convolution followed by a
+chain of pointwise nodes, under the same engine ids and catalog configs. The chain is the
+conv epilogue menu (`ConvEpilogue.hpp`): scale and bias (per-channel or scalar operands, device
+or pass-by-value), relu with its clips and slope (relu, clipped relu, clamp, leaky relu), gelu,
+gelu-tanh, swish/silu, sigmoid, tanh, elu, abs and softplus. The provider generates the pattern's
+code into the kernel's compile options; operand pointers and values are runtime arguments, so
+one code object serves every graph of a pattern.
+
+The epilogue runs on the fp32 accumulator and the kernel rounds once:
+
+- FMA kernel: per thread, before its output stores.
+- Halo-tile kernel: before the accumulators go to the wave's LDS strip.
+- Rows kernels (2-D, batch unfold, 3-D, in-place channels-first): once per tile on the
+  accumulators, before either store, so the LDS-staged 16-byte store copies rounded values
+  bitwise.
+- Split-C configs: the main kernel writes raw fp32 partials and `ConvDirectReduce` applies the
+  epilogue to each summed element, deriving the channel with no division per element.
+- Three-bf16 (TF32) configs: the same fp32 accumulator, rounded once to fp32.
+
+The weight format, the three-bf16 input split and the staging copies take no epilogue. Backward
+data does not fuse. With no pointwise node the compile options, and so the code, are those of
+the unfused engine.
+
 ## Strengths and weaknesses
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts shapes faster or slower by more than 5%.
 

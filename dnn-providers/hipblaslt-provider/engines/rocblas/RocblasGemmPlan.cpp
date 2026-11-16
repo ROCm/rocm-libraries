@@ -21,6 +21,14 @@ namespace hipblaslt_plugin
 RocblasGemmPlan::RocblasGemmPlan(const std::vector<GemmCall>& calls, const std::string& gcnArchName)
     : _calls(fitLibraryLimits(calls))
 {
+    // rocBLAS has no epilogue: a fused convolution applies its own in a repack pass.
+    if(std::any_of(_calls.begin(), _calls.end(), [](const GemmCall& call) {
+           return call.epilogue.has_value();
+       }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "rocBLAS GEMMs take no native epilogue");
+    }
     // A reduction rocBLAS would chunk into a half or bf16 output rounds once per chunk:
     // declined, so the result is summed in fp32 and rounded once, or not computed here.
     if(std::any_of(_calls.begin(), _calls.end(), rocblasRoundsReductionChunks))

@@ -96,7 +96,8 @@ HipblasltContainer::HipblasltContainer()
                                         bool tf32,
                                         ConvGemmPlanBuilder::NarrowPartials narrowPartials,
                                         Notes numericalNotes,
-                                        bool reducedPrecisionReduction = false) {
+                                        bool reducedPrecisionReduction = false,
+                                        bool nativeEpilogue = false) {
             auto engine
                 = std::make_unique<PlanBuilderEngine>(engineId, false, std::move(numericalNotes));
             engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(std::move(factory),
@@ -106,7 +107,8 @@ HipblasltContainer::HipblasltContainer()
                                                                          false,
                                                                          ColumnLayout::FOLLOW_Y,
                                                                          narrowPartials,
-                                                                         wrwRepackCap));
+                                                                         wrwRepackCap,
+                                                                         nativeEpilogue));
             _engineManager->addEngine(std::move(engine));
         };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
@@ -122,22 +124,30 @@ HipblasltContainer::HipblasltContainer()
                   hipblasltGemm(false),
                   false,
                   HIPBLASLT_NARROW,
-                  Notes{NONDETERMINISTIC});
+                  Notes{NONDETERMINISTIC},
+                  false,
+                  true);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_DETERMINISTIC_ID,
                   hipblasltGemm(true),
                   false,
                   HIPBLASLT_NARROW,
-                  Notes{});
+                  Notes{},
+                  false,
+                  true);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID,
                   hipblasltGemm(false),
                   true,
                   HIPBLASLT_NARROW,
-                  Notes{TF32, NONDETERMINISTIC});
+                  Notes{TF32, NONDETERMINISTIC},
+                  false,
+                  true);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_DETERMINISTIC_ID,
                   hipblasltGemm(true),
                   true,
                   HIPBLASLT_NARROW,
-                  Notes{TF32});
+                  Notes{TF32},
+                  false,
+                  true);
     addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_RPR_ENGINE_ID,
                   hipblasltGemm(false),
                   false,
