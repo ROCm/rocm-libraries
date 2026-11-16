@@ -10,6 +10,7 @@ querying a GPU or compiler.
 from ..dtypes import normalize_dtype
 from .target import (  # noqa: F401
     ArchTarget,
+    GemmCapabilities,
     LayoutMap,
     MemoryCapabilities,
     MmaCatalog,
@@ -39,6 +40,7 @@ from .target import (  # noqa: F401
 
 __all__ = [
     "ArchTarget",
+    "GemmCapabilities",
     "LayoutMap",
     "MemoryCapabilities",
     "MmaCatalog",

@@ -18,6 +18,10 @@
 #include "handle.h"
 #include "utility.hpp"
 
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+
+#include <optional>
+
 using namespace rocRoller;
 
 std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolutionIndex)
@@ -34,6 +38,10 @@ std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolution
 struct RocRollerHandle
 {
     SolutionCache cache;
+
+    // Looked up on the first block-scaled problem, so other workloads never load the
+    // rocRoller architecture library for it.
+    std::optional<bool> hasBlockScaling;
 };
 
 /**
@@ -336,6 +344,37 @@ rocblaslt_status
 }
 
 /**
+ * Whether the handle's device has the block scaling that kernelType asks for. Without it
+ * every candidate kernel fails to generate, each after seconds of work.
+ */
+static bool supportsBlockScaling(rocblaslt_handle handle, const KernelType& kernelType)
+{
+    if(!isBlockScaling(kernelType.scaleTypeA.format)
+       && !isBlockScaling(kernelType.scaleTypeB.format))
+        return true;
+
+    auto& hasBlockScaling
+        = static_cast<RocRollerHandle*>(handle->rocroller_handle)->hasBlockScaling;
+    if(!hasBlockScaling)
+    {
+        hasBlockScaling = false;
+        try
+        {
+            auto target     = GPUArchitectureTarget::fromString(handle->properties.gcnArchName,
+                                                            handle->properties.asicRevision);
+            hasBlockScaling = GPUArchitectureLibrary::getInstance()->HasCapability(
+                target, GPUCapability::HasBlockScaling32);
+        }
+        catch(const std::exception& e)
+        {
+            // fromString throws on an architecture rocRoller does not know, such as gfx1100.
+            log_info(__func__, e.what());
+        }
+    }
+    return *hasBlockScaling;
+}
+
+/**
  * @brief Find the best rocRoller kernels for a given problem
  *
  * This mimics the functionality of getBestSolutions in tensile_host.cpp
@@ -398,8 +437,13 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    auto solutionIndexParameters
-        = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);
+    std::vector<SolutionIndexParameters> solutionIndexParameters;
+    if(supportsBlockScaling(handle, kernelType))
+        solutionIndexParameters
+            = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);
+    else
+        log_info(
+            __func__, "no block-scaled rocRoller kernels for ", handle->properties.gcnArchName);
 
     int i = 0;
     for(auto const& solutionIndexParameter : solutionIndexParameters)
