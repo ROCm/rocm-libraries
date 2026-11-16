@@ -1051,7 +1051,9 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                 # argument; scale and zero-point pointers come per group.
                 assert kernel["ProblemType"]["ScaleBlockSizesA"] == [32]
                 assert ".name:            groupSize" not in src
-                assert "v_wmma_f32_16x16x16" in src
+                # Decode tiles are dot2 GEMVs (WaveSplitK), the others WMMA.
+                assert ("v_dot2_f32_bf16" in src) == bool(kernel["WaveSplitK"])
+                assert ("v_wmma_f32_16x16x16" in src) != bool(kernel["WaveSplitK"])
                 assert "G2LScaleZeroA" in src
                 grouped.add(kernel["BaseName"])
                 continue
@@ -1073,7 +1075,7 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                     assert "0xd480e408" in src  # {-(64 + 8) : -(1024 + 8)}
             seen.add(kernel["BaseName"])
     assert len(seen) == 20
-    assert len(grouped) == 3
+    assert len(grouped) == 5
 
 
 @pytest.mark.parametrize("zeroPoint", [False, True])

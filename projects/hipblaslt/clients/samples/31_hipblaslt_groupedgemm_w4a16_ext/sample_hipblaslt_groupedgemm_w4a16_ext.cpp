@@ -301,6 +301,10 @@ int main(int argc, char** argv)
     fails += runCase(handle, 2048, 512, 1, std::vector<int32_t>(8, 1), iters);
     // More groups than the 16 synchronizer slots that grouped split-K kernels need.
     fails += runCase(handle, 1024, 2048, 1, std::vector<int32_t>(20, 1), iters);
+    // Up to 2 tokens per expert, with empty groups.
+    fails += runCase(handle, 1024, 2048, 2, {2, 0, 1, 2, 2, 0, 1, 2}, iters);
+    // A token count whose nearest tile is split-K, with more groups than its 16 slots.
+    fails += runCase(handle, 1024, 2048, 1, std::vector<int32_t>(60, 1), iters);
     // Uneven groups below the host bound, including empty ones.
     fails += runCase(handle, 1024, 2048, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);
     fails += runCase(handle, 2048, 512, 32, {3, 0, 17, 1, 0, 32, 8, 5}, 0);
