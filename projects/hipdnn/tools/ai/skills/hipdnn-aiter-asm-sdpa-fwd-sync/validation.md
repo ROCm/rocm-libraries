@@ -12,7 +12,7 @@ Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (
 
 - Every update: the `TestAsmKpack*`, `TestAsmKernelPath`, `TestSdpaModuleCache`, `TestSdpaKernargRanges` and `TestAsmSdpaEngine` suites.
 - Forward modules: the `TestSdpaFwd*` suites.
-- Backward modules: the `TestSdpaBwd*` suites, among them `TestSdpaBwdOdoKernelArgs`, `TestSdpaBwdDqdkdvKernelArgs` and `TestSdpaBwdPostKernelArgs` (argument layout), `TestSdpaBwdRegistryLookup` (registry lookups per arch), `TestSdpaBwdPostStage`, `TestSdpaBwdPsskOffStrides`, `TestSdpaBwdPaddedHeadDims`, `TestSdpaBwdPlanGridMath` and `TestSdpaBwdPlanBuilder`.
+- Backward modules: the `TestSdpaBwd*` suites, among them `TestSdpaBwdOdoKernelArgs`, `TestSdpaBwdDqdkdvKernelArgs` and `TestSdpaBwdPostKernelArgs` (argument layout), `TestSdpaBwdArgsBuilder` (argument values per stage, arch and accumulator), `TestSdpaBwdRegistryLookup` (registry lookups per arch), `TestSdpaBwdPostStage`, `TestSdpaBwdPsskOffStrides`, `TestSdpaBwdPaddedHeadDims`, `TestSdpaBwdPlanGridMath` and `TestSdpaBwdPlanBuilder`.
 
 `TestAsmKpackLoading` needs no GPU: it opens the built archive of every arch in `ASM_SDPA_GPU_ARCHS`, so it checks packing for all of them on any machine. `TestSdpaFwdPlanBuilder.IsApplicableAvailableKernels`, the backward builder tests that need a device, and the other device tests check only the device's own arch, or skip. Check the GPU with `rocminfo` before saying a machine has no AMD GPU.
 
