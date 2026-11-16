@@ -53,11 +53,22 @@ namespace rocalution
         virtual void Print(void) const;
 
         /** \brief Set the minimum and maximum eigenvalues of the operator
-      * \details
-      * ReBuildNumeric() keeps the eigenvalues. When new values of the operator change
-      * them, call Set() again; this needs no Build(). Clear() and a Build() of a built
-      * solver drop them, so call Set() again after these.
-      */
+        * \details The bounds are those of the preconditioned operator if a preconditioner
+        * is set, and can be given in either order. For real bounds, which includes complex
+        * values with an imaginary part of exactly 0, if the upper bound is positive, a lower
+        * bound that is not positive, such as the lower bound of LocalMatrix::Gershgorin(), is
+        * replaced by the upper bound / 30. This assumes that the operator is positive
+        * definite. For a negative definite operator, an upper bound of 0 with a negative lower
+        * bound is replaced by the lower bound / 30. Bounds with a nonzero imaginary part are
+        * used as they are. The program is terminated if a bound is not finite or if the
+        * segment between the bounds then still contains 0. The number of iterations grows
+        * with the ratio of the bounds, and the iteration can diverge if the spectrum extends
+        * beyond the bound that is farther from 0.
+        *
+        * ReBuildNumeric() keeps the eigenvalues. When new values of the operator change
+        * them, call Set() again; this needs no Build(). Clear() and a Build() of a built
+        * solver drop them, so call Set() again after these.
+        */
         ROCALUTION_EXPORT
         void Set(ValueType lambda_min, ValueType lambda_max);
 
