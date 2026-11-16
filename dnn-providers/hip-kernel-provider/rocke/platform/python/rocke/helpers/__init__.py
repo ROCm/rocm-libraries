@@ -330,11 +330,10 @@ from .mx_scale import (
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
     MxElementFormat,
-    MxScaleSplit,
+    add_mx_scaled_dot,
     apply_mx_scale,
     decode_mx_scale_e8m0,
-    exact_mx_scale_split,
-    fma_with_mx_scale_pair,
+    largest_safe_mx_scale_code,
     load_and_decode_mx_scale_byte,
 )
 from .preshuffle import (
@@ -690,11 +689,10 @@ __all__ = [
     "FP8_E4M3_FNUZ",
     "FP8_E4M3_OCP",
     "MxElementFormat",
-    "MxScaleSplit",
+    "add_mx_scaled_dot",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",
-    "exact_mx_scale_split",
-    "fma_with_mx_scale_pair",
+    "largest_safe_mx_scale_code",
     "load_and_decode_mx_scale_byte",
     # preshuffled-B layout
     "PreshuffleBSpec",
