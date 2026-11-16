@@ -77,6 +77,7 @@ enum class Topology
     PLAIN, ///< conv -> y
     VARIANT3, ///< conv -> mul(y, scale) -> add(bias) -> relu -> out, as the Variant3 bundles
     VARIANT2, ///< conv -> add(bias) -> relu -> out, as develop's Variant2 bundles
+    TWO_BRANCHES, ///< conv -> y; mul(y, scale) -> one output; add(y, bias) -> another output
 };
 
 enum class ScaleSource
@@ -92,15 +93,25 @@ struct Spec
     Topology topology = Topology::PLAIN;
     ScaleSource scaleSource = ScaleSource::BAKED;
     double bakedValue = 0.5;
+    std::string mulLabel = "mul_out"; ///< the name of the multiply's output of TWO_BRANCHES
+    std::string addLabel = "add_out"; ///< the name of the add's output of TWO_BRANCHES
     std::string convCompute = "float";
     std::string intermediateType = "float"; ///< the type of every virtual tensor
     std::string pointwiseCompute = "float"; ///< the compute type of every pointwise node
     bool inputBlobs = false;
     std::string inputType; ///< the type of x and w; empty: the graph's own
 
-    int64_t outUid() const
+    std::vector<int64_t> outputUids() const
     {
-        return topology == Topology::PLAIN ? Y_UID : OUT_UID;
+        switch(topology)
+        {
+        case Topology::PLAIN:
+            return {Y_UID};
+        case Topology::TWO_BRANCHES:
+            return {MUL_OUT_UID, ADD_OUT_UID};
+        default:
+            return {OUT_UID};
+        }
     }
 };
 
@@ -149,6 +160,7 @@ std::string graphJson(const Spec& spec)
     const std::string yStrides = "[128, 16, 4, 1]";
     const bool plain = spec.topology == Topology::PLAIN;
     const bool topology3 = spec.topology == Topology::VARIANT3;
+    const bool twoBranches = spec.topology == Topology::TWO_BRANCHES;
 
     std::ostringstream convNode;
     convNode << R"({"compute_data_type": ")" << spec.convCompute
@@ -163,23 +175,23 @@ std::string graphJson(const Spec& spec)
         tensorJson(W_UID, "w", "[8, 4, 3, 3]", "[36, 9, 3, 1]", inputDtype, false),
         tensorJson(Y_UID, "y", yDims, yStrides, plain ? dtype : spec.intermediateType, !plain),
     };
+    std::string scaleExtra;
+    if(spec.scaleSource == ScaleSource::BAKED)
+    {
+        std::string valueType = "BFloat16Value";
+        if(spec.isFloat)
+        {
+            valueType = "Float32Value";
+        }
+        else if(spec.isHalf)
+        {
+            valueType = "Float16Value";
+        }
+        scaleExtra = std::string(R"(, "value": )") + std::to_string(spec.bakedValue)
+                     + R"(, "value_type": ")" + valueType + "\"";
+    }
     if(topology3)
     {
-        std::string scaleExtra;
-        if(spec.scaleSource == ScaleSource::BAKED)
-        {
-            std::string valueType = "BFloat16Value";
-            if(spec.isFloat)
-            {
-                valueType = "Float32Value";
-            }
-            else if(spec.isHalf)
-            {
-                valueType = "Float16Value";
-            }
-            scaleExtra = std::string(R"(, "value": )") + std::to_string(spec.bakedValue)
-                         + R"(, "value_type": ")" + valueType + "\"";
-        }
         nodes.push_back(
             pointwiseJson("mul", "mul", Y_UID, SCALE_UID, MUL_OUT_UID, spec.pointwiseCompute));
         nodes.push_back(
@@ -191,6 +203,21 @@ std::string graphJson(const Spec& spec)
         tensors.push_back(
             tensorJson(MUL_OUT_UID, "mul_out", yDims, yStrides, spec.intermediateType, true));
     }
+    else if(twoBranches)
+    {
+        nodes.push_back(
+            pointwiseJson("mul", "mul", Y_UID, SCALE_UID, MUL_OUT_UID, spec.pointwiseCompute));
+        nodes.push_back(
+            pointwiseJson("add", "add", Y_UID, BIAS_UID, ADD_OUT_UID, spec.pointwiseCompute));
+        tensors.push_back(tensorJson(
+            SCALE_UID, "scale", "[1, 1, 1, 1]", "[1, 1, 1, 1]", dtype, false, scaleExtra));
+        tensors.push_back(
+            tensorJson(MUL_OUT_UID, spec.mulLabel.c_str(), yDims, yStrides, dtype, false));
+        tensors.push_back(
+            tensorJson(BIAS_UID, "bias", "[1, 8, 1, 1]", "[8, 1, 1, 1]", dtype, false));
+        tensors.push_back(
+            tensorJson(ADD_OUT_UID, spec.addLabel.c_str(), yDims, yStrides, dtype, false));
+    }
     else if(!plain)
     {
         nodes.push_back(
@@ -198,7 +225,7 @@ std::string graphJson(const Spec& spec)
         nodes.push_back(
             pointwiseJson("relu", "relu_fwd", ADD_OUT_UID, std::nullopt, OUT_UID, "float"));
     }
-    if(!plain)
+    if(!plain && !twoBranches)
     {
         tensors.push_back(tensorJson(OUT_UID, "out", yDims, yStrides, dtype, false));
         tensors.push_back(
@@ -257,6 +284,20 @@ struct Graded
     std::optional<AbsRelTolerance> reportedTolerance() const
     {
         const std::regex pattern(R"(Tolerance: atol=([^ ]+) rtol=([^\s]+))");
+        std::smatch match;
+        if(!std::regex_search(messages, match, pattern))
+        {
+            return std::nullopt;
+        }
+        return AbsRelTolerance{std::stod(match[1].str()), std::stod(match[2].str())};
+    }
+
+    /// The same, of the output with this uid, when the comparison reported several outputs.
+    std::optional<AbsRelTolerance> reportedToleranceOf(int64_t uid) const
+    {
+        const std::regex pattern(
+            R"(Tensor: [^\n]*\(UID )" + std::to_string(uid)
+            + R"(, output\)\n[^\n]*\n  Tolerance: atol=([^ ]+) rtol=([^\s]+))");
         std::smatch match;
         if(!std::regex_search(messages, match, pattern))
         {
@@ -344,18 +385,25 @@ protected:
         using ::testing::_;
         const bool isHalf = spec.isHalf;
         const bool isFloat = spec.isFloat;
-        const int64_t outUid = spec.outUid();
+        const auto outUids = spec.outputUids();
         testing_support::engineWrites(
             _mocks.engineRunner,
             [=](VariantPack& pack, float value) {
-                writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, value);
+                for(const int64_t outUid : outUids)
+                {
+                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, value);
+                }
             },
             engineValue);
         for(auto* reference : {&_mocks.cpuReference, &_mocks.gpuReference})
         {
             ON_CALL(*reference, execute(_, _, _))
                 .WillByDefault([=](void*, size_t, const VariantPack& pack) {
-                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, referenceValue);
+                    for(const int64_t outUid : outUids)
+                    {
+                        writeConstant(
+                            pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, referenceValue);
+                    }
                 });
         }
 
@@ -578,10 +626,11 @@ TEST_F(TestConvFwdToleranceGradingFixture, ConvolutionComputingInHalfKeepsTheDef
     Spec spec;
     spec.convCompute = "half";
     const auto bundle = loadBundle(spec);
-    const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
-        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
+    const auto fixedDefault = tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
-                   AbsRelTolerance{fixedDefault, fixedDefault});
+                   AbsRelTolerance{static_cast<double>(fixedDefault.atol),
+                                   static_cast<double>(fixedDefault.rtol)});
 }
 
 // The Variant3 graph with every intermediate stored in the output type: the convolution's
@@ -662,10 +711,11 @@ TEST_F(TestConvFwdToleranceGradingFixture, IntermediateOfAnUnknownTypeKeepsTheDe
     spec.topology = Topology::VARIANT3;
     spec.intermediateType = "int32";
     const auto bundle = loadBundle(spec);
-    const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
-        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
+    const auto fixedDefault = tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
-                   AbsRelTolerance{fixedDefault, fixedDefault});
+                   AbsRelTolerance{static_cast<double>(fixedDefault.atol),
+                                   static_cast<double>(fixedDefault.rtol)});
 }
 
 // ── Where the input statistics come from ────────────────────────────────────
@@ -784,6 +834,61 @@ TEST_F(TestConvFwdToleranceGradingFixture, BiasAddAndReluDoNotChangeTheTolerance
         recipes.set(BIAS_UID, FillRecipe::fixed(0.001f));
     });
     expectReported(graded, dynamicTolerance(true, defaultFillScale()));
+}
+
+// ── The tolerance lookup names an output by its label ───────────────────────
+
+namespace
+{
+
+void expectReportedOf(const Graded& graded, int64_t uid, const AbsRelTolerance& expected)
+{
+    SCOPED_TRACE(::testing::Message() << "output uid " << uid);
+    const auto reported = graded.reportedToleranceOf(uid);
+    ASSERT_TRUE(reported.has_value()) << graded.messages;
+    EXPECT_NEAR(reported->atol, expected.atol, 1e-4 * expected.atol);
+    EXPECT_NEAR(reported->rtol, expected.rtol, 1e-4 * expected.rtol);
+}
+
+} // namespace
+
+// conv -> y, then mul(y, 0.5) -> one output and add(y, bias) -> the other: the two outputs are
+// 0.5 y and y + bias. The harness gets a label from the comparison and maps it back to the
+// output's uid, so each output is graded with the scale of its own branch, 0.5 and 1.
+TEST_F(TestConvFwdToleranceGradingFixture, OutputsWithDistinctLabelsAreGradedWithTheirOwnScale)
+{
+    Spec spec;
+    spec.topology = Topology::TWO_BRANCHES;
+    spec.bakedValue = 0.5;
+    const auto graded = grade(spec, K_FAR_OFF, K_REFERENCE);
+    ASSERT_TRUE(graded.failed) << graded.messages;
+    const auto scaled = dynamicTolerance(true, defaultFillScale(0.5));
+    const auto unscaled = dynamicTolerance(true, defaultFillScale(1.0));
+    ASSERT_LT(scaled.atol, unscaled.atol) << "the two outputs must not share a tolerance";
+    expectReportedOf(graded, MUL_OUT_UID, scaled);
+    expectReportedOf(graded, ADD_OUT_UID, unscaled);
+}
+
+// Two outputs that carry one label cannot be told apart by the lookup, which has the label and
+// no uid: neither is graded with a dynamic tolerance, both keep the per-op default.
+TEST_F(TestConvFwdToleranceGradingFixture, OutputsSharingALabelKeepThePerOpDefault)
+{
+    Spec spec;
+    spec.topology = Topology::TWO_BRANCHES;
+    spec.bakedValue = 0.5;
+    spec.mulLabel = "shared_out";
+    spec.addLabel = "shared_out";
+    const auto bundle = loadBundle(spec);
+    const auto fixedDefault = tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    const AbsRelTolerance expected{static_cast<double>(fixedDefault.atol),
+                                   static_cast<double>(fixedDefault.rtol)};
+    ASSERT_GT(expected.atol, dynamicTolerance(true, defaultFillScale(1.0)).atol)
+        << "the default must differ from the dynamic tolerance for the test to tell them apart";
+    const auto graded = grade(spec, K_FAR_OFF, K_REFERENCE);
+    ASSERT_TRUE(graded.failed) << graded.messages;
+    expectReportedOf(graded, MUL_OUT_UID, expected);
+    expectReportedOf(graded, ADD_OUT_UID, expected);
 }
 
 // ── A TOML override replaces the dynamic tolerance ──────────────────────────

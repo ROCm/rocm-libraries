@@ -200,7 +200,10 @@ std::optional<tol::ConvErrorScale> errorScale(const GraphSpec& spec)
         return tol::hostMoments(*it->second, DataType::HALF);
     };
     flatbuffers::FlatBufferBuilder b;
-    return tol::convErrorScale(buildGraph(b, spec), lookup);
+    // The graded output: the activation's result when there is one, else the convolution's.
+    const int64_t output
+        = spec.fusedReluBackward ? OUT_UID : (spec.direction == Direction::DGRAD ? X_UID : W_UID);
+    return tol::convErrorScale(buildGraph(b, spec), lookup, output);
 }
 
 std::optional<sdk::ConvDgradErrorScale> dgradScale(const GraphSpec& spec)

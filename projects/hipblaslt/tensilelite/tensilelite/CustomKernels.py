@@ -577,10 +577,12 @@ def getCustomKernelConfig(
     # runtime picks which scale modes it serves from this field.
     problemType = kernelConfig.get("ProblemType", {})
     if (problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0)) and kernelConfig.get(
-            "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"):
+            "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
+                                     "HostPreSwizzle128x4"):
         raise RuntimeError(
             f"Custom kernel {kernelName} has MX scales, so its config must set 'MXScaleFormat' to "
-            "the scale layout it reads: NoSwizzle, HostPreSwizzle or InMemorySwizzle")
+            "the scale layout it reads: NoSwizzle, HostPreSwizzle, InMemorySwizzle or "
+            "HostPreSwizzle128x4")
 
     kernelIsp = kernelConfig["InternalSupportParams"]
     # Missing metadata describes a prebuilt legacy payload, even when the

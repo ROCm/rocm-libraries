@@ -27,6 +27,18 @@ public:
         ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::pointwiseCompute(
             operation, output, std::forward<Args>(args)...);
     }
+
+    /// pointwiseCompute() with the operation carried out in ComputeType (see
+    /// ReferencePointwiseBase::pointwiseComputeAs()).
+    template <typename ComputeType, typename... Args>
+    static void pointwiseComputeAs(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                   hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                   Args&&... args)
+    {
+        ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::
+            template pointwiseComputeAs<ComputeType>(
+                operation, output, std::forward<Args>(args)...);
+    }
 };
 
 // Generic N-ary type alias for CPU operations
