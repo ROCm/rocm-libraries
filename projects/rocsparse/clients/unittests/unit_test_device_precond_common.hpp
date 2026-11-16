@@ -360,10 +360,10 @@ namespace precond_ut
     // row holds `fat` entries and every other row `band` + 1 entries
     // (r - band .. r). The longest row, `fat`, selects between the hash kernels
     // (fat <= 512) and the binary-search kernels (fat > 512). With band >= 2 the
-    // IC(0) / ILDLT(0) inner sums of the last row have several terms.
-    // `imag` adds an imaginary part to the off-diagonal entries of complex types.
+    // IC(0) / ILDLT(0) inner sums of the last row have several terms. The off-diagonal
+    // entries of complex types have an imaginary part.
     template <typename T>
-    csr_matrix<T> make_fat_row_matrix(int32_t fat, bool imag = true, int32_t band = 1)
+    csr_matrix<T> make_fat_row_matrix(int32_t fat, int32_t band = 1)
     {
         require_safe_row_length(fat);
         csr_matrix<T> a;
@@ -378,9 +378,8 @@ namespace precond_ut
                 if(c == r)
                     a.val.push_back(make_value<T>(4.0));
                 else
-                    a.val.push_back(
-                        make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
-                                      (imag && is_cplx<T>) ? 0.01 * ((r - c) % 3) : 0.0));
+                    a.val.push_back(make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
+                                                  is_cplx<T> ? 0.01 * ((r - c) % 3) : 0.0));
             }
             a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
         }
@@ -390,10 +389,10 @@ namespace precond_ut
     // Lower band matrix of order n: row r holds the columns max(0, r - w) .. r, so the
     // longest row has min(n, w + 1) entries and every IC(0) / ILDLT(0) inner sum
     // runs over up to w terms. The diagonal grows with w so that the symmetric
-    // matrix (the lower triangle mirrored) stays positive definite. See make_fat_row_matrix
-    // for `imag`.
+    // matrix (the lower triangle mirrored) stays positive definite. The off-diagonal
+    // entries of complex types have an imaginary part.
     template <typename T>
-    csr_matrix<T> make_lower_band_matrix(int32_t n, int32_t w, bool imag = true)
+    csr_matrix<T> make_lower_band_matrix(int32_t n, int32_t w)
     {
         require_safe_row_length(std::min(n, w + 1));
         csr_matrix<T> a;
@@ -408,9 +407,8 @@ namespace precond_ut
                     a.val.push_back(
                         make_value<T>(1.0 + 0.15 * std::min(w, n - 1) + 0.25 * (r % 3)));
                 else
-                    a.val.push_back(
-                        make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
-                                      (imag && is_cplx<T>) ? 0.01 * ((r - c) % 3) : 0.0));
+                    a.val.push_back(make_value<T>(-0.05 * (1.0 + 0.1 * ((r + 2 * c) % 3)),
+                                                  is_cplx<T> ? 0.01 * ((r - c) % 3) : 0.0));
             }
             a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
         }

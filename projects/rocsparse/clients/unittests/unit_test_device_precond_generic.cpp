@@ -94,27 +94,24 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
     // the sizes) and band 3 so that the sums have three terms.
     for(const int32_t fat : {8, 40, 100, 300, 511})
     {
-        check_csr_matrix<Kind::ic, double>(
-            handle, make_fat_row_matrix<double>(fat, false, 3), opt, "fat " + std::to_string(fat));
-        check_csr_matrix<Kind::ic, float>(
-            handle, make_fat_row_matrix<float>(fat, false, 3), opt, "fat " + std::to_string(fat));
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            check_csr_matrix<Kind::ic, T>(
+                handle, make_fat_row_matrix<T>(fat, 3), opt, "fat " + std::to_string(fat));
+        });
     }
     // Band and fat-row matrices (non-zero inner sums) in the other index base.
     const auto one = rocsparse_index_base_one;
     check_csr_matrix<Kind::ic, double>(
-        handle, make_lower_band_matrix<double>(60, 5, false), opt, "band", one);
+        handle, make_lower_band_matrix<double>(60, 5), opt, "band", one);
     check_csr_matrix<Kind::ic, double>(
-        handle, make_fat_row_matrix<double>(520, false, 3), opt, "fat 520", one);
+        handle, make_fat_row_matrix<double>(520, 3), opt, "fat 520", one);
     check_csr_matrix<Kind::ilu, double>(
         handle, with_upper_triangle(make_lower_band_matrix<double>(60, 5)), opt, "band", one);
     check_csr_matrix<Kind::ilu, double>(
-        handle,
-        with_upper_triangle(make_fat_row_matrix<double>(520, true, 3)),
-        opt,
-        "fat 520",
-        one);
+        handle, with_upper_triangle(make_fat_row_matrix<double>(520, 3)), opt, "fat 520", one);
     check_csr_matrix<Kind::ildlt, double>(
-        handle, make_fat_row_matrix<double>(40, true, 3), opt, "fat 40", one);
+        handle, make_fat_row_matrix<double>(40, 3), opt, "fat 40", one);
 }
 
 // IC(0) of a full Hermitian matrix is its exact Cholesky factor (issue #15943), so a
@@ -565,10 +562,8 @@ TEST_F(PrecondGeneric, spildlt0_csr_hash_row_lengths)
     {
         check_csr_matrix<Kind::ildlt, double>(
             handle, make_fat_row_matrix<double>(fat), opt, "fat=" + std::to_string(fat));
-        check_csr_matrix<Kind::ildlt, double>(handle,
-                                              make_fat_row_matrix<double>(fat, true, 3),
-                                              opt,
-                                              "band 3 fat=" + std::to_string(fat));
+        check_csr_matrix<Kind::ildlt, double>(
+            handle, make_fat_row_matrix<double>(fat, 3), opt, "band 3 fat=" + std::to_string(fat));
     }
 }
 
@@ -833,14 +828,14 @@ namespace
             handle, shape(make_lower_band_matrix<T>(12, 3)), opt, what + " short rows");
         // A row of 100 entries: hash kernel with a table of 128.
         check_csr_matrix<K, T, I, J>(
-            handle, shape(make_fat_row_matrix<T>(100, true, 3)), opt, what + " fat row 100");
+            handle, shape(make_fat_row_matrix<T>(100, 3)), opt, what + " fat row 100");
         // A row of 520 entries: binary-search kernel.
         // Not for spildlt0 i32 rows / i64 cols: find_csrildlt0_kernel_binsearch_launch
         // dispatches <int32_t, int32_t> whenever row_type is i32 without looking at
         // col_type, so 64-bit column indices are read as 32-bit (AISPARSE-920).
         if constexpr(!(K == Kind::ildlt && sizeof(I) == 4 && sizeof(J) == 8))
             check_csr_matrix<K, T, I, J>(
-                handle, shape(make_fat_row_matrix<T>(520, true, 3)), opt, what + " fat row 520");
+                handle, shape(make_fat_row_matrix<T>(520, 3)), opt, what + " fat row 520");
     }
 
     template <Kind K, typename T>
