@@ -230,8 +230,8 @@ __device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, Inde
     return v;
 }
 
-/// The flat epilogue cast, N (4 or 8) elements a thread: 16-byte loads of the fp32 result and
-/// one store of the N outputs (16 bytes for 16-bit outputs at N 8). Index is int where every
+/// The flat epilogue cast, N elements a thread: 16-byte loads of the fp32 result and one store
+/// of the N outputs. Index is int where every
 /// count and offset fits 32 bits. The channel advances element by element within the N, and by
 /// the grid stride's quotient and remainder between them, worked out once per thread.
 template <typename OutputType, typename Index, int N>
@@ -314,19 +314,9 @@ __device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
         const bool narrow = args.total <= NARROW && a.epilogue.flatChannelStride <= NARROW
                             && a.epilogue.flatChannels <= NARROW
                             && static_cast<long long>(gridDim.x) * blockDim.x <= NARROW / 8;
-        // Eight a thread for 16-bit outputs (a 16-byte store), four for fp32.
-        const bool eight = sizeof(OutputType) == 2 && args.total % 8 == 0
-                           && reinterpret_cast<unsigned long long>(args.dst) % 16 == 0;
-        if(eight)
-        {
-            narrow ? flatEpilogueRuns<OutputType, int, 8>(a)
-                   : flatEpilogueRuns<OutputType, long long, 8>(a);
-        }
-        else
-        {
-            narrow ? flatEpilogueRuns<OutputType, int, 4>(a)
-                   : flatEpilogueRuns<OutputType, long long, 4>(a);
-        }
+        // Four a thread: eight would inline the run-time menu eight times and spill.
+        narrow ? flatEpilogueRuns<OutputType, int, 4>(a)
+               : flatEpilogueRuns<OutputType, long long, 4>(a);
         return;
     }
     if(a.epilogue.channelAxis < 0)
