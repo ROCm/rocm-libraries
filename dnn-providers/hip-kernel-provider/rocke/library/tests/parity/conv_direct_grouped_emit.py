@@ -2474,15 +2474,62 @@ def _wgrad_auto_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
-# DwWgradFoldSpec block shapes, indices 364..374: the narrow, deep fold the
+# Tiled wgrad ping-pong on one wave group (q_groups 1: the two halves of the
+# block's waves share one row stream), indices 364..370: a short last
+# segment, packed images under a deeper prefetch, blocks walking several
+# segments, an odd wave count, a row_unroll off the extra row buffer and a
+# prefetch of -2 (zero row buffers) that both engines must reject, and the
+# auto launch (rows_per_seg 0) on one row stream.
+# ---------------------------------------------------------------------------
+_WGRAD_PP_CFG_BASE = 364
+
+
+def _wgrad_pp_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_PP_CFG_BASE + idx``, or None."""
+    ts = DirectWgradTiledSpec
+    table = {
+        0: ts(problem=_wp(H=13), pingpong=True, rows_per_seg=12),
+        1: ts(
+            problem=_wp(N=5, H=12, W=8, dtype="fp16"),
+            pingpong=True,
+            waves_k=2,
+            waves_c=4,
+            wave_c16=1,
+            prefetch=4,
+            row_unroll=6,
+            rows_per_seg=6,
+            unfold_n=4,
+        ),
+        2: ts(
+            problem=_wp(H=20),
+            pingpong=True,
+            waves_k=2,
+            wave_c16=1,
+            row_unroll=4,
+            rows_per_seg=8,
+            target_blocks=2,
+        ),
+        3: ts(problem=_wp(), pingpong=True, waves_k=1, waves_c=1, rows_per_seg=12),
+        4: ts(problem=_wp(), pingpong=True, row_unroll=3, rows_per_seg=12),
+        5: ts(problem=_wp(), pingpong=True, prefetch=-2, rows_per_seg=12),
+        6: ts(problem=_wp(H=13), pingpong=True, rows_per_seg=0, target_blocks=64),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad_tiled", sel, "gfx950")
+
+
+# ---------------------------------------------------------------------------
+# DwWgradFoldSpec block shapes, indices 371..381: the narrow, deep fold the
 # gfx1250 grouped WMMA wgrad runs with (cols 32, slices 32, unroll 8) on
 # gfx1250 and gfx950, wide / shallow and narrow shapes, the defaults spelled
 # out (the original kernel name), a one-load unroll; then no unroll, no
 # slices, no cols, negative cols and a 2048-thread block (slices * cols past
-# 1024), which both engines must reject. Follows the 5 auto-launch tiled
-# wgrad configs.
+# 1024), which both engines must reject. Follows the 7 tiled wgrad
+# ping-pong configs.
 # ---------------------------------------------------------------------------
-_FOLD_KNOB_CFG_BASE = 364
+_FOLD_KNOB_CFG_BASE = 371
 
 
 def _fold_knob_spec(idx: int):
@@ -2514,6 +2561,11 @@ def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
     if idx >= _FOLD_KNOB_CFG_BASE:
         sel = _fold_knob_spec(idx - _FOLD_KNOB_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _WGRAD_PP_CFG_BASE:
+        sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
         if sel is not None:
             return sel
         raise SystemExit(f"unknown config index {idx}")

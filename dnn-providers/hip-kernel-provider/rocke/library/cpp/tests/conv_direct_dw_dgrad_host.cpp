@@ -87,7 +87,7 @@
 static_assert(sizeof(rocke_direct_fwd_wmma_spec_t) == 152 && ROCKE_ABI_VERSION >= 8,
               "rocke_direct_fwd_wmma_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
-static_assert(sizeof(rocke_dw_wgrad_fold_spec_t) == 32 && ROCKE_ABI_VERSION >= 20,
+static_assert(sizeof(rocke_dw_wgrad_fold_spec_t) == 32 && ROCKE_ABI_VERSION >= 21,
               "rocke_dw_wgrad_fold_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif

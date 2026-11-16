@@ -1046,6 +1046,19 @@ WGRAD_TILED_UNFOLD = (1, 4)
 # Eight-wave blocks of two ping-ponged wave groups, on
 # the plain two-row prefetch of four-wave 32x32 tiles.
 WGRAD_TILED_PINGPONG = ((2, 2, 2, 2), (2, 0), (30,), (256,), (1,))
+# Eight-wave blocks ping-ponged in halves on one row stream (q_groups 1),
+# one block per CU: wave tile, (prefetch, row_unroll), rows_per_seg, unfold_n.
+# Only the points that win a dense 3x3 layer.
+WGRAD_TILED_PP_HALVES_BLOCKS = 256
+WGRAD_TILED_PP_HALVES = (
+    ((2, 2, 4, 2), (2, 4), 32, 1),
+    ((2, 2, 4, 2), (2, 4), 64, 1),
+    ((2, 2, 4, 2), (2, 0), 48, 1),
+    ((2, 2, 4, 2), (2, 0), 48, 4),
+    ((2, 2, 4, 2), (2, 0), 96, 1),
+    ((2, 2, 4, 2), (2, 0), 96, 4),
+    ((2, 2, 2, 4), (2, 4), 64, 1),
+)
 # Auto launch (rows_per_seg 0: whole strips, one-round grid) at
 # target_blocks 512 (two blocks per CU of a 256-CU part): wave tile,
 # (prefetch, row_unroll), unfold_n. Only the points that win a dense 3x3 row.
@@ -2398,6 +2411,19 @@ def _knob_grid(
                 target_blocks=tb,
                 unfold_n=un,
                 q_groups=2,
+                pingpong=True,
+            )
+        for (wk16, wc16, wk, wc), (pf, ru), rps, un in WGRAD_TILED_PP_HALVES:
+            yield dict(
+                wave_k16=wk16,
+                wave_c16=wc16,
+                waves_k=wk,
+                waves_c=wc,
+                prefetch=pf,
+                row_unroll=ru,
+                rows_per_seg=rps,
+                target_blocks=WGRAD_TILED_PP_HALVES_BLOCKS,
+                unfold_n=un,
                 pingpong=True,
             )
         for (wk16, wc16, wk, wc), (pf, ru), un in WGRAD_TILED_AUTO:
