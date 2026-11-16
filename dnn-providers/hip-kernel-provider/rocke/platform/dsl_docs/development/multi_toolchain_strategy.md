@@ -364,8 +364,9 @@ it. A probe that links is then compiled to assembly and assembled for its target
 with the same install's `llvm-mc`: the backend can select an intrinsic for a
 target that lacks the instruction and write it into the object, and only the
 text assembler checks each instruction against the target (`arch_absent`
-otherwise). Every decl key × every wired arch — the committed columns are the count of
-record, not this sentence — ~15 s wall across cores on `llvm22`. The committed artifact supplies a monotonic support floor: the test requires
+otherwise). The sweep covers every declaration key on every wired architecture;
+the committed columns define its recorded coverage. Probes share a bounded worker
+pool. The committed artifact supplies a monotonic support floor: the test requires
 previously working cells and accepted processor names to remain working, with
 compatible flavor, scope, and probe methodology. Retained positives additionally
 require the same effective return/operand types, operand sources and constants,
