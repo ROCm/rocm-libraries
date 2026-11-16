@@ -45,6 +45,10 @@ inline constexpr const char* kSkipList[] = {
     // ---- not reproducible: the result changes from run to run -------------------
     "Image_Effects/SpatterTest.*",
 
+    // ---- backend not implemented yet --------------------------------------------
+    "Image_Filter/PrewittFilterTest.Correctness/HIP_*",
+    "Image_DataExchange/BayerToRgbTest.Correctness/HIP_*",
+
     // ---- known kernel defects ---------------------------------------------------
     "Image_Color/ColorCastTest.Correctness/*",
     "Image_Color/ColorJitterTest.Correctness/HOST_*_PLN1_*_b0_c0_h0_s1",
@@ -80,14 +84,11 @@ inline constexpr const char* kSkipList[] = {
     "Image_Effects/GaussianNoiseTest.Correctness/HOST_I8toI8_*_FullRoi_1x45x13",
     "Image_Effects/GlitchTest.Correctness/HIP_*_PartialRoi_*",
     "Image_Effects/GlitchTest.Correctness/HOST_U8toU8_PLN3_PartialRoi_*",
-    "Image_Effects/GlitchTest.Correctness/HOST_U8toU8_PLN3_FullRoi_1x45x13_*",
     "Image_Effects/GlitchTest.Correctness/HOST_U8toU8_PKD3_PartialRoi_1x45x13_*",
     "Image_Effects/GlitchTest.Correctness/HOST_F32toF32_PLN3_PartialRoi_1x45x13_*",
-    "Image_Effects/GlitchTest.Correctness/HOST_F32toF32_PKD3_FullRoi_1x45x13_Shift",
-    "Image_Effects/GlitchTest.Correctness/HOST_F32toF32_PKD3_FullRoi_2x36x55_Shift",
     "Image_Effects/GlitchTest.Correctness/HOST_*_PKD3_PartialRoi_*_Shift",
     "Image_Effects/GlitchTest.Correctness/HOST_F16toF16_PLN3_PartialRoi_*_Shift",
-    "Image_Effects/GlitchTest.Correctness/HOST_F32toF32_PLN3_*_Shift",
+    "Image_Effects/GlitchTest.Correctness/HOST_F32toF32_PLN3_PartialRoi_*_Shift",
     "Image_Effects/GridDropoutTest.Correctness/*_PartialRoi_*",
     "Image_Effects/JitterTest.Correctness/HIP_*_PartialRoi_*",
     "Image_Effects/NoiseShotTest.Correctness/HIP_U8toU8_PKD3_FullRoi_*_Seed",

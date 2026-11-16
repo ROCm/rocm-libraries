@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "../type_traits.hpp"
 
 template <typename T>
@@ -56,6 +58,9 @@ template <typename DataType>
 __global__ void
     maxReduceKernel(DataType* relativeError, uint32_t elements, uint32_t offset, uint32_t maxElements)
 {
+    static_assert(std::is_same_v<DataType, double>,
+                  "maxDouble reduces in double; the relative-error buffer is always double*");
+
     DataType* localRelativeError = relativeError + (offset * elements * blockIdx.x);
 
     for(int i = elements >> 1; i > 0; i = i >> 1)

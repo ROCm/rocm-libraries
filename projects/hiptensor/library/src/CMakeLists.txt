@@ -97,6 +97,8 @@ endfunction()
 # build time. Source properties are directory-scoped, so call this from the directory that
 # creates the target compiling the sources. Target-wide offload flags (e.g. --offload-compress)
 # are unused without a device pass, hence the warning suppression.
+# A listed source that does define a kernel fails the build: its host object references an
+# undefined __hip_fatbin_<hash>, which the -Wl,--no-undefined link of libhiptensor rejects.
 function(hiptensor_set_host_only_sources)
     set_source_files_properties(${ARGN} PROPERTIES
         COMPILE_OPTIONS "--offload-host-only;-Wno-unused-command-line-argument")
@@ -138,6 +140,15 @@ function(create_hiptensor_shared_library)
         # Relink when the script changes (not tracked as a link input otherwise).
         set_target_properties(hiptensor PROPERTIES
             LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.map")
+        # Reject undefined symbols. Besides catching missing dependencies, this guards the
+        # host-only sources (hiptensor_set_host_only_sources): a source that defines a kernel but
+        # is compiled --offload-host-only references an undefined __hip_fatbin_<hash>, which
+        # would otherwise link silently and fail at run time. (Executables and the Windows DLL
+        # already reject undefined symbols.) Skipped with ASan, whose runtime symbols are left
+        # undefined in shared libraries.
+        if(NOT ADDRESS_SANITIZER_ENABLED)
+            target_link_options(hiptensor PRIVATE "-Wl,--no-undefined")
+        endif()
     endif()
 
     # Add export definitions

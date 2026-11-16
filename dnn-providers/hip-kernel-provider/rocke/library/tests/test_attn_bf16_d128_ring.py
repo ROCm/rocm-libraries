@@ -267,7 +267,7 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, h
 
         from rocke import compile_kernel
         from kernels import build_unified_attention_2d_tiled
-        from kernels.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import _tiled_2d_signature
         from rocke.runtime import KernelLauncher
 
         kernel = build_unified_attention_2d_tiled(spec, arch="gfx942")
@@ -275,9 +275,7 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, h
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
             kernel_name=artifact.kernel_name,
-            signature=_attn_signature(
-                dtype, include_bt_stride=True, include_qq_bias_stride=True
-            ),
+            signature=_tiled_2d_signature("gfx942", dtype),
             cache_key=("d128guard", spec.kernel_name(), dtype, sq, hq, hk),
         )
         out, _ = H._run_rocke(s, data, launcher, spec, warmup=3, attempts=3)

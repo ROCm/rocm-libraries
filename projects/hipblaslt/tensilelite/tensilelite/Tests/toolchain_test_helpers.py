@@ -1,3 +1,5 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """The toolchain pieces the tests share: one ``Assembler`` and one capability map per ISA.
 
 Tests need an ``Assembler`` (what ``Solution`` reads ``rocm_version`` and the
@@ -13,11 +15,12 @@ caches the probe), about 1.5 s for the first use of an ISA.
 Import from tests by bare module name (``from toolchain_test_helpers import ...``).
 That works because ``Tests/`` has no ``__init__.py``, so pytest's default
 ``prepend`` import mode inserts the ``Tests/`` directory into ``sys.path``; it
-does not work under ``--import-mode=importlib`` or outside pytest. (conftest.py
-only appends the tensilelite project root, which is what makes
-``tensilelite.Tests.rocisa_test_state`` importable by package path.) Import it
+does not work under ``--import-mode=importlib`` or outside pytest. Import it
 by this one name everywhere: a second import path would load a second copy of
-the module with its own caches.
+the module with its own caches. The same goes for the other shared test
+modules (``rocisa_test_state``, ``gpu_detection``): never import them as
+``tensilelite.Tests.…``. The tests also run against an installed ``tensilelite``
+wheel, which does not ship ``Tests``.
 """
 
 import copy
@@ -124,9 +127,12 @@ def _read_only_isa_info(info):
 
 def _isa_of(arch):
     from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Types import IsaVersion
 
     if not isinstance(arch, str):
-        return arch  # already an IsaVersion
+        # A plain tuple equals and hashes like the IsaVersion, so without this the
+        # first caller's type would become the type of the shared cache's keys.
+        return IsaVersion(*arch)
     isa = gfxToIsa(arch)
     if isa is None:
         raise ValueError(f"Unrecognized gfx architecture: {arch!r}")
@@ -145,6 +151,44 @@ def shared_isa_info_map(arch):
     """The process-wide, read-only capability map holding only ``arch`` (a gfx
     name or an IsaVersion). Every caller gets the same object."""
     return _shared_isa_info_map(_isa_of(arch))
+
+
+def use_isa(arch, wavefront):
+    """Initialize cached capabilities and select an ISA and wavefront for this test.
+
+    Selection is not cached: another test may have changed the active kernel.
+    The unit fixtures restore the previous kernel state after each test.
+    """
+    import rocisa
+
+    isa = _isa_of(arch)
+    shared_isa_info_map(isa)
+    ri = rocisa.rocIsa.getInstance()
+    ri.setKernel(tuple(isa), wavefront)
+    return ri
+
+
+def _prime_isa_cache(isas, compiler):
+    """Probe every uncached ISA concurrently, in-process, like ``makeIsaInfoMap``.
+
+    ``initMany`` skips ISAs already in the cache and probes the rest on native
+    threads with the GIL released.
+    """
+    import rocisa
+
+    rocisa.rocIsa.getInstance().initMany(isas, compiler, False)
+
+
+@functools.lru_cache(maxsize=1)
+def shared_full_isa_info_map():
+    """One read-only map for SUPPORTED_ISA per process, primed by one ``initMany``.
+
+    Only missing ISAs are probed. xdist workers keep separate process caches.
+    """
+    from tensilelite.Common.Architectures import SUPPORTED_ISA
+
+    _prime_isa_cache(SUPPORTED_ISA, cxx_compiler())
+    return _ReadOnlyDict({isa: shared_isa_info_map(isa)[isa] for isa in SUPPORTED_ISA})
 
 
 def shared_isa_info_map_or_skip(arch, toolchainRequired=True):

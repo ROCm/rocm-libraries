@@ -25,6 +25,9 @@
  *******************************************************************************/
 
 #include <cstring>
+#include <limits>
+#include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -32,6 +35,9 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#ifndef TENSILE_YAML
+#include <Tensile/msgpack/MessagePack.hpp>
+#endif
 
 #include "FallbackTestUtils.hpp"
 
@@ -50,6 +56,34 @@ TEST(CustomKernelTest, DefaultsTripTheUninitializedMetadataGuard)
     EXPECT_EQ(kernel.threads.x, 0u);
     EXPECT_EQ(kernel.macrotile.x, 0u);
 }
+
+#ifndef TENSILE_YAML
+// A kernel's uniformSummationOrder declaration reaches hipBLASLt only through
+// this mapping; lost, every declaring kernel would quietly be refused again
+// under uniform summation order.
+TEST(CustomKernelTest, UniformSummationOrderDeserializes)
+{
+    for(const bool declared : {false, true})
+    {
+        msgpack::zone                          zone;
+        std::map<std::string, msgpack::object> fields{
+            {"name", msgpack::object(std::string("probe"), zone)}};
+        if(declared)
+            fields["uniformSummationOrder"] = msgpack::object(true, zone);
+
+        msgpack::sbuffer packed;
+        msgpack::pack(packed, fields);
+        auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+        CustomKernel                    kernel;
+        Serialization::MessagePackInput reader(unpacked.get());
+        reader.input(kernel);
+        ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+        EXPECT_EQ(kernel.name, "probe");
+        EXPECT_EQ(kernel.uniformSummationOrder, declared);
+    }
+}
+#endif
 
 namespace
 {
@@ -484,6 +518,7 @@ namespace
     constexpr size_t fusedWOffset       = fusedMyRankOffset + sizeof(uint32_t);
     constexpr size_t fusedDrainOffset   = fusedWOffset + sizeof(uint32_t);
     constexpr size_t fusedAMOffset      = fusedDrainOffset + sizeof(uint32_t);
+    constexpr size_t fusedNumCuOffset   = fusedAMOffset + sizeof(uint32_t);
 
     template <typename T>
     T packedAt(KernelArguments const& args, size_t offset)
@@ -493,27 +528,34 @@ namespace
         return result;
     }
 
-    KernelInvocation fusedCustomCall()
+    KernelInvocation fusedCustomCall(FusedA2A mode     = FusedA2A::GemmA2A,
+                                     int      fixedWGM = std::numeric_limits<int>::max(),
+                                     void*    myBuf    = nullptr)
     {
         ContractionSolution solution;
         configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::FusedA2ASegment});
+        solution.problemType.fusedA2A = mode;
 
         auto problem = dummyProblem();
-        problem.setFusedGemmA2A(true);
+        problem.setFusedA2A(mode);
         problem.setWorld(2);
         problem.setFusedA2AExtent(256);
 
         FusedA2APeerFields peer0{};
         peer0[FUSED_A2A_SLOT_FLAG_PTR] = const_cast<char*>(&fusedPeerFlag);
 
+        FusedA2APeerFields peer1{};
+        peer1[FUSED_A2A_SLOT_BUF_PTR] = myBuf;
+
         ContractionInputs inputs;
-        inputs.fusedA2APeers   = {peer0, FusedA2APeerFields{}};
+        inputs.fusedA2APeers   = {peer0, peer1};
         inputs.fusedA2ACounter = const_cast<char*>(&fusedCounter);
         inputs.fusedA2AMyRank  = 1;
         inputs.fusedA2ADrain   = FUSED_A2A_DRAIN_RECV;
 
-        return solution.generateCustomCall<false>(
-            problem, inputs, probeDevice(), StreamKSettings{});
+        auto device     = probeDevice();
+        device.fixedWGM = fixedWGM;
+        return solution.generateCustomCall<false>(problem, inputs, device, StreamKSettings{});
     }
 }
 
@@ -529,4 +571,22 @@ TEST(CustomKernelTest, FusedSegmentPacksEveryField)
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedWOffset), 2u);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedDrainOffset), FUSED_A2A_DRAIN_RECV);
     EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedAMOffset), 256u);
+    EXPECT_EQ(packedAt<uint32_t>(fused.args, fusedNumCuOffset),
+              static_cast<uint32_t>(TensileLite::testing::_SPX_CU));
+}
+
+TEST(CustomKernelTest, A2AGemmRejectsANegativeRuntimeWgm)
+{
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm));
+    EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, -8), std::runtime_error);
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, -8));
+}
+
+TEST(CustomKernelTest, A2AGemmRejectsAMisalignedA2ABuf)
+{
+    alignas(128) static char buf[256];
+    constexpr int            defaultWGM = std::numeric_limits<int>::max();
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf));
+    EXPECT_THROW(fusedCustomCall(FusedA2A::A2AGemm, defaultWGM, buf + 64), std::runtime_error);
+    EXPECT_NO_THROW(fusedCustomCall(FusedA2A::GemmA2A, defaultWGM, buf + 64));
 }

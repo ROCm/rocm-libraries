@@ -154,8 +154,10 @@ namespace TensileLite
                                              rhs.swizzleTensorA(),
                                              lhs.swizzleTensorB(),
                                              rhs.swizzleTensorB(),
-                                             lhs.fusedGemmA2A(),
-                                             rhs.fusedGemmA2A(),
+                                             lhs.mxScaleFormat(),
+                                             rhs.mxScaleFormat(),
+                                             lhs.fusedA2A(),
+                                             rhs.fusedA2A(),
                                              lhs.fusedA2AExtent(),
                                              rhs.fusedA2AExtent(),
                                              lhs.world(),
@@ -190,6 +192,9 @@ namespace TensileLite
                                         // BufferLoadOffsetLimitCheck_Beta reads only beta == 0.
                                         lhs.beta() == 0.0,
                                         rhs.beta() == 0.0,
+                                        // AlphaValue reads it.
+                                        lhs.alphaRestriction(),
+                                        rhs.alphaRestriction(),
                                         lhs.getParams().gsu(),
                                         rhs.getParams().gsu(),
                                         lhs.getParams().fallbackStatus(),
@@ -200,7 +205,9 @@ namespace TensileLite
                                         lhs.scaleZeroPointA(),
                                         rhs.scaleZeroPointA(),
                                         lhs.int4EncodingA(),
-                                        rhs.int4EncodingA());
+                                        rhs.int4EncodingA(),
+                                        lhs.getParams().deviceScalarAlpha(),
+                                        rhs.getParams().deviceScalarAlpha());
         }
     };
 } // namespace TensileLite
@@ -244,7 +251,8 @@ namespace std
                                           problem.f32XdlMathOp(),
                                           problem.swizzleTensorA(),
                                           problem.swizzleTensorB(),
-                                          problem.fusedGemmA2A(),
+                                          problem.mxScaleFormat(),
+                                          problem.fusedA2A(),
                                           problem.fusedA2AExtent(),
                                           problem.world(),
                                           problem.mxBlockA(),
@@ -260,11 +268,13 @@ namespace std
                                           problem.getParams().activationEnum(),
                                           problem.amaxd().dataType(),
                                           problem.beta() == 0.0,
+                                          problem.alphaRestriction(),
                                           problem.getParams().gsu(),
                                           problem.getParams().fallbackStatus(),
                                           problem.scaleBlockSizeA(),
                                           problem.scaleZeroPointA(),
-                                          problem.int4EncodingA()));
+                                          problem.int4EncodingA(),
+                                          problem.getParams().deviceScalarAlpha()));
         }
     };
 

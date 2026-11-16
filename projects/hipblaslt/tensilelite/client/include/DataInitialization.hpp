@@ -42,6 +42,7 @@
 #include <random>
 
 #include "RunListener.hpp"
+#include "TimingInstrumentation.hpp"
 
 namespace TensileLite
 {
@@ -182,7 +183,7 @@ namespace TensileLite
             ~DataInitialization();
 
             // True when the CPU reference must be recomputed for this solution
-            // because DataInitialization refreshes MX inputs per solution
+            // because DataInitialization may refresh MX inputs for it
             // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
             // gfx1250, gfx942, non-MX) the per-problem reference is still valid
             // and can be reused across all solutions.
@@ -386,6 +387,8 @@ namespace TensileLite
                 {
                     if(m_elementsToValidate)
                     {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_fast_reset_output",
+                                                           "gpu_input_prep_fast_reset_output"));
                         resetOutput(m_gpuPtrs,
                                     m_gpuBatchPtrs,
                                     m_maxElements,
@@ -397,23 +400,48 @@ namespace TensileLite
                 }
                 else
                 {
+                    // This slow path is taken on every call when bounds checking is enabled
+                    // (m_curBoundsCheck != Disable), or for problem-dependent data / swizzles.
+                    {
+                        ScopedTimer slowPathMarker(gpuInputCategory("gpu_input_reset_slow_path",
+                                                                    "gpu_input_prep_slow_path"));
+                    }
                     // Update CPU Inputs if prepareGPUInputs is not called.
-                    if(m_cpuPtrs.empty() && m_problemDependentData)
+                    if(m_cpuPtrs.empty() && m_problemDependentData && !m_cpuInputsReadyForProblem)
+                    {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_init_cpu_inputs",
+                                                           "gpu_input_prep_init_cpu_inputs"));
                         initializeCPUInputs(problem);
+                        m_cpuInputsReadyForProblem = m_currentSolution != nullptr;
+                    }
                     if(m_problemDependentData)
+                    {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_valid_to_gpu",
+                                                           "gpu_input_prep_copy_valid_to_gpu"));
                         copyValidToGPUBuffer(problem);
+                    }
                     if(needSwizzle || needMXSwizzle)
+                    {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_swizzled",
+                                                           "gpu_input_prep_copy_swizzled"));
                         copySwizzledToGPUBuffer(problem);
+                    }
 
                     // gpu to gpu
-                    copyInputs(m_gpuPtrs,
-                               m_gpuBatchPtrs,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               problem,
-                               hipMemcpyDeviceToDevice);
+                    {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_copy_inputs_d2d",
+                                                           "gpu_input_prep_copy_inputs_d2d"));
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   problem,
+                                   hipMemcpyDeviceToDevice);
+                    }
                     if(m_rotatingMode == 1 && m_rotatingBuffer > 0)
                     {
+                        ScopedTimer timer(gpuInputCategory("gpu_input_reset_rotating_init",
+                                                           "gpu_input_prep_rotating_init"));
                         auto mem = m_rm->getRotatingMemory();
                         // init mode 1 rotating data
                         for(size_t j = 1; j < mem.size(); j++)
@@ -434,12 +462,24 @@ namespace TensileLite
                     }
                     m_gpuInit = true;
                 }
-                initializeGPUBatchedInputs(problem);
+                {
+                    ScopedTimer timer(gpuInputCategory("gpu_input_reset_batched_inputs",
+                                                       "gpu_input_prep_batched_inputs"));
+                    initializeGPUBatchedInputs(problem);
+                }
 
                 if(m_cpuPtrs.empty())
+                {
+                    ScopedTimer timer(gpuInputCategory("gpu_input_reset_constant_inputs",
+                                                       "gpu_input_prep_constant_inputs"));
                     initializeConstantInputs(problem);
+                }
 
-                m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                {
+                    ScopedTimer timer(gpuInputCategory("gpu_input_reset_convert_to_inputs",
+                                                       "gpu_input_prep_convert_to_inputs"));
+                    m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                }
                 return m_cachedGPUInputs;
             }
 
@@ -864,23 +904,31 @@ namespace TensileLite
                 }
             }
 
+            // A zero-stride (broadcast) dimension is filled from its coordinate 0 only, so shared
+            // storage is written once rather than raced by elements with different values.
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, TensorDescriptor const& tensor)
+            static void initArrayTrig(T* array, TensorDescriptor const& tensor)
             {
-                const auto& sizes = tensor.sizes();
-                const auto  count = CoordCount(sizes.begin(), sizes.end());
-#pragma omp parallel for shared(array, tensor, sizes, count)
+                const auto& sizes   = tensor.sizes();
+                const auto& strides = tensor.strides();
+                const auto  count   = CoordCount(sizes.begin(), sizes.end());
+#pragma omp parallel for shared(array, tensor, sizes, strides, count)
                 for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+                    bool broadcast = false;
+                    for(size_t d = 0; d < coord.size(); d++)
+                        broadcast = broadcast || (strides[d] == 0 && coord[d] != 0);
+                    if(broadcast)
+                        continue;
                     size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
                     array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
                 }
             }
 
             template <typename T, bool useCos, bool useAbs>
-            void initArrayTrig(T* array, size_t elements)
+            static void initArrayTrig(T* array, size_t elements)
             {
 #pragma omp parallel for shared(array) firstprivate(elements)
                 for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
@@ -909,29 +957,52 @@ namespace TensileLite
             {
                 m_currentGemmProblem
                     = dynamic_cast<ContractionProblemGemm const*>(problem);
-                m_currentSolution = nullptr;
+                m_currentSolution          = nullptr;
+                m_mxPreswizzleMiK          = -1;
+                m_cpuInputsReadyForProblem = false;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX inputs for solution-dependent HostPreSwizzle.
-                if(m_currentSolution != nullptr
-                   && m_currentGemmProblem != nullptr
-                   && !m_gpuPtrs.empty()
-                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
-                                                         m_currentSolution))
+                // Re-init MX inputs for solution-dependent HostPreSwizzle. The
+                // swizzled scale layout only depends on the solution's MFMA K,
+                // so consecutive solutions sharing it reuse the uploaded data.
+                bool needsMXReinit = false;
+                {
+                    ScopedTimer timer("pre_solution_mx_check");
+                    needsMXReinit
+                        = m_currentSolution != nullptr && m_currentGemmProblem != nullptr
+                          && !m_gpuPtrs.empty()
+                          && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
+                                                                m_currentSolution)
+                          && static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2])
+                                 != m_mxPreswizzleMiK;
+                }
+                if(needsMXReinit)
                 {
                     ScopedDevice device(m_deviceId);
-                    initializeMXData(*m_currentGemmProblem);
-                    copyValidToGPUBuffer(*m_currentGemmProblem);
-                    copyInputs(m_gpuPtrs,
-                               m_gpuBatchPtrs,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               *m_currentGemmProblem,
-                               hipMemcpyDeviceToDevice);
+                    m_mxPreswizzleMiK
+                        = static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2]);
+                    {
+                        ScopedTimer timer("pre_solution_mx_init_data");
+                        initializeMXData(*m_currentGemmProblem);
+                    }
+                    {
+                        ScopedTimer timer("pre_solution_mx_copy_valid_to_gpu");
+                        copyValidToGPUBuffer(*m_currentGemmProblem);
+                    }
+                    {
+                        ScopedTimer timer("pre_solution_mx_copy_inputs_d2d");
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   *m_currentGemmProblem,
+                                   hipMemcpyDeviceToDevice);
+                    }
                     // Sync CPU current buffers so the reference matches GPU data.
+                    ScopedTimer cpuSyncTimer("pre_solution_mx_cpu_sync");
                     for(int ti : {ContractionProblemGemm::TENSOR::A,
                                   ContractionProblemGemm::TENSOR::B,
                                   ContractionProblemGemm::TENSOR::MXSA,
@@ -1194,6 +1265,8 @@ namespace TensileLite
 
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
+            int                           m_mxPreswizzleMiK          = -1;
+            bool                          m_cpuInputsReadyForProblem = false;
 
             int m_mxScaleFormat = 0;
             /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator
@@ -3281,9 +3354,10 @@ namespace TensileLite
             rocm_random_common<BFloat16>::signsig_exp(FP_PARAM<BFloat16>::UINT_T signsig,
                                                       FP_PARAM<BFloat16>::UINT_T exp)
         {
-            FP_PARAM<BFloat16>::UINT_T u;
-            u = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
-            return static_cast<BFloat16>(u);
+            // Store u as the raw bits; static_cast<BFloat16>(u) would convert it as a number.
+            BFloat16 r;
+            r.data = signsig & ~expmask | ((exp + expbias) << NUMSIG) & expmask;
+            return r;
         }
 
         template <typename T, int LOW_EXP, int HIGH_EXP>
