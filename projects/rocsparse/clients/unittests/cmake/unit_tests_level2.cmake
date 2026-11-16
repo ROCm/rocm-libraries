@@ -37,5 +37,6 @@ list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_level2_legacy.cpp
   unit_test_device_level2_level1.cpp
   unit_test_device_level2_mv.cpp
+  unit_test_device_level2_set_pointers.cpp
   unit_test_device_level2_spsv.cpp
 )
