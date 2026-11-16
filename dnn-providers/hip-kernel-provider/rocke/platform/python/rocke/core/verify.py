@@ -54,8 +54,9 @@ from .ir import (
     _if_else_yields,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
+    _fcmp_pred_error,
     _int_add_wrap_error,
-    _int_cmp_pred_error,
+    _int_cmp_error,
     _integer_element_error,
     _is_flag_ptr,
     _first_reused_loop_name,
@@ -68,6 +69,7 @@ from .ir import (
     _scf_if_region_error,
     _smem_store_vN_op_error,
     _smem_vN_f32_op_error,
+    _vector_cmp_pred_error,
     KernelDef,
     Op,
     Region,
@@ -379,7 +381,7 @@ class _Verifier:
                     op,
                 )
             if name == "arith.add":
-                wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), a.type.name)
+                wrap_error = _int_add_wrap_error(op.attrs, a.type.name)
                 if wrap_error:
                     self.err(wrap_error, op)
             if name in _INTEGER_ELEMENT_OPS:
@@ -421,10 +423,13 @@ class _Verifier:
                 self.err(
                     f"{name}: result must be i1, got {op.results[0].type.name}", op
                 )
-            if name == "arith.cmp":
-                pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
-                if pred_error:
-                    self.err(pred_error, op)
+            cmp_error = (
+                _int_cmp_error(op.attrs, a.type.name)
+                if name == "arith.cmp"
+                else _fcmp_pred_error(op.attrs)
+            )
+            if cmp_error:
+                self.err(cmp_error, op)
         elif name == ASSUME_RANGE_OP:
             if len(op.operands) not in (1, 2, 3) or len(op.results) != 1:
                 self.err(
@@ -454,6 +459,10 @@ class _Verifier:
                     f"{name}: branch types differ ({lhs.type.name} vs {rhs.type.name})",
                     op,
                 )
+        elif name == "vector.cmp":
+            pred_error = _vector_cmp_pred_error(op.attrs)
+            if pred_error:
+                self.err(pred_error, op)
         elif name == "vector.extract":
             if len(op.operands) != 1 or len(op.results) != 1:
                 self.err(f"{name}: expected 1 operand / 1 result", op)

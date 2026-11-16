@@ -983,21 +983,22 @@ const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key)
     return v->u.s;
 }
 
-/* ir._INT_ADD_WRAPS / ir._INT_CMP_PREDICATES. */
+/* ir._INT_ADD_WRAPS / ir._INT_CMP_PREDICATES / ir._VECTOR_CMP_PREDICATES /
+ * ir._FCMP_PREDICATES. */
 static const char* const k_int_add_wraps[] = {"nsw", "nuw", NULL};
 static const char* const k_int_cmp_predicates[] = {"lt", "le", "gt", "ge", "eq", "ne", "ult", NULL};
+static const char* const k_vector_cmp_predicates[] = {"lt", "le", "gt", "ge", "eq", "ne", NULL};
+static const char* const k_fcmp_predicates[]
+    = {"olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno", NULL};
 
-/* The shared body of rocke_i_add_wrap_error / rocke_i_cmp_pred_error: the
- * error for the string attr `key` of `op_name`, or NULL when it is absent or
- * one of `allowed`. The unsigned value `unsigned_value` takes i32 or i64
- * operands only. */
+/* ir._string_attr_error: the error for the string attr `key` of `op_name`,
+ * or NULL when it is absent or one of `allowed`; `not_a_string` is the error
+ * for a value of another kind. */
 static const char* string_attr_error(const rocke_attr_map_t* attrs,
                                      const char* op_name,
                                      const char* key,
                                      const char* const* allowed,
                                      const char* not_a_string,
-                                     const char* unsigned_value,
-                                     const rocke_type_t* operand_type,
                                      char* buf,
                                      size_t cap)
 {
@@ -1017,20 +1018,35 @@ static const char* string_attr_error(const rocke_attr_map_t* attrs,
         snprintf(buf, cap, "%s: unknown %s '%s'", op_name, key, v->u.s);
         return buf;
     }
-    const char* type_name = operand_type ? operand_type->name : "?";
-    if(strcmp(v->u.s, unsigned_value) == 0 && strcmp(type_name, "i32") != 0
-       && strcmp(type_name, "i64") != 0)
-    {
-        snprintf(buf,
-                 cap,
-                 "%s: %s '%s' needs i32 or i64 operands, got %s",
-                 op_name,
-                 key,
-                 unsigned_value,
-                 type_name);
-        return buf;
-    }
     return NULL;
+}
+
+/* The unsigned form `unsigned_value` of the string attr `key` of `op_name`
+ * (add's "nuw", cmp's "ult") takes i32 or i64 operands only: the error when
+ * the attr is that form on operands of another type, else NULL. */
+static const char* unsigned_form_width_error(const rocke_attr_map_t* attrs,
+                                             const char* op_name,
+                                             const char* key,
+                                             const char* unsigned_value,
+                                             const rocke_type_t* operand_type,
+                                             char* buf,
+                                             size_t cap)
+{
+    const char* value = rocke_attr_get_str(attrs, key);
+    const char* type_name = operand_type ? operand_type->name : "?";
+    if(!value || strcmp(value, unsigned_value) != 0 || strcmp(type_name, "i32") == 0
+       || strcmp(type_name, "i64") == 0)
+    {
+        return NULL;
+    }
+    snprintf(buf,
+             cap,
+             "%s: %s '%s' needs i32 or i64 operands, got %s",
+             op_name,
+             key,
+             unsigned_value,
+             type_name);
+    return buf;
 }
 
 const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
@@ -1038,29 +1054,76 @@ const char* rocke_i_add_wrap_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap)
 {
+    const char* wrap_error = string_attr_error(attrs,
+                                               "arith.add",
+                                               "wrap",
+                                               k_int_add_wraps,
+                                               "arith.add: wrap must be the string 'nsw' or 'nuw'",
+                                               buf,
+                                               cap);
+    if(wrap_error)
+    {
+        return wrap_error;
+    }
+    return unsigned_form_width_error(attrs, "arith.add", "wrap", "nuw", operand_type, buf, cap);
+}
+
+const char* rocke_i_cmp_error(const rocke_attr_map_t* attrs,
+                              const rocke_type_t* operand_type,
+                              char* buf,
+                              size_t cap)
+{
+    const char* pred_error = string_attr_error(attrs,
+                                               "arith.cmp",
+                                               "pred",
+                                               k_int_cmp_predicates,
+                                               "arith.cmp: pred must be a string",
+                                               buf,
+                                               cap);
+    if(!pred_error)
+    {
+        pred_error
+            = unsigned_form_width_error(attrs, "arith.cmp", "pred", "ult", operand_type, buf, cap);
+    }
+    if(pred_error)
+    {
+        return pred_error;
+    }
+    /* ir._INT_CMP_OPERAND_TYPES: the integer and predicate dtypes. A vector or
+     * pointer type name is no dtype. */
+    const char* type_name = operand_type ? operand_type->name : "?";
+    const rocke_dtype_info_t* info = rocke_dtype_info(type_name);
+    if(info && strcmp(info->name, type_name) == 0
+       && (info->category == ROCKE_DTYPE_INTEGER || info->category == ROCKE_DTYPE_PREDICATE))
+    {
+        return NULL;
+    }
+    snprintf(buf,
+             cap,
+             "arith.cmp failed - operand_type=%s, expected an integer or i1 type (compare "
+             "floats with fcmp)",
+             type_name);
+    return buf;
+}
+
+const char* rocke_i_vector_cmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap)
+{
     return string_attr_error(attrs,
-                             "arith.add",
-                             "wrap",
-                             k_int_add_wraps,
-                             "arith.add: wrap must be the string 'nsw' or 'nuw'",
-                             "nuw",
-                             operand_type,
+                             "vector.cmp",
+                             "pred",
+                             k_vector_cmp_predicates,
+                             "vector.cmp: pred must be a string",
                              buf,
                              cap);
 }
 
-const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
-                                   const rocke_type_t* operand_type,
-                                   char* buf,
-                                   size_t cap)
+const char* rocke_i_fcmp_pred_error(const rocke_attr_map_t* attrs, char* buf, size_t cap)
 {
     return string_attr_error(attrs,
-                             "arith.cmp",
+                             "arith.fcmp",
                              "pred",
-                             k_int_cmp_predicates,
-                             "arith.cmp: pred must be a string",
-                             "ult",
-                             operand_type,
+                             k_fcmp_predicates,
+                             "arith.fcmp: pred must be a string",
                              buf,
                              cap);
 }

@@ -498,6 +498,11 @@ static rocke_value_t* cmp_impl(
     operands[1] = c;
     at = rocke_i_attrs(b);
     rocke_attr_set_str(b, &at, "pred", pred);
+    /* Python IRBuilder._int_cmp: refuse what ir._int_cmp_error refuses. */
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const char* cmp_error = rocke_i_cmp_error(&at, a->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", cmp_error);
     return rocke_i_op1(b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &at, hint);
 }
 
@@ -545,36 +550,20 @@ rocke_value_t*
 {
     rocke_value_t* operands[2];
     rocke_attr_map_t at;
-    static const char* const valid[] = {"olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno"};
-    int i;
-    bool ok = false;
     if(!rocke_i_live(b))
         return NULL;
     if(!pred)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp predicate is NULL");
-    for(i = 0; i < (int)(sizeof(valid) / sizeof(valid[0])); ++i)
-    {
-        const char *p = pred, *q = valid[i];
-        while(*p && *q && *p == *q)
-        {
-            ++p;
-            ++q;
-        }
-        if(*p == '\0' && *q == '\0')
-        {
-            ok = true;
-            break;
-        }
-    }
-    if(!ok)
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "unsupported fcmp predicate '%s'", pred);
+    at = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &at, "pred", pred);
+    char pred_buf[ROCKE_ERR_MSG_CAP];
+    const char* pred_error = rocke_i_fcmp_pred_error(&at, pred_buf, sizeof pred_buf);
+    if(pred_error)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", pred_error);
     if(!a || !c)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fcmp NULL operand");
     operands[0] = a;
     operands[1] = c;
-    at = rocke_i_attrs(b);
-    rocke_attr_set_str(b, &at, "pred", pred);
     return rocke_i_op1(b, ROCKE_OP_ARITH_FCMP, operands, 2, rocke_i1(), &at, "fcmp");
 }
 
