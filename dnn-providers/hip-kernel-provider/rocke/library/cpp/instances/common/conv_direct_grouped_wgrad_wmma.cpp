@@ -294,8 +294,7 @@ rocke_kernel_def_t* build_grouped(rocke_ir_builder_t* b,
     const int CH8 = BC / 8; /* 16-byte chunks per staged pixel */
     const bool bf16 = problem_is_bf16(&p);
     const rocke_type_t* io_type = bf16 ? rocke_bf16() : rocke_f16();
-    const char* wmma_op
-        = rocke_wmma_fwd_op_id(b, p.dtype, arch, "build_grouped_wgrad_wmma");
+    const char* wmma_op = rocke_wmma_fwd_op_id(b, p.dtype, arch, "build_grouped_wgrad_wmma");
     if(wmma_op == NULL)
         return NULL;
 
