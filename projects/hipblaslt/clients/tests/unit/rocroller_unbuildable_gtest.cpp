@@ -217,6 +217,9 @@ TEST(HostUnitRocRollerUnbuildable, smoke_StreamKIgnoresWorkgroupMapping)
     EXPECT_GT(streamK, 0);
 }
 
+// The full enumeration fails both workgroup-mapping values together. Flipping
+// the bit on a non-Stream-K failure stays in the table. Stream-K is excluded
+// because that path ignores the bit.
 TEST(HostUnitRocRollerUnbuildable, smoke_WorkgroupMappingCountsWithoutStreamK)
 {
     int differs = 0;
@@ -228,7 +231,7 @@ TEST(HostUnitRocRollerUnbuildable, smoke_WorkgroupMappingCountsWithoutStreamK)
         EXPECT_EQ(unbuildable(row), recorded(row));
         differs += !recorded(row);
     }
-    EXPECT_GT(differs, 0);
+    EXPECT_EQ(differs, 0);
 }
 
 TEST(HostUnitRocRollerUnbuildable, smoke_AnUnrecordedTileIsNot)
