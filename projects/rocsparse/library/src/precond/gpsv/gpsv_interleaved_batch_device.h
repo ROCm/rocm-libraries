@@ -363,10 +363,6 @@ namespace rocsparse
                - dw[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 1) + gid])
               / d[batch_stride * (m - 3) + gid];
 
-        // Row m - 4 is in range only for m >= 4. The entry point accepts m >= 3,
-        // and at m == 3 this index is -batch_stride + gid: it would read the
-        // diagonals and r3 before the start of those arrays and write one
-        // value before x.
         if(m >= 4)
         {
             x[batch_stride * (m - 4) + gid]
