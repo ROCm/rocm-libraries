@@ -23,8 +23,8 @@ packaged launch supports: an implicit-GEMM identity of the AOT sweep
 ``GFX1250_DIRECT_ALGORITHMS``). The rocKE adapter decides
 (``conv_fwd_aot_spec_for_identity`` in
 ``builders/common/convolution_forward.py``); it refuses, with a reason, every identity
-feature the packaged launch does not model: group-merged implicit GEMM, the
-grouped-halo and split-C direct kernels and any other field off its default.
+feature the packaged launch does not model, such as a direct algorithm it does
+not run or any other field off its default.
 Anything refused is listed with its reason and the tool exits non-zero, unless
 ``--skip-unsupported`` is given. Entries
 are de-duplicated by ``instance_id`` (``KernelIdentity.stable_hash()``), which is the
@@ -409,7 +409,7 @@ def adapter_builder(arch: str = DEFAULT_ARCH) -> str:
 def optional_fields(arch: str = DEFAULT_ARCH) -> dict:
     """``name -> builder_default`` of the KMD fields after :data:`SPEC_ORDER`, in
     spec order: :data:`DIRECT_FIELDS` and :data:`DIRECT_KNOB_FIELDS` on gfx950; on
-    gfx1250 the same (``unroll_rows`` defaulting to -1, its absent value) and then
+    gfx1250 the same (``unroll_rows`` defaulting to 0, its absent value) and then
     the knobs its spec class adds, each at its dataclass default."""
     fields = {**DIRECT_FIELDS, **DIRECT_KNOB_FIELDS}
     if arch == DEFAULT_ARCH:
