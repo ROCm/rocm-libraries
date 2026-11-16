@@ -185,9 +185,16 @@ searched after the plain-GEMM one and before the FP8 Bias/activation/scale-vecto
 libraries, and its rows lie inside the plain file's rows, so a GEMM without a
 bias never takes a bias row. Problems with an FP32 bias, an activation or a
 scale-alpha vector, scale vectors, or `K % 16 != 0` fall through to the
-libraries they reach today. The rows follow vLLM's dispatch, with or without a
-bias: every `n` up to 4 from K = 1024, where the 64 lanes of a wave first get
-16 bytes of K each.
+libraries they reach today. With or without a bias, the rows cover every `n`
+up to 4, as vLLM does, from m = 9 and K = 1024, where the 64 lanes of a wave
+first get 16 bytes of K each; vLLM itself sends any such GEMM with M and K
+multiples of 16 to the kernel.
+
+MI355X searches its own tuned logic first here too. Its FP8 Bias logic with
+BF16 D (`gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_F8BS_BH_BiasSB_HAS_SAB_SAV_UserArgs.yaml`),
+which also accepts GEMMs without a bias, tunes 24 shapes with `n` up to 4
+inside the BF16 rows, among them the Llama-3.1-70B TP8 decode GEMMs, so on
+MI355X those shapes keep their tuned kernels, with or without a bias.
 
 ## Tensile metadata
 
