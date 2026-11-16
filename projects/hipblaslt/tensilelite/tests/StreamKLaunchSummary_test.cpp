@@ -2268,7 +2268,7 @@ namespace
     StreamK::Dynamic::SplitInputs dynamicSplitInputs(size_t tiles, size_t itersPerTile)
     {
         StreamK::Dynamic::SplitInputs in;
-        in.tiles            = tiles;
+        in.totalTiles       = tiles;
         in.itersPerTile     = itersPerTile;
         in.maxGrid          = 256;
         in.splitCUs         = 256;

@@ -331,61 +331,84 @@ namespace TensileLite
 
         // The split is rounded through SKItersPerWI the way the kernel decodes
         // it, so the packed SKSplit is the number of parts that exist.
-        auto decompose = [&](size_t skTiles, size_t split) {
+        auto splitTiles = [&](size_t skTiles, size_t split) {
             KernelArguments d;
             split = std::max(size_t{1}, split);
             d.itersPerWI
                 = static_cast<uint32_t>(kGran * CeilDivide(CeilDivide(itersPerTile, split), kGran));
-            d.split      = static_cast<uint32_t>(CeilDivide(itersPerTile, size_t{d.itersPerWI}));
-            d.tiles      = static_cast<uint32_t>(skTiles);
-            d.totalItems = static_cast<uint32_t>((in.tiles - skTiles) + skTiles * size_t{d.split});
-            d.grid       = static_cast<uint32_t>(
+            d.split = static_cast<uint32_t>(CeilDivide(itersPerTile, size_t{d.itersPerWI}));
+            d.tiles = static_cast<uint32_t>(skTiles);
+            d.totalItems
+                = static_cast<uint32_t>((in.totalTiles - skTiles) + skTiles * size_t{d.split});
+            d.grid = static_cast<uint32_t>(
                 in.maxGrid > 0 ? std::min(size_t{d.totalItems}, in.maxGrid) : size_t{d.totalItems});
             return d;
         };
-        // Every tile whole, packed with split 2.
-        const KernelArguments whole = decompose(0, 2);
+        // Whole tiles are packed with this split.
+        constexpr size_t      defaultSplit = 2;
+        const KernelArguments allWhole     = splitTiles(0, defaultSplit);
 
         // The partials a split needs must fit the workspace and the flag region.
-        auto fits = [&](size_t skTiles, size_t split) {
+        auto partialsFit = [&](size_t skTiles, size_t split) {
             const size_t slots = skTiles * split;
             return slots <= in.flagSlots && slots * in.partialTileBytes <= in.workspaceBytes;
         };
 
+        // Debug overrides replace the policy below. Uniform summation order
+        // ignores those that split only some tiles, or split where the policy
+        // would not, as if unset. An applied override whose partials do not fit
+        // keeps every tile whole rather than taking the policy's split, so a
+        // debug run never launches a split nobody asked for.
         if(in.overrideTiles > -1 || in.overrideSplit > -1)
         {
             const size_t skTiles
-                = std::min(in.tiles, size_t(in.overrideTiles > -1 ? in.overrideTiles : 0));
-            KernelArguments d = decompose(skTiles, in.overrideSplit > -1 ? in.overrideSplit : 2);
-            // Uniform summation order ignores overrides that split only some
-            // tiles, or split where the gate below would not.
-            if(!in.uniformSummationOrder || d.tiles == 0
-               || (isRowUniform(d, in.tiles) && in.allowSplit))
-            {
-                if(d.tiles > 0 && !fits(d.tiles, d.split))
-                    return whole;
-                return d;
-            }
+                = std::min(in.totalTiles, size_t(in.overrideTiles > -1 ? in.overrideTiles : 0));
+            const KernelArguments d
+                = splitTiles(skTiles, in.overrideSplit > -1 ? in.overrideSplit : defaultSplit);
+            const bool overrideApplies = !in.uniformSummationOrder || d.tiles == 0
+                                         || (isRowUniform(d, in.totalTiles) && in.allowSplit);
+            if(overrideApplies)
+                return (d.tiles == 0 || partialsFit(d.tiles, d.split)) ? d : allWhole;
         }
 
-        if(!in.allowSplit || in.tiles == 0 || in.splitCUs == 0 || in.tiles >= in.splitCUs)
-            return whole;
+        if(!in.allowSplit || in.totalTiles == 0 || in.splitCUs == 0 || in.totalTiles >= in.splitCUs)
+            return allWhole;
 
         // Largest factor that fits (origami grid_k_split_aware).
         for(const size_t split : SplitFactors)
         {
-            if(in.tiles * split > in.splitCUs || itersPerTile / split < MinItersPerWI)
+            if(in.totalTiles * split > in.splitCUs || itersPerTile / split < MinItersPerWI)
                 continue;
-            const KernelArguments d = decompose(in.tiles, split);
-            if(d.split >= 2 && fits(d.tiles, d.split))
+            const KernelArguments d = splitTiles(in.totalTiles, split);
+            if(d.split >= 2 && partialsFit(d.tiles, d.split))
                 return d;
         }
-        return whole;
+        return allWhole;
     }
 
-    bool StreamK::Dynamic::isRowUniform(KernelArguments const& d, size_t tiles)
+    bool StreamK::Dynamic::isRowUniform(KernelArguments const& d, size_t totalTiles)
     {
-        return d.tiles == 0 || d.tiles == tiles;
+        return d.tiles == 0 || d.tiles == totalTiles;
+    }
+
+    size_t StreamK::Dynamic::maxGrid(AMDGPU const& gpu, int cuOccupancy)
+    {
+        const size_t occupancy = std::max(cuOccupancy, 1);
+        size_t       maxGrid   = gpu.computeUnitCount * std::min(occupancy, MaxOccupancy);
+        if(gpu.persistentMaxCUs > 0)
+            maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentMaxCUs));
+        if(gpu.persistentFixedGrid > 0)
+            maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentFixedGrid));
+        return maxGrid;
+    }
+
+    bool StreamK::Dynamic::keepsSummationOrder(ContractionSolution const& solution)
+    {
+        auto const& type           = solution.problemType;
+        const bool  widenedPartial = type.highPrecisionAccumulate
+                                    && (type.computeType == rocisa::DataType::Half
+                                        || type.computeType == rocisa::DataType::BFloat16);
+        return solution.sizeMapping.streamKAtomic == 0 && !widenedPartial;
     }
 
     bool StreamK::usePerTileSplit(ContractionSolution const&      solution,
