@@ -463,6 +463,29 @@ int test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts()
     return 0;
 }
 
+/* An f32 tile whose rows are 6 elements, read and written 4 wide by the f32
+ * epilogue ops: row 1 starts 24 bytes in, so both accesses claim only the 8
+ * bytes every row start guarantees (gcd(4, 6) = 2 elements). Mirrors the
+ * Python test of the same name in test_smem_access_alignment.py. */
+int test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_align_padded_f32_rows") == ROCKE_OK);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {2, 6};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f32(), tile_shape, 2, "t");
+    rocke_value_t* const row_zero[] = {zero, zero};
+    rocke_value_t* row = rocke_b_smem_load_vN_f32(&b, tile, row_zero, 2, 4);
+    rocke_value_t* const row_one[] = {rocke_b_const_i32(&b, 1), zero};
+    rocke_b_smem_store_vN_f32(&b, tile, row_one, 2, row, 4);
+    rocke_b_ret(&b);
+    const Lowering lowering = lower_and_free(&b);
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(every_lds_access_claims(lowering.text, "= load <4 x float>, ptr addrspace(3)", 8));
+    CHECK(every_lds_access_claims(lowering.text, "store <4 x float> %", 8));
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -477,7 +500,8 @@ int main()
        || test_a_distributed_store_claims_its_element_width()
        || test_an_eight_byte_element_segment_is_aligned_to_its_width()
        || test_eight_wide_fp8_load_claims_eight_bytes()
-       || test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts())
+       || test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts()
+       || test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts())
     {
         std::fprintf(stderr, "LDS alignment contract failed\n");
         return 1;
