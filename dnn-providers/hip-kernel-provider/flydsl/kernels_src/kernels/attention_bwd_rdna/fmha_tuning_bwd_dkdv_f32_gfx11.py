@@ -35,7 +35,11 @@ LDS_PITCH = (
     D_CHUNK + 1
 )  # row pitch (words) of a staged slab: conflict-free for a row-per-lane read
 GENERIC_ARCH = "gfx11-generic"
+GFX12_ARCH = "gfx12-generic"
 LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+GFX12_LADDER = LADDER + (
+    512,
+)  # gfx12-generic only: one wide rung for head dims 257..512
 
 # (BLOCK_M, BLOCK_N) tile pairs of the grid, wave counts, `waves_per_eu` lever values.
 GEOMETRIES = ((16, 16), (32, 16), (32, 32))
@@ -66,6 +70,8 @@ POLICY = {
     224: (32, 16, 8),
     256: (32, 16, 8),
 }
+# gfx12-generic: the gfx11 rows plus the 512 rung, a copy of the hd 256 row.
+POLICY_GFX12 = {**POLICY, 512: POLICY[256]}
 
 
 def chunks(hd):
@@ -191,8 +197,8 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     """Resolve the policy for `tile`, apply `pins` (Spec knob names; only the knobs a Spec sets), derive the rest. `legal` is false for a record that breaks a
     rule the Spec cannot see (`block_q < block_kv`, thread count not divisible, LDS over 65,536 B, `dump`).
     """
-    if arch != GENERIC_ARCH:
-        raise ValueError(f"arch {arch!r} is not {GENERIC_ARCH}")
+    if arch not in (GENERIC_ARCH, GFX12_ARCH):
+        raise ValueError(f"arch {arch!r} is not {GENERIC_ARCH} or {GFX12_ARCH}")
     if dtype != "fp32":
         raise ValueError(f"dtype {dtype!r} is not fp32")
     unknown = set(pins) - {
@@ -205,9 +211,10 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     }
     if unknown:
         raise ValueError(f"unknown fp32 dkdv knob(s) {sorted(unknown)}")
-    if tile not in POLICY:
+    policy = POLICY_GFX12 if arch == GFX12_ARCH else POLICY
+    if tile not in policy:
         raise ValueError(f"no dK/dV policy for tile {tile}")
-    p_bq, p_bkv, p_waves = POLICY[tile]
+    p_bq, p_bkv, p_waves = policy[tile]
     bq = int(pins.get("block_q", p_bq))
     bkv = int(pins.get("block_kv", p_bkv))
     waves = int(pins.get("num_waves", p_waves))

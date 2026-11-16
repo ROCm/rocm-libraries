@@ -409,3 +409,287 @@ def test_every_routing_entry_of_the_arch_is_reproduced(cdna9):
         hit.add(("dkdv", r["dtype"], tile, cls, r["dropout"], ""))
         hit.add(("dq", r["dtype"], tile, cls, r["dropout"], store_db))
     assert {k for k in sel if k[0] in ("dkdv", "dq")} <= hit
+
+
+# --- gfx12-generic: per-(dtype, kernel) rungs, classified from literals (not from the Spec module the tool reads) ---
+
+G12_16BIT = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 320, 384, 448, 512)
+G12_FP32 = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512)
+# The 16-bit dQ has no 320 or 448 object; every other (dtype, kernel) has the whole ladder of its dtype.
+G12_DQ_16BIT = tuple(t for t in G12_16BIT if t not in (320, 448))
+G12_RUNGS = {
+    ("f16", "prep"): G12_16BIT,
+    ("bf16", "prep"): G12_16BIT,
+    ("fp32", "prep"): G12_FP32,
+    ("f16", "dkdv"): G12_16BIT,
+    ("bf16", "dkdv"): G12_16BIT,
+    ("fp32", "dkdv"): G12_FP32,
+    ("f16", "dq"): G12_DQ_16BIT,
+    ("bf16", "dq"): G12_DQ_16BIT,
+    ("fp32", "dq"): G12_FP32,
+}
+
+
+def gfx12_row_set():
+    """The Spec of every pinned gfx12-generic object of the model: a padded object per (rung, class, dropout, dtype) of each kernel's own
+    rungs, a prep per rung, a standalone reduce per dtype."""
+    from generators._sdpa_bwd_spec import Spec  # noqa: PLC0415
+
+    specs = []
+    for (dtype, kernel), rungs in G12_RUNGS.items():
+        for tile in rungs:
+            if kernel == "prep":
+                specs.append(Spec("prep", dtype, tile, padded=1, arch="gfx12-generic"))
+                continue
+            for cls in ("plain", "causal", "bias"):
+                for drop in (0, 1):
+                    specs.append(
+                        Spec(
+                            kernel,
+                            dtype,
+                            tile,
+                            cls,
+                            "bk",
+                            drop,
+                            1,
+                            "g1",
+                            arch="gfx12-generic",
+                        )
+                    )
+    specs += [
+        Spec("dbias_reduce", d, 32, arch="gfx12-generic")
+        for d in ("f16", "bf16", "fp32")
+    ]
+    return specs
+
+
+def _gfx12_fixture(root, with_dq_448):
+    """(model, specs, selection, rows): routing derived from a synthetic reference of the row set, as ``--write-selection`` derives it.
+    ``with_dq_448`` adds 16-bit dQ 448 rows, so the dQ rungs are the table's, not the ladder's.
+    """
+    import csv  # noqa: PLC0415
+
+    from generators._sdpa_bwd_spec import Spec  # noqa: PLC0415
+
+    model = sv.MODELS["gfx12-generic"]
+    specs = gfx12_row_set()
+    if with_dq_448:
+        for dtype in ("f16", "bf16"):
+            for cls in ("plain", "causal", "bias"):
+                for drop in (0, 1):
+                    specs.append(
+                        Spec(
+                            "dq",
+                            dtype,
+                            448,
+                            cls,
+                            "bk",
+                            drop,
+                            1,
+                            "g1",
+                            arch="gfx12-generic",
+                        )
+                    )
+    reference = root / "reference.csv"
+    with reference.open("w", newline="") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(("hash", "spec"))
+        w.writerows((s.hash(), s.key()) for s in specs)
+    sv.write_selection(model, reference, root / "selection.csv")
+    sel = sv.load_selection(root / "selection.csv")
+    rows = sv.generate(model, root / "selection.csv", content=None)
+    return model, specs, sel, rows
+
+
+@pytest.fixture(scope="module")
+def gfx12(tmp_path_factory):
+    """gfx12-generic with dQ rows lacking 320 and 448 (the shipped row set)."""
+    return _gfx12_fixture(tmp_path_factory.mktemp("gfx12"), False)
+
+
+@pytest.fixture(scope="module")
+def gfx12_dq448(tmp_path_factory):
+    """gfx12-generic whose 16-bit dQ rows also include 448."""
+    return _gfx12_fixture(tmp_path_factory.mktemp("gfx12_dq448"), True)
+
+
+def test_gfx12_model_is_registered_with_its_own_csv_stem():
+    model = sv.MODELS["gfx12-generic"]
+    assert (model.stem, model.from_bundle, model.combined_reduce) == (
+        "gfx12",
+        False,
+        (),
+    )
+    assert model.verdicts_csv.name == "sdpa_bwd_gfx12_verdicts.csv"
+    assert model.selection_csv.name == "sdpa_bwd_gfx12_selection.csv"
+    assert model.reference_csv.name == "sdpa_bwd_gfx12_reference.csv"
+    assert model.ladders == {"f16": G12_16BIT, "bf16": G12_16BIT, "fp32": G12_FP32}
+
+
+def test_a_kernels_rungs_are_the_tables_and_the_ladder_is_validity(gfx12, gfx12_dq448):
+    model, _, sel, _ = gfx12
+    assert model.kernel_ladders(sel, "dq") == {
+        "f16": G12_DQ_16BIT,
+        "bf16": G12_DQ_16BIT,
+        "fp32": G12_FP32,
+    }
+    assert (
+        model.kernel_ladders(sel, "dkdv")
+        == model.kernel_ladders(sel, "prep")
+        == model.ladders
+    )
+    sel448 = gfx12_dq448[2]
+    assert model.kernel_ladders(sel448, "dq")["f16"] == tuple(
+        sorted((*G12_DQ_16BIT, 448))
+    )
+    bad = {
+        **sel,
+        ("dq", "f16", 300, "plain", 0, ""): ("x", "x"),
+    }  # a tile off the ladder is refused
+    with pytest.raises(AssertionError):
+        model.kernel_ladders(bad, "dq")
+
+
+def test_gfx12_served_graphs_take_the_smallest_rung_each_kernel_has(gfx12):
+    model, specs, sel, rows = gfx12
+    by_hash = {s.hash(): s for s in specs}
+    n = 0
+    for r in rows:
+        if r["verdict"] != "served":
+            continue
+        n += 1
+        hd = max(r["dqk"], r["dv"])
+        want = {
+            "prep": next(t for t in G12_RUNGS[(r["dtype"], "prep")] if t >= r["dv"]),
+            "dkdv": next(t for t in G12_RUNGS[(r["dtype"], "dkdv")] if t >= hd),
+            "dq": next(t for t in G12_RUNGS[(r["dtype"], "dq")] if t >= hd),
+        }
+        for slot, tile in want.items():
+            spec = by_hash[r[slot]]
+            assert (spec.kernel, spec.dtype, spec.tile, spec.arch) == (
+                slot,
+                r["dtype"],
+                tile,
+                "gfx12-generic",
+            ), (r["id"], slot)
+    assert n > 300
+
+
+@pytest.mark.parametrize(
+    "dtype,dqk,dv,prep,dkdv,dq",
+    [
+        ("f16", 300, 300, 320, 320, 384),
+        ("bf16", 300, 300, 320, 320, 384),
+        ("f16", 448, 448, 448, 448, 512),
+        ("bf16", 449, 449, 512, 512, 512),
+        ("f16", 257, 257, 320, 320, 384),
+        ("f16", 64, 300, 320, 320, 384),
+        ("f16", 300, 64, 64, 320, 384),
+        ("f16", 448, 64, 64, 448, 512),
+        ("f16", 320, 320, 320, 320, 384),
+        ("f16", 384, 384, 384, 384, 384),
+        ("fp32", 300, 300, 512, 512, 512),
+        ("fp32", 257, 257, 512, 512, 512),
+        ("fp32", 448, 64, 64, 512, 512),
+        ("fp32", 512, 512, 512, 512, 512),
+    ],
+)
+def test_gfx12_wide_head_dims_take_the_rung_each_kernel_has(
+    gfx12, dtype, dqk, dv, prep, dkdv, dq
+):
+    """hd 300 is dK/dV 320 and dQ 384 (no 320 dQ object); hd 448 is dK/dV 448 and dQ 512; prep rides the rung of Dv."""
+    model, specs, sel, _ = gfx12
+    by_hash = {s.hash(): s for s in specs}
+    row = sv.make("probe", "test", dtype=dtype, dqk=dqk, dv=dv)
+    verdict, p, k, q, _, rule, _ = sv.expect(row, sel, model)
+    assert (verdict, rule) == ("served", "")
+    assert (by_hash[p].tile, by_hash[k].tile, by_hash[q].tile) == (prep, dkdv, dq)
+
+
+@pytest.mark.parametrize("dtype", ["f16", "bf16"])
+def test_gfx12_dq_rung_follows_the_rows_not_the_ladder(gfx12, gfx12_dq448, dtype):
+    """hd 300 and 400 are dQ 384 / 512 without a 448 row; with one, hd 400 is dQ 448 (hd 300 stays 384): drift between rows and verdicts shows."""
+    for fixture, hd400 in ((gfx12, 512), (gfx12_dq448, 448)):
+        model, specs, sel, _ = fixture
+        by_hash = {s.hash(): s for s in specs}
+        for hd, want in ((300, 384), (400, hd400)):
+            row = sv.make("probe", "test", dtype=dtype, dqk=hd)
+            _, _, k, q, _, _, basis = sv.expect(row, sel, model)
+            assert (by_hash[k].tile, by_hash[q].tile) == (
+                (320 if hd == 300 else 448),
+                want,
+            ), (hd, fixture is gfx12)
+
+
+def test_gfx12_ladder_ends_at_512_and_the_matcher_declines_above(gfx12):
+    _, _, _, rows = gfx12
+    by_id = {r["id"]: r for r in rows}
+    for dtype in ("f16", "bf16", "fp32"):
+        assert by_id[f"bnd-{dtype}-d512"]["verdict"] == "served"
+        assert by_id[f"bnd-{dtype}-d513"]["verdict"] == "declined"
+        assert by_id[f"bnd-{dtype}-d513"]["rule"] == "DT-4"
+    assert by_id["bnd-f16-qk300-v64"]["verdict"] == "served"
+    assert {r["rule"] for r in rows if "ref-hd-gt-512" in r["id"]} == {"DT-4"}
+    assert not any(r["rule"] == sv.NO_ROW for r in rows)
+
+
+def test_gfx12_every_routing_entry_is_reproduced(gfx12):
+    """Each routed entry of the full row set is taken by an exact and a padded graph, wide rungs included."""
+    _, _, sel, rows = gfx12
+    assert {k[2] for k in sel if k[0] == "dq" and k[1] == "f16"} == set(G12_DQ_16BIT)
+    assert {k[2] for k in sel if k[0] == "dkdv" and k[1] == "bf16"} == set(G12_16BIT)
+    assert {k[2] for k in sel if k[0] == "dkdv" and k[1] == "fp32"} == set(G12_FP32)
+    hit = set()
+    for r in rows:
+        if r["verdict"] != "served":
+            continue
+        hd = max(r["dqk"], r["dv"])
+        cls = (
+            "bias"
+            if r["bias"] != "none"
+            else (
+                "causal"
+                if r["mask"] != "none"
+                or r["window_left"] != -1
+                or r["window_right"] != -1
+                else "plain"
+            )
+        )
+        store_db = ("requested" if r["dbias"] else "null") if cls == "bias" else ""
+        hit.add(
+            (
+                "dkdv",
+                r["dtype"],
+                next(t for t in G12_RUNGS[(r["dtype"], "dkdv")] if t >= hd),
+                cls,
+                r["dropout"],
+                "",
+            )
+        )
+        hit.add(
+            (
+                "dq",
+                r["dtype"],
+                next(t for t in G12_RUNGS[(r["dtype"], "dq")] if t >= hd),
+                cls,
+                r["dropout"],
+                store_db,
+            )
+        )
+    assert {k for k in sel if k[0] in ("dkdv", "dq")} <= hit
+
+
+def test_gfx12_standalone_reduce_serves_every_dtype(gfx12):
+    """gfx12 has no combined reduce: a broadcast dBias graph names a standalone reduce object of its dtype, fp32 included."""
+    _, specs, _, rows = gfx12
+    by_hash = {s.hash(): s for s in specs}
+    seen = set()
+    for r in rows:
+        if r["verdict"] != "served" or not sv.needs_reduce(r):
+            continue
+        seen.add(r["dtype"])
+        assert (by_hash[r["reduce"]].kernel, by_hash[r["reduce"]].dtype) == (
+            "dbias_reduce",
+            r["dtype"],
+        )
+    assert seen == {"f16", "bf16", "fp32"}

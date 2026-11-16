@@ -3,7 +3,7 @@
 
 """The arch allow-lists of the SDPA backward ops, refused before anything compiles.
 
-The split ops (prep, dkdv, dq) build ``gfx950``, ``gfx11-generic``, ``gfx942`` and ``gfx90a``; the merged and reduce ops build only
+The split ops (prep, dkdv, dq) build ``gfx950``, ``gfx11-generic``, ``gfx12-generic``, ``gfx942`` and ``gfx90a``; the merged and reduce ops build only
 ``gfx950``. Each generator must refuse any other target on the command line (exit 1, nothing written) rather
 than hand a foreign ABI to the compiler. Host-only: no FlyDSL install is needed, because the refusal precedes
 every compile.
@@ -40,16 +40,17 @@ def _run(module, arch: str, out_dir: Path) -> int:
     return module.main(["--arch", arch, "--out-dir", str(out_dir)])
 
 
+@pytest.mark.parametrize("arch", ["gfx11-generic", "gfx12-generic"])
 @pytest.mark.parametrize("module", CDNA_ONLY_GENERATORS, ids=lambda m: m.OP)
-def test_the_cdna_only_ops_refuse_gfx11_generic(
-    module, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_the_cdna_only_ops_refuse_the_generic_arches(
+    module, arch: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert _run(module, "gfx11-generic", tmp_path) == 1
+    assert _run(module, arch, tmp_path) == 1
     assert "gfx950" in capsys.readouterr().err
     assert not any(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("arch", ["gfx12-generic", "gfx1100"])
+@pytest.mark.parametrize("arch", ["gfx1100", "gfx1200", "gfx1201"])
 @pytest.mark.parametrize("module", SPLIT_GENERATORS, ids=lambda m: m.OP)
 def test_the_split_ops_refuse_every_other_target(
     module, arch: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -59,7 +60,26 @@ def test_the_split_ops_refuse_every_other_target(
     assert not any(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("arch", ["gfx11-generic", "gfx942", "gfx90a"])
+@pytest.mark.parametrize("module", SPLIT_GENERATORS, ids=lambda m: m.OP)
+def test_gfx12_generic_builds_the_three_split_ops_through_the_rdna_builder(
+    module,
+) -> None:
+    """gfx12-generic is a generic arch of the RDNA builder: each split op routes it there, and its tables are the arch's own."""
+    from generators import _instances as inst  # noqa: PLC0415
+    from generators import _sdpa_bwd_rdna_build as rdna  # noqa: PLC0415
+
+    assert "gfx12-generic" in rdna.ARCHES
+    assert "gfx12-generic" in rdna.GENERIC_ARCHES
+    assert "gfx12-generic" not in rdna.GATED_ARCHES
+    assert "gfx12-generic" in module._OTHER_ARCHES
+    assert rdna._REFERENCE_CSVS["gfx12-generic"].name == "sdpa_bwd_gfx12_reference.csv"
+    # Every row of a generic arch is an RDNA-family row: the builder takes the arch's whole table.
+    assert rdna.rows_of(module.OP, "gfx12-generic")[0] == inst.instances_for(
+        module.OP, "gfx12-generic"
+    )
+
+
+@pytest.mark.parametrize("arch", ["gfx11-generic", "gfx12-generic", "gfx942", "gfx90a"])
 @pytest.mark.parametrize("module", SPLIT_GENERATORS, ids=lambda m: m.OP)
 def test_a_non_gfx950_build_needs_the_s1_reference_dir(
     module, arch: str, tmp_path: Path

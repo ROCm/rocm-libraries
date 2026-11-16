@@ -417,15 +417,86 @@ def test_mfma16_dq_block_is_waves_times_sixty_four(arch):
     assert g11.block_size == g11.num_waves * 32
 
 
-def test_mfma16_ladders_reach_512_and_wmma_ladders_do_not():
-    for arch in ("gfx90a", "gfx942"):
+def test_mfma16_and_gfx12_ladders_reach_512_and_gfx11_does_not():
+    for arch in ("gfx90a", "gfx942", "gfx12-generic"):
         assert TDQ.bwd_dq_knobs(arch, "f16", 512, "plain", 0, 1, 512, 512).legal
+    for arch in ("gfx90a", "gfx942"):
         assert TDKDV.bwd_dkdv_knobs(arch, "f16", 512, "plain", 0, 1, 512, 512).legal
+    # gfx12 resolves a 512 dK/dV record (no refusal); it is legal once the row spells `transposed_source=derived`, as every wide gfx12 row does.
+    default = TDKDV.bwd_dkdv_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+    assert not default.legal and "LDS" in default.illegal_reason
+    assert TDKDV.bwd_dkdv_knobs(
+        "gfx12-generic",
+        "f16",
+        512,
+        "plain",
+        0,
+        1,
+        512,
+        512,
+        transposed_source="derived",
+    ).legal
     assert not TDQ.bwd_dq_knobs(
         "gfx11-generic", "f16", 512, "plain", 0, 1, 512, 512
     ).legal
     with pytest.raises(ValueError):
-        TDKDV.bwd_dkdv_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+        TDKDV.bwd_dkdv_knobs("gfx11-generic", "f16", 512, "plain", 0, 1, 512, 512)
+
+
+def test_the_wide_rungs_are_legal_on_gfx12_only_and_the_other_ladders_do_not_move():
+    wide = (320, 384, 448, 512)
+    assert (
+        TDKDV.LADDER == TDQ.LADDER == (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+    )
+    assert TDKDV.GFX12_LADDER == TDQ.GFX12_LADDER == TDKDV.LADDER + wide
+    # CDNA9 dQ keeps its literal ladder: it does not follow the extended generic one.
+    assert TDQ.MFMA16_LADDER == (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512)
+    for tile in wide:
+        k = TDKDV.bwd_dkdv_knobs(
+            "gfx12-generic",
+            "f16",
+            tile,
+            "plain",
+            0,
+            1,
+            tile,
+            tile,
+            transposed_source="derived",
+        )
+        assert k.legal, (tile, k.illegal_reason)
+        assert (k.split_head_dim, k.contraction_shards, k.num_waves, k.block_q) == (
+            True,
+            4,
+            16,
+            16,
+        )
+        q = TDQ.bwd_dq_knobs("gfx12-generic", "f16", tile, "plain", 0, 1, tile, tile)
+        assert q.legal, (tile, q.why)
+        assert (q.contraction_shards, q.num_waves, q.block_n) == (4, 8, 16)
+        with pytest.raises(ValueError):
+            TDKDV.bwd_dkdv_knobs(
+                "gfx11-generic", "f16", tile, "plain", 0, 1, tile, tile
+            )
+        assert not TDQ.bwd_dq_knobs(
+            "gfx11-generic", "f16", tile, "plain", 0, 1, tile, tile
+        ).legal
+    # The pinned wide rows spell `transposed_source=derived` (the `tile` copy of Q^T / dO^T does not fit 64 KiB at 512) and dQ 512 spells 8 shards.
+    d512 = TDKDV.bwd_dkdv_knobs(
+        "gfx12-generic",
+        "f16",
+        512,
+        "plain",
+        0,
+        1,
+        512,
+        512,
+        transposed_source="derived",
+    )
+    assert d512.legal and d512.lds_bytes <= TDKDV.LDS_LIMIT
+    q512 = TDQ.bwd_dq_knobs(
+        "gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512, contraction_shards=8
+    )
+    assert q512.legal and q512.slice == 64 and q512.num_waves % 8 == 0
 
 
 def test_mfma16_hd512_dkdv_default_fits_64k_and_the_transposed_tile_copy_does_not():
@@ -517,3 +588,147 @@ def test_fp32_exact_head_is_refused_on_gfx90a_only(kind):
         )
     padded = meta_cls(num_heads=1, head_dim=100)
     assert knobs("gfx90a", block_dmodel=128).resolve(padded).padded_head
+
+
+# ---- LSE / Delta, mask, bias and dB index maps: the layer's (q, kv) of each accumulator element against the instruction model ------------------------------
+ORIENTS = (L.Q_ROWS, L.KV_ROWS)
+
+
+def _model_q_kv(w, orient, r, q0, kv0):
+    """(q, kv) of element `r` of every lane from the instruction model alone (`_c_pos`): rows are q on `Q_ROWS`, kv on `KV_ROWS`."""
+    row = np.array([_c_pos(w.abi, l, r)[0] for l in range(w.n)])
+    col = np.array([_c_pos(w.abi, l, r)[1] for l in range(w.n)])
+    return (q0 + row, kv0 + col) if orient == L.Q_ROWS else (q0 + col, kv0 + row)
+
+
+def _tile_of(w, orient, q0, kv0, per_element):
+    """The 16 x 16 tile (rows are the orientation's rows) of `per_element(r, q, kv)` evaluated for every lane and element at the layer's indices,
+    stored at the instruction model's accumulator position; every position must be written once.
+    """
+    tile = np.full((16, 16), np.nan)
+    for r in range(w.acc):
+        q, kv = L.acc_q_kv(orient, r, w.lane, q0, kv0, w.abi)
+        vals = per_element(r, q, kv)
+        for l in range(w.n):
+            row, col = _c_pos(w.abi, l, r)
+            assert np.isnan(tile[row, col]) or tile[row, col] == vals[l]
+            tile[row, col] = vals[l]
+    assert not np.isnan(tile).any()
+    return tile
+
+
+@pytest.mark.parametrize("abi", ABIS)
+@pytest.mark.parametrize("orient", ORIENTS)
+def test_lse_and_delta_rows_are_the_q_index_of_the_instruction_model(abi, orient):
+    """LSE and Delta are read at `acc_q`: per element on `Q_ROWS` (the accumulator row), one per lane on `KV_ROWS` (its column); `acc_kv` is the other index."""
+    w = Wave(abi)
+    for q0, kv0 in ((0, 0), (16, 48), (96, 32)):
+        for r in range(w.acc):
+            q, kv = _model_q_kv(w, orient, r, q0, kv0)
+            assert np.array_equal(L.acc_q(orient, r, w.lane, q0, abi), q)
+            assert np.array_equal(L.acc_kv(orient, r, w.lane, kv0, abi), kv)
+            lq, lkv = L.acc_q_kv(orient, r, w.lane, q0, kv0, abi)
+            assert np.array_equal(lq, q) and np.array_equal(lkv, kv)
+    # With `lse` and `delta` vectors over q the per-element read gives the dense `lse[q] x ones` and `delta[q] x ones` tiles.
+    lse = rng.standard_normal(128)
+    delta = rng.standard_normal(128)
+    for read in (lse, delta):
+        got = _tile_of(w, orient, 16, 48, lambda r, q, kv: read[q])
+        qs = (
+            (16 + np.arange(16)[:, None] + 0 * np.arange(16)[None, :])
+            if orient == L.Q_ROWS
+            else (16 + 0 * np.arange(16)[:, None] + np.arange(16)[None, :])
+        )
+        assert np.array_equal(got, read[qs])
+
+
+def _visible_reference(kind, q, kv, sq, sk, wl, wr):
+    off = sk - sq if kind in ("br", "winbr") else 0
+    if kind in ("tl", "br"):
+        return (kv <= q + off) & (kv < sk)
+    return (q + off - wl <= kv) & (kv <= q + off + wr) & (kv < sk)
+
+
+@pytest.mark.parametrize("abi", ABIS)
+@pytest.mark.parametrize("orient", ORIENTS)
+@pytest.mark.parametrize(
+    "kind,wl,wr", (("tl", 0, 0), ("br", 0, 0), ("win", 3, 5), ("winbr", 4, 2))
+)
+@pytest.mark.parametrize("sq,sk", ((70, 90), (90, 70), (48, 48)))
+def test_causal_and_window_visibility_at_every_accumulator_element(
+    abi, orient, kind, wl, wr, sq, sk
+):
+    """The per-row `(first, span)` window of `kv_window` evaluated at the layer's (q, kv) of each element equals the dense causal / sliding-window mask."""
+    w = Wave(abi)
+    for q0 in range(0, sq + 16, 16):
+        for kv0 in range(0, sk + 16, 16):
+
+            def visible(r, q, kv):
+                first, span = L.kv_window(
+                    q, sq, sk, kind, wl, wr, np.maximum, np.minimum
+                )
+                return L.kv_visible(kv, first, span)
+
+            got = _tile_of(w, orient, q0, kv0, visible)
+            rows = np.arange(16)[:, None] + 0 * np.arange(16)[None, :]
+            cols = np.arange(16)[None, :] + 0 * np.arange(16)[:, None]
+            q, kv = (
+                (q0 + rows, kv0 + cols)
+                if orient == L.Q_ROWS
+                else (q0 + cols, kv0 + rows)
+            )
+            assert np.array_equal(
+                got.astype(bool), _visible_reference(kind, q, kv, sq, sk, wl, wr)
+            )
+
+
+@pytest.mark.parametrize("abi", ABIS)
+@pytest.mark.parametrize("orient", ORIENTS)
+@pytest.mark.parametrize("row_broadcast", (False, True))
+def test_bias_read_and_db_write_offsets_cover_the_dense_tile(
+    abi, orient, row_broadcast
+):
+    """The bias entry read by each element is the dense bias at its (q, kv); a full-shape dB written at `bias_offset` lands every dS element at its
+    own (q, kv) exactly once (a row-broadcast bias has q stride 0 and returns no dB)."""
+    w = Wave(abi)
+    sq, sk, pitch = 64, 72, 80
+    bias = rng.standard_normal((sq, sk))
+    plane = np.zeros(sq * pitch)
+    for i in range(sq):
+        plane[i * pitch : i * pitch + sk] = bias[i]
+    stride_q = 0 if row_broadcast else pitch
+    for q0, kv0 in ((0, 0), (16, 48), (48, 16)):
+        read = _tile_of(
+            w,
+            orient,
+            q0,
+            kv0,
+            lambda r, q, kv: plane[L.bias_offset(q, kv, stride_q, 1)],
+        )
+        for l in range(w.n):
+            for r in range(w.acc):
+                row, col = _c_pos(abi, l, r)
+                q, kv = (
+                    (q0 + row, kv0 + col)
+                    if orient == L.Q_ROWS
+                    else (q0 + col, kv0 + row)
+                )
+                assert read[row, col] == bias[0 if row_broadcast else q, kv]
+        if row_broadcast:
+            continue
+        ds = rng.standard_normal((16, 16))  # dS in the orientation's tile coordinates
+        db = np.full(sq * pitch, np.nan)
+        for r in range(w.acc):
+            q, kv = L.acc_q_kv(orient, r, w.lane, q0, kv0, abi)
+            for l in range(w.n):
+                row, col = _c_pos(abi, l, r)
+                off = int(L.bias_offset(q[l], kv[l], pitch, 1))
+                assert np.isnan(db[off]), "two elements write one dB entry"
+                db[off] = ds[row, col]
+        assert int(np.isfinite(db).sum()) == 256
+        for q in range(16):
+            for kv in range(16):
+                qq, kk = (
+                    (q0 + q, kv0 + kv) if orient == L.Q_ROWS else (q0 + kv, kv0 + q)
+                )
+                assert db[qq * pitch + kk] == ds[q, kv]

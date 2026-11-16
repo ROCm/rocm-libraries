@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Compile the pinned SDPA backward prep objects (gfx950, gfx11-generic, gfx942, gfx90a): the Delta and LSE workspace kernel that runs before dK/dV and dQ; the `sink=1` rows are its attention-sink twin.
+"""Compile the pinned SDPA backward prep objects (gfx950, gfx11-generic, gfx12-generic, gfx942, gfx90a): the Delta and LSE workspace kernel that runs before dK/dV and dQ; the `sink=1` rows are its attention-sink twin.
 
     python -m generators.gen_sdpa_bwd_prep --arch gfx950 --out-dir <content root> --reference-dir <S1 reference dir>
 

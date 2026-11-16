@@ -43,6 +43,10 @@ LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
 MFMA16_LADDER = LADDER + (
     512,
 )  # hd 257..512 rides one padded 512 rung on gfx90a / gfx942
+# gfx12-generic only: the wide rungs for head dims 257..512. gfx11-generic stops at `LADDER`.
+GFX12_ARCH = "gfx12-generic"
+WIDE_RUNGS = (320, 384, 448, 512)
+GFX12_LADDER = LADDER + WIDE_RUNGS
 LDS_CAP_BYTES = 65536
 ROWS_PER_WAVE = 16
 WARP_SIZE = 32  # WMMA targets; MFMA16 (`MFMA16_ARCHES`) is wave64
@@ -71,6 +75,8 @@ POLICY = {
     224: (2, 16, 16),
     256: (4, 16, 16),
 }
+# gfx12-generic: the gfx11 rows plus one row per wide rung: 4 contraction shards, 8 waves, block_n 16.
+POLICY_GFX12 = {**POLICY, **dict.fromkeys(WIDE_RUNGS, (4, 8, 16))}
 # MFMA16 (wave64): a 16-column Q / dO pack is 2 VGPRs and an accumulator 4, so no rung to 256 needs the contraction shards; 4 waves = 256 threads.
 # (contraction_shards, num_waves, block_n): measured on gfx90a with the dK/dV policy (the dQ kernel moves the total by 2-3 %: block_n 16 at
 # hd 128, 8 waves with block_n 32 at hd >= 160; the 4-wave block_n 32 default holds at hd <= 64); 80-96 follow hd 128, 160-224 follow hd 256.
@@ -188,12 +194,21 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
         why.append(f"arch {arch!r} is not a gfx11/gfx12/MFMA16 target")
     if dtype not in ("f16", "bf16"):
         why.append(f"dtype {dtype!r} is not f16 or bf16")
-    ladder = MFMA16_LADDER if arch in MFMA16_ARCHES else LADDER
+    ladder = (
+        MFMA16_LADDER
+        if arch in MFMA16_ARCHES
+        else GFX12_LADDER if arch == GFX12_ARCH else LADDER
+    )
     if tile not in ladder:
         why.append(f"tile {tile} is not a rung of {ladder}")
     if cls not in ("plain", "causal", "bias"):
         why.append(f"class {cls!r}")
-    base = (POLICY_MFMA16 if arch in MFMA16_ARCHES else POLICY).get(tile, (1, 8, 32))
+    policy = (
+        POLICY_MFMA16
+        if arch in MFMA16_ARCHES
+        else POLICY_GFX12 if arch == GFX12_ARCH else POLICY
+    )
+    base = policy.get(tile, (1, 8, 32))
     shards = int(pins.get("contraction_shards", base[0]))
     if shards < 1 or shards & (shards - 1):
         why.append(f"contraction_shards {shards} is not a power of two")

@@ -48,6 +48,7 @@ import gen_descriptors as gd  # noqa: E402
 from generators._instances import (  # noqa: E402
     SDPA_BWD_CDNA9_TARGETS,
     SDPA_BWD_GFX11_TARGET,
+    SDPA_BWD_GFX12_TARGET,
     SDPA_BWD_TARGET,
     instances_for,
 )
@@ -55,7 +56,12 @@ from generators._sdpa_bwd_spec import family, rung_below, to_spec  # noqa: E402
 
 PROBE_CSV = FLYDSL / "tests" / "data" / "sdpa_bwd_probe_graphs.csv"
 PROBE_COLUMNS = ("arch", "kernel", "dtype", "graph", "served_rows")
-ARCHES = (SDPA_BWD_TARGET, SDPA_BWD_GFX11_TARGET, *SDPA_BWD_CDNA9_TARGETS)
+ARCHES = (
+    SDPA_BWD_TARGET,
+    SDPA_BWD_GFX11_TARGET,
+    SDPA_BWD_GFX12_TARGET,
+    *SDPA_BWD_CDNA9_TARGETS,
+)
 KERNELS = ("prep", "dkdv", "dq")
 
 PACK_MAX_BLOCK_Q = gd.pack_max_block_q()
@@ -180,7 +186,7 @@ def table_rows(kind: str, arch: str) -> list[dict]:
     else:
         from generators import _sdpa_bwd_rdna_build as rdna  # noqa: PLC0415
 
-        # The rows of the RDNA family (all of gfx11-generic's, the 16-bit rows of gfx942 and gfx90a) are spelled by the RDNA
+        # The rows of the RDNA family (all of gfx11-generic's and gfx12-generic's, the 16-bit rows of gfx942 and gfx90a) are spelled by the RDNA
         # builder, the others by their Spec grammar; both keep table order.
         rdna_specs = iter(rdna.specs_for(kind, arch))
         specs = [

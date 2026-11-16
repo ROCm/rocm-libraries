@@ -13,7 +13,7 @@ rows are the tables of ``_instances`` (``SDPA_BWD_GFX11_TABLES``, ...), each the
 ``SWEEP_ARCH``-free, through the FlyDSL generic-target shim (``_flydsl_env.prepare``), in cache mode, under the module's own
 compile hints.
 
-``ARCHES`` are the arches whose rows ``family(arch, dtype, kernel) == "rdna"`` this module builds: gfx11-generic (every row) and
+``ARCHES`` are the arches whose rows ``family(arch, dtype, kernel) == "rdna"`` this module builds: gfx11-generic and gfx12-generic (every row) and
 the 16-bit rows of gfx942 and gfx90a (the MFMA16 layer, wave64) with their fp32 ``dbias_reduce`` (the f32 dB reduce of a 16-bit row,
 the gfx11 kernel). ``_sdpa_bwd_split_build`` builds those arches' other fp32 rows with the CDNA family and writes one manifest.
 
@@ -58,6 +58,7 @@ from ._instances import (
     SDPA_BWD_GFX11_KNOBS,
     SDPA_BWD_GFX11_SPLIT_KINDS,
     SDPA_BWD_GFX11_TARGET,
+    SDPA_BWD_GFX12_TARGET,
     _sdpa_bwd_tables,
     instances_for,
     sdpa_bwd_perf_knobs,
@@ -79,10 +80,10 @@ from ._sdpa_bwd_spec import (
     family,
 )
 
-# The arches whose RDNA-family rows this module builds (every row of gfx11-generic, the 16-bit rows of gfx942 and gfx90a).
-ARCHES = (SDPA_BWD_GFX11_TARGET, *SDPA_BWD_CDNA9_TARGETS)
-# The arches whose every row this module builds alone (gfx12-generic joins with its rows).
-GENERIC_ARCHES = (SDPA_BWD_GFX11_TARGET,)
+# The arches whose RDNA-family rows this module builds (every row of gfx11-generic and gfx12-generic, the 16-bit rows of gfx942 and gfx90a).
+ARCHES = (SDPA_BWD_GFX11_TARGET, SDPA_BWD_GFX12_TARGET, *SDPA_BWD_CDNA9_TARGETS)
+# The arches whose every row this module builds alone.
+GENERIC_ARCHES = (SDPA_BWD_GFX11_TARGET, SDPA_BWD_GFX12_TARGET)
 # The arches whose rows pass the CDNA gates (R-MIR verdict, #1087 facts; ``_sdpa_bwd_cdna_build._run_gate``). The other arches record
 # ``gates: "n/a"``: byte identity with the S1 pin is their only check; their R-MIR is scanned only on request (``_compile_one``).
 GATED_ARCHES = SDPA_BWD_CDNA9_TARGETS
@@ -95,6 +96,7 @@ _REFERENCE_CSVS = {
     arch: FLYDSL_DIR / "tests" / "data" / name
     for arch, name in {
         SDPA_BWD_GFX11_TARGET: "sdpa_bwd_gfx11_reference.csv",
+        SDPA_BWD_GFX12_TARGET: "sdpa_bwd_gfx12_reference.csv",
         "gfx942": "sdpa_bwd_gfx942_reference.csv",
         "gfx90a": "sdpa_bwd_gfx90a_reference.csv",
     }.items()
@@ -792,7 +794,7 @@ def generate(
     nondeterministic_csv: Path = nondet.NONDETERMINISTIC_CSV,
     stored_dir: Path | None = None,
 ) -> int:
-    """Build every row of @p op (or the rows whose Spec hash is in @p only) for the generic arch @p arch (gfx11-generic).
+    """Build every row of @p op (or the rows whose Spec hash is in @p only) for the generic arch @p arch (gfx11-generic or gfx12-generic).
 
     Writes ``<out_root>/<op>/<arch>/``; returns the number of ``error`` rows. The directory must not hold files already.
     @p reference_dir holds the S1 objects (``<hash>.hsaco``): every built object must be its sha256, which the rows of @p reference_csv
