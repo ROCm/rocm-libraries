@@ -7,15 +7,19 @@
 
 default_config.json sweeps M/N blocks and tile_k from 64 up and pads nothing.
 The *_config_gfx950.json files below add the blocks it leaves out: an M or N
-block of 16 or 32, tile_k 32, and padded kernels at native vector widths. Each
-test expands a config through the batched bridge (no GPU, hipcc or build) and
-checks that it lists those kernels and only those.
+block of 16 or 32, tile_k 32, padded kernels at native vector widths, and (with
+the batched-only extra_wave_maps key) 1- and 2-wave blocks. Each test expands a
+config through the batched bridge (no GPU, hipcc or build) and checks that it
+lists those kernels and only those.
 
 Run: python3 -m pytest tests/test_batched_narrow_configs.py -v
 """
 
 import functools
+import itertools
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,7 +28,8 @@ DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
-from batched_gemm_utils import expand_sweep  # noqa: E402
+from batched_gemm_utils import _extra_wave_maps, expand_sweep  # noqa: E402
+from gemm_utils import _warp_config_supported, _warp_supported_table  # noqa: E402
 
 _CONFIG_DIR = DISPATCHER_DIR.parent / "tile_engine/ops/gemm/batched_gemm/configs"
 # The gfx950 wave maps of the Tile Engine table (gemm_validation_utils).
@@ -110,6 +115,55 @@ class TestNarrowConfigs(unittest.TestCase):
         self.assertEqual(min(min(c.tile_m, c.tile_n, c.tile_k) for c in kernels), 64)
         self.assertFalse([c.name for c in kernels if c.pad_m or c.pad_n or c.pad_k])
         self.assertLessEqual({_waves(c) for c in kernels}, _TE_WAVES)
+
+
+class TestBatchedExtraWaveMaps(unittest.TestCase):
+    """narrow_1w2w_*: extra_wave_maps adds 1- and 2-wave blocks for that config only."""
+
+    EXTRA = {(1, 1, 1), (1, 2, 1), (2, 1, 1)}
+
+    @staticmethod
+    def _path(half):
+        return _CONFIG_DIR / f"narrow_1w2w_{half}_config_gfx950.json"
+
+    def _expand_with(self, half, extra):
+        cfg = json.loads(self._path(half).read_text())
+        cfg.pop("extra_wave_maps")
+        if extra is not None:
+            cfg["extra_wave_maps"] = {"gfx950": extra}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cfg.json"
+            path.write_text(json.dumps(cfg))
+            return expand_sweep(str(path), arch="gfx950", dtype="bf16", layout="rcr")
+
+    def test_lists_the_extra_maps(self):
+        for half, rule in (("m", lambda c: c.tile_m <= 32), ("n", lambda c: c.tile_n <= 32)):
+            with self.subTest(half=half):
+                kernels = _kernels(self._path(half))
+                self.assertEqual({_waves(c) for c in kernels}, self.EXTRA | {(2, 2, 1)})
+                self.assertEqual([c.name for c in kernels if not rule(c)], [])
+        blocks = {(c.tile_m, c.tile_n, _waves(c)) for c in _kernels(self._path("m"))}
+        self.assertIn((16, 16, (1, 1, 1)), blocks)
+
+    def test_without_the_key_only_the_table_maps(self):
+        kernels = self._expand_with("m", None)
+        self.assertEqual({_waves(c) for c in kernels}, {(2, 2, 1)})
+
+    def test_rejects_maps_batched_does_not_take(self):
+        for extra in ([[4, 2, 1]], [[2, 1, 2]], [[1, 1, 1], [8, 2, 1]]):
+            with self.subTest(extra=extra):
+                with self.assertRaises(ValueError):
+                    self._expand_with("m", extra)
+
+    def test_maps_are_per_arch(self):
+        self.assertEqual(_extra_wave_maps(str(self._path("m")), "gfx942"), ())
+        self.assertEqual(set(_extra_wave_maps(str(self._path("m")), "gfx950")), self.EXTRA)
+
+    def test_shared_gate_without_extra_is_the_table(self):
+        for arch, table in _warp_supported_table().items():
+            for wave in itertools.product((1, 2, 4, 8), (1, 2, 4, 8), (1, 2)):
+                with self.subTest(arch=arch, wave=wave):
+                    self.assertEqual(_warp_config_supported(*wave, arch), list(wave) in table)
 
 
 if __name__ == "__main__":

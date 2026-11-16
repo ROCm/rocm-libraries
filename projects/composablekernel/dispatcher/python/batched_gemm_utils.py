@@ -35,6 +35,7 @@ from __future__ import annotations
 from dispatcher_common import unified_framework_flags, arch_feature_defines
 
 import ctypes
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -736,6 +737,31 @@ def setup_multiple_batched_gemm_dispatchers(
 # TE sweep config expansion
 # ============================================================================
 
+# Wave maps a batched sweep config may add on top of the Tile Engine table with
+# "extra_wave_maps": {"<arch>": [[m, n, k], ...]} (the table's gfx950 maps are
+# 1x4x1, 2x2x1, 4x1x1). Only maps arch_specs.json lists for the arch, so the
+# codegen emits them: the 1- and 2-wave blocks of the gfx950 narrow tiles
+# (configs/narrow_1w2w_*_config_gfx950.json).
+_BATCHED_EXTRA_WAVE_MAPS: Dict[str, Tuple[Tuple[int, int, int], ...]] = {
+    "gfx950": ((1, 1, 1), (1, 2, 1), (2, 1, 1)),
+}
+
+
+def _extra_wave_maps(config_path: str, arch: str) -> Tuple[Tuple[int, int, int], ...]:
+    """The sweep config's extra wave maps for ``arch``; ValueError for a map the
+    batched kernel does not take on that arch."""
+    with open(config_path) as f:
+        wanted = json.load(f).get("extra_wave_maps", {}).get(arch, [])
+    maps = tuple(tuple(w) for w in wanted)
+    allowed = _BATCHED_EXTRA_WAVE_MAPS.get(arch, ())
+    bad = sorted(set(maps) - set(allowed))
+    if bad:
+        raise ValueError(
+            f"{config_path}: extra_wave_maps {bad} for {arch}; "
+            f"batched takes {list(allowed)}"
+        )
+    return maps
+
 
 def expand_sweep(
     config_path: str,
@@ -751,7 +777,9 @@ def expand_sweep(
     ``arch`` is resolved via ``_get_arch()`` (rocminfo) when omitted and
     validated against the supported set otherwise -- never a silent gfx942
     default. ``vector_kwargs`` (``vector_sizes``/``rejects``) is forwarded to
-    gemm_utils.expand_sweep for misaligned-problem vector widths."""
+    gemm_utils.expand_sweep for misaligned-problem vector widths. A config's
+    ``extra_wave_maps`` (see ``_BATCHED_EXTRA_WAVE_MAPS``) adds wave maps to the
+    Tile Engine table for that config only."""
     arch = _resolve_arch(arch)
     # Match Old-TE's validated set EXACTLY (the batched_gemm instance builder's
     # --datatype/--layout choices, kept equal by a unit test) so the bridge never
@@ -765,7 +793,13 @@ def expand_sweep(
                 f"batched_gemm bridge supports {name} {list(supported)}; got {value!r}"
             )
     base_configs = _gu.expand_sweep(
-        config_path, arch, dtype=dtype, layout=layout, variant="batched", **vector_kwargs
+        config_path,
+        arch,
+        dtype=dtype,
+        layout=layout,
+        variant="batched",
+        extra_wave_maps=_extra_wave_maps(config_path, arch),
+        **vector_kwargs,
     )
     out: List[BatchedGemmKernelConfig] = []
     seen: set = set()

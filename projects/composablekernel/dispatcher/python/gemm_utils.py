@@ -2772,14 +2772,17 @@ def _warp_supported_table():
         return _WARP_SUPPORTED_COMBINATIONS_FALLBACK
 
 
-def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> bool:
+def _warp_config_supported(
+    wave_m: int, wave_n: int, wave_k: int, arch: str, extra=()
+) -> bool:
     """True iff [wave_m, wave_n, wave_k] is an allowed warps-per-block triple
-    for ``arch`` (mirrors Old-TE validate_warp_configuration). Unknown arch =>
-    permissive (matches Old-TE's log-and-allow behavior)."""
+    for ``arch`` (mirrors Old-TE validate_warp_configuration) or one of the
+    calling op's own ``extra`` maps (the shared table is untouched). Unknown
+    arch => permissive (matches Old-TE's log-and-allow behavior)."""
     allowed = _warp_supported_table().get(arch)
     if not allowed:
         return True
-    return [wave_m, wave_n, wave_k] in allowed
+    return [wave_m, wave_n, wave_k] in allowed or (wave_m, wave_n, wave_k) in extra
 
 
 # --- gfx1250 pipeline gate (parity with unified_gemm_codegen) --------------
@@ -2947,6 +2950,7 @@ def expand_sweep(
     vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
     rejects: Optional[Dict[str, int]] = None,
     reduction_strategies: Optional[Union[str, List[str]]] = None,
+    extra_wave_maps: Tuple[Tuple[int, int, int], ...] = (),
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2988,6 +2992,10 @@ def expand_sweep(
     strategy that runs it: a C width that is illegal for atomic is legal for
     linear and tree. The argument with another variant, and Stream-K with a
     column-major C (which no strategy supports), raise ``ValueError`` too.
+
+    ``extra_wave_maps`` are wave maps the calling op accepts on top of the Tile
+    Engine table for ``arch`` (the ctypes validator and the codegen's ArchFilter
+    still apply arch_specs.json); the default is none, so other ops are unchanged.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -3216,7 +3224,7 @@ def expand_sweep(
             continue
         # Parity gate: only emit warps-per-block triples Old-TE allows
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
-        if not _warp_config_supported(wm, wn, wk, arch):
+        if not _warp_config_supported(wm, wn, wk, arch, extra_wave_maps):
             continue
         if _codegen_common().gfx1250_fp32_tile_reject_reason(
             arch, dtype, tm, tn, wm * wn * wk
