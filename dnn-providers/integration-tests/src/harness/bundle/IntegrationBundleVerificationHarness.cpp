@@ -5,7 +5,11 @@
 #include "harness/bundle/RngDumpHandoff.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <optional>
 #include <ostream>
@@ -69,6 +73,68 @@ const char* modeName(VerificationMode mode)
     default:
         return "unknown";
     }
+}
+
+// Diagnostic, off unless HIPDNN_TEST_DUMP_DIR is set: writes every input, the engine's output and the
+// reference's output of the comparison to <dir>/<test name>/ as raw element-space bytes plus a
+// manifest.json (role, uid, dims, strides, element size, file). Lets an offline tool grade the same
+// tensors with another tolerance rule (see the sdpa_conformance comparison in the gauntlet notes).
+template <class Inputs, class Engine, class Expected, class Uids>
+void dumpComparisonTensors(const std::string& testName,
+                           Inputs& inputs,
+                           Engine& engineOutputs,
+                           const Expected& expectedFor,
+                           const Uids& outputUids)
+{
+    const char* root = std::getenv("HIPDNN_TEST_DUMP_DIR");
+    if(root == nullptr || *root == '\0')
+    {
+        return;
+    }
+    std::string safe = testName;
+    for(auto& c : safe)
+    {
+        if(!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.' && c != '-')
+        {
+            c = '_';
+        }
+    }
+    const auto dir = std::filesystem::path(root) / safe;
+    std::filesystem::create_directories(dir);
+    std::ostringstream manifest;
+    manifest << "{\"test\":\"" << safe << "\",\"tensors\":[";
+    bool first = true;
+    const auto write = [&](const char* role, int64_t uid, hipdnn_data_sdk::utilities::ITensor& t) {
+        const std::string file = std::string(role) + "_" + std::to_string(uid) + ".bin";
+        std::ofstream out(dir / file, std::ios::binary);
+        out.write(static_cast<const char*>(t.rawHostData()),
+                  static_cast<std::streamsize>(t.elementSpace() * t.elementSize()));
+        manifest << (first ? "" : ",") << "{\"role\":\"" << role << "\",\"uid\":" << uid
+                 << ",\"elem\":" << t.elementSize() << ",\"space\":" << t.elementSpace()
+                 << ",\"file\":\"" << file << "\",\"dims\":[";
+        first = false;
+        for(size_t i = 0; i < t.dims().size(); ++i)
+        {
+            manifest << (i != 0 ? "," : "") << t.dims()[i];
+        }
+        manifest << "],\"strides\":[";
+        for(size_t i = 0; i < t.strides().size(); ++i)
+        {
+            manifest << (i != 0 ? "," : "") << t.strides()[i];
+        }
+        manifest << "]}";
+    };
+    for(auto& [uid, tensor] : inputs)
+    {
+        write("input", uid, *tensor);
+    }
+    for(const auto uid : outputUids)
+    {
+        write("engine", uid, *engineOutputs.at(uid));
+        write("ref", uid, expectedFor(uid));
+    }
+    manifest << "]}";
+    std::ofstream(dir / "manifest.json") << manifest.str();
 }
 
 } // namespace
@@ -1865,6 +1931,8 @@ VerificationOutcome
                                                + e.what() + " (" + _bundlePath.string() + ")")
             .atStage(OutcomeStage::COMPARE);
     }
+    dumpComparisonTensors(
+        currentTestName(), _inputs, engineOutputs, expectedFor, _bundle->outputTensorUids);
     const auto mismatches = bundle::compareOutputs(
         wrapper,
         bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
