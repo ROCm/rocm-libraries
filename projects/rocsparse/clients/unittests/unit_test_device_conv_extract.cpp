@@ -37,8 +37,6 @@ namespace
 {
     using ConvExtract = ConvTest;
 
-    using ExtractDescr = Owned<rocsparse_extract_descr, rocsparse_destroy_extract_descr>;
-
     size_t value_size(rocsparse_datatype dt)
     {
         switch(dt)
@@ -56,24 +54,6 @@ namespace
             return 16;
         default:
             return 4;
-        }
-    }
-
-    // Library bug (AISPARSE-925): for a matrix it does not support,
-    // rocsparse_create_extract_descr lets a rocsparse_status thrown by the descriptor
-    // constructor escape the C API instead of returning it. Both behaviours are accepted.
-    rocsparse_status create_extract(ExtractDescr&               descr,
-                                    rocsparse_const_spmat_descr source,
-                                    rocsparse_spmat_descr       target)
-    {
-        try
-        {
-            return rocsparse_create_extract_descr(
-                &descr, source, target, rocsparse_extract_alg_default);
-        }
-        catch(const rocsparse_status& status)
-        {
-            return status;
         }
     }
 
