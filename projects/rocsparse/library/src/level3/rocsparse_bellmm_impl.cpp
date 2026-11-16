@@ -204,9 +204,7 @@ namespace rocsparse
 
         if(mb == 0 || n == 0 || kb == 0 || bell_cols == 0)
         {
-            // mb is the block-row count of C for every trans_A (rocsparse_spmm
-            // passes mat_C->rows / block_dim). kb is the K dimension of op(A),
-            // which is A.rows when A is transposed, not the row count of C.
+            // Only trans_A == none reaches here, so C has mb * block_dim rows.
             const int64_t m = mb * bell_block_dim;
 
             // matrix never accessed however still need to update C matrix
