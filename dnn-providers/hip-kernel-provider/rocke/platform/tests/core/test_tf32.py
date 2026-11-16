@@ -306,10 +306,11 @@ def test_vector_arithmetic_rejected_after_serialization(operation):
             b.vector_trunc(v, TF32)
         else:
             getattr(b, f"vector_{operation}")(v, I32)
-    elif operation == "lshr":
-        # IRBuilder refuses a shift of a non-integer, so the op is written past
-        # it, as hand-assembled IR can reach the parser and the lowerings.
-        b._op("vector.lshr", [v, v], [v.type])
+    elif operation in ("and", "or", "shl", "lshr"):
+        # IRBuilder refuses a bitwise op or shift of a non-integer, so the op is
+        # written past it, as hand-assembled IR can reach the parser and the
+        # lowerings.
+        b._op(f"vector.{operation}", [v, v], [v.type])
     else:
         getattr(b, f"vector_{operation}")(v, v)
     b.ret()
