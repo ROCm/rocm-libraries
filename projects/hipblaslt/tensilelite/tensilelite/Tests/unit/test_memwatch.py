@@ -79,6 +79,12 @@ def test_phase_from_line(line, expected):
         ("/opt/rocm/lib/llvm/bin/clang-offload-bundler\x00--compress", "bundler"),
         ("/bin/sh\x00-c\x00true", "sh"),
         ("/usr/bin/sleep\x0030", "other"),
+        # A Python path among a compiler's arguments does not make it the driver.
+        (
+            "/opt/rocm/lib/llvm/bin/clang\x00-I/venv/lib/python3.13/include\x00-c\x00k.s",
+            "clang",
+        ),
+        ("/usr/bin/python3.13\x00/tmp/x.py", "python-main"),
     ],
 )
 def test_classify(cmdline, cls):
@@ -102,7 +108,11 @@ def test_largest_rss_and_largest_pss_are_tracked_separately(monkeypatch):
         11: {"Rss": 100 << 20, "Pss": 20 << 20, "Uss": 10 << 20},
         12: {"Rss": 50 << 20, "Pss": 40 << 20, "Uss": 40 << 20},
     }
-    monkeypatch.setattr(memwatch, "proc_table", lambda: {1: 0, 10: 1, 11: 10, 12: 10})
+    monkeypatch.setattr(
+        memwatch,
+        "proc_table",
+        lambda: {1: (0, 1), 10: (1, 50), 11: (10, 60), 12: (10, 70)},
+    )
     monkeypatch.setattr(memwatch, "smaps_rollup", lambda pid: smaps.get(pid))
     monkeypatch.setattr(memwatch, "read_file", lambda path: b"/bin/sleep\x0030")
     monkeypatch.setattr(memwatch, "mem_available", lambda: None)
@@ -117,6 +127,68 @@ def test_largest_rss_and_largest_pss_are_tracked_separately(monkeypatch):
     summary = sampler.summary(1.0, 0, ["sleep"])
     assert summary["per_class_peak"]["other"]["largest_single_rss_MiB"] == 100.0
     assert summary["per_class_peak"]["other"]["largest_single_pss_MiB"] == 40.0
+
+
+def test_a_recycled_pid_is_classified_afresh(monkeypatch):
+    tables = iter(
+        [
+            {1: (0, 1), 10: (1, 50), 11: (10, 60)},  # pid 11 is an assembler
+            {1: (0, 1), 10: (1, 50), 11: (10, 900)},  # pid 11 reused by a worker
+        ]
+    )
+    cmdlines = [
+        b"/opt/rocm/lib/llvm/bin/clang\x00-c\x00k.s",
+        b"/venv/bin/python3\x00-m\x00joblib.externals.loky.backend.popen_loky_posix",
+    ]
+    monkeypatch.setattr(memwatch, "proc_table", lambda: next(tables))
+    monkeypatch.setattr(
+        memwatch,
+        "smaps_rollup",
+        lambda pid: {"Rss": 1 << 20, "Pss": 1 << 20, "Uss": 1 << 20},
+    )
+    monkeypatch.setattr(
+        memwatch,
+        "read_file",
+        lambda path: (
+            cmdlines[0]
+            if path.endswith("/11/cmdline")
+            else b"/venv/bin/python3\x00-m\x00tensilelite.create_library"
+        ),
+    )
+    monkeypatch.setattr(memwatch, "mem_available", lambda: None)
+    sampler = memwatch.Sampler(root_pid=10, interval=1.0, csv_path=None)
+    sampler.sample()
+    assert sampler.rows[0]["clang.n"] == 1 and sampler.rows[0]["loky-worker.n"] == 0
+    cmdlines.reverse()
+    sampler.sample()
+    assert sampler.rows[1]["clang.n"] == 0 and sampler.rows[1]["loky-worker.n"] == 1
+    assert set(sampler.cmdline_cache) == {
+        (10, 50),
+        (11, 900),
+    }  # the dead (11, 60) entry is gone
+
+
+def test_a_root_that_exited_before_the_sample_is_skipped(monkeypatch):
+    # /proc listing taken after the child exited: the root is not in the table.
+    monkeypatch.setattr(memwatch, "proc_table", lambda: {1: (0, 1)})
+    monkeypatch.setattr(
+        memwatch, "smaps_rollup", lambda pid: {"Rss": 1, "Pss": 1, "Uss": 1}
+    )
+    monkeypatch.setattr(memwatch, "mem_available", lambda: None)
+    sampler = memwatch.Sampler(root_pid=10, interval=1.0, csv_path=None)
+    sampler.sample()
+    assert sampler.rows[0]["nproc"] == 0 and sampler.rows[0]["rss_sum"] == 0
+
+
+def test_unreadable_smaps_is_reported_rather_than_silent_zero(monkeypatch):
+    monkeypatch.setattr(memwatch, "proc_table", lambda: {1: (0, 1), 10: (1, 50)})
+    monkeypatch.setattr(memwatch, "smaps_rollup", lambda pid: None)
+    monkeypatch.setattr(memwatch, "mem_available", lambda: None)
+    sampler = memwatch.Sampler(root_pid=10, interval=1.0, csv_path=None)
+    sampler.sample()
+    summary = sampler.summary(1.0, 0, ["x"])
+    assert summary["peak"]["pss_sum"]["GiB"] == 0.0
+    assert summary["warnings"] and "smaps_rollup" in summary["warnings"][0]
 
 
 # ------------------------------------------------------------- exit status
@@ -171,6 +243,7 @@ def test_summary_and_csv_account_for_a_shell_in_the_tree(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     summary = json.loads(out.read_text())
     assert summary["returncode"] == 0 and summary["samples"] >= 2
+    assert summary["warnings"] == []
     assert (
         "Phase A" in summary["phase_peak"] and "after phase A" in summary["phase_peak"]
     )

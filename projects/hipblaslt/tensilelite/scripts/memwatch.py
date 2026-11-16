@@ -21,6 +21,9 @@ Usage::
 
 Exit status is the child's exit status; a child killed by a signal gives
 128 + the signal number, as a shell would report.
+
+Linux only: it reads /proc/<pid>/smaps_rollup (kernel 4.14 or later), which is
+readable for processes of the same user or with CAP_SYS_PTRACE.
 """
 
 import argparse
@@ -35,9 +38,11 @@ import threading
 import time
 from collections import defaultdict
 
-PAGE = os.sysconf("SC_PAGE_SIZE")
-
-# Process classes, matched against /proc/<pid>/cmdline (NUL-joined argv) in order.
+# Process classes, matched against /proc/<pid>/cmdline (NUL-joined argv) in
+# order. The tool classes come before the interpreter so that a compiler
+# invoked with a Python path among its arguments is not taken for the
+# driver; "python-main" then only matches an interpreter in argv[0]. The
+# root process is always reported as "python-main" regardless.
 CLASSIFIERS = [
     (
         "loky-worker",
@@ -45,11 +50,11 @@ CLASSIFIERS = [
             r"loky|joblib\.externals|multiprocessing\.(spawn|forkserver|resource_tracker)|concurrent\.futures"
         ),
     ),
-    ("python-main", re.compile(r"TensileCreateLibrary|Tensile\.|python")),
     ("clang", re.compile(r"(^|/)(amd)?clang(\+\+)?(-\d+)?(\x00|$)")),
     ("lld", re.compile(r"(^|/)(ld\.lld|lld)(\x00|$)")),
     ("bundler", re.compile(r"clang-offload-bundler")),
     ("sh", re.compile(r"(^|/)(ba)?sh(\x00|$)")),
+    ("python-main", re.compile(r"^[^\x00]*python[0-9.]*(\x00|$)")),
 ]
 
 CLASS_NAMES = [name for name, _ in CLASSIFIERS] + ["other"]
@@ -69,6 +74,8 @@ PHASE_TOTAL = re.compile(r"^Total time")
 # Phases whose ParallelMap2 call returns a generator: "Done." is printed when
 # the generator is handed back, before any result has been consumed, so it
 # does not mark the end of the work. The phase ends at its "Time to" line.
+# Today that is only logic loading (generateLogicDataAndSolutions in
+# create_library/run.py); a new return_as="generator" caller belongs here too.
 GENERATOR_PHASES = {"Loading Logics..."}
 
 
@@ -88,7 +95,11 @@ def read_file(path: str):
 
 
 def proc_table():
-    """Return {pid: ppid} for all processes."""
+    """Return {pid: (ppid, starttime)} for all processes.
+
+    starttime (clock ticks since boot, /proc/<pid>/stat field 22) tells a
+    reused pid apart from the process that held it before.
+    """
     table = {}
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
@@ -96,11 +107,12 @@ def proc_table():
         data = read_file(f"/proc/{entry}/stat")
         if not data:
             continue
-        # comm may contain spaces/parens; ppid is the 2nd field after ')'.
+        # comm may contain spaces/parens; the fields after ')' start at field 3,
+        # so ppid is index 1 and starttime index 19.
         rpar = data.rfind(b")")
         fields = data[rpar + 2 :].split()
         try:
-            table[int(entry)] = int(fields[1])
+            table[int(entry)] = (int(fields[1]), int(fields[19]))
         except (IndexError, ValueError):
             continue
     return table
@@ -108,7 +120,7 @@ def proc_table():
 
 def descendants(root: int, table):
     children = defaultdict(list)
-    for pid, ppid in table.items():
+    for pid, (ppid, _) in table.items():
         children[ppid].append(pid)
     out = []
     stack = [root]
@@ -167,7 +179,11 @@ class Sampler(threading.Thread):
         self.phase = "startup"
         self.phase_lock = threading.Lock()
         self.rows = []
+        # (pid, starttime) -> class. Keyed on the start time as well so a pid
+        # recycled by a later process (a build spawns 200k assemblers) is
+        # classified afresh; entries of dead processes are dropped each sample.
         self.cmdline_cache = {}
+        self.readable = 0  # processes whose smaps_rollup could be read, ever
         self.peaks = {
             "rss_sum": (0, 0.0, ""),
             "pss_sum": (0, 0.0, ""),
@@ -195,17 +211,23 @@ class Sampler(threading.Thread):
         pids = descendants(self.root_pid, table)
         by_class = defaultdict(lambda: {"rss": 0, "pss": 0, "uss": 0, "count": 0})
         rss_sum = pss_sum = uss_sum = 0
+        # The root is listed even when it exited between proc_table() and here.
+        pids = [pid for pid in pids if pid in table]
+        live = {(pid, table[pid][1]) for pid in pids}
+        self.cmdline_cache = {k: v for k, v in self.cmdline_cache.items() if k in live}
         for pid in pids:
             vals = smaps_rollup(pid)
             if vals is None:
                 continue
-            cls = self.cmdline_cache.get(pid)
+            self.readable += 1
+            key = (pid, table[pid][1])
+            cls = self.cmdline_cache.get(key)
             if cls is None:
                 raw = read_file(f"/proc/{pid}/cmdline") or b""
                 cls = classify(raw.decode("utf-8", "replace"))
                 if pid == self.root_pid:
                     cls = "python-main"
-                self.cmdline_cache[pid] = cls
+                self.cmdline_cache[key] = cls
             rss, pss, uss = vals["Rss"], vals["Pss"], vals["Uss"]
             rss_sum += rss
             pss_sum += pss
@@ -327,7 +349,18 @@ class Sampler(threading.Thread):
                 if self.mem_avail0 is not None and self.min_mem_avail is not None
                 else None
             ),
+            "warnings": self.warnings(),
         }
+
+    def warnings(self):
+        out = []
+        if self.rows and self.readable == 0:
+            out.append(
+                "no process in the tree had a readable /proc/<pid>/smaps_rollup "
+                "(needs Linux >= 4.14 and the same user as the command, or "
+                "CAP_SYS_PTRACE); every memory figure above is 0 for that reason"
+            )
+        return out
 
     def write_csv(self):
         if not self.csv_path or not self.rows:
@@ -441,6 +474,8 @@ def main(argv=None):
     with open(args.out, "w") as f:
         json.dump(summary, f, indent=2)
     sampler.write_csv()
+    for w in summary["warnings"]:
+        print(f"memwatch: warning: {w}", file=sys.stderr)
 
     pk = summary["peak"]
     print("\n==== memwatch summary ====")
