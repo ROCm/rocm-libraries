@@ -389,10 +389,11 @@ void CheckInfer(miopen::Handle& handle, Data& d)
     test::ComputeCPUBNInference(d);
     activationHostInfer(
         d.activ_mode, 0.0, d.activ_beta, d.activ_alpha, d.out_ref.data, d.out_ref.data);
-    auto tolerance = kTol;
 #if WORKAROUND_SWDEV_547301
     // The bn.hpp inference fixture's tolerance, which Navi4x needs (SWDEV-547301).
-    tolerance = miopen::StartsWith(handle.GetDeviceName(), "gfx120") ? 8e-3 : kTol;
+    const auto tolerance = miopen::StartsWith(handle.GetDeviceName(), "gfx120") ? 8e-3 : kTol;
+#else
+    const auto tolerance = kTol;
 #endif
     test::CompareTensor<float>(d.output, d.out_ref, tolerance);
 }
