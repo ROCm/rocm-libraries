@@ -31,13 +31,18 @@
 // descriptor over the same arrays, through rocsparse_spmv and through
 // rocsparse_v2_spmv. The compute stage that follows set_pointers without a new
 // preprocessing is checked as well: it must never use the analysis of the old
-// pattern.
+// pattern. SpMV keeps no analysis for ELL, so the ELL tests only guard
+// set_pointers followed by SpMV.
 //
 #include "unit_test_device_level2_common.hpp"
+
+#include "rocsparse_mat_info.hpp"
+#include "rocsparse_spmat_descr.hpp"
 
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <numeric>
 
 using namespace level2;
 
@@ -324,6 +329,23 @@ namespace
         bool                v2     = false;
     };
 
+    // Entries of the y allocation before and after the vector, which no stage may write.
+    constexpr size_t y_guard = 16;
+
+    template <typename T>
+    T guard_value()
+    {
+        return case_scalar<T>(-1234.5f, 0.0f);
+    }
+
+    template <typename T>
+    std::vector<T> with_guards(const std::vector<T>& y)
+    {
+        std::vector<T> g(y.size() + 2 * y_guard, guard_value<T>());
+        std::copy(y.begin(), y.end(), g.begin() + y_guard);
+        return g;
+    }
+
     // x, y and the SpMV stages of one matrix descriptor, through the v1 or the v2 interface.
     template <typename T>
     class session
@@ -420,7 +442,7 @@ namespace
             , m_x(make_vector<T>(trans_size(c.trans, m, n, true), 2))
             , m_y0(make_vector<T>(trans_size(c.trans, m, n, false), 9))
             , m_dx(m_x)
-            , m_dy(m_y0)
+            , m_dy(with_guards(m_y0))
             , m_dalpha(std::vector<T>(1, m_alpha))
             , m_dbeta(std::vector<T>(1, m_beta))
         {
@@ -428,7 +450,7 @@ namespace
                           &m_vx.d, m_x.size(), m_dx.ptr, rocsparse_ut::dt_of<T>()),
                       rocsparse_status_success);
             EXPECT_EQ(rocsparse_create_dnvec_descr(
-                          &m_vy.d, m_y0.size(), m_dy.ptr, rocsparse_ut::dt_of<T>()),
+                          &m_vy.d, m_y0.size(), m_dy.ptr + y_guard, rocsparse_ut::dt_of<T>()),
                       rocsparse_status_success);
             if(m_cfg.v2)
             {
@@ -463,9 +485,18 @@ namespace
             return p.gemv(m_cfg.trans, m_alpha, m_x, m_beta, m_y0);
         }
 
+        // y; the entries around it must still hold the guard value.
         std::vector<T> y() const
         {
-            return to_host(m_dy);
+            const std::vector<T> all = to_host(m_dy);
+            size_t               bad = 0;
+            for(size_t k = 0; k < y_guard; ++k)
+            {
+                bad += !(all[k] == guard_value<T>());
+                bad += !(all[all.size() - 1 - k] == guard_value<T>());
+            }
+            EXPECT_EQ(bad, 0u) << "entries around y were written";
+            return std::vector<T>(all.begin() + y_guard, all.end() - y_guard);
         }
 
         // Buffer size query and preprocessing (v1) or analysis (v2) of the current pointers.
@@ -495,8 +526,8 @@ namespace
         // Compute stage on the initial y.
         rocsparse_status compute()
         {
-            const hipError_t copy
-                = hipMemcpy(m_dy.ptr, m_y0.data(), m_y0.size() * sizeof(T), hipMemcpyHostToDevice);
+            const hipError_t copy = hipMemcpy(
+                m_dy.ptr + y_guard, m_y0.data(), m_y0.size() * sizeof(T), hipMemcpyHostToDevice);
             EXPECT_EQ(copy, hipSuccess);
             if(m_cfg.v2)
             {
@@ -531,15 +562,42 @@ namespace
         return (i % 97 == 5) ? 600 : 1 + (i % 23);
     }
 
+    // Row lengths of p1 and of p2 for COO: p2 has the same number of entries, but
+    // a row longer than 10 * 256, above which the atomic COO kernel processes two
+    // entries per thread; the longest row of p1 has 600 entries.
+    constexpr int32_t coo_long_row = 2800;
+
+    inline std::vector<int32_t> coo_row_lengths(int32_t m, bool second)
+    {
+        std::vector<int32_t> len(m);
+        for(int32_t i = 0; i < m; ++i)
+            len[i] = row_length(second ? m - 1 - i : i, m);
+        if(!second)
+            return len;
+        const int32_t r     = m / 2;
+        int32_t       extra = coo_long_row - len[r];
+        len[r]              = coo_long_row;
+        for(int32_t i = 0; extra > 0; i = (i + 1) % m)
+        {
+            if(i != r && len[i] > 0)
+            {
+                --len[i];
+                --extra;
+            }
+        }
+        return len;
+    }
+
+    // block_dim only applies to BSR: SpMV keeps an analysis for block_dim == 1 only.
     template <typename T, typename I>
-    scenario<T, I> make_scenario(fmt f, int base)
+    scenario<T, I> make_scenario(fmt f, int base, int32_t block_dim = 1)
     {
         scenario<T, I> s;
         if(f == fmt::bsr)
         {
             const int32_t mb = 96;
             const int32_t nb = 80;
-            const int32_t bd = 4;
+            const int32_t bd = block_dim;
 
             std::vector<int32_t> count1(mb), count2(mb);
             for(int32_t i = 0; i < mb; ++i)
@@ -554,12 +612,22 @@ namespace
             return s;
         }
 
-        const int32_t     m = 1500;
-        const int32_t     n = 1300;
-        const host_csr<T> h1
-            = make_csr_by_length<T>(m, n, base, [&](int32_t i) { return row_length(i, m); });
-        const host_csr<T> h2 = make_csr_by_length<T>(
-            m, n, base, [&](int32_t i) { return row_length(m - 1 - i, m); });
+        const int32_t m = 1500;
+        const int32_t n = (f == fmt::coo) ? 3000 : 1300;
+        host_csr<T>   h1, h2;
+        if(f == fmt::coo)
+        {
+            const std::vector<int32_t> len1 = coo_row_lengths(m, false);
+            const std::vector<int32_t> len2 = coo_row_lengths(m, true);
+            h1 = make_csr_by_length<T>(m, n, base, [&](int32_t i) { return len1[i]; });
+            h2 = make_csr_by_length<T>(m, n, base, [&](int32_t i) { return len2[i]; });
+        }
+        else
+        {
+            h1 = make_csr_by_length<T>(m, n, base, [&](int32_t i) { return row_length(i, m); });
+            h2 = make_csr_by_length<T>(
+                m, n, base, [&](int32_t i) { return row_length(m - 1 - i, m); });
+        }
         host_csr<T> h3 = h1;
         for(size_t k = 0; k < h3.val.size(); ++k)
             h3.val[k] = value_of<T>(static_cast<int64_t>(k) * 3 + 1001, true);
@@ -570,20 +638,49 @@ namespace
         return s;
     }
 
+    // Whether the rocsparse_spmv_descr holds an analysis of the matrix arrays, so that
+    // its compute stage after set_pointers returns rocsparse_status_invalid_value.
+    // The COO analysis is kept with the matrix descriptor, not with the SpMV descriptor.
+    inline bool v2_refuses(fmt f, const config& c, int32_t block_dim)
+    {
+        switch(f)
+        {
+        case fmt::csr:
+        case fmt::csc:
+        {
+            // CSC runs the CSR kernels on the transposed operation. Rowsplit, and the
+            // default of a transposed CSR operation, which is rowsplit, keep no analysis.
+            const bool csr_none = (f == fmt::csr) == (c.trans == rocsparse_operation_none);
+            return c.alg == rocsparse_spmv_alg_csr_nnzsplit
+                   || (c.alg != rocsparse_spmv_alg_csr_rowsplit && csr_none);
+        }
+        case fmt::bsr:
+            return block_dim == 1;
+        case fmt::coo:
+        case fmt::ell:
+            return false;
+        }
+        return false;
+    }
+
+    // Returns the number of v2 compute stages refused after set_pointers.
     template <typename T, typename I>
-    void run_case(rocsparse_handle handle, fmt f, const config& c, int base)
+    int run_case(rocsparse_handle handle, fmt f, const config& c, int base, int32_t block_dim)
     {
         SCOPED_TRACE(::testing::Message() << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans
                                           << " device=" << c.device << " v2=" << c.v2
-                                          << " base=" << base << " i64=" << (sizeof(I) == 8));
+                                          << " base=" << base << " i64=" << (sizeof(I) == 8)
+                                          << " block_dim=" << block_dim);
 
-        const scenario<T, I> sc = make_scenario<T, I>(f, base);
+        int                  refused = 0;
+        const bool           refuses = c.v2 && v2_refuses(f, c, block_dim);
+        const scenario<T, I> sc      = make_scenario<T, I>(f, base, block_dim);
         device_problem<T, I> d1(sc.p1), d2(sc.p2), d3(sc.p3);
 
         spmat_guard mat;
         create(mat, sc.p1, d1);
         if(::testing::Test::HasFatalFailure())
-            return;
+            return refused;
         session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
 
         auto product = [&](const problem<T, I>& p, const char* what) {
@@ -613,10 +710,10 @@ namespace
             ASSERT_EQ(set_pointers(mat, p, d), rocsparse_status_success);
 
             // The analysis of the previous pointers must not be used. v1 computes the
-            // product without it; v2 either computes the product or refuses.
+            // product without it; v2 refuses when its descriptor holds that analysis.
             const rocsparse_status st  = s.compute();
             const auto             got = s.y();
-            if(!c.v2 || st == rocsparse_status_success)
+            if(!refuses)
             {
                 EXPECT_EQ(st, rocsparse_status_success) << "compute without preprocessing";
                 EXPECT_TRUE(expect_near(s.want(p), got, "compute without preprocessing"));
@@ -625,6 +722,7 @@ namespace
             {
                 EXPECT_EQ(st, rocsparse_status_invalid_value) << "compute without analysis";
                 EXPECT_TRUE(expect_near(s.y0(), got, "y after the refused compute"));
+                refused += (st == rocsparse_status_invalid_value);
             }
             if(::testing::Test::HasFailure())
                 return;
@@ -640,34 +738,35 @@ namespace
 
         s.preprocess();
         if(::testing::Test::HasFatalFailure())
-            return;
+            return refused;
         product(sc.p1, "initial product");
         if(::testing::Test::HasFailure())
-            return;
+            return refused;
 
         // Another sparsity pattern.
         replace(sc.p2, d2, "another pattern");
         if(::testing::Test::HasFailure())
-            return;
+            return refused;
 
         // The pattern of the first matrix with other values.
         replace(sc.p3, d3, "same pattern, other values");
         if(::testing::Test::HasFailure())
-            return;
+            return refused;
 
         // The same arrays rewritten with another pattern, then set again.
         replace(sc.p2, d2, "arrays of p2");
         if(::testing::Test::HasFailure())
-            return;
+            return refused;
         d2.overwrite(sc.p1);
         if(::testing::Test::HasFatalFailure())
-            return;
+            return refused;
         replace(sc.p1, d2, "same arrays rewritten in place");
         if(::testing::Test::HasFailure())
-            return;
+            return refused;
 
         // Back to the arrays of the first matrix.
         replace(sc.p1, d1, "back to the first arrays");
+        return refused;
     }
 
     struct alg_trans
@@ -741,30 +840,38 @@ namespace
     }
 
     template <typename T, typename I>
-    void sweep_index(rocsparse_handle handle, fmt f, bool v2)
+    int sweep_index(rocsparse_handle handle, fmt f, bool v2)
     {
-        for(const int base : {0, 1})
-            for(const bool device : {false, true})
-                for(const auto& at : cases_of<T>(f))
-                {
-                    scoped_pointer_mode mode(handle, device);
-                    config              c;
-                    c.alg    = at.alg;
-                    c.trans  = at.trans;
-                    c.device = device;
-                    c.v2     = v2;
-                    run_case<T, I>(handle, f, c, base);
-                    if(::testing::Test::HasFailure())
-                        return;
-                }
+        int refused = 0;
+        for(const int32_t block_dim : (f == fmt::bsr) ? std::vector<int32_t>{1, 4}
+                                                      : std::vector<int32_t>{1})
+            for(const int base : {0, 1})
+                for(const bool device : {false, true})
+                    for(const auto& at : cases_of<T>(f))
+                    {
+                        scoped_pointer_mode mode(handle, device);
+                        config              c;
+                        c.alg    = at.alg;
+                        c.trans  = at.trans;
+                        c.device = device;
+                        c.v2     = v2;
+                        refused += run_case<T, I>(handle, f, c, base, block_dim);
+                        if(::testing::Test::HasFailure())
+                            return refused;
+                    }
+        return refused;
     }
 
     template <typename T>
     void sweep(rocsparse_handle handle, fmt f, bool v2)
     {
-        sweep_index<T, int32_t>(handle, f, v2);
+        int refused = sweep_index<T, int32_t>(handle, f, v2);
         if(!::testing::Test::HasFailure())
-            sweep_index<T, int64_t>(handle, f, v2);
+            refused += sweep_index<T, int64_t>(handle, f, v2);
+        if(v2 && (f == fmt::csr || f == fmt::csc || f == fmt::bsr) && !::testing::Test::HasFailure())
+        {
+            EXPECT_GT(refused, 0) << "no v2 compute stage was refused after set_pointers";
+        }
     }
 
     class L2SetPointers : public rocsparse_ut::HandleTest
@@ -805,6 +912,8 @@ namespace
         const std::vector<int32_t> new_col = {1, 0, 1};
         const std::vector<float>   val     = {2, 3, 4};
 
+        // nnz-split is left out until #15869 is fixed: on this matrix it computes
+        // y[0] = 127 instead of 65 before set_pointers.
         for(const bool v2 : {false, true})
             for(const auto alg : {rocsparse_spmv_alg_default,
                                   rocsparse_spmv_alg_csr_adaptive,
@@ -849,5 +958,159 @@ namespace
                 ASSERT_EQ(s.compute(), rocsparse_status_success);
                 EXPECT_TRUE(expect_near(std::vector<float>{31, 92, 9}, s.y(), "replaced pointers"));
             }
+    }
+
+    // The same pointers are set again after the arrays were rewritten with another
+    // pattern, which an analysis recognised by its pointers cannot detect.
+    template <typename T>
+    void same_pointers_new_contents(rocsparse_handle handle, fmt f, const config& c)
+    {
+        SCOPED_TRACE(::testing::Message() << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans
+                                          << " v2=" << c.v2);
+
+        const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
+        device_problem<T, int32_t> d(sc.p2);
+
+        spmat_guard mat;
+        create(mat, sc.p2, d);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        session<T> s(handle, c, mat.d, sc.p2.rows, sc.p2.cols);
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product of the first contents"));
+
+        d.overwrite(sc.p1);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(set_pointers(mat, sc.p1, d), rocsparse_status_success);
+
+        const rocsparse_status st = s.compute();
+        if(c.v2)
+        {
+            EXPECT_EQ(st, rocsparse_status_invalid_value) << "compute without analysis";
+            EXPECT_TRUE(expect_near(s.y0(), s.y(), "y after the refused compute"));
+        }
+        else
+        {
+            EXPECT_EQ(st, rocsparse_status_success) << "compute without preprocessing";
+            EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "compute without preprocessing"));
+        }
+
+        s.preprocess();
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "product after the new preprocessing"));
+    }
+
+    TEST_F(L2SetPointers, same_pointers_new_contents)
+    {
+        const std::vector<std::pair<fmt, alg_trans>> cases
+            = {{fmt::csr, {rocsparse_spmv_alg_default, rocsparse_operation_none}},
+               {fmt::csr, {rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_none}},
+               {fmt::csr, {rocsparse_spmv_alg_csr_lrb, rocsparse_operation_none}},
+               {fmt::csc, {rocsparse_spmv_alg_csr_adaptive, rocsparse_operation_transpose}},
+               {fmt::csc, {rocsparse_spmv_alg_csr_lrb, rocsparse_operation_transpose}},
+               {fmt::bsr, {rocsparse_spmv_alg_default, rocsparse_operation_none}}};
+        for(const bool v2 : {false, true})
+            for(const auto& fc : cases)
+            {
+                config c;
+                c.alg   = fc.second.alg;
+                c.trans = fc.second.trans;
+                c.v2    = v2;
+                same_pointers_new_contents<double>(handle, fc.first, c);
+            }
+    }
+
+    // The COO analysis stores the longest row, which selects the atomic COO kernel;
+    // it has to be the longest row of the new arrays.
+    TEST_F(L2SetPointers, coo_analysis_of_the_new_arrays)
+    {
+        using T = double;
+        using I = int32_t;
+        for(const bool v2 : {false, true})
+        {
+            SCOPED_TRACE(::testing::Message() << "v2=" << v2);
+            const scenario<T, I> sc = make_scenario<T, I>(fmt::coo, 0);
+            device_problem<T, I> d1(sc.p1), d2(sc.p2);
+
+            spmat_guard mat;
+            create(mat, sc.p1, d1);
+            ASSERT_FALSE(HasFatalFailure());
+            config c;
+            c.alg = rocsparse_spmv_alg_coo_atomic;
+            c.v2  = v2;
+            session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+
+            auto longest_row = [&]() -> int64_t {
+                const rocsparse_coomv_info info = mat.d->info->get_coomv_info();
+                return info != nullptr ? info->max_nnz_per_row : -1;
+            };
+
+            s.preprocess();
+            ASSERT_FALSE(HasFatalFailure());
+            EXPECT_EQ(longest_row(), 600);
+            ASSERT_EQ(s.compute(), rocsparse_status_success);
+            EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "initial product"));
+
+            ASSERT_EQ(set_pointers(mat, sc.p2, d2), rocsparse_status_success);
+            ASSERT_EQ(s.compute(), rocsparse_status_success);
+            EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "compute without preprocessing"));
+
+            s.preprocess();
+            ASSERT_FALSE(HasFatalFailure());
+            EXPECT_EQ(longest_row(), coo_long_row);
+            ASSERT_EQ(s.compute(), rocsparse_status_success);
+            EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product after the new preprocessing"));
+        }
+    }
+
+    // set_pointers frees nothing and makes no device call, so it can run while
+    // another stream is being captured.
+    TEST_F(L2SetPointers, set_pointers_during_stream_capture)
+    {
+        using T = double;
+        using I = int32_t;
+        const scenario<T, I> sc = make_scenario<T, I>(fmt::csr, 0);
+        device_problem<T, I> d1(sc.p1), d2(sc.p2);
+
+        spmat_guard mat;
+        create(mat, sc.p1, d1);
+        ASSERT_FALSE(HasFatalFailure());
+        config c;
+        c.alg = rocsparse_spmv_alg_csr_adaptive;
+        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        hipStream_t capture = nullptr;
+        ASSERT_EQ(hipStreamCreate(&capture), hipSuccess);
+        device_vector<char> scratch(size_t(256));
+        ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
+        EXPECT_EQ(hipMemsetAsync(scratch.ptr, 0, scratch.n, capture), hipSuccess);
+
+        rocsparse_status st = rocsparse_status_internal_error;
+        EXPECT_NO_THROW(
+            st = rocsparse_csr_set_pointers(mat.d, d2.first.ptr, d2.second.ptr, d2.val.ptr));
+        EXPECT_EQ(st, rocsparse_status_success);
+
+        hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
+        EXPECT_EQ(hipStreamIsCapturing(capture, &status), hipSuccess);
+        EXPECT_EQ(status, hipStreamCaptureStatusActive);
+        hipGraph_t graph = nullptr;
+        EXPECT_EQ(hipStreamEndCapture(capture, &graph), hipSuccess);
+        EXPECT_NE(graph, nullptr);
+        if(graph != nullptr)
+        {
+            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
+        }
+        EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
+
+        s.preprocess();
+        ASSERT_FALSE(HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product after set_pointers"));
     }
 }
