@@ -44,6 +44,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestTestSettings.cpp
     TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
+    TestGpuBatchnormBwdPlan.cpp
+    TestGpuBatchnormBwdSignatureKey.cpp
     TestGpuBatchnormFwdTrainPlan.cpp
     TestGpuBatchnormFwdTrainSignatureKey.cpp
     TestGpuConvolutionBwdPlan.cpp
@@ -62,8 +64,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuSdpaBwdPlan.cpp
     TestGpuSdpaFwdPlan.cpp
     TestGpuSdpaFwdPlanZeroDropout.cpp
-    TestGpuSdpaFwdPlanVllmForm.cpp
-    TestGpuSdpaFwdPlanSeqLenKvOnly.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:TestGpuSdpaFwdPlanVllmForm.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:TestGpuSdpaFwdPlanSeqLenKvOnly.cpp>
     TestGpuSdpaPagedFwdPlan.cpp
     TestGpuRaggedSdpaDensify.cpp
     TestGpuRaggedSdpaMapping.cpp

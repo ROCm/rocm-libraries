@@ -377,8 +377,10 @@ static Rejection
     // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
     HIP_KERNEL_REJECT_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
     HIP_KERNEL_REJECT_IF(attrs.seq_len_kv_tensor_uid().has_value()
-                             || attrs.seq_len_q_tensor_uid().has_value(),
-                         "SEQ_LENS_Q and SEQ_LENS_KV not supported");
+                             || attrs.seq_len_q_tensor_uid().has_value()
+                             || attrs.cu_seq_len_q_tensor_uid().has_value()
+                             || attrs.cu_seq_len_kv_tensor_uid().has_value(),
+                         "SEQ_LENS_Q/KV and CU_SEQ_LEN_Q/KV not supported");
 
     // Softmax/output (de)quantization is not implemented by the v3 forward kernel
     // (its argument struct exposes only q/k/v descales).
