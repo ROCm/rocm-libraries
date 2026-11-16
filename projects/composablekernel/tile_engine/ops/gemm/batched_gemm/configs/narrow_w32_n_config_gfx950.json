@@ -1,0 +1,129 @@
+{
+    "_comment": [
+        "gfx950 batched, 32-wide blocks with the 32x32x16 warp tile (narrow_m/n use 16x16x32):",
+        "one wave on the 32-wide side (extra_wave_maps adds 1x1x1/1x2x1/2x1x1 to the Tile",
+        "Engine table for this config only), tile_k 32/64/128/256. pad_m/n/k false and true: an unpadded kernel for the problems it divides and padded ones at native vector widths for the rest.",
+        "This half: N block 32, M block 64..256.",
+        "Use next to default_config.json (kernel names that both list dedupe). Usage: python batched_gemm_full_benchmark.py batched_gemm/configs/default_config.json batched_gemm/configs/narrow_w32_n_config_gfx950.json --arch gfx950 --dtype bf16 --layout rcr"
+    ],
+    "tile_config": {
+        "tile_m": {
+            "values": [
+                64,
+                128,
+                256
+            ]
+        },
+        "tile_n": {
+            "values": [
+                32
+            ]
+        },
+        "tile_k": {
+            "values": [
+                32,
+                64,
+                128,
+                256
+            ]
+        },
+        "warp_m": {
+            "values": [
+                1,
+                2,
+                4
+            ]
+        },
+        "warp_n": {
+            "values": [
+                1,
+                2,
+                4
+            ]
+        },
+        "warp_k": {
+            "values": [
+                1
+            ]
+        },
+        "warp_tile_m": {
+            "values": [
+                32
+            ]
+        },
+        "warp_tile_n": {
+            "values": [
+                32
+            ]
+        },
+        "warp_tile_k": {
+            "values": [
+                16
+            ]
+        }
+    },
+    "trait_config": {
+        "pipeline": {
+            "values": [
+                "compv3",
+                "compv4",
+                "mem"
+            ]
+        },
+        "scheduler": {
+            "values": [
+                "intrawave",
+                "interwave"
+            ]
+        },
+        "epilogue": {
+            "values": [
+                "cshuffle",
+                "default"
+            ]
+        },
+        "pad_m": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "pad_n": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "pad_k": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "persistent": {
+            "values": [
+                false
+            ]
+        }
+    },
+    "extra_wave_maps": {
+        "gfx950": [
+            [
+                1,
+                1,
+                1
+            ],
+            [
+                1,
+                2,
+                1
+            ],
+            [
+                2,
+                1,
+                1
+            ]
+        ]
+    },
+    "k_block_per_cu": 1
+}

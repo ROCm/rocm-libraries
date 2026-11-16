@@ -7,8 +7,9 @@
 
 default_config.json sweeps M/N blocks and tile_k from 64 up and pads nothing.
 The *_config_gfx950.json files below add the blocks it leaves out: an M or N
-block of 16 or 32, tile_k 32, padded kernels at native vector widths, and (with
-the batched-only extra_wave_maps key) 1- and 2-wave blocks. Each test expands a
+block of 16 or 32, tile_k 32 (both bf16 warp tiles), padded kernels at native
+vector widths, and (with the batched-only extra_wave_maps key) 1- and 2-wave
+blocks. Each test expands a
 config through the batched bridge (no GPU, hipcc or build) and checks that it
 lists those kernels and only those.
 
@@ -65,7 +66,12 @@ class TestNarrowConfigs(unittest.TestCase):
         "k32": (
             lambda c: c.tile_k == 32 and min(c.tile_m, c.tile_n) >= 64,
             (16, 16, 32),
-            {(128, 128, 32)},
+            {(128, 128, 32), (128, 192, 32), (192, 64, 32)},
+        ),
+        "k32_w32": (
+            lambda c: c.tile_k == 32 and min(c.tile_m, c.tile_n) >= 64,
+            (32, 32, 16),
+            {(64, 64, 32), (256, 128, 32)},
         ),
         "pads": (
             lambda c: c.tile_k == 64 and min(c.tile_m, c.tile_n) >= 64,
@@ -144,6 +150,19 @@ class TestBatchedExtraWaveMaps(unittest.TestCase):
                 self.assertEqual([c.name for c in kernels if not rule(c)], [])
         blocks = {(c.tile_m, c.tile_n, _waves(c)) for c in _kernels(self._path("m"))}
         self.assertIn((16, 16, (1, 1, 1)), blocks)
+
+    def test_narrow_w32_one_wave_on_the_32_side(self):
+        for half, rule in (("m", lambda c: c.tile_m == 32), ("n", lambda c: c.tile_n == 32)):
+            with self.subTest(half=half):
+                kernels = _kernels(_CONFIG_DIR / f"narrow_w32_{half}_config_gfx950.json")
+                self.assertEqual([c.name for c in kernels if not rule(c)], [])
+                self.assertEqual({_warp_tile(c) for c in kernels}, {(32, 32, 16)})
+                self.assertLessEqual({_waves(c) for c in kernels}, self.EXTRA | _TE_WAVES)
+        blocks = {(c.tile_m, c.tile_n, _waves(c)) for c in _kernels(
+            _CONFIG_DIR / "narrow_w32_n_config_gfx950.json")}
+        self.assertLessEqual(
+            {(128, 32, (4, 1, 1)), (64, 32, (2, 1, 1)), (256, 32, (1, 1, 1))}, blocks
+        )
 
     def test_without_the_key_only_the_table_maps(self):
         kernels = self._expand_with("m", None)

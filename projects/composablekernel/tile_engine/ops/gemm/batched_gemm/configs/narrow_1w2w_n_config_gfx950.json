@@ -4,13 +4,15 @@
         "tile 16x16x32, tile_k 32/64/128. extra_wave_maps adds these maps to the gfx950 Tile",
         "Engine wave table (1x4x1/2x2x1/4x1x1) for this config only; its 2x2x1 points",
         "dedupe with narrow_m/narrow_n. pad_m/n/k false and true: an unpadded kernel for the problems it divides and padded ones at native vector widths for the rest.",
-        "This half: N block 16/32, M block 64..64.",
+        "This half: N block 16/32, M block 64..256.",
         "Use next to default_config.json (kernel names that both list dedupe). Usage: python batched_gemm_full_benchmark.py batched_gemm/configs/default_config.json batched_gemm/configs/narrow_1w2w_n_config_gfx950.json --arch gfx950 --dtype bf16 --layout rcr"
     ],
     "tile_config": {
         "tile_m": {
             "values": [
-                64
+                64,
+                128,
+                256
             ]
         },
         "tile_n": {
