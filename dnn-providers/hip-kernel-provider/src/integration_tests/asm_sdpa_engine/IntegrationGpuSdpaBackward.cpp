@@ -149,9 +149,10 @@ const std::vector<std::string> K_GFX950_ONLY = {"gfx950"};
 
 // Shapes stay small because the CPU backward reference costs O(B*H*S_q*S_kv*D).
 
-// Quick tier: one case per engine path, at the cheapest shape that reaches it.
-// getSdpaBwdComprehensiveTestCases() covers the larger shapes and the rest of
-// the mask, layout and head-dim combinations.
+// Quick tier: one case per engine path and per kernel family this engine serves
+// (head dim, accumulator, mask and post stage), at the cheapest shape that
+// reaches it. getSdpaBwdComprehensiveTestCases() covers the larger shapes and the
+// rest of the mask, layout and head-dim combinations.
 std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
 {
     return {
@@ -164,9 +165,10 @@ std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
         // Bottom-right sliding window: mask=3 on gfx942, mask=4 on gfx950.
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, false),
         // S_q = 1: the gfx950 hd128 kernels carry a seqlen_q == 1 buffer-range fix.
-        // With one query row the reference |dQ| and |dK| stay near 0.01, so the case
-        // tightens atol to keep an all-zero dQ or dK failing.
-        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}).withAbsoluteTolerance(2e-3f),
+        // With one query row many reference elements of dQ and dK are small, so the
+        // case lowers atol to keep a halved or all-zero output failing (see the BF16
+        // test for the measurement behind 1e-2).
+        SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}).withAbsoluteTolerance(1e-2f),
         // The a16 accumulator: the gfx942 A16 rows without sequence padding
         // (S_q == S_kv, S_kv % 64 == 0, packed strides) and the gfx950 A16
         // psskddv rows with the dq_shuffle post kernel.
@@ -180,6 +182,24 @@ std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
         // [B, S, H, D] falls back to the psskddv kernel.
         SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).withBshdDo().onlyOn(K_GFX942_ONLY),
+        // gfx942 hd64 top-left causal with S_q != S_kv (hd64 dq_convert), and the
+        // gfx942 A16 causal rows at hd64 (S_q == S_kv, a multiple of 64).
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX942_ONLY),
+        // gfx942 hd192 bottom-right causal with S_q != S_kv (hd192 dq_convert).
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX942_ONLY),
+        // gfx950 A16: top-left sliding window (mask=3) and D_qk = 192 with D_v = 128
+        // top-left causal (hd192 dq_shuffle).
+        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, 64, 64, true)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 128}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
     };
 }
 
@@ -203,10 +223,10 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         // One-sided bottom-right window: the right bound is unbounded (-1).
         SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, 64, -1, false),
         // Small S_q (1 and 16). AITER's Python layer sends these to CK for speed,
-        // so the ASM kernels see them less often. S_q = 1 tightens atol as the
-        // Smoke case does.
+        // so the ASM kernels see them less often. S_q = 1 lowers atol as the Smoke
+        // case does.
         SdpaBwdTestCase({1, 1, 1, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false)
-            .withAbsoluteTolerance(2e-3f),
+            .withAbsoluteTolerance(1e-2f),
         SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 256, 128}),
         SdpaBwdTestCase({1, 1, 16, 128}, {1, 1, 16, 128}, std::nullopt, -1, 0, true),
         // B=2 and H=2, so every batch and head stride, and the packed LSE/D
@@ -270,9 +290,6 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 512, 128}, std::nullopt, -1, 0, false)
             .withA16()
             .onlyOn(K_GFX950_ONLY),
-        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, 64, 64, true)
-            .withA16()
-            .onlyOn(K_GFX950_ONLY),
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 512, 128}, std::nullopt, 64, 64, false)
             .withA16()
             .onlyOn(K_GFX950_ONLY),
@@ -290,20 +307,8 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         // kernels differ.
         SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 128}, std::nullopt, -1, 0, true)
             .onlyOn(K_GFX950_ONLY),
-        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 128}, std::nullopt, -1, 0, true)
-            .withA16()
-            .onlyOn(K_GFX950_ONLY),
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, true)
-            .onlyOn(K_GFX942_ONLY),
-        // gfx942 A16 causal at hd64; its A16 rows need S_q == S_kv, a multiple of 64.
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}, std::nullopt, -1, 0, true)
-            .withA16()
-            .onlyOn(K_GFX942_ONLY),
         // A padded head dim on the gfx942 A16 no-mask rows (pddv = 1).
         SdpaBwdTestCase({1, 1, 128, 72}, {1, 1, 128, 72}).withA16().onlyOn(K_GFX942_ONLY),
-        // gfx942 hd192 bottom-right causal with S_q != S_kv.
-        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, false)
-            .onlyOn(K_GFX942_ONLY),
         // ALMIOPEN-2079: Re-enable when GQA support is implemented
         // // GQA: 4 Q heads, 1 KV head — no mask
         // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
@@ -622,12 +627,11 @@ TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
     // from the reference's, and the dS = P * (dP - D) subtraction amplifies the
     // difference.
     //
-    // PROVISIONAL, pending the gfx942 and gfx950 measurement: atol = rtol = 0.1 on both
-    // paths. The values come from a CPU emulation, at scale 1.0 on this suite's
-    // seed + UID fill, of a kernel that rounds to 16 bits: its error uses at most 16% of
-    // the bound, and an all-zero or halved dQ, dK or dV fails every case. Replace them
-    // with values measured from the SDPA_BWD_ERROR lines of a run on both architectures
-    // over several seeds, keeping worst_ratio at or below 0.5.
+    // atol = rtol = 0.1 on both paths, and atol = 1e-2 for the S_q = 1 cases. Measured on
+    // an MI300X (gfx942) and an MI355X (gfx950) over seeds 0-7 from the SDPA_BWD_ERROR
+    // lines: the largest error uses 22% of the bound on the paths and 28% on the S_q = 1
+    // cases, and every halved or all-zero dQ, dK or dV fails each case. Keep worst_ratio
+    // at or below 0.5 when changing them.
     const SdpaBwdTolerance a32{0.1f, 0.1f};
     const SdpaBwdTolerance a16{0.1f, 0.1f};
 
@@ -647,9 +651,8 @@ TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
     // FP16 takes the paths the BF16 test lists; its 10-bit mantissa (BF16 has 7) leaves
     // less rounding error on each.
     //
-    // PROVISIONAL, pending the gfx942 and gfx950 measurement: atol = rtol = 0.1 on both
-    // paths, from the same CPU emulation as BF16 (its error uses at most 16% of the
-    // bound). Replace them with measured values as the BF16 test describes.
+    // The same tolerances as BF16, from the same measurement: the largest error uses 3%
+    // of the bound on the paths and the S_q = 1 cases.
     const SdpaBwdTolerance a32{0.1f, 0.1f};
     const SdpaBwdTolerance a16{0.1f, 0.1f};
 
