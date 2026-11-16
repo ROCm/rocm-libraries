@@ -200,6 +200,14 @@ class _GbdtModelVerifier:
         self._typed_array(at, vtable, 40, REAL_ARRAY_BYTES, f"{what}.leaves")
         self._depth -= 1
 
+    def _table_vector(
+        self, at: int, vtable: int, field: int, what: str, verify
+    ) -> None:
+        tables = self._pointer_field(at, vtable, field, what)
+        count = self._vector(tables, 4, what)
+        for index, table in enumerate(self._elements(tables, count)):
+            verify(table, f"{what}[{index}]")
+
     def _trees(self, at: int, vtable: int, field: int, what: str) -> None:
         trees = self._pointer_field(at, vtable, field, what)
         count = self._vector(trees, 4, what)
@@ -721,14 +729,6 @@ class _LinearModelVerifier(_GbdtModelVerifier):
         self._scalar_field(at, vtable, 8, 8, f"{what}.floor")
         self._depth -= 1
 
-    def _table_vector(
-        self, at: int, vtable: int, field: int, what: str, verify
-    ) -> None:
-        tables = self._pointer_field(at, vtable, field, what)
-        count = self._vector(tables, 4, what)
-        for index, table in enumerate(self._elements(tables, count)):
-            verify(table, f"{what}[{index}]")
-
     def _model(self, at: int) -> None:
         vtable = self._table(at, "model")
         self._scalar_field(at, vtable, 4, 4, "num_features")
@@ -959,4 +959,259 @@ def linear_features_hash(data: bytes) -> str:
     from hipdnn_flatbuffers_sdk.data_objects.LinearModel import LinearModel
 
     recorded = LinearModel.GetRootAs(bytearray(data), 0).FeaturesHash()
+    return recorded.decode("utf-8") if recorded is not None else ""
+
+
+# --------------------------------------------------------------------------------------
+# mlp_data (mlp_model.fbs): the checks of MlpDataAdapter::loadFromBuffer
+# --------------------------------------------------------------------------------------
+
+MLP_MODEL_IDENTIFIER = b"HMLP"
+#: `MlpDataAdapter::MAX_ARTIFACT_BYTES`: it loads nothing larger.
+MAX_MLP_ARTIFACT_BYTES = 64 * 1024 * 1024
+
+
+class _MlpModelVerifier(_GbdtModelVerifier):
+    """`VerifyMlpModelBuffer`, on the primitives of `_GbdtModelVerifier`."""
+
+    def _input(self, at: int, what: str) -> None:
+        vtable = self._table(at, what)
+        for field, width, name in ((4, 4, "feature"), (6, 8, "mean"), (8, 8, "scale")):
+            self._scalar_field(at, vtable, field, width, f"{what}.{name}")
+        self._depth -= 1
+
+    def _layer(self, at: int, what: str) -> None:
+        vtable = self._table(at, what)
+        self._scalar_field(at, vtable, 4, 4, f"{what}.inputs")
+        self._scalar_field(at, vtable, 6, 4, f"{what}.outputs")
+        for field, name in ((8, "weights"), (10, "biases")):
+            where = f"{what}.{name}"
+            self._vector(self._pointer_field(at, vtable, field, where), 4, where)
+        self._depth -= 1
+
+    def _network(self, at: int, what: str) -> None:
+        vtable = self._table(at, what)
+        self._table_vector(at, vtable, 4, f"{what}.layers", self._layer)
+        self._depth -= 1
+
+    def _model(self, at: int) -> None:
+        vtable = self._table(at, "model")
+        self._scalar_field(at, vtable, 4, 4, "num_features")
+        self._string(self._pointer_field(at, vtable, 6, "metric"), "metric")
+        self._string(
+            self._pointer_field(at, vtable, 8, "features_hash"), "features_hash"
+        )
+        self._table_vector(at, vtable, 10, "inputs", self._input)
+        flags = self._pointer_field(at, vtable, 12, "missing_flags")
+        self._vector(flags, 4, "missing_flags")
+        self._table_vector(at, vtable, 14, "networks", self._network)
+        self._scalar_field(at, vtable, 16, 8, "target_mean")
+        self._scalar_field(at, vtable, 18, 8, "target_scale")
+        self._string(self._pointer_field(at, vtable, 20, "framework"), "framework")
+        self._string(
+            self._pointer_field(at, vtable, 22, "training_date"), "training_date"
+        )
+        self._scalar_field(at, vtable, 24, 8, "num_training_samples")
+        arches = self._pointer_field(at, vtable, 26, "training_arches")
+        count = self._vector(arches, 4, "training_arches")
+        for index, arch in enumerate(self._elements(arches, count)):
+            self._string(arch, f"training_arches[{index}]")
+        self._string(
+            self._pointer_field(at, vtable, 28, "model_version"), "model_version"
+        )
+        self._depth -= 1
+
+    def verify(self) -> None:
+        """`VerifyBufferFromStart<MlpModel>("HMLP", 0)`, or _Unverifiable naming the check."""
+        self._check(
+            self._size >= self._MIN_SIZE,
+            f"{self._size} bytes is below the smallest FlatBuffer",
+        )
+        self._check(
+            self._data[4:8] == MLP_MODEL_IDENTIFIER,
+            f"file identifier {bytes(self._data[4:8])!r} is not {MLP_MODEL_IDENTIFIER!r}",
+        )
+        self._model(self._offset(0, "root offset"))
+
+
+def verify_mlp_buffer(data: bytes) -> None:
+    """Raise ValueError unless `VerifyMlpModelBuffer` would accept `data`."""
+    try:
+        _MlpModelVerifier(data).verify()
+    except _Unverifiable as error:
+        raise ValueError(
+            f"the FlatBuffers verifier refuses the artifact: {error}"
+        ) from None
+
+
+def _mlp_ensemble(data: bytes):
+    """The verified buffer `data` as `(MlpEnsemble, metric)`, or ValueError with the reason
+    `MlpDataAdapter::build` gives, checked in its order."""
+    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+
+    from hipdnn_flatbuffers_sdk.data_objects.MlpModel import MlpModelT
+
+    from .mlp import MAX_FEATURES, MAX_LAYERS, MAX_MEMBERS, MAX_WIDTH, MlpEnsemble
+
+    model = MlpModelT.InitFromPackedBuf(bytearray(data), 0)
+    num_features = int(model.numFeatures)
+    if not 1 <= num_features <= MAX_FEATURES:
+        raise ValueError(f"num_features must be between 1 and {MAX_FEATURES}")
+    metric = (
+        model.metric.decode("utf-8")
+        if isinstance(model.metric, bytes)
+        else model.metric
+    )
+    if not metric:
+        raise ValueError("the model names no metric")
+
+    inputs = list(model.inputs or [])
+    flags = [
+        int(slot)
+        for slot in (model.missingFlags if model.missingFlags is not None else [])
+    ]
+    width = len(inputs) + len(flags)
+    if not 1 <= width <= MAX_WIDTH:
+        raise ValueError(
+            f"the network input must have between 1 and {MAX_WIDTH} values"
+        )
+    slots, means, scales = [], [], []
+    for index, entry in enumerate(inputs):
+        if entry is None or not 0 <= entry.feature < num_features:
+            raise ValueError(
+                f"input {index} reads a slot outside the {num_features} features"
+            )
+        if not (
+            math.isfinite(entry.mean)
+            and math.isfinite(entry.scale)
+            and entry.scale > 0.0
+        ):
+            raise ValueError(f"input {index} needs a finite mean and a positive scale")
+        slots.append(int(entry.feature))
+        means.append(float(entry.mean))
+        scales.append(float(entry.scale))
+    for index, slot in enumerate(flags):
+        if not 0 <= slot < num_features:
+            raise ValueError(
+                f"missing flag {index} reads a slot outside the {num_features} features"
+            )
+    if not (
+        math.isfinite(model.targetMean)
+        and math.isfinite(model.targetScale)
+        and model.targetScale > 0.0
+    ):
+        raise ValueError("target_mean must be finite and target_scale positive")
+
+    networks = list(model.networks or [])
+    if not 1 <= len(networks) <= MAX_MEMBERS:
+        raise ValueError(f"networks must hold between 1 and {MAX_MEMBERS} networks")
+    members = []
+    for m, network in enumerate(networks):
+        name = f"network {m}"
+        layers = list(network.layers or []) if network is not None else []
+        if not 1 <= len(layers) <= MAX_LAYERS:
+            raise ValueError(f"{name} must hold between 1 and {MAX_LAYERS} layers")
+        previous = width
+        compiled = []
+        for l, layer in enumerate(layers):
+            label = f"{name} layer {l}"
+            last = l + 1 == len(layers)
+            if layer is None or layer.inputs <= 0 or layer.outputs <= 0:
+                raise ValueError(f"{label} must declare positive inputs and outputs")
+            if layer.inputs != previous:
+                raise ValueError(
+                    f"{label} takes {layer.inputs} inputs, but {previous} are available"
+                )
+            if layer.outputs > MAX_WIDTH or (last and layer.outputs != 1):
+                raise ValueError(
+                    f"{label} has a width outside [1, {MAX_WIDTH}], or the last layer does "
+                    "not have exactly one output"
+                )
+            for values, count, what in (
+                (layer.weights, layer.inputs * layer.outputs, "weights"),
+                (layer.biases, layer.outputs, "biases"),
+            ):
+                if values is None or len(values) > count:
+                    raise ValueError(f"{label} {what} must hold at most {count} values")
+                if not np.isfinite(values).all():
+                    raise ValueError(f"{label} {what} holds a value that is not finite")
+            if (
+                len(layer.weights) != layer.inputs * layer.outputs
+                or len(layer.biases) != layer.outputs
+            ):
+                raise ValueError(
+                    f"{label} must hold inputs*outputs weights and outputs biases"
+                )
+            compiled.append(
+                (
+                    np.asarray(layer.weights, dtype=np.float32).reshape(
+                        layer.outputs, layer.inputs
+                    ),
+                    np.asarray(layer.biases, dtype=np.float32),
+                )
+            )
+            previous = layer.outputs
+        members.append(compiled)
+    ensemble = MlpEnsemble(
+        num_features=num_features,
+        input_slots=np.array(slots, dtype=np.int64),
+        input_mean=np.array(means, dtype=np.float64),
+        input_scale=np.array(scales, dtype=np.float64),
+        missing_slots=np.array(flags, dtype=np.int64),
+        networks=members,
+        target_mean=float(model.targetMean),
+        target_scale=float(model.targetScale),
+    )
+    return ensemble, metric
+
+
+def load_mlp_artifact(
+    path: Path, declared_hash: str | None, *, feature_count: int | None = None
+):
+    """`(MlpEnsemble, metric)` of an `mlp_data` artifact the runtime would load, or ValueError
+    saying why not. Checks run in `MlpDataAdapter::loadFromBuffer` order; the caller compares
+    the metric and the features hash. `feature_count`, when given, must equal `num_features`.
+    """
+    path = Path(path)
+    data = path.read_bytes()
+    if not data or len(data) > MAX_MLP_ARTIFACT_BYTES:
+        raise ValueError(f"{path}: artifact size {len(data)} is outside (0, 64 MiB]")
+    if len(data) < _MIN_ARTIFACT_BYTES:
+        raise ValueError(f"{path}: artifact is too short to be a FlatBuffer")
+    if declared_hash is not None:
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != declared_hash:
+            raise ValueError(
+                f"{path}: model hash mismatch - declared {declared_hash!r}, actual {actual!r}"
+            )
+    if data[4:8] != MLP_MODEL_IDENTIFIER:
+        raise ValueError(
+            f"{path}: file identifier {bytes(data[4:8])!r} is not "
+            f"{MLP_MODEL_IDENTIFIER!r}"
+        )
+    try:
+        verify_mlp_buffer(data)
+        loaded = _mlp_ensemble(data)
+    except ValueError as error:
+        raise ValueError(f"{path}: {error}") from None
+    if feature_count is not None:
+        verify_feature_count(loaded[0].num_features, feature_count, path)
+    return loaded
+
+
+def verify_mlp_artifact(
+    path: Path, declared_hash: str | None, *, feature_count: int | None = None
+) -> bytes:
+    """The bytes of an `mlp_data` artifact the runtime would load, or ValueError."""
+    load_mlp_artifact(path, declared_hash, feature_count=feature_count)
+    return Path(path).read_bytes()
+
+
+def mlp_features_hash(data: bytes) -> str:
+    """The `features_hash` a verified mlp_data artifact records ("" when absent)."""
+    import uhd_gen  # noqa: F401  puts _generated/ on sys.path
+
+    from hipdnn_flatbuffers_sdk.data_objects.MlpModel import MlpModel
+
+    recorded = MlpModel.GetRootAs(bytearray(data), 0).FeaturesHash()
     return recorded.decode("utf-8") if recorded is not None else ""

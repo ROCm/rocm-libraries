@@ -8432,9 +8432,19 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
         from rocke.instances import MxGemmSpec
         from rocke.instances.common.mx_gemm import build_mx_gemm
 
-        spec = MxGemmSpec(M=16, N=16, K=64, mantissa_dtype="fp8e4m3")
+        spec = MxGemmSpec(
+            M=16,
+            N=16,
+            K=64,
+            block_tile_m=32,
+            block_tile_n=128,
+            mantissa_dtype="fp8e4m3",
+        )
         ll = self._llvm_for(build_mx_gemm, spec)
-        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.fp8", ll)
+        # gfx950: the E8M0-scaled MFMA, and the unscaled 32x32x16 MFMA of the
+        # path that recomputes a tile whose scale codes are too large for it.
+        self.assertIn("@llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4", ll)
+        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.fp8", ll)
 
     def test_universal_gemm_uses_mfma(self):
         """The pre-existing gemm_universal kernel underpins
