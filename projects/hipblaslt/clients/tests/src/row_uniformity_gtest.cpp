@@ -1620,6 +1620,8 @@ namespace
         RowUniformity,
         RowUniformityMXFp6_smoke,
         ::testing::Values(
+            MXFp6Case{"E2M3_K2048", HIP_R_6F_E2M3, 2048, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{"E3M2_K2048", HIP_R_6F_E3M2, 2048, "rocke_gemm_mx_e3m2_e3m2_", true},
             MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{
                 "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false},
