@@ -15,9 +15,10 @@
  *
  * The provider declares hipDNN's newest engine plugin API (PluginPublic.cpp), so hipDNN's
  * backend routes it graphs that use any schema field up to it: ragged tensors and declared
- * alignments (1.3.0), ragged offset multipliers (1.4.0). An engine reads those fields only once
- * it says so: each engine declares the newest graph schema its matchers were reviewed against
- * (Container's engine table), PROVIDER_BASELINE_GRAPH_SCHEMA unless it opts in, and the
+ * alignments (1.3.0), ragged offset multipliers (1.4.0), cumulative sequence lengths (1.6.0).
+ * An engine reads those fields only once it says so: each engine declares the newest graph
+ * schema its matchers were reviewed against (Container's engine table),
+ * PROVIDER_BASELINE_GRAPH_SCHEMA unless it opts in, and the
  * ApplicabilityManager declines a graph for every engine below the graph's floor before the
  * engine runs. Descriptor-driven (ingestor) engines declare their UED's `sdk_version`, the claim
  * their own plan builder enforces too.
@@ -43,6 +44,7 @@ inline hipdnn_data_sdk::utilities::Version
     bool ragged = false;
     bool aligned = false;
     bool multiplier = false;
+    bool cuSeqLen = false;
     if(const auto* tensors = graph.tensors())
     {
         for(const auto* tensor : *tensors)
@@ -53,8 +55,24 @@ inline hipdnn_data_sdk::utilities::Version
             multiplier = multiplier || tensor->ragged_offset_multiplier() != 1;
         }
     }
-    const auto implied = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
-        graph.is_override_shape_enabled(), runtimePassByValue, ragged, aligned, multiplier);
+    if(const auto* nodes = graph.nodes())
+    {
+        for(const auto* node : *nodes)
+        {
+            if(const auto* sdpa = node->attributes_as_SdpaAttributes())
+            {
+                cuSeqLen = cuSeqLen || sdpa->cu_seq_len_q_tensor_uid().has_value()
+                           || sdpa->cu_seq_len_kv_tensor_uid().has_value();
+            }
+        }
+    }
+    const auto implied
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(graph.is_override_shape_enabled(),
+                                                                  runtimePassByValue,
+                                                                  ragged,
+                                                                  aligned,
+                                                                  multiplier,
+                                                                  cuSeqLen);
     const auto stamped
         = hipdnn_plugin_sdk::fromEngineApiVersion(graph.min_required_engine_api_version());
     return std::max(implied, stamped, [](const auto& lhs, const auto& rhs) { return lhs < rhs; });

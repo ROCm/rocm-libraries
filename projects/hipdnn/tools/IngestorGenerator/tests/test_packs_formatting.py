@@ -40,9 +40,11 @@ _SHIPPED_CONFIGS = (
     *_BUNDLES,
 )
 # Names either side of the column limit on each census line the template wraps: the knob
-# checks and the score-registration check. A knob past 24 characters, or an engine local
-# name past 30, needs a layout the template does not emit.
-_KNOBS = ["k" * n for n in range(1, 25)]
+# checks and the score-registration check. A knob wraps in one of three layouts (one line,
+# the call on its own line, the std::find arguments one per line), so the lengths run past
+# the point where the third takes over (about 40 characters); an engine local name past 30
+# needs a layout the template does not emit.
+_KNOBS = ["k" * n for n in range(1, 41)]
 _LOCAL_NAME_LENGTHS = range(1, 31)
 
 
