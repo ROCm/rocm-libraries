@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <map>
 #include <optional>
 #include <ostream>
 #include <set>
@@ -1540,32 +1541,68 @@ VerificationOutcome
     // A half, bfloat16 or float output of a convolution-forward graph is graded with the dynamic
     // tolerance computed from the graph and its input statistics instead of the fixed per-op
     // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
-    // inputs read from golden blobs are scanned on the host; a scalar baked into the graph is
-    // read from the graph (convFwdErrorScale() asks this lookup only for the rest). Computed
-    // once, and only when an output needs it.
-    std::optional<std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>> convScale;
+    // inputs read from golden blobs are scanned on the host, once; a scalar baked into the graph
+    // is read from the graph (convFwdErrorScale() asks this lookup only for the rest). The scale
+    // is that of one output, computed the first time the output is graded, and only when it
+    // needs it. The tolerance lookup gets the label of an output, not its uid (a uid is not
+    // stable between a C++ graph test and the bundle captured from it): the label names the
+    // output here, and an output that shares its label with another has the per-op default.
+    std::map<int64_t, std::optional<tolerance::InputMoments>> momentsCache;
     const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
+        const auto cached = momentsCache.find(uid);
+        if(cached != momentsCache.end())
+        {
+            return cached->second;
+        }
+        std::optional<tolerance::InputMoments> moments;
         if(_inputsFromRecipes)
         {
-            return tolerance::recipeMoments(_inputFillRecipes.fill(uid));
+            moments = tolerance::recipeMoments(_inputFillRecipes.fill(uid));
         }
-        const auto it = _inputs.find(uid);
-        if(it == _inputs.end())
+        else if(const auto it = _inputs.find(uid); it != _inputs.end())
         {
-            return std::nullopt;
+            moments
+                = tolerance::hostMoments(*it->second, wrapper.getTensorMap().at(uid)->data_type());
         }
-        return tolerance::hostMoments(*it->second, wrapper.getTensorMap().at(uid)->data_type());
+        momentsCache.emplace(uid, moments);
+        return moments;
+    };
+    std::map<int64_t, std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>>
+        convScales;
+    const auto outputUidOf = [&](const std::string& label) -> std::optional<int64_t> {
+        std::optional<int64_t> found;
+        for(const auto uid : _bundle->outputTensorUids)
+        {
+            if(bundle::tensorLabel(uid, *wrapper.getTensorMap().at(uid)) != label)
+            {
+                continue;
+            }
+            if(found.has_value())
+            {
+                return std::nullopt;
+            }
+            found = uid;
+        }
+        return found;
     };
     const auto toleranceFor = [&](const std::string& label,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
         std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> dynamic;
-        if(tolerance::hasDynamicToleranceFor(dataType))
+        const auto outputUid = tolerance::hasDynamicToleranceFor(dataType)
+                                   ? outputUidOf(label)
+                                   : std::optional<int64_t>();
+        if(outputUid.has_value())
         {
-            if(!convScale.has_value())
+            auto convScale = convScales.find(*outputUid);
+            if(convScale == convScales.end())
             {
-                convScale = tolerance::convFwdErrorScale(wrapper, momentsFor);
+                convScale
+                    = convScales
+                          .emplace(*outputUid,
+                                   tolerance::convFwdErrorScale(wrapper, momentsFor, *outputUid))
+                          .first;
             }
-            if(convScale->has_value())
+            if(convScale->second.has_value())
             {
                 hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
                 if(dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
@@ -1574,7 +1611,8 @@ VerificationOutcome
                     coefficients.summationOrder
                         = _deps.policy.testSettings->convFwdSummationOrder("float");
                 }
-                dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType, coefficients);
+                dynamic
+                    = tolerance::convFwdOutputTolerance(*convScale->second, dataType, coefficients);
             }
         }
         if(dynamic.has_value())

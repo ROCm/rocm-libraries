@@ -69,6 +69,7 @@ enum class Wiring
     ADD_Y_TWICE, ///< ADD(y, y)
     SELECT_IN2_PRODUCED, ///< z = ADD(y, bias); BINARY_SELECT(bias, bias, z): in_2 is produced
     SELECT_IN2_INPUT, ///< z = ADD(y, bias); BINARY_SELECT(z, bias, bias): in_2 is a graph input
+    INDEPENDENT_ADD, ///< ADD(bias, bias): a result that does not depend on the convolution
 };
 
 struct GraphSpec
@@ -99,6 +100,11 @@ struct GraphSpec
     bool reverseNodes = false; ///< the nodes are listed from the last to the first
     bool cycle = false; ///< two more nodes, each reading the other's result
     Wiring wiring = Wiring::NONE; ///< more nodes, after the multiply
+    PointwiseMode biasMode = PointwiseMode::ADD; ///< the mode of the node that reads the bias
+    PointwiseMode reluMode = PointwiseMode::RELU_FWD; ///< the mode of the activation node
+    std::optional<float> reluSlope; ///< the lower-clip slope of the activation node
+    std::optional<float> eluAlpha; ///< the alpha of the activation node
+    bool otherNode = false; ///< a node that is neither the convolution nor pointwise
 };
 
 // x [2, 16, 8, 8], w as given, y [2, 32, 6, 6]; scale [1, 3, 1, 1].
@@ -185,22 +191,29 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     addTensor(CYCLE_B_UID, "cycle_b", yDims, true, spec.intermediateType);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
+    const auto optionalFloat = [](const std::optional<float>& value) {
+        return value.has_value() ? flatbuffers::Optional<float>(*value) : flatbuffers::nullopt;
+    };
     const auto addPointwise = [&](PointwiseMode mode,
                                   int64_t in0,
                                   flatbuffers::Optional<int64_t> in1,
                                   int64_t out,
                                   std::optional<DataType> compute = std::nullopt,
-                                  flatbuffers::Optional<int64_t> in2 = flatbuffers::nullopt) {
+                                  flatbuffers::Optional<int64_t> in2 = flatbuffers::nullopt,
+                                  flatbuffers::Optional<float> slope = flatbuffers::nullopt,
+                                  flatbuffers::Optional<float> alpha = flatbuffers::nullopt) {
         const auto pointwise = CreatePointwiseAttributes(b,
                                                          mode,
                                                          flatbuffers::nullopt,
                                                          flatbuffers::nullopt,
-                                                         flatbuffers::nullopt,
+                                                         slope,
                                                          flatbuffers::nullopt,
                                                          in0,
                                                          in1,
                                                          in2,
-                                                         out);
+                                                         out,
+                                                         flatbuffers::nullopt,
+                                                         alpha);
         nodes.push_back(CreateNodeDirect(b,
                                          "pointwise",
                                          compute.value_or(spec.pointwiseCompute),
@@ -297,17 +310,33 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
         addPointwise(
             PointwiseMode::BINARY_SELECT, ADD_OUT_UID, BIAS_UID, OUT_UID, std::nullopt, BIAS_UID);
         break;
+    case Wiring::INDEPENDENT_ADD:
+        addPointwise(PointwiseMode::ADD, BIAS_UID, BIAS_UID, ADD_OUT_UID);
+        break;
     default:
         break;
     }
     if(spec.withBias)
     {
         const int64_t addOut = spec.withRelu ? ADD_OUT_UID : OUT_UID;
-        addPointwise(PointwiseMode::ADD, last, BIAS_UID, addOut, spec.addCompute);
+        addPointwise(spec.biasMode, last, BIAS_UID, addOut, spec.addCompute);
         if(spec.withRelu)
         {
-            addPointwise(PointwiseMode::RELU_FWD, ADD_OUT_UID, flatbuffers::nullopt, OUT_UID);
+            addPointwise(spec.reluMode,
+                         ADD_OUT_UID,
+                         flatbuffers::nullopt,
+                         OUT_UID,
+                         std::nullopt,
+                         flatbuffers::nullopt,
+                         optionalFloat(spec.reluSlope),
+                         optionalFloat(spec.eluAlpha));
         }
+    }
+    if(spec.otherNode)
+    {
+        const auto matmul = CreateMatmulAttributes(b, X_UID, W_UID, OUT_UID);
+        nodes.push_back(CreateNodeDirect(
+            b, "other", DataType::FLOAT, NodeAttributes::MatmulAttributes, matmul.Union()));
     }
 
     if(spec.reverseNodes)
@@ -368,12 +397,37 @@ Inputs defaultInputs(const GraphSpec& spec)
     return in;
 }
 
-// The error scale of the graph `spec` describes, given the statistics of `in`.
+// The graph output a spec grades: the last result of the chain it describes.
+int64_t gradedOutput(const GraphSpec& spec)
+{
+    if(spec.wiring != Wiring::NONE || spec.withBias)
+    {
+        return OUT_UID;
+    }
+    switch(spec.mul)
+    {
+    case Mul::NONE:
+        return Y_UID;
+    case Mul::TWO_SCALES:
+        return MUL2_OUT_UID;
+    default:
+        return MUL_OUT_UID;
+    }
+}
+
+// The error scale of the graph `spec` describes at `output`, given the statistics of `in`.
+std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
+    errorScale(const GraphSpec& spec, const Inputs& in, int64_t output)
+{
+    flatbuffers::FlatBufferBuilder b;
+    return tol::convFwdErrorScale(buildGraph(b, spec), in.lookup(), output);
+}
+
+// The same at the output the spec grades.
 std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     errorScale(const GraphSpec& spec, const Inputs& in)
 {
-    flatbuffers::FlatBufferBuilder b;
-    return tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    return errorScale(spec, in, gradedOutput(spec));
 }
 
 // The same, with the default inputs of `spec`.
@@ -737,9 +791,10 @@ TEST(TestConvFwdDynamicTolerance, ScaleOfAMultiplyComputingBelowFloatIsRoundedWi
     }
 }
 
-// A tensor that two nodes read has the largest of their slopes: the convolution's result feeds a
-// multiply (slope 3) and an add (slope 1), in whichever order they are listed.
-TEST(TestConvFwdDynamicTolerance, TensorTwoNodesReadHasTheLargestSlopeOfThem)
+// A tensor that two nodes read has, for each output, the slope of the path that leads to it: the
+// convolution's result feeds a multiply (slope 3) and an add (slope 1), in whichever order they
+// are listed, and is a point of each output with that output's slope.
+TEST(TestConvFwdDynamicTolerance, SlopeOfATensorTwoNodesReadIsThatOfTheOutputGraded)
 {
     for(const bool branchFirst : {true, false})
     {
@@ -748,10 +803,15 @@ TEST(TestConvFwdDynamicTolerance, TensorTwoNodesReadHasTheLargestSlopeOfThem)
         spec.convOutputType = DataType::BFLOAT16;
         spec.branch = true;
         spec.branchFirst = branchFirst;
-        const auto scale = errorScale(spec);
-        ASSERT_TRUE(scale.has_value()) << branchFirst;
-        ASSERT_EQ(scale->roundingPoints.size(), 1u) << branchFirst;
-        EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 3.0) << branchFirst;
+        const auto in = defaultInputs(spec);
+        const auto viaMultiply = errorScale(spec, in, MUL_OUT_UID);
+        ASSERT_TRUE(viaMultiply.has_value()) << branchFirst;
+        ASSERT_EQ(viaMultiply->roundingPoints.size(), 1u) << branchFirst;
+        EXPECT_DOUBLE_EQ(viaMultiply->roundingPoints[0].slope, 3.0) << branchFirst;
+        const auto viaAdd = errorScale(spec, in, BRANCH_OUT_UID);
+        ASSERT_TRUE(viaAdd.has_value()) << branchFirst;
+        ASSERT_EQ(viaAdd->roundingPoints.size(), 1u) << branchFirst;
+        EXPECT_DOUBLE_EQ(viaAdd->roundingPoints[0].slope, 1.0) << branchFirst;
     }
 }
 
@@ -952,24 +1012,32 @@ TEST(TestConvFwdDynamicTolerance, ScalesOfSeveralMultipliesAreRoundedWithTheSlop
 }
 
 // y goes to a multiply (slope 3) and to an add that is a second output (slope 1), both computing
-// in bfloat16: each node's rounding of y is the same error in the same tensor, so both points
-// take the slope of the tensor, the largest of the two, not the slope of the node's own path.
-TEST(TestConvFwdDynamicTolerance, EveryReaderOfATensorRoundsItWithTheSlopeOfTheTensor)
+// in bfloat16. Each output has the points of the nodes on the path to it and no other: the
+// roundings of the add are no point of the multiply's output, and the multiply's are none of the
+// add's.
+TEST(TestConvFwdDynamicTolerance, OutputHasTheRoundingPointsOfItsOwnBranchOnly)
 {
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
     spec.branch = true;
     spec.pointwiseCompute = DataType::BFLOAT16;
-    const auto scale = errorScale(spec);
-    ASSERT_TRUE(scale.has_value());
-    const auto& points = scale->roundingPoints;
-    ASSERT_EQ(points.size(), 6u);
-    expectPoint(points[0], BFLOAT16_EPS, SIGMA, 3.0); // y into the multiply
-    expectPoint(points[1], BFLOAT16_EPS, SCALE_RMS, SIGMA); // the scale
-    expectPoint(points[2], BFLOAT16_EPS, 3.0 * SIGMA, 1.0); // the multiply's result
-    expectPoint(points[3], BFLOAT16_EPS, SIGMA, 3.0); // y into the add
-    expectPoint(points[4], BFLOAT16_EPS, BIAS_RMS, 1.0); // the bias
-    expectPoint(points[5], BFLOAT16_EPS, std::sqrt(SIGMA * SIGMA + BIAS_RMS * BIAS_RMS), 1.0);
+    const auto in = defaultInputs(spec);
+
+    const auto viaMultiply = errorScale(spec, in, MUL_OUT_UID);
+    ASSERT_TRUE(viaMultiply.has_value());
+    const auto& multiplied = viaMultiply->roundingPoints;
+    ASSERT_EQ(multiplied.size(), 3u);
+    expectPoint(multiplied[0], BFLOAT16_EPS, SIGMA, 3.0); // y into the multiply
+    expectPoint(multiplied[1], BFLOAT16_EPS, SCALE_RMS, SIGMA); // the scale
+    expectPoint(multiplied[2], BFLOAT16_EPS, 3.0 * SIGMA, 1.0); // the multiply's result
+
+    const auto viaAdd = errorScale(spec, in, BRANCH_OUT_UID);
+    ASSERT_TRUE(viaAdd.has_value());
+    const auto& added = viaAdd->roundingPoints;
+    ASSERT_EQ(added.size(), 3u);
+    expectPoint(added[0], BFLOAT16_EPS, SIGMA, 1.0); // y into the add
+    expectPoint(added[1], BFLOAT16_EPS, BIAS_RMS, 1.0); // the bias
+    expectPoint(added[2], BFLOAT16_EPS, std::sqrt(SIGMA * SIGMA + BIAS_RMS * BIAS_RMS), 1.0);
 }
 
 // A graph input of a type the model does not know, read by a node computing below float, leaves
@@ -1052,7 +1120,8 @@ TEST(TestConvFwdDynamicTolerance, InputsAreLookedUpOnlyWhenSomethingNeedsThem)
             return inputs.lookup()(uid);
         };
         flatbuffers::FlatBufferBuilder b;
-        EXPECT_TRUE(tol::convFwdErrorScale(buildGraph(b, spec), lookup).has_value());
+        EXPECT_TRUE(
+            tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value());
         return asked;
     };
     const std::set<int64_t> convolutionInputs = {X_UID, W_UID};
@@ -1206,6 +1275,236 @@ TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
     const auto scale = errorScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_NEAR(scale->outputScale, 3.0 * static_cast<double>(static_cast<half>(0.01f)), 1e-12);
+}
+
+// ── The scale of one output ─────────────────────────────────────────────────
+
+// ADD(MUL(y, s), y): an error in y travels both paths, so the output is (s + 1) y, whatever the
+// order the nodes are listed in. With s = 0.5 that is 1.5 y, not 0.5 y.
+TEST(TestConvFwdDynamicTolerance, OutputScaleOfAReconvergentAddIsTheSumOfItsPaths)
+{
+    for(const bool reverseNodes : {false, true})
+    {
+        GraphSpec halved;
+        halved.mul = Mul::SCALE_SECOND;
+        halved.bakedScale = 0.5f;
+        halved.wiring = Wiring::MUL_THEN_ADD_Y;
+        halved.reverseNodes = reverseNodes;
+        const auto small = errorScale(halved);
+        ASSERT_TRUE(small.has_value()) << reverseNodes;
+        EXPECT_DOUBLE_EQ(small->outputScale, 1.5) << reverseNodes;
+
+        GraphSpec tripled;
+        tripled.mul = Mul::SCALE_SECOND;
+        tripled.wiring = Wiring::MUL_THEN_ADD_Y;
+        tripled.reverseNodes = reverseNodes;
+        const auto large = errorScale(tripled);
+        ASSERT_TRUE(large.has_value()) << reverseNodes;
+        EXPECT_DOUBLE_EQ(large->outputScale, 4.0) << reverseNodes;
+    }
+}
+
+// A multiply on the branch of one output does not scale another: y goes to MUL(y, scale) and to
+// ADD(y, bias), and each output has its own factor.
+TEST(TestConvFwdDynamicTolerance, MultiplyOnTheBranchOfAnotherOutputDoesNotScaleThisOne)
+{
+    for(const bool branchFirst : {true, false})
+    {
+        GraphSpec spec;
+        spec.mul = Mul::SCALE_SECOND;
+        spec.branch = true;
+        spec.branchFirst = branchFirst;
+        const auto in = defaultInputs(spec);
+
+        const auto multiplied = errorScale(spec, in, MUL_OUT_UID);
+        ASSERT_TRUE(multiplied.has_value()) << branchFirst;
+        EXPECT_DOUBLE_EQ(multiplied->outputScale, 3.0) << branchFirst;
+
+        const auto added = errorScale(spec, in, BRANCH_OUT_UID);
+        ASSERT_TRUE(added.has_value()) << branchFirst;
+        EXPECT_DOUBLE_EQ(added->outputScale, 1.0) << branchFirst;
+
+        const auto result = errorScale(spec, in, Y_UID);
+        ASSERT_TRUE(result.has_value()) << branchFirst;
+        EXPECT_DOUBLE_EQ(result->outputScale, 1.0) << branchFirst;
+    }
+}
+
+// The output graded is a result of the graph: a tensor no node writes, one that is not in the
+// graph, and a result that does not depend on the convolution have no scale.
+TEST(TestConvFwdDynamicTolerance, OutputThatIsNoResultOfTheConvolutionIsNotModeled)
+{
+    GraphSpec spec;
+    spec.withBias = true;
+    const auto in = defaultInputs(spec);
+    EXPECT_TRUE(errorScale(spec, in, OUT_UID).has_value());
+    EXPECT_FALSE(errorScale(spec, in, BIAS_UID).has_value());
+    EXPECT_FALSE(errorScale(spec, in, 9999).has_value());
+
+    GraphSpec independent;
+    independent.wiring = Wiring::INDEPENDENT_ADD;
+    const auto inIndependent = defaultInputs(independent);
+    EXPECT_TRUE(errorScale(independent, inIndependent, Y_UID).has_value());
+    EXPECT_FALSE(errorScale(independent, inIndependent, ADD_OUT_UID).has_value());
+}
+
+// The graded output's own storage is the model's rtol, not a point: y stored in bfloat16 and read
+// by another output's add is a point of that output, and of no other.
+TEST(TestConvFwdDynamicTolerance, GradedOutputIsNoRoundingPointOfItself)
+{
+    GraphSpec spec;
+    spec.convOutputVirtual = false;
+    spec.convOutputType = DataType::BFLOAT16;
+    spec.branch = true;
+    const auto in = defaultInputs(spec);
+
+    const auto ofResult = errorScale(spec, in, Y_UID);
+    ASSERT_TRUE(ofResult.has_value());
+    EXPECT_TRUE(ofResult->roundingPoints.empty());
+
+    const auto ofBranch = errorScale(spec, in, BRANCH_OUT_UID);
+    ASSERT_TRUE(ofBranch.has_value());
+    ASSERT_EQ(ofBranch->roundingPoints.size(), 1u);
+    expectPoint(ofBranch->roundingPoints[0], BFLOAT16_EPS, SIGMA, 1.0);
+}
+
+// ── Modes, nodes and fills outside the model ────────────────────────────────
+
+// The modes whose slope the model takes as about 1 are modeled, wherever they sit: the bias node
+// and the activation node.
+TEST(TestConvFwdDynamicTolerance, PointwiseModesWithAKnownSlopeAreModeled)
+{
+    for(const auto mode : {PointwiseMode::ADD, PointwiseMode::SUB})
+    {
+        GraphSpec spec;
+        spec.withBias = true;
+        spec.biasMode = mode;
+        EXPECT_TRUE(errorScale(spec).has_value()) << EnumNamePointwiseMode(mode);
+    }
+    for(const auto mode : {PointwiseMode::IDENTITY,
+                           PointwiseMode::RELU_FWD,
+                           PointwiseMode::SIGMOID_FWD,
+                           PointwiseMode::TANH_FWD,
+                           PointwiseMode::SOFTPLUS_FWD,
+                           PointwiseMode::ELU_FWD,
+                           PointwiseMode::SWISH_FWD,
+                           PointwiseMode::GELU_FWD,
+                           PointwiseMode::GELU_APPROX_TANH_FWD})
+    {
+        GraphSpec spec;
+        spec.withBias = true;
+        spec.withRelu = true;
+        spec.reluMode = mode;
+        EXPECT_TRUE(errorScale(spec).has_value()) << EnumNamePointwiseMode(mode);
+    }
+}
+
+// Any other mode would be graded as if its slope were 1 whatever its parameters, so it leaves the
+// model and the per-op default grades the graph.
+TEST(TestConvFwdDynamicTolerance, PointwiseModeWithoutAKnownSlopeIsNotModeled)
+{
+    for(const auto mode : {PointwiseMode::DIV,
+                           PointwiseMode::ADD_SQUARE,
+                           PointwiseMode::MAX_OP,
+                           PointwiseMode::MIN_OP,
+                           PointwiseMode::CMP_GT})
+    {
+        GraphSpec spec;
+        spec.withBias = true;
+        spec.biasMode = mode;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNamePointwiseMode(mode);
+    }
+    for(const auto mode : {PointwiseMode::RECIPROCAL,
+                           PointwiseMode::SQRT,
+                           PointwiseMode::RSQRT,
+                           PointwiseMode::EXP,
+                           PointwiseMode::LOG,
+                           PointwiseMode::NEG,
+                           PointwiseMode::ABS,
+                           PointwiseMode::TAN,
+                           PointwiseMode::RELU_BWD,
+                           PointwiseMode::UNSET})
+    {
+        GraphSpec spec;
+        spec.withBias = true;
+        spec.withRelu = true;
+        spec.reluMode = mode;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNamePointwiseMode(mode);
+    }
+}
+
+// A parameter that steepens an activation breaks the slope of about 1: a leaky relu whose slope
+// exceeds 1 in magnitude, an elu whose alpha exceeds 1.
+TEST(TestConvFwdDynamicTolerance, ParameterThatSteepensAnActivationIsNotModeled)
+{
+    for(const auto& [slope, modeled] : {std::pair{0.01f, true},
+                                        std::pair{1.0f, true},
+                                        std::pair{-1.0f, true},
+                                        std::pair{2.0f, false},
+                                        std::pair{-2.0f, false}})
+    {
+        GraphSpec spec;
+        spec.withBias = true;
+        spec.withRelu = true;
+        spec.reluSlope = slope;
+        EXPECT_EQ(errorScale(spec).has_value(), modeled) << slope;
+    }
+    for(const auto& [alpha, modeled] :
+        {std::pair{0.5f, true}, std::pair{1.0f, true}, std::pair{2.0f, false}})
+    {
+        GraphSpec spec;
+        spec.withBias = true;
+        spec.withRelu = true;
+        spec.reluMode = PointwiseMode::ELU_FWD;
+        spec.eluAlpha = alpha;
+        EXPECT_EQ(errorScale(spec).has_value(), modeled) << alpha;
+    }
+}
+
+// A node that is neither the convolution nor pointwise is not skipped: the graph is outside the
+// model.
+TEST(TestConvFwdDynamicTolerance, NodeThatIsNeitherTheConvolutionNorPointwiseIsNotModeled)
+{
+    GraphSpec spec;
+    spec.withBias = true;
+    EXPECT_TRUE(errorScale(spec).has_value());
+    spec.otherNode = true;
+    EXPECT_FALSE(errorScale(spec).has_value());
+}
+
+// x and w that each hold one value sum products that round the same way at every step: the error
+// grows as K, not as sqrt(K), and the model does not describe it. One constant input is not
+// enough (the products still change sign with the other), and a value list is not constant.
+TEST(TestConvFwdDynamicTolerance, FixedFillOfBothConvolutionInputsIsNotModeled)
+{
+    using hipdnn_integration_tests::FillRecipe;
+    const auto modeled = [](const GraphSpec& spec, const FillRecipe& x, const FillRecipe& w) {
+        flatbuffers::FlatBufferBuilder b;
+        const auto lookup = [&](int64_t uid) -> std::optional<tol::InputMoments> {
+            if(uid == X_UID)
+            {
+                return tol::recipeMoments(x);
+            }
+            return tol::recipeMoments(uid == W_UID ? w : FillRecipe::free(-1.0f, 1.0f));
+        };
+        return tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value();
+    };
+    const GraphSpec spec;
+    const auto free = FillRecipe::free(-1.0f, 1.0f);
+    const auto fixed = FillRecipe::fixed(0.5f);
+    const auto list = FillRecipe::values(std::vector<int64_t>{3, -4});
+    EXPECT_TRUE(modeled(spec, free, free));
+    EXPECT_TRUE(modeled(spec, fixed, free));
+    EXPECT_TRUE(modeled(spec, free, fixed));
+    EXPECT_TRUE(modeled(spec, list, list));
+    EXPECT_TRUE(modeled(spec, fixed, list));
+    EXPECT_FALSE(modeled(spec, fixed, fixed));
+
+    // A value baked into the graph is as constant as a FIXED fill.
+    GraphSpec baked;
+    baked.bakedX = 2.0f;
+    EXPECT_TRUE(modeled(baked, free, free));
+    EXPECT_FALSE(modeled(baked, free, fixed));
 }
 
 // ── Output dispatch ─────────────────────────────────────────────────────────
@@ -1407,7 +1706,8 @@ TEST(TestConvFwdDynamicTolerance, GraphWithANonFiniteRecipeIsNotModeled)
                 return tol::recipeMoments(uid == badUid ? badRecipe
                                                         : FillRecipe::free(-1.0f, 1.0f));
             };
-            EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), lookup).has_value())
+            EXPECT_FALSE(
+                tol::convFwdErrorScale(buildGraph(b, spec), lookup, gradedOutput(spec)).has_value())
                 << "bad uid " << badUid;
         }
     }
