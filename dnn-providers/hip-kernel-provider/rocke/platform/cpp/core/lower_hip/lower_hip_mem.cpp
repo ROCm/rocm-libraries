@@ -200,6 +200,13 @@ static rocke_status_t _op_tile_smem_store_vN(rocke_h_lowerer_t* lw, const rocke_
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.smem_store_vN: too few operands");
     }
+    {
+        char lanes_error[ROCKE_ERR_MSG_CAP];
+        if(const char* error = rocke_i_smem_store_vN_op_error(op, lanes_error, sizeof lanes_error))
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        }
+    }
     smem = op->operands[0];
     value = op->operands[op->num_operands - 1];
     vec = mem_attr_int(op, "vec", 0);

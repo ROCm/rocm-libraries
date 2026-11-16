@@ -322,6 +322,39 @@ def _require_smem_vector_element(access: str, elem_name: str) -> None:
         )
 
 
+def _smem_store_lanes_error(
+    store: str, value_type: Type, width: int, width_param: str
+) -> str | None:
+    """The error for an LDS ``store`` of ``width`` elements whose value has
+    another lane count (a scalar has one), or None when they match.
+
+    The lowerings store the value as a ``width``-element vector, so a value of
+    any other lane count would be stored as a type it does not have. The
+    builder names the width ``n`` and serialized IR names it ``vec``
+    (``width_param``); the C++ engine (``rocke_i_smem_store_lanes_error``)
+    reports the same texts.
+    """
+    lanes = value_type.count if isinstance(value_type, VectorType) else 1
+    if lanes != width:
+        return f"{store} failed - lanes={lanes}, expected {width_param}={width}"
+    return None
+
+
+def _smem_store_vN_op_error(op: Op) -> str | None:
+    """:func:`_smem_store_lanes_error` for a built ``tile.smem_store_vN`` op,
+    whose last operand is the stored value and whose ``vec`` attribute is its
+    width: serialized IR reaches the verifier and the lowerings without passing
+    the builder, so they all use this rule. An op without operands or without
+    an integer ``vec`` has no width to compare here (C++ engine:
+    ``rocke_i_smem_store_vN_op_error``)."""
+    width = op.attrs.get("vec")
+    if not op.operands or not isinstance(width, int) or isinstance(width, bool):
+        return None
+    return _smem_store_lanes_error(
+        "tile.smem_store_vN", op.operands[-1].type, width, "vec"
+    )
+
+
 def _is_flag_ptr(t: "Type") -> bool:
     """True for the ``ptr<i32,global>`` a cross-workgroup flag op addresses.
 
@@ -4411,10 +4444,14 @@ class IRBuilder:
         every row start of a padded tile guarantees) and claims it, capped at
         the 16-byte pool alignment (``lower_llvm.SMEM_POOL_ALIGN``): the
         indices must address an element whose byte offset in the allocation is
-        a multiple of that claim. The LLVM lowering aligns the allocation's base to it. An
-        ``n=1`` store of a vector value stores it whole and claims only
-        element alignment.
+        a multiple of that claim. The LLVM lowering aligns the allocation's base to it.
+
+        The value has ``n`` lanes (a scalar or a one-lane vector for ``n=1``);
+        any other lane count is refused with ValueError.
         """
+        lanes_error = _smem_store_lanes_error("smem_store_vN", value.type, n, "n")
+        if lanes_error:
+            raise ValueError(lanes_error)
         if n == 1:
             # Single-element store; route through the scalar `tile.smem_store`.
             self._op(
@@ -4423,8 +4460,6 @@ class IRBuilder:
                 attrs={"rank": len(indices), "elem_type": value.type.name},
             )
             return
-        if not isinstance(value.type, VectorType):
-            raise ValueError("smem_store_vN expects vector value for n > 1")
         elem_name = value.type.elem.name
         _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):

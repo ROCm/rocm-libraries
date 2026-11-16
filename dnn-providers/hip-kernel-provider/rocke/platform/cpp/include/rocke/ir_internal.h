@@ -325,6 +325,26 @@ const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap);
  * written to `buf`. The verifier and both lowerings use it. */
 const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap);
 
+/* The error for an LDS `store` of `width` elements whose value has another lane
+ * count (a scalar has one), or NULL when they match (Python
+ * core/ir.py::_smem_store_lanes_error, same texts): the lowerings store the
+ * value as a `width`-element vector. `width_param` names the width as the
+ * caller spells it ("n" in the builder, "vec" in serialized IR). A returned
+ * error is written to `buf`. */
+const char* rocke_i_smem_store_lanes_error(const char* store,
+                                           const rocke_type_t* value_type,
+                                           int64_t width,
+                                           const char* width_param,
+                                           char* buf,
+                                           size_t cap);
+
+/* rocke_i_smem_store_lanes_error for a built tile.smem_store_vN op, whose last
+ * operand is the stored value and whose `vec` attribute is its width (Python
+ * core/ir.py::_smem_store_vN_op_error). An op without operands or without an
+ * integer `vec` has no width to compare here. The verifier and both lowerings
+ * use it. */
+const char* rocke_i_smem_store_vN_op_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* The code-object symbol of `kernel_name`'s GPU-check word, allocated in
  * `arena` (Python core/ir.py::gpu_check_word_symbol, same spelling). A wave
  * whose gpu_checked_value fact is false stores 1 to it and returns; the host reads

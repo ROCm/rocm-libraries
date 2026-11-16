@@ -674,6 +674,14 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         check_sync_attrs(
             v, op, o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings : NULL);
     }
+    else if(o == ROCKE_OP_TILE_SMEM_STORE_VN)
+    {
+        char err[ROCKE_ERR_MSG_CAP];
+        if(const char* error = rocke_i_smem_store_vN_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
     else if(o == ROCKE_OP_TILE_GLOBAL_PTR_OFFSET)
     {
         char err[256];

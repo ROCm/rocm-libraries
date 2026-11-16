@@ -72,6 +72,7 @@ from .ir import (
     _if_else_yields,
     _is_unsigned,
     _ldexp_op_error,
+    _smem_store_vN_op_error,
     _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -1397,9 +1398,9 @@ def _lds_natural_align(op: Op) -> int | None:
     """The natural alignment of ``op``'s LDS access, before the pool cap."""
     name = op.name
     if name == "tile.smem_store":
-        # One store of the whole value, which may be a vector: smem_store_vN
-        # routes n=1 here whatever the value's type. n=1 is the scalar store
-        # and records no align, so a vector stored whole promises nothing about
+        # One store of the whole value: a scalar or a one-lane vector from
+        # smem_store_vN(n=1), or any vector in serialized IR.
+        # It records no align, so a vector stored whole promises nothing about
         # its index beyond element alignment, which is all it claims.
         return type_bytes(element_type(op.operands[-1].type))
     if name == "tile.smem_store_vN":
@@ -3872,6 +3873,9 @@ class _Lowerer:
         The AMDGPU backend turns naturally-aligned payloads into
         ds_write_b{16,32,64,128} based on total byte width.
         """
+        lanes_error = _smem_store_vN_op_error(op)
+        if lanes_error:
+            raise ValueError(lanes_error)
         smem = op.operands[0]
         indices = op.operands[1:-1]
         value = op.operands[-1]

@@ -48,6 +48,7 @@ from .ir import (
     _gpu_check_failed_op_error,
     _if_else_yields,
     _ldexp_op_error,
+    _smem_store_vN_op_error,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
@@ -802,6 +803,9 @@ class _Lowerer:
         self._emit(f"{prefix}{vec} {_name(op.result)} = *{src};")
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
+        lanes_error = _smem_store_vN_op_error(op)
+        if lanes_error:
+            raise ValueError(lanes_error)
         smem = op.operands[0]
         value = op.operands[-1]
         indices = op.operands[1:-1]
