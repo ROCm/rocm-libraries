@@ -17,7 +17,7 @@ SPDX-License-Identifier:  MIT
 - **Wins when:** groups of 2 to 16 channels (ResNeXt g32, RegNet, ResNeXt3D), where a per-group implicit GEMM fills 1/16 to 1/4 of its tile. It is the best non-MIOpen engine on roughly 40-110 graphs per direction per GPU in the full corpus.
 - **Loses when:** gfx950 NHWC 16-channel groups (ResNeXt c512 g32) at 28x28-32x32 against MIOpen's hipconv grouped kernel, by about 1.2x with the row-streaming configs (at parity from 56x56). Also mid-width compute-bound groups (Winograd does fewer MACs). Most grouped wrw goes to `CONV_GROUP_VALU_WRW` (see GROUP_VALU.md).
 - **Precision:** fp32 accumulation and one rounding at the store. Wrw keeps fp32 partials and reduces them in a fixed order. No numerical notes on the exact engines (the TF32 siblings report `TENSOR_CORE`). Results are bitwise deterministic, and the device test relaunches every config to check it.
-- **Instances:** fwd 990 (138 row-streaming) + 144 three-bf16; bwd 1648 (276 row-streaming) + 120 three-bf16; wrw 3132 in 7 packs (each tile at 3 `bpu` targets that share one compiled kernel). Counted from the generator's output.
+- **Instances:** fwd 1524 (672 row-streaming) + 144 three-bf16; bwd 2200 (828 row-streaming) + 120 three-bf16; wrw 3132 in 7 packs (each tile at 3 `bpu` targets that share one compiled kernel). Counted from the generator's output.
 - **vs MIOpen:** competes with `ConvHipImplicitGemmGroup{Fwd,Bwd,Wrw}Xdlops` and their 3-D forms, `ConvHipConv`, and the grouped Winograd solvers. On the full corpus the grouped class (all engines) runs at 1.41x on gfx950, 2.06x on MI325X, 1.44x on gfx1201 and 1.77x on gfx1100 against MIOpen search.
 
 ## Why it exists
