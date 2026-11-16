@@ -58,7 +58,7 @@ model_info_t make_tilewright_info(const twrec::detail::LoadedModel& model) {
   info.backend                     = backend_id_t::tilewright_v1;
   info.arch                        = model.arch;
   info.features.catalog_id         = features::gemm_tilewright::catalog_id;
-  info.features.feature_names_hash = features::gemm_tilewright::feature_names_hash;
+  info.features.feature_names_hash = model.feature_names_hash;  // the manifest's, not the build's
   info.features.query_dim          = model.q_dim;
   info.features.item_dim           = model.i_dim;
   info.features.interaction_dim    = model.x_dim;

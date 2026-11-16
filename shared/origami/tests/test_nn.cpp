@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -27,6 +29,49 @@ namespace {
 #define ORIGAMI_TEST_TW_WEIGHTS_DIR ""
 #endif
 
+
+// Copy of the gfx950 BBS manifest in a scratch directory with its feature_names_hash replaced.
+// The weights sidecar is linked, not copied. The directory is removed on destruction.
+class ScratchManifest {
+ public:
+  explicit ScratchManifest(const std::string& new_hash) {
+    namespace fs = std::filesystem;
+    const std::string stem = "gfx950_Cijk_Alik_Bljk_BBS_BH_BiasSB_HAS_SAV_UserArgs";
+    const fs::path src     = fs::path(ORIGAMI_TEST_TW_WEIGHTS_DIR);
+    dir_                   = fs::temp_directory_path() /
+             ("origami_nn_hash_" + std::to_string(std::chrono::steady_clock::now()
+                                                      .time_since_epoch()
+                                                      .count()));
+    fs::create_directories(dir_);
+    fs::create_symlink(fs::absolute(src / (stem + ".tilewright.wts.yaml")),
+                       dir_ / (stem + ".tilewright.wts.yaml"));
+
+    std::ifstream in(src / (stem + ".tilewright.yaml"));
+    std::ostringstream buf;
+    buf << in.rdbuf();
+    std::string text            = buf.str();
+    const std::string needle    = "feature_names_hash: ";
+    const std::size_t at        = text.find(needle);
+    REQUIRE(at != std::string::npos);
+    const std::size_t value_at  = at + needle.size();
+    const std::size_t value_end = text.find('\n', value_at);
+    text.replace(value_at, value_end - value_at, new_hash);
+
+    path_ = (dir_ / (stem + ".tilewright.yaml")).string();
+    std::ofstream out(path_);
+    out << text;
+  }
+  ~ScratchManifest() {
+    std::error_code ec;
+    std::filesystem::remove_all(dir_, ec);
+  }
+  const std::string& path() const { return path_; }
+
+ private:
+  std::filesystem::path dir_;
+  std::string path_;
+};
+
 bool tilewright_weights_available() {
   const std::string weights_dir = ORIGAMI_TEST_TW_WEIGHTS_DIR;
   if (weights_dir.empty()) return false;
@@ -37,6 +82,15 @@ bool tilewright_weights_available() {
 }
 
 }  // namespace
+
+// Weight YAML is downloaded separately (see data/nn/README.md). Report the case as skipped,
+// not passed, when it is absent.
+#define SKIP_UNLESS_TW_WEIGHTS()                                                          \
+  do {                                                                                    \
+    if (!tilewright_weights_available()) {                                                \
+      SKIP("tilewright weights not present in " ORIGAMI_TEST_TW_WEIGHTS_DIR);             \
+    }                                                                                     \
+  } while (0)
 
 TEST_CASE("NN: rank_options_t defaults", "[nn]") {
   origami::rank_options_t options;
@@ -124,9 +178,9 @@ TEST_CASE("NN: load_models_for_logic loads gfx950 tilewright weights", "[nn][til
 
   const std::string weights_dir = ORIGAMI_TEST_TW_WEIGHTS_DIR;
   const std::string logic_stem  = ORIGAMI_TEST_TW_LOGIC_STEM;
-  if (!tilewright_weights_available() || logic_stem.empty()) {
-    SUCCEED("tilewright weights not present; skipping.");
-    return;
+  SKIP_UNLESS_TW_WEIGHTS();
+  if (logic_stem.empty()) {
+    SKIP("ORIGAMI_TEST_TW_LOGIC_STEM is not set.");
   }
 
   const auto models = origami::nn::load_models_for_logic(logic_stem, weights_dir);
@@ -136,6 +190,8 @@ TEST_CASE("NN: load_models_for_logic loads gfx950 tilewright weights", "[nn][til
   REQUIRE(info != nullptr);
   REQUIRE(info->backend == origami::nn::backend_id_t::tilewright_v1);
   REQUIRE(info->arch == "gfx950");
+  REQUIRE(info->features.feature_names_hash ==
+          origami::nn::features::gemm_tilewright::feature_names_hash);
   REQUIRE(info->features.query_dim == 55);
   REQUIRE(info->features.item_dim == 12);
   REQUIRE(info->features.interaction_dim == 37);
@@ -145,10 +201,7 @@ TEST_CASE("NN: load_models_for_logic loads gfx950 tilewright weights", "[nn][til
 
 TEST_CASE("NN: load_models_for_logic falls back to ORIGAMI_NN_WEIGHTS_DIR when hint_dir empty",
           "[nn][tilewright]") {
-  if (!tilewright_weights_available()) {
-    SUCCEED("tilewright weights not present; skipping.");
-    return;
-  }
+  SKIP_UNLESS_TW_WEIGHTS();
 
   ScopedEnvVar weights_dir_env("ORIGAMI_NN_WEIGHTS_DIR", ORIGAMI_TEST_TW_WEIGHTS_DIR);
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
@@ -157,11 +210,65 @@ TEST_CASE("NN: load_models_for_logic falls back to ORIGAMI_NN_WEIGHTS_DIR when h
   REQUIRE(models.tilewright >= 0);
 }
 
-TEST_CASE("NN: rank_configs inference=nn ranks with loaded tilewright model", "[nn][tilewright]") {
-  if (!tilewright_weights_available()) {
-    SUCCEED("tilewright weights not present; skipping.");
-    return;
+TEST_CASE("NN: load_model rejects a manifest with a mismatched feature hash",
+          "[nn][tilewright]") {
+  SKIP_UNLESS_TW_WEIGHTS();
+
+  // Control: an unmodified hash loads, so the rejection below is due to the hash alone.
+  ScratchManifest matching(origami::nn::features::gemm_tilewright::feature_names_hash);
+  const origami::nn::model_handle_t ok = origami::nn::load_model(matching.path());
+  REQUIRE(ok >= 0);
+  origami::nn::unload_model(ok);
+
+  ScratchManifest mismatched("0000000000000000");
+  REQUIRE(origami::nn::load_model(mismatched.path()) == origami::nn::invalid_handle);
+}
+
+TEST_CASE("NN: a model for another architecture is not used", "[nn][tilewright]") {
+  SKIP_UNLESS_TW_WEIGHTS();
+
+  const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
+                           "Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const auto models      = origami::nn::load_models_for_logic(logic_stem, ORIGAMI_TEST_TW_WEIGHTS_DIR);
+  REQUIRE(models.tilewright >= 0);  // a gfx950 model
+
+  const auto hardware = make_hardware(942);
+  auto problem = make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype  = origami::data_type_t::BFloat16;
+  problem.b_dtype  = origami::data_type_t::BFloat16;
+  problem.c_dtype  = origami::data_type_t::BFloat16;
+  problem.d_dtype  = origami::data_type_t::BFloat16;
+  problem.mi_dtype = origami::data_type_t::BFloat16;
+
+  std::vector<origami::config_t> configs = {
+      make_config(128, 128, 128, 32, 32, 32, false, 1, 6, 0, 0),
+      make_config(352, 224, 64, 32, 32, 32, false, 1, 6, 0, 0),
+  };
+
+  const auto analytical = origami::rank_configs(problem, hardware, configs, origami::rank_options_t{});
+  REQUIRE_FALSE(analytical.empty());
+
+  origami::rank_options_t options;
+  options.nn_backend     = origami::nn_backend_t::tilewright;
+  options.library_models = &models;
+
+  // nn_fallback declines the gfx950 model on gfx942 and returns the analytical ranking.
+  options.inference = origami::inference_mode_t::nn_fallback;
+  const auto fallback = origami::rank_configs(problem, hardware, configs, options);
+  REQUIRE(fallback.size() == analytical.size());
+  for (std::size_t i = 0; i < fallback.size(); ++i) {
+    REQUIRE(fallback[i].config.mt.m == analytical[i].config.mt.m);
+    REQUIRE(fallback[i].config.mt.n == analytical[i].config.mt.n);
+    REQUIRE(fallback[i].latency == analytical[i].latency);
   }
+
+  // nn has no fallback, so the mismatch is an error.
+  options.inference = origami::inference_mode_t::nn;
+  REQUIRE_THROWS_AS(origami::rank_configs(problem, hardware, configs, options), std::runtime_error);
+}
+
+TEST_CASE("NN: rank_configs inference=nn ranks with loaded tilewright model", "[nn][tilewright]") {
+  SKIP_UNLESS_TW_WEIGHTS();
 
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
@@ -230,10 +337,7 @@ TEST_CASE("NN: is_kernel_feasible cache-hint gate", "[nn]") {
 }
 
 TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
-  if (!tilewright_weights_available()) {
-    SUCCEED("tilewright weights not present; skipping.");
-    return;
-  }
+  SKIP_UNLESS_TW_WEIGHTS();
 
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
@@ -257,10 +361,7 @@ TEST_CASE("NN: unload_model releases model info and payload", "[nn]") {
 }
 
 TEST_CASE("NN: unload_model while ranking is in flight", "[nn][tilewright]") {
-  if (!tilewright_weights_available()) {
-    SUCCEED("tilewright weights not present; skipping.");
-    return;
-  }
+  SKIP_UNLESS_TW_WEIGHTS();
 
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";
@@ -299,10 +400,7 @@ TEST_CASE("NN: unload_model while ranking is in flight", "[nn][tilewright]") {
 }
 
 TEST_CASE("NN: rank_options force_cell overrides routing", "[nn][tilewright]") {
-  if (!tilewright_weights_available()) {
-    SUCCEED("tilewright weights not present; skipping.");
-    return;
-  }
+  SKIP_UNLESS_TW_WEIGHTS();
 
   const char* logic_stem = "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_"
                            "Bljk_Cijk_Dijk_ID75a0_gfx950";

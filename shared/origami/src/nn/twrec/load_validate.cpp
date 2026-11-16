@@ -3,7 +3,10 @@
 
 #include "origami/nn/twrec/load_validate.hpp"
 
+#include "origami/nn/features/gemm_tilewright.hpp"
+
 #include <cmath>
+#include <iostream>
 
 namespace origami::nn::twrec::detail {
 
@@ -77,6 +80,15 @@ bool finalize_loaded_model(LoadedModel* model) {
   if (model->splits.size() > kMaxSplits) return false;
   if (!validate_string_len(model->arch)) return false;
   if (!validate_string_len(model->feature_names_hash)) return false;
+
+  // The weights were trained on one feature layout. Scoring with a different one yields
+  // meaningless numbers without any other sign of failure, so refuse the manifest.
+  if (model->feature_names_hash != features::gemm_tilewright::feature_names_hash) {
+    std::cerr << "TWREC manifest rejected: feature_names_hash " << model->feature_names_hash
+              << " does not match this build's " << features::gemm_tilewright::feature_names_hash
+              << '\n';
+    return false;
+  }
 
   for (const auto& kv : model->splits) {
     if (!validate_split_rule(kv.second)) return false;
