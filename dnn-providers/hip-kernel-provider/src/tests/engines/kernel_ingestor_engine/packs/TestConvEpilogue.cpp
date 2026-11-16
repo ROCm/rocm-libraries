@@ -811,6 +811,33 @@ TEST(TestConvEpilogueKey, GeneratedCodeIsCanonical)
     EXPECT_EQ(removed, plain);
 }
 
+TEST(TestConvEpilogueKey, AddingAndRemovingTheEpilogueRestoresTheCodeObjectKey)
+{
+    // A staging helper of a fused plan compiles with the epilogue defines removed: it must
+    // reuse the unfused build's code object, so its options and key come back unchanged. Enough
+    // pack defines that the define map rehashes on the way.
+    const auto fused
+        = parseFused(fusedSpecFor(nhwcHalf(), {scale(), bias(DataType::HALF), relu()}));
+    ASSERT_TRUE(fused.has_value());
+    compilation::KernelCompileOptions options("gfx942");
+    for(int i = 0; i < 40; ++i)
+    {
+        options.add("CONV_TEST_DEFINE_" + std::to_string(i), i);
+    }
+    const std::vector<std::string> before = options;
+    const auto keyBefore = compilation::Program::codeObjectKey("kernels/ConvIgemm.cpp", before);
+
+    conv_epilogue::addEpilogueDefines(options, fused->epilogue);
+    const std::vector<std::string> withEpilogue = options;
+    EXPECT_NE(compilation::Program::codeObjectKey("kernels/ConvIgemm.cpp", withEpilogue),
+              keyBefore);
+
+    conv_epilogue::removeEpilogueDefines(options);
+    const std::vector<std::string> after = options;
+    EXPECT_EQ(after, before);
+    EXPECT_EQ(compilation::Program::codeObjectKey("kernels/ConvIgemm.cpp", after), keyBefore);
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_CONV

@@ -8,6 +8,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,10 +43,20 @@ public:
         {
             return std::make_shared<compilation::Program>(kernelFileName, options);
         }
-        catch(hipdnn_plugin_sdk::HipdnnPluginException&)
+        catch(hipdnn_plugin_sdk::HipdnnPluginException& error)
         {
+            lastLoadFailure() = error;
             return nullptr;
         }
+    }
+
+    /// Why the last load() on this thread returned null, so a caller can report the failure
+    /// without building the program a second time. load() runs on the thread that called
+    /// getOrLoad(), so this is that call's failure.
+    static std::optional<hipdnn_plugin_sdk::HipdnnPluginException>& lastLoadFailure()
+    {
+        thread_local std::optional<hipdnn_plugin_sdk::HipdnnPluginException> s_failure;
+        return s_failure;
     }
 };
 

@@ -39,6 +39,12 @@ struct K1Args
     /// graph's filter reaches by one tiled transpose.
     long long wRowStride;
     long long wTapStride;
+    /// Patch backward data (K1_PATCH 1): the graph is a patch convolution (stride equal to the
+    /// filter, no padding) run as one GEMM over dy's positions, c = the filter's T R S C. Its
+    /// columns n = ((t R + r) S + s) C + c scatter to dx pixel (od T + t, oh R + r, ow S + s):
+    /// the filter's depth and height extents (T, R). Unused otherwise.
+    int patchT;
+    int patchR;
 };
 
 /// Adds the splits' fp32 partials in split order into the output's element type.

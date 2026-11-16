@@ -158,6 +158,11 @@ struct K1Raw<2>
 #ifndef K1_LARGE
 #define K1_LARGE 0
 #endif
+// Patch backward data (K1_PATCH 1): the output index of a patch convolution run as one GEMM
+// (K1Args::patchT, patchR); forward patch configs run the kernel unchanged on a reshaped problem.
+#ifndef K1_PATCH
+#define K1_PATCH 0
+#endif
 #if K1_LARGE
 typedef long long K1Pos;
 #else
@@ -821,6 +826,28 @@ __device__ inline long long
     }
     else
     {
+#if K1_PATCH
+        // Patch convolution as one GEMM (one group, unit stride over dy's positions): column n
+        // is the filter element ((t R + r) S + s) C + c, and dx is (D T) x (H R) x (W S) x C, so
+        // a row of S C columns is one contiguous run of dx.
+        (void)g;
+        (void)phase;
+        const int run = a.c / (a.patchT * a.patchR); // S C
+        const int tr = n / run;
+        const int j = n - tr * run;
+        const int t = tr / a.patchR;
+        const int r = tr - t * a.patchR;
+        const K1Pos spatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
+        const long long img = m / spatial;
+        K1Pos rest = static_cast<K1Pos>(m - img * spatial);
+        const int jw = static_cast<int>(rest % gather.out[2]);
+        rest /= gather.out[2];
+        const int jh = static_cast<int>(rest % gather.out[1]);
+        const int jd = static_cast<int>(rest / gather.out[1]);
+        const long long id = static_cast<long long>(jd) * a.patchT + t;
+        const long long ih = static_cast<long long>(jh) * a.patchR + r;
+        return (((img * a.di * a.patchT + id) * a.hi * a.patchR + ih) * a.wi + jw) * run + j;
+#else
         const int pw = phase % a.sw;
         const int ph = (phase / a.sw) % a.sh;
         const int pd = phase / (a.sw * a.sh);
@@ -836,6 +863,7 @@ __device__ inline long long
         const int id = ((pd - a.pd) % a.sd + a.sd) % a.sd + jd * a.sd;
         return (((img * a.di + id) * a.hi + ih) * a.wi + iw) * a.c
                + static_cast<long long>(g) * (a.c / a.groups) + n;
+#endif
     }
 }
 
@@ -1325,9 +1353,14 @@ struct K1Tiles
     __device__ void loadLds(T* As, T* Bs, int wave)
     {
         typedef K1Swz<BK> Swz;
-        static_assert(VEC * sizeof(T) == 16 && !DIRECT && PACK == 0, "DMA tiles");
+        static_assert(VEC * sizeof(T) == 16 && !DIRECT && PACK != 1, "DMA tiles");
         static_assert(BM % ROWS_PER_PASS == 0 && BN % ROWS_PER_PASS == 0, "DMA: whole passes");
         constexpr int RPW = 64 / ROW_THREADS; // rows a wave fills per pass
+        if constexpr(PACK == 2)
+        {
+            loadLdsFlat(As, Bs, wave);
+            return;
+        }
         const int it = curIt;
         const int c0 = curC * BK;
         const int qs = curQs, qr = curQr, qt = curQt;
@@ -1389,6 +1422,79 @@ struct K1Tiles
                 = ok ? static_cast<unsigned>(
                            bOff[p]
                            + static_cast<int>((tap * tapStride + c)
+                                              * static_cast<long long>(sizeof(T))))
+                     : K1_OUT_OF_RANGE;
+            __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                bRsrc,
+                (__attribute__((address_space(3))) void*)(Bs
+                                                          + (p * ROWS_PER_PASS + wave * RPW) * BK),
+                16,
+                offset,
+                0,
+                0,
+                0);
+        }
+    }
+
+    /// DMA with the flat reduction (PACK 2): a thread's 16-byte LDS slot holds reduction chunk
+    /// kv / VEC of its rows, which the caller set to the swizzled chunk of its row (the swizzle key
+    /// is the same for all of a thread's rows, ROWS_PER_PASS being a whole number of key periods),
+    /// so one flat cursor serves every pass, as in load().
+    __device__ void loadLdsFlat(T* As, T* Bs, int wave)
+    {
+        constexpr int RPW = 64 / ROW_THREADS;
+        const int it = curIt;
+        const int qs = curQs, qr = curQr, qt = curQt;
+        const int chan = packChan;
+        ++curIt;
+        const int t = packChan + BK;
+        const int adv = magicDiv(t, cgMul, cgSh);
+        packChan = t - adv * gather.cgroup;
+        const int sNext = curQs + adv;
+        const int sCarry = magicDiv(sNext, sMul, sSh);
+        curQs = sNext - sCarry * gather.taps[2];
+        const int rNext = curQr + sCarry;
+        const int rCarry = magicDiv(rNext, rMul, rSh);
+        curQr = rNext - rCarry * gather.taps[1];
+        curQt += rCarry;
+        const int td = qt * gather.step[0], th = qr * gather.step[1], tw = qs * gather.step[2];
+        const long long delta
+            = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
+        const bool cOk = (qt < gather.taps[0]) & (it < endIt);
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const int id = aD[p] + td, ih = aH[p] + th, iw = aW[p] + tw;
+            const bool ok = cOk & (static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0]))
+                            & (static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1]))
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]));
+            const unsigned offset
+                = ok ? static_cast<unsigned>(
+                           aOff[p]
+                           + static_cast<int>((delta + chan) * static_cast<long long>(sizeof(T))))
+                     : K1_OUT_OF_RANGE;
+            __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                aRsrc,
+                (__attribute__((address_space(3))) void*)(As
+                                                          + (p * ROWS_PER_PASS + wave * RPW) * BK),
+                16,
+                offset,
+                0,
+                0,
+                0);
+        }
+        const long long tap = (static_cast<long long>(map.first[0] + qt * map.step[0]) * map.fr
+                               + map.first[1] + qr * map.step[1])
+                                  * map.fs
+                              + map.first[2] + qs * map.step[2];
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            const bool ok = cOk & bOk[p];
+            const unsigned offset
+                = ok ? static_cast<unsigned>(
+                           bOff[p]
+                           + static_cast<int>((tap * tapStride + chan)
                                               * static_cast<long long>(sizeof(T))))
                      : K1_OUT_OF_RANGE;
             __builtin_amdgcn_raw_ptr_buffer_load_lds(
@@ -1539,7 +1645,7 @@ struct K1Tiles
     __device__ void storeRowsSwz(T* As, T* Bs) const
     {
         typedef K1Swz<BK> Swz;
-        static_assert(VEC * sizeof(T) == 16 && !DIRECT && PACK == 0, "swizzled tiles");
+        static_assert(VEC * sizeof(T) == 16 && !DIRECT && PACK != 1, "swizzled tiles");
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
             if(aRow(p))
@@ -1804,7 +1910,8 @@ __device__ inline void k1LdsBarrier()
 // the epilogue (and the split-K partials indexed alike), so it needs no staging transpose.
 // SWZ 1: XOR-swizzled, unpadded LDS tiles (K1Swz) read in whole 16-byte chunks, 8-byte fragments
 // two k-steps at a time: no LDS bank conflicts on the fragment reads (16-bit, VEC 8, no halo,
-// direct filter or tap packing).
+// direct filter or tap packing; the flat reduction, PACK 2, swizzles at the LDS store, so it
+// takes no DMA).
 
 template <class T,
           class Atom,
@@ -1863,10 +1970,12 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     // writes (a barrier hid it, a fence did not); with vector row stores only it passes.
     static_assert(STAGES == 1 || STAGES == 2, "stages");
     static_assert(
-        SWZ == 0 || (!SPLIT && HALO == 0 && WD == 0 && PACK == 0 && sizeof(T) == 2 && VEC == 8),
+        SWZ == 0 || (!SPLIT && HALO == 0 && WD == 0 && PACK != 1 && sizeof(T) == 2 && VEC == 8),
         "swizzled tiles: 16-bit native, no halo, direct filter or tap packing");
-    static_assert(DMA == 0 || (SWZ != 0 && STAGES == 1 && DMA >= 2 && DMA <= 4),
-                  "DMA: swizzled tiles, 2 to 4 LDS stages");
+    static_assert(DMA == 0 || (SWZ != 0 && STAGES == 1 && DMA >= 2 && DMA <= 4 && PACK != 1),
+                  "DMA: swizzled tiles, 2 to 4 LDS stages, no tap packing");
+    static_assert(K1_PATCH == 0 || DIR == K1_FORWARD || CF == 0,
+                  "patch backward data writes channels-last dx");
 
     __shared__ __attribute__((aligned(16))) T lds[LDS];
 
@@ -1896,6 +2005,9 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     // The fused epilogue: each output column's per-channel operands, loaded before the
     // reduction so their latency hides behind it (a short reduction otherwise waits on them at
     // the store).
+    // Patch backward data's columns are filter elements, not channels: it takes no epilogue
+    // (the graph parse declines fused backward data).
+    static_assert(K1_PATCH == 0 || DIR == K1_FORWARD, "patch backward data fuses no epilogue");
     ConvEpiGen::Chan chans[FN];
 #pragma unroll
     for(int j = 0; j < FN; ++j)
@@ -1907,6 +2019,15 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
 
     K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
+    if constexpr(DMA != 0 && PACK == 2)
+    {
+        // DMA with the flat reduction: the thread's LDS slot takes its row's swizzled chunk
+        // (loadLdsFlat), the same for each of its rows.
+        typedef K1Swz<BK> Swz;
+        static_assert(decltype(tiles)::ROWS_PER_PASS % (Swz::RPL * Swz::CPR) == 0,
+                      "a thread's rows share one swizzle key");
+        tiles.kv = ((tiles.kv / VEC) ^ Swz::key(tiles.row)) * VEC;
+    }
 
     typename Atom::acc acc[FM][FN];
 #pragma unroll
@@ -2458,6 +2579,7 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
 #if defined(CONV_EPI) && CONV_EPI
     // The fused epilogue: each output column's per-channel operands, loaded before the
     // reduction so their latency hides behind it.
+    static_assert(K1_PATCH == 0 || DIR == K1_FORWARD, "patch backward data fuses no epilogue");
     ConvEpiGen::Chan chans[TN];
 #pragma unroll
     for(int j = 0; j < TN; ++j)

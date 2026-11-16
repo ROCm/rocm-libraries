@@ -20,6 +20,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
@@ -45,6 +46,7 @@
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
+#include "core/PlanDescription.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
@@ -255,6 +257,8 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     stubAsThisEnginesConfig(engineConfig);
 
     Context context;
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     ASSERT_NO_THROW(
         engineManager.initializeExecutionContext(handle, wrap(graph), engineConfig, context));
     ASSERT_TRUE(context.hasValidPlan());
@@ -263,6 +267,17 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     const auto& plan
         = dynamic_cast<const hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>&>(context.plan());
     EXPECT_EQ(plan.kernel().getIntMetadata(std::string(BLOCK_SIZE_FIELD)), 256);
+
+    // The plan names the config it runs, and the build logs it with its one program.
+    const auto description = hip_kernel_provider::core::describePlan(context);
+    EXPECT_FALSE(description.autotunePending);
+    ASSERT_FALSE(plan.kernel().name.empty());
+    EXPECT_EQ(description.configName, plan.kernel().name);
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                  "plan build: engine '" + std::string(POINTWISE_ADD.engineName)
+                                      + "', config '" + plan.kernel().name + "', 1 program(s): "))
+        << recorder.getRecordedLogsAsString();
 }
 
 // ---------------------------------------------------------------------------
