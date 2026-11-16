@@ -476,9 +476,11 @@ Masks are runtime arguments: one prefill object per mask class (`none`, or
 `causal` for every causal/window request) and one decode object serve every
 bound. `use_attn_bias=True` adds the `attn_bias` feature and requires an
 `attn_bias` tensor `[B|1, H|1, Sq|1, Sk]` with a unit-stride key dimension;
-`attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype). Broadcast,
-expanded, permuted, and row-padded views are accepted without copies; invalid
-dtype, rank, extent, or key stride raises `ValueError`. `emit_lse=True`
+`attn_bias_dtype` is `"f32"` (default) or `"q"` (the Q dtype); any other
+spelling, or a flag that is not a real bool, raises `ValueError` when the
+request is built. Broadcast, expanded, permuted, and row-padded views are
+accepted without copies; invalid dtype, rank, extent, or key stride raises
+`ValueError`. `emit_lse=True`
 requires a caller-owned FP32 `lse` tensor; direct dispatch accepts
 `[B,Hq,Sq]`, `[Hq,total_q]`, and layout-shaped forms, while the hipDNN graph
 contract uses rank-4 stats. Fully masked rows store `-inf` (the sink with

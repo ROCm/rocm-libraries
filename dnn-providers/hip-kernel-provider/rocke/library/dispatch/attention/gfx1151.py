@@ -265,9 +265,10 @@ def mask_arguments(req: AttentionRequest) -> Tuple[bool, int, int]:
 
 
 def _bias_kind(req: AttentionRequest) -> Optional[str]:
-    if not bool(req.use_attn_bias):
-        return None
-    return "f32" if req.attn_bias_dtype.strip().lower() == "f32" else "q"
+    # ``AttentionRequest`` holds a real bool and one of ``ATTN_BIAS_DTYPES``,
+    # whose spellings are the kernel's bias kinds on purpose; a new request
+    # dtype must be mapped here explicitly.
+    return req.attn_bias_dtype if req.use_attn_bias else None
 
 
 def _wmma_family(arch: str) -> str:
