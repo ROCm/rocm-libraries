@@ -469,6 +469,111 @@ def _reference(q, k, v, scale, bottom_right, wl, wr, causal, bias):
     return out, lse
 
 
+def _launch(
+    spec,
+    q,
+    k,
+    v,
+    *,
+    scale,
+    bottom_right=0,
+    wl=-1,
+    wr=-1,
+    layout="bshd",
+    pad=None,
+    write_lse=False,
+    bias=None,
+    bias_lead=0,
+):
+    """O, and the natural-log LSE [B, Hq, Sq] when ``write_lse`` (else None), of
+    one launch of ``spec`` on logical [B, S, H, D] ``q`` / ``k`` / ``v`` stored
+    in ``layout`` / ``pad``. ``bias`` is a logical [b, h, q, k] array whose
+    size-1 axes broadcast, placed ``bias_lead`` NaN elements past a dword
+    boundary (a misread surfaces)."""
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
+        build_wmma_fmha_fwd_v2,
+        wmma_fmha_fwd_v2_grid,
+        wmma_fmha_fwd_v2_signature,
+    )
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.packing import pack_args
+
+    B, Sq, Hq, dq = q.shape
+    Sk, Hk = k.shape[1], k.shape[2]
+    Hv, dv = v.shape[2], v.shape[3]
+    rt = Runtime()
+    tensors = []
+    module = None
+    try:
+        tq, tk, tv = (_Tensor(rt, x, layout, pad) for x in (q, k, v))
+        to = _Tensor(rt, np.zeros((B, Sq, Hq, dv), q.dtype), layout, pad)
+        tensors = [tq, tk, tv, to]
+        values = dict(
+            Q=tq.ptr, K=tk.ptr, V=tv.ptr, O=to.ptr, LSE=0,
+            scale_log2=scale * _LOG2E, batch=B, seqlen_q=Sq, seqlen_k=Sk,
+            num_query_heads=Hq, num_kv_heads=Hk, num_v_heads=Hv, head_dim_q=dq, head_dim_v=dv,
+            bottom_right=bottom_right, window_left=wl, window_right=wr, write_lse=0,
+            stride_lse_batch=0, stride_lse_token=0, stride_lse_head=0,
+        )  # fmt: skip
+        if write_lse:
+            tl = _Tensor(rt, np.zeros((B, Hq, Sq, 1), np.float32))
+            tensors.append(tl)
+            values.update(
+                LSE=tl.ptr,
+                write_lse=1,
+                stride_lse_batch=Hq * Sq,
+                stride_lse_token=1,
+                stride_lse_head=Sq,
+            )
+        for name, t in (("q", tq), ("k", tk), ("v", tv), ("o", to)):
+            sb, st, sh = t.strides
+            values.update(
+                {
+                    f"stride_{name}_batch": sb,
+                    f"stride_{name}_token": st,
+                    f"stride_{name}_head": sh,
+                }
+            )
+        if bias is not None:
+            flat = np.concatenate(
+                [np.full(bias_lead, np.nan, bias.dtype), bias.reshape(-1)]
+            )
+            tb = _Tensor(rt, flat)
+            tensors.append(tb)
+            bs = [
+                s // bias.itemsize if n > 1 else 0
+                for s, n in zip(bias.strides, bias.shape)
+            ]
+            values.update(
+                attn_bias_ptr=tb.ptr + bias_lead * bias.itemsize,
+                bias_stride_b=bs[0],
+                bias_stride_h=bs[1],
+                bias_stride_q=bs[2],
+            )
+        artifact = compile_kernel(
+            build_wmma_fmha_fwd_v2(spec, arch=_ARCH), arch=_ARCH, backend="python"
+        )
+        module = rt.load_module(artifact.hsaco)
+        grid, block = wmma_fmha_fwd_v2_grid(
+            spec, batch=B, seqlen_q=Sq, num_query_heads=Hq
+        )
+        rt.launch(
+            module.get_function(artifact.kernel_name),
+            grid,
+            block,
+            pack_args(wmma_fmha_fwd_v2_signature(spec), values),
+        )
+        rt.sync()
+        return to.read(), (tl.read()[..., 0] if write_lse else None)
+    finally:
+        rt.sync()
+        if module is not None:
+            module.unload()
+        for t in tensors:
+            t.free()
+
+
 @pytest.mark.gpu
 @_NEEDS_RDNA
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -481,15 +586,7 @@ def test_prefill_matches_reference(case, dtype):
         npdt = pytest.importorskip("ml_dtypes").bfloat16
     else:
         npdt = np.float16
-    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
-        WmmaFmhaFwdV2Spec,
-        build_wmma_fmha_fwd_v2,
-        wmma_fmha_fwd_v2_grid,
-        wmma_fmha_fwd_v2_signature,
-    )
-    from rocke.helpers import compile_kernel
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.packing import pack_args
+    from kernels.gfx1151.wmma_fmha_fwd_v2 import WmmaFmhaFwdV2Spec
 
     bias_opt = opt.get("bias")
     spec = WmmaFmhaFwdV2Spec(
@@ -520,70 +617,22 @@ def test_prefill_matches_reference(case, dtype):
             bias[..., -1] = 4.0
     scale = opt.get("scale", dq**-0.5)
 
-    rt = Runtime()
-    layout, pad = opt.get("layout", "bshd"), opt.get("pad")
-    tensors = []
-    module = None
-    try:
-        tq, tk, tv = (_Tensor(rt, x, layout, pad) for x in (q, k, v))
-        to = _Tensor(rt, np.zeros((B, Sq, Hq, dv), npdt), layout, pad)
-        tl = _Tensor(rt, np.zeros((B, Hq, Sq, 1), np.float32))
-        tensors = [tq, tk, tv, to, tl]
-        values = dict(
-            Q=tq.ptr, K=tk.ptr, V=tv.ptr, O=to.ptr, LSE=tl.ptr,
-            scale_log2=scale * _LOG2E, batch=B, seqlen_q=Sq, seqlen_k=Sk,
-            num_query_heads=Hq, num_kv_heads=Hk, num_v_heads=Hv, head_dim_q=dq, head_dim_v=dv,
-            bottom_right=br, window_left=wl, window_right=wr, write_lse=1,
-            stride_lse_batch=Hq * Sq, stride_lse_token=1, stride_lse_head=Sq,
-        )  # fmt: skip
-        for name, t in (("q", tq), ("k", tk), ("v", tv), ("o", to)):
-            sb, st, sh = t.strides
-            values.update(
-                {
-                    f"stride_{name}_batch": sb,
-                    f"stride_{name}_token": st,
-                    f"stride_{name}_head": sh,
-                }
-            )
-        if bias is not None:
-            # NaN-poisoned lead elements before the bias (a misread surfaces).
-            lead = opt.get("bias_lead", 0)
-            flat = np.concatenate([np.full(lead, np.nan, bias.dtype), bias.reshape(-1)])
-            tb = _Tensor(rt, flat)
-            tensors.append(tb)
-            bs = [
-                s // bias.itemsize if n > 1 else 0
-                for s, n in zip(bias.strides, bias.shape)
-            ]
-            values.update(
-                attn_bias_ptr=tb.ptr + lead * bias.itemsize,
-                bias_stride_b=bs[0],
-                bias_stride_h=bs[1],
-                bias_stride_q=bs[2],
-            )
-        artifact = compile_kernel(
-            build_wmma_fmha_fwd_v2(spec, arch=_ARCH), arch=_ARCH, backend="python"
-        )
-        module = rt.load_module(artifact.hsaco)
-        grid, block = wmma_fmha_fwd_v2_grid(
-            spec, batch=B, seqlen_q=Sq, num_query_heads=Hq
-        )
-        rt.launch(
-            module.get_function(artifact.kernel_name),
-            grid,
-            block,
-            pack_args(wmma_fmha_fwd_v2_signature(spec), values),
-        )
-        rt.sync()
-        out = to.read().astype(np.float64)
-        got_lse = tl.read()[..., 0]
-    finally:
-        rt.sync()
-        if module is not None:
-            module.unload()
-        for t in tensors:
-            t.free()
-
+    out, got_lse = _launch(
+        spec,
+        q,
+        k,
+        v,
+        scale=scale,
+        bottom_right=br,
+        wl=wl,
+        wr=wr,
+        layout=opt.get("layout", "bshd"),
+        pad=opt.get("pad"),
+        write_lse=True,
+        bias=bias,
+        bias_lead=opt.get("bias_lead", 0),
+    )
+    out = out.astype(np.float64)
     ref, ref_lse = _reference(q, k, v, scale, br, wl, wr, mask == "causal", bias)
     tol = 3e-2 if dtype == "bf16" else 1e-2
     assert np.isfinite(out).all()
@@ -593,70 +642,6 @@ def test_prefill_matches_reference(case, dtype):
     if fin.any():
         lse_tol = 1e-2 + 1e-5 * float(np.abs(ref_lse[fin]).max())
         np.testing.assert_allclose(got_lse[fin], ref_lse[fin], rtol=0, atol=lse_tol)
-
-
-def _launch_dense(spec, q, k, v, *, wl, wr, bias=None):
-    """O of one BSHD launch of ``spec`` (top-left diagonal, no LSE)."""
-    from kernels.gfx1151.wmma_fmha_fwd_v2 import (
-        build_wmma_fmha_fwd_v2,
-        wmma_fmha_fwd_v2_grid,
-        wmma_fmha_fwd_v2_signature,
-    )
-    from rocke.helpers import compile_kernel
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.packing import pack_args
-
-    B, S, H, D = q.shape
-    rt = Runtime()
-    tensors = []
-    module = None
-    try:
-        tq, tk, tv = (_Tensor(rt, x) for x in (q, k, v))
-        to = _Tensor(rt, np.zeros_like(q))
-        tensors = [tq, tk, tv, to]
-        values = dict(
-            Q=tq.ptr, K=tk.ptr, V=tv.ptr, O=to.ptr, LSE=0,
-            scale_log2=D**-0.5 * _LOG2E, batch=B, seqlen_q=S, seqlen_k=S,
-            num_query_heads=H, num_kv_heads=H, num_v_heads=H, head_dim_q=D, head_dim_v=D,
-            bottom_right=0, window_left=wl, window_right=wr, write_lse=0,
-            stride_lse_batch=0, stride_lse_token=0, stride_lse_head=0,
-        )  # fmt: skip
-        for name, t in (("q", tq), ("k", tk), ("v", tv), ("o", to)):
-            sb, st, sh = t.strides
-            values.update(
-                {
-                    f"stride_{name}_batch": sb,
-                    f"stride_{name}_token": st,
-                    f"stride_{name}_head": sh,
-                }
-            )
-        if bias is not None:
-            tb = _Tensor(rt, bias)
-            tensors.append(tb)
-            values.update(
-                attn_bias_ptr=tb.ptr, bias_stride_b=0, bias_stride_h=0, bias_stride_q=S
-            )
-        artifact = compile_kernel(
-            build_wmma_fmha_fwd_v2(spec, arch=_ARCH), arch=_ARCH, backend="python"
-        )
-        module = rt.load_module(artifact.hsaco)
-        grid, block = wmma_fmha_fwd_v2_grid(
-            spec, batch=B, seqlen_q=S, num_query_heads=H
-        )
-        rt.launch(
-            module.get_function(artifact.kernel_name),
-            grid,
-            block,
-            pack_args(wmma_fmha_fwd_v2_signature(spec), values),
-        )
-        rt.sync()
-        return to.read()
-    finally:
-        rt.sync()
-        if module is not None:
-            module.unload()
-        for t in tensors:
-            t.free()
 
 
 @pytest.mark.gpu
@@ -692,9 +677,10 @@ def test_prefill_rows_independent_of_wave_neighbours(mask, dtype):
     else:
         spec = WmmaFmhaFwdV2Spec(dtype=dtype, head_dim=D, mask="causal", bias="q")
         keep = np.arange(S)[None, :] <= np.arange(S)[:, None]
-        launch = dict(wl=-1, wr=-1, bias=np.where(keep, 0.0, lowest).astype(npdt))
-    clean = _launch_dense(spec, q, k, v, **launch)
-    poisoned = _launch_dense(spec, q, kp, vp, **launch)
+        bias = np.where(keep, 0.0, lowest).astype(npdt)[None, None]
+        launch = dict(wl=-1, wr=-1, bias=bias)
+    clean, _ = _launch(spec, q, k, v, scale=D**-0.5, **launch)
+    poisoned, _ = _launch(spec, q, kp, vp, scale=D**-0.5, **launch)
     assert np.isfinite(poisoned.astype(np.float32)).all()
     rows = slice(0, S - 1)
     assert np.array_equal(
