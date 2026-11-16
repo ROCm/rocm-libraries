@@ -417,6 +417,45 @@ namespace precond_ut
         return a;
     }
 
+    // Full 3 x 3 Hermitian positive definite matrix A = L * L^H with all nine entries
+    // stored (reproducer of issue #15943). With no dropped fill, IC(0) is the exact
+    // Cholesky factorization, so the factor is compared with L itself rather than with a
+    // host IC(0). The inner sums are not real for the complex types; real types drop the
+    // imaginary parts.
+    template <typename T>
+    struct cholesky_reproducer
+    {
+        csr_matrix<T>  a;
+        std::vector<T> factor; // L on and below the diagonal, A above it
+    };
+
+    template <typename T>
+    cholesky_reproducer<T> make_cholesky_reproducer()
+    {
+        using cd                       = std::complex<double>;
+        const double           s       = is_cplx<T> ? 1.0 : 0.0;
+        const cd               l[3][3] = {{cd(2.0), 0.0, 0.0},
+                            {cd(1.0, 2.0 * s), cd(3.0), 0.0},
+                            {cd(2.0, -s), cd(0.5, 0.75 * s), cd(4.0)}};
+        cholesky_reproducer<T> r;
+        r.a.n = 3;
+        r.a.ptr.push_back(0);
+        for(int32_t i = 0; i < 3; ++i)
+        {
+            for(int32_t j = 0; j < 3; ++j)
+            {
+                cd sum = 0.0;
+                for(int32_t k = 0; k < 3; ++k)
+                    sum += l[i][k] * std::conj(l[j][k]);
+                r.a.ind.push_back(j);
+                r.a.val.push_back(from_cd<T>(sum));
+                r.factor.push_back(from_cd<T>(j <= i ? l[i][j] : sum));
+            }
+            r.a.ptr.push_back(static_cast<int32_t>(r.a.ind.size()));
+        }
+        return r;
+    }
+
     // ILU(0) input from a lower-triangular matrix: every stored a_ij (j < i) gets the
     // mirror a_ji = 0.8 * conj(a_ij), so the update loop over the dependency row after its
     // diagonal has entries to hit and to miss. Each diagonal entry becomes

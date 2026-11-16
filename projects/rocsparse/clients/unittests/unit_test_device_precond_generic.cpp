@@ -117,6 +117,23 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
         handle, make_fat_row_matrix<double>(40, true, 3), opt, "fat 40", one);
 }
 
+// IC(0) of a full Hermitian matrix is its exact Cholesky factor (issue #15943), so a
+// defect shared by the kernels and the host reference cannot pass.
+TEST_F(PrecondGeneric, spic0_csr_exact_cholesky_factor)
+{
+    const run_options opt;
+    for_all_types([&](auto tag) {
+        using T      = decltype(tag);
+        const auto r = make_cholesky_reproducer<T>();
+        for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+        {
+            run_result<T> out;
+            check_csr_matrix<Kind::ic, T>(handle, r.a, opt, "exact cholesky", base, &out);
+            expect_close(keep_lower_only(r.a, out.values), r.factor);
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Singularity reporting
 // ---------------------------------------------------------------------------
@@ -486,6 +503,54 @@ TEST_F(PrecondGeneric, spic0_bsr_long_block_rows)
             opt,
             "fat block row, complex");
     }
+}
+
+// The matrix of spic0_csr_exact_cholesky_factor as one 3 x 3 block (inner sums inside
+// the block) and as 1 x 1 blocks (inner sums across block rows).
+TEST_F(PrecondGeneric, spic0_bsr_exact_cholesky_factor)
+{
+    const run_options opt;
+    for_all_types([&](auto tag) {
+        using T      = decltype(tag);
+        const auto r = make_cholesky_reproducer<T>();
+        for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            for(const int32_t block_dim : {1, 3})
+            {
+                SCOPED_TRACE("block_dim=" + std::to_string(block_dim));
+                bsr_matrix<T> m;
+                m.block_dim = block_dim;
+                m.dir       = dir;
+                if(block_dim == 1)
+                {
+                    m.mb  = r.a.n;
+                    m.ptr = r.a.ptr;
+                    m.ind = r.a.ind;
+                    m.val = r.a.val;
+                }
+                else
+                {
+                    m.mb  = 1;
+                    m.ptr = {0, 1};
+                    m.ind = {0};
+                    m.val.resize(9);
+                    for(int32_t i = 0; i < 3; ++i)
+                        for(int32_t j = 0; j < 3; ++j)
+                            m.val[dir == rocsparse_direction_row ? 3 * i + j : 3 * j + i]
+                                = r.a.val[3 * i + j];
+                }
+                dev_bsr<T> d;
+                d.init(m);
+                ASSERT_NE(d.A, nullptr);
+                run_result<T> out;
+                run_factorization<Kind::ic, T>(handle, d.A, d.val, 1, opt, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                EXPECT_EQ(out.singularity[0], rocsparse_singularity_none);
+                m.val = out.values;
+                expect_close(keep_lower_only(r.a, expand_bsr(m).val), r.factor);
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
