@@ -44,7 +44,8 @@
 #   AMG:    hybrid_amg, pairwise_amg, ruge_stueben_amg, saamg, uaamg
 #   Other:  preconditioner, itersolver, chebyshev, mixed_precision
 #   Local:  local_matrix_*, local_vector, local_stencil  (skip in emulation)
-#   Infra:  backend, backend_init_order                   (skip in emulation)
+#   Infra:  backend, backend_init_order                   (skip in emulation, except
+#           backend_omp_parallel_region and backend_omp_restore_state)
 
 test_categories:
   quick:
