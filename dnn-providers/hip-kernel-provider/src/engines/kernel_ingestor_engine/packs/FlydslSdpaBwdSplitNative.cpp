@@ -1166,8 +1166,10 @@ SplitPlan planFor(Slot slot,
         plan.sink = row->sink == 1;
         if(plan.sink != facts->sink)
         {
-            failBadParam("kernel '" + kernel.name + "' has sink " + std::to_string(row->sink)
-                         + " but the graph " + (facts->sink ? "has" : "has no") + " dSink");
+            native::failBadParam(ERROR_SCOPE,
+                                 "kernel '" + kernel.name + "' has sink "
+                                     + std::to_string(row->sink) + " but the graph "
+                                     + (facts->sink ? "has" : "has no") + " dSink");
         }
         plan.dsinkGrid = {static_cast<unsigned int>(facts->numHeads), 1, 1};
     }
@@ -1670,7 +1672,8 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         {
             if(problem.dsinkUid == bwd::NO_UID || !layout.hasSinkterm)
             {
-                failBadParam("a sink twin row was chosen for a graph without dSink");
+                native::failBadParam(ERROR_SCOPE,
+                                     "a sink twin row was chosen for a graph without dSink");
             }
             void* const sinkTerm = native::inWorkspace(workspace, layout.sinkterm.offset);
             arguments.kernel = PrepSinkKernargs{prep, buffer(problem.sinkUid), sinkTerm};
@@ -2033,9 +2036,10 @@ public:
             // A twin row is launched by the `prep_sink` dispatch and no other.
             if(plan.sink != SOURCES)
             {
-                failBadParam("kernel '" + kernel.name + "' has sink " + (plan.sink ? "1" : "0")
-                             + " but is dispatched by the " + (SOURCES ? "prep_sink" : "prep")
-                             + " handler");
+                native::failBadParam(ERROR_SCOPE,
+                                     "kernel '" + kernel.name + "' has sink "
+                                         + (plan.sink ? "1" : "0") + " but is dispatched by the "
+                                         + (SOURCES ? "prep_sink" : "prep") + " handler");
             }
             if constexpr(SOURCES)
             {
