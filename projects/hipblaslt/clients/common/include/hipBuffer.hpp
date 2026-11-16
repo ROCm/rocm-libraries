@@ -154,6 +154,13 @@ public:
     {
         memory_pool<h_memory>::Restore(buffer);
     }
+
+    // Returns the memory to the pool early. The buffer must not be read afterwards.
+    void release()
+    {
+        memory_pool<h_memory>::Restore(buffer);
+    }
+
     HipHostBuffer(const HipHostBuffer&)            = delete;
     HipHostBuffer(HipHostBuffer&&)                 = default;
     HipHostBuffer& operator=(const HipHostBuffer&) = delete;

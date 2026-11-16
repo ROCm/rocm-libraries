@@ -709,9 +709,10 @@ namespace
 #ifndef __linux__
         GTEST_SKIP() << "the estimate check reads the peak resident memory from /proc";
 #endif
-        // In the f32 case six 256 MiB host buffers make up the estimate, each with the pool's 20%
-        // extra. In the f16 case the CPU reference's 1 GiB float copy of A is most of it. The
-        // bound on the overestimate keeps the preflight from skipping cases that would fit.
+        // In the f32 case two 256 MiB host buffers make up the estimate, each with the pool's 20%
+        // extra: hD_gold, and hC, whose memory hD_1 then takes. In the f16 case the CPU
+        // reference's 1 GiB float copy of A is most of it. The bound on the overestimate keeps
+        // the preflight from skipping cases that would fit.
         struct Shape
         {
             const char* name;
