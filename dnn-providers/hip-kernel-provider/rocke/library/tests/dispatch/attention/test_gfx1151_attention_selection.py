@@ -853,8 +853,8 @@ class TestRdnaWmmaTunedCandidates(unittest.TestCase):
 
     def test_query_side_options_are_validated(self):
         for fields, message in (
-            (dict(dense_q="false", layout="paged"), "dense_q must be a bool"),
-            (dict(seqused_q=1, layout="paged"), "seqused_q must be a bool"),
+            (dict(dense_q="false", layout="paged"), "dense_q='false', expected a bool"),
+            (dict(seqused_q=1, layout="paged"), "seqused_q=1, expected a bool"),
             (dict(dense_q=True, layout="ragged"), "dense_q requires layout='paged'"),
             (dict(dense_q=True), "dense_q requires layout='paged'"),
             (dict(seqused_q=True, layout="dense"), "seqused_q requires layout="),

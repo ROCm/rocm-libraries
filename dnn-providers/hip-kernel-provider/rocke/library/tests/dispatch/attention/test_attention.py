@@ -287,6 +287,80 @@ class TestAttentionMaskType(unittest.TestCase):
                     dispatch_attention(_attn(mask_type=value))
 
 
+# Every boolean flag of AttentionRequest, listed by hand so a flag that the
+# request stops checking (or a new one it does not check) fails the test below.
+_REQUEST_BOOL_FLAGS = (
+    "use_sinks",
+    "window_bottom_right",
+    "use_fp8",
+    "fp8_fnuz",
+    "use_softcap",
+    "use_alibi",
+    "use_qq_bias",
+    "use_attn_bias",
+    "emit_lse",
+    "runtime_head_dims",
+    "dense_q",
+    "seqused_q",
+)
+
+
+class TestAttentionRequestFieldValues(unittest.TestCase):
+    """The request refuses, at construction, a flag that is not a real bool and a
+    bias dtype that is not one of its exact spellings, instead of coercing them
+    where they are read: ``bool("false")`` is True, and ``1 == True`` with the same
+    hash, so a later check could be skipped by a selection-cache hit."""
+
+    def test_bool_fields_derived_from_annotations_match_the_flag_list(self):
+        from dispatch.attention.common import _BOOL_FIELDS
+
+        self.assertEqual(sorted(_BOOL_FIELDS), sorted(_REQUEST_BOOL_FLAGS))
+
+    def test_each_flag_refuses_a_non_bool_value(self):
+        for flag in _REQUEST_BOOL_FLAGS:
+            for bad in ("false", None, 1, 0):
+                with self.subTest(flag=flag, value=bad):
+                    with self.assertRaises(ValueError) as caught:
+                        _attn(**{flag: bad})
+                    self.assertEqual(
+                        str(caught.exception),
+                        f"AttentionRequest rejected - {flag}={bad!r}, "
+                        "expected a bool (True or False)",
+                    )
+
+    def test_a_flag_is_refused_after_the_same_request_with_true_was_selected(self):
+        selected = dispatch_attention(_attn(use_sinks=True))
+        self.assertIn("sinks", selected.request.features())
+        for bad in (1, "true"):
+            with self.subTest(value=bad), self.assertRaisesRegex(
+                ValueError, rf"use_sinks={bad!r}, expected a bool"
+            ):
+                dispatch_attention(_attn(use_sinks=bad))
+
+    def test_attn_bias_dtype_takes_its_exact_spellings_only(self):
+        for dtype in ("f32", "q"):
+            with self.subTest(dtype=dtype):
+                self.assertEqual(_attn(attn_bias_dtype=dtype).attn_bias_dtype, dtype)
+        for bad in ("fp32", "F32", " f32 ", "Q", "fp16", "", None):
+            with self.subTest(dtype=bad):
+                with self.assertRaises(ValueError) as caught:
+                    _attn(attn_bias_dtype=bad)
+                self.assertEqual(
+                    str(caught.exception),
+                    f"AttentionRequest rejected - attn_bias_dtype={bad!r}, "
+                    "expected one of ('f32', 'q')",
+                )
+
+    def test_rdna_bias_kind_is_the_requested_dtype(self):
+        from dispatch.attention.gfx1151 import _bias_kind
+
+        self.assertIsNone(_bias_kind(_attn("gfx1151", attn_bias_dtype="f32")))
+        for dtype in ("f32", "q"):
+            with self.subTest(dtype=dtype):
+                request = _attn("gfx1151", use_attn_bias=True, attn_bias_dtype=dtype)
+                self.assertEqual(_bias_kind(request), dtype)
+
+
 class TestAttentionPublicSurface(unittest.TestCase):
     def test_every_all_entry_resolves(self):
         import dispatch.attention as attention
