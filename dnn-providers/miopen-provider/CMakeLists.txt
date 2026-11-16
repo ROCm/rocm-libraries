@@ -194,14 +194,6 @@ else()
 endif()
 message(STATUS "miopen-provider: linking MIOpen library target '${MIOPEN_PROVIDER_MIOPEN_LIB}'")
 
-# Treat MIOpen headers as system headers so neither the compiler nor
-# clang-tidy emits diagnostics for code we do not own. MIOpen's exported
-# CMake package (both in-tree and the installed miopen-targets.cmake)
-# does not mark its include dirs SYSTEM, so we promote them here.
-# Requires CMake 3.25+ (SYSTEM target property); enforced by
-# cmake_minimum_required above.
-set_target_properties(${MIOPEN_PROVIDER_MIOPEN_LIB} PROPERTIES SYSTEM TRUE)
-
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
@@ -236,6 +228,20 @@ add_library(
 
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+
+# Mark every header included as <miopen/...> as a system header, so the provider's -Werror and
+# clang-tidy ignore them (on Windows, miopen.h trips -Wmicrosoft-enum-value). Marking MIOpen's
+# include directories SYSTEM instead would not work: the in-tree target is shared with MIOpen's
+# tests, CK plugins and driver, and SYSTEM would put ROCM_PATH/include ahead of this checkout's
+# headers for all of them. An installed MIOpen is already system via its imported target.
+# PUBLIC so the unit tests inherit it.
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set(miopen_provider_system_header_prefix "/clang:--system-header-prefix=miopen/")
+else()
+    set(miopen_provider_system_header_prefix "--system-header-prefix=miopen/")
+endif()
+target_compile_options(miopen_plugin_impl PUBLIC "${miopen_provider_system_header_prefix}")
+unset(miopen_provider_system_header_prefix)
 
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 # When linking the private implementation library, force-include the symbol-rename

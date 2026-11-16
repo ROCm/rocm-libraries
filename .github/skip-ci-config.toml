@@ -86,7 +86,7 @@ common = [
     ".github/workflows/merge-submodules.yml",
     ".github/workflows/miopen-wrapper-flag-on.yml",
     ".github/workflows/multiple_pr_import.yml",
-    ".github/workflows/pr-base-freshness.yml",
+    ".github/workflows/pr-ci-freshness.yml",
     ".github/workflows/pr-import.yml",
     ".github/workflows/pr-merge-sync-patches.yml",
     ".github/workflows/pr-merge-sync-patches-manual.yml",

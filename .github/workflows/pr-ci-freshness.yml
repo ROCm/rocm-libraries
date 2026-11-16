@@ -1,8 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Reports how far behind `develop` each open PR's base is, as a commit status
-# named by STATUS_CONTEXT below.
+# Reports how old the `develop` is that each open PR's CI was tested against,
+# as a commit status named by STATUS_CONTEXT below.
+#
+# PR CI builds a test merge of the PR head into `develop`, made when the run
+# is created and reused by every re-run. So what matters is not when the
+# branch last merged `develop` but when its newest TheRock Multi-Arch CI run
+# was created. A re-run does not refresh it; only a new run (a push, a
+# reopen, a label change) does. See pr_ci_freshness.py for the details.
 #
 # Why a commit status and not a check run: staleness is a function of
 # wall-clock time, so a PR that is fine today has to be able to turn red three
@@ -20,24 +26,30 @@
 # Do (1) first and let it soak; an enforcing status that is never posted would
 # block its PR permanently.
 
-name: PR Base Freshness
+name: PR CI Freshness
 
 on:
-  # SECURITY: pull_request_target runs in the BASE-repo context, so the token
-  # can post a status even for PRs opened from FORKS.
+  # Fires when a CI run is created, which is the moment its merge of develop
+  # is fixed, so the status always describes the run the PR now shows. A PR
+  # event would race the CI run it is meant to judge.
+  #
+  # SECURITY: workflow_run runs in the BASE-repo context from the default
+  # branch's copy of this file, so the token can post a status even for PRs
+  # opened from FORKS.
   #
   # This is SAFE here ONLY because this workflow:
   #   • NEVER checks out or executes PR head code (see checkout step below),
-  #   • runs the TRUSTED pr_base_freshness.py from the base branch, and
+  #   • runs the TRUSTED pr_ci_freshness.py from the default branch, and
   #   • reads all PR data via the GitHub API.
   # Do NOT add build/test/install steps that run PR-provided code, and do NOT
   # change the checkout to the PR head — that would create a "pwn request".
-  # Refs:
+  # The same rules apply to workflow_run as to pull_request_target. Refs:
   #   https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target
   #   https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
-  pull_request_target:
-    branches: [develop]
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    # The `name:` of CI_WORKFLOW_FILE below; rename them together.
+    workflows: ['TheRock Multi-Arch CI']
+    types: [requested]
 
   # Four times a day. The threshold is measured in days, so this only needs to
   # be fine-grained enough that a PR cannot sit stale-green for long; anything
@@ -59,7 +71,7 @@ on:
       # script rejects those too, but there is no reason to be able to type
       # them in the first place.
       max_age_days:
-        description: 'Maximum days the base may lag develop'
+        description: 'Maximum days the develop that CI merged may lag'
         type: choice
         options: ['1', '2', '3', '5', '7', '14']
         default: '3'
@@ -68,15 +80,18 @@ on:
         type: boolean
         default: false
 
-# Least privilege: the only write is the commit status itself.
+# Least privilege: the only write is the commit status itself. `actions: read`
+# is for looking up the CI runs being judged.
 permissions:
   contents: read
   statuses: write
   pull-requests: read
+  actions: read
 
-# Per-PR runs supersede each other; scheduled runs never cancel one another.
+# Runs for the same head supersede each other; scheduled runs never cancel
+# one another.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -84,25 +99,31 @@ env:
   MODE: ${{ inputs.mode || 'report' }}
   MAX_AGE_DAYS: ${{ inputs.max_age_days || '3' }}
   # Also the context name to add to the develop ruleset when enforcing.
-  STATUS_CONTEXT: base-freshness
+  STATUS_CONTEXT: ci-freshness
+  # The CI workflow whose runs are judged, by file. The workflow_run trigger
+  # above names the same workflow by its `name:`; rename them together.
+  CI_WORKFLOW_FILE: therock-multi-arch-ci.yml
 
 jobs:
   freshness:
-    name: Base freshness
+    name: CI freshness
+    # The CI workflow also runs on pushes to develop and release branches,
+    # which have no PR to report on.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       # SECURITY: check out the TRUSTED default branch, NEVER the PR head. This
-      # guarantees we run OUR pr_base_freshness.py, not the fork's.
+      # guarantees we run OUR pr_ci_freshness.py, not the fork's.
       #
-      # Every event is pinned to the default branch tip. For PR and scheduled
-      # runs that is also where this workflow file is loaded from, so the two
-      # always match. Do not use the PR's base SHA: a PR based on a commit
-      # older than the script has no script to run. Do not leave `ref` empty
-      # either: a workflow_dispatch run falls through to whatever branch the
-      # caller picked and would run that branch's copy of the script. (A
-      # dispatch also loads this YAML from that branch; that needs write
-      # access, which can already add a workflow with `statuses: write`.)
+      # Every event is pinned to the default branch tip. For workflow_run and
+      # scheduled runs that is also where this workflow file is loaded from,
+      # so the two always match. Do not use the PR's base SHA: a PR based on
+      # a commit older than the script has no script to run. Do not leave
+      # `ref` empty either: a workflow_dispatch run falls through to whatever
+      # branch the caller picked and would run that branch's copy of the
+      # script. (A dispatch also loads this YAML from that branch; that needs
+      # write access, which can already add a workflow with `statuses: write`.)
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -118,17 +139,20 @@ jobs:
       # privilege, and an unpinned `pip install` would make that a moving
       # target on every run. The script uses only the standard library.
 
-      - name: Evaluate base freshness
+      - name: Evaluate CI freshness
         env:
           GH_TOKEN: ${{ github.token }}
-          # A PR event scopes the run to that one PR; schedule and manual runs
-          # sweep every open PR so a long-idle one cannot stay stale-green.
-          PR_SCOPE: ${{ github.event.pull_request.number && format('--pr {0}', github.event.pull_request.number) || '--all-open' }}
+          # A CI run scopes this to that run's head. It goes by SHA rather than
+          # PR number because a fork PR's run does not carry its PR. Schedule
+          # and manual runs sweep every open PR so a long-idle one cannot stay
+          # stale-green.
+          PR_SCOPE: ${{ github.event.workflow_run.head_sha && format('--head-sha {0}', github.event.workflow_run.head_sha) || '--all-open' }}
           DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
         run: |
-          python .github/scripts/pr_base_freshness.py \
+          python .github/scripts/pr_ci_freshness.py \
             --base-branch develop \
             --max-age-days "$MAX_AGE_DAYS" \
             --context "$STATUS_CONTEXT" \
+            --ci-workflow "$CI_WORKFLOW_FILE" \
             --mode "$MODE" \
             $PR_SCOPE $DRY_RUN
