@@ -2625,6 +2625,28 @@ TYPED_TEST(preconditioners, multicolored_preconditioners_rebuild_from_new_values
                     scaled_tol<T>(1e-14));
     }
 
+    KNOWN_BUG("MultiColoredSGS::ReBuildNumeric without decomposition deletes the blocks that only "
+              "the decomposition allocates, and does not analyse the new triangular factors");
+    expect_in_child([&] {
+        const T                                              omega = 1.5;
+        auto                                                 A     = this->make(ref);
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> sgs;
+        sgs.SetRelaxation(omega);
+        sgs.SetDecomposition(false);
+        sgs.SetOperator(*A);
+        sgs.Build();
+        A->CopyFromCSR(changed.row_offset.data(), changed.col.data(), changed.val.data());
+        sgs.ReBuildNumeric();
+        expect_near(apply(sgs, *A, r),
+                    permuted_solve(changed,
+                                   colors.perm,
+                                   r,
+                                   [&](const Csr<T>& B, const std::vector<T>& b) {
+                                       return ssor(B, omega, b);
+                                   }),
+                    scaled_tol<T>(1e-13));
+    });
+
     KNOWN_BUG("ReBuildNumeric without decomposition calls PermuteBackward, which leaves the COO "
               "entries unsorted, so the conversion back to CSR fails an assert");
     expect_in_child([&] {
