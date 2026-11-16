@@ -61,4 +61,8 @@ function(hipccl_require_libhipcxx MINIMUM_VERSION)
         # This is similar to the earlier 'TARGET libhipcxx::libhipcxx' check.
         set(libhipcxx_FOUND TRUE PARENT_SCOPE)
     endif()
+
+    # hipccl libraries need to check on libhipcxx_FOUND, but that is not in the scope when the find_package(...) is invoked
+    # from the shared function
+    set(libhipcxx_FOUND ${libhipcxx_FOUND} PARENT_SCOPE)
 endfunction()
