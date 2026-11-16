@@ -984,7 +984,8 @@ TEST(TestConvRepackFormulation, BandsAnImageOverTheCap)
 {
     // One image of 512 * 512 rows x 512 * 9 columns is 2.4 GB of bf16 column matrix (4.8 GB of
     // fp32 for backward data): it runs in bands of rows along its height. Strided and dilated so
-    // backward data's bands read overlapping output rows.
+    // backward data's bands read overlapping output rows. (Backward weights by image slices: its
+    // default runs blocks of w's columns.)
     ConvGemmShape shape = oversized(2);
     shape.input = {512, 512};
     shape.stride = {2, 1};
@@ -993,7 +994,8 @@ TEST(TestConvRepackFormulation, BandsAnImageOverTheCap)
     shape.dataType = conv_data_objects::DataType::BFLOAT16;
     for(const auto direction : ALL_DIRECTIONS)
     {
-        const auto calls = plan(shape, direction);
+        const auto calls = convGemmCalls(
+            parse(shape, direction), MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::IMAGE_SLICES);
         ASSERT_TRUE(calls.has_value()) << static_cast<int>(direction);
         EXPECT_LE(calls->workspaceBytes, MAX_REPACK_WORKSPACE_BYTES);
         const auto problem = parse(shape, direction);
@@ -1112,12 +1114,22 @@ TEST(TestConvRepackFormulation, LongNarrowBackwardWeightsSumsInFp32)
 TEST(TestConvRepackFormulation, DeclinesWhenOneRowExceedsTheCap)
 {
     // One output row of 2^20 positions x 512 * 9 columns is 9.7 GB of bf16 column matrix.
+    // Backward weights runs blocks of w's columns instead (one tap's channel ranges); image
+    // slices and the other directions decline.
     ConvGemmShape shape = oversized(1);
     shape.input = {4, 1 << 20};
     shape.dataType = conv_data_objects::DataType::BFLOAT16;
     for(const auto direction : ALL_DIRECTIONS)
     {
-        EXPECT_FALSE(plan(shape, direction).has_value());
+        const auto problem = parse(shape, direction);
+        EXPECT_FALSE(convGemmCalls(problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::IMAGE_SLICES)
+                         .has_value());
+        const auto calls = plan(shape, direction);
+        EXPECT_EQ(calls.has_value(), direction == ConvDirection::BACKWARD_WEIGHTS);
+        if(calls.has_value())
+        {
+            expectColumnBlocks(problem, *calls, MAX_REPACK_WORKSPACE_BYTES);
+        }
     }
 }
 
