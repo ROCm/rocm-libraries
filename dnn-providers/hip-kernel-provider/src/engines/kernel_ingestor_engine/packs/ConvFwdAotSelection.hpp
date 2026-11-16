@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot
 {
 
 /// What rocKE's runtime selection reads of one implicit-GEMM instance that already serves
@@ -74,4 +74,4 @@ inline std::vector<bool>
     return keep;
 }
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot

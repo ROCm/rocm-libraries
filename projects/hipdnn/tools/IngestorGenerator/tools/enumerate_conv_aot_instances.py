@@ -225,8 +225,8 @@ def main(argv=None) -> int:
         type=Path,
         default=None,
         help="A curated subset override, one KernelIdentity label per line "
-        "(default: every instance rocKE's forward dispatcher list of --arch, "
-        f"{DISPATCHER_INSTANCE_LIST} for gfx950, lists).",
+        "(default: every instance rocKE's forward dispatcher list of --arch "
+        f"lists, {DISPATCHER_INSTANCE_LIST} for gfx950).",
     )
     parser.add_argument(
         "--excludes",

@@ -80,20 +80,25 @@ namespace
 constexpr const char* ENGINE_NAME = "hipkernel:Gfx1250ConvFwdAot";
 constexpr const char* SERVED_ARCH = "gfx1250";
 constexpr const char* DESCRIPTOR_PREFIX = "gfx1250_conv_fwd_aot";
-constexpr const char* ALGORITHM_KNOB = "algorithm";
-/// Every kernel family (the `algorithm` KMD field) of the catalog; the order of
-/// FwdGraph's counts.
-constexpr std::array<const char*, 11> FAMILIES{"implicit_gemm",
-                                               "direct_fwd_wmma",
-                                               "direct_fwd_gstream_wmma",
-                                               "direct_fwd_tapouter_wmma",
-                                               "direct_fwd_smallc_wmma",
-                                               "direct_fwd_smallk_wmma",
-                                               "direct_dw_fwd_wmma",
-                                               "direct_depthwise",
-                                               "direct_depthwise_tiled",
-                                               "direct_depthwise_col",
-                                               "direct_depthwise_spatial"};
+/// The knob that forces a kernel family: the `direct_variant` KMD field ("none" for
+/// implicit GEMM; the adapter's GFX1250_DIRECT_ALGORITHMS).
+constexpr const char* FAMILY_KNOB = "direct_variant";
+/// Every kernel family of the catalog, as its direct_variant; the order of FwdGraph's
+/// counts.
+constexpr std::array<const char*, 11> FAMILIES{"none",
+                                               "wmma",
+                                               "gstream_wmma",
+                                               "tapouter_wmma",
+                                               "smallc_wmma",
+                                               "smallk_wmma",
+                                               "dw_wmma",
+                                               "std",
+                                               "tiled",
+                                               "col",
+                                               "spatial"};
+/// The families that compile cpg = kpg = 1 (their KMD leaves both 0).
+constexpr std::array<const char*, 5> DEPTHWISE_FAMILIES{
+    "dw_wmma", "std", "tiled", "col", "spatial"};
 /// Instances per dtype in the shipped catalog.
 constexpr size_t INSTANCES_PER_DTYPE = 263;
 /// The shortlist limit of the capped benchmark: below the candidate total of most graphs
@@ -157,9 +162,9 @@ struct FwdProblem
 };
 
 /// One graph and how many catalog instances of each family (FAMILIES order) serve it, the
-/// same in fp16 and bf16, as gfx1250_conv_fwd_aot_serves in
-/// rocke/library/builders/gfx1250/conv_fwd_aot.py (the dispatcher's admission) counts them
-/// over gfx1250_conv_fwd_aot_{fp16,bf16}.instances.json. The native kernel matcher is
+/// same in fp16 and bf16, as conv_fwd_aot_serves in
+/// rocke/library/builders/common/convolution_forward.py (the dispatcher's admission) counts
+/// them over gfx1250_conv_fwd_aot_{fp16,bf16}.instances.json. The native kernel matcher is
 /// checked against these counts.
 struct FwdGraph
 {
@@ -357,11 +362,6 @@ KnobSetting benchmarkingKnob(bool enabled)
     return KnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{enabled ? 1 : 0});
 }
 
-std::string candidateCount(size_t candidates)
-{
-    return std::to_string(candidates) + " candidate(s)";
-}
-
 /// The kernel id following @p marker in the last log that carries it, or empty.
 std::string loggedKernel(const LogRecorderBase& recorder, const std::string& marker)
 {
@@ -416,7 +416,7 @@ struct CatalogKernel
     std::string id;
     std::string name;
     std::string dtype;
-    std::string algorithm;
+    std::string family; ///< The direct_variant (FAMILIES).
     std::array<int64_t, BAKED_FIELDS.size()> baked{};
     /// Every UED knob, at the kernel's value: an ordinal for a string field, the
     /// descriptor value for an int one (0 unset; a bool knob 1 true, 2 false).
@@ -584,10 +584,16 @@ const FwdCatalog& shippedCatalog()
             kernel.id = canonicalUuid(id);
             kernel.name = metadata.at("__name").get<std::string>();
             kernel.dtype = metadata.at("dtype").get<std::string>();
-            kernel.algorithm = metadata.at("algorithm").get<std::string>();
+            kernel.family = metadata.at(FAMILY_KNOB).get<std::string>();
             for(size_t i = 0; i < BAKED_FIELDS.size(); ++i)
             {
                 kernel.baked[i] = metadata.at(BAKED_FIELDS[i]).get<int64_t>();
+            }
+            if(std::find(DEPTHWISE_FAMILIES.begin(), DEPTHWISE_FAMILIES.end(), kernel.family)
+               != DEPTHWISE_FAMILIES.end())
+            {
+                kernel.baked[BAKED_FIELDS.size() - 2] = 1;
+                kernel.baked[BAKED_FIELDS.size() - 1] = 1;
             }
             for(const auto& knob : ued.at("knobs"))
             {
@@ -671,7 +677,7 @@ protected:
     /// The ordinal the engine addresses @p family by; a failure when the catalog has none.
     static int64_t familyOrdinal(const std::string& family)
     {
-        const auto ordinal = shippedCatalog().ordinal(ALGORITHM_KNOB, family);
+        const auto ordinal = shippedCatalog().ordinal(FAMILY_KNOB, family);
         EXPECT_TRUE(ordinal) << family << " is not in the shipped catalog";
         return ordinal.value_or(-1);
     }
@@ -923,7 +929,7 @@ class IntegrationGpuGfx1250ConvFwdAot : public IntegrationGpuGfx1250ConvFwd
 {
 };
 
-// The whole catalog's count, and each family's count through the algorithm knob: a family
+// The whole catalog's count, and each family's count through the direct_variant knob: a family
 // with no instance for the graph is not offered (the knob never falls back to another
 // family). The fallback score (the catalog priority) is not restated here; the selected
 // kernel must come from a family that serves the graph.
@@ -949,7 +955,7 @@ TEST_P(IntegrationGpuGfx1250ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatal
     ASSERT_NE(selected, nullptr) << recorder.getRecordedLogsAsString();
     EXPECT_EQ(selected->dtype, dtypeToken(variant.dtype));
     EXPECT_TRUE(selected->capabilityAdmits(graphCase.problem)) << selected->name;
-    EXPECT_GT(graphCase.count(selected->algorithm), 0U) << selected->name;
+    EXPECT_GT(graphCase.count(selected->family), 0U) << selected->name;
     // The installed trained ranker orders the candidates. A model that cannot score one of
     // them logs an ERROR and ranks the whole catalog by priority (`decided_by=declared_order
     // reason=ranking_failed`), which every check above would accept.
@@ -965,7 +971,7 @@ TEST_P(IntegrationGpuGfx1250ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatal
 
     for(size_t i = 0; i < FAMILIES.size(); ++i)
     {
-        const KnobSetting knob(ALGORITHM_KNOB, familyOrdinal(FAMILIES[i]));
+        const KnobSetting knob(FAMILY_KNOB, familyOrdinal(FAMILIES[i]));
         const auto count = graphCase.counts[i];
         recorder.clearLogs();
         const auto pinned = buildFwdGraph(variant.dtype, graphCase.problem);
@@ -981,7 +987,7 @@ TEST_P(IntegrationGpuGfx1250ConvFwdAot, UnbenchmarkedPlanServesFromTheWholeCatal
             << FAMILIES[i] << ": " << recorder.getRecordedLogsAsString();
         const auto* pinnedKernel = catalog.find(selectedKernel(recorder));
         ASSERT_NE(pinnedKernel, nullptr) << recorder.getRecordedLogsAsString();
-        EXPECT_EQ(pinnedKernel->algorithm, FAMILIES[i]);
+        EXPECT_EQ(pinnedKernel->family, FAMILIES[i]);
         ASSERT_NO_FATAL_FAILURE(executeAndVerify(*pinned, variant.dtype, reference));
     }
 }
@@ -1046,7 +1052,7 @@ TEST_F(IntegrationGpuGfx1250ConvFwdAot, DeclinesChannelsFirstStorage)
 }
 
 // The engine advertises only the families that serve the graph: a dilated 3x3 has no
-// direct_fwd_wmma instance, so that algorithm is not offered, and pinning it builds no plan
+// direct_fwd_wmma instance, so that family is not offered, and pinning it builds no plan
 // and selects no kernel (the knob never falls back to another family).
 TEST_F(IntegrationGpuGfx1250ConvFwdAot, AFamilyThatDoesNotServeTheGraphIsNotOffered)
 {
@@ -1059,15 +1065,14 @@ TEST_F(IntegrationGpuGfx1250ConvFwdAot, AFamilyThatDoesNotServeTheGraphIsNotOffe
     std::vector<Knob> knobs;
     auto result = graph->get_knobs_for_engine(engineId(), knobs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    const auto implicitGemm = familyOrdinal("implicit_gemm");
-    const auto directWmma = familyOrdinal("direct_fwd_wmma");
-    ASSERT_TRUE(detail::advertises(knobs, ALGORITHM_KNOB, implicitGemm))
+    const auto implicitGemm = familyOrdinal("none");
+    const auto directWmma = familyOrdinal("wmma");
+    ASSERT_TRUE(detail::advertises(knobs, FAMILY_KNOB, implicitGemm))
         << "the family that serves the graph is not advertised";
-    EXPECT_FALSE(detail::advertises(knobs, ALGORITHM_KNOB, directWmma))
+    EXPECT_FALSE(detail::advertises(knobs, FAMILY_KNOB, directWmma))
         << "a family with no instance for the graph is advertised";
 
-    result
-        = graph->create_execution_plan_ext(engineId(), {KnobSetting(ALGORITHM_KNOB, directWmma)});
+    result = graph->create_execution_plan_ext(engineId(), {KnobSetting(FAMILY_KNOB, directWmma)});
     if(result.code == ErrorCode::OK)
     {
         result = graph->build_plans();
@@ -1139,7 +1144,7 @@ TEST_P(IntegrationGpuGfx1250ConvFwdAotCatalog, EveryInstanceMatchesCpuReference)
             }
             ++executions;
             covered.insert(ran->id);
-            ++served[ran->algorithm];
+            ++served[ran->family];
         }
         for(const auto* family : FAMILIES)
         {

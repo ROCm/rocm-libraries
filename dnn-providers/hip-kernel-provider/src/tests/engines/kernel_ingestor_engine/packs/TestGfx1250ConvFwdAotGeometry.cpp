@@ -15,19 +15,19 @@
 /**
  * @file TestGfx1250ConvFwdAotGeometry.cpp
  * @brief hipkernel:Gfx1250ConvFwdAot's port of rocKE's dispatcher, on every catalog
- *        instance: each admits and plans exactly what the dispatcher does.
+ *        instance: each serves and plans exactly what the packaging adapter does.
  *
  * The engine decides per graph which kernels serve it and how each launches, through its
- * C++ port of rocKE's dispatcher (Gfx1250ConvFwdGeometry.hpp) over each kernel's KMD
- * fields. Gfx1250ConvFwdAotTestVectors.hpp, generated through the packaging adapter
- * (make_gfx1250_conv_fwd_aot_test_vectors.py --header), holds every instance's KMD fields,
- * a problem set and, per instance, how many problems it admits and an FNV-1a digest of
- * every admitted problem's launch plan (grid, block, every kernel argument, workspaces).
- * This suite decodes each instance as the engine's prepare step does and recomputes both,
- * so a port that drifts from the committed vectors fails here rather than launching a wrong
- * grid. It reads only that header: a list or dispatcher change that leaves the header stale
- * is caught by the tooling test
- * test_make_gfx1250_conv_fwd_aot_test_vectors.py::test_the_golden_header_regenerates_from_the_in_tree_dispatcher.
+ * C++ port of rocKE's dispatcher (Gfx1250ConvFwdGeometry.hpp, servedPlan) over each
+ * kernel's KMD fields. Gfx1250ConvFwdAotTestVectors.hpp, generated through the packaging
+ * adapter (make_conv_aot_test_vectors.py --arch gfx1250 --header), holds every instance's
+ * KMD fields, a problem set and, per instance, how many problems it serves and an FNV-1a
+ * digest of every served problem's launch plan (grid, block, every kernel argument,
+ * workspaces). This suite decodes each instance as the engine's prepare step does and
+ * recomputes both, so a port that drifts from the committed vectors fails here rather than
+ * launching a wrong grid. It reads only that header: a list or adapter change that leaves
+ * the header stale is caught by the tooling test
+ * test_make_conv_aot_test_vectors.py::test_the_golden_header_regenerates_from_the_in_tree_adapter.
  */
 namespace
 {
@@ -84,7 +84,7 @@ std::string canonicalPlan(const conv::Plan& plan)
     return out;
 }
 
-TEST(TestGfx1250ConvFwdAotGeometry, EveryInstancePlansWhatTheDispatcherPlans)
+TEST(TestGfx1250ConvFwdAotGeometry, EveryInstancePlansWhatTheAdapterPlans)
 {
     ASSERT_FALSE(vectors::KERNELS.empty());
     for(const auto& expected : vectors::KERNELS)
@@ -96,18 +96,22 @@ TEST(TestGfx1250ConvFwdAotGeometry, EveryInstancePlansWhatTheDispatcherPlans)
         for(size_t index = 0; index < vectors::PROBLEMS.size(); ++index)
         {
             const auto problem = problemAt(index);
-            if(problem.dtype != geometry.dtype() || kernel.refuse(problem).has_value())
+            if(problem.dtype != geometry.dtype())
             {
                 continue;
             }
-            digest = fnv1a(digest,
-                           std::to_string(index) + ":" + canonicalPlan(kernel.plan(problem)) + ";");
+            const auto plan = conv::servedPlan(kernel, problem);
+            if(!plan)
+            {
+                continue;
+            }
+            digest = fnv1a(digest, std::to_string(index) + ":" + canonicalPlan(*plan) + ";");
             ++admitted;
         }
-        EXPECT_EQ(admitted, expected.admitted) << "instance " << expected.instanceId
-                                               << " admits another problem set than the dispatcher";
+        EXPECT_EQ(admitted, expected.admitted)
+            << "instance " << expected.instanceId << " serves another problem set than the adapter";
         EXPECT_EQ(digest, expected.digest)
-            << "instance " << expected.instanceId << " plans another launch than the dispatcher";
+            << "instance " << expected.instanceId << " plans another launch than the adapter";
     }
 }
 

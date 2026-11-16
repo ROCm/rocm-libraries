@@ -210,15 +210,27 @@ def problems_from_header(path: Path) -> list[dict]:
     return out
 
 
+def _field_defaults(spec_class) -> dict:
+    """``name -> default`` of the header's fields: each KMD field's default (the
+    dataclass default), 0 or empty for a field every instance states."""
+    out = {}
+    for field in dataclasses.fields(spec_class):
+        if field.default is not dataclasses.MISSING:
+            out[field.name] = field.default
+        else:
+            out[field.name] = "" if field.type in (str, "str") else 0
+    return out
+
+
 def _metadata(spec) -> str:
-    """``spec``'s KMD fields as ``name=value;``, those at their KMD default (the
-    dataclass default) left out."""
-    out = []
-    for field in dataclasses.fields(spec):
-        value = getattr(spec, field.name)
-        if field.default is dataclasses.MISSING or value != field.default:
-            out.append(f"{field.name}={value};")
-    return "".join(out)
+    """``spec``'s KMD fields as ``name=value;``, those at :func:`_field_defaults`'
+    value left out."""
+    defaults = _field_defaults(type(spec))
+    return "".join(
+        f"{name}={getattr(spec, name)};"
+        for name, default in defaults.items()
+        if getattr(spec, name) != default
+    )
 
 
 def _header(args, cf, specs, rng) -> None:
@@ -232,9 +244,9 @@ def _header(args, cf, specs, rng) -> None:
         unique = list(
             {tuple(p[f] for f in _FIELDS) + (p["dtype"],): p for p in problems}.values()
         )
-    fields = dataclasses.fields(type(specs[0]))
-    int_fields = [f.name for f in fields if f.type in (int, "int")]
-    string_fields = [f.name for f in fields if f.type in (str, "str")]
+    defaults = _field_defaults(type(specs[0]))
+    int_fields = [(n, v) for n, v in defaults.items() if not isinstance(v, str)]
+    string_fields = [(n, v) for n, v in defaults.items() if isinstance(v, str)]
     kernels = []
     for spec in specs:
         digest, admitted = _FNV_OFFSET, 0
@@ -275,13 +287,23 @@ def _header(args, cf, specs, rng) -> None:
     lines += [
         "}};",
         "",
-        "/// The KMD fields every instance carries; a row states those it does not leave",
-        "/// at their KMD default.",
-        f"inline constexpr std::array<const char*, {len(int_fields)}> INT_FIELDS = {{{{",
-        *[f'    "{name}",' for name in int_fields],
+        "/// The KMD fields every instance carries, each with its KMD default (0 or empty",
+        "/// for a field every instance states); a row states those it does not leave at it.",
+        "struct IntField",
+        "{",
+        "    const char* name;",
+        "    int64_t defaultValue;",
+        "};",
+        "struct StringField",
+        "{",
+        "    const char* name;",
+        "    const char* defaultValue;",
+        "};",
+        f"inline constexpr std::array<IntField, {len(int_fields)}> INT_FIELDS = {{{{",
+        *[f'    {{"{name}", {value}}},' for name, value in int_fields],
         "}};",
-        f"inline constexpr std::array<const char*, {len(string_fields)}> STRING_FIELDS = {{{{",
-        *[f'    "{name}",' for name in string_fields],
+        f"inline constexpr std::array<StringField, {len(string_fields)}> STRING_FIELDS = {{{{",
+        *[f'    {{"{name}", "{value}"}},' for name, value in string_fields],
         "}};",
         "",
         "struct KernelVector",

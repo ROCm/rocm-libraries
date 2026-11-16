@@ -8,6 +8,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "engines/kernel_ingestor_engine/packs/Gfx1250ConvFwdTypes.hpp"
@@ -17,11 +18,13 @@
  * @brief An instance's catalog fields: its rocKE KernelIdentity, read once.
  *
  * The KMD carries the identity fields the packaged launch reads and every family knob,
- * each an int or a string (builders/gfx1250/conv_fwd_aot.py, Gfx1250ConvFwdAotSpec). A
- * knob an instance leaves unset is 0 (an int knob the list sets is positive); a bool knob
- * is 1 when set true and 2 when set false. The families read the fields by name through
- * the accessors here, which refuse a missing field rather than default it: the KMD gives
- * every kernel every field, so a missing one is a catalog that does not match this port.
+ * each an int or a string (Gfx1250ConvFwdAotSpec in
+ * rocke/library/builders/common/convolution_forward.py). A knob an instance leaves unset
+ * is 0 (an int knob the list sets is positive) or "none" (a string); a bool knob is 1
+ * when set true and 2 when set false. The family is kernel_family and direct_variant.
+ * The families read the fields by name through the accessors here, which refuse a missing
+ * field rather than default it: the loader completes every kernel's fields from the KMD
+ * defaults, so a missing one is a catalog that does not match this port.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd
 {
@@ -44,9 +47,44 @@ public:
     {
         return _label;
     }
+    /// rocKE's KernelIdentity.algorithm of the instance: implicit_gemm for
+    /// kernel_family 0, else the direct algorithm of its direct_variant
+    /// (GFX1250_DIRECT_ALGORITHMS in convolution_forward.py).
     std::string algorithm() const
     {
-        return str("algorithm");
+        if(integer("kernel_family") == 0)
+        {
+            return "implicit_gemm";
+        }
+        static constexpr std::array<std::pair<std::string_view, std::string_view>, 10> VARIANTS{
+            {{"std", "direct_depthwise"},
+             {"spatial", "direct_depthwise_spatial"},
+             {"tiled", "direct_depthwise_tiled"},
+             {"col", "direct_depthwise_col"},
+             {"dw_wmma", "direct_dw_fwd_wmma"},
+             {"wmma", "direct_fwd_wmma"},
+             {"smallc_wmma", "direct_fwd_smallc_wmma"},
+             {"smallk_wmma", "direct_fwd_smallk_wmma"},
+             {"gstream_wmma", "direct_fwd_gstream_wmma"},
+             {"tapouter_wmma", "direct_fwd_tapouter_wmma"}}};
+        const auto variant = str("direct_variant");
+        for(const auto& [name, algorithm] : VARIANTS)
+        {
+            if(variant == name)
+            {
+                return std::string(algorithm);
+            }
+        }
+        throw std::invalid_argument(_label + ": unknown direct_variant " + variant);
+    }
+    /// Whether the instance is a depthwise kernel that compiles cpg = kpg = 1 (the
+    /// adapter's _direct_caps): its KMD leaves cpg and kpg at 0.
+    bool compilesDepthwise() const
+    {
+        const auto family = algorithm();
+        return family == "direct_depthwise" || family == "direct_depthwise_spatial"
+               || family == "direct_depthwise_tiled" || family == "direct_depthwise_col"
+               || family == "direct_dw_fwd_wmma";
     }
     DataType dtype() const
     {
@@ -84,7 +122,7 @@ public:
             return i->second != 0;
         }
         const auto s = _strings.find(knob);
-        return s != _strings.end() && !s->second.empty();
+        return s != _strings.end() && !s->second.empty() && s->second != "none";
     }
     /// An int tuning knob; @p fallback when the instance leaves it unset (the spec's
     /// default).
@@ -111,7 +149,7 @@ public:
     std::string knobString(const char* knob, const std::string& fallback) const
     {
         const auto value = str(knob);
-        return value.empty() ? fallback : value;
+        return value.empty() || value == "none" ? fallback : value;
     }
 
 private:
@@ -137,8 +175,8 @@ struct BakedShape
                 g.integer("dilation_w"),
                 g.integer("pad_h"),
                 g.integer("pad_w"),
-                g.integer("cpg"),
-                g.integer("kpg")};
+                g.compilesDepthwise() ? 1 : g.integer("cpg"),
+                g.compilesDepthwise() ? 1 : g.integer("kpg")};
     }
 
     /// Why a problem with these fields (in the member order) is not this instance's.

@@ -16,11 +16,11 @@
  * @file Gfx1250ConvFwdAotTestCatalog.hpp
  * @brief The golden vectors' instances and problems as the engine's port reads them.
  *
- * Gfx1250ConvFwdAotTestVectors.hpp (make_gfx1250_conv_fwd_aot_test_vectors.py --header)
- * carries each catalog instance's KMD fields as `name=value;` text, the fields left at 0
- * or empty omitted. Decoding them here into an InstanceGeometry is what the engine's
- * prepare step does with a kernel's metadata, so the port is tested on the catalog
- * without a packaged product.
+ * Gfx1250ConvFwdAotTestVectors.hpp (make_conv_aot_test_vectors.py --arch gfx1250
+ * --header) carries each catalog instance's KMD fields as `name=value;` text, the fields
+ * left at their KMD default omitted. Decoding them here into an InstanceGeometry is what
+ * the engine's prepare step does with a kernel's metadata (the loader completes it from
+ * the KMD defaults), so the port is tested on the catalog without a packaged product.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::gfx1250_conv_fwd_aot
 {
@@ -33,13 +33,13 @@ inline conv::InstanceGeometry instanceGeometry(const vectors::KernelVector& kern
 {
     conv::InstanceGeometry::Ints ints;
     conv::InstanceGeometry::Strings strings;
-    for(const auto* name : vectors::INT_FIELDS)
+    for(const auto& field : vectors::INT_FIELDS)
     {
-        ints.emplace(name, 0);
+        ints.emplace(field.name, field.defaultValue);
     }
-    for(const auto* name : vectors::STRING_FIELDS)
+    for(const auto& field : vectors::STRING_FIELDS)
     {
-        strings.emplace(name, "");
+        strings.emplace(field.name, field.defaultValue);
     }
     std::string_view text(kernel.metadata);
     while(!text.empty())

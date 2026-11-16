@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <initializer_list>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -21,8 +23,9 @@
  *
  * A catalog kernel is parsed once from its KMD fields (InstanceGeometry) into its
  * family's kernel; refuse() and plan() then port rocKE's dispatcher
- * for it -- an instance's `_admits` / `launch_plan_for`. Pure: no hipDNN includes, so the
- * port is unit-tested against the dispatcher's golden vectors.
+ * for it -- an instance's `_admits` / `launch_plan_for` -- and servedPlan() adds the
+ * packaged contract's bounds. Pure: no hipDNN includes, so the port is unit-tested
+ * against the adapter's golden vectors.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd
 {
@@ -87,6 +90,12 @@ public:
         return _family;
     }
 
+    /// The implicit-GEMM kernel, or nullptr for a direct one.
+    const ImplicitGemmKernel* implicitGemm() const
+    {
+        return std::get_if<ImplicitGemmKernel>(&_kernel);
+    }
+
     /// Why this kernel cannot run @p problem; empty when it can.
     Refusal refuse(const Problem& problem) const
     {
@@ -123,5 +132,50 @@ private:
     std::string _family;
     Variant _kernel;
 };
+
+/// The bytes of an fp16/bf16 tensor of @p dims elements fit the kernels' i32 byte-size and
+/// offset arguments.
+inline bool fitsI32Bytes(std::initializer_list<int64_t> dims)
+{
+    int64_t bytes = 2;
+    for(const auto extent : dims)
+    {
+        if(extent < 1 || extent > I32_MAX / bytes)
+        {
+            return false;
+        }
+        bytes *= extent;
+    }
+    return true;
+}
+
+/// The plan @p kernel runs @p problem with, or std::nullopt when it does not serve it:
+/// conv_fwd_aot_serves and ConvFwdAotSpec.launch_plan of the packaging adapter
+/// (rocke/library/builders/common/convolution_forward.py). Every tensor's bytes fit the i32
+/// launch ABI, the kernel admits the problem (refuse()), and a direct kernel's launch fits:
+/// grid x one 32-bit dispatch, y and z 65535.
+inline std::optional<Plan> servedPlan(const CatalogKernel& kernel, const Problem& problem)
+{
+    if(!fitsI32Bytes({problem.n, problem.h, problem.w, problem.c})
+       || !fitsI32Bytes({problem.k, problem.y, problem.x, problem.cpg()})
+       || !fitsI32Bytes({problem.n, problem.ho(), problem.wo(), problem.k})
+       || kernel.refuse(problem).has_value())
+    {
+        return std::nullopt;
+    }
+    auto plan = kernel.plan(problem);
+    if(kernel.family() != "implicit_gemm")
+    {
+        for(const auto& step : plan.steps)
+        {
+            if(step.grid[0] > I32_MAX || step.grid[0] * step.block[0] > MAX_DISPATCH_ITEMS
+               || step.grid[1] > MAX_GRID_DIM || step.grid[2] > MAX_GRID_DIM)
+            {
+                return std::nullopt;
+            }
+        }
+    }
+    return plan;
+}
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd

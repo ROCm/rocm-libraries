@@ -16,9 +16,10 @@
  * @brief The problem and launch-plan vocabulary of hipkernel:Gfx1250ConvFwdAot's geometry.
  *
  * Header-only and free of hipDNN includes, so the geometry it carries is unit-tested against
- * rocKE's dispatcher (the golden vectors of make_gfx1250_conv_fwd_aot_test_vectors.py)
+ * rocKE's dispatcher (the golden vectors of make_conv_aot_test_vectors.py --arch gfx1250)
  * without a GPU or a loaded plugin. A plan names its buffers -- the operands `x`, `w`, `y`
- * and the workspaces it sizes -- and the native pack binds them at launch.
+ * and the workspaces it sizes -- and the native pack (ConvFwdAotNative.cpp) launches it
+ * through the shared conv_fwd_aot kernel ABI.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd
 {
@@ -40,6 +41,8 @@ inline const char* toString(DataType dtype)
 constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
 /// Hardware cap on a grid Y or Z dimension (kernel_identity._MAX_GRID_DIM).
 constexpr int64_t MAX_GRID_DIM = 65535;
+/// Work-items one dispatch can address: a grid x extent times the block.
+constexpr int64_t MAX_DISPATCH_ITEMS = (int64_t{1} << 32) - 1;
 constexpr int64_t GFX1250_WAVE_SIZE = 32;
 constexpr int64_t GFX1250_MAX_THREADS_PER_BLOCK = 1024;
 constexpr int64_t GFX1250_LDS_BYTES = 327680;

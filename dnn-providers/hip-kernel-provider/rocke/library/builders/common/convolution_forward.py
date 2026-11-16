@@ -975,8 +975,10 @@ GFX1250_DIRECT_KNOBS = {
         "sched": "sched",
     },
 }
-#: The gfx1250 fields rocKE spells as a bool: -1 when the identity leaves the
-#: knob out, else 0 or 1 (an identity may state ``False``).
+#: The gfx1250 fields rocKE spells as a bool: 0 when the identity leaves the
+#: knob out, 1 for ``True`` and 2 for ``False`` (an identity may state it), so
+#: no value of the field stands for two identities. (gfx950's ``unroll_rows``,
+#: which its grid always states, is 0 or 1.)
 _GFX1250_BOOL_FIELDS = (
     "unroll_rows",
     "prefetch",
@@ -993,6 +995,7 @@ _GFX1250_BOOL_FIELDS = (
     "poly_view",
     "tdm_store",
 )
+_GFX1250_TRUE, _GFX1250_FALSE = 1, 2
 _GFX1250_STRING_FIELDS = ("sched",)
 #: Fields the gfx1250 spec adds to the gfx950 one; the value each holds where
 #: its variant does not use it or the identity leaves the knob out (the KMD
@@ -1004,42 +1007,40 @@ _GFX1250_KNOB_DEFAULTS = {
     "tiles_p": 0,
     "waves_k": 0,
     "waves_p": 0,
-    "prefetch": -1,
+    "prefetch": 0,
     "tile_n_out": 0,
     "pack_groups": 0,
     "pp_group": 0,
     "sched": "none",
-    "split_barrier": -1,
-    "wave_epilogue": -1,
-    "phase_split": -1,
-    "row_ring": -1,
-    "tap_ring": -1,
-    "pingpong": -1,
-    "tap_reuse": -1,
-    "tap_shift": -1,
-    "strided_view": -1,
-    "fold_n": -1,
-    "poly_view": -1,
+    "split_barrier": 0,
+    "wave_epilogue": 0,
+    "phase_split": 0,
+    "row_ring": 0,
+    "tap_ring": 0,
+    "pingpong": 0,
+    "tap_reuse": 0,
+    "tap_shift": 0,
+    "strided_view": 0,
+    "fold_n": 0,
+    "poly_view": 0,
     "walk": 0,
     "pf_depth": 0,
     "tdm_split": 0,
     "out_h": 0,
     "out_w": 0,
     "tiles_per_block": 0,
-    "tdm_store": -1,
+    "tdm_store": 0,
     "tiles_c": 0,
     "waves_c": 0,
     "cpl": 0,
     "max_live_f32": 0,
 }
 #: A gfx1250 field's absent value: the gfx950 knobs it shares keep their
-#: :data:`_AOT_FAMILY_DEFAULTS` value, except ``unroll_rows``, a bool the
-#: gfx1250 grid may leave out.
+#: :data:`_AOT_FAMILY_DEFAULTS` value (``unroll_rows`` 0, the bools' absent value).
 _GFX1250_ABSENT = {
     "block_w": 0,
     "block_waves": 0,
     **_AOT_DIRECT_KNOB_DEFAULTS,
-    "unroll_rows": -1,
     **_GFX1250_KNOB_DEFAULTS,
 }
 #: The gfx1250 variants whose compiled ``cpg``/``kpg`` the identity records
@@ -1168,7 +1169,7 @@ def _gfx1250_fields_from_knobs(variant: str, knobs: dict) -> dict:
         if field_name in _GFX1250_BOOL_FIELDS:
             if type(value) is not bool:
                 raise ValueError(f"knob {key} must be a bool, got {value!r}")
-            value = int(value)
+            value = _GFX1250_TRUE if value else _GFX1250_FALSE
         elif field_name in _GFX1250_STRING_FIELDS:
             if type(value) is not str or value in ("", _GFX1250_ABSENT[field_name]):
                 raise ValueError(f"knob {key} must be a name, got {value!r}")
@@ -1445,7 +1446,7 @@ class ConvFwdAotSpec:
         if self.TARGET.arch != _ARCH:
             return {
                 key: (
-                    bool(getattr(self, name))
+                    getattr(self, name) == _GFX1250_TRUE
                     if name in _GFX1250_BOOL_FIELDS
                     else getattr(self, name)
                 )
@@ -1688,41 +1689,41 @@ class Gfx1250ConvFwdAotSpec(ConvFwdAotSpec):
     fields, then the knobs of gfx1250's direct pipelines
     (:data:`GFX1250_DIRECT_KNOBS`), each at its absent value
     (:data:`_GFX1250_KNOB_DEFAULTS`) where the instance's variant does not use it
-    or its identity leaves it out. ``unroll_rows`` moves its default to -1: the
-    gfx1250 tiled grid may leave it out, so it is a three-state bool there.
+    or its identity leaves it out. A bool knob is 0 when left out, 1 for true and
+    2 for false (:data:`_GFX1250_BOOL_FIELDS`); that includes ``unroll_rows``,
+    which the gfx1250 tiled grid may leave out, where gfx950 states it as 0 or 1.
     """
 
     TARGET: ClassVar[ConvFwdAotTarget] = TARGETS["gfx1250"]
 
-    unroll_rows: int = -1
     stages: int = 0
     tiles_k: int = 0
     tiles_p: int = 0
     waves_k: int = 0
     waves_p: int = 0
-    prefetch: int = -1
+    prefetch: int = 0
     tile_n_out: int = 0
     pack_groups: int = 0
     pp_group: int = 0
     sched: str = "none"
-    split_barrier: int = -1
-    wave_epilogue: int = -1
-    phase_split: int = -1
-    row_ring: int = -1
-    tap_ring: int = -1
-    pingpong: int = -1
-    tap_reuse: int = -1
-    tap_shift: int = -1
-    strided_view: int = -1
-    fold_n: int = -1
-    poly_view: int = -1
+    split_barrier: int = 0
+    wave_epilogue: int = 0
+    phase_split: int = 0
+    row_ring: int = 0
+    tap_ring: int = 0
+    pingpong: int = 0
+    tap_reuse: int = 0
+    tap_shift: int = 0
+    strided_view: int = 0
+    fold_n: int = 0
+    poly_view: int = 0
     walk: int = 0
     pf_depth: int = 0
     tdm_split: int = 0
     out_h: int = 0
     out_w: int = 0
     tiles_per_block: int = 0
-    tdm_store: int = -1
+    tdm_store: int = 0
     tiles_c: int = 0
     waves_c: int = 0
     cpl: int = 0
@@ -1851,15 +1852,15 @@ _AOT_GEOMETRY_FIELDS = (
 def _family_defaults(target: ConvFwdAotTarget) -> dict:
     """The value each field after the implicit-GEMM ones holds where an instance
     does not use it: :data:`_AOT_FAMILY_DEFAULTS`, and on gfx1250 also its
-    pipelines' knobs at their absent values (``unroll_rows`` -1 there)."""
+    pipelines' knobs at their absent values."""
     if target.arch == _ARCH:
         return _AOT_FAMILY_DEFAULTS
-    return {**_AOT_FAMILY_DEFAULTS, "unroll_rows": -1, **_GFX1250_KNOB_DEFAULTS}
+    return {**_AOT_FAMILY_DEFAULTS, **_GFX1250_KNOB_DEFAULTS}
 
 
 def _gfx1250_direct_knob_error(spec: ConvFwdAotSpec) -> str:
     """The knobs of a gfx1250 direct instance: each one its variant uses has its
-    kind (a bool -1, 0 or 1, a name, an int with 0 for absent; ``cpg``/``kpg``
+    kind (a bool 0, 1 or 2, a name, an int with 0 for absent; ``cpg``/``kpg``
     0 where runtime), every other one holds its absent value; "" when accepted.
     rocKE's validators and sweep decide the values further."""
     variant = spec.direct_variant
@@ -1878,8 +1879,12 @@ def _gfx1250_direct_knob_error(spec: ConvFwdAotSpec) -> str:
                 )
             continue
         if name in _GFX1250_BOOL_FIELDS:
-            if type(value) is not int or value not in (-1, 0, 1):
-                return f"{name} must be -1 (unset), 0 or 1"
+            if type(value) is not int or value not in (
+                0,
+                _GFX1250_TRUE,
+                _GFX1250_FALSE,
+            ):
+                return f"{name} must be 0 (unset), 1 (true) or 2 (false)"
         elif name in _GFX1250_STRING_FIELDS:
             if type(value) is not str or not value:
                 return f"{name} must be a name"
@@ -2559,7 +2564,7 @@ def build_gfx1250_conv_fwd_aot(
 
 
 def supports_gfx950_conv_fwd_aot_split_reduce(
-    spec: ConvFwdAotSpec, *, arch: str = _ARCH
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
 ) -> tuple[bool, str]:
     """hkp_pack's predicate for :func:`build_gfx950_conv_fwd_aot_split_reduce`: a
     packageable split-C instance."""
@@ -2572,7 +2577,7 @@ def supports_gfx950_conv_fwd_aot_split_reduce(
 
 
 def build_gfx950_conv_fwd_aot_split_reduce(
-    spec: ConvFwdAotSpec, *, arch: str = _ARCH
+    spec: Gfx950ConvFwdAotSpec, *, arch: str = _ARCH
 ) -> KernelDef:
     """The second launch of a split-C instance, the ``reduce`` entry of its
     descriptor's ``sources``: rocKE's ``direct_split_reduce`` fold for the

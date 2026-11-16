@@ -13,12 +13,12 @@
 
 #include <gtest/gtest.h>
 
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvFwdGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvFwdAotGeometry.hpp"
 
 namespace
 {
 
-using namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd;
+using namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot;
 
 constexpr Problem SMOKE{2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1};
 

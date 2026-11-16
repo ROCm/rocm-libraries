@@ -15,7 +15,7 @@
 
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvGeometryCommon.hpp"
 
-namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
+namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot
 {
 
 using gfx950_conv::bufferRangesDoNotOverlap;
@@ -1234,4 +1234,4 @@ inline bool
            && blockWaves == DEFAULT_DIRECT_BLOCK_WAVES;
 }
 
-} // namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
+} // namespace hip_kernel_provider::kernel_ingestor_engine::conv_fwd_aot

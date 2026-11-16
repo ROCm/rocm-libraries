@@ -155,9 +155,9 @@ are where the packaged guard is knowingly stricter: spatial at exactly 64 groups
 before), and graphs whose two axes differ in stride or padding, which rocKE's direct
 problem cannot state.
 
-Natively, `aotDirectInstance` in `Gfx950ConvFwdNative.cpp` parses the variant and its
+Natively, `aotDirectInstance` in `ConvFwdAotNative.cpp` parses the variant and its
 knobs (`aotDirectVariantUses`), and `conv::directInstanceLaunch` in
-`Gfx950ConvFwdGeometry.hpp` applies the variant's rule (`depthwiseTileLaunch`,
+`ConvFwdAotGeometry.hpp` applies the variant's rule (`depthwiseTileLaunch`,
 `groupedDirectLaunch`, `nongroupedDirectLaunch` for both DirectNongroupedConvSpec
 variants). `TestGfx950ConvFwdGeometry.cpp`
 holds it to a table of (instance, problem) cases that
@@ -195,7 +195,7 @@ launch as keep both windows below the offset, and the launches are balanced: a b
 images.
 
 The packaged engine runs it the same way. `conv::nongroupedBatchChunks` in
-`Gfx950ConvFwdGeometry.hpp` (`gfx950_conv_fwd_aot_batch_chunks` in the adapter) gives
+`ConvFwdAotGeometry.hpp` (`gfx950_conv_fwd_aot_batch_chunks` in the adapter) gives
 the images per launch. The graph matcher admits such a graph even when a whole tensor
 passes the i32 launch ABI; only a non-grouped or grouped-halo instance serves it, and
 only when it serves each chunk as a problem of its own. That is stricter than
@@ -216,7 +216,7 @@ pointwise graphs are served by grouped instances: an instance is built against a
 probe, so it is never rocKE's pointwise GEMM.
 
 An implicit-GEMM instance serves a graph when all of these hold (`aotInstanceLaunch` in
-`Gfx950ConvFwdGeometry.hpp`, `gfx950_conv_fwd_aot_serves` in the adapter). Both apply
+`ConvFwdAotGeometry.hpp`, `gfx950_conv_fwd_aot_serves` in the adapter). Both apply
 the exact-shape engine's capability check (`implicitGemmServes`,
 `_implicit_gemm_serves`) to the widths the identity records, plus the async chunks:
 
@@ -285,7 +285,7 @@ for the graph, across all packs listing it (every shard here), and keeps a subse
 No descriptor changes: a matcher with no filter registered keeps what it admitted.
 `hipkernel:Gfx950ConvFwdAot` registers `aotCandidateFilter` under its kernel matcher's
 symbol; the policy itself is `conv::widestVectorSelection` in
-`Gfx950ConvFwdAotSelection.hpp`. Direct instances of every variant are all kept:
+`ConvFwdAotSelection.hpp`. Direct instances of every variant are all kept:
 rocKE's direct benchmark (`direct_plans` in `benchmarks/common/direct_kernel_sweep.py`)
 runs every direct kernel that serves, with no cross-candidate rule. So are group-merged
 instances, whose widths are derived (recorded as 0) and never compared. A graph's direct

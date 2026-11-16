@@ -437,8 +437,8 @@ def engine_knobs(arch: str = DEFAULT_ARCH) -> tuple:
     class adds."""
     if arch == DEFAULT_ARCH:
         return ENGINE_KNOBS
-    added = [n for n in optional_fields(arch) if n not in DIRECT_FIELDS]
-    return ENGINE_KNOBS + tuple(n for n in added if n not in ENGINE_KNOBS)
+    shared = {**DIRECT_FIELDS, **DIRECT_KNOB_FIELDS}
+    return ENGINE_KNOBS + tuple(n for n in optional_fields(arch) if n not in shared)
 
 
 def direct_variant_fields(spec) -> tuple:

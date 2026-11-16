@@ -741,6 +741,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: the integration root does not ship hipkernel:Gfx950ConvFwdAotSeed "
             "for gfx950, so its census is not registered.")
+    endif()
+
     # Census for the shape-generic forward AOT-instance pack, hipkernel:Gfx1250ConvFwdAot.
     hkp_product_ships_engine_for_arch(_hkp_gfx1250_conv_fwd_aot
                                       "hipkernel:Gfx1250ConvFwdAot" gfx1250)

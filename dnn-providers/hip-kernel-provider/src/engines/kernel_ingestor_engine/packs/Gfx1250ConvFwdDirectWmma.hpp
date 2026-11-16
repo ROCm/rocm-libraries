@@ -88,7 +88,7 @@ struct DirectFwdWmmaKernel
                 g.knob("tiles_k", 4),
                 g.knob("tiles_p", 4),
                 g.knob("tile_w", 16),
-                g.knob("tile_n", 1),
+                g.knob("tile_n_out", 1),
                 g.knob("ck", 32),
                 g.knob("stages", 2),
                 WMMA_SPEC_WAVE_SIZE,

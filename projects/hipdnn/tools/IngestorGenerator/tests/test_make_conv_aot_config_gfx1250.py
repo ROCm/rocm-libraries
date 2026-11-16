@@ -447,7 +447,7 @@ def test_a_bool_knob_stated_false_keeps_its_identity(identities):
     for identity in stated_false:
         spec, why = tool.instance_spec(identity, _ARCH)
         assert spec is not None, why
-        assert spec.unroll_rows == 0
+        assert spec.unroll_rows == 2
 
 
 def test_main_dedups_and_refuses_unsupported_unless_asked(tmp_path, identities, capsys):

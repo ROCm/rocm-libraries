@@ -93,13 +93,13 @@ KernelDefinition kernelOf(const gfx1250_conv_fwd_aot_vectors::KernelVector& kern
     out.name = kernel.instanceId;
     out.source.kind = KernelSourceKind::KPACK;
     const auto geometry = catalog::instanceGeometry(kernel);
-    for(const auto* name : gfx1250_conv_fwd_aot_vectors::INT_FIELDS)
+    for(const auto& field : gfx1250_conv_fwd_aot_vectors::INT_FIELDS)
     {
-        out.metadata[name] = geometry.integer(name);
+        out.metadata[field.name] = geometry.integer(field.name);
     }
-    for(const auto* name : gfx1250_conv_fwd_aot_vectors::STRING_FIELDS)
+    for(const auto& field : gfx1250_conv_fwd_aot_vectors::STRING_FIELDS)
     {
-        out.metadata[name] = geometry.str(name);
+        out.metadata[field.name] = geometry.str(field.name);
     }
     const auto dtype = geometry.str("dtype");
     int64_t index = 0;
@@ -185,7 +185,8 @@ KernelDefinition dwWmmaBlockH1()
 
 constexpr std::string_view PROBLEM_TOKEN = "_gfx1250_conv_fwd_aot.problem";
 
-/// The problem graph_match bound: uids x/w/y, N C K H W Y X G, stride, pad, dilation, dtype.
+/// The problem graph_match bound (ConvFwdAotNative.cpp's problemTokenValues): uids x/w/y,
+/// N C K H W Y X, stride, pad, dilation, groups, then the dtype.
 std::vector<int64_t> boundProblem(const BoundTokens& bound)
 {
     const auto it = bound.find(std::string(PROBLEM_TOKEN));
@@ -224,7 +225,7 @@ TEST(TestGfx1250ConvFwdAotMatchers, ServesAPackedChannelsLastConvAndBindsItsProb
     EXPECT_EQ(boundInt(*bound, "gfx1250_conv_fwd_aot.x.uid"), X_UID);
     EXPECT_EQ(boundInt(*bound, "gfx1250_conv_fwd_aot.w.uid"), W_UID);
     EXPECT_EQ(boundInt(*bound, "gfx1250_conv_fwd_aot.y.uid"), Y_UID);
-    // uids, then N C K H W Y X G, stride h/w, pad h/w, dilation h/w, dtype (HALF).
+    // uids, then N C K H W Y X, stride h/w, pad h/w, dilation h/w, groups, dtype (HALF).
     const std::vector<int64_t> expected = {X_UID,
                                            W_UID,
                                            Y_UID,
@@ -235,14 +236,14 @@ TEST(TestGfx1250ConvFwdAotMatchers, ServesAPackedChannelsLastConvAndBindsItsProb
                                            14,
                                            3,
                                            5,
-                                           1,
                                            2,
                                            1,
                                            1,
                                            2,
                                            1,
                                            1,
-                                           static_cast<int64_t>(gfx1250_conv_fwd::DataType::FP16)};
+                                           1,
+                                           static_cast<int64_t>(data_objects::DataType::HALF)};
     EXPECT_EQ(boundProblem(*bound), expected);
     // The problem is private (`_`): the graph features describe it, so nothing else is
     // bound for a ranker.
@@ -269,7 +270,7 @@ TEST(TestGfx1250ConvFwdAotMatchers, InfersGroupsFromTheFiltersChannels)
     const auto graph = graphOf(shape);
     const auto bound = matchesGraph(GFX1250_CONV_FWD_AOT, graph.context());
     ASSERT_TRUE(bound.has_value());
-    EXPECT_EQ(boundProblem(*bound).at(10), 4);
+    EXPECT_EQ(boundProblem(*bound).at(16), 4);
 }
 
 TEST(TestGfx1250ConvFwdAotMatchers, ServesBf16)
@@ -506,7 +507,8 @@ TEST(TestGfx1250ConvFwdAotMatchers, AnInstanceItCannotReadDoesNotServe)
     missingField.metadata.erase("tile_m");
     EXPECT_FALSE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), missingField, *bound));
     auto unknownFamily = implicitGemm("6b7f3c52-0000-4000-8000-000000000008");
-    unknownFamily.metadata["algorithm"] = std::string("winograd");
+    unknownFamily.metadata["kernel_family"] = int64_t{1};
+    unknownFamily.metadata["direct_variant"] = std::string("winograd");
     EXPECT_FALSE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), unknownFamily, *bound));
     auto notKpack = implicitGemm("6b7f3c52-0000-4000-8000-000000000009");
     notKpack.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
@@ -548,7 +550,19 @@ TEST(TestGfx1250ConvFwdAotMatchers, ABakedFieldIsCheckedAgainstTheWidthFoldedPro
 
 TEST(TestGfx1250ConvFwdAotMatchers, FallbackOrderIsTheCatalogsOrder)
 {
-    const auto graph = graphOf(ConvShape{});
+    // A 1x1 stride-2 graph both kernels serve: only an admitted kernel is scored.
+    ConvShape shape;
+    shape.n = 1;
+    shape.c = 128;
+    shape.k = 128;
+    shape.h = 28;
+    shape.w = 28;
+    shape.y = 1;
+    shape.x = 1;
+    shape.stride = {2, 2};
+    shape.prePadding = {0, 0};
+    shape.postPadding = {0, 0};
+    const auto graph = graphOf(shape);
     const auto bound = matchesGraph(GFX1250_CONV_FWD_AOT, graph.context());
     ASSERT_TRUE(bound.has_value());
     // The catalog gives the instance list's earlier entry the higher priority, so the native
@@ -596,7 +610,10 @@ std::string catalogUuid(size_t index)
 // rocKE builds the spec of every WMMA family at its own wave size, 32, whatever wave_size
 // the identity spells, and so does the port: an instance of each family that serves a
 // golden problem still serves it when its identity says 64.
-TEST(TestGfx1250ConvFwdAotMatchers, AWmmaKernelKeepsItsSpecsWaveSize)
+// The engine's wave size is part of an instance, as gfx950's wave64 is of its own: a kernel
+// whose metadata names another wave size (one built for another target) serves nothing,
+// even where the same instance at wave 32 serves.
+TEST(TestGfx1250ConvFwdAotMatchers, AKernelOfAnotherWaveSizeDoesNotServe)
 {
     const auto& golden = gfx1250_conv_fwd_aot_vectors::KERNELS;
     for(const std::string family : {"direct_fwd_wmma",
@@ -619,7 +636,7 @@ TEST(TestGfx1250ConvFwdAotMatchers, AWmmaKernelKeepsItsSpecsWaveSize)
             {
                 const auto problem = catalog::problemAt(index);
                 if(gfx1250_conv_fwd::toString(problem.dtype) != geometry.str("dtype")
-                   || port.refuse(problem).has_value())
+                   || !gfx1250_conv_fwd::servedPlan(port, problem).has_value())
                 {
                     continue;
                 }
@@ -629,9 +646,12 @@ TEST(TestGfx1250ConvFwdAotMatchers, AWmmaKernelKeepsItsSpecsWaveSize)
                 {
                     continue;
                 }
-                auto wave64 = kernelOf(golden[i], catalogUuid(i));
+                const auto wave32 = kernelOf(golden[i], catalogUuid(i));
+                auto wave64 = wave32;
                 wave64.metadata["wave_size"] = int64_t{64};
-                EXPECT_TRUE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), wave64, *bound))
+                EXPECT_TRUE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), wave32, *bound))
+                    << golden[i].instanceId << " on golden problem " << index;
+                EXPECT_FALSE(matchesKernel(GFX1250_CONV_FWD_AOT, graph.context(), wave64, *bound))
                     << golden[i].instanceId << " with wave_size 64 on golden problem " << index;
                 checked = true;
             }
@@ -674,8 +694,8 @@ TEST(TestGfx1250ConvFwdAotMatchers, ServesExactlyWhatThePortAdmitsOverTheGoldenP
         const auto* dtype = gfx1250_conv_fwd::toString(problem.dtype);
         for(size_t i = 0; i < kernels.size(); ++i)
         {
-            const bool expected
-                = goldenDtypes()[i] == dtype && !ports[i].refuse(problem).has_value();
+            const bool expected = goldenDtypes()[i] == dtype
+                                  && gfx1250_conv_fwd::servedPlan(ports[i], problem).has_value();
             const bool actual = matcher(graph.context(), *bound, kernels[i]);
             EXPECT_EQ(actual, expected) << golden[i].instanceId << " on golden problem " << index;
             served += actual ? 1 : 0;
@@ -707,15 +727,15 @@ TEST(TestGfx1250ConvFwdAotDispatch, NoWorkspaceAndPrepareReachesCodeLoading)
     {
         const std::string message = error.what();
         for(const auto* earlier :
-            {"cannot run this convolution", "an empty launch plan", "different launch geometry"})
+            {"does not satisfy the convolution contract", "requires this graph matcher"})
         {
             EXPECT_EQ(message.find(earlier), std::string::npos) << message;
         }
     }
 
-    // A kernel that refuses the graph is refused before any code loads, in both.
-    EXPECT_THROW(handler.workspaceBytes(graph.context(), *bound, kernels[1]),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    // A kernel that refuses the graph sizes no workspace (no gfx1250 kernel uses one) and is
+    // refused before any code loads.
+    EXPECT_EQ(handler.workspaceBytes(graph.context(), *bound, kernels[1]), 0U);
     EXPECT_THROW(handler.prepare(graph.context(), *bound, kernels[1]),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }

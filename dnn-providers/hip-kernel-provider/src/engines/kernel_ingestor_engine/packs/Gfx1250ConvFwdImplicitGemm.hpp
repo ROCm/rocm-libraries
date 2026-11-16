@@ -22,8 +22,8 @@
  *
  * Only what the shipped instances use is ported: every one is grouped and 2-D, with patch,
  * split-K, async DMA, stream-K and pointwise off. The packaging adapter
- * (builders/gfx1250/conv_fwd_aot._CONSTANT) refuses an instance that turns one of those on,
- * and parse() refuses an ungrouped instance.
+ * (conv_fwd_aot_spec_for_identity in builders/common/convolution_forward.py) refuses an
+ * instance that turns one of those on, and parse() refuses an ungrouped instance.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx1250_conv_fwd
 {

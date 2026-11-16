@@ -205,7 +205,7 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
 /// The engine name gfx1250_conv_fwd_aot.ued.json declares.
 inline constexpr std::string_view GFX1250_CONV_FWD_AOT_ENGINE_NAME = "hipkernel:Gfx1250ConvFwdAot";
 
-/// @see packs/Gfx1250ConvFwdAotNative.cpp
+/// @see packs/ConvFwdAotNative.cpp
 void registerGfx1250ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1250ConvFwdAotModuleCache();
 
@@ -257,7 +257,7 @@ void registerGfx942AttentionUnified2DSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx942AttentionUnified2DModuleCache();
 
-/// @see packs/Gfx950ConvFwdNative.cpp (hipkernel:Gfx950ConvFwdAot)
+/// @see packs/ConvFwdAotNative.cpp (hipkernel:Gfx950ConvFwdAot)
 void registerGfx950ConvFwdAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950ConvFwdAotModuleCache();
 

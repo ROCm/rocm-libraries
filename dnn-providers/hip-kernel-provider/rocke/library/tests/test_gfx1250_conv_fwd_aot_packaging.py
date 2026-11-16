@@ -129,14 +129,13 @@ def test_the_spec_extends_the_gfx950_spec():
     assert added == list(cf._GFX1250_KNOB_DEFAULTS)
     for name, default in cf._GFX1250_KNOB_DEFAULTS.items():
         assert fields[name].default == default, name
-    assert fields["unroll_rows"].default == -1
     used = {f for knobs in cf.GFX1250_DIRECT_KNOBS.values() for f in knobs.values()}
     assert set(added) <= used
 
 
 def _with_knob(spec, field_name):
     value = (
-        1
+        cf._GFX1250_TRUE
         if field_name in cf._GFX1250_BOOL_FIELDS
         else "iterative-ilp" if field_name in cf._GFX1250_STRING_FIELDS else 2
     )
@@ -246,7 +245,7 @@ def test_bool_knobs_keep_an_explicit_false(registered):
         spec = _spec(instance.identity)
         seen.add(spec.unroll_rows)
         assert spec.identity() == instance.identity
-    assert seen == {-1, 0, 1}
+    assert seen == {0, cf._GFX1250_TRUE, cf._GFX1250_FALSE}
 
 
 def _problems_near(spec, rng, count: int):
