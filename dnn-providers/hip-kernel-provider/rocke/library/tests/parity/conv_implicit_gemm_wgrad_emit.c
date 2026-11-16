@@ -92,6 +92,8 @@
  *  109-113 reg_transpose on the gfx1201 WMMA base (config 6): auto widths,
  *         bf16 at widths 4 / 2, scalar loads, split-K on gfx1200, and gfx950
  *         (rejected). Must match the Python _REGT_CFGS.
+ *  114-116 regt_prefetch: mode 3, mode 3 bf16 at width 2 on gfx12-generic;
+ *         mode 2 (rejected). Must match the Python _REGT_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -350,6 +352,24 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
         spec->warp_tile_n = 32;
         *arch = "gfx950";
         break;
+    case 114:
+        spec->regt_prefetch = 3;
+        break;
+    case 115:
+        spec->regt_prefetch = 3;
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 2;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 2;
+        *arch = "gfx12-generic";
+        break;
+    case 116:
+        /* rejected: no mode 2 */
+        spec->regt_prefetch = 2;
+        break;
     default:
         return -1;
     }
@@ -360,7 +380,7 @@ static int make_regt_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, c
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
-    if(idx >= 109 && idx <= 113)
+    if(idx >= 109 && idx <= 116)
         return make_regt_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);

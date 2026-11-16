@@ -240,6 +240,15 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
      * set v exactly when given. Mirrors WgradConvSpec.reg_transpose.
      * Default false: every existing config emits byte-identical IR. */
     bool reg_transpose; /* default false */
+    /* regt_prefetch: the register-prefetch K loop of the reg_transpose loaders
+     * (kernel-name flag rtp<N>). Each K step issues the next tile's global
+     * loads into registers, runs the current tile's MMAs out of LDS, then
+     * transposes and stores the prefetched tile. 0 off; 3 LDS-only barriers,
+     * the prefetch pinned ahead of the MMAs with sched_barrier and guarded
+     * reads of a partially loading tile (the only mode built). Needs
+     * reg_transpose; rejected with unroll_k and stream-K, and off gfx12 RDNA.
+     * Mirrors WgradConvSpec.regt_prefetch. Default 0: byte-identical IR. */
+    int regt_prefetch; /* default 0 */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

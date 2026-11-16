@@ -1664,6 +1664,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.register_prefetch = dict_bool(d, "register_prefetch", s.register_prefetch);
     s.prefetch_global_regs = dict_bool(d, "prefetch_global_regs", s.prefetch_global_regs);
     s.reg_transpose = dict_bool(d, "reg_transpose", s.reg_transpose);
+    s.regt_prefetch = dict_int(d, "regt_prefetch", s.regt_prefetch);
     s.streamk_ctas = dict_int(d, "streamk_ctas", s.streamk_ctas);
     s.group_merge = dict_int(d, "group_merge", s.group_merge);
     s.async_dma = dict_bool(d, "async_dma", s.async_dma);

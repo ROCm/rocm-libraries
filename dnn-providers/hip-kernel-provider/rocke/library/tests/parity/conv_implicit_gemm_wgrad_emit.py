@@ -119,6 +119,10 @@
 #         participation), bf16 at widths 4 / 2, scalar loads, the zero-partner
 #         split-K atomic on gfx1200, and gfx950 (wave64), which both engines
 #         must reject.
+#   114-116 -- regt_prefetch (the register-prefetch K loop of the
+#         register-transpose loaders, see _REGT_CFGS): mode 3 (guarded reads
+#         under partial participation), mode 3 in bf16 at width 2 on
+#         gfx12-generic; mode 2, which both engines must reject.
 #   (Grouped wgrad reaches the C++ engine only through stream-K. The
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
@@ -134,7 +138,7 @@
 #   207 -- streamk with unroll_k (must raise ValueError)
 #   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-113, so run_diff.py stops at the shared END before reaching 200+; these
+# 0-121, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -254,6 +258,21 @@ _REGT_CFGS = {
         dict(reg_transpose=True, wave_size=64, warp_tile_m=32, warp_tile_n=32),
         "gfx950",
     ),
+    114: (dict(reg_transpose=True, regt_prefetch=3), "gfx1201"),
+    115: (
+        dict(
+            reg_transpose=True,
+            regt_prefetch=3,
+            dtype_a="bf16",
+            dtype_b="bf16",
+            dtype_d="bf16",
+            vector_size_a=2,
+            vector_size_b=2,
+        ),
+        "gfx12-generic",
+    ),
+    # rejected: no mode 2
+    116: (dict(reg_transpose=True, regt_prefetch=2), "gfx1201"),
 }
 
 

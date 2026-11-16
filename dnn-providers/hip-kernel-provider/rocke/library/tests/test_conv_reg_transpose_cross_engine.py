@@ -126,5 +126,31 @@ class TestRegTransposeCrossEngine(_CrossEngine):
         )
 
 
+class TestRegtPrefetchCrossEngine(_CrossEngine):
+    def test_identical_ir(self):
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        bf16 = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
+        self.assert_same(
+            (
+                dict(regt_prefetch=3),
+                # Mode 3 on a full-participation tile (no guarded reads).
+                dict(regt_prefetch=3, data=bf16, vector_size_a=2, vector_size_b=2),
+                dict(regt_prefetch=3, split_k=2),
+            )
+        )
+
+    def test_rejected_alike(self):
+        self.assert_rejected_alike(
+            (
+                # Modes 1 / 2 are not built.
+                dict(regt_prefetch=1),
+                dict(regt_prefetch=2),
+                dict(regt_prefetch=3, reg_transpose=False),
+                dict(regt_prefetch=3, unroll_k=True),
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

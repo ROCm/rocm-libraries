@@ -33,6 +33,7 @@
 
 #include <cstdint> /* int64_t */
 #include <cstdio> /* snprintf */
+#include <cstdlib> /* malloc, free */
 #include <cstring> /* strcmp, memset, memcpy */
 
 #include "rocke/error_boundary.hpp"
@@ -80,6 +81,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.register_prefetch = false;
     s.prefetch_global_regs = false;
     s.reg_transpose = false;
+    s.regt_prefetch = 0;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -354,7 +356,7 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
      *     f"{pipeline}_{epilogue}",
      *     self.acc_epilogue.tag(),   -- always "" (omitted) in this port
      *     flags={"async": async_dma, "kouter": lds_k_outer, "regt": ...,
-     *            "pad{N}": ...,
+     *            "rtp{N}": ..., "pad{N}": ...,
      *            "spk": split_k>1, "spkauto": split_k==-1, "twostage": ...,
      *            "wsr{N}": ..., "unroll": unroll_k, "pfa": prefetch_addr},
      *   )
@@ -384,13 +386,13 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     /* acc_epilogue.tag() is always "" in this port (field omitted from struct). */
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
-    /* flags: async, kouter, regt, pad{N}, spk/spkauto, twostage, wsr{N}, unroll,
-     * pfa, rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most WGRAD_NAME_MAX_FLAGS
+    /* flags: async, kouter, regt, rtp{N}, pad{N}, spk/spkauto, twostage, wsr{N},
+     * unroll, pfa, rpf, pgr, sk, skpers, skr{reduction}, tf32 -- at most WGRAD_NAME_MAX_FLAGS
      * when every conditional tag is present. The name is built before
      * validation, so an invalid spec can reach the maximum too. */
     enum
     {
-        WGRAD_NAME_MAX_FLAGS = 15
+        WGRAD_NAME_MAX_FLAGS = 16
     };
     char pad_flag[32] = {0};
     const char* flag_names[WGRAD_NAME_MAX_FLAGS];
@@ -409,6 +411,16 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     flag_names[n_flags] = "regt";
     flag_on[n_flags] = s->reg_transpose ? 1 : 0;
     n_flags++;
+
+    /* A different K-loop body; only tagged when set. Mirrors Python. */
+    char rtp_buf[32];
+    if(s->regt_prefetch > 0)
+    {
+        snprintf(rtp_buf, sizeof(rtp_buf), "rtp%d", s->regt_prefetch);
+        flag_names[n_flags] = rtp_buf;
+        flag_on[n_flags] = 1;
+        n_flags++;
+    }
 
     /* An explicit lds_k_pad changes the LDS row stride and so the emitted code;
      * without it in the name two pads collide on one symbol and a cache keyed on
@@ -813,8 +825,34 @@ static bool wgrad_reg_transpose_conflict(const rocke_implicit_gemm_conv_wgrad_sp
                                          char* reason,
                                          size_t reason_cap)
 {
+    if(s->regt_prefetch != 0 && s->regt_prefetch != 3)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "regt_prefetch must be one of (0, 3) (got %d)",
+                     s->regt_prefetch);
+        return true;
+    }
+    if(s->regt_prefetch && !s->reg_transpose)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "regt_prefetch is the reg_transpose K loop; set reg_transpose=True");
+        return true;
+    }
     if(!s->reg_transpose)
         return false;
+    if(s->regt_prefetch && (s->unroll_k || wgrad_streamk_on(s)))
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "regt_prefetch is its own K loop; it does not combine with unroll_k or "
+                     "stream-K");
+        return true;
+    }
     const char* da = s->dtype_a ? s->dtype_a : "fp16";
     const char* db = s->dtype_b ? s->dtype_b : "fp16";
     const bool a16 = strcmp(da, "bf16") == 0 || strcmp(da, "fp16") == 0;
@@ -1536,6 +1574,19 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     }
     if(wgrad_reg_transpose_conflict(s, reason, reason_cap))
         return false;
+    /* The register-prefetch loop (and the LDS-only barrier of mode 3) is
+     * written for gfx12 RDNA. Mirrors Python _REGT_PREFETCH_TARGET_FAMILIES. */
+    if(s->regt_prefetch
+       && (target->target_family == NULL || strcmp(target->target_family, "gfx12_rdna") != 0))
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "regt_prefetch is enabled only on ('gfx12_rdna',) targets; got %s (%s)",
+                     arch,
+                     target->target_family ? target->target_family : "");
+        return false;
+    }
 
     /* The wgrad builder has no load/math wave split, so "wavelet" would build
      * the "mem" kernel under another name. Mirrors Python is_valid_wgrad_spec. */
@@ -4391,6 +4442,187 @@ static void wgrad_emit_kloop_prefetch_global_regs(rocke_conv_build_ctx_t* ctx)
         ctx->final_accs[i] = for_op.op->results[i];
 }
 
+// ---------------------------------------------------------------------------
+// regt_prefetch K loop
+// ---------------------------------------------------------------------------
+
+/* Python _masked / _masked_run: a descriptor whose validity is ANDed with the
+ * tile's "inside the K range" predicate (tile_ok when the descriptor has none). */
+typedef struct wgrad_rtp_mask
+{
+    rocke_loads_descriptor_fn fn;
+    rocke_loads_run_descriptor_fn run_fn;
+    void* user;
+    void* run_user;
+    rocke_value_t* tile_ok;
+} wgrad_rtp_mask_t;
+
+static rocke_value_t* wgrad_rtp_masked_desc(rocke_ir_builder_t* b,
+                                            rocke_value_t* row,
+                                            rocke_value_t* col,
+                                            rocke_value_t** out_valid,
+                                            void* user)
+{
+    wgrad_rtp_mask_t* m = (wgrad_rtp_mask_t*)user;
+    rocke_value_t* ok = NULL;
+    rocke_value_t* off = m->fn(b, row, col, &ok, m->user);
+    *out_valid = ok == NULL ? m->tile_ok : rocke_b_land(b, ok, m->tile_ok);
+    return off;
+}
+
+static void wgrad_rtp_masked_run(rocke_ir_builder_t* b,
+                                 rocke_value_t* row,
+                                 rocke_value_t* col,
+                                 rocke_value_t** out_off,
+                                 rocke_value_t** out_valid,
+                                 void* user)
+{
+    wgrad_rtp_mask_t* m = (wgrad_rtp_mask_t*)user;
+    rocke_value_t* ok[ROCKE_REGT_K_RUN];
+    m->run_fn(b, row, col, out_off, ok, m->run_user);
+    for(int j = 0; j < ROCKE_REGT_K_RUN; ++j)
+        out_valid[j] = ok[j] == NULL ? m->tile_ok : rocke_b_land(b, ok[j], m->tile_ok);
+}
+
+/* The two staged tiles of one _fetch. */
+typedef struct wgrad_rtp_tiles
+{
+    rocke_regt_staged_t a;
+    rocke_regt_staged_t b;
+} wgrad_rtp_tiles_t;
+
+/* Python _fetch(k_tile): the reads of tile k_tile, masked to the K range. */
+static void wgrad_rtp_fetch(rocke_conv_build_ctx_t* ctx,
+                            rocke_value_t* k_tile,
+                            bool guard,
+                            wgrad_rtp_mask_t* ma,
+                            wgrad_rtp_mask_t* mb,
+                            wgrad_rtp_tiles_t* out)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    ctx->k_off_capture = k_tile;
+    rocke_value_t* tile_ok = rocke_b_cmp_lt(b, k_tile, ctx->c_K_gemm);
+    ma->fn = ctx->a_descriptor_fn;
+    ma->user = ctx;
+    ma->run_fn = ctx->a_run_fn;
+    ma->run_user = ctx->run_user;
+    ma->tile_ok = tile_ok;
+    mb->fn = ctx->b_descriptor_fn;
+    mb->user = ctx;
+    mb->run_fn = ctx->b_run_fn;
+    mb->run_user = ctx->run_user;
+    mb->tile_ok = tile_ok;
+    rocke_reg_transpose_tile_loader_load_global(b,
+                                                &ctx->a_regt_loader,
+                                                ctx->tid,
+                                                wgrad_rtp_masked_desc,
+                                                ma,
+                                                ctx->a_rsrc,
+                                                /*masked=*/true,
+                                                ma->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
+                                                ma,
+                                                guard,
+                                                &out->a);
+    rocke_reg_transpose_tile_loader_load_global(b,
+                                                &ctx->b_regt_loader,
+                                                ctx->tid,
+                                                wgrad_rtp_masked_desc,
+                                                mb,
+                                                ctx->b_rsrc,
+                                                /*masked=*/true,
+                                                mb->run_fn != NULL ? wgrad_rtp_masked_run : NULL,
+                                                mb,
+                                                guard,
+                                                &out->b);
+}
+
+/* Python _store(staged). */
+static void wgrad_rtp_store(rocke_conv_build_ctx_t* ctx, const wgrad_rtp_tiles_t* t)
+{
+    rocke_reg_transpose_tile_loader_store_lds(ctx->b, &ctx->a_regt_loader, ctx->A_smem, &t->a);
+    rocke_reg_transpose_tile_loader_store_lds(ctx->b, &ctx->b_regt_loader, ctx->B_smem, &t->b);
+}
+
+/* Mirrors the Python ``elif spec.regt_prefetch:`` K-loop branch (mode 3,
+ * the only mode built):
+ *   prologue: tile k_lo -> LDS; barrier
+ *   per tile: regs <- tile k+1; MMA(LDS); LDS barrier; LDS <- regs; LDS barrier
+ * The prefetch is pinned ahead of the MMAs with sched_barrier and its reads are
+ * guarded. The prefetch of the last step lies at or past k_hi and is masked to
+ * the out-of-range sentinel. */
+static void wgrad_emit_kloop_regt_prefetch(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int num_accs = ctx->num_accs;
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+
+    /* Heap: each staged tile holds ROCKE_REGT_MAX_UNITS units. */
+    wgrad_rtp_tiles_t* t = (wgrad_rtp_tiles_t*)malloc(sizeof(wgrad_rtp_tiles_t));
+    wgrad_rtp_mask_t* masks
+        = (wgrad_rtp_mask_t*)rocke_arena_alloc(&b->arena, 4 * sizeof(wgrad_rtp_mask_t));
+    if(t == NULL || masks == NULL)
+    {
+        free(t);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "regt_prefetch: out of memory");
+        return;
+    }
+
+    /* _store(_fetch(k_lo)); b.sync() */
+    wgrad_rtp_fetch(ctx, k_lo, /*guard=*/true, &masks[0], &masks[1], t);
+    wgrad_rtp_store(ctx, t);
+    rocke_b_sync(b);
+    if(!rocke_ir_builder_ok(b))
+    {
+        free(t);
+        return;
+    }
+
+    rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
+    for(int i = 0; i < num_accs; ++i)
+    {
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    rocke_for_t for_op = rocke_b_scf_for_iter(b,
+                                              k_lo,
+                                              ctx->c_K_gemm,
+                                              ctx->c_block_k,
+                                              iter_args,
+                                              num_accs,
+                                              "k_rpf",
+                                              /*unroll=*/false,
+                                              /*elide_trailing_barrier=*/false);
+    if(!rocke_ir_builder_ok(b))
+    {
+        free(t);
+        return;
+    }
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* k_next = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        wgrad_rtp_fetch(ctx, k_next, /*guard=*/true, &masks[2], &masks[3], t);
+        rocke_b_sched_barrier(b, 0);
+        ctx->k_off_capture = for_op.iv;
+        rocke_value_t* new_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, for_op.iter_vars, num_accs, new_accs);
+        rocke_b_sched_barrier(b, 0);
+        rocke_b_sync_lds_only(b);
+        wgrad_rtp_store(ctx, t);
+        rocke_b_sync_lds_only(b);
+        rocke_b_scf_yield(b, new_accs, num_accs);
+    }
+    rocke_b_region_leave(b);
+    free(t);
+    if(!rocke_ir_builder_ok(b))
+        return;
+
+    ctx->num_final_accs = num_accs;
+    for(int i = 0; i < num_accs; ++i)
+        ctx->final_accs[i] = for_op.op->results[i];
+}
+
 rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     rocke_ir_builder_t* b, const rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char* arch)
 {
@@ -4829,6 +5061,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
+    else if(spec->regt_prefetch)
+        wgrad_emit_kloop_regt_prefetch(&ctx);
     else if(spec->prefetch_global_regs)
         wgrad_emit_kloop_prefetch_global_regs(&ctx);
     else if(spec->prefetch_addr)

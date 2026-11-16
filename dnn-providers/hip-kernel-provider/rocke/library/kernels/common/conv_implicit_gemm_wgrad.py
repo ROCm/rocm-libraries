@@ -614,6 +614,33 @@ class WgradConvSpec:
     # byte-identical IR and keeps its kernel name.
     reg_transpose: bool = False
 
+    # Register-prefetch K loop for the reg_transpose path (tag "rtp<mode>").
+    # Each K step issues the NEXT tile's global loads into registers (the
+    # loaders' load_global) and runs the current tile's MMAs out of LDS while
+    # they are in flight; only then is the prefetched tile transposed and
+    # stored (store_lds), so the global latency hides behind the MMAs.
+    #   0 -- off (the plain load / barrier / MMA / barrier loop).
+    #   3 -- the two in-loop barriers emitted LDS-only, so they leave the
+    #        prefetch in flight, the prefetch pinned ahead of the MMAs with
+    #        sched_barrier (the machine scheduler otherwise sinks the loads
+    #        behind most of them), and the reads of a partially loading tile
+    #        in their own branch (RegTransposeTileLoader guard).
+    # (Modes 1 / 2 / 4 are not built; mode 3 keeps its number so the tag
+    # stays stable.)
+    # The prefetch issued on the last step lies at or past the slice end; it
+    # is masked to the buffer resource's out-of-range sentinel and reads zero,
+    # so no load leaves the slice.
+    #
+    # Not ``register_prefetch`` (tag "rpf": the compv3 + prefetch_addr loop
+    # with carried offsets on the CoalescedTileLoader slots) and not
+    # ``prefetch_global_regs`` (tag "pgr": the loads of tile k+1 carried as
+    # loop values into the next iteration's store); both are refused with
+    # reg_transpose.
+    #
+    # Default 0: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    regt_prefetch: int = 0
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -801,6 +828,8 @@ class WgradConvSpec:
                 "kouter": self.lds_k_outer,
                 # A different load/store body; only tagged when set.
                 "regt": self.reg_transpose,
+                # A different K-loop body; only tagged when set.
+                f"rtp{self.regt_prefetch}": self.regt_prefetch > 0,
                 # An explicit lds_k_pad changes the LDS row stride and so the
                 # emitted code, but nothing else in the name reflects it. Two
                 # pads would otherwise collide on one symbol and the compile
@@ -1420,14 +1449,34 @@ def _prefetch_global_regs_conflict(spec: "WgradConvSpec") -> str:
     return ""
 
 
+# WgradConvSpec.regt_prefetch modes that are built (see the field).
+_REGT_PREFETCH_MODES = (0, 3)
+
+# Target families whose register-prefetch loop has been measured; the
+# LDS-only barrier of mode 3 is written for them (see the field).
+_REGT_PREFETCH_TARGET_FAMILIES = ("gfx12_rdna",)
+
+
 def _reg_transpose_conflict(spec: "WgradConvSpec") -> str:
     """Why ``spec.reg_transpose`` cannot be honoured, or ``""`` if it can.
 
     Arch-free half of the gate (is_valid_wgrad_spec adds the arch family).
     Shared by ``validate`` and ``is_valid_wgrad_spec`` so the two cannot drift.
     """
+    if spec.regt_prefetch not in _REGT_PREFETCH_MODES:
+        return (
+            f"regt_prefetch must be one of {_REGT_PREFETCH_MODES} "
+            f"(got {spec.regt_prefetch})"
+        )
+    if spec.regt_prefetch and not spec.reg_transpose:
+        return "regt_prefetch is the reg_transpose K loop; set reg_transpose=True"
     if not spec.reg_transpose:
         return ""
+    if spec.regt_prefetch and (spec.unroll_k or spec.streamk != "off"):
+        return (
+            "regt_prefetch is its own K loop; it does not combine with "
+            "unroll_k or stream-K"
+        )
     if spec.data.dtype_a not in ("bf16", "fp16") or spec.data.dtype_b not in (
         "bf16",
         "fp16",
@@ -2400,6 +2449,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _regt_why = _reg_transpose_conflict(spec)
     if _regt_why:
         return False, _regt_why
+    if (
+        spec.regt_prefetch
+        and target.target_family not in _REGT_PREFETCH_TARGET_FAMILIES
+    ):
+        return False, (
+            f"regt_prefetch is enabled only on {_REGT_PREFETCH_TARGET_FAMILIES} "
+            f"targets; got {arch} ({target.target_family})"
+        )
     # The wgrad builder has no load/math wave split, so a "wavelet" spec built
     # silently as "mem" under another name. Reject it instead of benchmarking
     # one kernel twice.
@@ -3798,6 +3855,74 @@ def build_implicit_gemm_conv_wgrad(
 
             b.scf_yield(*accs_b)
         final_accs = list(for_op_uk.results)
+    elif spec.regt_prefetch:
+        # Register-prefetch K loop of the reg_transpose loaders
+        # (regt_prefetch, see the spec field):
+        #   prologue: tile k_lo -> LDS; barrier
+        #   per tile: regs <- tile k+1; MMA(LDS); barrier; LDS <- regs; barrier
+        # The prefetch of the last step lies at or past _k_upper and is masked
+        # to the out-of-range sentinel, so it reads zero and adds nothing.
+        # Mode 3 (the only mode built): LDS-only in-loop barriers, the
+        # prefetch pinned ahead of the MMAs, and guarded reads.
+        _a_fn, _b_fn = _split_desc_fns()
+
+        def _masked(fn, tile_ok):
+            def desc(b_, row, col):
+                off, ok = fn(b_, row, col)
+                return off, (tile_ok if ok is None else b_.land(ok, tile_ok))
+
+            return desc
+
+        def _fetch(k_tile):
+            k_off_capture[0] = k_tile
+            tile_ok = b.cmp_lt(k_tile, _k_upper)
+            # The reads of a partially loading tile are branched
+            # (RegTransposeTileLoader guard) so they are not sunk behind the
+            # MMAs into the store's branch.
+            return (
+                a_sync_loader.load_global(
+                    b,
+                    tid=tid,
+                    descriptor=_masked(_a_fn, tile_ok),
+                    rsrc=dy_rsrc,
+                    guard=True,
+                ),
+                b_sync_loader.load_global(
+                    b,
+                    tid=tid,
+                    descriptor=_masked(_b_fn, tile_ok),
+                    rsrc=x_rsrc,
+                    guard=True,
+                ),
+            )
+
+        def _store(staged):
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=staged[0])
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=staged[1])
+
+        _store(_fetch(k_lo))
+        b.sync()
+        for_op_rp = b.scf_for_iter(
+            k_lo,
+            _k_upper,
+            c_block_k,
+            accs,
+            iv_name="k_rpf",
+            elide_trailing_barrier=False,
+        )
+        with for_op_rp as (k_rp, iter_accs):
+            _st = _fetch(b.add(k_rp, c_block_k))
+            # The prefetch pinned ahead of the MMAs ...
+            b.sched_barrier(0)
+            k_off_capture[0] = k_rp
+            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
+            # ... and the transposes of the prefetched tile behind them.
+            b.sched_barrier(0)
+            b.sync_lds_only()
+            _store(_st)
+            b.sync_lds_only()
+            b.scf_yield(*new_accs)
+        final_accs = list(for_op_rp.results)
     elif spec.prefetch_global_regs:
         # Register-prefetch K loop. The prologue issues tile k_lo's global
         # reads into VGPRs. Each iteration writes the tile it carries to LDS,

@@ -147,5 +147,61 @@ class TestRegTransposeIdentity(unittest.TestCase):
         self.assertNotEqual(base.stable_hash(), regt.stable_hash())
 
 
+class TestRegtPrefetch(unittest.TestCase):
+    def test_names_and_gates(self):
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        self.assertIn("_rtp3", _wgrad(regt_prefetch=3).kernel_name())
+        self.assertNotIn("rtp", _wgrad().kernel_name())
+        with self.assertRaises(ValueError):
+            _wgrad(reg_transpose=False, regt_prefetch=3).validate()
+        # Only mode 3 is built.
+        for mode in (1, 2, 4, 5):
+            with self.assertRaises(ValueError):
+                _wgrad(regt_prefetch=mode).validate()
+        for kw in (dict(unroll_k=True), dict(register_prefetch=True)):
+            with self.assertRaises(ValueError):
+                _wgrad(regt_prefetch=3, **kw).validate()
+        for arch in ("gfx1201", "gfx1200", "gfx12-generic"):
+            self.assertEqual(
+                is_valid_wgrad_spec(_wgrad(regt_prefetch=3), arch), (True, "ok")
+            )
+        # Measured (and its LDS-only barrier written) for gfx12 RDNA only.
+        for arch in ("gfx1250", "gfx11-generic"):
+            ok, why = is_valid_wgrad_spec(_wgrad(regt_prefetch=3), arch)
+            self.assertFalse(ok)
+            self.assertIn("regt_prefetch", why)
+
+    def test_identity_label(self):
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        base = _ident(reg_transpose=True)
+        rtp = replace(base, regt_prefetch=3)
+        self.assertNotIn("rtp", base.label())
+        self.assertIn("-rtp3-regt-", rtp.label())
+        self.assertEqual(KernelIdentity.from_label(rtp.label()), rtp)
+        self.assertNotEqual(base.stable_hash(), rtp.stable_hash())
+
+    def test_mode_3_keeps_the_prefetch_in_flight(self):
+        def ll(mode):
+            return _ll(_wgrad(regt_prefetch=mode, warp_m=4, warp_n=2))
+
+        intr = r"call void @llvm\.amdgcn\.s\.barrier\(\)"
+        plain, three = ll(0), ll(3)
+        # Prologue + two per tile.
+        self.assertEqual(len(re.findall(intr, three)), 3)
+        self.assertIn("llvm.amdgcn.sched.barrier", three)
+        self.assertNotIn("llvm.amdgcn.sched.barrier", plain)
+        # The in-loop barriers are LDS-only -- the full drain is asked for in
+        # front of the prologue's barrier only.
+        full = "call void @llvm.amdgcn.s.waitcnt(i32 7)"
+        self.assertEqual(three.count(full), 1)
+        # The loads of the plain loop, plus the prologue's.
+        loads = r"call <\d+ x i32> @llvm\.amdgcn\.raw\.ptr\.buffer\.load"
+        self.assertEqual(
+            len(re.findall(loads, three)), 2 * len(re.findall(loads, plain))
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

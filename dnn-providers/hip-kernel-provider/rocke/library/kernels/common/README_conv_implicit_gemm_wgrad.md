@@ -70,6 +70,16 @@ tagged in the kernel name and `KernelIdentity`.
   explicit `vector_size_a` / `vector_size_b` is taken exactly). WMMA only;
   rejected with `lds_k_outer`, `async_dma`, `prefetch_addr`,
   `prefetch_global_regs` and non-16-bit A/B.
+- `regt_prefetch` (tag `rtp<N>`, gfx12 RDNA only): the register-prefetch K
+  loop of the `reg_transpose` loaders. Each K step issues the next tile's
+  global reads into registers, runs the current tile's MMAs out of LDS, then
+  transposes and stores the prefetched tile. Mode 3 makes both in-loop barriers
+  LDS-only, pins the prefetch ahead of the MMAs with `sched_barrier` and
+  branches the reads of a partially loading tile (`guard`). The last step's
+  prefetch is masked to the out-of-range sentinel. Accepted values: 0 (off)
+  and 3. Rejected with `unroll_k` and stream-K. Not `register_prefetch`
+  (`rpf`) and not `prefetch_global_regs` (`pgr`), both refused with
+  `reg_transpose`.
 
 ### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
 
