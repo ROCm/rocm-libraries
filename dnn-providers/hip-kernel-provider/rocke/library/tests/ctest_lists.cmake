@@ -206,9 +206,9 @@ else()
 endif()
 
 # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-# dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
-# and K/V cache policy, the scalar fallback's cache key and block-table
-# stride kernarg, the unified attention running-max carry and keyless
+# dense block-order decodes, the dense paged launch checks, spec-wrapper
+# parity gate, the 3D decode split rule and K/V cache policy, the scalar
+# fallback's cache key and block-table stride kernarg, the unified attention running-max carry and keyless
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
 # LDS alignment claims of the backward kernel with the slices dK / dV sink, the
@@ -236,6 +236,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_decode.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
+    "tests/library/tests/test_attention_dense_paged_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
