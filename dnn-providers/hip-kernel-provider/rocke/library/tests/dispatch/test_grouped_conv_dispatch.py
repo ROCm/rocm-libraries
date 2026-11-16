@@ -126,7 +126,8 @@ _SHAPES = {
 
 # Shapes that reach every registered dgrad family: implicit GEMM with one
 # tilde sub-GEMM and with several (stride 2, dilation 2), the depthwise dgrad
-# filters and strides, and every channel pair the MFMA dgrad instances bake.
+# filters and strides, every channel pair the MFMA dgrad instances bake, and
+# gfx1250's WMMA dgrad families (dense, small-C, patch stem).
 # The 2x2/s2 downsample and the 16x16/s16 stem run width-folded (fold_width).
 _DGRAD_SHAPES = {
     "dense3x3": dict(),
@@ -155,6 +156,8 @@ _DGRAD_SHAPES = {
     "grouped_cpg24": dict(C=384, K=384, G=16),
     "grouped_cpg48_kpg192": dict(C=384, K=1536, G=8),
     "grouped_cpg4_kpg320": dict(C=64, K=5120, G=16),
+    # Dense with four input channels: gfx950's dense MFMA rows, gfx1250's small-C WMMA.
+    "dense_c4_k320": dict(C=4, K=320),
     "depthwise3x3": dict(C=144, K=144, G=144),
     "depthwise3x3_s2": dict(C=144, K=144, G=144, stride_h=2, stride_w=2),
     "depthwise7x7": dict(C=96, K=96, G=96, Y=7, X=7, pad_h=3, pad_w=3),
@@ -338,22 +341,37 @@ def test_default_llvm_flavor_is_the_registered_one():
             for s in gc.registered_conv_grouped_instances(arch, direction=direction)
         }
         assert flavors == {gc.DEFAULT_LLVM_FLAVORS[arch]}, arch
-        assert _req(arch=arch).llvm_flavor == gc.DEFAULT_LLVM_FLAVORS[arch]
-    assert _req(arch="gfx942").llvm_flavor == gc.DEFAULT_LLVM_FLAVOR
-    assert _req(arch="gfx1250", llvm_flavor="llvm23").llvm_flavor == "llvm23"
+        assert _req(arch=arch).resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS[arch]
+        assert _req(arch=arch).normalized()["llvm_flavor"] == (
+            gc.DEFAULT_LLVM_FLAVORS[arch]
+        )
+    assert _req(arch="gfx942").resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVOR
+    named = _req(arch="gfx1250", llvm_flavor="llvm23")
+    assert named.resolved_llvm_flavor() == "llvm23"
+    assert named.normalized()["llvm_flavor"] == "llvm23"
 
 
-def test_replace_across_arches_keeps_the_flavor_unless_reset():
-    """The default flavor is resolved once, at construction: replacing only the
-    arch keeps the old arch's flavor, replacing it with ``llvm_flavor=None`` too
-    resolves the new arch's default (as the field's comment documents)."""
-    gfx950 = _req(arch="gfx950")
-    assert gfx950.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
-    kept = dataclasses.replace(gfx950, arch="gfx1250")
-    assert kept.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
-    reset = dataclasses.replace(gfx950, arch="gfx1250", llvm_flavor=None)
-    assert reset == _req(arch="gfx1250")
-    assert reset.llvm_flavor == gc.DEFAULT_LLVM_FLAVORS["gfx1250"]
+def test_replace_across_arches_follows_the_new_arch_flavor():
+    """A request that names no flavor keeps ``None`` and resolves its arch's
+    default where it is read, so ``replace(req, arch=...)`` -- as the attention
+    dispatcher does across arches -- admits the new arch's instances; a flavor
+    the request names is kept across the replace."""
+    gfx950 = _req(arch="gfx950", direction="dgrad")
+    assert gfx950.llvm_flavor is None
+    assert gfx950.resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
+    moved = dataclasses.replace(gfx950, arch="gfx1250")
+    assert moved == _req(arch="gfx1250", direction="dgrad")
+    assert moved.resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS["gfx1250"]
+    results = gc.dispatch_conv_grouped_all(moved)
+    assert results
+    assert {r.spec.identity.arch for r in results} == {"gfx1250"}
+    assert {r.spec.identity.llvm_flavor for r in results} == {
+        gc.DEFAULT_LLVM_FLAVORS["gfx1250"]
+    }
+    pinned = dataclasses.replace(gfx950, llvm_flavor=gc.DEFAULT_LLVM_FLAVORS["gfx950"])
+    kept = dataclasses.replace(pinned, arch="gfx1250")
+    assert kept.resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVORS["gfx950"]
+    assert not gc.dispatch_conv_grouped_all(kept)
 
 
 def test_dispatch_does_not_read_the_process_flavor(monkeypatch):
@@ -839,20 +857,40 @@ def test_fwd_default_pick_follows_the_list_files_on_disk_priority_order():
 
 @pytest.mark.parametrize(
     "shape",
-    [s for s in _SHAPES if s.startswith("depthwise")],
+    [
+        s
+        for s in _SHAPES
+        if s.startswith("depthwise")
+        # depthwise11x11 is a 11x11 depthwise shape the AOT-packaged
+        # fwd dispatcher (gfx950_fwd.json, trimmed to the 233/dtype
+        # instances the AOT catalog ships) carries no direct_depthwise
+        # candidate for; it falls back to implicit_gemm, same as every
+        # other non-depthwise shape. depthwise11x11_g32 still admits a
+        # direct_depthwise candidate under the trim, but not the tiled one
+        # this test otherwise expects for a non-windowed shape -- it picks
+        # direct_depthwise_spatial instead. Both are covered instead by
+        # test_fwd_default_pick_follows_the_list_files_on_disk_priority_order,
+        # which asserts on whatever the on-disk order actually admits.
+        and s not in ("depthwise11x11", "depthwise11x11_g32")
+    ],
 )
-def test_depthwise_shapes_default_to_a_direct_depthwise_kernel(shape):
-    """A depthwise-shaped request must not fall back to a generic IGEMM tile:
-    the direct depthwise candidates are admitted only for genuinely depthwise
-    shapes (cpg=kpg=1), so one of them is always among the admitted set and
-    wins fwd's on-disk default pick over implicit_gemm. *Which*
-    direct_depthwise variant wins is deliberately a hand-tuned family
-    preference (e.g. the windowed depthwise kernel sorting first),
-    not a label-order tie-break -- see
-    test_fwd_default_pick_follows_the_list_files_on_disk_priority_order.
+def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
+    """A depthwise-shaped request must not fall back to a generic IGEMM tile
+    just because it happens to come earlier in the list -- the direct
+    depthwise candidates are admitted only for genuinely depthwise shapes
+    (cpg=kpg=1), so they are listed ahead of implicit_gemm so they win
+    whenever both are admitted. The windowed MFMA forward
+    (direct_depthwise_win: stride 1, "same" padding, channels a multiple of 8)
+    leads; the tiled kernel takes the rest. This pins fwd's hand-tuned
+    priority order (gfx950_fwd.json's own file order): moving the tiled
+    records ahead of the windowed ones changes the default pick and fails
+    here.
     """
-    req = _req(**_SHAPES[shape])
-    assert gc.dispatch_conv_grouped(req).spec.algorithm.startswith("direct_depthwise")
+    kw = _SHAPES[shape]
+    req = _req(**kw)
+    windowed = kw.get("stride_h", 1) == 1 and kw.get("Y", 3) <= 9 and kw["C"] % 8 == 0
+    want = "direct_depthwise_win" if windowed else "direct_depthwise_tiled"
+    assert gc.dispatch_conv_grouped(req).spec.algorithm == want
 
 
 def test_spec_id_pins_one_instance():
@@ -885,7 +923,9 @@ def test_a_pin_no_candidate_matches_says_so():
 
 
 def test_algorithm_pin_keeps_one_family():
-    req = _req(**_SHAPES["depthwise7x7"], algorithm="direct_depthwise_tiled")
+    # depthwise_s2: the registered direct_depthwise_tiled instances are stride-2
+    # only, so a stride-1 shape would admit none and the pin would prove nothing.
+    req = _req(**_SHAPES["depthwise_s2"], algorithm="direct_depthwise_tiled")
     results = gc.dispatch_conv_grouped_all(req)
     assert results
     assert {r.spec.algorithm for r in results} == {"direct_depthwise_tiled"}
@@ -1020,19 +1060,58 @@ def test_registered_list_must_declare_its_arch_and_direction(tmp_path, monkeypat
 
 
 def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
-    """Add order never matters: the written file is always sorted by label,
-    regardless of what order names were added in (a list is a set)."""
+    """fwd's list is a priority order: ``new`` keeps the labels' order, ``add``
+    appends (lowest priority) or inserts at ``--at N``, and ``labels`` prints
+    the file's order -- every write keeps it."""
+    assert not gc.instance_list_is_set("fwd")
     names = _listed_names()
     labels = tmp_path / "labels.txt"
-    labels.write_text("# picked\n" + "\n".join(names[:3]) + "\n", encoding="utf-8")
+    labels.write_text(
+        "# picked\n" + "\n".join(reversed(names[:3])) + "\n", encoding="utf-8"
+    )
     path = tmp_path / "new.json"
     instance_list.main(["new", str(path), "--from", str(labels)])
-    instance_list.main(["add", str(path), names[3]])
+    instance_list.main(["add", str(path), names[3], "--at", "1"])
+    instance_list.main(["add", str(path), names[4]])
+    instance_list.main(["add", str(path), names[5], "--at", "0"])
     with pytest.raises(SystemExit, match="already listed"):
         instance_list.main(["add", str(path), names[0]])
+    with pytest.raises(SystemExit, match="already listed"):
+        instance_list.main(["add", str(path), names[6], names[6]])
+    with pytest.raises(SystemExit, match="not in 0..6"):
+        instance_list.main(["add", str(path), names[6], "--at", "7"])
     capsys.readouterr()
     instance_list.main(["labels", str(path)])
-    assert capsys.readouterr().out.split() == sorted(names[:4])
+    want = [names[5], names[2], names[3], names[1], names[0], names[4]]
+    assert capsys.readouterr().out.split() == want
     instance_list.main(["format", "--check", str(path)])
     lst = gc.load_instance_list(path)
+    assert [i.label() for i in lst.identities] == want
     assert lst.defaults == gc.load_instance_list(_LIST).defaults
+
+
+def test_instance_list_tool_prints_fwd_labels_in_file_order(capsys):
+    """``labels`` on the registered fwd list prints its priority order, not
+    its labels sorted."""
+    names = _listed_names(_LISTS[(_ARCH, "fwd")])
+    assert names != sorted(names)
+    capsys.readouterr()
+    instance_list.main(["labels", str(_LISTS[(_ARCH, "fwd")])])
+    assert capsys.readouterr().out.split() == names
+
+
+def test_instance_list_tool_keeps_a_dgrad_list_sorted(tmp_path, capsys):
+    """dgrad's list is a set: add order never matters, the written file and
+    ``labels`` are sorted by label, and ``--at`` (a position) is refused."""
+    assert gc.instance_list_is_set("dgrad")
+    names = _listed_names(_LISTS[(_ARCH, "dgrad")])[:4]
+    path = tmp_path / "dgrad.json"
+    instance_list.main(["new", str(path), *reversed(names[:3])])
+    instance_list.main(["add", str(path), names[3]])
+    with pytest.raises(SystemExit, match="is a set"):
+        instance_list.main(["add", str(path), names[0], "--at", "0"])
+    capsys.readouterr()
+    instance_list.main(["labels", str(path)])
+    assert capsys.readouterr().out.split() == sorted(names)
+    lst = gc.load_instance_list(path)
+    assert [i.label() for i in lst.identities] == sorted(names)

@@ -34,7 +34,7 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
 )
 from rocke.core.arch import known_arches
 from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden_flavors, load_golden
-from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     cases,
     check_golden,
@@ -112,7 +112,14 @@ class TestIrParityCoverage(unittest.TestCase):
         for case in cases():
             arch_counts[case["arch"]] = arch_counts.get(case["arch"], 0) + 1
 
-        expected_arches = set(known_arches()) | {"gfx1201"}
+        # The generic targets' only representative cases are the deep fused
+        # conv shims, which live with the other conv families in the library's
+        # own golden (library/tests/test_conv_ir_golden.py checks that it
+        # covers them).
+        expected_arches = (set(known_arches()) | {"gfx1201"}) - {
+            "gfx11-generic",
+            "gfx12-generic",
+        }
         self.assertLessEqual(expected_arches, set(arch_counts))
         for arch in expected_arches:
             self.assertGreater(arch_counts[arch], 0, f"{arch} has no IR cases")
@@ -122,13 +129,6 @@ class TestIrParityCoverage(unittest.TestCase):
         for arch in COVERED_ARCHES:
             self.assertIn("moe", family_by_arch[arch])
             self.assertIn("kda_chunkwise", family_by_arch[arch])
-
-    @arch_specific(
-        ("gfx950",),
-        reason="deep_fused_conv has an IR case on gfx950 only; gfx942 needs a new case and golden",
-    )
-    def test_deep_fused_conv_ir_case_exists(self):
-        self.assertIn("deep_fused_conv", self._families_by_arch()["gfx950"])
 
     def test_ir_case_ids_are_unique(self):
         case_ids = [case["case_id"] for case in cases()]

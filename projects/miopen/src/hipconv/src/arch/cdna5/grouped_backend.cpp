@@ -3,12 +3,12 @@
 #include <array>
 
 using hipconv::ConvAlgorithm;
-using hipconv::ConvKernelSpan;
+using hipconv::ConvKernelGroup;
 using hipconv::ConvParams;
 
-extern const ConvKernelSpan grouped_multi_g_cdna5_kernels;
+extern const ConvKernelGroup grouped_multi_g_cdna5_kernels;
 // Unified wgrad kernel covering group channel counts G in {4,8,16,32}
-extern const ConvKernelSpan grouped_multi_g_wgrad_cdna5_kernels;
+extern const ConvKernelGroup grouped_multi_g_wgrad_cdna5_kernels;
 
 namespace
 {
@@ -20,7 +20,7 @@ bool is_applicable(const ConvParams& par)
     return par.dilation_h == 1 && par.dilation_w == 1;
 }
 
-constexpr std::array<const ConvKernelSpan*, 2> kernel_groups = {
+constexpr std::array<const ConvKernelGroup*, 2> kernel_groups = {
     &grouped_multi_g_cdna5_kernels,
     &grouped_multi_g_wgrad_cdna5_kernels,
 };

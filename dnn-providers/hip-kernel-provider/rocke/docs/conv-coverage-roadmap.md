@@ -28,12 +28,12 @@ qualification from checks of the current source. Use the
 
 ## Production selection and explicit coverage
 
-The grouped-convolution dispatcher registers gfx950 forward and dgrad instance lists
-and a gfx1250 forward list. A gfx942 request, a gfx1250 dgrad request or a wgrad
-request cannot establish production selection coverage. Their tests build explicit
-configurations without modifying the production registry. No test silently falls
-back from a refused production request. The explicitly enrolled gfx950 K=33 gradient
-cases preserve coverage where the production list has no admitted instance.
+The grouped-convolution dispatcher registers only gfx950 and gfx1250 forward and
+dgrad instance lists. A gfx942 request or wgrad request cannot establish
+production selection coverage. Their tests build explicit configurations without modifying
+the production registry. No test silently falls back from a refused production
+request. The explicitly enrolled gfx950 K=33 gradient cases preserve coverage
+where the production list has no admitted instance.
 
 The gfx950 forward request fixes the algorithm to implicit-GEMM. Default
 selection may choose a direct depthwise kernel; such a result is a different

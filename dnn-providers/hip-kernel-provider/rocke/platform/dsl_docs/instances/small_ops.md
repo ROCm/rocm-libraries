@@ -491,6 +491,36 @@ descriptor's `valid` predicate masks padded cells with the reduction's
 neutral element (`-inf` for max, `0` for sum / avg). One thread per
 output element.
 
+Source: `instances/common/pooling.py`.
+
+```python
+PoolOp = Literal["max", "avg", "sum"]   # Pooling2DSpec.op takes the string
+
+
+@dataclass(frozen=True)
+class PoolingProblem:
+    N: int; H: int; W: int; C: int   # NHWC input
+    Y: int; X: int        # pool window
+    sH: int = 1; sW: int = 1
+    pH: int = 0; pW: int = 0
+    dH: int = 1; dW: int = 1
+    # Ho / Wo / total_out are derived properties.
+```
+
+Algorithm:
+
+```text
+1. One thread per NHWC output element.
+2. Decompose flat output index into (n, ho, wo, c).
+3. Loop over pooling window (y, x).
+4. Compute input (hi, wi) via embed-style formulas.
+5. Mask out invalid (hi, wi).
+6. Reduce in f32: max / sum (for avg, divide by selected count or window count).
+7. Cast back to output dtype and store.
+```
+
+Grid: `ceil_div(total_output_elements, block_size)`.
+
 ## Permute (rank-N)
 
 File: `instances/permute_nd.py`. Matches CK Tile `06_permute`.
@@ -769,16 +799,16 @@ carries one 8-bit biased E8M0 scale (bias 127).
 
 Per-element math::
 
- A_real[i] = mantissa[i] * 2^(A_scale[i // 32] - 127)
+ A_real[m, k] = A[m, k] * 2^(AScale[k // 32, m] - 127)
 
-The kernel scales each group's MFMA result with
-:func:`rocke.helpers.fma_with_mx_scale_pair` (see the MX GEMM section
-of ``instances/gemm.md`` for the scale contract, why the two scale
-exponents are added as integers, and why each update is exact).
+Both scale tensors are K-major (``AScale`` is ``(K / 32, M)``, ``BScale``
+``(K / 32, N)``). gfx950 applies the scales in its scaled MFMA; gfx942 scales
+each group's MFMA result with :func:`rocke.helpers.add_mx_scaled_dot`. See the
+MX GEMM section of ``instances/gemm.md`` for the numerical contract and the
+structure.
 
-v1 ships fp8 and bf8 mantissa with ``group_k=32`` (the MX spec
-default); fp4 and fp6 mantissa variants land with the matching
-unpack helpers in v2.
+It reads fp8 and bf8 mantissas with ``group_k=32`` (the MX spec default); fp4
+and fp6 mantissas are not supported yet.
 
  failure modes:
 

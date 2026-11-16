@@ -10,6 +10,7 @@
   operand exceeds the kernels' i32 byte addressing.
 * ``_batch_slices`` -- the batch slices the torch reference runs, so no fp32
   operand crosses torch's 2^32-byte break point.
+  ``conv_reference`` refuses an image that alone crosses the cap.
 
 CPU only; no kernel is built or launched.
 """
@@ -153,7 +154,7 @@ def test_batch_chunks_single_launch_up_to_the_limit(direction):
     assert _chunks(direction, _image(15)) == [(0, 15)]
 
 
-@pytest.mark.parametrize("direction", ["fwd", "dgrad"])
+@pytest.mark.parametrize("direction", ["fwd", "dgrad", "wgrad"])
 def test_batch_chunks_splits_one_past_the_limit(direction):
     # 16 images are exactly 2^31 bytes: one byte past the i32 maximum.
     assert _chunks(direction, _image(16)) == [(0, 8), (8, 8)]
@@ -194,9 +195,20 @@ def test_batch_chunks_3d_counts_depth():
     assert _chunks("fwd", p) == [(0, 8), (8, 8)]
 
 
-def test_batch_chunks_wgrad_cannot_split():
-    with pytest.raises(ValueError, match="wgrad reduces over"):
-        _chunks("wgrad", _image(16))
+def test_wgrad_slices_need_a_kernel_that_accumulates():
+    """A wgrad problem past the limit runs as slices that all add into the one
+    dW: only the packed-atomic split-K kernels accumulate into it."""
+    from types import SimpleNamespace
+
+    from benchmarks.common.benchmark_implicit_gemm_conv import _wgrad_accumulates
+
+    def ident(split_k, two_stage=False, streamk="off"):
+        return SimpleNamespace(split_k=split_k, two_stage=two_stage, streamk=streamk)
+
+    assert _wgrad_accumulates(ident(4))
+    assert not _wgrad_accumulates(ident(1))
+    assert not _wgrad_accumulates(ident(4, two_stage=True))
+    assert not _wgrad_accumulates(ident(4, streamk="linear"))
 
 
 def test_batch_chunks_rejects_one_oversized_image():
@@ -261,3 +273,35 @@ def test_batch_slices_3d_counts_depth():
 def test_batch_slices_oversized_image_runs_alone():
     p = ConvProblem(N=3, Hi=8192, Wi=8192, C=32, K=32, Y=1, X=1)
     assert _slices(p, 3) == [(0, 1), (1, 1), (2, 1)]
+
+
+def test_batch_slices_strided_stem_is_sized_by_its_output():
+    # A 16x16 stride-16 patch stem on a 1024x1024 image: 64x64x1280 outputs
+    # (20 MiB fp32) per image. Bounding the output by the padded input
+    # (1024x1024x1280, 5 GiB) refused even one image.
+    p = ConvProblem(N=200, Hi=1024, Wi=1024, C=3, K=1280, Y=16, X=16, sH=16, sW=16)
+    step = (2**31 - 1) // (4 * 64 * 64 * 1280)
+    assert _slices(p, 200) == [(0, step), (step, 200 - step)]
+
+
+def _meta_conv_reference(p):
+    torch = pytest.importorskip("torch")
+    from builders.common.conv_reference import conv_reference
+
+    # Meta tensors: the refusal must come before any data is touched.
+    A = torch.empty((p.N, p.Hi, p.Wi, p.C), device="meta")
+    B = torch.empty((p.K, p.Y, p.X, p.C), device="meta")
+    return conv_reference(A, B, p)
+
+
+def test_conv_reference_refuses_an_image_past_the_limit():
+    p = ConvProblem(N=1, Hi=8192, Wi=8192, C=32, K=32, Y=1, X=1)
+    with pytest.raises(ValueError, match="2\\*\\*31 limit"):
+        _meta_conv_reference(p)
+
+
+def test_conv_reference_refuses_an_output_past_the_limit():
+    # The input fits (2^30 fp32 bytes); padding grows the output past 2^31.
+    p = ConvProblem(N=1, Hi=8190, Wi=8190, C=4, K=8, Y=1, X=1, pH=1, pW=1)
+    with pytest.raises(ValueError, match="2\\*\\*31 limit"):
+        _meta_conv_reference(p)

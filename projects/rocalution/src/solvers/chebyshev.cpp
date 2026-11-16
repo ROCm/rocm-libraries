@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,9 +34,13 @@
 
 #include "../utils/log.hpp"
 #include "../utils/math_functions.hpp"
+#include "../utils/type_traits.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <complex>
 #include <math.h>
+#include <utility>
 
 namespace rocalution
 {
@@ -62,6 +66,82 @@ namespace rocalution
                                                              ValueType lambda_max)
     {
         log_debug(this, "Chebyshev::Set()", lambda_min, lambda_max);
+
+        if(!std::isfinite(std::real(lambda_min)) || !std::isfinite(std::imag(lambda_min))
+           || !std::isfinite(std::real(lambda_max)) || !std::isfinite(std::imag(lambda_max)))
+        {
+            LOG_INFO("Chebyshev::Set() the bounds " << lambda_min << " and " << lambda_max
+                                                    << " are not finite");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+
+        // The iteration depends on the bounds only through their sum and the square of their
+        // difference, so their order does not matter. It does not converge if the segment
+        // between them contains 0, such as for the bounds of LocalMatrix::Gershgorin(), whose
+        // lower bound is at most 0 and whose upper bound is at least 0. Only real bounds are
+        // replaced; complex bounds can have real parts of both signs without containing 0.
+        bool contains_zero;
+        if(std::imag(lambda_min) == 0 && std::imag(lambda_max) == 0)
+        {
+            if(std::real(lambda_min) > std::real(lambda_max))
+            {
+                std::swap(lambda_min, lambda_max);
+            }
+
+            if(std::real(lambda_min) <= 0 && std::real(lambda_max) > 0)
+            {
+                ValueType lower = lambda_max / static_cast<ValueType>(30);
+
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: Chebyshev::Set() the lower bound "
+                                     << lambda_min
+                                     << " is not positive, using the upper bound / 30 = " << lower);
+
+                lambda_min = lower;
+            }
+            else if(std::real(lambda_min) < 0 && std::real(lambda_max) == 0)
+            {
+                ValueType upper = lambda_min / static_cast<ValueType>(30);
+
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: Chebyshev::Set() the upper bound is 0 with a "
+                                 "negative lower bound, using the lower bound / 30 = "
+                                     << upper);
+
+                lambda_max = upper;
+            }
+
+            contains_zero = !(std::real(lambda_min) > 0 || std::real(lambda_max) < 0);
+        }
+        else
+        {
+            using RealType = numeric_traits_t<ValueType>;
+
+            // Scaling by a power of 2 is exact and keeps the product from underflowing or
+            // overflowing
+            auto scaled = [](ValueType z) {
+                int exponent;
+                std::frexp(std::max(std::abs(std::real(z)), std::abs(std::imag(z))), &exponent);
+                return std::complex<RealType>(std::ldexp(std::real(z), -exponent),
+                                              std::ldexp(std::imag(z), -exponent));
+            };
+
+            const std::complex<RealType> a       = scaled(lambda_min);
+            const std::complex<RealType> b       = scaled(lambda_max);
+            const std::complex<RealType> product = std::conj(a) * b;
+
+            // The sum catches bounds that are opposite up to a power of 2, whose product is not
+            // exact with FMA
+            contains_zero = a + b == static_cast<RealType>(0)
+                            || (std::imag(product) == 0 && std::real(product) <= 0);
+        }
+
+        if(contains_zero)
+        {
+            LOG_INFO("Chebyshev::Set() the segment between the bounds "
+                     << lambda_min << " and " << lambda_max << " contains 0");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
 
         this->lambda_min_ = lambda_min;
         this->lambda_max_ = lambda_max;
@@ -270,7 +350,9 @@ namespace rocalution
         // p = r
         p->CopyFrom(*r);
 
-        alpha = two / d;
+        // Saad, Iterative Methods for Sparse Linear Systems, Algorithm 12.1
+        alpha = static_cast<ValueType>(1) / d;
+        beta  = (c * alpha) * (c * alpha) / two;
 
         // x = x + alpha*p
         x->AddScale(*p, alpha);
@@ -282,9 +364,7 @@ namespace rocalution
         res = this->Norm_(*r);
         while(!this->iter_ctrl_.CheckResidual(std::abs(res), this->index_))
         {
-            beta = (c * alpha / two) * (c * alpha / two);
-
-            alpha = static_cast<ValueType>(1) / (d - beta);
+            alpha = static_cast<ValueType>(1) / (d - beta / alpha);
 
             // p = beta*p + r
             p->ScaleAdd(beta, *r);
@@ -296,6 +376,8 @@ namespace rocalution
             op->Apply(*x, r);
             r->ScaleAdd(static_cast<ValueType>(-1), rhs);
             res = this->Norm_(*r);
+
+            beta = (c * alpha / two) * (c * alpha / two);
         }
 
         log_debug(this, "Chebyshev::SolveNonPrecond_()", " #*# end");
@@ -344,7 +426,9 @@ namespace rocalution
         // p = z
         p->CopyFrom(*z);
 
-        alpha = two / d;
+        // Saad, Iterative Methods for Sparse Linear Systems, Algorithm 12.1
+        alpha = static_cast<ValueType>(1) / d;
+        beta  = (c * alpha) * (c * alpha) / two;
 
         // x = x + alpha*p
         x->AddScale(*p, alpha);
@@ -359,9 +443,7 @@ namespace rocalution
             // Solve Mz=r
             this->precond_->SolveZeroSol(*r, z);
 
-            beta = (c * alpha / two) * (c * alpha / two);
-
-            alpha = static_cast<ValueType>(1) / (d - beta);
+            alpha = static_cast<ValueType>(1) / (d - beta / alpha);
 
             // p = beta*p + z
             p->ScaleAdd(beta, *z);
@@ -373,6 +455,8 @@ namespace rocalution
             op->Apply(*x, r);
             r->ScaleAdd(static_cast<ValueType>(-1), rhs);
             res = this->Norm_(*r);
+
+            beta = (c * alpha / two) * (c * alpha / two);
         }
 
         log_debug(this, "Chebyshev::SolvePrecond_()", " #*# end");
