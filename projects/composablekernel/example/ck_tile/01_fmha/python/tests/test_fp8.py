@@ -131,22 +131,23 @@ def test_fp8_fixedlen(qscale, d, mask, sq, sk, h, hk, return_lse):
 @pytest.mark.parametrize(
     "block_size_q,block_size_kv", [(128, 32), (128, 64), (128, 128), (256, 128), (256, 256)]
 )
-def test_fp8_block_sizes(block_size_q, block_size_kv):
+@pytest.mark.parametrize("d", [96, 128, 160])  # 96 / 160 run on qr_tdm on gfx1250
+def test_fp8_block_sizes(block_size_q, block_size_kv, d):
     qscale = "blockscale"
 
-    if (
-        not torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx1250")
-        and block_size_kv % 128
-    ):
+    on_gfx1250 = torch.cuda.get_device_properties(0).gcnArchName.startswith("gfx1250")
+    if not on_gfx1250 and d != 128:
+        pytest.skip("The gfx9 block-size sweep runs head dimension 128 only")
+    if not on_gfx1250 and block_size_kv % 128:
         pytest.skip("The gfx9 FP8 head-dimension 128 kernel requires KV blocks divisible by 128")
     torch.manual_seed(1)
-    q, qs, qr = make_fp8_input((2, 273, 6, 128), qscale, block_size_q)
-    k, ks, kr = make_fp8_input((2, 397, 2, 128), qscale, block_size_kv)
-    v, vs, vr = make_fp8_input((2, 397, 2, 128), qscale, block_size_kv, is_value=True)
+    q, qs, qr = make_fp8_input((2, 273, 6, d), qscale, block_size_q)
+    k, ks, kr = make_fp8_input((2, 397, 2, d), qscale, block_size_kv)
+    v, vs, vr = make_fp8_input((2, 397, 2, d), qscale, block_size_kv, is_value=True)
     out = fmha_fp8_func(
         q, k, v, qs, ks, vs, qscale=qscale, block_size_q=block_size_q, block_size_kv=block_size_kv
     )
-    check_fp8_output(out, qr, kr, vr, 128**-0.5)
+    check_fp8_output(out, qr, kr, vr, d**-0.5)
 
 
 @pytest.mark.parametrize("qscale", ["no_scale", "pertensor", "blockscale"])

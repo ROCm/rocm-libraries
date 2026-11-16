@@ -1092,6 +1092,37 @@ void ExpectFp8QrTdm(const std::string& kernel_name, bool is_v_rowmajor)
         CHECK_RESULT(result);                                                   \
     } while(0)
 
+// The same for the head dims that run on qr_tdm.
+#define CHECK_FP8_QR_TDM_RESULT(result, is_v_rowmajor)                          \
+    do                                                                          \
+    {                                                                           \
+        if(result == fwd_result::no_instance && ExpectsFp8QrTdm(is_v_rowmajor)) \
+            FAIL() << "No qr_tdm instance for current parameters";              \
+        CHECK_RESULT(result);                                                   \
+    } while(0)
+
+// FP8 head dims qr_tdm_fp8_sched does not cover; they run on qr_tdm.
+bool IsFp8QrTdmHdim(int hdim) { return hdim == 32 || hdim == 96 || hdim == 160 || hdim == 512; }
+
+void ExpectFp8Pipeline(int hdim, const std::string& kernel_name, bool is_v_rowmajor)
+{
+    if(IsFp8QrTdmHdim(hdim))
+        ExpectFp8QrTdm(kernel_name, is_v_rowmajor);
+    else
+        ExpectFp8Sched(kernel_name, is_v_rowmajor);
+}
+
+// CHECK_FP8_SCHED_RESULT and ExpectFp8Sched, or their qr_tdm forms, by head dim.
+#define CHECK_FP8_PIPELINE(result, kernel_name, hdim, is_v_rowmajor) \
+    do                                                               \
+    {                                                                \
+        if(IsFp8QrTdmHdim(hdim))                                     \
+            CHECK_FP8_QR_TDM_RESULT(result, is_v_rowmajor);          \
+        else                                                         \
+            CHECK_FP8_SCHED_RESULT(result, is_v_rowmajor);           \
+        ExpectFp8Pipeline(hdim, kernel_name, is_v_rowmajor);         \
+    } while(0)
+
 // Skips what qr_tdm_fp8_sched leaves out by design: MX bias and gfx125x MX on col-major V.
 #define SKIP_IF_MX_UNSUPPORTED(is_v_rowmajor, bias_str)                          \
     do                                                                           \
@@ -1425,9 +1456,22 @@ static const auto kGroupPadHdims =
         ? std::vector<std::tuple<int, int>>{{64, 64}, {128, 128}, {192, 128}, {256, 256}}
         : std::vector<std::tuple<int, int>>{{128, 128}};
 
+// FP8 head dims that run on qr_tdm (IsFp8QrTdmHdim).
+static const auto kQrTdmHdims =
+    kIsMxFp8Config || kIsFp8Config
+        ? std::vector<std::tuple<int, int>>{{32, 32}, {96, 96}, {160, 160}, {512, 512}}
+        : std::vector<std::tuple<int, int>>{};
+
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          QuantScaleGroupPad,
                          Combine(ValuesIn(kGroupPadHdims),
+                                 QScaleValues,
+                                 Values(false, true), // lse
+                                 Values("0", "t", "b:128,30"),
+                                 Values(std::tuple{2, 1}, std::tuple{4, 2})));
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwdQrTdm,
+                         QuantScaleGroupPad,
+                         Combine(ValuesIn(kQrTdmHdims),
                                  QScaleValues,
                                  Values(false, true), // lse
                                  Values("0", "t", "b:128,30"),
@@ -1480,8 +1524,7 @@ TEST_P(QuantScaleGroupPad, DataTypeConfig)
         stream_config,
         std::nullopt,
         &kernel_name);
-    CHECK_FP8_SCHED_RESULT(result, true);
-    ExpectFp8Sched(kernel_name, true);
+    CHECK_FP8_PIPELINE(result, kernel_name, hdim, true);
 }
 
 // Per-head sink logit (init_sink) and mask sink tokens across every quantization scale and LSE.
@@ -1629,9 +1672,7 @@ void RunQuantScaleHdim(int hdim,
         &kernel_name);
     if(qr_tdm)
     {
-        if(result == fwd_result::no_instance && ExpectsFp8QrTdm(is_v_rowmajor))
-            FAIL() << "No qr_tdm instance for current parameters";
-        CHECK_RESULT(result);
+        CHECK_FP8_QR_TDM_RESULT(result, is_v_rowmajor);
         ExpectFp8QrTdm(kernel_name, is_v_rowmajor);
         return;
     }
@@ -1716,7 +1757,11 @@ INSTANTIATE_TEST_SUITE_P(
                            std::tuple{1, 3, -1, 300, 129, "0", "e", 1}, // bias and sink logit
                            std::tuple{1, 3, -1, 500, 700, "b:128,30", "e", 0},     // bias, window
                            std::tuple{1, 2, 1, 256, 1000, "b:128,30,200", "e", 1}, // sink tokens
-                           std::tuple{1, 2, -1, 300, 512, "0", "n", 0}))));        // MHA
+                           std::tuple{1, 2, -1, 300, 512, "0", "n", 0},            // MHA
+                           std::tuple{1, 2, 1, 300, 100, "0", "n", 0}, // one partial KV tile
+                           std::tuple{1, 2, 1, 300, 128, "0", "n", 0}, // one full KV tile
+                           std::tuple{2, 4, 1, 1024, 1024, "t:128,30,64", "n", 1}, // one sink tile
+                           std::tuple{2, 8, 2, 1, 1024, "0", "n", 0}))));          // decode, GQA
 
 TEST_P(QuantScaleQrTdmHdim, DataTypeConfig)
 {
@@ -2125,6 +2170,14 @@ INSTANTIATE_TEST_SUITE_P(
                    // Merge-eligible decode shapes stay unmerged once cu_seqlen_q or _k is set.
                    EarlyExitDims{2, 8, 2, 1, 1024, {1, 1}, {}, "0", true},
                    EarlyExitDims{2, 16, 2, 8, 700, {}, {700, 9}, "b", true})));
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwdQrTdm,
+    QuantScaleBatchEarlyExit,
+    Combine(ValuesIn(kQrTdmHdims),
+            Values(false, true), // lse
+            Values(EarlyExitDims{3, 4, -1, 300, 400, {300, 64, 1}, {400, 100, 7}, "0", true},
+                   EarlyExitDims{3, 8, 2, 300, 300, {129, 0, 257}, {300, 50, 300}, "b", false},
+                   EarlyExitDims{2, 4, 1, 600, 512, {513, 17}, {}, "t:128,30", true})));
 
 TEST_P(QuantScaleBatchEarlyExit, DataTypeConfig)
 {
@@ -2176,8 +2229,9 @@ TEST_P(QuantScaleBatchEarlyExit, DataTypeConfig)
         stream_config,
         std::nullopt,
         &kernel_name);
-    CHECK_FP8_SCHED_RESULT(result, true);
-    EXPECT_EQ(DecodeKernelOf(kernel_name), "sched") << kernel_name;
+    CHECK_FP8_PIPELINE(result, kernel_name, hdim, true);
+    if(!IsFp8QrTdmHdim(hdim))
+        EXPECT_EQ(DecodeKernelOf(kernel_name), "sched") << kernel_name;
 }
 
 // Direct fmha_fwd() calls with arguments the runner never produces.
@@ -2358,6 +2412,8 @@ bool SameBits(const std::vector<float>& x, const std::vector<float>& y)
 
 static const auto kDirectHdims =
     kIsFp8Config ? kEarlyExitHdims : std::vector<std::tuple<int, int>>{};
+static const auto kQrTdmDirectHdims =
+    kIsFp8Config ? kQrTdmHdims : std::vector<std::tuple<int, int>>{};
 
 // K/V descale blocks of 64-256 keys must match the same values spelled out per 32 keys.
 class QuantScaleBlockScaleKv
@@ -2371,6 +2427,11 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          Combine(ValuesIn(kDirectHdims),
                                  Values(64, 128, 256), // block_scale_size_kv
                                  // window starts mid-block for 256; sink tokens jump to it
+                                 Values("0", "b:128,30", "b:128,30,200")));
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwdQrTdm,
+                         QuantScaleBlockScaleKv,
+                         Combine(ValuesIn(kQrTdmDirectHdims),
+                                 Values(64, 128, 256), // block_scale_size_kv
                                  Values("0", "b:128,30", "b:128,30,200")));
 
 TEST_P(QuantScaleBlockScaleKv, DataTypeConfig)
@@ -2387,7 +2448,7 @@ TEST_P(QuantScaleBlockScaleKv, DataTypeConfig)
     const auto narrow         = RunDirect(c);
     ASSERT_GE(wide.rc, 0) << wide.kernel;
     ASSERT_GE(narrow.rc, 0) << narrow.kernel;
-    ExpectFp8Sched(wide.kernel, true);
+    ExpectFp8Pipeline(c.hdim_q, wide.kernel, true);
     EXPECT_EQ(wide.kernel, narrow.kernel);
     EXPECT_TRUE(std::any_of(wide.o.begin(), wide.o.end(), [](float x) { return x != 0.f; }));
     EXPECT_TRUE(SameBits(wide.o, narrow.o));
@@ -2479,6 +2540,11 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                         std::tuple{2, 8, 2, 1},   // one-wavefront
                                         std::tuple{1, 16, 2, 8}), // merged-GQA
                                  Bool()));                        // NaN
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwdQrTdm,
+                         QuantScaleSinkNonFinite,
+                         Combine(ValuesIn(kQrTdmDirectHdims),
+                                 Values(std::tuple{2, 2, 1, 200}), // tiled
+                                 Bool()));                         // NaN
 
 TEST_P(QuantScaleSinkNonFinite, DataTypeConfig)
 {
@@ -2497,7 +2563,7 @@ TEST_P(QuantScaleSinkNonFinite, DataTypeConfig)
         c.sink.push_back(i % 2 ? 0.5f : bad);
     const auto r = RunDirect(c);
     ASSERT_GE(r.rc, 0) << r.kernel;
-    ExpectFp8Sched(r.kernel, true);
+    ExpectFp8Pipeline(c.hdim_q, r.kernel, true);
     const int dv = c.hdim_v, sq = c.seqlen_q;
     for(int bh = 0; bh < c.batch * c.nhead; ++bh)
     {
