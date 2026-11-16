@@ -693,3 +693,138 @@ def test_gfx12_standalone_reduce_serves_every_dtype(gfx12):
             r["dtype"],
         )
     assert seen == {"f16", "bf16", "fp32"}
+
+
+# --- gfx12-generic: the committed table (``sdpa_bwd_gfx12_verdicts.csv``) against the installed content and the arch's reference ---
+
+GFX12_MODEL = sv.MODELS["gfx12-generic"]
+
+
+def require_gfx12_content():
+    """Fail when the gfx12-generic manifests are not pulled (DVC content), as the gfx11 census does."""
+    missing = [
+        op
+        for op in ("sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq")
+        if not (sv.CONTENT / op / "gfx12-generic" / "manifest.json").is_file()
+    ]
+    if missing:
+        pytest.fail(
+            f"no gfx12-generic content for {', '.join(missing)} under {sv.CONTENT}; pull the content"
+        )
+
+
+@pytest.fixture(scope="module")
+def gfx12_rows():
+    return sv.read_csv(GFX12_MODEL.verdicts_csv)
+
+
+@pytest.fixture(scope="module")
+def gfx12_installed_specs():
+    """{12-hex hash: Spec} of the arch's reference CSV: the pin of every installed object."""
+    import csv  # noqa: PLC0415
+
+    from generators._sdpa_bwd_spec import Spec  # noqa: PLC0415
+
+    with GFX12_MODEL.reference_csv.open(newline="") as fh:
+        return {r["hash"]: Spec.parse(r["spec"]) for r in csv.DictReader(fh)}
+
+
+def test_gfx12_header_is_the_contract():
+    first = GFX12_MODEL.verdicts_csv.read_text().splitlines()[0]
+    assert first.split(",") == CONTRACT_COLUMNS
+
+
+def test_gfx12_table_is_the_generators_output_over_the_installed_content():
+    require_gfx12_content()
+    assert GFX12_MODEL.verdicts_csv.read_text() == sv.render(sv.generate(GFX12_MODEL))
+    assert sv.main(["--arch", "gfx12-generic", "--check"]) == 0
+
+
+def test_gfx12_table_is_reproduced_without_the_installed_content():
+    assert GFX12_MODEL.verdicts_csv.read_text() == sv.render(
+        sv.generate(GFX12_MODEL, content=None)
+    )
+
+
+def test_gfx12_routing_is_what_the_reference_derives():
+    """The committed routing CSV is ``selection_from_reference`` of the arch's reference."""
+    import csv  # noqa: PLC0415
+
+    with GFX12_MODEL.reference_csv.open(newline="") as fh:
+        derived = sv.selection_from_reference(list(csv.DictReader(fh)), GFX12_MODEL)
+    assert derived == sv.load_selection(GFX12_MODEL.selection_csv)
+
+
+def test_gfx12_ids_unique_and_every_hash_is_an_installed_object(gfx12_rows):
+    require_gfx12_content()
+    assert len({r["id"] for r in gfx12_rows}) == len(gfx12_rows)
+    assert {r["verdict"] for r in gfx12_rows} == {"served", "declined"}
+    have = sv.in_tree_hashes(arch="gfx12-generic")
+    # 594 split rows; the dQ manifest's companions are the 3 standalone reduces and the 5 tail-zero objects.
+    assert [len(have[k]) for k in ("prep", "dkdv", "dq", "reduce")] == [42, 292, 260, 8]
+    for r in gfx12_rows:
+        for slot in sv.SLOT_COLUMNS:
+            if r[slot]:
+                assert r[slot] in have[slot], (r["id"], slot, r[slot])
+    for (kernel, *_), hashes in sv.load_selection(GFX12_MODEL.selection_csv).items():
+        slot = "reduce" if kernel == "dbias_reduce" else kernel
+        assert set(hashes) <= have[slot]
+
+
+def test_gfx12_served_rows_name_the_rung_each_kernel_has(
+    gfx12_rows, gfx12_installed_specs
+):
+    """Every served row of the committed table: each kernel's object is the smallest rung of that kernel's own rows holding the head dim."""
+    n = 0
+    for r in gfx12_rows:
+        if r["verdict"] != "served":
+            continue
+        n += 1
+        hd = max(r["dqk"], r["dv"])
+        want = {
+            "prep": next(t for t in G12_RUNGS[(r["dtype"], "prep")] if t >= r["dv"]),
+            "dkdv": next(t for t in G12_RUNGS[(r["dtype"], "dkdv")] if t >= hd),
+            "dq": next(t for t in G12_RUNGS[(r["dtype"], "dq")] if t >= hd),
+        }
+        for slot, tile in want.items():
+            spec = gfx12_installed_specs[r[slot]]
+            assert (spec.kernel, spec.dtype, spec.tile, spec.arch) == (
+                slot,
+                r["dtype"],
+                tile,
+                "gfx12-generic",
+            ), (r["id"], slot)
+    assert n > 300
+
+
+@pytest.mark.parametrize(
+    "dtype,dqk,dv,prep,dkdv,dq",
+    [
+        ("f16", 300, 300, 320, 320, 384),
+        ("bf16", 300, 300, 320, 320, 384),
+        ("f16", 448, 448, 448, 448, 512),
+        ("bf16", 448, 448, 448, 448, 512),
+        ("f16", 300, 64, 64, 320, 384),
+        ("f16", 448, 64, 64, 448, 512),
+        ("fp32", 300, 300, 512, 512, 512),
+    ],
+)
+def test_gfx12_wide_head_dims_route_to_the_installed_rungs(
+    gfx12_installed_specs, dtype, dqk, dv, prep, dkdv, dq
+):
+    """hd 300 is dK/dV 320 and dQ 384; hd 448 is dK/dV 448 and dQ 512 (the 16-bit dQ rows have no 320 or 448): the routing of the installed objects."""
+    sel = sv.load_selection(GFX12_MODEL.selection_csv)
+    row = sv.make("probe", "test", dtype=dtype, dqk=dqk, dv=dv)
+    verdict, p, k, q, _, rule, _ = sv.expect(row, sel, GFX12_MODEL)
+    assert (verdict, rule) == ("served", "")
+    by = gfx12_installed_specs
+    assert (by[p].tile, by[k].tile, by[q].tile) == (prep, dkdv, dq)
+
+
+def test_gfx12_ladder_ends_at_512_and_the_matcher_declines_above(gfx12_rows):
+    by_id = {r["id"]: r for r in gfx12_rows}
+    for dtype in ("f16", "bf16", "fp32"):
+        assert by_id[f"bnd-{dtype}-d512"]["verdict"] == "served"
+        assert by_id[f"bnd-{dtype}-d513"]["verdict"] == "declined"
+        assert by_id[f"bnd-{dtype}-d513"]["rule"] == "DT-4"
+    assert not any(r["rule"] == sv.NO_ROW for r in gfx12_rows)

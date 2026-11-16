@@ -74,9 +74,9 @@ def test_gfx12_generic_builds_the_three_split_ops_through_the_rdna_builder(
     assert "gfx12-generic" in module._OTHER_ARCHES
     assert rdna._REFERENCE_CSVS["gfx12-generic"].name == "sdpa_bwd_gfx12_reference.csv"
     # Every row of a generic arch is an RDNA-family row: the builder takes the arch's whole table.
-    assert rdna.rows_of(module.OP, "gfx12-generic")[0] == inst.instances_for(
-        module.OP, "gfx12-generic"
-    )
+    rows = inst.instances_for(module.OP, "gfx12-generic")
+    assert rows
+    assert rdna.rows_of(module.OP, "gfx12-generic")[0] == rows
 
 
 @pytest.mark.parametrize("arch", ["gfx11-generic", "gfx12-generic", "gfx942", "gfx90a"])

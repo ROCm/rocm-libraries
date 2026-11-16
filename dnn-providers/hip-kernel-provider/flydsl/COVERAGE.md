@@ -16,7 +16,7 @@ engine of its own (256, §5.6). Every target also ships the keep-mask writer and
 padding copy (one object each); §6.2 has the per-target ledger.
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,707 object files; the split engine also on gfx942, gfx90a and gfx11-generic, 509 each). Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,707 object files; the split engine also on gfx942, gfx90a and gfx11-generic, 509 each, and on gfx12-generic, 602). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -2265,7 +2265,7 @@ Approved for this integration.
 
 ## 9. SDPA backward — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
 
-Split and merged ship for gfx950; split alone also ships for gfx942, gfx90a and gfx11-generic. Both engines share one graph matcher
+Split and merged ship for gfx950; split alone also ships for gfx942, gfx90a, gfx11-generic and gfx12-generic. Both engines share one graph matcher
 ([`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp)),
 a pure function of the graph that either computes the problem or says why it declines; what
 belongs to one engine (tile routing, bias staging, workspace bounds) is that engine's.
@@ -2275,7 +2275,7 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 | `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (325) |
 | `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,329), `sdpa_bwd_dq` (962); `sdpa_bwd_split` carries the descriptors only |
 
-Backward rows exist for gfx950, gfx942, gfx90a and gfx11-generic (the merged engine on gfx950 only); the forward engines also run on gfx12. The table's split columns cover gfx950 and gfx11-generic; on gfx942 and gfx90a the split engine serves head dims up to 512, as on gfx950. What the engines serve, in one place (rule IDs and decline causes are in 9.1 and 9.2). In the last column, AOTriton's entry is `yes` where its backward test suite parametrizes the feature and `untested` where it does not; `?` marks a cell this document does not establish.
+Backward rows exist for gfx950, gfx942, gfx90a, gfx11-generic and gfx12-generic (the merged engine on gfx950 only). The table's split columns cover gfx950 and gfx11-generic; gfx12-generic's envelope is in 9.4; on gfx942 and gfx90a the split engine serves head dims up to 512, as on gfx950. What the engines serve, in one place (rule IDs and decline causes are in 9.1 and 9.2). In the last column, AOTriton's entry is `yes` where its backward test suite parametrizes the feature and `untested` where it does not; `?` marks a cell this document does not establish.
 
 | Variant | Split gfx950 | Split gfx11 | Merged gfx950 | Also served by: FlyDSL forward / cuDNN / AOTriton |
 |---|---|---|---|---|
@@ -2315,10 +2315,10 @@ declined with a named cause (data type, operand layout, mask, workspace overflow
 another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
 backward engine). The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
-the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
+the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md). gfx12-generic ships the split set of 594 rows and the same 8 companions (§9.4).
 
 **Regeneration needs only this tree.** The backward objects regenerate from the tree and the pulled content alone
-([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`),
+([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`; gfx12-generic: `sdpa_bwd_gfx12_reference.csv`),
 the shipped object is the pin of every row except the main kernels of the combined (dB-storing bias) objects and gfx950's standalone reduce
 kernels, and `tests/data/sdpa_bwd_pin_functions.csv` holds those pins' function digests. A rebuild is byte-identical to the shipped
 object except where the nondeterministic list (`tests/data/sdpa_bwd_nondeterministic.csv`) or the pinned-exception list ships a pin instead.
@@ -2456,3 +2456,17 @@ ship their pins. Residual resource cells, none with a correctness effect:
   config and carries no claim there. Scaling P into the normal range for the dV GEMM would remove it.
 - **Support claims on CDNA.** The split engine carries gfx942 and gfx90a claims over the SdpaBackward bundle graphs; the merged engine
   has no CDNA content and no CDNA claims.
+
+### 9.4 gfx12-generic
+
+The split engine ships for gfx12-generic (RDNA4: gfx1200, gfx1201) from the same RDNA kernels and table grammar as gfx11-generic. The 597 pins are 594 rows (prep 42, dK/dV 292, dQ 260) and 3 standalone dBias reduce objects; the dQ manifest also lists 5 unpinned tail-zero entries (3 `tailzero`, 2 `tailzero_hv` naming one object), 8 companions in all. The verdict table is `tests/data/sdpa_bwd_gfx12_verdicts.csv`.
+
+| | gfx11-generic | gfx12-generic |
+|---|---|---|
+| 16-bit head dims | up to 256 | up to 512: prep and dK/dV rungs 320, 384, 448 and 512 beyond 256; dQ rungs 384 and 512 only |
+| fp32 head dims | up to 256 | up to 512: one 512 rung beyond 256 |
+| Split K/V head rows (U6) | head dims 1 to 128 | head dims 1 to 128; no variants above 128 |
+
+A graph takes the smallest rung each kernel has, so head dim 300 runs dK/dV at 320 and dQ at 384, and head dim 448 runs dK/dV at 448 and dQ at 512. Above 512 the matcher declines (DT-4). The bias, dropout, `padding_mask`, ragged and tail-zero behaviour is gfx11-generic's. The tail-zero objects are scan-only, as on gfx11-generic.
+
+Device claims for gfx12-generic are pending: the host tiers verify the table, the census and the matcher; the device tiers have not run.

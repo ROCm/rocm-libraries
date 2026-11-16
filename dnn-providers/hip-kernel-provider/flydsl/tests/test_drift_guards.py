@@ -54,6 +54,9 @@ PIN_REFERENCE_CSVS = {
     "gfx11-generic": Path(__file__).resolve().parent
     / "data"
     / "sdpa_bwd_gfx11_reference.csv",
+    "gfx12-generic": Path(__file__).resolve().parent
+    / "data"
+    / "sdpa_bwd_gfx12_reference.csv",
     "gfx90a": Path(__file__).resolve().parent
     / "data"
     / "sdpa_bwd_gfx90a_reference.csv",
@@ -363,7 +366,7 @@ def test_split_rows_are_the_reference_rows(op: str) -> None:
 
 
 def _arch_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
-    """Where a gfx11-generic, gfx90a or gfx942 manifest differs from its S1 reference: every row and companion is a reference spec,
+    """Where a gfx11-generic, gfx12-generic, gfx90a or gfx942 manifest differs from its S1 reference: every row and companion is a reference spec,
     ships the reference's sha256 (such an object is its pin byte for byte; a combined row is gated against its pin), and no reference
     spec of the op's kinds is missing.
 
@@ -437,6 +440,34 @@ def test_an_arch_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
     assert _arch_pin_problems(path, reference) == [
         f"dq,bf16,16: ships {'a' * 64}, the pin is {'c' * 64}",
         "ships no row for dq,bf16,32",
+    ]
+
+
+@pytest.mark.parametrize("op", SPLIT_KINDS)
+def test_a_gfx12_row_that_is_not_its_pin_is_refused(op: str, tmp_path: Path) -> None:
+    """The installed gfx12-generic manifest, with one object's sha256 changed and one row added outside the reference, is refused for both."""
+    path = CONTENT / op / "gfx12-generic" / MANIFEST_NAME
+    if not path.is_file():
+        pytest.skip(f"no {op} gfx12-generic content under {CONTENT}")
+    kinds = [SPLIT_KINDS[op]] + (["dbias_reduce,"] if op == "sdpa_bwd_dq" else [])
+    reference = {
+        spec: sha
+        for kind in kinds
+        for spec, sha in _reference_rows(
+            PIN_REFERENCE_CSVS["gfx12-generic"], kind
+        ).items()
+    }
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    assert manifest["instances"], f"{op} gfx12-generic ships no rows"
+    tuned = dict(manifest["instances"][-1], spec="tuned-not-a-pin")
+    pinned = manifest["instances"][0]
+    manifest["instances"][0] = dict(pinned, sha256="0" * 64)
+    manifest["instances"].append(tuned)
+    refused = tmp_path / MANIFEST_NAME
+    refused.write_text(json.dumps(manifest), encoding="utf-8")
+    assert _arch_pin_problems(refused, reference) == [
+        f"{pinned['spec']}: ships {'0' * 64}, the pin is {reference[pinned['spec']]}",
+        "tuned-not-a-pin: not a reference row",
     ]
 
 
