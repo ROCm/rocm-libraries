@@ -64,6 +64,7 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
                     else:
                         sorted_gflops1[i] = float("nan")
 
+            function_label = prec + "_" + funcname
             if(prec == "f32_r"):
                 function_label = "s" + funcname
             elif(prec == "f64_r"):
@@ -74,7 +75,10 @@ def plot_data(title, gflops_dicts1, gflops_dicts2, const_args_dicts, funcname_li
                 function_label = "z" + funcname
 
             if(theo_max == True):
-                theo_max_value = machine_spec_dict[function_label]
+                theo_max_value = machine_spec_dict.get(function_label)
+                if not theo_max_value:
+                    print(f"skip {function_label}: no theoretical maximum in machine_spec.yaml")
+                    continue
                 sorted_gflops1[:] = [gf / theo_max_value for gf in sorted_gflops1]
 
             function_label = function_label + " :  " + const_args_dict[prec]
@@ -566,7 +570,14 @@ if __name__ =='__main__':
 
     machine_spec_yaml_file = os.path.join(dir1, "machine_spec.yaml")
 
+    if not os.path.isfile(machine_spec_yaml_file):
+        raise SystemExit(f"plot.py: missing {machine_spec_yaml_file}; run benchmark.py first")
     machine_spec_dict = yaml.safe_load(Path(machine_spec_yaml_file).read_text())
+
+    # machine_spec.yaml files written before the theo_max key existed only carry GBps
+    if args.theo_max == True and not machine_spec_dict.get('GBps'):
+        raise SystemExit("plot.py --theo_max: machine_spec.yaml has no theoretical maximum; "
+                         "rerun benchmark.py with --gbps")
 
     if args.level == "blas1":
         x_axis_label = args.label1
