@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_givens_rotation.hpp"
 
 namespace rocsparse
 {
@@ -228,14 +229,12 @@ namespace rocsparse
             T ck   = du[ind_k];
             T ck_1 = du[ind_k_1];
 
-            T radius = rocsparse::sqrt(
-                rocsparse::abs(bk * rocsparse::conj(bk) + ak_1 * rocsparse::conj(ak_1)));
-
             // Apply Givens rotation
             // | cos  sin | |bk    ck   0   |
             // |-sin  cos | |ak_1  bk_1 ck_1|
-            T cos_theta = rocsparse::conj(bk) / radius;
-            T sin_theta = rocsparse::conj(ak_1) / radius;
+            T cos_theta;
+            T sin_theta;
+            rocsparse::givens_rotation(bk, ak_1, cos_theta, sin_theta);
 
             d[ind_k]   = rocsparse::fma(bk, cos_theta, ak_1 * sin_theta);
             d[ind_k_1] = rocsparse::fma(
@@ -254,12 +253,12 @@ namespace rocsparse
                 -xk, rocsparse::conj(sin_theta), xk_1 * rocsparse::conj(cos_theta));
         }
 
-        x[batch_stride * (m - 1) + gid]
-            = x[batch_stride * (m - 1) + gid] / d[batch_stride * (m - 1) + gid];
-        x[batch_stride * (m - 2) + gid]
-            = (x[batch_stride * (m - 2) + gid]
-               - du[batch_stride * (m - 2) + gid] * x[batch_stride * (m - 1) + gid])
-              / d[batch_stride * (m - 2) + gid];
+        x[batch_stride * (m - 1) + gid] = rocsparse::scaled_div(x[batch_stride * (m - 1) + gid],
+                                                                d[batch_stride * (m - 1) + gid]);
+        x[batch_stride * (m - 2) + gid] = rocsparse::scaled_div(
+            x[batch_stride * (m - 2) + gid]
+                - du[batch_stride * (m - 2) + gid] * x[batch_stride * (m - 1) + gid],
+            d[batch_stride * (m - 2) + gid]);
 
         for(rocsparse_int i = m - 3; i >= 0; i--)
         {
@@ -267,8 +266,9 @@ namespace rocsparse
             int64_t ind_k_1 = batch_stride * (i + 1) + gid;
             int64_t ind_k_2 = batch_stride * (i + 2) + gid;
 
-            x[ind_k] = (x[ind_k] - du[ind_k] * x[ind_k_1] - r2[batch_count * i + gid] * x[ind_k_2])
-                       / d[ind_k];
+            x[ind_k] = rocsparse::scaled_div(x[ind_k] - du[ind_k] * x[ind_k_1]
+                                                 - r2[batch_count * i + gid] * x[ind_k_2],
+                                             d[ind_k]);
         }
     }
 }

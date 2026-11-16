@@ -236,9 +236,16 @@ TEST_F(PrecondGpsvInterleaved, uniform_scale_keeps_solution)
     {
         for(const int32_t m : orders)
         {
+            run_uniform_scale<float>(handle, alg, m, 1.0);
+            run_uniform_scale<float>(handle, alg, m, 1.0e20);
+            run_uniform_scale<float>(handle, alg, m, 1.0e-20);
             run_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0);
             run_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e20);
             run_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-20);
+
+            run_uniform_scale<double>(handle, alg, m, 1.0);
+            run_uniform_scale<double>(handle, alg, m, 1.0e200);
+            run_uniform_scale<double>(handle, alg, m, 1.0e-200);
             run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0);
             run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e200);
             run_uniform_scale<rocsparse_double_complex>(handle, alg, m, 1.0e-200);

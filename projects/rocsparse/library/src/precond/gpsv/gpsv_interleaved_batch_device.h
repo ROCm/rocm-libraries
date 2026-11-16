@@ -25,8 +25,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
-
-#include <type_traits>
+#include "rocsparse_givens_rotation.hpp"
 
 namespace rocsparse
 {
@@ -192,102 +191,6 @@ namespace rocsparse
         }
     }
 
-    // cos = conj(f) / hypot(|f|, |g|) and sin = conj(g) / hypot(|f|, |g|), for real and complex T.
-    // Divide by the largest component first so the hypotenuse lies in [1, 2].
-    // Forming |z|^2 directly overflows or underflows when f and g are scaled far from 1.
-    // If f and g are both zero there is nothing to eliminate: cos = 1, sin = 0.
-    template <typename T>
-    __device__ __forceinline__ void gpsv_givens(T f, T g, T& cos_theta, T& sin_theta)
-    {
-        if constexpr(std::is_same<T, float>() || std::is_same<T, double>())
-        {
-            T scale = rocsparse::max(rocsparse::abs(f), rocsparse::abs(g));
-
-            if(scale == static_cast<T>(0))
-            {
-                cos_theta = static_cast<T>(1);
-                sin_theta = static_cast<T>(0);
-                return;
-            }
-
-            f /= scale;
-            g /= scale;
-
-            T hypotenuse = rocsparse::sqrt(rocsparse::fma(f, f, g * g));
-
-            cos_theta = f / hypotenuse;
-            sin_theta = g / hypotenuse;
-        }
-        else
-        {
-            auto fr = rocsparse::real(f);
-            auto fi = rocsparse::imag(f);
-            auto gr = rocsparse::real(g);
-            auto gi = rocsparse::imag(g);
-
-            using real_t = decltype(fr);
-
-            real_t scale = rocsparse::max(rocsparse::max(rocsparse::abs(fr), rocsparse::abs(fi)),
-                                          rocsparse::max(rocsparse::abs(gr), rocsparse::abs(gi)));
-
-            if(scale == static_cast<real_t>(0))
-            {
-                cos_theta = static_cast<T>(1);
-                sin_theta = static_cast<T>(0);
-                return;
-            }
-
-            fr /= scale;
-            fi /= scale;
-            gr /= scale;
-            gi /= scale;
-
-            real_t hypotenuse = rocsparse::sqrt(rocsparse::fma(fr, fr, fi * fi)
-                                                + rocsparse::fma(gr, gr, gi * gi));
-            real_t inv        = static_cast<real_t>(1) / hypotenuse;
-
-            // Divide the components by the real hypotenuse. Complex operator/ squares its denominator.
-            cos_theta = T(fr * inv, -fi * inv);
-            sin_theta = T(gr * inv, -gi * inv);
-        }
-    }
-
-    // a / b for real and complex T.
-    // A real quotient is a single division. For complex T, operator/ computes 1/|b|^2 and leaves
-    // the floating-point range when |b| is far from 1, so b is scaled by its larger component
-    // first and the denominator lies in [1, 2].
-    template <typename T>
-    __device__ __forceinline__ T gpsv_div(T a, T b)
-    {
-        if constexpr(std::is_same<T, float>() || std::is_same<T, double>())
-        {
-            return a / b;
-        }
-        else
-        {
-            auto br = rocsparse::real(b);
-            auto bi = rocsparse::imag(b);
-
-            using real_t = decltype(br);
-
-            real_t scale = rocsparse::max(rocsparse::abs(br), rocsparse::abs(bi));
-            if(scale == static_cast<real_t>(0))
-            {
-                return a / b;
-            }
-
-            br /= scale;
-            bi /= scale;
-
-            real_t inv_denom = static_cast<real_t>(1) / rocsparse::fma(br, br, bi * bi);
-            auto   ar        = rocsparse::real(a) / scale;
-            auto   ai        = rocsparse::imag(a) / scale;
-
-            return T(rocsparse::fma(ar, br, ai * bi) * inv_denom,
-                     rocsparse::fma(ai, br, -ar * bi) * inv_denom);
-        }
-    }
-
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gpsv_interleaved_batch_givens_qr_kernel(rocsparse_int m,
@@ -332,7 +235,7 @@ namespace rocsparse
             T wk_1 = dw[ind_k_1];
             T wk_2 = dw[ind_k_2];
 
-            rocsparse::gpsv_givens(lk_1, sk_2, cos_theta, sin_theta);
+            rocsparse::givens_rotation(lk_1, sk_2, cos_theta, sin_theta);
 
             T dlk_1_new = rocsparse::fma(lk_1, cos_theta, sk_2 * sin_theta);
             T dk_1_new  = rocsparse::fma(dk_1, cos_theta, lk_2 * sin_theta);
@@ -374,7 +277,7 @@ namespace rocsparse
             T rk   = r3[batch_count * i + gid];
             T rk_1 = r3[batch_count * (i + 1) + gid];
 
-            rocsparse::gpsv_givens(dk, lk_1, cos_theta, sin_theta);
+            rocsparse::givens_rotation(dk, lk_1, cos_theta, sin_theta);
 
             d[ind_k]   = rocsparse::fma(dk, cos_theta, lk_1 * sin_theta);
             d[ind_k_1] = rocsparse::fma(
@@ -414,7 +317,7 @@ namespace rocsparse
 
         T cos_theta;
         T sin_theta;
-        rocsparse::gpsv_givens(dk, lk_1, cos_theta, sin_theta);
+        rocsparse::givens_rotation(dk, lk_1, cos_theta, sin_theta);
 
         d[batch_stride * (m - 2) + gid] = rocsparse::fma(dk, cos_theta, lk_1 * sin_theta);
         d[batch_stride * (m - 1) + gid]
@@ -439,20 +342,20 @@ namespace rocsparse
             = rocsparse::fma(-xk, rocsparse::conj(sin_theta), xk_1 * rocsparse::conj(cos_theta));
 
         // Backward substitution on upper triangular R * x = x
-        x[batch_stride * (m - 1) + gid]
-            = rocsparse::gpsv_div(x[batch_stride * (m - 1) + gid], d[batch_stride * (m - 1) + gid]);
-        x[batch_stride * (m - 2) + gid] = rocsparse::gpsv_div(
+        x[batch_stride * (m - 1) + gid] = rocsparse::scaled_div(x[batch_stride * (m - 1) + gid],
+                                                                d[batch_stride * (m - 1) + gid]);
+        x[batch_stride * (m - 2) + gid] = rocsparse::scaled_div(
             x[batch_stride * (m - 2) + gid]
                 - du[batch_stride * (m - 2) + gid] * x[batch_stride * (m - 1) + gid],
             d[batch_stride * (m - 2) + gid]);
 
-        x[batch_stride * (m - 3) + gid] = rocsparse::gpsv_div(
+        x[batch_stride * (m - 3) + gid] = rocsparse::scaled_div(
             x[batch_stride * (m - 3) + gid]
                 - du[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 2) + gid]
                 - dw[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 1) + gid],
             d[batch_stride * (m - 3) + gid]);
 
-        x[batch_stride * (m - 4) + gid] = rocsparse::gpsv_div(
+        x[batch_stride * (m - 4) + gid] = rocsparse::scaled_div(
             x[batch_stride * (m - 4) + gid]
                 - du[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 3) + gid]
                 - dw[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 2) + gid]
@@ -461,7 +364,7 @@ namespace rocsparse
 
         for(rocsparse_int i = m - 5; i >= 0; i--)
         {
-            x[batch_stride * i + gid] = rocsparse::gpsv_div(
+            x[batch_stride * i + gid] = rocsparse::scaled_div(
                 x[batch_stride * i + gid]
                     - du[batch_stride * i + gid] * x[batch_stride * (i + 1) + gid]
                     - dw[batch_stride * i + gid] * x[batch_stride * (i + 2) + gid]
