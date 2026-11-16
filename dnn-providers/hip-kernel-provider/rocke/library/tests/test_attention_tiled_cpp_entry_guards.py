@@ -9,12 +9,13 @@ the same reason, instead of crashing.
   uninitialised builder (signal 11).
 * fastKV register-P on gfx942: the body is gfx950-only, so the C++ builder must
   refuse it as Python does rather than emit gfx950 MFMA for gfx942.
-* The grouped-KV2 softmax and early-V schedule rules: the C++ entries that
-  build gfx950 specs (tiled 2D and fastKV register-P; lower, serialize and
-  verify) refuse them with the Python text rather than build the spec, for every
-  rule whose fields the entry's binding passes. The gfx942 entry refuses
-  grouped-KV2 and the fp8 K/V cache outright, on every arch, as the gfx942 spec
-  does.
+* The tiled-2D spec rules the C++ entries mirror -- the gfx950 32x32 atom
+  geometry, the transposed-softmax VALU opts, grouped-KV2 softmax and the
+  early-V schedule: every C++ tiled-2D entry (gfx942, gfx950, gfx950 fastKV
+  register-P; lower, serialize and verify) on every arch its builder admits
+  refuses them with the Python text rather than build the spec, for every rule
+  whose fields the entry's binding passes. The gfx942 entry refuses grouped-KV2
+  and the fp8 K/V cache outright, as the gfx942 spec does.
 """
 
 from __future__ import annotations
@@ -93,6 +94,7 @@ class _Refusal(NamedTuple):
     fastkv_binding_carries: bool = True
 
 
+_PROBLEM_64_8 = {"num_query_heads": 64, "num_kv_heads": 8, **_PROBLEM}
 _GKV2_R4 = {
     "tile_size": 32,
     "block_m_per_warp": 32,
@@ -100,8 +102,18 @@ _GKV2_R4 = {
     "use_transposed_qk_32x32": True,
     "use_grouped_kv2_softmax": True,
 }
+_S1MASK = {
+    "tile_size": 32,
+    "block_m_per_warp": 32,
+    "use_transposed_qk_32x32": True,
+    "use_transposed_scalar_state": True,
+    "use_transposed_mask_once": True,
+    "use_transposed_mask_limit": True,
+}
 # Specs each spec class accepts; every case changes one of them.
-_GFX950_GKV2 = {"num_query_heads": 64, "num_kv_heads": 8, **_PROBLEM, **_GKV2_R4}
+_GFX950_GKV2 = {**_PROBLEM_64_8, **_GKV2_R4}
+_GFX950_VALU = {**_PROBLEM_64_8, **_S1MASK, "use_mfma_32x32": True}
+_GFX942_VALU = {**_PROBLEM_64_8, **_S1MASK, "use_mfma_32x32x8": True}
 _FASTKV_GKV2 = {
     **_GFX950_GKV2,
     "head_size": 64,
@@ -110,13 +122,57 @@ _FASTKV_GKV2 = {
     "num_warps": 4,
     "use_fast_paged_kv_desc": True,
 }
-_GFX942_NARROW = {"num_query_heads": 64, "num_kv_heads": 8, **_PROBLEM}
 
 _FP8_KV = {"kv_storage_dtype": "fp8e4m3"}
 
-_SHARED_RULES = [
+# The gfx950 32x32x16 atom geometry and the transposed QK it needs.
+_GFX950_32X32_RULES = [
     _Refusal(
-        rule="bf16 only",
+        rule="32x32 atom per warp",
+        change={"block_m_per_warp": 16},
+        py_reason=(
+            "use_mfma_32x32 requires one 32-row MFMA atom per warp - "
+            "block_m_per_warp=16, expected 32"
+        ),
+    ),
+    _Refusal(
+        rule="32x32 whole tiles",
+        change={"tile_size": 48},
+        py_reason=(
+            "use_mfma_32x32 requires whole 32-row tiles - tile_size=48 "
+            "(block_size when unset), expected a multiple of 32"
+        ),
+    ),
+    _Refusal(
+        rule="32x32 head steps",
+        change={"head_size": 72},
+        py_reason=(
+            "use_mfma_32x32 requires whole 16-element head steps - head_size=72, "
+            "expected a multiple of 16"
+        ),
+    ),
+    # Python runs these rules before the register-P ones; so must C++.
+    _Refusal(
+        rule="32x32 rules before register-P",
+        change={"use_register_pv": True, "block_m_per_warp": 16},
+        py_reason=(
+            "use_mfma_32x32 requires one 32-row MFMA atom per warp - "
+            "block_m_per_warp=16, expected 32"
+        ),
+    ),
+    _Refusal(
+        rule="transposed QK needs the 32x32 atom",
+        change={"use_mfma_32x32": False},
+        py_reason=(
+            "use_transposed_qk_32x32 requires the 32x32 MFMA atom - "
+            "use_mfma_32x32=False, expected True"
+        ),
+    ),
+]
+
+_GKV2_RULES = [
+    _Refusal(
+        rule="grouped-KV2 bf16 only",
         change={"dtype": "fp16"},
         py_reason=(
             "use_grouped_kv2_softmax v1 is restricted to bf16 - dtype='fp16', "
@@ -124,37 +180,15 @@ _SHARED_RULES = [
         ),
     ),
     _Refusal(
-        rule="transposed 32x32",
+        rule="grouped-KV2 transposed 32x32",
         change={"use_transposed_qk_32x32": False},
         py_reason=(
             "use_grouped_kv2_softmax requires the transposed 32x32 R4 path - "
             "use_mfma_32x32=True, use_transposed_qk_32x32=False, expected both True"
         ),
     ),
-    # Python reaches the next two through its 32x32 rules first; the C++ entries
-    # do not carry those, so the grouped-KV2 rule refuses there.
     _Refusal(
-        rule="32x32 atom",
-        change={"use_mfma_32x32": False},
-        py_reason="use_transposed_qk_32x32 requires use_mfma_32x32",
-        cpp_reason=(
-            "use_grouped_kv2_softmax requires the transposed 32x32 R4 path - "
-            "use_mfma_32x32=False, use_transposed_qk_32x32=True, expected both True"
-        ),
-    ),
-    _Refusal(
-        rule="32-row warp",
-        change={"block_m_per_warp": 16},
-        py_reason=(
-            "use_mfma_32x32 requires block_m_per_warp=32: one 32-row MFMA atom per warp"
-        ),
-        cpp_reason=(
-            "use_grouped_kv2_softmax requires one 32-row MFMA atom per warp - "
-            "block_m_per_warp=16, expected 32"
-        ),
-    ),
-    _Refusal(
-        rule="sliding window",
+        rule="grouped-KV2 sliding window",
         change={"sliding_window": 64},
         py_reason=(
             "use_grouped_kv2_softmax v1 does not support a sliding window - "
@@ -162,7 +196,7 @@ _SHARED_RULES = [
         ),
     ),
     _Refusal(
-        rule="softcap",
+        rule="grouped-KV2 softcap",
         change={"has_softcap": True},
         py_reason=(
             "use_grouped_kv2_softmax v1 does not support softcap - "
@@ -170,7 +204,7 @@ _SHARED_RULES = [
         ),
     ),
     _Refusal(
-        rule="ALiBi",
+        rule="grouped-KV2 ALiBi",
         change={"use_alibi": True},
         py_reason=(
             "use_grouped_kv2_softmax v1 does not support ALiBi - use_alibi=True, "
@@ -179,7 +213,7 @@ _SHARED_RULES = [
         fastkv_binding_carries=False,
     ),
     _Refusal(
-        rule="QQ bias",
+        rule="grouped-KV2 QQ bias",
         change={"use_qq_bias": True},
         py_reason=(
             "use_grouped_kv2_softmax v1 does not support QQ bias - "
@@ -188,7 +222,7 @@ _SHARED_RULES = [
         fastkv_binding_carries=False,
     ),
     _Refusal(
-        rule="fp8 K/V",
+        rule="grouped-KV2 fp8 K/V",
         change=_FP8_KV,
         py_reason=(
             "use_grouped_kv2_softmax v1 does not support FP8 KV - "
@@ -221,6 +255,61 @@ _SHARED_RULES = [
 ]
 
 
+_VALU_RULES = [
+    _Refusal(
+        rule="VALU opts R4_s1mask path",
+        change={"use_transposed_mask_once": False},
+        py_reason=(
+            "transposed softmax VALU opts require the R4_s1mask path - "
+            "use_transposed_qk_32x32=True, use_transposed_scalar_state=True, "
+            "use_transposed_mask_once=False, expected all True"
+        ),
+    ),
+    _Refusal(
+        rule="VALU opts sliding window",
+        change={"sliding_window": 64},
+        py_reason=(
+            "transposed softmax VALU opts do not support a sliding window - "
+            "sliding_window=64, expected 0"
+        ),
+    ),
+    _Refusal(
+        rule="VALU opts softcap",
+        change={"has_softcap": True},
+        py_reason=(
+            "transposed softmax VALU opts do not support softcap - "
+            "has_softcap=True, expected False"
+        ),
+    ),
+    _Refusal(
+        rule="VALU opts ALiBi",
+        change={"use_alibi": True},
+        py_reason=(
+            "transposed softmax VALU opts do not support ALiBi - "
+            "use_alibi=True, expected False"
+        ),
+    ),
+    _Refusal(
+        rule="VALU opts QQ bias",
+        change={"use_qq_bias": True},
+        py_reason=(
+            "transposed softmax VALU opts do not support QQ bias - "
+            "use_qq_bias=True, expected False"
+        ),
+    ),
+]
+
+
+_VALU_GKV2 = _Refusal(
+    rule="VALU opts grouped-KV2",
+    change={"use_grouped_kv2_softmax": True},
+    py_reason=(
+        "transposed softmax VALU opts do not support grouped-KV2 softmax - "
+        "use_grouped_kv2_softmax=True, expected False"
+    ),
+)
+
+
 class _Entry(NamedTuple):
     name: str
     spec_cls: type
@@ -230,15 +319,24 @@ class _Entry(NamedTuple):
     rules: list[_Refusal]
 
 
-# The gfx950 builders admit only gfx950.
-_GFX950_ENTRIES = [
+# The gfx942 builder admits gfx942 and gfx950; the gfx950 builders admit gfx950.
+# The fastKV binding does not pass the VALU opts knob, so fastKV has no VALU rows.
+_ENTRIES = [
     _Entry(
         "gfx950 tiled 2D",
         Gfx950Spec2D,
         _GFX950_GKV2,
         "gfx950_attention_tiled_2d",
         ("gfx950",),
-        _SHARED_RULES,
+        _GFX950_32X32_RULES + _GKV2_RULES,
+    ),
+    _Entry(
+        "gfx950 tiled 2D, VALU opts",
+        Gfx950Spec2D,
+        _GFX950_VALU,
+        "gfx950_attention_tiled_2d",
+        ("gfx950",),
+        [*_VALU_RULES, _VALU_GKV2],
     ),
     _Entry(
         "gfx950 fastKV register-P",
@@ -246,7 +344,21 @@ _GFX950_ENTRIES = [
         _FASTKV_GKV2,
         "gfx950_attention_tiled_2d_fastkv_regp",
         ("gfx950",),
-        [refusal for refusal in _SHARED_RULES if refusal.fastkv_binding_carries],
+        [
+            refusal
+            for refusal in _GFX950_32X32_RULES + _GKV2_RULES
+            if refusal.fastkv_binding_carries
+        ],
+    ),
+    # The gfx942 spec refuses grouped-KV2 before its VALU rules, so no gfx942
+    # grouped-KV2 VALU row.
+    _Entry(
+        "gfx942 tiled 2D, VALU opts",
+        Gfx942Spec2D,
+        _GFX942_VALU,
+        "gfx942_attention_tiled_2d",
+        ("gfx942", "gfx950"),
+        _VALU_RULES,
     ),
 ]
 # Each binding entry point builds through the same C++ entry.
@@ -257,7 +369,7 @@ _ENTRY_POINTS = ("lower_llvm", "serialize_ir", "verify")
     "spec_cls, accepted, binding, arch",
     [
         pytest.param(e.spec_cls, e.accepted, e.binding, arch, id=f"{e.name} on {arch}")
-        for e in _GFX950_ENTRIES
+        for e in _ENTRIES
         for arch in e.archs
     ],
 )
@@ -268,6 +380,8 @@ def test_2d_entries_build_the_accepted_specs(spec_cls, accepted, binding, arch):
 
 
 def _assert_both_engines_refuse(spec_cls, accepted, entry_point, arch, refusal):
+    # The C++ message is matched as a substring: the binding prefixes it with
+    # the entry's "build failed:" context.
     accepted_spec = spec_cls(**accepted)
     with pytest.raises(ValueError) as py_err:
         dataclasses.replace(accepted_spec, **refusal.change)
@@ -289,16 +403,16 @@ def _assert_both_engines_refuse(spec_cls, accepted, entry_point, arch, refusal):
             refusal,
             id=f"{e.name} {entry_point} on {arch}: {refusal.rule}",
         )
-        for e in _GFX950_ENTRIES
+        for e in _ENTRIES
         for arch in e.archs
         for entry_point in _ENTRY_POINTS
         for refusal in e.rules
     ],
 )
-def test_gfx950_2d_entries_refuse_grouped_kv2_and_early_v_rules_like_python(
+def test_2d_entries_refuse_the_spec_rules_like_python(
     spec_cls, accepted, entry_point, arch, refusal
 ):
-    """Python refuses the changed spec at construction; the C++ entry refuses it too."""
+    """Python and the C++ entry refuse the changed spec with the same text."""
     _assert_both_engines_refuse(spec_cls, accepted, entry_point, arch, refusal)
 
 
@@ -368,30 +482,49 @@ def test_gfx942_2d_entry_refuses_grouped_kv2_and_fp8_kv_on_every_arch(
     """The gfx942 entry runs the gfx942 spec checks for every target, so the
     grouped-KV2 and early-V specs the gfx942 spec refuses are refused on both
     arches its builder admits."""
-    _assert_both_engines_refuse(
-        Gfx942Spec2D, _GFX942_NARROW, entry_point, arch, refusal
-    )
+    _assert_both_engines_refuse(Gfx942Spec2D, _PROBLEM_64_8, entry_point, arch, refusal)
 
 
 @pytest.mark.parametrize(
-    "change, reason",
+    "accepted, change, reason",
     [
         pytest.param(
+            _GFX950_GKV2,
             {"use_additive_bias": True},
             "use_grouped_kv2_softmax v1 does not support additive bias - "
             "use_additive_bias=True, expected False",
-            id="additive bias",
+            id="grouped-KV2 additive bias",
         ),
         pytest.param(
+            _GFX950_GKV2,
             {"use_additive_bias": True, "has_softcap": True},
             "use_grouped_kv2_softmax v1 does not support softcap - has_softcap=True, "
             "expected False",
-            id="additive bias after the shared rules",
+            id="grouped-KV2 additive bias after the shared rules",
+        ),
+        pytest.param(
+            _GFX950_VALU,
+            {"use_additive_bias": True},
+            "transposed softmax VALU opts do not support additive bias - "
+            "use_additive_bias=True, expected False",
+            id="VALU opts additive bias",
+        ),
+        pytest.param(
+            _GFX950_VALU,
+            {"use_additive_bias": True, "use_alibi": True},
+            "transposed softmax VALU opts do not support ALiBi - use_alibi=True, "
+            "expected False",
+            id="VALU opts additive bias after the shared rules",
         ),
     ],
 )
-def test_gfx950_2d_spec_refuses_grouped_kv2_with_additive_bias(change, reason):
-    """The C++ spec has no additive-bias field, so only Python carries this rule."""
+def test_gfx950_2d_spec_refuses_additive_bias_with_shared_rule_knobs(
+    accepted, change, reason
+):
+    """Python alone refuses additive bias here, after the shared rules.
+
+    The C++ spec has no additive-bias field.
+    """
     with pytest.raises(ValueError) as py_err:
-        dataclasses.replace(Gfx950Spec2D(**_GFX950_GKV2), **change)
+        dataclasses.replace(Gfx950Spec2D(**accepted), **change)
     assert str(py_err.value) == reason

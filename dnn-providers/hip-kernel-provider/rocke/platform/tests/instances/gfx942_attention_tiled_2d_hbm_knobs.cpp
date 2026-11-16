@@ -118,6 +118,12 @@ static rocke_attention_tiled_2d_spec_t fastkv_register_p_spec(void)
     spec.use_sinks = false;
     spec.sliding_window = 0;
     spec.has_softcap = false;
+    spec.num_warps = 4;
+    spec.has_waves_per_eu = true;
+    spec.waves_per_eu = 2;
+    spec.has_tile_size = true;
+    spec.tile_size = 2 * spec.block_size;
+    spec.block_m_per_warp = 32;
     spec.use_fast_paged_kv_desc = true;
     spec.use_mfma_32x32 = true;
     spec.use_transposed_qk_32x32 = true;
