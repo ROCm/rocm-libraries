@@ -1,0 +1,26 @@
+---
+include: ../../../../../clients/include/hipblas_common.yaml
+
+Definitions:
+  - &sizes
+    - {N: 20480, lda: 20480 }
+    - {N: 24576, lda: 24576 }
+    - {N: 28672, lda: 28672 }
+    - {N: 32768, lda: 32768 }
+    - {N: 36864, lda: 36864 }
+    - {N: 40960, lda: 40960 }
+
+
+Tests:
+- name: spmv
+  function: spmv
+  precision: *single_double_precisions
+  samples: 10
+  uplo: L
+  alpha: 1
+  beta: 1
+  incx: 1
+  incy: 1
+  K: 512
+  matrix_size: *sizes
+...
