@@ -27,8 +27,14 @@
     "gfx1201": [
       "86d7b10e-260a-4a23-ad7f-5e4c726796c8"
     ],
-    "gfx1101": "d038ca42-06d1-459c-aca0-44fac52c59ac",
-    "gfx1102": "36897f6e-c007-414b-b295-fcc4b58065ed",
-    "gfx1150": "6319c1f8-9ad4-477d-863b-92d8ee9cee71"
+    "gfx1101": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
+    "gfx1102": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ],
+    "gfx1150": [
+      "7d0b7a91-f44b-4b9d-82bc-6dabdb1e2c3e"
+    ]
   }
 }
