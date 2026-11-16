@@ -151,9 +151,7 @@ def emit_lse_field():
 
     ``emit_lse``: also write the natural-log softmax normalizer (LSE) as FP32
     ``[total_q, num_query_heads, 1]`` through a trailing ``lse_ptr`` argument. Off by
-    default; off adds no LSE parameter and no LSE store. (The reduce IR still differs
-    from before LSE existed: the masked-segment merge fix in the reduce builder applies
-    with LSE on or off.)
+    default; off adds no LSE parameter and no LSE store.
 
     A factory and not a base class, so the field stays where each spec declares it:
     field order, ``spec_hash`` and cache keys do not move. Every call returns a new
