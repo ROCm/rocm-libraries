@@ -39,10 +39,12 @@
     ROCSOLVER_ASAN_VALUE(16, 32) // generic 2 dimensional thread-block size used \
     // to call common kernels
 
-#ifdef DEBUG
+#ifndef MAX_BATCH_COUNT
+#ifndef NDEBUG
 #define MAX_BATCH_COUNT 100
 #else
 #define MAX_BATCH_COUNT (64 * 1024 - 1)
+#endif
 #endif
 
 /******************************* larf ****************************************

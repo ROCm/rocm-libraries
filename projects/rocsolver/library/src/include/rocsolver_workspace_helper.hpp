@@ -76,6 +76,7 @@ private:
 
     void assign_buffer(std::byte* scalars_r, std::byte* scalars_c, std::byte* curr_ptr)
     {
+        pointers.clear();
         pointers.reserve(sizes.size() + has_scalars_r + has_scalars_c);
 
         if(has_scalars_r)
@@ -263,8 +264,6 @@ public:
     template <typename T>
     rocblas_status assign_buffer(rocblas_handle handle, void* buffer)
     {
-        this->pointers.clear();
-
         using S = decltype(std::real(T{}));
 
         hipStream_t stream;
@@ -331,7 +330,7 @@ public:
     {
         using S = decltype(std::real(T{}));
 
-        if(std::is_same<T, S>::value)
+        if constexpr(std::is_same<T, S>::value)
             this->has_scalars_r = 1;
         else
             this->has_scalars_c = 1;
@@ -342,7 +341,7 @@ public:
     {
         using S = decltype(std::real(T{}));
 
-        if(std::is_same<T, S>::value)
+        if constexpr(std::is_same<T, S>::value)
         {
             if(has_scalars_r && pointers.size() > 0)
                 return (T*)pointers[0];
@@ -418,9 +417,9 @@ public:
             }
 
             if(name.length() > 0)
-                s += fmt::format("  {}: {} bytes", name, sizes[i]);
+                s += fmt::format("  {} {}: {} bytes", i, name, sizes[i]);
             else
-                s += fmt::format("  {} bytes", sizes[i]);
+                s += fmt::format("  {}: {} bytes", i, sizes[i]);
 
             if(i < pointers.size())
                 s += fmt::format(" ({})", (void*)pointers[i + has_scalars_r + has_scalars_c]);

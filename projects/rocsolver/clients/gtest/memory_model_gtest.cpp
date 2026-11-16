@@ -63,9 +63,11 @@ protected:
     size_t query_workspace_size(Func func, Args... args)
     {
         size_t size;
-        rocblas_start_device_memory_size_query(handle);
-        func(handle, args...);
-        rocblas_stop_device_memory_size_query(handle, &size);
+        EXPECT_EQ(rocblas_start_device_memory_size_query(handle), rocblas_status_success);
+        const rocblas_status status = func(handle, args...);
+        EXPECT_TRUE(status == rocblas_status_size_increased || status == rocblas_status_size_unchanged)
+            << "Unexpected workspace query status: " << status;
+        EXPECT_EQ(rocblas_stop_device_memory_size_query(handle, &size), rocblas_status_success);
         return size;
     }
 };
