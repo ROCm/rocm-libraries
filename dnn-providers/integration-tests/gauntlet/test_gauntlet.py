@@ -562,6 +562,7 @@ FEATURE_KEYS = {
     "SdpaBackward/FlydslBwdSplit": {"node_patches"},
     "SdpaBackward/FlydslBwdSplitBias": {"add_tensors", "node_patches"},
     "SdpaBackward/FlydslBwdSplitPadded": {"add_tensors", "node_patches"},
+    "SdpaBackward/FlydslBwdSplitDropout": {"add_tensors", "node_patches"},
     "SdpaFwd/Default": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151": {"add_tensors", "node_patches"},
     "SdpaFwd/Gfx1151Decode": {"add_tensors", "node_patches"},
@@ -648,6 +649,7 @@ def test_spaces_ship_with_the_tool_not_in_the_bundle_root():
         "SdpaBackward/FlydslBwdSplit",
         "SdpaBackward/FlydslBwdSplitBias",
         "SdpaBackward/FlydslBwdSplitPadded",
+        "SdpaBackward/FlydslBwdSplitDropout",
         "SdpaBackward/FlydslBwdSplitStride",
         "SdpaFwd/AsmStride",
         "SdpaFwd/Default",
@@ -1474,6 +1476,7 @@ LARGE_SCALE = {
     "SdpaBackward/FlydslBwdSplit": 8,
     "SdpaBackward/FlydslBwdSplitBias": 8,
     "SdpaBackward/FlydslBwdSplitPadded": 8,
+    "SdpaBackward/FlydslBwdSplitDropout": 8,
     "SdpaFwd/Gfx950Dense": 8,
     "SdpaFwd/Flash2Region": 8,
     "SdpaFwd/Gfx1151": 8,
@@ -1527,6 +1530,7 @@ OPERAND_DOMAIN = {
             "SdpaBackward/FlydslBwdSplit",
             "SdpaBackward/FlydslBwdSplitBias",
             "SdpaBackward/FlydslBwdSplitPadded",
+            "SdpaBackward/FlydslBwdSplitDropout",
         )
         for name in ("V", "dO")
     },
@@ -1565,6 +1569,7 @@ PRIMARY_OPERANDS = {
     "SdpaBackward/FlydslBwdSplit": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitBias": ["Q", "K", "V", "dO"],
     "SdpaBackward/FlydslBwdSplitPadded": ["Q", "K", "V", "dO"],
+    "SdpaBackward/FlydslBwdSplitDropout": ["Q", "K", "V", "dO"],
 }
 # The operands that carry the `special` fill in the nan and inf domains, per space. The other
 # primary operands keep the default range there. Each choice keeps the non-finite positions
@@ -1583,6 +1588,7 @@ POISONED_OPERANDS = {
     "SdpaBackward/FlydslBwdSplit": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitBias": [],  # as SdpaBackward/Default
     "SdpaBackward/FlydslBwdSplitPadded": [],  # as SdpaBackward/Default
+    "SdpaBackward/FlydslBwdSplitDropout": [],  # as SdpaBackward/Default
     "SdpaFwd/Gfx950Dense": ["V"],
     "SdpaFwd/FlydslCdna": ["V"],
     "SdpaFwd/FlydslCdnaDecode": ["V"],
@@ -1632,6 +1638,7 @@ PLACEMENT_OPERAND = {
     "SdpaBackward/FlydslBwdSplit": "Q",
     "SdpaBackward/FlydslBwdSplitBias": "Q",
     "SdpaBackward/FlydslBwdSplitPadded": "Q",
+    "SdpaBackward/FlydslBwdSplitDropout": "Q",
     "SdpaBackward/FlydslBwdSplitStride": "Q",
     "SdpaFwd/AsmStride": "Q",
     "SdpaFwd/Default": "Q",
@@ -1658,6 +1665,7 @@ NONFINITE_EXCLUDED = {
     "SdpaBackward/FlydslBwdSplit",
     "SdpaBackward/FlydslBwdSplitBias",
     "SdpaBackward/FlydslBwdSplitPadded",
+    "SdpaBackward/FlydslBwdSplitDropout",
 }
 # the spaces that draw half only: an infinity never poisons there (P underflows), see
 # test_sdpa_poisons_v_only_where_the_reference_and_the_kernels_agree
