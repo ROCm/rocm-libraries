@@ -131,6 +131,7 @@ With `HIPDNN_LOG_LEVEL=info`:
   ```
 
   An engine without named configs logs `config -`.
+- **With autotune** (`global.benchmarking`) the plan build logs `config chosen by autotune at first execution`; the first execution benchmarks the candidates and logs `ingestor: benchmarking selected kernel <id> in <ms> ms among <n> candidate(s), config '<name>'`.
 ## Saving and Loading Execution Plans
 
 You can save a built execution plan to bytes and load it later, in the same process or in another one. A loaded plan runs without the plan build: the provider does not search descriptors, read a kpack archive, or compile a kernel.
