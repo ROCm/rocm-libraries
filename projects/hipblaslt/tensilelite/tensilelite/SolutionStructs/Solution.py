@@ -2425,11 +2425,19 @@ class Solution(collections.abc.Mapping):
                         or (not pairedStoreAvailable)
                         or (not streamKAtomicFree)
                         or (not barrierFreeStore))
-      # Register / spill budget: the fused store would overflow the arch-VGPR / 102-SGPR
-      # ceiling for this tile.
+      # fp8 operand fragments are twice fp4's for the same MI shape, so the
+      # headroom the fused store needs is not the same for the two. At DepthU
+      # 128 it fits everywhere measured; at DepthU 256 four of the shipped
+      # tiles (MIWaveTile [6,6], [8,4], [10,2], [2,10]) land on 264 VGPRs
+      # against the 256 cap, which judgeRegisterBudget refuses outright rather
+      # than emit as a dropped shell. Hold fp8 to the shallower unroll until
+      # the deeper one has a bound derived rather than sampled. fp4 keeps its
+      # existing scope at every DepthU.
+      fp8DepthFits = plsinDataTypes(state) or state["DepthU"] <= 128
       registerFail = ((not spillFree)
                       or (not storeFitsVgpr)
-                      or (not mxBlockScaleSgprFits))
+                      or (not mxBlockScaleSgprFits)
+                      or (not fp8DepthFits))
       # Schedule feasibility is not decided here: LogicalScheduler works from exact
       # producer/consumer ranges, and a schedule with no safe group falls back
       # without extracting terminal MFMAs.
