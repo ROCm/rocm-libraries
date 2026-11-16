@@ -1616,7 +1616,7 @@ public:
         // Only where set: the other configs' compile options (and cache keys) stay as they are.
         if(config.sb != 0)
         {
-            options.add("CONV_WINO_SB", "1");
+            options.add("CONV_WINO_SB", std::string("1"));
         }
         if(wrw)
         {
