@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -329,6 +329,20 @@ try
         ("cold_iters,j",
          value<int>(&arg.cold_iters)->default_value(2),
          "Cold Iterations to run before entering the timing loop")
+
+        ("flush_batch_count",
+         value<uint64_t>(&arg.flush_batch_count)->default_value(1),
+         "Number of copies of the operands to cycle through in the timing loop, so that each copy is"
+         " evicted from cache before it is reused. To flush operands before reuse set"
+         " flush_batch_count >= 1 + cache_size / operand_bytes."
+         " If you specify flush_batch_count you cannot also specify flush_memory_size")
+
+        ("flush_memory_size",
+         value<uint64_t>(&arg.flush_memory_size)->default_value(0),
+         "Bytes of device memory the operand copies may occupy in the timing loop. Set to more than"
+         " the cache size so operands are evicted before they are reused. The number of copies is"
+         " flush_memory_size / operand_bytes, rounded up."
+         " If you specify flush_memory_size you cannot also specify flush_batch_count")
 
         ("algo",
          value<uint32_t>(&arg.algo)->default_value(0),

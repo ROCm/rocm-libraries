@@ -493,6 +493,8 @@ Arguments:
   - timing: int
   - iters: int
   - cold_iters: int
+  - flush_batch_count: c_uint64
+  - flush_memory_size: c_uint64
   - algo: c_uint
   - solution_index: c_int
   - flags: c_uint
@@ -581,6 +583,8 @@ Defaults:
   timing: 0
   iters: 10
   cold_iters: 2
+  flush_batch_count: 1
+  flush_memory_size: 0
   algo: 0
   solution_index: 0
   flags: 0

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -168,11 +168,13 @@ struct Arguments
     bool inplace    = false; // only for trmm
     bool with_flags = false;
 
-    int      norm_check = 0;
-    int      unit_check = 1;
-    int      timing     = 0;
-    int      iters      = 10;
-    int      cold_iters = 2;
+    int      norm_check        = 0;
+    int      unit_check        = 1;
+    int      timing            = 0;
+    int      iters             = 10;
+    int      cold_iters        = 2;
+    uint64_t flush_batch_count = 1;
+    uint64_t flush_memory_size = 0;
     uint32_t algo;
     int32_t  solution_index;
     uint32_t flags;
@@ -254,6 +256,8 @@ struct Arguments
     OPER(timing) SEP                 \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
+    OPER(flush_batch_count) SEP      \
+    OPER(flush_memory_size) SEP      \
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
     OPER(flags) SEP                  \
@@ -421,7 +425,7 @@ namespace ArgumentsHelper
             func("compute_type", hip_datatype2string(arg.compute_type));
         };
 };
-    // clang-format on
+// clang-format on
 
 #else
 
