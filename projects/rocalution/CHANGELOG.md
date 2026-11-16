@@ -12,9 +12,11 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * The `cg-rsamg_mpi`, `cg-saamg_mpi` and `cg-uaamg_mpi` samples now print the total runtime, as the non-MPI samples do.
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
-* CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
+* CMake 3.21 or later is now required to build rocALUTION (previously 3.19).
+* On Linux, the HIP library is now built with CMake's HIP language support instead of the `FindHIP` module and hipcc. The HIP compiler is `amdclang++` from `ROCM_PATH`, unless `CMAKE_HIP_COMPILER` or `HIPCXX` selects another one. The host sources can still be built with any C++ compiler. `GPU_TARGETS` sets the GPU architectures of the HIP sources.
 
 ### Removed
+* Removed the `USE_HIPCXX` option. CMake's HIP language support is now always used on Linux.
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
 
 ### Resolved issues
@@ -45,6 +47,9 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `LocalMatrix::LLSolve()` on the host taking the last entry of each row as the diagonal of factors that store zeros above the diagonal, such as IC with a BCSR operator on the host. Without the inverse diagonal this gave NaN. With it, which the IC preconditioner passes, the results depended on the previous contents of the output vector. Without the inverse diagonal, `LLSolve()` now ends the program for a row that does not store its diagonal.
 * Fixed the `ExtPI` interpolation of `RugeStuebenAMG`, with and without `SetInterpolationFF1Limit(true)`, for a strong coupling to an F point that has no couplings to distribute it through. The coupling was dropped, or gave infinite or NaN weights for negative diagonals and in the ghost part of a distributed matrix. It is now lumped into the diagonal, as in hypre, so the interpolation reproduces constants for zero row sums. A row whose diagonal is zero, for example after this lumping, is now left without interpolation instead of getting infinite or NaN weights.
 * Fixed the scaled coarse-grid correction of the multigrid cycles using the right-hand side instead of the residual on the coarse levels. With four or more levels, this changes the convergence of `MultiGrid`, which scales by default, and of the AMG solvers with `BaseMultiGrid::SetScaling(true)`.
+* Fixed the host conversion of non-square matrices to DIA writing past the end of the values when the matrix has more rows than columns, for example in `LocalMatrix::ExtractSubMatrices()` and in the multicolored preconditioners. When the matrix has more columns than rows, `LocalMatrix::LeaveDataPtrDIA()` aborted on the result. The host now sizes the DIA values and decides whether the conversion succeeds as the accelerator does, so some non-square matrices that the host converted to DIA before now stay in CSR, with the fallback warning.
+* Fixed the host `LocalMatrix::Apply()` and `LocalMatrix::ApplyAdd()` of non-square DIA matrices ignoring the entries in the columns at or past the number of rows, and reading past the end of the input vector when the matrix has more rows than columns. They also skipped diagonals in the last rows, for square matrices too, when the offsets set with `LocalMatrix::SetDataPtrDIA()` were not in ascending order.
+* Fixed the conversion to DIA of matrices with more than 2^31 - 1 DIA entries, which overflowed the number of entries or the index into the values. These matrices now stay in CSR, with the fallback warning.
 
 ## (Unreleased) rocALUTION 4.1.1
 

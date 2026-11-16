@@ -123,9 +123,11 @@ binary operators that combine them:
 Two things about it matter for this document.
 
 **It is evaluated in two places, and CI proves they agree.** `eval_intexpr` in
-`utils/recipe_expand.py` (Python) and `rv_int` in `cpp/portable_ir/recipe_vm.cpp`
-(C99) implement the same grammar. Because a wrong constant changes the emitted
-kernel, the byte-identity gates fail if the two ever disagree. So "an expression
+`rocke/core/intexpr.py` (Python) and `rocke_intexpr_eval` in
+`cpp/support/intexpr.cpp` (C++, which the recipe VM's `rv_int` calls) implement
+the same grammar. `tests/core/test_intexpr.py` runs one case table through both,
+values and error texts alike, and because a wrong constant changes the emitted
+kernel, the byte-identity gates fail too if the two ever disagree. So "an expression
 the C runtime can evaluate, that Python agrees with" is not something to be
 built — it is running in CI today.
 
@@ -493,8 +495,8 @@ Every piece needed already exists or is a small addition.
 | Piece                                 | Status                                                                 |
 | ------------------------------------- | ---------------------------------------------------------------------- |
 | Expression language for the guard     | **Exists.** No new operators strictly required — see below             |
-| Evaluator in C99                      | **Exists** (`recipe_vm.cpp::rv_int`)                                   |
-| Evaluator in Python                   | **Exists** (`recipe_expand.py::eval_intexpr`)                          |
+| Evaluator in C++                      | **Exists** (`cpp/support/intexpr.cpp::rocke_intexpr_eval`)             |
+| Evaluator in Python                   | **Exists** (`rocke/core/intexpr.py::eval_intexpr`)                     |
 | Proof the two agree                   | **Exists** — the HSACO byte-identity gates already cover the evaluator |
 | Adding a field to the recipe          | **Backward compatible** — see below                                    |
 | Enforcement point in the VM           | ~15 lines at the top of `rv_run_root`                                  |
@@ -721,17 +723,15 @@ constraint rather than just returning false:
 
 Every `pred` is an ordinary intexpr, desugared, so **today's evaluators run it
 unchanged** — `mul` for conjunction, `eq`/`ge`/`le` for the comparisons. No new
-node kinds means the CI gate that already pins `rv_int` against
+node kinds means the CI gate that already pins `rocke_intexpr_eval` against
 `eval_intexpr` covers guards without being extended.
 
 Rule **order** is part of the contract. Evaluation stops at the first failure,
 and the bounds rule on an axis is emitted ahead of the divisibility rule on the
-same axis, because the two evaluators do not agree about `mod` with a negative
-left operand (Python floors, C truncates). Today that ordering is belt and
-braces rather than the only defence — the rules ask whether a remainder is
-*zero*, which is the same question under either convention — but a rule that
-divided, or compared a remainder against anything else, would depend on the
-ordering alone.
+same axis. Both evaluators refuse a `mod` or `div` with a negative operand
+(Python floors, C truncates), so a negative that reached the divisibility rule
+would be refused as "did not evaluate" in both engines; the ordering makes the
+bounds rule refuse it first, with the reason that names the bound.
 
 The `derivation` block is provenance: which form was used, against which gate,
 how much was probed, and what the oracle found. It is what makes a suspicious
@@ -1163,8 +1163,8 @@ and is the reason item 1 in §10 is worth doing regardless.
 The argument is the one made in [What an `intexpr` is](#what-an-intexpr-is), so
 only the conclusion is repeated here: the recipe's expression language already
 has integer arithmetic, the six comparisons and enum equality; it already has two
-evaluators (`recipe_expand.py::eval_intexpr` in Python, `recipe_vm.cpp::rv_int`
-in C99); the byte-identity gates already fail if those two ever disagree; and the
+evaluators (`rocke/core/intexpr.py::eval_intexpr` in Python,
+`cpp/support/intexpr.cpp::rocke_intexpr_eval` in C++); the byte-identity gates already fail if those two ever disagree; and the
 VM already evaluates such an expression *as a truth value* in `static_if`.
 
 So "a predicate over spec values that C can evaluate and Python agrees with" is

@@ -11,8 +11,7 @@ scoreboard instead (see [Scoreboard-driven filler placement](waitalu-placement.m
 
 Prefetch placement is not a hazard but a **performance** placement. Left alone, the DAG
 issues a prefetch as soon as its address is ready, far ahead of the `tensor_load_to_lds` it
-belongs with. The former WaitAwareScheduleRepairPass (now removed) hid that by accident: it
-carried the prefetch forward to the segment end, the barrier right before the tensor_load.
+belongs with, so the rules below place it explicitly.
 
 ## Rules, in order of measured impact
 
@@ -65,8 +64,7 @@ is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `st
 | `DsSpread` | true | `--ds-spread` / `--no-ds-spread` | spread the region's ds_loads evenly over its WMMAs |
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
-| `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time (queue model off). > 1 also merges the waits of back-to-back WMMAs onto the first one |
-| `WmmaQueueCoverCycles` | -1 = automatic, (`WmmaQueueDepth` - 1) x the next WMMA's latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
+| `WmmaQueueCoverCycles` | -1 = automatic, (queue depth - 1) x the next WMMA's latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Forced picks (a promoted barrier) are not held. Not 0 also merges the waits of back-to-back WMMAs onto the first one. 0 = queue model off (one WMMA at a time). The queue depth comes from each matrix opcode's `HwInstDesc`, generated from the architecture `.def`: 5 for `v_wmma_scale*`, 8 otherwise |
 
 ## Measured effect
 
@@ -91,12 +89,10 @@ Findings behind the rules:
   loop a staggered lead. A lead of 80 on henry is −14%.
 - A stage under 64 WMMAs (MAB, medium mxf8) has no room for a multi-stage lead: the address
   chain is ready only a few windows before the tensor_load, and a prefetch issued there is
-  worse than one grouped at the tensor_load. That grouping used to come from the former
-  WaitAwareScheduleRepairPass, which moved the prefetches next to the stage barrier. Without
-  the pass, lead 0 issues them mid-stage among the ds_loads, and the next WMMAs wait longer
-  for their LDS data: MAB bf16 is 0.41% slower and MAB nvf4 0.63%. The single-stage grouping
-  (lead below 8) is therefore kept at any stage length; it brings MAB nvf4 level with
-  develop and MAB bf16 to 0.25% behind.
+  worse than one grouped at the tensor_load. Lead 0 issues them mid-stage among the ds_loads,
+  and the next WMMAs wait longer for their LDS data: MAB bf16 is 0.41% slower and MAB nvf4
+  0.63%. The single-stage grouping (lead below 8) is therefore kept at any stage length; it
+  brings MAB nvf4 level with develop and MAB bf16 to 0.25% behind.
 - An LDS-address swap (`v_xor`) issued while ds_loads still read the old address pays a
   `vm_vsrc` wait (about 100 cycles/iteration on medium mxf4). Moving it after the barrier
   is worse: the next stage's first ds_loads read the new address right after the barrier.

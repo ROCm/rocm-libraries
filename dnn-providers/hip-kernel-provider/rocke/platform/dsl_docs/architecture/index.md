@@ -46,7 +46,7 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
 
 ## Kernel optimization design
 
-- [`ck_tile_merged_groups.md`](ck_tile_merged_groups.md) — how CK Tile's
+- [`library/kernels/conv/docs/ck_tile_merged_groups.md`](../../../library/kernels/conv/docs/ck_tile_merged_groups.md) — how CK Tile's
   `NumGroupsToMerge` works in grouped convolution, read as the basis for porting
   the same capability to ROCKE. Records where ROCKE's forward arrangement
   deliberately departs from CK's and why. Line numbers are pinned to the commit

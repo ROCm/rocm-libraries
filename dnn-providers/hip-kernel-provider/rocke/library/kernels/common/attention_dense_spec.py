@@ -10,6 +10,7 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
@@ -47,11 +48,36 @@ DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 # num_records field is unsigned in hardware.
 INT32_LIMIT = 2**31
 
+# Softmax scales both dense kernels compute correctly: a chosen margin, not a hardware
+# limit. gfx950's reason and known limit are noted in its kernel module, above
+# _EMPTY_ROW_MAX_GRID. gfx942 multiplies each fp32 score by scale * log2(e) and masks
+# with -1e30, so a larger scale can push a visible score below the mask (the row max
+# goes to a masked key) or past FLT_MAX (NaN). The hipDNN packs check the same range
+# as 0x1p-64F / 0x1p4F (isSupportedScale, AttentionDenseNative.cpp); change them
+# together. test_attention_dense_scale.py pins both bounds.
+DENSE_MIN_SCALE = 2.0**-64
+DENSE_MAX_SCALE = 2.0**4
+
+
+def check_dense_scale(scale: float) -> None:
+    """Raise unless ``scale`` is in ``[DENSE_MIN_SCALE, DENSE_MAX_SCALE]``.
+
+    NaN and +-inf are invalid input (``ValueError``); a finite scale outside the
+    range, zero and negatives included, is a kernel limit (``NotImplementedError``).
+    Every dense runner calls this before it builds a kernel."""
+    if not math.isfinite(scale):
+        raise ValueError(f"scale must be finite, got {scale!r}")
+    if not DENSE_MIN_SCALE <= scale <= DENSE_MAX_SCALE:
+        raise NotImplementedError(
+            "NOT_YET_IMPLEMENTED: the dense attention kernels support a softmax "
+            f"scale in [2**-64, 2**4], got {scale!r}"
+        )
+
 
 def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
     """Say which sequence length leaves a partial tile on a ``ragged`` spec.
 
-    The dense ``_base_spec`` factories set ``ragged`` for an ordinary graph whose
+    The dense base-spec factories set ``ragged`` for an ordinary graph whose
     lengths are not tile multiples (Sq == Skv == 384 at block_m 256, say), so a
     refusal that only says "ragged" reads as a varlen problem. This names the
     length and the tile instead.
@@ -284,7 +310,7 @@ class AttentionDenseSpec:
                 * self.block_size
                 * self.num_kv_heads
                 * self.head_size
-                * 2
+                * self.kv_elem_bytes
             )
             if cache_bytes > 2**31 - 1:
                 raise ValueError(
@@ -320,6 +346,25 @@ class AttentionDenseSpec:
     @property
     def dtype_ir(self):
         return _DTYPE_IR[self.dtype]
+
+    @property
+    def kv_elem_bytes(self) -> int:
+        """Bytes per stored K/V element.
+
+        2 on the shared spec: KV is stored at the compute dtype. A narrower KV
+        format is an arch-specific knob, so the arch whose loader implements one
+        overrides this (gfx950 fp8).
+
+        This is the one arch override the SHARED checks read, via the KV extent
+        in :func:`check_dense_spec_preflight`. The C++ mirror of this spec has
+        no narrow-KV field, so it always computes that extent at 2 B, and a
+        narrow-KV spec would be sized as its wide twin there. Nothing hands the
+        mirror such a spec today: the field lives on the arch subclass, which
+        the mirror does not carry, exactly like ``kv_segments``, ``emit_lse``
+        and ``wide_lds_dma``. Giving the mirror a narrow KV format means giving
+        it the field and the width, not only this property.
+        """
+        return 2
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -477,6 +522,15 @@ class AttentionDenseSpec:
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         return ("lazyrs",) if self.lazy_rescale else ()
 
+    def _kv_storage_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for a narrow KV storage format, empty on the shared spec.
+
+        KV at the compute dtype needs no token. The arch whose loader decodes a
+        narrower format overrides this, so the shared spec never reads a field
+        it does not declare and its C++ mirror stays in step with it.
+        """
+        return ()
+
     def _persist_decode_name_part(self) -> str:
         return PERSIST_DECODES[self.resolved_persist_decode].tag
 
@@ -488,6 +542,9 @@ class AttentionDenseSpec:
             f"bn{self.block_n}",
             self.dtype,
         ]
+        # Kept in the shared name, at this position, so an fp8 kernel can never
+        # share a symbol with its bf16 twin. The arch spec supplies the token.
+        parts.extend(self._kv_storage_name_parts())
         if self.block_m != DEFAULT_DENSE_TILE_GEOMETRY["block_m"]:
             parts.append(f"bm{self.block_m}")
         if 128 // self.head_size > 1:
@@ -523,6 +580,49 @@ class AttentionDenseSpec:
         if self.chiplet_num_xcds != 8:
             parts.append(f"xcd{self.chiplet_num_xcds}")
         return kernel_name_join(*parts)
+
+
+#: The one dtype an fp8 KV loader decodes. The K/V pointers are declared OCP
+#: fp8e4m3, so a bf16 or FNUZ tensor is read as OCP and silently produces wrong
+#: output. Compared by name so no torch import is needed, which also rejects
+#: ``torch.float8_e4m3fnuz``.
+OCP_FP8_KV_DTYPE = "torch.float8_e4m3fn"
+
+
+def require_ocp_fp8_kv(named_tensors) -> None:
+    """Raise unless every ``(name, tensor)`` is OCP fp8 K/V.
+
+    The single home of the fp8 K/V dtype rule. It lives beside
+    :attr:`AttentionDenseSpec.kv_elem_bytes`, which is what makes the rule
+    load-bearing, so the dispatch binding and the runner enforce one wording
+    instead of two. ``kernels`` may not import ``dispatch``, so a checker that
+    both layers share has to live here.
+    """
+    for name, tensor in named_tensors:
+        dtype = getattr(tensor, "dtype", None)
+        if str(dtype) != OCP_FP8_KV_DTYPE:
+            raise ValueError(
+                f"fp8 dense expects OCP fp8 {name} ({OCP_FP8_KV_DTYPE}), got "
+                f"{dtype!r}; a bf16 or FNUZ tensor is read as OCP fp8 and "
+                "silently produces wrong output"
+            )
+
+
+def require_fp8_kv_scale(name: str, value, label: str) -> float:
+    """Return one per-tensor fp8 dequant scale as a float, or raise.
+
+    The companion of :func:`require_ocp_fp8_kv`, and the single home of the
+    missing-scale rule. Both the dispatch binding and the runner enforce it, so
+    it lives here for the same reason the dtype rule does: ``kernels`` may not
+    import ``dispatch``. Defaulting a missing scale to 1.0 would silently
+    dequantize at unit scale and produce wrong output, so it is refused.
+    """
+    if value is None:
+        raise ValueError(
+            f"{label} requires {name!r} (per-tensor dequant scale); pass "
+            f"{name}=1.0 explicitly for unit-scale KV"
+        )
+    return float(value)
 
 
 def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
@@ -600,6 +700,14 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
        emitted through ``const_i32`` (no range check) and the voffset feeding it is
        signed i32 arithmetic, so the signed bound is the binding one on both paths.
 
+       The UNIT differs per operand and is not cosmetic. K/V always go through a
+       buffer resource, so they are bounded in bytes. Q is bounded in bytes only
+       when ``ragged`` (the buffer-resource path, whose voffset is ``addr * 2``)
+       and in elements otherwise (``global_load_vN`` takes an element index). O is
+       element-addressed in every mode, despite ``_emit_o_store`` naming its
+       address argument ``q_row_byte``. Bounding ragged Q in elements lets a spec
+       between 2**30 and 2**31 elements through to a byte offset that overflows.
+
     Order matters between 2 and 4: a negative extent makes the products in 4
     vacuously true, so the sign check has to run first.
 
@@ -635,14 +743,30 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"n_per = {spec.block_m} // block_n floors and drops keys"
         )
 
-    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
+    kv_bytes = (
+        spec.batch
+        * spec.seqlen_kv
+        * spec.num_kv_heads
+        * spec.head_size
+        * spec.kv_elem_bytes
+    )
     if kv_bytes >= INT32_LIMIT:
         return False, (
             f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
             f"limit ({INT32_LIMIT} B)"
         )
     qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= INT32_LIMIT:
+    if spec.ragged:
+        # A ragged Q goes through a buffer resource whose num_records AND voffset
+        # are both i32 BYTES, so the ceiling is half the element count the
+        # element-offset paths get. O stays element-addressed even here.
+        qo_bytes = qo_elems * 2
+        if qo_bytes >= INT32_LIMIT:
+            return False, (
+                f"Q/O extent is {qo_bytes} B, at or past the 32-bit "
+                f"buffer-resource limit ({INT32_LIMIT} B)"
+            )
+    elif qo_elems >= INT32_LIMIT:
         return False, (
             f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
             f"limit ({INT32_LIMIT})"
@@ -653,9 +777,12 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
 __all__ = [
     "AttentionDenseSpec",
     "DEFAULT_DENSE_TILE_GEOMETRY",
+    "DENSE_MAX_SCALE",
+    "DENSE_MIN_SCALE",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
     "attention_dense_cache_key",
+    "check_dense_scale",
     "check_dense_spec_preflight",
     "partial_tile_reason",
 ]

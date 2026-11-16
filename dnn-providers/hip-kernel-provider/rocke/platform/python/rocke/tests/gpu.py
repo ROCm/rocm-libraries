@@ -35,6 +35,7 @@ __all__ = [
     "current_device_arch",
     "current_device_arch_in",
     "launch_with_buffers",
+    "probe_device_arch",
     "run_on_device",
     "supported_device_arch",
 ]
@@ -51,9 +52,10 @@ _SIGNATURE_DTYPE = {
 }
 
 
-def _probe_device_arch() -> tuple[str | None, str]:
+def probe_device_arch() -> tuple[str | None, str]:
     """``(arch, "")`` for HIP's current device, the one rocke's runtime keeps and
-    launches kernels on, or ``(None, reason)`` when there is no GPU."""
+    launches kernels on, or ``(None, reason)`` when there is no GPU. Never skips;
+    for callers that decide themselves what to do without a GPU."""
     try:
         from rocke.runtime import hip_module as hip
 
@@ -68,7 +70,7 @@ def _probe_device_arch() -> tuple[str | None, str]:
 def current_device_arch() -> str:
     """The arch of the GPU this process launches on: HIP's current device, the one
     rocke's runtime keeps and launches kernels on. Skips when there is no GPU."""
-    arch, absence = _probe_device_arch()
+    arch, absence = probe_device_arch()
     if arch is None:
         pytest.skip(absence)
     return arch
@@ -78,7 +80,7 @@ def current_device_arch_in(arches: Collection[str], subject: str = "this test") 
     """The current GPU's arch when it is one of `arches`; otherwise skip, naming `subject`
     and the GPU found. Fails instead when ``ROCKE_REQUIRE_<ARCH>=1`` is set for an arch
     in `arches` and the current GPU is not that arch (see the module docstring)."""
-    arch, absence = _probe_device_arch()
+    arch, absence = probe_device_arch()
     found = arch or absence
     for required in arches:
         variable = f"ROCKE_REQUIRE_{required.upper()}"
