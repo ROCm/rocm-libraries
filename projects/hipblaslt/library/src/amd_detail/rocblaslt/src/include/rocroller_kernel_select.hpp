@@ -9,6 +9,8 @@
 
 #include "rocroller_kernel_match.hpp"
 
+#include <Tensile/ContractionSolution.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <vector>
@@ -137,5 +139,37 @@ RocRollerWalkResult walkRocRollerTiles(const std::vector<RocRollerSelectedTile>&
             continue;
         result.picks.push_back(match);
     }
+    // The count check above runs at the start of the next tile. A count that
+    // fills on the last ranked tile has no next tile, and is still CountReached.
+    if(requestedAlgoCount >= 0 && result.picks.size() >= static_cast<size_t>(requestedAlgoCount))
+        return stopAt(RocRollerWalkStop::CountReached, ranked.size());
     return stopAt(RocRollerWalkStop::Exhausted, ranked.size());
+}
+
+// True when a kernel dropped only because its MX scale layout does not fit
+// is the kernel rocRoller would build for this tile.
+inline bool rocRollerLayoutRejectionCoversTile(const std::vector<RocRollerKernelFields>& rejected,
+                                               const RocRollerSelectedTile&              tile)
+{
+    for(const auto& kernel : rejected)
+        if(rocRollerKernelMatchesTile(kernel, tile))
+            return true;
+    return false;
+}
+
+// The fields a checked-in rocRoller kernel declares in its custom.config.
+inline RocRollerKernelFields rocRollerKernelFields(const TensileLite::ContractionSolution& solution)
+{
+    const auto&           kernel = solution.customKernel;
+    RocRollerKernelFields fields;
+    fields.tileM   = static_cast<int>(kernel.macrotile.x);
+    fields.tileN   = static_cast<int>(kernel.macrotile.y);
+    fields.tileK   = static_cast<int>(kernel.macrotile.z);
+    fields.unroll  = kernel.unroll;
+    fields.streamK = kernel.workspaceType == TensileLite::CustomWorkspaceType::RocRollerStreamK;
+    fields.workgroupMapping
+        = std::any_of(kernel.args.begin(), kernel.args.end(), [](auto const& arg) {
+              return arg.semantic == TensileLite::CustomArgSemantic::RR_WorkgroupMapping;
+          });
+    return fields;
 }

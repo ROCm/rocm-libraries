@@ -8,47 +8,6 @@
 
 #include "solution_selection.hpp"
 
-namespace
-{
-    // DataTypeInfo::Get().elementBits for the types rocRoller is handed.
-    size_t elementBits(hipDataType type)
-    {
-        switch(type)
-        {
-        case HIP_R_4F_E2M1:
-            return 4;
-        case HIP_R_6F_E2M3:
-        case HIP_R_6F_E3M2:
-            return 6;
-        case HIP_R_8F_E4M3:
-        case HIP_R_8F_E5M2:
-            return 8;
-        case HIP_R_16F:
-        case HIP_R_16BF:
-            return 16;
-        case HIP_R_32F:
-            return 32;
-        case HIP_R_64F:
-            return 64;
-        default:
-            return 0;
-        }
-    }
-
-    // RocRollerGemmKernel::exceedsBufferAddressingLimit: one buffer descriptor
-    // per tensor, whose 32-bit byte count wraps at 4 GiB.
-    bool exceedsBufferAddressingLimit(const KernelType& kernelType, size_t m, size_t n, size_t k)
-    {
-        constexpr size_t maxBufferBytes = size_t(1) << 32;
-        auto             bytesOf
-            = [](size_t elems, hipDataType type) { return (elems * elementBits(type) + 7u) / 8u; };
-        return bytesOf(m * k, kernelType.typeA) >= maxBufferBytes
-               || bytesOf(k * n, kernelType.typeB) >= maxBufferBytes
-               || bytesOf(m * n, kernelType.typeC) >= maxBufferBytes
-               || bytesOf(m * n, kernelType.typeD) >= maxBufferBytes;
-    }
-} // namespace
-
 rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& prob,
                                             std::vector<RocRollerSelectedTile>& tiles)
 {
@@ -65,7 +24,8 @@ rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& p
         return rocblaslt_status_invalid_value;
 
     // rocRoller refuses every tile of such a problem.
-    if(exceedsBufferAddressingLimit(kernelType, prob.m, prob.n, prob.k))
+    if(rocRollerOperandExceeds4GiB(
+           kernelType.typeA, kernelType.typeB, kernelType.typeC, kernelType.typeD, prob.m, prob.n, prob.k))
         return rocblaslt_status_success;
 
     // Same inputs parameter_selection.cpp feeds preferredUnrolling.

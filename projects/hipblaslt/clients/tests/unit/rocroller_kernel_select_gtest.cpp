@@ -7,6 +7,8 @@
 // library's internal header of the same name.
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_kernel_select.hpp"
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_selected.hpp"
+#include "../../../library/src/amd_detail/rocblaslt/src/rocroller/include/solution_selection.hpp"
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
@@ -284,6 +286,58 @@ TEST(HostUnitRocRollerKernelSelect, smoke_NoTilesNoKernels)
     const auto none = walk({t16}, {});
     EXPECT_TRUE(none.picks.empty());
     EXPECT_EQ(none.stop, RocRollerWalkStop::NoKernel);
+}
+
+TEST(HostUnitRocRollerKernelSelect, smoke_CountReachedOnTheLastTile)
+{
+    const auto r = walk({t16}, {k16}, 1);
+    ASSERT_EQ(r.picks.size(), 1u);
+    EXPECT_EQ(r.picks[0], 0u);
+    EXPECT_EQ(r.stop, RocRollerWalkStop::CountReached);
+    EXPECT_EQ(r.stopTile, 1u);
+}
+
+TEST(HostUnitRocRollerKernelSelect, smoke_LayoutRejectionCoversTheMatchingTile)
+{
+    EXPECT_TRUE(rocRollerLayoutRejectionCoversTile({k16}, t16));
+    EXPECT_FALSE(rocRollerLayoutRejectionCoversTile({k32}, t16));
+    EXPECT_FALSE(rocRollerLayoutRejectionCoversTile({}, t16));
+}
+
+TEST(HostUnitRocRollerKernelSelect, smoke_PreferredUnrollingIsFourOnlyForLargeFp4)
+{
+    const WorkGroupTileSize big{64, 64, 128};
+    const WorkGroupTileSize small{32, 32, 128};
+    EXPECT_EQ(preferredUnrolling(HIP_R_4F_E2M1, HIP_R_4F_E2M1, big, false, false), 4);
+    EXPECT_EQ(preferredUnrolling(HIP_R_4F_E2M1, HIP_R_4F_E2M1, big, true, true), 2);
+    EXPECT_EQ(preferredUnrolling(HIP_R_4F_E2M1, HIP_R_4F_E2M1, small, false, false), 2);
+    EXPECT_EQ(preferredUnrolling(HIP_R_8F_E4M3, HIP_R_8F_E4M3, big, false, false), 2);
+}
+
+TEST(HostUnitRocRollerKernelSelect, smoke_FourGiBOperandExceedsTheBuffer)
+{
+    // FP32 is 4 bytes, so 65536 x 16384 is 4 GiB.
+    EXPECT_TRUE(rocRollerOperandExceeds4GiB(
+        HIP_R_8F_E4M3, HIP_R_8F_E4M3, HIP_R_32F, HIP_R_32F, 65536, 16384, 128));
+    EXPECT_FALSE(rocRollerOperandExceeds4GiB(
+        HIP_R_8F_E4M3, HIP_R_8F_E4M3, HIP_R_16F, HIP_R_16F, 1024, 1024, 1024));
+}
+
+TEST(HostUnitRocRollerKernelSelect, smoke_KernelFieldsReadTheSolution)
+{
+    TensileLite::ContractionSolution solution;
+    solution.customKernel.macrotile     = dim3(64, 32, 128);
+    solution.customKernel.unroll        = 4;
+    solution.customKernel.workspaceType = TensileLite::CustomWorkspaceType::RocRollerStreamK;
+    solution.customKernel.args.push_back(
+        {TensileLite::CustomArgType::int32, TensileLite::CustomArgSemantic::RR_WorkgroupMapping});
+    const auto fields = rocRollerKernelFields(solution);
+    EXPECT_EQ(fields.tileM, 64);
+    EXPECT_EQ(fields.tileN, 32);
+    EXPECT_EQ(fields.tileK, 128);
+    EXPECT_EQ(fields.unroll, 4);
+    EXPECT_TRUE(fields.streamK);
+    EXPECT_TRUE(fields.workgroupMapping);
 }
 
 TEST(HostUnitRocRollerKernelSelect, smoke_ZeroCountKeepsNothing)
