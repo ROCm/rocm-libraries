@@ -203,6 +203,12 @@ class _attention(torch.autograd.Function):
     # DEBUG_MASK_DTYPE = torch.int32
     # DEBUG_MASK_DTYPE = torch.float32
 
+    # `causal` is a bool, a CausalType, a window `(left, right)`, or a window
+    # with the principal diagonal `(left, right, p)`; see
+    # aotriton_flash.split_principal_diagonal. It is forwarded untouched to
+    # attn_fwd / attn_bwd (ctx.causal carries it to the backward), which is
+    # where p becomes VarlenBits::principal_diagonal_choice, so nothing here
+    # has to know about it.
     @staticmethod
     def forward(ctx, q, k, v, b, causal, sm_scale, dropout_p,
                 attn_extra_args=AttentionExtraArgs()):

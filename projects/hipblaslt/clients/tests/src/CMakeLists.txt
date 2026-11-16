@@ -48,11 +48,12 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/row_order_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/host_memory_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fp6_tile128x4_args_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/handwritten_algo_reuse_gtest.cpp
 )
 
 if(NOT WIN32)

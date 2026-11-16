@@ -27,6 +27,7 @@
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -230,7 +231,7 @@ namespace TensileLite
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
-                ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
+                ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -291,10 +292,11 @@ namespace TensileLite
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
                 ("world",                    po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: device count of each problem, one value per problem-size.")
-                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: extent that goes all-to-all, one value per problem-size: leading feature (M) count for GemmA2A.")
+                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: extent that goes all-to-all, one value per problem-size: leading feature (M) count for GemmA2A, reduction (K) count for A2AGemm (defaults to K).")
                 ("world-filter",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: run only the problems whose world is listed; empty runs all.")
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
+                ("fused-a2a-sdma-rotate",    po::value<int>(), "Fused A2A: move each remote peer SDMA queue this many steps along the even xGMI engines 2,4,...,14 from its KFD recommendation; nonzero requires 14 xGMI SDMA engines. The loopback queue uses engine 0. Defaults to -1.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -822,6 +824,10 @@ namespace TensileLite
                 throw std::runtime_error("[fused-a2a] --use-user-args is not supported.");
             if(!args["library-update-file"].as<std::string>().empty())
                 throw std::runtime_error("[fused-a2a] --library-update-file is not supported.");
+            if(args["fused-a2a"].as<FusedA2A>() == FusedA2A::A2AGemm
+               && args["batch-mode"].as<int>() != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] A2AGemm supports only --batch-mode=0 (strided).");
             if(args["rotating-buffer-size"].as<int32_t>() > 0
                && args["rotating-buffer-mode"].as<int32_t>() == 1)
                 throw std::runtime_error(
@@ -840,7 +846,29 @@ int main(int argc, const char* argv[])
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
+    auto const mainStart     = TimingClock::now();
+    auto const mainStartWall = std::chrono::system_clock::now();
+
+    // Declared first => destroyed last among main()'s locals. Stamps the wall clock once
+    // every local (dataInit, library, hip buffers, ...) has been destroyed so the Python
+    // side can separate "locals destruction" from "static destruction / process exit".
+    struct LocalsDestroyedStamp
+    {
+        ~LocalsDestroyedStamp()
+        {
+            if(g_timingInstrumentationEnabled)
+            {
+                auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              std::chrono::system_clock::now().time_since_epoch())
+                              .count();
+                std::clog << "TIMING_TS:main_locals_destroyed:" << ns << "\n";
+                std::clog.flush();
+            }
+        }
+    } localsDestroyedStamp;
+
     auto args = parse_args(argc, argv);
+    auto const argsParsed = TimingClock::now();
 
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
@@ -854,17 +882,37 @@ int main(int argc, const char* argv[])
     std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
     srand(seed);
 
-    ClientProblemFactory problemFactory(args);
-
+    // Timing buffer is initialized before the problem factory so timers inside it work.
+    auto const preCalibration = TimingClock::now();
     initTimingBuffer();
     calibrateTimingOverhead();
+    auto const calibrated = TimingClock::now();
 
-    bool fusedA2A = args["fused-gemm-a2a"].as<bool>();
+    ClientProblemFactory problemFactory(args);
+    auto const factoryDone = TimingClock::now();
+    // These happen before the timing buffer exists; record them now.
+    if(g_timingInstrumentationEnabled)
+    {
+        g_timingBuffer.push_back(TimingRec{
+            "main_parse_args",
+            std::chrono::duration<double, std::milli>(argsParsed - mainStart).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_timing_calibration",
+            std::chrono::duration<double, std::milli>(calibrated - preCalibration).count()});
+        g_timingBuffer.push_back(TimingRec{
+            "main_problem_factory",
+            std::chrono::duration<double, std::milli>(factoryDone - calibrated).count()});
+    }
+
+    const FusedA2A fusedMode = args["fused-a2a"].as<FusedA2A>();
+    bool           fusedA2A  = fusedMode != FusedA2A::Disabled;
     if(fusedA2A)
         checkFusedA2AArgs(args);
     auto const& worldFilter = args["world-filter"].as<std::vector<int>>();
     if(!fusedA2A && !worldFilter.empty())
-        throw std::runtime_error("--world-filter applies only with --fused-gemm-a2a");
+        throw std::runtime_error("--world-filter applies only with --fused-a2a");
+    if(!fusedA2A && args.count("fused-a2a-sdma-rotate"))
+        throw std::runtime_error("--fused-a2a-sdma-rotate applies only with --fused-a2a");
 
     auto problems        = problemFactory.problems();
     int  firstProblemIdx = args["problem-start-idx"].as<int>();
@@ -901,12 +949,16 @@ int main(int argc, const char* argv[])
 
         std::vector<int> deviceIds(world);
         std::iota(deviceIds.begin(), deviceIds.end(), args["device-idx"].as<int>());
+        const int sdmaRotate = args.count("fused-a2a-sdma-rotate")
+                                   ? args["fused-a2a-sdma-rotate"].as<int>()
+                                   : kFusedA2ASdmaRotateDefault;
         for(int id : deviceIds)
             devices.push_back(
                 std::make_shared<DeviceContext>(id,
                                                 args["use-default-stream"].as<bool>(),
                                                 fusedA2A ? kCommFlagsBytes : 0,
-                                                fusedA2A ? deviceIds : std::vector<int>{}));
+                                                fusedA2A ? deviceIds : std::vector<int>{},
+                                                sdmaRotate));
     }
     std::shared_ptr<DeviceContext>              device0 = devices[0];
     std::vector<std::shared_ptr<DeviceContext>> active;
@@ -1021,8 +1073,9 @@ int main(int argc, const char* argv[])
     }
 
     MetaRunListener listeners;
-    std::shared_ptr<BenchmarkTimer> benchmarkTimer;
-    float                           flushTimeMs{};
+    std::shared_ptr<BenchmarkTimer>        benchmarkTimer;
+    std::shared_ptr<SynchronizerValidator> synchronizerValidator;
+    float                                  flushTimeMs{};
 
     {
         ScopedTimer timer("listener_setup");
@@ -1040,7 +1093,8 @@ int main(int argc, const char* argv[])
             // Before ReferenceValidator: postSolution runs listeners in
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
-            listeners.addListener(std::make_shared<SynchronizerValidator>(args));
+            synchronizerValidator = std::make_shared<SynchronizerValidator>(args);
+            listeners.addListener(synchronizerValidator);
             listeners.addListener(std::make_shared<ReferenceValidator>(args));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);
@@ -1107,12 +1161,19 @@ int main(int argc, const char* argv[])
             size_t rotationLaunchIdx = 0;
             for(int problemIdx : problemIdxs)
             {
+                // Declared first => destroyed last: problem_total covers the whole body,
+                // problem_teardown covers destruction of the body's locals (see mark() below).
+                ScopedTimer          problemTotalTimer("problem_total");
+                ScopeTeardownTimer   problemTeardownTimer("problem_teardown");
                 auto problem = problems[problemIdx].get();
                 active.assign(devices.begin(), devices.begin() + problem->world());
 
-                reporters->report(ResultKey::ProblemIndex, problemIdx);
-                reporters->report(ResultKey::ProblemProgress,
-                                  concatenate(problemIdx, "/", lastProblemIdx));
+                {
+                    ScopedTimer timer("problem_report_index");
+                    reporters->report(ResultKey::ProblemIndex, problemIdx);
+                    reporters->report(ResultKey::ProblemProgress,
+                                      concatenate(problemIdx, "/", lastProblemIdx));
+                }
 
                 {
                     ScopedTimer timer("pre_problem");
@@ -1243,6 +1304,8 @@ int main(int argc, const char* argv[])
                 bool resetInput = true;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
+                    ScopedTimer        solutionTotalTimer("solution_total");
+                    ScopeTeardownTimer solutionTeardownTimer("solution_teardown");
                     std::shared_ptr<ContractionSolution> solution;
                     {
                         ScopedTimer timer("solution_selection");
@@ -1263,7 +1326,12 @@ int main(int argc, const char* argv[])
                         listeners.preSolution(solution.get());
                     }
                     bool deviceLost = false;
-                    if(solutionIterator->runCurrentSolution() && runKernels)
+                    bool runThisSolution = false;
+                    {
+                        ScopedTimer timer("run_current_solution_check");
+                        runThisSolution = solutionIterator->runCurrentSolution() && runKernels;
+                    }
+                    if(runThisSolution)
                     {
                         try
                         {
@@ -1271,14 +1339,22 @@ int main(int argc, const char* argv[])
                             resetCommBuffers(*problem, active);
                             while(listeners.needMoreRunsInSolution())
                             {
+                                ScopedTimer        runIterTotalTimer("run_iteration_total");
+                                ScopeTeardownTimer runIterTeardownTimer("run_iteration_teardown");
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
+                                    struct ResetScope
+                                    {
+                                        ResetScope() { g_inGpuInputReset = true; }
+                                        ~ResetScope() { g_inGpuInputReset = false; }
+                                    } resetScope;
                                     forEachDevice(active, [&](DeviceContext& ctx) {
                                         ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(problem);
                                     });
                                 }
                                 resetInput = true;
+                                synchronizerValidator->beginRunIteration();
 
                                 std::vector<std::vector<std::vector<KernelInvocation>>> kernels;
                                 {
@@ -1318,12 +1394,14 @@ int main(int argc, const char* argv[])
                                         }
                                 }
 
+                                auto const   warmupSetupStart  = TimingClock::now();
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
                                 size_t       warmupEventCount  = kernels[0][0].size();
                                 TimingEvents warmupStartEvents(
                                     active, warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(
                                     active, warmupInvocations, warmupEventCount);
+                                recordTimingSince("warmup_events_setup", warmupSetupStart);
 
                                 // I-cache rotation counter: increments per launchKernels call
                                 // and selects which hipModule_t copy services the next launch.
@@ -1358,12 +1436,29 @@ int main(int argc, const char* argv[])
                                     }
                                 };
 
+                                // Whether this run iteration launched anything (for the
+                                // end-of-iteration attribution sync below).
+                                bool iterationLaunched = false;
+
                                 if(warmupInvocations > 0)
                                 {
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         listeners.preWarmup();
                                         launchAll(&warmupStartEvents, &warmupStopEvents, 0);
+                                        iterationLaunched = true;
+                                    }
+
+                                    // Attribution only: wait for warmup 0 under its own timer, so
+                                    // the validators' readbacks do not absorb the kernel's runtime.
+                                    // Not done without instrumentation, to keep the launch/host
+                                    // overlap of production runs.
+                                    if(g_timingInstrumentationEnabled)
+                                    {
+                                        ScopedTimer timer("warmup_first_sync");
+                                        forEachDevice(active, [](DeviceContext& ctx) {
+                                            HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                        });
                                     }
 
                                     {
@@ -1386,6 +1481,7 @@ int main(int argc, const char* argv[])
                                 listeners.preProfiler();
                                 rotateAndSelect();
                                 launchAll(&ProfilerStartEvents, &ProfilerStopEvents, 0);
+                                iterationLaunched = true;
                                 listeners.postProfiler();
 #endif
 
@@ -1396,15 +1492,25 @@ int main(int argc, const char* argv[])
 
                                 {
                                     ScopedTimer timer("benchmark_runs");
-                                    listeners.preSyncs();
+                                    {
+                                        ScopedTimer preSyncsTimer("benchmark_pre_syncs");
+                                        listeners.preSyncs();
+                                    }
                                     if(enq)
                                         for(int i = 0; i < syncs; i++)
                                         {
+                                            // Declared first => destroyed last: times the event
+                                            // destruction at the end of the iteration (mark() below).
+                                            ScopeTeardownTimer eventsTeardownTimer(
+                                                "benchmark_events_teardown");
+                                            auto const eventsSetupStart = TimingClock::now();
                                             TimingEvents startEvents(active, enq, eventCount);
                                             TimingEvents stopEvents(active, enq, eventCount);
                                             std::vector<size_t> slots;
                                             for(size_t j = 0; j < std::min(enq, slotCount); j++)
                                                 slots.push_back((launchIdx + j) % slotCount);
+                                            recordTimingSince("benchmark_events_setup",
+                                                              eventsSetupStart);
 
                                             {
                                                 ScopedTimer kernelTimer("gpu_kernel_execution");
@@ -1414,6 +1520,7 @@ int main(int argc, const char* argv[])
                                                 {
                                                     rotateAndSelect();
                                                     launchAll(nullptr, nullptr, 0);
+                                                    iterationLaunched = true;
 
                                                     if(icacheFlush)
                                                     {
@@ -1427,17 +1534,46 @@ int main(int argc, const char* argv[])
 
                                                 listeners.postEnqueues(startEvents, stopEvents);
                                             }
-                                            listeners.validateEnqueues(
-                                                slots, startEvents, stopEvents);
+                                            {
+                                                ScopedTimer validateEnqueuesTimer(
+                                                    "benchmark_validate_enqueues");
+                                                listeners.validateEnqueues(
+                                                    slots, startEvents, stopEvents);
+                                            }
+                                            eventsTeardownTimer.mark();
                                         }
 
-                                    listeners.postSyncs();
+                                    {
+                                        ScopedTimer postSyncsTimer("benchmark_post_syncs");
+                                        listeners.postSyncs();
+                                    }
+                                }
+
+                                // Attribution only: wait for everything this iteration queued
+                                // (e.g. warmups 1..N-1 with SyncsPerBenchmark: 0) under its own
+                                // timer. Otherwise the next solution's first blocking call (e.g.
+                                // its input reset or GPU readback validation) or an
+                                // end-of-iteration check would absorb it. Inside the try: a kernel
+                                // fault surfacing here takes the device-lost path below.
+                                if(g_timingInstrumentationEnabled && iterationLaunched)
+                                {
+                                    ScopedTimer timer("run_iteration_sync");
+                                    forEachDevice(active, [](DeviceContext& ctx) {
+                                        HIP_CHECK_EXC(hipStreamSynchronize(ctx.stream));
+                                    });
                                 }
 
                                 if(useUserArgs)
                                 {
                                     solution->relaseDeviceUserArgs(dUA, dUAHost);
                                 }
+
+                                // Check the Synchronizer after all of this iteration's launches,
+                                // before the next iteration's input reset (GuardPageAll runs two
+                                // iterations). The verdict is reported in postSolution. It can
+                                // throw, so it follows the release of the user args.
+                                synchronizerValidator->checkRunIteration();
+                                runIterTeardownTimer.mark();
                             }
                             forEachDevice(active, [](DeviceContext&) {
                                 HIP_CHECK_EXC(hipDeviceSynchronize());
@@ -1471,6 +1607,7 @@ int main(int argc, const char* argv[])
                         ScopedTimer timer("post_solution");
                         listeners.postSolution();
                     }
+                    solutionTeardownTimer.mark();
 
                     if(deviceLost || (exitOnError && listeners.error() > 0))
                     {
@@ -1484,6 +1621,7 @@ int main(int argc, const char* argv[])
                     ScopedTimer timer("post_problem");
                     listeners.postProblem();
                 }
+                problemTeardownTimer.mark();
             }
         }
 
@@ -1501,10 +1639,22 @@ int main(int argc, const char* argv[])
     // has already drained and cleared it, so the record would be lost.
     {
         auto flushStart = TimingClock::now();
+        recordTimingSince("main_total", mainStart);
         flushTimingBuffer();
         auto flushMs = std::chrono::duration<double, std::milli>(
             TimingClock::now() - flushStart).count();
         std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+        if(g_timingInstrumentationEnabled)
+        {
+            // Wall-clock stamps so the Python side can split process startup / teardown.
+            auto toNs = [](std::chrono::system_clock::time_point t) {
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch())
+                    .count();
+            };
+            std::clog << "TIMING_TS:main_start:" << toNs(mainStartWall) << "\n"
+                      << "TIMING_TS:main_end:" << toNs(std::chrono::system_clock::now()) << "\n";
+            std::clog.flush();
+        }
     }
 
     // error range in shell is [0-255]
