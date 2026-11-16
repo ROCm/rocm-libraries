@@ -1,0 +1,28 @@
+# Integration test configuration for the FlyDSL SDPA forward engines (hipkernel:flydsl_sdpa_*)
+# (one file for all six engines: src/CMakeLists.txt writes each (engine, arch) copy with its own header line)
+# Filters use GTest-style globs: * matches any sequence of characters
+# The first matching skip entry wins.
+
+[meta]
+version = 1
+
+# -- SdpaFwdPlan known engine refusals --
+# SdpaFwdPlan cases whose run-time attention scale is zero. The engines refuse them at execute.
+[[test_skips]]
+filters = [
+    "full_SdpaFwdPlan_Bm_ScRt.bf16_7ce8c20b0aa9dab3",
+    "full_SdpaFwdPlan_Bm_ScRt.bf16_eb6d98791c63695b",
+    "standard_SdpaFwdPlan_Bm_ScRt.bf16_83e906024b68c435",
+    "standard_SdpaFwdPlan_Bm_ScRt.bf16_d78679e2a34d1c47",
+]
+reason = "ALMIOPEN-3247: a run-time attention scale of zero or below is refused at execute; the harness cannot accept an expected refusal yet"
+
+# SdpaFwdPlan cases with a bias whose run-time attention scale is negative. The engines refuse them at execute.
+[[test_skips]]
+filters = [
+    "comprehensive_SdpaFwdPlan_Bias_ScRt_Stats.bf16_00e130a802bf3019",
+    "full_SdpaFwdPlan_Bias_ScRt_Stats.bf16_12bf5c234e92fd7a",
+    "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_195fa1067d4d3335",
+    "standard_SdpaFwdPlan_Bias_ScRt_Stats.bf16_e255b647ffccf099",
+]
+reason = "ALMIOPEN-3247: a run-time attention scale of zero or below is refused at execute; the harness cannot accept an expected refusal yet"
