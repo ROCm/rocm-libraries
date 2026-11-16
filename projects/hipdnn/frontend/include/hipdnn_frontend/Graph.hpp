@@ -71,6 +71,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1010,6 +1011,18 @@ private:
         auto tensor = std::make_shared<TensorAttributes>();
         tensor->set_name(name).set_is_virtual(true);
         return tensor;
+    }
+
+    // Names an input tensor after its node when the tensor has no name yet. A null tensor is
+    // skipped so that the node's pre_validate_node() reports it as a missing input.
+    static void nameInputIfUnset(const std::shared_ptr<TensorAttributes>& tensor,
+                                 const std::string& nodeName,
+                                 std::string_view suffix)
+    {
+        if(tensor && tensor->get_name().empty())
+        {
+            tensor->set_name(std::string(nodeName).append(suffix));
+        }
     }
 
     /// Whether the engine advertises the SUPPORTS_EXECUTION_PLAN_SERIALIZATION
@@ -5723,24 +5736,10 @@ public:
             attributes.set_name("Layernorm_" + std::to_string(_sub_nodes.size()));
         }
 
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
-        if(scale->get_name().empty())
-        {
-            scale->set_name(attributes.get_name() + "::SCALE");
-        }
-        if(bias->get_name().empty())
-        {
-            bias->set_name(attributes.get_name() + "::BIAS");
-        }
-
-        auto epsilon = attributes.get_epsilon();
-        if(epsilon && epsilon->get_name().empty())
-        {
-            epsilon->set_name(attributes.get_name() + "::EPSILON");
-        }
+        nameInputIfUnset(x, attributes.get_name(), "::X");
+        nameInputIfUnset(scale, attributes.get_name(), "::SCALE");
+        nameInputIfUnset(bias, attributes.get_name(), "::BIAS");
+        nameInputIfUnset(attributes.get_epsilon(), attributes.get_name(), "::EPSILON");
 
         auto y = outputTensor(attributes.get_name() + "::Y");
 
@@ -5805,34 +5804,12 @@ public:
         {
             attributes.set_name("LayernormBackward_" + std::to_string(_sub_nodes.size()));
         }
-        if(dy->get_name().empty())
-        {
-            dy->set_name(attributes.get_name() + "::DY");
-        }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
-        if(scale->get_name().empty())
-        {
-            scale->set_name(attributes.get_name() + "::SCALE");
-        }
-
-        auto mean = attributes.get_mean();
-        if(mean && mean->get_name().empty())
-        {
-            mean->set_name(attributes.get_name() + "::MEAN");
-        }
-        auto invVariance = attributes.get_inv_variance();
-        if(invVariance && invVariance->get_name().empty())
-        {
-            invVariance->set_name(attributes.get_name() + "::INV_VARIANCE");
-        }
-        auto epsilon = attributes.get_epsilon();
-        if(epsilon && epsilon->get_name().empty())
-        {
-            epsilon->set_name(attributes.get_name() + "::EPSILON");
-        }
+        nameInputIfUnset(dy, attributes.get_name(), "::DY");
+        nameInputIfUnset(x, attributes.get_name(), "::X");
+        nameInputIfUnset(scale, attributes.get_name(), "::SCALE");
+        nameInputIfUnset(attributes.get_mean(), attributes.get_name(), "::MEAN");
+        nameInputIfUnset(attributes.get_inv_variance(), attributes.get_name(), "::INV_VARIANCE");
+        nameInputIfUnset(attributes.get_epsilon(), attributes.get_name(), "::EPSILON");
 
         auto dx = outputTensor(attributes.get_name() + "::DX");
         auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
@@ -6053,10 +6030,7 @@ public:
         {
             attributes.set_name("Pointwise_" + std::to_string(_sub_nodes.size()));
         }
-        if(in0->get_name().empty())
-        {
-            in0->set_name(attributes.get_name() + "::IN_0");
-        }
+        nameInputIfUnset(in0, attributes.get_name(), "::IN_0");
         auto out0 = outputTensor(attributes.get_name() + "::OUT_0");
 
         attributes.set_input_0(std::move(in0));
@@ -6089,14 +6063,8 @@ public:
         {
             attributes.set_name("Pointwise_" + std::to_string(_sub_nodes.size()));
         }
-        if(in0->get_name().empty())
-        {
-            in0->set_name(attributes.get_name() + "::IN_0");
-        }
-        if(in1->get_name().empty())
-        {
-            in1->set_name(attributes.get_name() + "::IN_1");
-        }
+        nameInputIfUnset(in0, attributes.get_name(), "::IN_0");
+        nameInputIfUnset(in1, attributes.get_name(), "::IN_1");
         auto out0 = outputTensor(attributes.get_name() + "::OUT_0");
 
         attributes.set_input_0(std::move(in0));
@@ -6133,18 +6101,9 @@ public:
         {
             attributes.set_name("Pointwise_" + std::to_string(_sub_nodes.size()));
         }
-        if(in0->get_name().empty())
-        {
-            in0->set_name(attributes.get_name() + "::IN_0");
-        }
-        if(in1->get_name().empty())
-        {
-            in1->set_name(attributes.get_name() + "::IN_1");
-        }
-        if(in2->get_name().empty())
-        {
-            in2->set_name(attributes.get_name() + "::IN_2");
-        }
+        nameInputIfUnset(in0, attributes.get_name(), "::IN_0");
+        nameInputIfUnset(in1, attributes.get_name(), "::IN_1");
+        nameInputIfUnset(in2, attributes.get_name(), "::IN_2");
         auto out0 = outputTensor(attributes.get_name() + "::OUT_0");
 
         attributes.set_input_0(std::move(in0));
@@ -6165,7 +6124,11 @@ public:
      *
      * @param x Input tensor (arbitrary shape)
      * @param attributes Configuration specifying the reduction mode
-     * @return y: Output tensor (graph-managed, shape inferred during build)
+     * @return y: Output tensor (graph-managed)
+     *
+     * @note The returned `y` tensor's dimensions must be set explicitly to the reduced
+     *       shape with `set_dim(...)` before graph validation/build. If `y` dimensions
+     *       are provided and strides are omitted, hipDNN infers the tensor strides.
      *
      * @see ReductionAttributes, ReductionMode
      */
@@ -6176,10 +6139,7 @@ public:
         {
             attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
         }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
+        nameInputIfUnset(x, attributes.get_name(), "::X");
         auto y = outputTensor(attributes.get_name() + "::Y");
 
         attributes.set_x(std::move(x));
@@ -6212,14 +6172,8 @@ public:
         {
             attributes.set_name("Reduction_" + std::to_string(_sub_nodes.size()));
         }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
-        if(y->get_name().empty())
-        {
-            y->set_name(attributes.get_name() + "::Y");
-        }
+        nameInputIfUnset(x, attributes.get_name(), "::X");
+        nameInputIfUnset(y, attributes.get_name(), "::Y");
 
         attributes.set_x(std::move(x));
         attributes.set_y(y);
@@ -6257,14 +6211,8 @@ public:
         {
             attributes.set_name("Matmul_" + std::to_string(_sub_nodes.size()));
         }
-        if(a->get_name().empty())
-        {
-            a->set_name(attributes.get_name() + "::A");
-        }
-        if(b->get_name().empty())
-        {
-            b->set_name(attributes.get_name() + "::B");
-        }
+        nameInputIfUnset(a, attributes.get_name(), "::A");
+        nameInputIfUnset(b, attributes.get_name(), "::B");
 
         auto c = outputTensor(attributes.get_name() + "::C");
 
@@ -6308,26 +6256,11 @@ public:
         {
             attributes.set_name("MoeGroupedMatmul_" + std::to_string(_sub_nodes.size()));
         }
-        if(token->get_name().empty())
-        {
-            token->set_name(attributes.get_name() + "::TOKEN");
-        }
-        if(weight->get_name().empty())
-        {
-            weight->set_name(attributes.get_name() + "::WEIGHT");
-        }
-        if(firstTokenOffset->get_name().empty())
-        {
-            firstTokenOffset->set_name(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
-        }
-        if(tokenIndex && tokenIndex->get_name().empty())
-        {
-            tokenIndex->set_name(attributes.get_name() + "::TOKEN_INDEX");
-        }
-        if(tokenKs && tokenKs->get_name().empty())
-        {
-            tokenKs->set_name(attributes.get_name() + "::TOKEN_KS");
-        }
+        nameInputIfUnset(token, attributes.get_name(), "::TOKEN");
+        nameInputIfUnset(weight, attributes.get_name(), "::WEIGHT");
+        nameInputIfUnset(firstTokenOffset, attributes.get_name(), "::FIRST_TOKEN_OFFSET");
+        nameInputIfUnset(tokenIndex, attributes.get_name(), "::TOKEN_INDEX");
+        nameInputIfUnset(tokenKs, attributes.get_name(), "::TOKEN_KS");
 
         auto output = outputTensor(attributes.get_name() + "::OUTPUT");
         attributes.set_token(std::move(token));
@@ -6368,20 +6301,9 @@ public:
         {
             attributes.set_name("MoeGroupedMatmulBwd_" + std::to_string(_sub_nodes.size()));
         }
-        // Null tensors are tolerated here so the error surfaces from pre_validate_node() as a
-        // missing-input error rather than a crash while auto-naming.
-        if(dOutput && dOutput->get_name().empty())
-        {
-            dOutput->set_name(attributes.get_name() + "::DOUTPUT");
-        }
-        if(token && token->get_name().empty())
-        {
-            token->set_name(attributes.get_name() + "::TOKEN");
-        }
-        if(firstTokenOffset && firstTokenOffset->get_name().empty())
-        {
-            firstTokenOffset->set_name(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
-        }
+        nameInputIfUnset(dOutput, attributes.get_name(), "::DOUTPUT");
+        nameInputIfUnset(token, attributes.get_name(), "::TOKEN");
+        nameInputIfUnset(firstTokenOffset, attributes.get_name(), "::FIRST_TOKEN_OFFSET");
 
         auto dweight = outputTensor(attributes.get_name() + "::DWEIGHT");
 
@@ -6490,18 +6412,9 @@ public:
             HIPDNN_FE_LOG_WARN("Ignoring SDPA unfuse-FMA hint on node '"
                                << attributes.get_name() << "'; hipDNN selects fusion internally");
         }
-        if(q->get_name().empty())
-        {
-            q->set_name(attributes.get_name() + "::Q");
-        }
-        if(k->get_name().empty())
-        {
-            k->set_name(attributes.get_name() + "::K");
-        }
-        if(v->get_name().empty())
-        {
-            v->set_name(attributes.get_name() + "::V");
-        }
+        nameInputIfUnset(q, attributes.get_name(), "::Q");
+        nameInputIfUnset(k, attributes.get_name(), "::K");
+        nameInputIfUnset(v, attributes.get_name(), "::V");
 
         auto o = outputTensor(attributes.get_name() + "::O");
         std::array<std::shared_ptr<TensorAttributes>, 2> ret = {o, nullptr};
@@ -6566,22 +6479,10 @@ public:
         {
             attributes.set_name("SdpaBwd_" + std::to_string(_sub_nodes.size()));
         }
-        if(q->get_name().empty())
-        {
-            q->set_name(attributes.get_name() + "::Q");
-        }
-        if(k->get_name().empty())
-        {
-            k->set_name(attributes.get_name() + "::K");
-        }
-        if(v->get_name().empty())
-        {
-            v->set_name(attributes.get_name() + "::V");
-        }
-        if(dO->get_name().empty())
-        {
-            dO->set_name(attributes.get_name() + "::dO");
-        }
+        nameInputIfUnset(q, attributes.get_name(), "::Q");
+        nameInputIfUnset(k, attributes.get_name(), "::K");
+        nameInputIfUnset(v, attributes.get_name(), "::V");
+        nameInputIfUnset(dO, attributes.get_name(), "::dO");
 
         auto dq = outputTensor(attributes.get_name() + "::dQ");
         auto dk = outputTensor(attributes.get_name() + "::dK");
@@ -6637,10 +6538,7 @@ public:
         {
             attributes.set_name("ResampleFwd_" + std::to_string(_sub_nodes.size()));
         }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
+        nameInputIfUnset(x, attributes.get_name(), "::X");
 
         auto y = outputTensor(attributes.get_name() + "::Y");
         std::shared_ptr<TensorAttributes> index = nullptr;
@@ -6693,10 +6591,7 @@ public:
         {
             attributes.set_name("ResampleFwd_" + std::to_string(_sub_nodes.size()));
         }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
+        nameInputIfUnset(x, attributes.get_name(), "::X");
 
         auto y = outputTensor(attributes.get_name() + "::Y");
 
@@ -6729,14 +6624,8 @@ public:
         {
             attributes.set_name("ResampleBwd_" + std::to_string(_sub_nodes.size()));
         }
-        if(dy->get_name().empty())
-        {
-            dy->set_name(attributes.get_name() + "::DY");
-        }
-        if(index && index->get_name().empty())
-        {
-            index->set_name(attributes.get_name() + "::INDEX");
-        }
+        nameInputIfUnset(dy, attributes.get_name(), "::DY");
+        nameInputIfUnset(index, attributes.get_name(), "::INDEX");
 
         auto dx = outputTensor(attributes.get_name() + "::DX");
 
@@ -6763,14 +6652,8 @@ public:
         {
             attributes.set_name("ConvolutionFprop_" + std::to_string(_sub_nodes.size()));
         }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
-        if(w->get_name().empty())
-        {
-            w->set_name(attributes.get_name() + "::W");
-        }
+        nameInputIfUnset(x, attributes.get_name(), "::X");
+        nameInputIfUnset(w, attributes.get_name(), "::W");
 
         auto y = outputTensor(attributes.get_name() + "::Y");
 
@@ -6819,14 +6702,8 @@ public:
         {
             attributes.set_name("ConvolutionDgrad_" + std::to_string(_sub_nodes.size()));
         }
-        if(dy->get_name().empty())
-        {
-            dy->set_name(attributes.get_name() + "::DY");
-        }
-        if(w->get_name().empty())
-        {
-            w->set_name(attributes.get_name() + "::W");
-        }
+        nameInputIfUnset(dy, attributes.get_name(), "::DY");
+        nameInputIfUnset(w, attributes.get_name(), "::W");
 
         auto dx = outputTensor(attributes.get_name() + "::DX");
 
@@ -6875,14 +6752,8 @@ public:
         {
             attributes.set_name("ConvolutionWgrad_" + std::to_string(_sub_nodes.size()));
         }
-        if(x->get_name().empty())
-        {
-            x->set_name(attributes.get_name() + "::X");
-        }
-        if(dy->get_name().empty())
-        {
-            dy->set_name(attributes.get_name() + "::DY");
-        }
+        nameInputIfUnset(x, attributes.get_name(), "::X");
+        nameInputIfUnset(dy, attributes.get_name(), "::DY");
 
         auto dw = outputTensor(attributes.get_name() + "::DW");
 

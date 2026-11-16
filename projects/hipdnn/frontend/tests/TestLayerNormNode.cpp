@@ -46,6 +46,24 @@ LayernormAttributes makeMinimalAttrs(const std::shared_ptr<TensorAttributes>& x)
 
     return attrs;
 }
+
+// Attributes with scale and bias of the given dims; with statsDims, also TRAINING-phase
+// mean and inv_variance of those dims.
+LayernormAttributes makeShapedAttrs(const std::vector<int64_t>& xDims,
+                                    const std::vector<int64_t>& scaleDims,
+                                    const std::vector<int64_t>& statsDims = {})
+{
+    auto attrs = makeMinimalAttrs(makeTensor(xDims));
+    attrs.set_scale(makeTensor(scaleDims));
+    attrs.set_bias(makeTensor(scaleDims));
+    if(!statsDims.empty())
+    {
+        attrs.set_forward_phase(NormFwdPhase::TRAINING);
+        attrs.set_mean(makeTensor(statsDims));
+        attrs.set_inv_variance(makeTensor(statsDims));
+    }
+    return attrs;
+}
 } // namespace
 
 TEST(TestLayerNormNode, PreValidateSucceedsMinimal)
@@ -814,8 +832,8 @@ TEST(TestLayerNormNode, InferPropertiesPreservesExplicitStatStrides)
     attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_dim({1});
-    mean->set_stride({1});
+    mean->set_dim({32, 1});
+    mean->set_stride({1, 1});
     attrs.set_mean(mean);
 
     const GraphAttributes graphAttrs;
@@ -823,8 +841,8 @@ TEST(TestLayerNormNode, InferPropertiesPreservesExplicitStatStrides)
     auto err = node.infer_properties_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 
-    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{1}));
-    EXPECT_EQ(mean->get_stride(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{32, 1}));
+    EXPECT_EQ(mean->get_stride(), (std::vector<int64_t>{1, 1}));
 }
 
 TEST(TestLayerNormNode, InferPropertiesSetsBothMeanAndInvVariance)
@@ -848,6 +866,131 @@ TEST(TestLayerNormNode, InferPropertiesSetsBothMeanAndInvVariance)
     EXPECT_FALSE(mean->get_stride().empty());
     EXPECT_FALSE(invVariance->get_dim().empty());
     EXPECT_FALSE(invVariance->get_stride().empty());
+}
+
+// ============================================================================
+// Scale, Bias and Statistics Shapes Against the Normalized Dims of X
+// ============================================================================
+
+TEST(TestLayerNormNode, PreValidateFailsScaleTrailingDimMismatch)
+{
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({4, 6, 8, 8}, {1, 6, 8, 4}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsRankReducedScaleMismatch)
+{
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({2, 5, 7}, {8}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsAllOnesScaleOnNonUnitX)
+{
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({4, 6, 8, 8}, {1, 1, 1, 1}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsStatsBatchExtentMismatch)
+{
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({4, 6, 8, 8}, {1, 6, 8, 8}, {2, 1, 1, 1}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsStatsNotOneOnNormalizedDims)
+{
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({4, 6, 8, 8}, {1, 6, 8, 8}, {4, 6, 1, 1}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsRankReducedScaleStatsMissingBatchDim)
+{
+    // x [B, S, D] with scale [D] has batch dims [B, S]
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(makeShapedAttrs({2, 5, 7}, {7}, {2, 1, 1}), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateFailsNormalizedDimCountOutOfRange)
+{
+    const GraphAttributes graphAttrs;
+    for(const int64_t count : {int64_t{-1}, int64_t{5}})
+    {
+        auto attrs = makeShapedAttrs({4, 6, 8, 8}, {1, 6, 8, 8});
+        attrs.set_normalized_dim_count(count);
+        const LayerNormNode node(std::move(attrs), graphAttrs);
+        auto err = node.pre_validate_node();
+        EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << "count " << count;
+    }
+}
+
+TEST(TestLayerNormNode, InferPropertiesRankReducedScaleInfersStatsPerRow)
+{
+    // x [B, S, D] with scale [D]: one statistic per row, B * S rows
+    auto attrs = makeShapedAttrs({2, 5, 7}, {7});
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
+    auto mean = std::make_shared<TensorAttributes>();
+    auto invVariance = std::make_shared<TensorAttributes>();
+    attrs.set_mean(mean);
+    attrs.set_inv_variance(invVariance);
+
+    const GraphAttributes graphAttrs;
+    LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.infer_properties_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    EXPECT_EQ(node.attributes.get_normalized_dim_count(), 1);
+    EXPECT_EQ(mean->get_dim(), (std::vector<int64_t>{2, 5, 1}));
+    EXPECT_EQ(invVariance->get_dim(), (std::vector<int64_t>{2, 5, 1}));
+
+    err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, NormalizedDimCountSpansUnitDimsAfterFirstNormalizedDim)
+{
+    struct Case
+    {
+        std::vector<int64_t> xDims;
+        std::vector<int64_t> scaleDims;
+        std::vector<int64_t> statsDims;
+    };
+    const std::vector<Case> cases = {{{4, 16, 1, 1}, {1, 16, 1, 1}, {4, 1, 1, 1}},
+                                     {{2, 3, 1, 129}, {1, 3, 1, 129}, {2, 1, 1, 1}}};
+
+    for(const auto& testCase : cases)
+    {
+        auto attrs = makeShapedAttrs(testCase.xDims, testCase.scaleDims);
+        attrs.set_forward_phase(NormFwdPhase::TRAINING);
+        auto mean = std::make_shared<TensorAttributes>();
+        auto invVariance = std::make_shared<TensorAttributes>();
+        attrs.set_mean(mean);
+        attrs.set_inv_variance(invVariance);
+
+        const GraphAttributes graphAttrs;
+        LayerNormNode node(std::move(attrs), graphAttrs);
+        auto err = node.pre_validate_node();
+        ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+        err = node.infer_properties_node();
+        ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+        EXPECT_EQ(node.attributes.get_normalized_dim_count(), 3);
+        EXPECT_EQ(mean->get_dim(), testCase.statsDims);
+        EXPECT_EQ(invVariance->get_dim(), testCase.statsDims);
+
+        err = node.pre_validate_node();
+        EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    }
 }
 
 // ============================================================================

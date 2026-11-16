@@ -75,6 +75,31 @@ LayernormBackwardAttributes createMinimalAttributes()
     return attrs;
 }
 
+// Attributes whose dy, dx follow xDims, whose dscale, dbias follow scaleDims and whose saved
+// mean and inv_variance have statsDims. normalized_dim_count is left unset.
+LayernormBackwardAttributes createShapedAttributes(const std::vector<int64_t>& xDims,
+                                                   const std::vector<int64_t>& scaleDims,
+                                                   const std::vector<int64_t>& statsDims)
+{
+    auto makeTensor = [](const std::vector<int64_t>& dims) {
+        auto tensor = std::make_shared<TensorAttributes>();
+        tensor->set_dim(dims);
+        return tensor;
+    };
+
+    LayernormBackwardAttributes attrs;
+    attrs.set_dy(makeTensor(xDims));
+    attrs.set_x(makeTensor(xDims));
+    attrs.set_scale(makeTensor(scaleDims));
+    attrs.set_mean(makeTensor(statsDims));
+    attrs.set_inv_variance(makeTensor(statsDims));
+    attrs.set_dx(makeTensor(xDims));
+    attrs.set_dscale(makeTensor(scaleDims));
+    attrs.set_dbias(makeTensor(scaleDims));
+
+    return attrs;
+}
+
 } // namespace
 
 // --- GetNodeType ---
@@ -1044,6 +1069,79 @@ TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedNormalizedDimsLen
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeRejectsStatsBatchMismatchWithoutCount)
+{
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(
+        createShapedAttributes({4, 6, 8, 8}, {1, 6, 8, 8}, {3, 1, 1, 1}), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeRejectsStatsBatchMismatchWithCount)
+{
+    auto attrs = createShapedAttributes({4, 6, 8, 8}, {1, 6, 8, 8}, {3, 1, 1, 1});
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeRejectsScaleTrailingDimMismatch)
+{
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(
+        createShapedAttributes({4, 6, 8, 8}, {1, 6, 8, 4}, {4, 1, 1, 1}), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeRejectsAllOnesScaleOnNonUnitX)
+{
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(
+        createShapedAttributes({4, 6, 8, 8}, {1, 1, 1, 1}, {4, 1, 1, 1}), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode, NormalizedDimCountSpansUnitDimsAfterFirstNormalizedDim)
+{
+    struct Case
+    {
+        std::vector<int64_t> xDims;
+        std::vector<int64_t> scaleDims;
+        std::vector<int64_t> statsDims;
+    };
+    const std::vector<Case> cases = {{{4, 16, 1, 1}, {1, 16, 1, 1}, {4, 1, 1, 1}},
+                                     {{2, 3, 1, 129}, {1, 3, 1, 129}, {2, 1, 1, 1}}};
+
+    for(const auto& testCase : cases)
+    {
+        const GraphAttributes graphAttributes;
+        LayernormBackwardNode node(
+            createShapedAttributes(testCase.xDims, testCase.scaleDims, testCase.statsDims),
+            graphAttributes);
+
+        auto error = node.pre_validate_node();
+        ASSERT_EQ(error.code, error_code_t::OK) << error.err_msg;
+
+        error = node.infer_properties_node();
+        ASSERT_EQ(error.code, error_code_t::OK) << error.err_msg;
+        EXPECT_EQ(node.attributes.get_normalized_dim_count(), 3);
+
+        // A later validate (as in build_operation_graph) sees the derived count
+        error = node.pre_validate_node();
+        EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+    }
 }
 
 // --- InferPropertiesNode ---

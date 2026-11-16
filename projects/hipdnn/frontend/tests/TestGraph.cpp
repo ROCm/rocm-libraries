@@ -6820,6 +6820,278 @@ TEST_F(TestGraph, CustomOpValidateFailsWithNullInput)
     EXPECT_FALSE(err.is_good());
 }
 
+namespace
+{
+
+// Adds one node through a Graph builder, passing nullptr for the tensor argument at position
+// nullArg, or every tensor argument when nullArg is ALL_TENSOR_ARGS.
+using NullTensorArgBuilder = std::function<void(Graph&, int nullArg)>;
+
+constexpr int ALL_TENSOR_ARGS = -1;
+
+struct NullTensorArgParam
+{
+    std::string name;
+    NullTensorArgBuilder build;
+    int nullArg;
+
+    friend std::ostream& operator<<(std::ostream& os, const NullTensorArgParam& p)
+    {
+        return os << p.name;
+    }
+};
+
+std::shared_ptr<TensorAttributes> packedTensor(const std::vector<int64_t>& dims,
+                                               DataType dataType = DataType::FLOAT)
+{
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_dim(dims)
+        .set_stride(hipdnn_data_sdk::utilities::generateStrides(dims))
+        .set_data_type(dataType);
+    return tensor;
+}
+
+std::shared_ptr<TensorAttributes> tensorOrNull(int position,
+                                               int nullArg,
+                                               const std::vector<int64_t>& dims,
+                                               DataType dataType = DataType::FLOAT)
+{
+    return position == nullArg ? nullptr : packedTensor(dims, dataType);
+}
+
+// One row per tensor argument of the builder; argNames are in argument order.
+void addNullTensorArgRows(std::vector<NullTensorArgParam>& params,
+                          const std::string& builderName,
+                          const std::vector<std::string>& argNames,
+                          const NullTensorArgBuilder& build)
+{
+    for(size_t i = 0; i < argNames.size(); ++i)
+    {
+        params.push_back({builderName + "Null" + argNames[i], build, static_cast<int>(i)});
+    }
+}
+
+ResampleFwdAttributes maxPoolFwdAttributes()
+{
+    ResampleFwdAttributes attributes;
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+    return attributes;
+}
+
+} // namespace
+
+class TestGraphNullTensorArg : public TestGraph,
+                               public ::testing::WithParamInterface<NullTensorArgParam>
+{
+};
+
+TEST_P(TestGraphNullTensorArg, BuilderAcceptsNullAndValidateReportsAttributeNotSet)
+{
+    const auto& param = GetParam();
+
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+    param.build(graph, param.nullArg);
+
+    auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+
+    // The same node with every tensor argument set validates, so the error above comes from
+    // the null argument.
+    Graph control;
+    control.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+    param.build(control, ALL_TENSOR_ARGS);
+
+    auto controlResult = control.validate();
+    EXPECT_TRUE(controlResult.is_good()) << controlResult.get_message();
+}
+
+// This needs to be a helper function rather than being defined inline so that we can use
+// preprocessor directives in it.
+static std::vector<NullTensorArgParam> getNullTensorArgParams()
+{
+    std::vector<NullTensorArgParam> params;
+
+    addNullTensorArgRows(params, "Layernorm", {"X", "Scale", "Bias"}, [](Graph& g, int nullArg) {
+        auto epsilon = std::make_shared<TensorAttributes>();
+        epsilon->set_value(1e-5f);
+        LayernormAttributes attributes;
+        attributes.set_forward_phase(NormFwdPhase::INFERENCE);
+        attributes.set_epsilon(epsilon);
+        g.layernorm(tensorOrNull(0, nullArg, {2, 6, 4}),
+                    tensorOrNull(1, nullArg, {6, 4}),
+                    tensorOrNull(2, nullArg, {6, 4}),
+                    attributes);
+    });
+
+    addNullTensorArgRows(
+        params, "LayernormBackward", {"Dy", "X", "Scale"}, [](Graph& g, int nullArg) {
+            LayernormBackwardAttributes attributes;
+            attributes.set_mean(packedTensor({16, 1, 1, 1}));
+            attributes.set_inv_variance(packedTensor({16, 1, 1, 1}));
+            attributes.set_epsilon(packedTensor({1}));
+            g.layernorm_backward(tensorOrNull(0, nullArg, {16, 64, 32, 32}),
+                                 tensorOrNull(1, nullArg, {16, 64, 32, 32}),
+                                 tensorOrNull(2, nullArg, {1, 64, 32, 32}),
+                                 attributes);
+        });
+
+    addNullTensorArgRows(params, "PointwiseUnary", {"In0"}, [](Graph& g, int nullArg) {
+        PointwiseAttributes attributes;
+        attributes.set_mode(PointwiseMode::RELU_FWD);
+        g.pointwise(tensorOrNull(0, nullArg, {1, 2, 3, 4}), attributes);
+    });
+
+    addNullTensorArgRows(params, "PointwiseBinary", {"In0", "In1"}, [](Graph& g, int nullArg) {
+        PointwiseAttributes attributes;
+        attributes.set_mode(PointwiseMode::ADD);
+        g.pointwise(tensorOrNull(0, nullArg, {1, 2, 3, 4}),
+                    tensorOrNull(1, nullArg, {1, 2, 3, 4}),
+                    attributes);
+    });
+
+    addNullTensorArgRows(
+        params, "PointwiseTernary", {"In0", "In1", "In2"}, [](Graph& g, int nullArg) {
+            PointwiseAttributes attributes;
+            attributes.set_mode(PointwiseMode::BINARY_SELECT);
+            g.pointwise(tensorOrNull(0, nullArg, {1, 2, 3, 4}),
+                        tensorOrNull(1, nullArg, {1, 2, 3, 4}),
+                        tensorOrNull(2, nullArg, {1, 2, 3, 4}),
+                        attributes);
+        });
+
+    addNullTensorArgRows(params, "Reduction", {"X"}, [](Graph& g, int nullArg) {
+        ReductionAttributes attributes;
+        attributes.set_mode(ReductionMode::ADD);
+        auto y = g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}), attributes);
+        y->set_dim({2, 8, 1, 1}).set_stride({8, 1, 1, 1});
+    });
+
+    addNullTensorArgRows(params, "ReductionWithOutput", {"X", "Y"}, [](Graph& g, int nullArg) {
+        ReductionAttributes attributes;
+        attributes.set_mode(ReductionMode::ADD);
+        g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}),
+                    tensorOrNull(1, nullArg, {2, 8, 1, 1}),
+                    attributes);
+    });
+
+    addNullTensorArgRows(params, "Matmul", {"A", "B"}, [](Graph& g, int nullArg) {
+        g.matmul(
+            tensorOrNull(0, nullArg, {4, 8}), tensorOrNull(1, nullArg, {8, 5}), MatmulAttributes{});
+    });
+
+    addNullTensorArgRows(params,
+                         "MoeGroupedMatmul",
+                         {"Token", "Weight", "FirstTokenOffset", "TokenIndex", "TokenKs"},
+                         [](Graph& g, int nullArg) {
+                             MoeGroupedMatmulAttributes attributes;
+                             attributes.set_mode(MoeGroupedMatmulMode::SCATTER);
+                             attributes.set_top_k(2);
+                             g.moe_grouped_matmul(
+                                 tensorOrNull(0, nullArg, {1, 8, 16}),
+                                 tensorOrNull(1, nullArg, {2, 16, 32}),
+                                 tensorOrNull(2, nullArg, {2, 1, 1}, DataType::INT32),
+                                 tensorOrNull(3, nullArg, {1, 8, 1}, DataType::INT32),
+                                 tensorOrNull(4, nullArg, {1, 8, 1}, DataType::INT32),
+                                 attributes);
+                         });
+
+#ifdef HIPDNN_ENABLE_SDPA
+    addNullTensorArgRows(params, "Sdpa", {"Q", "K", "V"}, [](Graph& g, int nullArg) {
+        g.sdpa(tensorOrNull(0, nullArg, {2, 8, 16, 64}),
+               tensorOrNull(1, nullArg, {2, 8, 32, 64}),
+               tensorOrNull(2, nullArg, {2, 8, 32, 64}),
+               SdpaAttributes{});
+    });
+
+    addNullTensorArgRows(
+        params, "SdpaBackward", {"Q", "K", "V", "O", "DO", "Stats"}, [](Graph& g, int nullArg) {
+            g.sdpa_backward(tensorOrNull(0, nullArg, {2, 8, 16, 64}),
+                            tensorOrNull(1, nullArg, {2, 8, 32, 64}),
+                            tensorOrNull(2, nullArg, {2, 8, 32, 64}),
+                            tensorOrNull(3, nullArg, {2, 8, 16, 64}),
+                            tensorOrNull(4, nullArg, {2, 8, 16, 64}),
+                            tensorOrNull(5, nullArg, {2, 8, 16, 1}),
+                            SdpaBackwardAttributes{});
+        });
+#endif // HIPDNN_ENABLE_SDPA
+
+    addNullTensorArgRows(params, "Resample", {"X"}, [](Graph& g, int nullArg) {
+        g.resample(tensorOrNull(0, nullArg, {1, 3, 4, 4}), maxPoolFwdAttributes());
+    });
+
+    addNullTensorArgRows(params, "ResampleFwd", {"X"}, [](Graph& g, int nullArg) {
+        g.resample_fwd(tensorOrNull(0, nullArg, {1, 3, 4, 4}), maxPoolFwdAttributes());
+    });
+
+    addNullTensorArgRows(params, "ResampleBwd", {"Dy", "Index"}, [](Graph& g, int nullArg) {
+        ResampleBwdAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({2, 2});
+        attributes.set_window({3, 3});
+        attributes.set_resample_mode(ResampleMode::MAXPOOL);
+        attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+        g.resample_bwd(tensorOrNull(0, nullArg, {1, 3, 16, 16}),
+                       attributes,
+                       tensorOrNull(1, nullArg, {1, 3, 16, 16}, DataType::INT32));
+    });
+
+    addNullTensorArgRows(params, "ConvFprop", {"X", "W"}, [](Graph& g, int nullArg) {
+        ConvFpropAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({1, 1});
+        attributes.set_dilation({1, 1});
+        g.conv_fprop(tensorOrNull(0, nullArg, {1, 3, 32, 32}),
+                     tensorOrNull(1, nullArg, {64, 3, 3, 3}),
+                     attributes);
+    });
+
+    addNullTensorArgRows(params, "ConvDgrad", {"Dy", "W"}, [](Graph& g, int nullArg) {
+        ConvDgradAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({1, 1});
+        attributes.set_dilation({1, 1});
+        auto dx = g.conv_dgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                               tensorOrNull(1, nullArg, {64, 3, 3, 3}),
+                               attributes);
+        dx->set_dim({1, 3, 32, 32});
+    });
+
+    addNullTensorArgRows(params, "ConvWgrad", {"Dy", "X"}, [](Graph& g, int nullArg) {
+        ConvWgradAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({1, 1});
+        attributes.set_dilation({1, 1});
+        auto dw = g.conv_wgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                               tensorOrNull(1, nullArg, {1, 3, 32, 32}),
+                               attributes);
+        dw->set_dim({64, 3, 3, 3});
+    });
+
+    return params;
+}
+
+// NOLINTNEXTLINE(cert-err58-cpp)
+INSTANTIATE_TEST_SUITE_P(Builders,
+                         TestGraphNullTensorArg,
+                         ::testing::ValuesIn(getNullTensorArgParams()),
+                         [](const ::testing::TestParamInfo<NullTensorArgParam>& info) {
+                             return info.param.name;
+                         });
+
 // ============================================================================
 // is_supported_ext() Tests
 // ============================================================================

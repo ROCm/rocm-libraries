@@ -123,6 +123,31 @@ public:
         HIPDNN_CHECK_ERROR(
             detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
 
+        // SECTION 6: Validate Scale, Bias and Statistics Against the Normalized Dims of X
+        // Scale and bias hold the last k dims of x, optionally preceded by 1s; mean and
+        // inv_variance hold the first n - k (batch) dims of x, optionally followed by 1s.
+        int64_t normalizedDimCount = 0;
+        HIPDNN_CHECK_ERROR(
+            detail::deriveLayernormNormalizedDimCount(x->get_dim(),
+                                                      scale->get_dim(),
+                                                      attributes.get_normalized_dim_count(),
+                                                      "LayerNormNode",
+                                                      normalizedDimCount));
+        HIPDNN_CHECK_ERROR(detail::validateLayernormAffineIfSet(
+            scale, x->get_dim(), normalizedDimCount, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateLayernormAffineIfSet(
+            bias, x->get_dim(), normalizedDimCount, "Bias tensor"));
+
+        if(attributes.get_forward_phase() != NormFwdPhase::INFERENCE)
+        {
+            HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(
+                attributes.get_mean(), x->get_dim(), normalizedDimCount, "Mean tensor"));
+            HIPDNN_CHECK_ERROR(detail::validateLayernormStatsIfSet(attributes.get_inv_variance(),
+                                                                   x->get_dim(),
+                                                                   normalizedDimCount,
+                                                                   "Inverse variance tensor"));
+        }
+
         return {ErrorCode::OK, ""};
     }
 
@@ -216,36 +241,30 @@ public:
             }
         }
 
+        // Normalized dim count: the explicit attribute if set, else derived from x and scale
+        const bool shapesSet = scale && !scale->get_dim().empty() && !x->get_dim().empty();
+        int64_t normalizedDimCount = 0;
+        if(shapesSet)
+        {
+            HIPDNN_CHECK_ERROR(
+                detail::deriveLayernormNormalizedDimCount(x->get_dim(),
+                                                          scale->get_dim(),
+                                                          attributes.get_normalized_dim_count(),
+                                                          "LayerNormNode",
+                                                          normalizedDimCount));
+            attributes.set_normalized_dim_count(normalizedDimCount);
+        }
+
         // Infer mean and inv_variance shapes (training phase outputs)
-        // Mean and inv_variance have shape of the batch dimensions (everything except normalized dims)
+        // Mean and inv_variance hold the batch dims of x followed by 1s for the normalized dims
         auto mean = attributes.get_mean();
         auto invVariance = attributes.get_inv_variance();
 
         auto inferStatsTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
-            if(tensorToInfer && tensorToInfer->get_dim().empty() && scale
-               && !scale->get_dim().empty())
+            if(tensorToInfer && tensorToInfer->get_dim().empty() && shapesSet)
             {
-                // Stats dims mirror X's shape, but where scale has dim 1 (batch dims),
-                // the stats dim retains X's value; where scale has dim > 1 (normalized
-                // dims), the stats dim becomes 1.
-                const auto& xDim = x->get_dim();
-                const auto& scaleDim = scale->get_dim();
-                if(scaleDim.size() == xDim.size())
-                {
-                    std::vector<int64_t> statsDims(xDim.size());
-                    for(size_t i = 0; i < xDim.size(); i++)
-                    {
-                        statsDims[i] = (scaleDim[i] == 1) ? xDim[i] : 1;
-                    }
-                    tensorToInfer->set_dim(statsDims);
-                }
-                else
-                {
-                    // Fallback: batch dim from X, rest set to 1
-                    std::vector<int64_t> statsDims(xDim.size(), 1);
-                    statsDims[0] = xDim[0];
-                    tensorToInfer->set_dim(statsDims);
-                }
+                tensorToInfer->set_dim(
+                    detail::inferLayernormStatsDims(x->get_dim(), normalizedDimCount));
             }
 
             if(tensorToInfer && tensorToInfer->get_stride().empty())
@@ -276,35 +295,6 @@ public:
             if(invVariance)
             {
                 inferStatsTensor(invVariance);
-            }
-        }
-
-        // Infer normalized dimension count if not available
-        if(attributes.get_normalized_dim_count() <= 0)
-        {
-            if(attributes.get_x()->get_dim().size()
-               == attributes.get_scale()
-                      ->get_dim()
-                      .size()) // Dimensions not used by scale have been set to 1
-            {
-                int64_t normalizedDimCount = 1;
-                for(int64_t i = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - 1;
-                    i >= 0;
-                    --i)
-                {
-                    if(attributes.get_scale()->get_dim()[static_cast<size_t>(i)] == 1)
-                    {
-                        break;
-                    }
-                    normalizedDimCount
-                        = static_cast<int64_t>(attributes.get_scale()->get_dim().size()) - i;
-                }
-                attributes.set_normalized_dim_count(normalizedDimCount);
-            }
-            else // Dimensions not used by scale have been omitted
-            {
-                attributes.set_normalized_dim_count(
-                    static_cast<int64_t>(attributes.get_scale()->get_dim().size()));
             }
         }
 

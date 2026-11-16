@@ -47,6 +47,25 @@ std::shared_ptr<TensorAttributes> createValidIndexTensor()
     return indexTensor;
 }
 
+// dy = {1, 3, 4, 4} with dx left to inference
+ResampleBwdAttributes createInferableAttributes()
+{
+    ResampleBwdAttributes attrs;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 3, 4, 4});
+    dyTensor->set_stride({48, 16, 4, 1});
+    attrs.set_dy(dyTensor);
+    attrs.set_dx(std::make_shared<TensorAttributes>());
+
+    attrs.set_pre_padding({0, 0});
+    attrs.set_post_padding({0, 0});
+    attrs.set_stride({2, 2});
+    attrs.set_window({2, 2});
+
+    return attrs;
+}
+
 } // namespace
 
 // --- GetNodeType ---
@@ -231,6 +250,30 @@ TEST(TestResampleBwdNode, PreValidateNodeRejectsInvalidIndexRank)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestResampleBwdNode, PreValidateNodeRejectsWindowShorterThanSpatialRank)
+{
+    auto attrs = createValidAttributes();
+    attrs.set_window({3});
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestResampleBwdNode, PreValidateNodeRejectsZeroStride)
+{
+    auto attrs = createInferableAttributes();
+    attrs.set_stride({0, 0});
+
+    const GraphAttributes graphAttributes;
+    const ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
 // --- InferPropertiesNode ---
 
 TEST(TestResampleBwdNode, InferPropertiesNode)
@@ -262,6 +305,53 @@ TEST(TestResampleBwdNode, InferPropertiesNode)
     EXPECT_EQ(dxTensor->get_stride(), (std::vector<int64_t>{2883, 961, 31, 1}));
     EXPECT_EQ(indexTensor->get_dim(), dyTensor->get_dim());
     EXPECT_EQ(indexTensor->get_stride(), dyTensor->get_stride());
+}
+
+TEST(TestResampleBwdNode, InferPropertiesNodeRejectsWindowShorterThanSpatialRank)
+{
+    auto attrs = createInferableAttributes();
+    attrs.set_window({2});
+    auto dxTensor = attrs.get_dx();
+
+    const GraphAttributes graphAttributes;
+    ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_TRUE(dxTensor->get_dim().empty());
+}
+
+TEST(TestResampleBwdNode, InferPropertiesNodeRejectsEmptyStride)
+{
+    auto attrs = createInferableAttributes();
+    attrs.set_stride(std::vector<int64_t>{});
+    auto dxTensor = attrs.get_dx();
+
+    const GraphAttributes graphAttributes;
+    ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(dxTensor->get_dim().empty());
+}
+
+TEST(TestResampleBwdNode, InferPropertiesNodeRejectsNonPositiveDxExtent)
+{
+    auto attrs = createInferableAttributes();
+    attrs.get_dy()->set_dim({1, 3, 1, 1});
+    attrs.set_stride({1, 1});
+    attrs.set_pre_padding({5, 5});
+    attrs.set_post_padding({5, 5});
+    attrs.set_window({1, 1});
+    auto dxTensor = attrs.get_dx();
+
+    const GraphAttributes graphAttributes;
+    ResampleBwdNode node(std::move(attrs), graphAttributes);
+
+    // (1 - 1) * 1 - 5 - 5 + 1 = -9
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_TRUE(dxTensor->get_dim().empty());
 }
 
 // --- GatherHipdnnTensors ---

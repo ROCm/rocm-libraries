@@ -114,6 +114,17 @@ public:
         // Validate that scale and bias tensors have matching shapes
         HIPDNN_CHECK_ERROR(
             detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
+        // Scale (and therefore bias) carries the channel count at index 0 for rank 1 ([C]) and
+        // at index 1 otherwise ([1, C], [1, C, 1, ..., 1])
+        const auto& scaleDims = scale->get_dim();
+        const size_t scaleChannelIndex = scaleDims.size() == 1 ? 0 : 1;
+        HIPDNN_RETURN_IF_NE(scaleDims[scaleChannelIndex],
+                            channels,
+                            ErrorCode::INVALID_VALUE,
+                            detail::getTensorNameForError(scale, "Scale tensor")
+                                + " channel dimension (index " + std::to_string(scaleChannelIndex)
+                                + ") must be " + std::to_string(channels) + ", got "
+                                + std::to_string(scaleDims[scaleChannelIndex]));
         // Validate optional mean and inv_variance tensors (only if dimensions set)
         HIPDNN_CHECK_ERROR(
             detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));

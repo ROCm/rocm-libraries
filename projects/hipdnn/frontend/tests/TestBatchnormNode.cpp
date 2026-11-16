@@ -128,6 +128,58 @@ TEST(TestBatchnormNode, PreValidateAcceptsDifferentBroadcastRanks)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
+namespace
+{
+
+Error preValidateWithScaleBiasDims(const std::vector<int64_t>& xDims,
+                                   const std::vector<int64_t>& scaleBiasDims)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim(xDims);
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim(scaleBiasDims);
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim(scaleBiasDims);
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_dim({1}).set_value(1e-5);
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+    return node.pre_validate_node();
+}
+
+} // namespace
+
+TEST(TestBatchnormNode, PreValidateRejectsScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 8, 4, 4}, {1, 6, 1, 1});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("Scale"), std::string::npos) << error.get_message();
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsRank1ScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsRank2ScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {1, 32});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
 TEST(TestBatchnormNode, PreValidateNode)
 {
     BatchnormAttributes batchnormAttributes;

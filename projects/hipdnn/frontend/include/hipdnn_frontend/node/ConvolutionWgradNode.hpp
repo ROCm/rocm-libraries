@@ -116,6 +116,25 @@ public:
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: dy tensor channels must match dw tensor output channels");
 
+        // Channel counts feed the group arithmetic below
+        HIPDNN_RETURN_IF_LT(xDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionWgradNode: x tensor channels (" + std::to_string(xDims[1])
+                                + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(dyDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionWgradNode: dy tensor channels (" + std::to_string(dyDims[1])
+                                + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(dwDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionWgradNode: dw tensor input channels ("
+                                + std::to_string(dwDims[1]) + ") must be positive");
+
         HIPDNN_RETURN_IF_NE(xDims[1] % dwDims[1],
                             0,
                             ErrorCode::INVALID_VALUE,

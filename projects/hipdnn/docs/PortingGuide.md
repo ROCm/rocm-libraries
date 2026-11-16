@@ -118,7 +118,7 @@ Normalization is performed over the feature dimensions (all dims where scale > 1
 |--------|-------|-------------|
 | A | `(...batch, M, K)` | Leading batch dims, last two are matrix dims |
 | B | `(...batch, K, N)` | K must match A's last dim |
-| C (output) | `(...batch, M, N)` | Batch dims are broadcast |
+| C (output) | `(...batch, M, N)` | Same rank as A; each batch dim is the larger of A's and B's; M from A, N from B |
 
 Batch dimensions support broadcasting (dims must be equal or divisible).
 

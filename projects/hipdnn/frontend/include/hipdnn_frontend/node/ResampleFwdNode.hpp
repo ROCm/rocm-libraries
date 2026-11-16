@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/detail/ResampleFwdPacker.hpp>
 #include <hipdnn_frontend/detail/ResampleFwdUnpacker.hpp>
+#include <hipdnn_frontend/node/detail/ResampleParamsValidation.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -59,6 +60,30 @@ public:
                     "ResampleFwdNode output Y must have at least rank 3 (N, C, spatial...)"};
         }
 
+        auto& xDims = x->get_dim();
+        if(!xDims.empty())
+        {
+            auto& windowVec = attributes.get_window();
+            auto& prePadding = attributes.get_pre_padding();
+            auto& postPadding = attributes.get_post_padding();
+
+            HIPDNN_CHECK_ERROR(detail::validateResampleParams("ResampleFwdNode",
+                                                              xDims.size() - 2,
+                                                              windowVec,
+                                                              attributes.get_stride(),
+                                                              prePadding,
+                                                              postPadding));
+
+            if(!windowVec.empty() && !prePadding.empty() && !postPadding.empty())
+            {
+                for(size_t i = 0; i < windowVec.size(); ++i)
+                {
+                    HIPDNN_CHECK_ERROR(detail::validateResampleWindowFitsPaddedInput(
+                        xDims[i + 2], prePadding[i], postPadding[i], windowVec[i], i));
+                }
+            }
+        }
+
         if(auto index = attributes.get_index())
         {
             switch(index->get_data_type())
@@ -93,13 +118,29 @@ public:
         if(yDims.empty())
         {
             auto& xDims = x->get_dim();
-            yDims.resize(xDims.size());
+            HIPDNN_RETURN_IF_TRUE(xDims.empty(),
+                                  ErrorCode::ATTRIBUTE_NOT_SET,
+                                  "ResampleFwdNode missing input X dimensions for inferring "
+                                  "output Y dimensions");
+            HIPDNN_RETURN_IF_LT(
+                xDims.size(),
+                3,
+                ErrorCode::INVALID_VALUE,
+                "ResampleFwdNode input X must have at least rank 3 (N, C, spatial...)");
 
             auto& prePadding = attributes.get_pre_padding();
             auto& postPadding = attributes.get_post_padding();
             auto& strideVec = attributes.get_stride();
             auto& windowVec = attributes.get_window();
 
+            HIPDNN_CHECK_ERROR(detail::requireResampleParams("ResampleFwdNode",
+                                                             xDims.size() - 2,
+                                                             windowVec,
+                                                             strideVec,
+                                                             prePadding,
+                                                             postPadding));
+
+            yDims.resize(xDims.size());
             yDims[0] = xDims[0]; // N (batch)
             yDims[1] = xDims[1]; // C (channels preserved)
 
@@ -112,6 +153,8 @@ public:
                 auto postPad = postPadding[spatialIdx];
                 auto strideVal = strideVec[spatialIdx];
                 auto windowVal = windowVec[spatialIdx];
+                HIPDNN_CHECK_ERROR(detail::validateResampleWindowFitsPaddedInput(
+                    inputSize, prePad, postPad, windowVal, spatialIdx));
 
                 yDims[i] = (inputSize + prePad + postPad - windowVal) / strideVal + 1;
             }

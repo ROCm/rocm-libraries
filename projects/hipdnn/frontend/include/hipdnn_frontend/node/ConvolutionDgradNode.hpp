@@ -114,6 +114,25 @@ public:
                             "ConvolutionDgradNode: dx tensor batch size must match dy "
                             "tensor batch size");
 
+        // Channel counts feed the group arithmetic below
+        HIPDNN_RETURN_IF_LT(dyDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: dy tensor channels (" + std::to_string(dyDims[1])
+                                + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(wDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: Weight tensor input channels ("
+                                + std::to_string(wDims[1]) + ") must be positive");
+
+        HIPDNN_RETURN_IF_LT(dxDims[1],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: dx tensor channels (" + std::to_string(dxDims[1])
+                                + ") must be positive");
+
         HIPDNN_RETURN_IF_NE(dxDims[1] % wDims[1],
                             0,
                             ErrorCode::INVALID_VALUE,

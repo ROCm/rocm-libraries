@@ -127,17 +127,17 @@ protected:
             .build();
     }
 
-    static v8fe::Operation matmul(std::int64_t aUid,
-                                  std::int64_t bUid,
-                                  std::int64_t cUid,
+    static v8fe::Operation matmul(const v8fe::Tensor& a,
+                                  const v8fe::Tensor& b,
+                                  const v8fe::Tensor& c,
                                   DataType_t computeType = DataType_t::FLOAT)
     {
         v8fe::MatMulDescBuilder descBuilder;
         const v8fe::MatMulDesc desc = descBuilder.setComputeType(computeType).build();
         return v8fe::OperationBuilder(DescriptorType_t::OPERATION_MATMUL_DESCRIPTOR)
-            .setaMatDesc(tensor(aUid, {1, 4, 8}))
-            .setbMatDesc(tensor(bUid, {1, 8, 5}))
-            .setcMatDesc(tensor(cUid, {1, 4, 5}))
+            .setaMatDesc(a)
+            .setbMatDesc(b)
+            .setcMatDesc(c)
             .setmatmulDesc(desc)
             .build();
     }
@@ -230,16 +230,18 @@ protected:
         return tensor(uid, POOLED, false, DataType_t::INT32);
     }
 
-    static v8fe::Operation
-        layerNormBackward(const Dims& scale, const Dims& statistics, std::int64_t epsilonUid = -1)
+    static v8fe::Operation layerNormBackward(const Dims& scale,
+                                             const Dims& statistics,
+                                             std::int64_t epsilonUid = -1,
+                                             const Dims& x = ACTIVATION)
     {
         v8fe::OperationBuilder builder(DescriptorType_t::OPERATION_NORM_BACKWARD_DESCRIPTOR);
         builder.setNormalizationMode(NormMode_t::LAYER_NORM)
-            .setxDesc(tensor(1, ACTIVATION))
-            .setdyDesc(tensor(2, ACTIVATION))
+            .setxDesc(tensor(1, x))
+            .setdyDesc(tensor(2, x))
             .setScale(tensor(3, scale))
             .setSavedMeanAndInvVar(tensor(4, statistics), tensor(5, statistics))
-            .setdxDesc(tensor(6, ACTIVATION))
+            .setdxDesc(tensor(6, x))
             .setDScaleAndDBias(tensor(7, scale), tensor(8, scale));
         if(epsilonUid >= 0)
         {
@@ -248,15 +250,15 @@ protected:
         return builder.build();
     }
 
-    static v8fe::Operation layerNormInference(const Dims& scale)
+    static v8fe::Operation layerNormInference(const Dims& scale, const Dims& x = ACTIVATION)
     {
         return v8fe::OperationBuilder(DescriptorType_t::OPERATION_NORM_FORWARD_DESCRIPTOR)
             .setNormalizationMode(NormMode_t::LAYER_NORM)
             .setNormFwdPhase(NormFwdPhase_t::INFERENCE)
-            .setxDesc(tensor(1, ACTIVATION))
+            .setxDesc(tensor(1, x))
             .setScaleAndBias(tensor(2, scale), tensor(3, scale))
             .setEpsilonTensor(scalar(4))
-            .setyDesc(tensor(5, ACTIVATION))
+            .setyDesc(tensor(5, x))
             .build();
     }
 
@@ -398,7 +400,12 @@ protected:
               {HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT, -1},
               {HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT, 3}}},
             {"Matmul",
-             [] { return matmul(1, 2, 3, DataType_t::INT32); },
+             [] {
+                 return matmul(tensor(1, {1, 4, 8}),
+                               tensor(2, {1, 8, 5}),
+                               tensor(3, {1, 4, 5}),
+                               DataType_t::INT32);
+             },
              HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR,
              HIPDNN_ATTR_MATMUL_COMP_TYPE,
              {{HIPDNN_ATTR_OPERATION_MATMUL_ADESC, 1},
@@ -933,19 +940,20 @@ TEST_F(TestCudnnCompatibilityV8BuilderLowering, LayerNormNormalizedDimCountFromS
         Dims scale;
         Dims statistics;
         std::int64_t expected;
+        Dims x = ACTIVATION;
     };
     // A full-rank scale normalizes from its first non-1 dim on, else the scale's rank. [1, C, 1, 1]
-    // is cuDNN's layer-norm layout ([B*S, H, 1, 1] activations); hipDNN's backward node rejects
-    // any count under 3 for it.
+    // is cuDNN's layer-norm layout: [B*S, H, 1, 1] activations, here x [2, 3, 1, 1]; hipDNN's
+    // backward node rejects any count under 3 for it.
     for(const DimCase& item : {DimCase{{1, 1, 1, 4}, {2, 3, 4, 1}, 1},
                                DimCase{{1, 1, 4, 4}, {2, 3, 1, 1}, 2},
                                DimCase{{1, 3, 4, 4}, {2, 1, 1, 1}, 3},
-                               DimCase{{1, 3, 1, 1}, {2, 1, 1, 1}, 3},
+                               DimCase{{1, 3, 1, 1}, {2, 1, 1, 1}, 3, {2, 3, 1, 1}},
                                DimCase{{3, 4, 4}, {2}, 3}})
     {
         SCOPED_TRACE(std::to_string(item.scale.size()) + "-D scale, "
                      + std::to_string(item.expected) + " normalized dims");
-        const v8fe::Operation forward = layerNormInference(item.scale);
+        const v8fe::Operation forward = layerNormInference(item.scale, item.x);
         hipdnnBackendDescriptor_t forwardOp = lowered(forward);
         ASSERT_NE(forwardOp, nullptr);
         const auto forwardCount
@@ -953,7 +961,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderLowering, LayerNormNormalizedDimCountFromS
         ASSERT_TRUE(forwardCount);
         EXPECT_EQ(forwardCount->value<std::int64_t>(), item.expected);
 
-        const v8fe::Operation backward = layerNormBackward(item.scale, item.statistics);
+        const v8fe::Operation backward = layerNormBackward(item.scale, item.statistics, -1, item.x);
         hipdnnBackendDescriptor_t backwardOp = lowered(backward);
         ASSERT_NE(backwardOp, nullptr);
         const auto backwardCount
@@ -1241,6 +1249,15 @@ TEST_F(TestCudnnCompatibilityV8BuilderLowering, ReductionForwardsDeterminism)
     EXPECT_FALSE(attributeOn(ops[0], HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC).value<bool>());
     EXPECT_EQ(slotUid(ops[1], HIPDNN_ATTR_OPERATION_REDUCTION_YDESC), 4);
     EXPECT_TRUE(attributeOn(ops[1], HIPDNN_ATTR_REDUCTION_IS_DETERMINISTIC).value<bool>());
+}
+
+TEST_F(TestCudnnCompatibilityV8BuilderLowering, MatmulOutputDimsNotMatchingInputsFailGraphBuild)
+{
+    const v8fe::Operation op
+        = matmul(tensor(1, {1, 4, 5}), tensor(2, {1, 5, 6}), tensor(3, {1, 4, 7}));
+    const hipdnn_shim_test::BuildFailure failure = graphFailure({&op});
+    ASSERT_TRUE(failure.thrown);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_BAD_PARAM);
 }
 
 } // namespace

@@ -9,6 +9,37 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+namespace
+{
+
+// Runs output inference for x = {1, 3, 8, 8} with zero padding and the given window and
+// stride; yDims receives the y dimensions afterwards.
+Error inferYFromX8x8(const std::vector<int64_t>& window,
+                     const std::vector<int64_t>& stride,
+                     std::vector<int64_t>& yDims)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 8, 8});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    attr.set_y(yTensor);
+
+    attr.set_pre_padding(std::vector<int64_t>{0, 0});
+    attr.set_post_padding(std::vector<int64_t>{0, 0});
+    attr.set_window(window);
+    attr.set_stride(stride);
+
+    const GraphAttributes graphAttributes;
+    ResampleFwdNode node(std::move(attr), graphAttributes);
+    auto error = node.infer_properties_node();
+    yDims = yTensor->get_dim();
+    return error;
+}
+
+} // namespace
+
 TEST(TestResampleFwdNode, ResampleFwdProperties)
 {
     ResampleFwdAttributes attr;
@@ -274,6 +305,97 @@ TEST(TestResampleFwdNode, InferDim5D)
 
     EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{1, 3, 7, 7, 7}));
     EXPECT_EQ(indexTensor->get_dim(), (std::vector<int64_t>{1, 3, 7, 7, 7}));
+}
+
+TEST(TestResampleFwdNode, InferRejectsZeroStride)
+{
+    std::vector<int64_t> yDims;
+    auto error = inferYFromX8x8({2, 2}, {0, 0}, yDims);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(yDims.empty());
+}
+
+TEST(TestResampleFwdNode, InferRejectsEmptyWindow)
+{
+    std::vector<int64_t> yDims;
+    auto error = inferYFromX8x8({}, {2, 2}, yDims);
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(yDims.empty());
+}
+
+TEST(TestResampleFwdNode, InferRejectsWindowShorterThanSpatialRank)
+{
+    std::vector<int64_t> yDims;
+    auto error = inferYFromX8x8({2}, {2, 2}, yDims);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(yDims.empty());
+}
+
+TEST(TestResampleFwdNode, InferRejectsWindowLargerThanPaddedInput)
+{
+    // A window equal to the padded extent yields a single output element
+    std::vector<int64_t> yDims;
+    auto error = inferYFromX8x8({8, 8}, {2, 2}, yDims);
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+    EXPECT_EQ(yDims, (std::vector<int64_t>{1, 3, 1, 1}));
+
+    // One element wider leaves no valid window position
+    error = inferYFromX8x8({9, 9}, {2, 2}, yDims);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(yDims.empty());
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsWindowShorterThanSpatialRankWithYSet)
+{
+    ResampleFwdAttributes attr;
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 8, 8});
+    attr.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({1, 3, 4, 4});
+    attr.set_y(yTensor);
+
+    attr.set_pre_padding(std::vector<int64_t>{0, 0});
+    attr.set_post_padding(std::vector<int64_t>{0, 0});
+    attr.set_stride(std::vector<int64_t>{2, 2});
+    attr.set_window(std::vector<int64_t>{2});
+
+    const GraphAttributes graphAttributes;
+    const ResampleFwdNode node(std::move(attr), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestResampleFwdNode, PreValidateRejectsWindowLargerThanPaddedInputWithYSet)
+{
+    auto preValidateWithWindow = [](const std::vector<int64_t>& window) {
+        ResampleFwdAttributes attr;
+        auto xTensor = std::make_shared<TensorAttributes>();
+        xTensor->set_dim({1, 3, 8, 8});
+        attr.set_x(xTensor);
+
+        auto yTensor = std::make_shared<TensorAttributes>();
+        yTensor->set_dim({1, 3, 1, 1});
+        attr.set_y(yTensor);
+
+        attr.set_pre_padding(std::vector<int64_t>{0, 0});
+        attr.set_post_padding(std::vector<int64_t>{0, 0});
+        attr.set_stride(std::vector<int64_t>{2, 2});
+        attr.set_window(window);
+
+        const GraphAttributes graphAttributes;
+        const ResampleFwdNode node(std::move(attr), graphAttributes);
+        return node.pre_validate_node();
+    };
+
+    // A window equal to the padded extent fits exactly once
+    auto error = preValidateWithWindow({8, 8});
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.err_msg;
+
+    error = preValidateWithWindow({9, 9});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestResampleFwdNode, InferStride)
