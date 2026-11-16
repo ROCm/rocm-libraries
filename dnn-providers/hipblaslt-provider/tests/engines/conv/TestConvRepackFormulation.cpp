@@ -908,7 +908,7 @@ TEST(TestConvRepackFormulation, ColumnBlocksLeaveWhatTheyDoNotServe)
     const auto fits = convGemmCalls(parse(shape, ConvDirection::BACKWARD_WEIGHTS));
     ASSERT_TRUE(fits.has_value());
     EXPECT_EQ(fits->stages.size(), 1u);
-    const auto sliced = [&](ConvGemmShape variant) {
+    const auto sliced = [&](const ConvGemmShape& variant) {
         const auto problem = parse(variant, ConvDirection::BACKWARD_WEIGHTS);
         const auto whole = im2colGemmCalls(problem);
         EXPECT_TRUE(whole.has_value());

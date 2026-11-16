@@ -1324,7 +1324,7 @@ std::optional<ConvGemmPlanCalls> columnBlockWeights(const ConvProblem& problem,
     // Blocks: along order[i] in even ranges as long as the cap allows, every axis before it at
     // one index, every axis after it whole; an index that alone exceeds the cap is split along
     // the next axis.
-    ColumnBlock whole{0, problem.c, std::vector<int64_t>(spatialRank, 0), problem.filter};
+    const ColumnBlock whole{0, problem.c, std::vector<int64_t>(spatialRank, 0), problem.filter};
     std::vector<ColumnBlock> blocks;
     const auto set = [&](ColumnBlock& block, int which, int64_t from, int64_t to) {
         if(which < 0)
