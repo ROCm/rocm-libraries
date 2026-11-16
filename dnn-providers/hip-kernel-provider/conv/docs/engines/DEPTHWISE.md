@@ -164,6 +164,8 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - 16-bit rowtile configs pass the accumulator through an empty `asm` before the epilogue: without it, instruction selection fails for some chains (gelu-tanh, bias + relu) in the current compiler.
 - No config is added: the epilogue is part of a config's compile, so a fused pattern compiles once per config and serves every graph of that pattern.
 
+**Known cost.** A fused graph a depthwise engine wins takes longer than the bare convolution's best time by, geomean with a bias first: MI325X (channels-last) relu 1.01x, gelu 1.19x, silu 1.10x; gfx950 (both layouts) relu 1.05x, gelu 1.16x, silu 1.09x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.55x on MI325X and 1.60x on gfx950 (all three depthwise engines) (usage-weighted; the conv README's fusion table).
+
 ## Comparison with MIOpen
 - **`ConvHipConv` (hipconv):** gfx950-centred MFMA depthwise (1-D Toeplitz on 16x16x32, sparse on wide filters) and the Hankel 4x4x4 wgrad.
   - `MFMA` adopts the one-hot channel-diagonal idea but applies it to 2-D rows with an accumulator ring, plus a separate channels-first Toeplitz core. It also brings the sparse atom to gfx94x.

@@ -11,6 +11,7 @@
 // one entry per output type. Grid-stride loops with 64-bit indexing throughout; no vectorization
 // or LDS tiling yet -- those come one at a time, each with a measured gain.
 
+#include "ConvRepackActivations.h"
 #include "ConvRepackArgs.h"
 
 namespace
@@ -150,17 +151,8 @@ __device__ inline float epilogueLoad(const ConvRepackEpilogue& e, int i, Index c
     }
 }
 
-__device__ inline float epilogueGated(float v, float gate)
-{
-    return gate == 0.0f ? 0.0f : v * gate;
-}
-
-__device__ inline float epilogueSigmoid(float v)
-{
-    return 1.0f / (1.0f + expf(-v));
-}
-
-template <typename Index>
+/// The chain on one fp32 value. P: the activations' form, RepackEpiForm of the output type.
+template <int P, typename Index>
 __device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, Index channel)
 {
     for(int i = 0; i < e.ops; ++i)
@@ -196,33 +188,29 @@ __device__ inline float applyEpilogue(const ConvRepackEpilogue& e, float v, Inde
             break;
         }
         case CONV_REPACK_EPI_GELU:
-            v = epilogueGated(v, 0.5f * erfcf(-v * 0.70710678118654752f));
+            v = repackEpiGelu<P>(v);
             break;
         case CONV_REPACK_EPI_GELU_TANH:
-            v = epilogueGated(
-                v, 0.5f * (1.0f + tanhf(0.79788456080286536f * (v + 0.044715f * v * v * v))));
+            v = repackEpiGeluTanh<P>(v);
             break;
         case CONV_REPACK_EPI_SWISH:
-            v = epilogueGated(v, epilogueSigmoid(e.scalar[s] * v));
+            v = repackEpiSwish<P>(v, e.scalar[s]);
             break;
         case CONV_REPACK_EPI_SIGMOID:
-            v = epilogueSigmoid(v);
+            v = repackEpiSigmoid<P>(v);
             break;
         case CONV_REPACK_EPI_TANH:
-            v = tanhf(v);
+            v = repackEpiTanh<P>(v);
             break;
         case CONV_REPACK_EPI_ELU:
-            v = v > 0.0f ? v : e.scalar[s] * expm1f(v);
+            v = repackEpiElu<P>(v, e.scalar[s]);
             break;
         case CONV_REPACK_EPI_ABS:
             v = fabsf(v);
             break;
         case CONV_REPACK_EPI_SOFTPLUS:
-        {
-            const float bv = e.scalar[s] * v;
-            v = bv > 20.0f ? v : log1pf(expf(bv)) / e.scalar[s];
+            v = repackEpiSoftplus<P>(v, e.scalar[s]);
             break;
-        }
         default:
             break;
         }
@@ -277,7 +265,8 @@ __device__ void flatEpilogueRuns(const StridedCastEpilogueArgs& a)
 #pragma unroll
         for(int e = 0; e < N; ++e)
         {
-            out[e] = static_cast<OutputType>(applyEpilogue(a.epilogue, in[e], channel));
+            out[e] = static_cast<OutputType>(
+                applyEpilogue<RepackEpiForm<OutputType>::value>(a.epilogue, in[e], channel));
             rem += e < N - 1 ? 1 : remStep;
             const Index jump = e < N - 1 ? 0 : chStep;
             Index carry = 0;
@@ -339,7 +328,8 @@ __device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
         const long long chStep = qs % chans;
         for(long long i = first; i < args.total; i += step)
         {
-            dst[i] = static_cast<OutputType>(applyEpilogue(a.epilogue, args.src[i], channel));
+            dst[i] = static_cast<OutputType>(
+                applyEpilogue<RepackEpiForm<OutputType>::value>(a.epilogue, args.src[i], channel));
             rem += remStep;
             long long carry = 0;
             if(rem >= inner)
@@ -377,7 +367,8 @@ __device__ void stridedCastEpilogue(const StridedCastEpilogueArgs& a)
         {
             sum += args.src[srcOffset + batch * args.batchStride];
         }
-        dst[dstOffset] = static_cast<OutputType>(applyEpilogue(a.epilogue, sum, channel));
+        dst[dstOffset] = static_cast<OutputType>(
+            applyEpilogue<RepackEpiForm<OutputType>::value>(a.epilogue, sum, channel));
     }
 }
 

@@ -131,6 +131,8 @@ take no epilogue. The generated code depends on the chain's pattern only; values
 pointers are a second kernel argument. With no epilogue the kernels compile to the same code as
 without the hook. Backward data and backward weights decline fused graphs.
 
+**Known cost.** A fused graph this engine wins takes longer than the bare convolution's best time by, geomean with a bias first: gfx950 (both layouts) relu 1.04x, gelu 1.07x, silu 1.05x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.18x on gfx950 (usage-weighted; the conv README's fusion table).
+
 ## Strengths and weaknesses
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts our-best graphs that are more than 5% faster or slower. Losses are counted against MIOpen's best, which is often its own Winograd.
 

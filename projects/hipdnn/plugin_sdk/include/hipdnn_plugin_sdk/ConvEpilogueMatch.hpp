@@ -94,6 +94,11 @@ struct ConvEpilogue
     int64_t convOutputUid = 0;
     /// The graph's written output: the last pointwise node's.
     int64_t outputUid = 0;
+    /// The written output's element type. Its precision decides the activations' form: an fp32
+    /// output takes the few-ulp form, a 16-bit output the faster one (its error stays far below
+    /// the output's rounding).
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
     bool empty() const
     {
@@ -472,6 +477,7 @@ public:
             return std::nullopt;
         }
         _epilogue.outputUid = current;
+        _epilogue.outputType = output->data_type();
         return _epilogue;
     }
 

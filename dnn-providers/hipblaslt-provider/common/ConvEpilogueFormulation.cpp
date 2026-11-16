@@ -447,19 +447,10 @@ std::optional<NativeEpilogue> nativeEpilogueFor(const ConvProblem& problem)
     {
         return native;
     }
-    if(next + 1 != ops.size())
-    {
-        return std::nullopt;
-    }
-    // hipBLASLt's activation epilogues do not keep the chain's special-value rules: its relu
-    // and clamp map NaN to a bound, and its swish and tanh GELU give NaN for -inf where the
-    // chain gives 0. Only sigmoid matches them, so the other activations run in a pass, where
-    // every engine gives the same result.
-    if(ops[next].code == OpCode::SIGMOID && !native.biasUid.has_value())
-    {
-        native.mode = NATIVE_EPILOGUE_SIGMOID;
-        return native;
-    }
+    // Activations run in the pass, with the conv engines' functions and accuracy rule (the
+    // few-ulp form for an fp32 output): hipBLASLt's activation epilogues have their own accuracy,
+    // and its relu and clamp map NaN to a bound and its swish and tanh GELU give NaN for -inf
+    // where the chain gives 0.
     return std::nullopt;
 }
 

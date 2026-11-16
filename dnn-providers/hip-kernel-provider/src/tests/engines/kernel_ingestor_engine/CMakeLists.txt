@@ -152,7 +152,8 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseValuProblem.cpp)
     if("naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvNaiveProblem.cpp
-                                                          ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvEpilogue.cpp)
+                                                          ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvEpilogue.cpp
+                                                          ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGpuConvEpilogueActivations.cpp)
     endif()
     if("depthwise_rows" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
         target_sources(hip_kernel_provider_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvDepthwiseRowsProblem.cpp)

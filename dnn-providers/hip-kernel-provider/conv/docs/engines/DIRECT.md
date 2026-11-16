@@ -125,6 +125,8 @@ The weight format, the three-bf16 input split and the staging copies take no epi
 data does not fuse. With no pointwise node the compile options, and so the code, are those of
 the unfused engine.
 
+**Known cost.** A fused graph this engine wins takes longer than the bare convolution's best time by, geomean with a bias first: MI325X (channels-last) relu 1.02x, gelu 1.06x, silu 1.04x; gfx950 (both layouts) relu 1.02x, gelu 1.09x, silu 1.05x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.06x on MI325X and 1.08x on gfx950 (usage-weighted; the conv README's fusion table).
+
 ## Strengths and weaknesses
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. W/L counts shapes faster or slower by more than 5%.
 

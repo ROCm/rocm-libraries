@@ -68,6 +68,61 @@ that apply the chain claim the graph under their own engine id, with no added ca
 - **Numerics.** The chain runs in fp32 on the convolution's accumulator and the kernel rounds once
   to the output type, whatever type the graph declares for its intermediates. relu and clamp
   propagate NaN; gates that saturate to 0 (silu, gelu at -inf) give 0. No fast-math.
+- **Activation accuracy.** The activations are built from the hardware exp2, log2 and reciprocal,
+  in one implementation (`ConvEpilogue.h`) that every engine of this provider compiles, in two
+  forms chosen by the graph's output type: an fp32 output takes the few-ulp form (e^v corrected
+  for the rounding of `v log2(e)`, GELU's argument and exponent kept to twice the float
+  precision); a 16-bit output takes the faster form, whose error stays under 0.1 ulp of fp16 and
+  bf16. Worst case over every fp32 input against a double reference, in fp32 ulp of the result
+  before the output rounding (results of magnitude 2^-122 and up; each form bit-identical on
+  gfx942 and gfx950):
+
+  | Activation | fp32 output, \|x\| <= 8 / all | 16-bit output, \|x\| <= 8 / all |
+  |---|---|---|
+  | sigmoid | 2.7 / 3.6 | 9.0 / 64 |
+  | silu (swish, beta 1) | 3.2 / 3.7 above -80 | 8.9 / 63 above -80 |
+  | swish, beta 1.702 | 13 | 20 |
+  | gelu | 8.8 / 8.8 | 119 / 310 |
+  | gelu-tanh | 94 / 184 | 134 / 230 |
+  | tanh | 1.6 | 1.6 |
+  | elu | 1.8 | 1.8 |
+  | softplus (beta 1, 2) | 4.9 | 11, 16 / 63 |
+
+  The larger errors sit in the negative tails, where the result is a small value. gelu-tanh and
+  swish with beta other than 1 carry the rounding of their fp32 argument (`u`, `beta x`) there,
+  as any fp32 evaluation of those formulas does. Every error of either form stays under 1.3% of
+  the fp32 pointwise tolerance (`1e-5 + 1e-5 |reference|`). Results below 2^-122 in magnitude may
+  flush to zero where an intermediate underflows (an absolute error under 2e-36; silu and swish
+  below `-88 / beta`, as the math library's form). NaN gives NaN; sigmoid(+-inf) is 1 and 0,
+  silu(-inf) and gelu(-inf) 0, silu(inf) and gelu(inf) inf, tanh(+-inf) +-1, elu(-0) +0, as
+  PyTorch. The explicit-GEMM engines' epilogue pass applies the same functions under the same
+  rule, so a fused graph's activation is the same on every engine; results differ between
+  engines by the convolution's summation order. On MI325X, an fp32-output fused kernel with the
+  few-ulp form takes, against the fast form (geomean per family over the fused timing shapes,
+  worst case in brackets): gelu 1.01-1.12x (1.26), silu 1.00-1.03x (1.26).
+- **Against a separate pointwise pass.** Time of the best bare convolution plus the chain as its
+  own one-pass kernel, over the fused graph's best time (above 1: fusion faster), per family of
+  the engine that wins the fused graph; 114 real-model shapes per layout, chains bias, bias + relu,
+  bias + gelu and bias + silu, all three data types, autotuned. Weighted by the shapes' calls per
+  model run; losses are graphs below 0.98x.
+
+  | Family | MI325X, channels-last: weighted (losses / graphs) | gfx950, both layouts: weighted (losses / graphs) |
+  |---|---|---|
+  | IGEMM | 1.01x (4 / 187) | 1.05x (20 / 253) |
+  | DIRECT | 1.06x (1 / 35) | 1.08x (5 / 90) |
+  | WINOGRAD | - | 1.18x (0 / 15) |
+  | SMALLC | 1.65x (0 / 35) | 1.34x (0 / 141) |
+  | GROUP | 1.33x (0 / 13) | 1.44x (0 / 21) |
+  | DEPTHWISE (VALU, ROWS, MFMA) | 1.55x (0 / 49) | 1.60x (0 / 100) |
+  | NAIVE | 1.52x (0 / 6) | 1.54x (0 / 11) |
+  | explicit GEMM (hipBLASLt, rocBLAS) | 1.10x (29 / 131) | 1.02x (87 / 281) |
+
+  Fusion wins wherever the convolution's output traffic matters (depthwise, small-C, grouped,
+  every small and mid-size layer) and is about even on large compute-bound layers. The losses are
+  1x1 and patchify layers whose bare convolution a BLAS GEMM wins by a wide margin: fused, the
+  explicit-GEMM engines write an fp32 result and run a pass over it, and the in-kernel engines
+  are slower than the BLAS GEMM, so the BLAS GEMM followed by a separate pass over the 16-bit
+  output is faster (down to 0.84x on MI325X, 0.60x on gfx950).
 - **Mechanism.** `ConvEpilogue.h` is the hook every fusing kernel calls before its single
   rounding. The pack generates the chain's code into the HIPRTC options (`CONV_EPI` and three
   generated macros) and passes `ConvEpiArgs` as the kernel's second argument: operand pointers
