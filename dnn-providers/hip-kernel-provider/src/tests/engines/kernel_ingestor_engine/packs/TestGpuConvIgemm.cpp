@@ -1903,7 +1903,7 @@ using FusedChain = std::pair<std::string, std::vector<Step>>;
 const std::vector<std::string>& fusedPathFields()
 {
     static const std::vector<std::string> s_fields{
-        "atom", "math", "cf", "pack", "halo", "fuse", "dma", "swz", "wdirect", "large"};
+        "atom", "math", "cf", "pack", "halo", "fuse", "dma", "swz", "wdirect", "large", "patch"};
     return s_fields;
 }
 
@@ -1930,6 +1930,11 @@ std::vector<FusedShape> fusedShapes()
     shapes.push_back({"Grouped", grouped});
     shapes.push_back({"OneD", dense(16, 24, {13}, {3}, {1}, true)});
     shapes.push_back({"ThreeD", dense(8, 16, {3, 5, 6}, {3, 3, 3}, {1, 1, 1}, true)});
+    // Patch convolutions: the patch view of the general loop and the patch tile (8- and 4-wide
+    // channel runs), channels-last and channels-first.
+    shapes.push_back({"Patch16x16Rgb", patchShape(3, 40, {32, 48}, 16, true)});
+    shapes.push_back({"Patch4x4Rgb", patchShape(3, 24, {12, 20}, 4, true)});
+    shapes.push_back({"Patch2x2ChannelsFirst", patchShape(16, 24, {6, 10}, 2, false)});
     return shapes;
 }
 
