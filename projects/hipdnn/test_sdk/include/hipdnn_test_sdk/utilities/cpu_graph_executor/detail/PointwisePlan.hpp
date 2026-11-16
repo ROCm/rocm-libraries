@@ -113,7 +113,7 @@ private:
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::
-                template pointwiseCompute<Input0Type, ComputeType>(
+                template pointwiseComputeAs<ComputeType>(
                     _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(_params.mode))
@@ -127,7 +127,7 @@ private:
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                template pointwiseCompute<Input0Type, Input1Type, ComputeType>(
+                template pointwiseComputeAs<ComputeType>(
                     _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
         }
         else if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(_params.mode))
@@ -147,12 +147,11 @@ private:
 
                 utilities::
                     CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type, Input2Type>::
-                        template pointwiseCompute<Input0Type, Input1Type, Input2Type, ComputeType>(
-                            _params.mode,
-                            *shallowOut0Tensor,
-                            *shallowIn0Tensor,
-                            *shallowIn1Tensor,
-                            *shallowIn2Tensor);
+                        template pointwiseComputeAs<ComputeType>(_params.mode,
+                                                                 *shallowOut0Tensor,
+                                                                 *shallowIn0Tensor,
+                                                                 *shallowIn1Tensor,
+                                                                 *shallowIn2Tensor);
             }
             else
             {
@@ -176,7 +175,7 @@ private:
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))
         {
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type>::
-                template pointwiseCompute<Input0Type, float, ComputeType>(
+                template pointwiseComputeAs<ComputeType>(
                     _params.mode,
                     *shallowOut0Tensor,
                     *shallowIn0Tensor,
@@ -198,7 +197,7 @@ private:
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
             utilities::CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::
-                template pointwiseCompute<Input0Type, Input1Type, float, ComputeType>(
+                template pointwiseComputeAs<ComputeType>(
                     _params.mode,
                     *shallowOut0Tensor,
                     *shallowIn0Tensor,

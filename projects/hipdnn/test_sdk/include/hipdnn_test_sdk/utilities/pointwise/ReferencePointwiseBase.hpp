@@ -109,6 +109,68 @@ public:
             operation, output, input1, input2, lowerClip, upperClip, lowerSlope);
     }
 
+    // The same operations with the compute type named first: every operand is converted to
+    // ComputeType, the operation is carried out in it (rounding once per operation) and the
+    // result is stored as OutputType. pointwiseCompute() above carries them out in double.
+    template <typename ComputeType, typename InputType>
+    static void pointwiseComputeAs(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                   hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                   const hipdnn_data_sdk::utilities::TensorBase<InputType>& input)
+    {
+        executeUnaryOperation<InputType, ComputeType>(operation, output, input);
+    }
+
+    template <typename ComputeType, typename InputType, typename ParamType>
+    static void pointwiseComputeAs(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                   hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                   const hipdnn_data_sdk::utilities::TensorBase<InputType>& input,
+                                   const ParamType lowerClip,
+                                   const ParamType upperClip,
+                                   const ParamType lowerSlope,
+                                   const ParamType swishBeta = ParamType{1})
+    {
+        static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
+                      "ParamType must be a valid tensor type for scalar parameters");
+        executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(
+            operation, output, input, lowerClip, upperClip, lowerSlope, swishBeta);
+    }
+
+    template <typename ComputeType, typename Input1Type, typename Input2Type>
+    static void pointwiseComputeAs(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                   hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                   const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                   const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
+    {
+        executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
+            operation, output, input1, input2);
+    }
+
+    template <typename ComputeType, typename Input0Type, typename Input1Type, typename Input2Type>
+    static void pointwiseComputeAs(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                   hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                   const hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
+                                   const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                   const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
+    {
+        executeTernaryOperation<Input0Type, Input1Type, Input2Type, ComputeType>(
+            operation, output, input0, input1, input2);
+    }
+
+    template <typename ComputeType, typename Input1Type, typename Input2Type, typename ParamType>
+    static void pointwiseComputeAs(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                   hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
+                                   const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
+                                   const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2,
+                                   const ParamType lowerClip,
+                                   const ParamType upperClip,
+                                   const ParamType lowerSlope)
+    {
+        static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
+                      "ParamType must be a valid tensor type for scalar parameters");
+        executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType, ComputeType>(
+            operation, output, input1, input2, lowerClip, upperClip, lowerSlope);
+    }
+
 private:
     template <typename InputType, typename ComputeType>
     static void
