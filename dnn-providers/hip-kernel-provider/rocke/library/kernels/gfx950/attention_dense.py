@@ -841,7 +841,11 @@ def _window_tile_counts(window: int, block_n: int) -> Tuple[int, int]:
     key. ``full`` is the window length in whole tiles, rounded DOWN so a tile runs
     without the window mask only when every row of the block sees all of it. They
     agree when ``window % block_n`` is 0 or 1; both are 0 when the window is off.
+    The window is a whole number of keys: the builders hand it to ``const_i32``, which
+    truncates, so a fractional width would silently build a different window.
     """
+    if not (isinstance(window, int) or float(window).is_integer()):
+        raise ValueError(f"sliding_window must be an integer, got {window!r}")
     if window <= 0:
         return 0, 0
     return -(-(window - 1) // block_n), window // block_n
