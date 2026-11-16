@@ -31,6 +31,7 @@
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_csrmv_adaptive.hpp"
 #include "rocsparse_csrmv_lrb.hpp"
+#include "rocsparse_spmv_helpers.h"
 
 #include <memory>
 #include <type_traits>
@@ -309,43 +310,22 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
         }
         else
         {
-            // Extract gamma arrays and z vectors for batched operation
-            using Z                      = Y;
-            T*        gamma_device_array = nullptr;
-            const Z** z_array            = nullptr;
-
-            size_t buffer_size = num_extra * sizeof(T) + num_extra * sizeof(const Z*);
-
-            bool  temp_alloc       = false;
-            void* temp_storage_ptr = nullptr;
-            if(handle->buffer_size >= buffer_size)
+            // Use the gamma and z arrays extracted by rocsparse_spmv_set_extra
+            using Z = T;
+            if(handle->temp_spmv_descr == nullptr
+               || !rocsparse::spmv_has_device_arrays(handle->temp_spmv_descr))
             {
-                temp_storage_ptr = handle->buffer;
-                temp_alloc       = false;
+                // LCOV_EXCL_START
+                return rocsparse_status_invalid_value;
+                // LCOV_EXCL_STOP
             }
-            else
-            {
-                RETURN_IF_HIP_ERROR(
-                    rocsparse_hipMallocAsync(&temp_storage_ptr, buffer_size, handle->stream));
-                temp_alloc = true;
-            }
-
-            gamma_device_array = reinterpret_cast<T*>(temp_storage_ptr);
-            z_array = reinterpret_cast<const Z**>(reinterpret_cast<char*>(temp_storage_ptr)
-                                                  + num_extra * sizeof(T));
-
-            // Fill the preallocated buffers
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
-                handle, num_extra, gamma_vec, z_vecs, gamma_device_array, z_array));
+            const T* gamma_device_array
+                = rocsparse::spmv_get_gamma_device_array<T>(handle->temp_spmv_descr);
+            const Z** z_array = rocsparse::spmv_get_z_array<Z>(handle->temp_spmv_descr);
 
             // matrix never accessed however still need to update y vector
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
                 handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
-
-            if(temp_alloc)
-            {
-                RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, handle->stream));
-            }
         }
 
         return rocsparse_status_success;

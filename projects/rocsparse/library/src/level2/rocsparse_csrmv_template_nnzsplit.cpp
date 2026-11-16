@@ -662,7 +662,7 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
     ROCSPARSE_ROUTINE_TRACE;
 
     // Extract gamma arrays and z vectors for batched operation
-    using Z                      = Y;
+    using Z                      = T;
     T*        gamma_device_array = nullptr;
     const Z** z_array            = nullptr;
 

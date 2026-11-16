@@ -28,17 +28,15 @@
 
 namespace rocsparse
 {
-    template <typename T, typename Y>
+    template <typename T, typename Z>
     rocsparse_status csrmv_extract_gamma_and_z_arrays(rocsparse_handle             handle,
                                                       rocsparse_int                num_extra,
                                                       rocsparse_const_dnvec_descr  gamma_vec,
                                                       rocsparse_const_dnvec_descr* z_vecs,
                                                       T*        gamma_device_array,
-                                                      const Y** z_array)
+                                                      const Z** z_array)
     {
         ROCSPARSE_ROUTINE_TRACE;
-
-        using Z = Y;
 
         if(num_extra <= 0)
         {
@@ -90,28 +88,20 @@ namespace rocsparse
     }
 
 // Explicit instantiations for all combinations used in csrmv
-#define INSTANTIATE_EXTRACT(TTYPE, YTYPE)                                  \
+#define INSTANTIATE_EXTRACT(TTYPE, ZTYPE)                                  \
     template rocsparse_status rocsparse::csrmv_extract_gamma_and_z_arrays( \
         rocsparse_handle             handle,                               \
         rocsparse_int                num_extra,                            \
         rocsparse_const_dnvec_descr  gamma_vec,                            \
         rocsparse_const_dnvec_descr* z_vecs,                               \
         TTYPE*                       gamma_device_array,                   \
-        const YTYPE**                z_array);
+        const ZTYPE**                z_array);
 
-    // Uniform precision
     INSTANTIATE_EXTRACT(float, float);
     INSTANTIATE_EXTRACT(double, double);
     INSTANTIATE_EXTRACT(rocsparse_float_complex, rocsparse_float_complex);
     INSTANTIATE_EXTRACT(rocsparse_double_complex, rocsparse_double_complex);
-
-    // Mixed precision
     INSTANTIATE_EXTRACT(int32_t, int32_t);
-    INSTANTIATE_EXTRACT(_Float16, float);
-    INSTANTIATE_EXTRACT(float, _Float16);
-    INSTANTIATE_EXTRACT(rocsparse_bfloat16, float);
-    INSTANTIATE_EXTRACT(float, rocsparse_bfloat16);
-    INSTANTIATE_EXTRACT(rocsparse_bfloat16, rocsparse_bfloat16);
 
 #undef INSTANTIATE_EXTRACT
 }
