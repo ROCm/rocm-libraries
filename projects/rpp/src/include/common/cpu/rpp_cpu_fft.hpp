@@ -45,6 +45,8 @@ SOFTWARE.
 // float32 value on any toolchain. That makes the kernel both more accurate than a float32 FFT
 // and bitwise reproducible, which is what the audio QA suite's exact-match checks require.
 
+#include <immintrin.h>
+
 #include <cmath>
 #include <complex>
 #include <utility>
@@ -249,6 +251,109 @@ inline void rpp_cpu_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* in
     for (Rpp32s i = 0; i < m; i++) scratch[i] = rpp_fft_cmul(scratch[i], plan.kernelFft[i]);
     rpp_fft_radix2_inverse(scratch, m, plan.bitRevM, plan.twiddlesM);
     for (Rpp32s k = 0; k < numBins; k++) out[k] = rpp_fft_cmul(scratch[k], plan.chirp[k]);
+}
+
+// In-place forward radix-2 DIT FFT over four transforms at once, held in split real and
+// imaginary arrays with element k of transform l at [k * 4 + l]. Four doubles are one 256-bit
+// vector, so a lane group is exactly one register and the shared twiddles broadcast across it:
+// every stage is vertical SIMD with no shuffles or cross-lane work. That is why this vectorizes
+// across transforms rather than within one, where butterfly partners sit at varying strides.
+// No FMA here: the audio kernels build with -mno-fma (add_fma_property in src/modules/
+// CMakeLists.txt), so these mirror the scalar expressions operation for operation, grouping
+// included, which keeps the two paths bit-identical.
+inline void rpp_simd_fft_radix2_forward(Rpp64f* re, Rpp64f* im, Rpp32s len,
+                                        const std::vector<Rpp32u>& bitRev,
+                                        const std::vector<RppFftComplex>& tw) {
+    for (Rpp32s i = 0; i < len; i++) {
+        const Rpp32u j = bitRev[i];
+        if ((Rpp32u)i < j) {
+            const __m256d ar = _mm256_loadu_pd(re + i * 4), br = _mm256_loadu_pd(re + j * 4);
+            const __m256d ai = _mm256_loadu_pd(im + i * 4), bi = _mm256_loadu_pd(im + j * 4);
+            _mm256_storeu_pd(re + i * 4, br);
+            _mm256_storeu_pd(re + j * 4, ar);
+            _mm256_storeu_pd(im + i * 4, bi);
+            _mm256_storeu_pd(im + j * 4, ai);
+        }
+    }
+    for (Rpp32s size = 2; size <= len; size <<= 1) {
+        const Rpp32s half = size >> 1;
+        const Rpp32s step = len / size;
+        for (Rpp32s i = 0; i < len; i += size) {
+            Rpp32s k = 0;
+            for (Rpp32s j = i; j < i + half; j++, k += step) {
+                const __m256d wr = _mm256_set1_pd(tw[k].real());
+                const __m256d wi = _mm256_set1_pd(tw[k].imag());
+                Rpp64f* reLo = re + j * 4;
+                Rpp64f* imLo = im + j * 4;
+                Rpp64f* reHi = re + (j + half) * 4;
+                Rpp64f* imHi = im + (j + half) * 4;
+                const __m256d xr = _mm256_loadu_pd(reHi), xi = _mm256_loadu_pd(imHi);
+                const __m256d tr = _mm256_sub_pd(_mm256_mul_pd(wr, xr), _mm256_mul_pd(wi, xi));
+                const __m256d ti = _mm256_add_pd(_mm256_mul_pd(wr, xi), _mm256_mul_pd(wi, xr));
+                const __m256d ur = _mm256_loadu_pd(reLo), ui = _mm256_loadu_pd(imLo);
+                _mm256_storeu_pd(reHi, _mm256_sub_pd(ur, tr));
+                _mm256_storeu_pd(imHi, _mm256_sub_pd(ui, ti));
+                _mm256_storeu_pd(reLo, _mm256_add_pd(ur, tr));
+                _mm256_storeu_pd(imLo, _mm256_add_pd(ui, ti));
+            }
+        }
+    }
+}
+
+// SIMD counterpart of rpp_cpu_fft_forward_real: transforms four real signals of length n at
+// once, in[l] being signal l. Bin k of transform l is written to outRe/outIm[k * 4 + l], which
+// keeps the lanes contiguous for whatever the caller does with them next. Power-of-two n only;
+// other sizes, and any group of fewer than four signals, use the scalar entry point.
+// scratchRe and scratchIm each need (n/2) * 4 elements and must not alias outRe/outIm.
+inline void rpp_simd_fft_forward_real(const RppCpuFftPlan& plan, const Rpp32f* const* in,
+                                      Rpp32s inLen, Rpp64f* outRe, Rpp64f* outIm, Rpp64f* scratchRe,
+                                      Rpp64f* scratchIm) {
+    const Rpp32s n = plan.n;
+    if (n == 1) {
+        for (Rpp32s l = 0; l < 4; l++) {
+            outRe[l] = (inLen > 0) ? (Rpp64f)in[l][0] : 0.0;
+            outIm[l] = 0.0;
+        }
+        return;
+    }
+
+    const Rpp32s h = n / 2;
+    for (Rpp32s k = 0; k < h; k++) {
+        const Rpp32s e = 2 * k, o = e + 1;
+        for (Rpp32s l = 0; l < 4; l++) {
+            scratchRe[k * 4 + l] = (e < inLen) ? (Rpp64f)in[l][e] : 0.0;
+            scratchIm[k * 4 + l] = (o < inLen) ? (Rpp64f)in[l][o] : 0.0;
+        }
+    }
+    rpp_simd_fft_radix2_forward(scratchRe, scratchIm, h, plan.bitRev, plan.twiddlesHalf);
+
+    // Z[0] carries both purely real end bins: X[0] = Re+Im and X[n/2] = Re-Im.
+    const __m256d zero = _mm256_setzero_pd();
+    const __m256d z0r = _mm256_loadu_pd(scratchRe), z0i = _mm256_loadu_pd(scratchIm);
+    _mm256_storeu_pd(outRe, _mm256_add_pd(z0r, z0i));
+    _mm256_storeu_pd(outIm, zero);
+    _mm256_storeu_pd(outRe + h * 4, _mm256_sub_pd(z0r, z0i));
+    _mm256_storeu_pd(outIm + h * 4, zero);
+
+    const __m256d pointFive = _mm256_set1_pd(0.5);
+    for (Rpp32s k = 1; k < h; k++) {
+        const __m256d wr = _mm256_set1_pd(plan.twiddles[k].real());
+        const __m256d wi = _mm256_set1_pd(plan.twiddles[k].imag());
+        const __m256d ar = _mm256_loadu_pd(scratchRe + k * 4);
+        const __m256d ai = _mm256_loadu_pd(scratchIm + k * 4);
+        const __m256d br = _mm256_loadu_pd(scratchRe + (h - k) * 4);
+        const __m256d bi = _mm256_sub_pd(zero, _mm256_loadu_pd(scratchIm + (h - k) * 4));
+        const __m256d zer = _mm256_mul_pd(pointFive, _mm256_add_pd(ar, br));
+        const __m256d zei = _mm256_mul_pd(pointFive, _mm256_add_pd(ai, bi));
+        const __m256d dr = _mm256_mul_pd(pointFive, _mm256_sub_pd(ar, br));
+        const __m256d di = _mm256_mul_pd(pointFive, _mm256_sub_pd(ai, bi));
+        const __m256d zor = di;  // Zo = -i * d
+        const __m256d zoi = _mm256_sub_pd(zero, dr);
+        _mm256_storeu_pd(outRe + k * 4, _mm256_sub_pd(_mm256_add_pd(zer, _mm256_mul_pd(wr, zor)),
+                                                      _mm256_mul_pd(wi, zoi)));
+        _mm256_storeu_pd(outIm + k * 4, _mm256_add_pd(_mm256_add_pd(zei, _mm256_mul_pd(wr, zoi)),
+                                                      _mm256_mul_pd(wi, zor)));
+    }
 }
 
 #endif  // RPP_CPU_FFT_HPP
