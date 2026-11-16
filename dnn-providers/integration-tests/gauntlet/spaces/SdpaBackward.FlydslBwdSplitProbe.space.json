@@ -1,7 +1,7 @@
 {
   "version": 1,
   "operation": "SdpaBackward",
-  "description": "Probe-only rejection library for hipkernel:flydsl_sdpa_bwd_split on gfx942 and gfx90a, written from the matcher's decline table (COVERAGE.md 9.1 and 9.2; FlydslSdpaBwdCommon.hpp): a legal SDPA backward (bfloat16 or half, head size 128 or 192, BHSD or BSHD, FP32 stats [B,H,Sq,1] as an INPUT, declared alignment 16) with ONE feature per case, named by the `family` axis; every family is a graph the frontend accepts. Families the engine serves expect declined_or_pass: the plain graph, odd dims and head sizes (declined only at a compact pitch, LY-3), dropout probability 0 and Philox dropout, a baked scale tensor, stats rank 1 and 3, f32 data, GQA, asymmetric head dims, head dim 64, a window, padding with both sequence lengths, a bias with and without dBias, an f32 bias with an f32 dBias at head dim 128 (BI-2), a 16-bit bias with an unaligned pitch, V with a head count of its own at head dim 128 (SH-1; at head dim 192 it declines). Families it declines expect declined: a dropout mask or scale tensor (DR-7), ALiBi (MW-12), sequence lengths without padding_mask (PV-2), mixed dtypes and a non-f32 stats tensor (DT-1, DT-3), head dims above 512 (DT-4), a bias with a causal or window mask (MW-10), dBias with a row-broadcast bias (BI-4), an unaligned dBias stride (BI-9), a window left bound of 0 (MW-9), a scale above 2**20 (SC-5), padding_mask without its tensors (PV-2), Hk != Hv with a bias or f32 data (SH-1), and the three overflow families (built, never run). Dropout is served but its gradient needs the forward's keep mask: the harness cannot supply it for a backward graph, so an accepted dropout case ends UNEXERCISED and shows as a violation: the list of those is the known oracle gap, not an engine defect.",
+  "description": "Probe-only rejection library for hipkernel:flydsl_sdpa_bwd_split on gfx942 and gfx90a, written from the matcher's decline table (COVERAGE.md 9.1 and 9.2; FlydslSdpaBwdCommon.hpp): a legal SDPA backward (bfloat16 or half, head size 128 or 192, BHSD or BSHD, FP32 stats [B,H,Sq,1] as an INPUT, declared alignment 16) with ONE feature per case, named by the `family` axis; every family is a graph the frontend accepts. Families the engine serves expect declined_or_pass: the plain graph, odd dims and head sizes (declined only at a compact pitch, LY-3), dropout probability 0 and Philox dropout, a baked scale tensor, stats rank 1 and 3, f32 data, GQA, asymmetric head dims, head dim 64, a window, padding with both sequence lengths, a bias with and without dBias, an f32 bias with an f32 dBias at head dim 128 (BI-2), a 16-bit bias with an unaligned pitch, V with a head count of its own at head dim 128 (SH-1; at head dim 192 it declines). Families it declines expect declined: a dropout mask or scale tensor (DR-7), ALiBi (MW-12), sequence lengths without padding_mask (PV-2), mixed dtypes and a non-f32 stats tensor (DT-1, DT-3), head dims above 512 (DT-4), a bias with a causal or window mask (MW-10), dBias with a row-broadcast bias (BI-4), an unaligned dBias stride (BI-9), a window left bound of 0 (MW-9), a scale above 2**20 (SC-5), padding_mask without its tensors (PV-2), Hk != Hv with a bias or f32 data (SH-1), and the overflow families: overflow_dim and the v_row and dq_row strides are declined and built, never run; the q_batch, o_batch, dk_batch and dv_head strides of 2**31 elements are served (DT-9 declines only a per-head slab beyond 32-bit byte offsets), so they run at full enforcement and expect declined_or_pass (allocations of 4 to 8 GiB per tensor); ASM's kernarg families are not drawn (no matcher rule behind them). Dropout is served but its gradient needs the forward's keep mask: the harness cannot supply it for a backward graph, so an accepted dropout case ends UNEXERCISED and shows as a violation: the list of those is the known oracle gap, not an engine defect.",
   "engine": "hipkernel:flydsl_sdpa_bwd_split",
   "template": "../../integration-test-bundles/quick/SdpaBackward/Default/graph.template.json",
   "axes": {
@@ -38,7 +38,6 @@
         "hd64",
         "window_hd192",
         "overflow_stride",
-        "overflow_kernarg",
         "overflow_dim",
         "hd_over",
         "bias_causal",
@@ -282,6 +281,7 @@
     "bias_dtype": "'float' if family == 'bias_f32_dbias' else dtype",
     "bias_q": "1 if family == 'dbias_rowbcast' else sq_e",
     "bias_skv": "skv_e",
+    "ovf_served": "family == 'overflow_stride' and var in [0, 3, 6, 7]",
     "scale_v": "2**21 if family == 'scale_huge' else 0.08838834764831843",
     "nseq": "family in ['padding', 'seq_len_group']",
     "ovf_skv": "skv_d"
@@ -289,10 +289,14 @@
   "constraints": [
     {
       "rule": "ov or b_e * hq * sq_e * skv_e * (dqk_e + dv_e) <= 2**29",
-      "reason": "GPU reference cost ceiling (as SdpaBackward.space.json); the overflow family is built, never run"
+      "reason": "GPU reference cost ceiling (as SdpaBackward.space.json); the overflow families that are declined are built, never run"
+    },
+    {
+      "rule": "family != 'overflow_stride' or var not in [1, 4]",
+      "reason": "k_head and do_head strides of 2**31 elements are served and correct (checked with HIPDNN_TEST_HOST_INPUT_FILL=1) but the device input fill fails on them (hipModuleLaunchKernel invalid argument), so they would end UNEXERCISED"
     }
   ],
-  "expect": "${'declined_or_pass' if family in ['none', 'odd_dims', 'odd_head_size', 'dropout_p0', 'dropout_philox', 'scale_const', 'stats_rank3', 'stats_rank1', 'dt_all_float', 'gqa', 'asym_hd', 'hd64', 'window_hd192', 'padding', 'attn_mask', 'attn_mask_dbias', 'bias_f32_dbias', 'bias_unaligned_pitch', 'v_heads'] else 'declined'}",
+  "expect": "${'declined_or_pass' if family in ['none', 'odd_dims', 'odd_head_size', 'dropout_p0', 'dropout_philox', 'scale_const', 'stats_rank3', 'stats_rank1', 'dt_all_float', 'gqa', 'asym_hd', 'hd64', 'window_hd192', 'padding', 'attn_mask', 'attn_mask_dbias', 'bias_f32_dbias', 'bias_unaligned_pitch', 'v_heads'] or ovf_served else 'declined'}",
   "case": {
     "values": {
       "io_data_type": "${dtype}",
@@ -375,7 +379,7 @@
     },
     "metadata": {
       "purpose": "probe",
-      "enforcement_level": "${'buildable' if ov else 'full'}",
+      "enforcement_level": "${'full' if ovf_served else ('buildable' if ov else 'full')}",
       "inputs": {
         "2": {
           "kind": "free",
