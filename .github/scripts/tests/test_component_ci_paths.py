@@ -82,12 +82,28 @@ class MiopenProseSelectionTest(unittest.TestCase):
         self.assertTrue(detect_changed_components(changed)["tensilelite_coverage"])
 
     def test_source_renamed_into_docs_runs_miopen(self):
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("GIT_")
+            and k not in ("GITHUB_OUTPUT", "GITHUB_EVENT_NAME")
+        }
         with tempfile.TemporaryDirectory() as repo:
 
             def git(*args):
                 subprocess.run(
-                    ["git", "-c", "user.name=ci", "-c", "user.email=ci@ci", *args],
+                    [
+                        "git",
+                        "-c",
+                        "user.name=ci",
+                        "-c",
+                        "user.email=ci@ci",
+                        "-c",
+                        "commit.gpgsign=false",
+                        *args,
+                    ],
                     cwd=repo,
+                    env=env,
                     check=True,
                     capture_output=True,
                 )
@@ -104,11 +120,6 @@ class MiopenProseSelectionTest(unittest.TestCase):
             )
             git("commit", "-qm", "move")
 
-            env = {
-                k: v
-                for k, v in os.environ.items()
-                if k not in ("GITHUB_OUTPUT", "GITHUB_EVENT_NAME")
-            }
             env["BASE_REF"] = "HEAD^"
             output = subprocess.run(
                 [sys.executable, str(SCRIPTS_DIR / "component_ci.py")],
