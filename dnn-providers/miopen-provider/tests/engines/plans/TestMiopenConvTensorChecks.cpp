@@ -1123,8 +1123,9 @@ TEST(TestMiopenConvTensorChecks, SizeLimitIsNotPartOfTheIoTensorRules)
 namespace
 {
 
-// Dims whose element count reaches INT64_MAX: the product, the packing extent and the canonical
-// strides of such dims overflow a signed 64-bit integer.
+// Dims whose product, counting a zero dim as 1, reaches INT64_MAX: the packing extent and the
+// canonical strides of such dims overflow a signed 64-bit integer. The zero-extent cases overflow
+// in either dim order although the element count is zero.
 std::vector<std::vector<int64_t>> overflowingDims()
 {
     return {
@@ -1132,6 +1133,8 @@ std::vector<std::vector<int64_t>> overflowingDims()
         {2, 1, 1, std::numeric_limits<int64_t>::max()},
         {std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max(), 2, 2},
         {4294967296, 4294967296, 1, 1},
+        {0, 4294967296, 4294967296, 1},
+        {4294967296, 4294967296, 0, 1},
         {std::numeric_limits<int64_t>::max(), 1, 1, 1},
     };
 }
