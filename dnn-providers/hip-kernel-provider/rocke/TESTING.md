@@ -568,8 +568,10 @@ The counted backward synchronization split is the reference implementation:
 fast validator/model/mutation contracts remain in source discovery; the
 exhaustive IR/LDS matrix and pinned representative compile/final-ISA/resource
 subset are explicit source-runner stages and registered installed CTests. The
-new CTests start at comprehensive/full so nightly coverage owns them without
-adding work to quick/standard pre-merge and post-merge runs. Fast
+new CTests start at comprehensive/full so scheduled coverage owns them without
+adding work to quick/standard pre-merge and post-merge runs. The scheduled job
+does not build rocKE yet
+([§5.0.2](#502-ci-shards-and-rocke-item-sharding)). Fast
 counted/resource files remain source-runner coverage rather than expanding the
 existing quick attention CTest. The compiler gate preserves the
 existing resource-table qualification:
@@ -612,7 +614,9 @@ exit status for local iteration, not plain `GREEN`.
 parity, pytest, and numeric checks, but does not enroll these new explicit
 library gates. Run the library runner directly for their combined source verdict.
 The separately registered CTests also support exact-name installed replay and
-are enrolled only in comprehensive/full nightly coverage.
+are enrolled only in comprehensive/full
+([§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI job runs those
+tiers).
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -748,6 +752,21 @@ deselected item. The gate entries set `ROCKE_EXPLICIT_GATE_PARTIAL=0`, so a
 partial run is not permitted. A split would stop the gate on every CI shard.
 Thus each gate runs whole on every CI shard of its tier.
 
+**Which CI job runs which tier.** TheRock picks the tier of each run. With the
+TheRock revision that the workflows pin today:
+
+| CI job | Runs on | Tier | CI shards | Builds rocKE |
+|---|---|---|---|---|
+| `therock-multi-arch-ci.yml` | a pull request or push that touches only `dnn-providers/hip-kernel-provider` | standard | 4 | yes |
+| `therock-multi-arch-ci.yml` | a pull request or push that touches shared CI files or unclassified paths | quick | 1 | yes |
+| `therock-multi-arch-ci-nightly.yml` | the nightly schedule | comprehensive | 4 | no |
+
+The scheduled job does not build rocKE: TheRock's flag
+`THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off by default, and only
+`therock-multi-arch-ci.yml` turns it on, through `extra_cmake_options`. Thus
+an entry that starts at comprehensive or full runs in no CI job until the
+scheduled job builds rocKE.
+
 **Dependency on TheRock.** Item sharding needs two TheRock behaviours.
 TheRock exports `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` to every CTest
 entry. TheRock also shards hipkernelprovider with gtest sharding only
@@ -791,6 +810,125 @@ outside the CTest directory. There, entries that put only `tests/library` on
 `PYTHONPATH` need `rocke` installed in the `python` on `PATH`. Examples are
 `rocke_library_attention_pytest` and the
 `rocke_<operation>_reference_unit_pytest` entries.
+
+### 5.0.3 Choosing a tier and an entry for a test
+
+A test that no CTest entry runs does not run in CI, so choosing its place is
+part of writing it. [§5.0.1](#501-unit-discovery-versus-explicit-resource-gates)
+and [§5.0.2](#502-ci-shards-and-rocke-item-sharding) say how tests are
+discovered, gated and split; this section says where a new or moved test goes.
+The owners of the hip-kernel-provider test tiers set this policy; change this
+section with it.
+
+**Test at the cheapest level that proves the claim.** Go up a level only for
+what the level below cannot see.
+
+| Level | Proves | Default tier |
+|---|---|---|
+| 1. Host unit and contract | A spec rule, a pure function, a typed refusal | standard |
+| 2. IR structure | The emitted IR has the claimed shape | standard |
+| 3. Golden and byte identity | Output bytes are stable; both engines agree | quick, as a case in the existing golden corpus |
+| 4. Installed artifact | The installed tree imports and packages | quick for the import smoke; otherwise standard |
+| 5. GPU numeric | A kernel computes the right result | quick for a published operation's pinned reference lane; otherwise standard |
+| 6. Explicit resource gate | An exhaustive matrix, a compiler or resource qualification | comprehensive or full (see below) |
+
+**quick is a smoke tier.** It runs unsplit on one CI shard, and a failure there
+must mean that rocKE cannot be used or that a shipped kernel is wrong. It admits
+only:
+
+- the import smoke, `rocke_python_import_smoke`;
+- golden byte stability (`rocke_golden_static`, `rocke_differential_golden_*`):
+  add cases to their corpus, not new golden entries;
+- the core refusal and parity contracts of shipped kernel families, including
+  their small non-pytest contract binaries within S3;
+- the pinned GPU reference lane of each published operation.
+
+Sweeps, matrices, tuning-space walks, doc examples, tool and runner tests, and
+tests of an unshipped family belong in standard. Which contracts count as core
+for each family is part of the domain test strategy, which refines this list.
+State the reason for a quick addition in the pull request.
+
+**standard is the default home of every new test.** Each entry is split over
+the CI shards item by item ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)).
+
+**comprehensive and full** are for explicit resource gates and other
+scheduled-only entries. Today no CI job that runs them builds rocKE
+([§5.0.2](#502-ci-shards-and-rocke-item-sharding)), so a test placed there runs
+only in developer runs; say so in the pull request. Do not move a test there to
+make room.
+
+**Until existing entries are re-tiered.** Most installed entries are listed
+under quick today: every `rocke_pytest_<part>`, `rocke_tiling_pytest`,
+`rocke_tiling_gpu_pytest` and most library entries. A new file under
+`platform/tests` or under the tiling tests joins one of them with no edit, so
+it runs in quick; a library file runs once it is added to an entry's file list.
+Such a test may stay in a quick entry only if each item is within Q2 and the
+change adds at most Q3 to quick. Otherwise register a standard entry, modeled on
+`rocke_ctest_shard_pytest` in `platform/CMakeLists.txt`:
+
+- start its command with `_ROCKE_INSTALLED_PYTEST`;
+- list it under `python-standard` in `ROCKE_ENGINE_test_categories_external.yaml`,
+  which gives it the labels of standard and every later tier;
+- keep its files out of the quick entries: for `platform/tests`, `list(APPEND)`
+  the file to `_ROCKE_PLATFORM_PYTEST_IGNORE_<part>`. The tiling entries split
+  only by directory and the `gpu` marker, so moving a tiling file out of quick
+  needs a CMake change.
+
+**Place a test so that sharding can split it.**
+
+1. Prefer an existing sharded entry of the right tier: each new entry adds its
+   start-up and collection time to every CI shard.
+2. Start every installed pytest entry, except an explicit gate
+   ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)), with
+   `_ROCKE_INSTALLED_PYTEST`.
+3. Avoid non-pytest entries (binaries, scripts): they run whole on every CI
+   shard. Keep a new one within S3.
+4. Keep each shard key within S1. A key gets heavy when one item loops over
+   every case, or when many tests of a module share one slow parameter id.
+   Parameterize per case, so a sweep is many small keys, not one large one. A
+   module fixture is paid on every CI shard that gets an item of the module.
+5. Set pytest `--timeout` and CTest `TIMEOUT` from measured time with the
+   headroom of S2; make a slow test cheaper rather than raise a limit.
+
+**Measure before you choose.** In `platform/`, the items of a file that take a
+second or more, and its split over 4 CI shards:
+
+```bash
+PYTHONPATH=python python -m pytest tests/dispatch/dispatch_tests/core/test_example_parity.py \
+  --durations=0 --durations-min=1 -q
+PYTHONPATH=python ROCKE_TEST_SHARD=1/4 python -m pytest -p rocke.tests.ctest_shard \
+  tests/dispatch/dispatch_tests/core/test_example_parity.py --collect-only -q
+```
+
+Run each shard index from 0 to 3; in `library/`, use
+`PYTHONPATH=../platform/python`. Items that share a shard key run on the same shard, so add their times. After
+the first CI run, check the entry's time and split lines in the CI log.
+
+**Examples.**
+
+| Test | Placement |
+|---|---|
+| A typed refusal of an invalid spec of a shipped family, well under a second | The family's existing entry; a core contract within Q2, so quick is right. |
+| An IR check of every tile of a family, tens of seconds in total | One case per tile, in a standard entry; never quick. |
+| A test that starts child pytest or CTest processes | Its own standard entry, as `rocke_ctest_shard_pytest`. |
+| Anti-example: an AOT packaging entry registered as plain `python -m pytest`, listed in quick, with items of up to a minute or more | It runs whole on every CI shard and in every quick run. Start it with `_ROCKE_INSTALLED_PYTEST`, split the heavy items, tier it standard. |
+| Anti-example: one item that compiles every tile of a family | One key that one shard carries whole. Parameterize per tile. |
+
+#### Budgets
+
+> **Proposed, pending agreement with the owners of the hip-kernel-provider test
+> tiers.** Change them here only. Times are wall time on a CI runner, as the CI
+> log shows it; the Test step of a CI shard has a 30-minute limit.
+
+| Id | Budget | Value | Why |
+|---|---|---|---|
+| Q1 | rocKE's share of the quick shard | 5 min | TheRock targets under 5 min for a whole quick shard; rocKE takes several times that today. |
+| Q2 | One item in a quick entry | 2 s | Almost every quick item is far below it; the few above it take a large share of quick time. |
+| Q3 | A new quick entry, or what one change adds to quick | 15 s | A small fraction of Q1; every entry also pays start-up and collection. |
+| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | Golden entries run unsplit on every CI shard of every tier. |
+| S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. |
+| S2 | Limit headroom | pytest `--timeout` at least 2× the slowest item; CTest `TIMEOUT` at least 2× the entry's longest run, which is its unsplit run if the entry is in quick | The worst case stays under half of each limit. |
+| S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions. |
 
 ### 5.1 Before merging: source backends and installed CI
 
@@ -922,19 +1060,17 @@ and run in three entries of their own:
 
 | Entry | Runs | Tier | CI jobs that run it |
 |---|---|---|---|
-| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | pull-request, develop push and nightly |
-| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | pull-request, develop push and nightly |
-| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | nightly only |
+| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | every CI job that builds rocKE |
+| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | every CI job that builds rocKE |
+| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | none today |
 
-The tree's `conftest.py` says which tests carry the `gpu` marker. TheRock picks
-the tier per run: pull-request CI runs `ctest -L '^standard$'` or `-L
-'^quick$'`, develop push CI runs `-L '^quick$'`, and the scheduled nightly
-rocm-libraries run (`therock-multi-arch-ci-nightly.yml`) runs `-L
-'^comprehensive$'`. A quick entry carries every tier's label, so all three CI
-jobs run it; a comprehensive entry carries only the comprehensive and full
-labels, so **pull-request CI does not run the visualization tests**; the nightly
-run does. `tests/run_all.py` does not run them either (it collects
-`platform/tests`). Run them before merging a change to the visualization
+The tree's `conftest.py` says which tests carry the `gpu` marker.
+[§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI job runs which
+tier. A quick entry carries every tier's label, so every CI job that builds
+rocKE runs it. A comprehensive entry carries only the comprehensive and full
+labels, and the only comprehensive job does not build rocKE yet, so **no CI job
+runs the visualization tests today**. `tests/run_all.py` does not run them
+either (it collects `platform/tests`). Run them before merging a change to the visualization
 package, from `platform/`:
 
 ```bash

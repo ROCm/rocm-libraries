@@ -113,6 +113,10 @@ a matching remote GPU before marking kernel work done.
       **new** family/case adds an entry, an intended emission change **re-blesses**
       it, an inert change touches no golden. [`run_checks.py`](#run-the-checks)
       picks all of this up automatically.
+- [ ] **Placed in CI.** Each new or moved test runs in a CTest entry at the tier
+      that [`TESTING.md` §5.0.3](TESTING.md#503-choosing-a-tier-and-an-entry-for-a-test)
+      gives (standard by default, quick only for smoke), within its budgets. The
+      pull request states the tier and the measured cost.
 - [ ] **[`run_checks.py`](#run-the-checks) green** on the platforms in the
       [testing matrix](#local-testing-matrix-platforms).
 - [ ] **Correctness before speed.** The numeric harness passes within tolerance
