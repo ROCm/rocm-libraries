@@ -432,7 +432,10 @@ def _request_errors(
             "runtime_head_dims must be a bool, got "
             f"{type(req.runtime_head_dims).__name__}"
         )
-    for field in QUERY_SIDE_OPTIONS:
+    # Checked before any candidate coerces them: bool("false") is True, so a
+    # string flag would select an fp8 kernel, and bool(None) is False, so a
+    # missing encoding would pass as OCP instead of being refused.
+    for field in (*QUERY_SIDE_OPTIONS, "use_fp8", "fp8_fnuz"):
         value = getattr(req, field)
         if type(value) is not bool:
             errors.append(f"{field} must be a bool, got {type(value).__name__}")
