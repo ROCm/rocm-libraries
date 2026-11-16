@@ -28,7 +28,7 @@ SPDX-License-Identifier:  MIT
   - NCHW fp16 3x3 on CDNA2 / CDNA1 (gfx90a 1.30x fwd / 1.50x bwd on its graphs), against CK and older implicit GEMMs;
   - fp32 3x3 wrw on detection backbones: Mask R-CNN c256 200², 0.52-0.68x of MIOpen's time on CDNA.
 - **Loses when:**
-  - RDNA fp16 small-C backward data against `ConvWinoRage/Fury` (1.4-1.7x);
+  - RDNA fp16 small-C against `ConvWinoFury` and `ConvWinoRage`: on gfx1101, kernel against kernel on Fury's graphs, Fury is up to 1.9x faster (backward data with 32 dy channels) and 1.2x faster on the geometric mean;
   - fp32 Mask R-CNN 200² fwd/bwd against `ConvBinWinogradRxSf2x3g1` (1.13-1.24x), F(2,3) only;
   - gfx906 fwd/bwd against MIOpen's asm Winograd (about 1.55x behind, weighted).
   - NHWC 3x3 fp16 backward weights and backward data against MIOpen's transpose-wrapped asm (`Transposed*`); other engines serve those graphs.
@@ -86,7 +86,7 @@ SPDX-License-Identifier:  MIT
 - **16-bin layout** (`bins 16`, RDNA F(2,3)):
   - A wave owns all 16 bins of 16 channels x 16 tiles, so the output transform runs in registers: no LDS round trip and no epilogue barriers.
   - It wins where the output side dominates: backward data with few dy channels. Measured on UNet c128 k64 512² backward data against the 4-bin layout: 7.76 against 9.07 ms on gfx1201, 8.66 against 9.83 ms on gfx1100.
-  - Its grid follows the residency of its 256-VGPR waves: 6 a SIMD on the 1536-register RDNA parts, 4 elsewhere.
+  - Its grid counts on 6 waves a SIMD on the 1536-register RDNA parts, 4 elsewhere. On gfx11 the kernel is built for exactly that, 240 VGPRs: at 242 a SIMD holds 5, and the grid's last blocks run a second round (gfx1101 UNet c128 k64 512² backward data with 8 K waves: 16.8 against 12.3 ms). The gfx12 build is not held to it.
 - **wreg / sreg:** register-operand variants.
   - In `wreg` (gfx11/gfx12), each wave owns one transform row and builds its WMMA B fragments from the loaded input rows in registers: no LDS for V, and no barrier in the channel loop. gfx11's half-waves exchange channels with `v_permlanex16`.
   - In `sreg` (wave64 gfx9), lane = tile, and the transformed filter is a wave-uniform operand through the scalar cache.
@@ -96,7 +96,8 @@ SPDX-License-Identifier:  MIT
   - Chunk loads use the chunk as a scalar offset, so a load needs no VALU.
   - The fp16 first chunk is peeled so MFMAs start from zero.
   - A `readfirstlane` on the U offset avoids waterfall loops.
-  - A V swizzle spreads LDS banks: it cuts CDNA conflict cycles 2.7x on gfx950 UNet.
+  - A V swizzle spreads LDS banks: it cuts CDNA conflict cycles 2.7x on gfx950 UNet. On gfx11, whose B fragment is a tile's 8 dwords read as two 4-dword halves, the halves swap on tile bit 2 xor bit 3: about 10x fewer conflict cycles on gfx1101 ESRGAN c192 k64 backward data.
+  - On gfx11 the cooperative kernel splits tile indices into column, row and image by multiply-high reciprocals set once per launch, instead of runtime divisions in every item's job setup and epilogue.
 - **Gates.**
   - Problem gates, everything the naive parser gates, plus: 2-D; 3x3 filter; dilation 1; equal stride 1 or 2 (wrw 1); n, c·stride², k and groups within 32 bits; extents and padding within 32 bits.
   - fwd/bwd bf16 only with the switch.
@@ -148,7 +149,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - fp32 wrw on detection layers.
   - gfx906 wrw, where MIOpen's universal GEMM is very slow.
 - **Weak:**
-  - RDNA fp16 small-C (c32-c192, k32-k64) against Rage / Fury: the cost is per-item overhead (load latency, barriers, the Z round trip), not the MMAs.
+  - RDNA fp16 small-C (c32-c192, k32-k64) against Rage / Fury: the cost is VALU. On gfx1101 backward data with 32 dy channels, K5 issues 2-3x Fury's VALU per WMMA, in the fp32 output transform of each item's 16 bins and the per-item job setup.
   - RDNA fp32 large layers, where F(2,3) runs (F(4,3) is the F43 engines').
   - gfx906 fused, where the Hadamard runs near peak but staging, loads and barriers cost as much again.
   - CDNA small-C against Rage: Inception c32 149² trails by 1.6-1.75x, realesrgan c160 k32 backward data by 1.33-1.38x, HRNet c32 56² by 1.18x (gfx950) and 1.27x (MI325X).
@@ -172,7 +173,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
 
 ## Comparison with MIOpen
 - **`ConvBinWinograd3x3U`, `ConvBinWinogradRxS`, `ConvBinWinoRxS<2,3>/<3,2>`, `…RxSf2x3g1`:** binary asm for gfx9 / gfx10 / gfx11 / gfx12, fp32 and fp16, NCHW. They also serve arbitrary RxS by decomposing the filter into 3x3 pieces, and stride 2 by decimation. They win gfx906 fwd/bwd and RDNA fp32 Mask R-CNN 200² (1.13-1.24x).
-- **`ConvWinoFuryRxS` (gfx11 / gfx12) and `ConvWinoRageRxS` (gfx942 / gfx950 / gfx12):** fp16 only, the WMMA / MFMA fused kernels. Fury builds B fragments in registers; K5's `wreg` and 16-bin `coop` take that idea. They lead on small-C fp16: 1.4-1.7x on RDNA backward data, 1.2-1.4x on most CDNA graphs, and up to 1.7x on Inception / EfficientNet.
+- **`ConvWinoFuryRxS` (gfx11 / gfx12) and `ConvWinoRageRxS` (gfx942 / gfx950 / gfx12):** fp16 only, the WMMA / MFMA fused kernels. Fury builds B fragments in registers; K5's `wreg` and 16-bin `coop` take that idea. They lead on small-C fp16: on gfx1101, Fury's own graphs run 1.2x faster under Fury than under K5's best config (geometric mean, kernel against kernel; 0.83-1.9x per graph); 1.2-1.4x on most CDNA graphs, and up to 1.7x on Inception / EfficientNet.
 - **`ConvMPBidirectWinograd`** (multipass, disabled by default) and **`ConvWinograd3x3MultipassWrW<3-x>`**: readable multipass sources. K5's multipass covers the same ground with its own GEMM and both layouts. Our wrw beats MIOpen's multipass wrw and `GemmWrwUniversal` on fp32 detection layers.
 - MIOpen wraps NHWC in transposes (`Transposed*`) and has no bf16 Winograd.
 
@@ -217,9 +218,15 @@ No code was copied.
 - None of the levers below needs assembly.
 
 1. **Channels-last 3x3 Winograd, mostly fp16 backward weights and backward data.** MIOpen serves these graphs with its NCHW asm wrapped in layout transposes (`Transposed*`), and most of K5's excess sits here (gfx906 2663 ms, gfx1100 1481 ms, gfx908 77 ms, gfx90a 39 ms). Give the wrw and bwd variants a fast NHWC path, or at least a transpose-wrapped one, so they don't run the slow configs.
-2. **RDNA fp16 small-C against Fury / Rage** (0.39-0.72x).
-   - Autotune does not pick the 16-bin config where it would win, so the planner needs register counts at plan time.
-   - Per-item overhead (loads, about 5 barriers per item) is the cost to cut.
+2. **RDNA fp16 small-C against Fury / Rage.**
+   - **Current gap:** kernel against kernel on gfx1101, on the graphs Fury wins on gfx1100 (full size), K5's best config runs at 0.84x of Fury on the geometric mean. That ranges from 0.53x (ESRGAN c160 k32 backward data) to 1.20x (HRNet c64 28²). gfx1201 against Rage and Fury is not measured at the current code.
+   - **What remains is VALU:** 2-3x Fury's per WMMA on backward data with 32 dy channels (ESRGAN c160 k32, HRNet c256 k32). It comes from the fp32 output transform of each item's 16 bins and the per-item job setup. Fury transforms its output in packed fp16, which K5's precision rules out. Candidates: more tiles per item for small C without more accumulators, and cheaper job setup.
+   - **gfx12:** apply the gfx11 changes there too (the 16-bin occupancy build, the reciprocal tile split, the bit 2 xor bit 3 swizzle) once gfx1201 can be measured.
+   - **Measured on gfx1101 without gain:**
+     - cross-item input prefetch;
+     - a predicate-free interior epilogue for the 16-bin layout (it spills);
+     - 16-bin configs with 2 K waves (they spill);
+     - dropping the per-bin scheduling barrier.
 3. **gfx942 / gfx950 against Rage** (0.93x on both; 7 / 6 ms excess, mostly fp16 small-C backward data: realesrgan c160 k32, HRNet c32, Inception c32 149²).
    - What is left is per-item overhead at low occupancy. Profiled on MI325X (HRNet c32 56² forward), K5 issues about 1.2x Rage's VALU, and Rage keeps 12 waves a CU against K5's 12 with the single input buffer (8 with two). Most of an item is load latency, transform VALU and the epilogue's LDS round trip with 2 barriers per 16-channel slab, not MFMA (about 3% busy).
    - Measured and not taken:
