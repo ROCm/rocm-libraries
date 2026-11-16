@@ -16,7 +16,8 @@ Tests:
     uplo: [ L, U ]
     diag: [ N ]
     matrix_size: *trtri_128_range
-    iters: 10
+    iters: 100
+    cold_iters: 20
 
   - name: trtri_bench_rem
     category: bench
@@ -25,5 +26,6 @@ Tests:
     uplo: [ L, U ]
     diag: [ N ]
     matrix_size: *trtri_128_range
-    iters: 10
+    iters: 100
+    cold_iters: 20
 ...

@@ -1,4 +1,40 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_merged": [
+      {
+        "cases": [
+          "l22_b1h2k2v2_288x480_d128_bfp16_none_biasfullio_told"
+        ],
+        "support": {
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "h101_b1h2k2v2_72x120_d128_fp16_none_biasm4to0_bias11fp32_biasrowpad8_told",
+          "h78_b1h2k2v2_72x120_d128_fp16_none_biascolfp32_told",
+          "l22_b1h2k2v2_288x480_d128_bfp16_none_biasfullio_told",
+          "prbb01_b1h2k2v2_64x96_d128_bfp16_none_biasm4to0_bias11fp32_told",
+          "prbb02_b1h2k2v2_64x96_d128_bfp16_none_biasm4to0_bias1hfp32_told",
+          "prbb03_b2h1k1v1_64x96_d128_bfp16_none_biasm4to0_biasb1fp32_told",
+          "prbb04_b2h2k2v2_64x96_d128_bfp16_none_biasm4to0_biasfullfp32_told",
+          "prbb06_b1h2k2v2_64x96_d128_bfp16_none_biasm4to0_biasr2fp32_told",
+          "prbb07_b1h2k2v2_64x96_d128_bfp16_none_biasm4to0_biasr3fp32_told"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

@@ -133,8 +133,9 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::WorkgroupMappingXCCCheck>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorA>(),
                      Base::template Pair<Predicates::Contraction::SwizzleTensorB>(),
-                     Base::template Pair<Predicates::Contraction::FusedGemmA2A>(),
+                     Base::template Pair<Predicates::Contraction::FusedA2AEqual>(),
                      Base::template Pair<Predicates::Contraction::GemmA2AShape>(),
+                     Base::template Pair<Predicates::Contraction::A2AGemmShape>(),
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::MXBlockFreeA>(),
@@ -143,7 +144,8 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
-                     Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
+                     Base::template Pair<Predicates::Contraction::Int4EncodingA>(),
+                     Base::template Pair<Predicates::Contraction::MXScaleFormatEquals>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -596,14 +598,26 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::FusedGemmA2A, IO>
-            : public AutoMappingTraits<Predicates::Contraction::FusedGemmA2A, IO>
+        struct MappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::FusedA2AEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::FusedA2AEqual, IO>
         {
         };
 
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::GemmA2AShape, IO>
             : public AutoMappingTraits<Predicates::Contraction::GemmA2AShape, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::A2AGemmShape, IO>
+            : public AutoMappingTraits<Predicates::Contraction::A2AGemmShape, IO>
         {
         };
 

@@ -18,14 +18,17 @@
 
 /**
  * @file TestAttentionDenseGeometry.cpp
- * @brief Pins gfx942AttentionDenseGeometry(), gfx950AttentionDenseGeometry(), each arch's
- *        tile rules and the gfx942 sliding-window guard against their Python originals.
+ * @brief Pins gfx942AttentionDenseGeometry(), gfx950AttentionDenseGeometry() and each arch's
+ *        tile rules against their Python originals, plus this engine's own gfx942
+ *        sliding-window guard.
  *
  * A geometry that disagrees with the Python does not fault, it computes something else,
- * and nothing else in the suite compares the two halves. Every expected number below is
- * read off `kernels/gfx94x/attention_dense.py` (`attention_dense_grid`,
- * `attention_dense_block`, `supports_attention_dense`) and written as a literal; deriving
- * one from the expression under test would assert only that the expression equals itself.
+ * and nothing else in the suite compares the two halves. Every expected tile number below
+ * is read off `kernels/gfx94x/attention_dense.py` (`attention_dense_grid`,
+ * `attention_dense_block`) and written as a literal; deriving one from the expression
+ * under test would assert only that the expression equals itself. The window-guard
+ * witnesses are literals too, but they pin this pack's own decline policy: the Python no
+ * longer has a counterpart.
  *
  * The two arches keep separate suites: they build different block_m sets under different
  * tile rules (gfx942 by quantum and CTA size, gfx950 by membership and LDS budget), so
@@ -242,9 +245,9 @@ TEST(TestGfx942AttentionDenseTile, RefusesNamedNeighboursOfTheLegalSet)
 }
 
 // =============================================================================
-// The sliding-window zero-trip guard. Every verdict is that guard's in
-// supports_attention_dense for a causal bf16 D128 spec at that tile and shape; the
-// Python's later row rule is not part of it.
+// The sliding-window zero-trip guard. The witnesses pin this pack's own decline policy at
+// each tile and shape, for a causal bf16 D128 spec; the Python no longer declines these
+// windows, and the row rule is not part of the guard.
 // =============================================================================
 
 TEST(TestGfx942AttentionDenseWindow, NoWindowAlwaysReachesKeys)
@@ -252,7 +255,7 @@ TEST(TestGfx942AttentionDenseWindow, NoWindowAlwaysReachesKeys)
     EXPECT_TRUE(gfx942AttentionDenseWindowReachesKeys(256, 64, 4096, 64, 0));
 }
 
-TEST(TestGfx942AttentionDenseWindow, MatchesThePythonVerdictAtEachWitness)
+TEST(TestGfx942AttentionDenseWindow, PinsThePackDeclinePolicyAtEachWitness)
 {
     struct Witness
     {
