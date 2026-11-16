@@ -432,10 +432,10 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             fp_type4 read4;
 
             static_unroll_count<unsigned int, 0, less4, grprd, 2>{[&](unsigned int k) {
-                if((k + (lid << 2)) < less4)
+                if((k + (lid * read_size)) < less4)
                 {
-                    nidx  = (k + (lid << 2)) / mio_bn_config::hw;
-                    hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
+                    nidx  = (k + (lid * read_size)) / mio_bn_config::hw;
+                    hwidx = (k + (lid * read_size)) - (nidx * mio_bn_config::hw);
                     index = nidx * mio_bn_config::chw + chwid + hwidx;
                     read4 = *(reinterpret_cast<const fp_type4*>(x_in + index));
                     typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
@@ -448,7 +448,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
             if constexpr(rem4 > 0u)
             {
-                const unsigned int remkey = (lid << 2) + less4;
+                const unsigned int remkey = (lid * read_size) + less4;
                 nidx                      = remkey / mio_bn_config::hw;
                 hwidx                     = remkey - (nidx * mio_bn_config::hw);
                 index                     = nidx * mio_bn_config::chw + chwid + hwidx;
