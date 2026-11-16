@@ -2608,23 +2608,28 @@ class _Lowerer:
         )
 
     def _op_tile_async_buffer_load_lds(self, op: Op) -> None:
-        # Typed-LDS variant: the second operand is a ``smem<...>`` value.
-        # Materialise an LDS pointer from the ``__shared__`` storage and
-        # hand it to the same intrinsic as the addr variant.
+        # The second operand is a ``smem<...>`` value, whose LDS pointer is
+        # its ``__shared__`` storage, or an i64 LDS address (from
+        # ``smem_addr_of`` / ``smem_ptr_add``, as the LLVM lowering also
+        # accepts), cast to a pointer as the addr variant does.
         rsrc, lds_val, voff, soff = op.operands
         dwords = int(op.attrs["dwords"])
         aux = int(op.attrs.get("aux", 0))
         size_bytes = dwords * 4
-        storage = lds_val.op.attrs.get("_storage") if lds_val.op else None
-        if storage is None:
-            raise ValueError("async_buffer_load_lds before smem_alloc was lowered")
+        if lds_val.type == I64:
+            lds_ptr = f"({_name(lds_val)})"
+        else:
+            storage = lds_val.op.attrs.get("_storage") if lds_val.op else None
+            if storage is None:
+                raise ValueError("async_buffer_load_lds before smem_alloc was lowered")
+            lds_ptr = f"&{storage}[0]"
         # Same builtin-vs-intrinsic distinction as the addr variant above:
         # call the LLVM intrinsic via the prologue's ``_llvm_amdgcn_*``
         # shim so size=12 / size=16 don't trip clang's builtin validator.
         self._emit(
             f"_llvm_amdgcn_raw_ptr_buffer_load_lds("
             f"{_name(rsrc)}, "
-            f"(__attribute__((address_space(3))) void*)&{storage}[0], "
+            f"(__attribute__((address_space(3))) void*){lds_ptr}, "
             f"{size_bytes}, {_name(voff)}, {_name(soff)}, 0, {aux});"
         )
 
