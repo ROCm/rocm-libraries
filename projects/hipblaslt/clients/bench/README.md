@@ -32,8 +32,8 @@ cd hipBLASLt; cd build/release
 --c_type <value>           Precision of matrix C. Options: f32_r, f64_r, i32_r, f16_r, bf16_r, i8_r, f32_c, f64_c 
 --d_type <value>           Precision of matrix D. Options: f32_r, f64_r, i32_r, f16_r, bf16_r, i8_r, f32_c, f64_c 
 --compute_type <value>     Precision of computation. Options: s,f32_r,x,xf32_r,f64_r,i32_r          (Default value is: f32_r)
---compute_input_typeA <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the argument has no effect. (Default value is: INVALID)
---compute_input_typeB <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the argument has no effect. (Default value is: INVALID)
+--compute_input_typeA <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the argument has no effect. (Default value is: INVALID)
+--compute_input_typeB <value>     Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the argument has no effect. (Default value is: INVALID)
 --scale_type <value>       Precision of scalar. Options: f16_r,bf16_r, f32_c, f64_c
 --initialization <value>   Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01   (Default value is: hpl)
 --transA <value>           N = no transpose, T = transpose, C = conjugate                                       (Default value is: N)
@@ -90,7 +90,7 @@ cd hipBLASLt; cd build/release
 --sm_count_target <value>  Target compute-unit (CU) count for the matmul kernel selection and persistent-grid sizing. 0 (default) means use all CUs the device exposes. Negative values are rejected. (Default value is: 0)
 --hybrid_assignment_policy <value>  Select the assignment policy for a Hybrid kernel: Default, DynamicWorkQueue, or Auto (case-sensitive). (Default value is: unset)
 --streamk_tile_scheduling <value>  Legacy alias for hybrid_assignment_policy: off|0, on|1, or auto|2 (case-insensitive). (Default value is: unset)
---uniform_summation_order <value>  off|0 or on|1. Omit to leave unset.
+--uniform_summation_order <value>  Set the handle-level request for every API method: off|0 or on|1. An explicit YAML case value overrides this option. When both are unset, the library default for the device applies.
 --help |-h                 produces this help message
 --version <value>          Prints the version number
 ```
@@ -132,7 +132,7 @@ Run fp32 GEMM with validation
 - `norm_error` is the Frobenius norm of the difference divided by the Frobenius norm of the reference, summed over batches and gemms. It averages over each whole matrix, so a few wrong elements in a large result can still give a small value.
 - `atol` and `rtol` come from an element-wise check. It tries the pairs 1e-6, 1e-5, ..., 1e-1 for each, tightest `atol` first, and reports the first pair under which every element satisfies `|reference - result| <= atol + rtol * |result|`. With several batches, or the gemms of a grouped GEMM, the columns show the loosest pair any one matrix needed. `failed` means at least one element is outside even `atol 0.1 + rtol 0.1 * |result|`.
 
-The norm check of D fails when any one batch's norm_error reaches the same limit `hipblaslt-test` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with `c_f32_fast_bf16_r` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The limit applies to each batch, not to the sum in the `norm_error` column. `hipblaslt-test` applies the same limit to the sum instead, so with many batches it can fail a result the bench passes. When a check fails, the bench prints one line per failing gemm to stderr, then a line naming the solution:
+The norm check of D fails when any one batch's norm_error reaches the same limit `hipblaslt-test` uses for the GEMM. The limit is the largest tolerance among the output and both input types (1e-5 for f32, 0.01 for f16, 0.1 for bf16); f32 output with `c_f32_fast_bf16_r` uses at least 0.5. For example, f16 inputs with f32 output use 0.01. The bench and `hipblaslt-test` apply this limit per batch; `norm_error` still reports the sum. When a check fails, the bench prints one line per failing gemm to stderr, then a line naming the solution:
 ```
 norm check failed for D of gemm 0: batch 2 has norm_error 0.408248, at or above the GEMM limit of 1e-05
 allclose check failed for D of gemm 0: 1 of 96 elements are outside atol 0.1 + rtol 0.1 * |result|; the worst is batch 2, row 5, column 0: result 7, reference 2

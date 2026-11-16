@@ -226,7 +226,10 @@ namespace TensileLite
                 if((*row.second->hardwarePredicate)(hardware))
                 {
                     useSolution = true;
-                    if(searchType == SolutionLibrarySearchType::DEFAULT)
+                    // Clustered StreamK throws while sizing workspace for grouped GEMM.
+                    if(row.second->usesStreamKSpatialCluster())
+                        useSolution = false;
+                    else if(searchType == SolutionLibrarySearchType::DEFAULT)
                     {
                         size_t ws = (*row.second).requiredWorkspaceSizeGroupedGemm(problems, hardware);
 
@@ -247,7 +250,7 @@ namespace TensileLite
                                 useSolution = false;
                         }
                     }
-                    else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+                    else if(isGemmTypeOnlySearch(searchType))
                     {
                         if(!isGemmTypeSame((*row.second), problems[0]))
                             useSolution = false;
@@ -255,13 +258,7 @@ namespace TensileLite
 
                     if(useSolution)
                     {
-                        if((*row.second).requiredHostWorkspaceSizePerProblem
-                           == static_cast<size_t>(-1))
-                        {
-                            (*row.second).requiredHostWorkspaceSizePerProblem
-                                = (*row.second)
-                                      .requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                        }
+                        (*row.second).ensureRequiredHostWorkspaceSize(problems[0], hardware);
                         rv.insert(row.second);
                     }
                 }

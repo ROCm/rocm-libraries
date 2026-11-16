@@ -28,13 +28,27 @@ watchdog thread writes the release itself after ``timeout_s``. That turns the
 hang into one slow, invalid sample: :meth:`StallGate.timed_out` reports it and
 :func:`time_launches_staged` raises :class:`StallTimeout` rather than return a
 number that includes host time.
+
+Garbage collection
+------------------
+``hipFree`` synchronizes the device, so freeing device memory while a gate
+holds a stream blocks the host until the watchdog fires. When an automatic
+garbage collection runs inside a sample and frees a buffer that some earlier
+code left in a reference cycle, the sample fails for a reason that has nothing
+to do with the measured call. :func:`time_launches_staged` therefore turns
+automatic garbage collection off for its sample loop; garbage left from before
+the call is freed after it, outside every sample. ``gc.disable`` is
+process-wide, so one thread per process times with a gate.
 """
 
 from __future__ import annotations
 
 import ctypes
+import gc
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Callable, List, Optional
 
 from .hip_module import (
@@ -222,6 +236,21 @@ def default_gate() -> StallGate:
     return _default_gate
 
 
+@contextmanager
+def _automatic_gc_paused() -> Iterator[None]:
+    """Turn automatic garbage collection off inside the block.
+
+    The caller's setting is restored on exit, also when the block raises.
+    """
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
+
+
 def time_launches_staged(
     fn: Callable[[], None],
     *,
@@ -241,7 +270,11 @@ def time_launches_staged(
     ``fn`` runs under :func:`~rocke.runtime.launcher.no_fence`, so a launcher
     call inside it does not synchronize with the host. ``stream`` is resolved
     as :func:`~rocke.runtime.time_launches` resolves it, and ``gate`` defaults
-    to :func:`default_gate`. Raises :class:`StallTimeout` when ``fn`` blocked
+    to :func:`default_gate`. Automatic garbage collection is off for the
+    sample loop (see *Garbage collection* in the module docstring). ``fn``
+    must not free device memory, for example by dropping the last reference
+    to a :class:`~rocke.runtime.launcher.DeviceMem`: the free blocks the host
+    on the stalled stream. Raises :class:`StallTimeout` when ``fn`` blocked
     the host on the stalled stream (the watchdog released it); the device is
     drained before any exception propagates.
     """
@@ -256,7 +289,7 @@ def time_launches_staged(
     out: List[float] = []
     try:
         rt.sync()
-        with no_fence():
+        with _automatic_gc_paused(), no_fence():
             for i in range(int(warmup) + int(iters)):
                 g.arm(stream)
                 try:

@@ -1277,6 +1277,118 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("has unused values entry 'layout'", completed.stderr)
 
+    def test_sweep_tensor_field_placeholders_resolve_by_first_token(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template["tensors"][1]["alignment"] = "${case.alignment.1}"
+            template["tensors"][1]["value"] = "${case.value}"
+            template_path.write_text(json.dumps(template))
+            used = self.sweep_case(
+                "used",
+                values_overrides={"alignment": {"0": 16, "1": 2}},
+                golden_path=None,
+            )
+            used["values"]["tensors"][1]["value"] = 0.5
+            missing = self.sweep_case("missing", golden_path=None)
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [used, missing]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertNotIn("case 'used' has unused values entry", completed.stderr)
+            self.assertNotIn("case 'used' is missing", completed.stderr)
+            self.assertIn(
+                "case 'missing' is missing placeholder value for 'alignment.0'",
+                completed.stderr,
+            )
+            self.assertIn(
+                "case 'missing' is missing placeholder value for 'value'",
+                completed.stderr,
+            )
+
+    def test_sweep_dotted_placeholder_nested_in_a_tensor_entry_now_resolves(
+        self,
+    ) -> None:
+        # The C++ loader's resolvePlaceholder()/lookupJsonPath() walk a (possibly
+        # dotted) placeholder path against a tensor's own values.tensors[] entry
+        # with no restriction on field name, descending through nested dicts. A
+        # dotted placeholder like alignment.0 therefore DOES resolve when the
+        # tensor's own entry holds the matching nested structure -- this used to
+        # be rejected because the verifier only ever checked a flat whitelist of
+        # field names against a single dotted token, not a real recursive walk.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case("nested", golden_path=None)
+            case["values"]["tensors"][0]["alignment"] = {"0": 16}
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_dotted_placeholder_over_a_tensor_scalar_is_still_missing(
+        self,
+    ) -> None:
+        # The real false-negative this family of tests originally caught: a
+        # dotted placeholder (alignment.0) whose tensor-scoped value is a plain
+        # scalar, not the nested object the dotted path needs to walk through.
+        # The recursive walk can't descend into a non-dict 16 to find key "0",
+        # so this must still be reported as missing -- distinct from the
+        # previous test, which nests the value correctly.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case("scalar_misplaced", golden_path=None)
+            case["values"]["tensors"][0]["alignment"] = 16
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "case 'scalar_misplaced' is missing placeholder value for 'alignment.0'",
+                completed.stderr,
+            )
+
+    def test_sweep_plain_tensor_scoped_placeholder_resolves_from_its_own_entry(
+        self,
+    ) -> None:
+        # A non-dotted, non-whitelisted field name (e.g. alignment, as used by
+        # develop's SdpaBackward bundles) placed directly in a tensor's own
+        # values.tensors[] entry must resolve -- the C++ loader has no
+        # whitelist on which per-tensor field names are allowed.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case("plain", golden_path=None)
+            case["values"]["tensors"][0]["alignment"] = 16
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_sweep_golden_path_must_reference_tensors_dvc(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1657,6 +1769,145 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 1)
             self.assertIn("missing graph.template.json", completed.stderr)
 
+    def write_superset_sweep_bundle(
+        self, root: Path, absent_case: dict[str, object], version: int = 2
+    ) -> Path:
+        """A template with an optional sink tensor 2, one case that has it and one
+        that marks it absent."""
+        template_path, sweep_path = self.write_sweep_bundle(
+            root, Path("quick/TestOp/Topology"), []
+        )
+        template = json.loads(template_path.read_text())
+        template["nodes"][0]["inputs"]["sink_tensor_uid"] = 2
+        template["tensors"].append(
+            {
+                "uid": 2,
+                "name": "sink",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            }
+        )
+        template_path.write_text(json.dumps(template))
+        full = self.sweep_case(
+            "with_sink",
+            tensor_uids=(0, 1, 2),
+            golden_path=None,
+        )
+        sweep_path.write_text(
+            json.dumps({"version": version, "cases": [full, absent_case]})
+        )
+        return sweep_path
+
+    def absent_sink_case(self, **overrides: object) -> dict[str, object]:
+        case = self.sweep_case(
+            "no_sink",
+            tensor_uids=(0, 1),
+            metadata={
+                "format_version": 2,
+                "generator": "manual",
+                "reference_source": "manual",
+            },
+            golden_path=None,
+        )
+        case["absent_tensors"] = [2]
+        case.update(overrides)
+        return case
+
+    def test_sweep_case_with_absent_tensor_needs_no_values_for_it(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_superset_sweep_bundle(root, self.absent_sink_case())
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("0 error(s), 0 warning(s)", completed.stderr)
+
+    def test_absent_tensor_with_a_tensor_scoped_placeholder_needs_no_value(
+        self,
+    ) -> None:
+        """A placeholder in a non-shape field of an absent tensor (here its
+        runtime `value`) is never expanded, so the absent case needs no value
+        for it; the case that keeps the tensor still does."""
+        for keep_value, returncode in ((True, 0), (False, 1)):
+            with self.subTest(keep_value=keep_value), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                sweep_path = self.write_superset_sweep_bundle(
+                    root, self.absent_sink_case()
+                )
+                template_path = sweep_path.parent / "graph.template.json"
+                template = json.loads(template_path.read_text())
+                template["tensors"][-1]["value"] = "${case.sink_value}"
+                template_path.write_text(json.dumps(template))
+                sweep = json.loads(sweep_path.read_text())
+                if keep_value:
+                    sweep["cases"][0]["values"]["sink_value"] = 0.5
+                sweep_path.write_text(json.dumps(sweep))
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, returncode, completed.stderr)
+                self.assertNotIn("case 'no_sink' is missing", completed.stderr)
+
+    def test_sweep_case_with_absent_tensor_the_loader_refuses_fails(self) -> None:
+        for version, overrides, message in (
+            (1, {}, "absent_tensors needs sweep version 2, not 1"),
+            (2, {"absent_tensors": [7]}, "7 is not a tensor of the template"),
+            (
+                2,
+                {"golden": {"path": "golden/no_sink/tensors.dvc"}},
+                "absent_tensors and golden data do not mix",
+            ),
+        ):
+            with self.subTest(message=message), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self.write_superset_sweep_bundle(
+                    root, self.absent_sink_case(**overrides), version
+                )
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(
+                    f"case 'no_sink' absent_tensors: {message}", completed.stderr
+                )
+
+    def test_sweep_values_entry_for_an_absent_tensor_is_one_error(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            case = self.absent_sink_case()
+            case["values"]["tensors"].append({"uid": 2})
+            self.write_superset_sweep_bundle(root, case)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "case 'no_sink' absent_tensors: 2 has a values.tensors entry",
+                completed.stderr,
+            )
+            self.assertIn("1 error(s), 0 warning(s)", completed.stderr)
+
+    def test_sweep_version_must_be_1_or_2(self) -> None:
+        for version, returncode in ((1, 0), (2, 0), (3, 1), (0, 1), (2.0, 1)):
+            with self.subTest(version=version), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                _, sweep_path = self.write_sweep_bundle(
+                    root, Path("quick/TestOp/Topology"), []
+                )
+                case = self.sweep_case("small_fp32", golden_path=None)
+                sweep_path.write_text(json.dumps({"version": version, "cases": [case]}))
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, returncode, completed.stderr)
+                if returncode:
+                    self.assertIn(
+                        "version is required and must be 1 or 2", completed.stderr
+                    )
+
     def test_sweep_case_over_2mib_fails(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1817,9 +2068,10 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             )
 
     def test_ragged_output_missing_multiplier_defaults_to_one(self) -> None:
+        # Element offsets 0, 6, 10 are whole tokens of the 2-element sequence stride.
         for elements, expected_returncode in (
-            (self.packed_element_count(multiplier=1), 0),
-            (self.packed_element_count(multiplier=2), 1),
+            (self.packed_element_count(multiplier=2), 0),
+            (2 * self.packed_element_count(multiplier=2), 1),
         ):
             with self.subTest(elements=elements):
                 with TemporaryDirectory() as tmpdir:
@@ -1827,6 +2079,7 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                     self.write_ragged_bundle(
                         root,
                         output_bytes=self.filled_bytes("float", elements),
+                        offsets=(0, 6, 10),
                         multiplier=None,
                     )
 
@@ -1953,6 +2206,506 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertIn(
                 "ragged_offset_multiplier must be an integer >= 1", completed.stderr
             )
+
+    SDPA_DIMS = (2, 1, 4, 2)
+    SDPA_STRIDES = (8, 2, 2, 1)
+
+    def write_sdpa_ragged_bundle(
+        self,
+        root: Path,
+        *,
+        elements: int,
+        offsets: tuple[int, ...],
+        lengths: tuple[int, ...] | None,
+        dims: tuple[int, ...] = SDPA_DIMS,
+        strides: tuple[int, ...] = SDPA_STRIDES,
+        multiplier: int = 1,
+        role_field: str = "q_tensor_uid",
+        length_field: str = "seq_len_q_tensor_uid",
+        aux_stride: int = 1,
+    ) -> Path:
+        """Writes a ragged tensor (uid 0) named by `role_field` of an SDPA backward node
+        whose `length_field` names the seq_len tensor uid 20 (absent: no seq_len). The
+        offset and seq_len tensors have batch stride `aux_stride`, poison between values.
+        """
+        bundle_dir = root / self.RAGGED_BUNDLE_DIR
+        bundle_dir.mkdir(parents=True)
+        name = bundle_dir.name
+
+        def plain(
+            uid: int, data_type: str, shape: list[int], stride: int = 1
+        ) -> dict[str, object]:
+            return {
+                "uid": uid,
+                "dims": shape,
+                "strides": [stride] + [1] * (len(shape) - 1),
+                "data_type": data_type,
+                "virtual": False,
+            }
+
+        inputs: dict[str, object] = {role_field: 0}
+        tensors = [
+            {
+                **plain(0, "float", list(dims)),
+                "strides": list(strides),
+                "ragged_offset_tensor_uid": 10,
+                "ragged_offset_multiplier": multiplier,
+            },
+            plain(1, "float", [1]),
+            plain(10, "int32", [len(offsets), 1, 1, 1], aux_stride),
+        ]
+
+        def pack_strided(values: tuple[int, ...]) -> bytes:
+            buffer = [-1] * ((len(values) - 1) * aux_stride + 1)
+            buffer[::aux_stride] = values
+            return struct.pack(f"<{len(buffer)}i", *buffer)
+
+        payloads = {
+            0: self.filled_bytes("float", elements),
+            1: self.default_bytes("float"),
+            10: pack_strided(offsets),
+        }
+        if lengths is not None:
+            inputs[length_field] = 20
+            tensors.append(plain(20, "int32", [len(lengths), 1, 1, 1], aux_stride))
+            payloads[20] = pack_strided(lengths)
+        graph = {
+            "nodes": [
+                {
+                    "type": "SdpaBackwardAttributes",
+                    "inputs": inputs,
+                    "outputs": {"dq_tensor_uid": 1},
+                }
+            ],
+            "tensors": tensors,
+            "io_data_type": "float",
+            "compute_data_type": "float",
+            "intermediate_data_type": "float",
+            "name": "",
+        }
+        graph_path = bundle_dir / f"{name}.json"
+        graph_path.write_text(json.dumps(graph))
+        for uid, payload in payloads.items():
+            (bundle_dir / f"{name}.tensor{uid}.bin").write_bytes(payload)
+        (bundle_dir / f"{name}.meta.json").write_text(
+            json.dumps({"generator": "manual", "reference_source": "manual"})
+        )
+        return graph_path
+
+    def verify_sdpa_ragged(self, **bundle: object) -> subprocess.CompletedProcess[str]:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sdpa_ragged_bundle(root, **bundle)
+            return self.run_verifier(root)
+
+    def test_ragged_file_holds_exactly_the_element_space(self) -> None:
+        # (offsets, lengths, elementSpace): shifted origin (L8), non-monotonic
+        # origins (L9), a trailing gap that the file does not hold (L14), and a zero
+        # length beside a non-zero origin (L15).
+        for offsets, lengths, space in (
+            ((4, 8, 14), (2, 3), 14),
+            ((10, 0, 0), (2, 3), 14),
+            ((0, 4, 12), (2, 3), 10),
+            ((6, 0, 0), (0, 3), 6),
+        ):
+            with self.subTest(offsets=offsets, lengths=lengths):
+                passed = self.verify_sdpa_ragged(
+                    elements=space, offsets=offsets, lengths=lengths
+                )
+                self.assertEqual(passed.returncode, 0, passed.stderr)
+                for wrong in (space - 1, space + 1):
+                    failed = self.verify_sdpa_ragged(
+                        elements=wrong, offsets=offsets, lengths=lengths
+                    )
+                    self.assertEqual(failed.returncode, 1)
+                    self.assertIn(f"graph expects {space * 4} bytes", failed.stderr)
+
+    def test_ragged_strided_offsets_and_seq_len_are_walked_by_stride(self) -> None:
+        # L14 with batch stride 2 on both aux tensors, -1 in the gaps: the files
+        # hold the strided element space and the size check sees the packed values.
+        passed = self.verify_sdpa_ragged(
+            elements=10, offsets=(0, 4, 12), lengths=(2, 3), aux_stride=2
+        )
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+
+        failed = self.verify_sdpa_ragged(
+            elements=11, offsets=(0, 4, 12), lengths=(2, 3), aux_stride=2
+        )
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("graph expects 40 bytes", failed.stderr)
+
+    def test_ragged_file_sized_to_the_last_offset_fails(self) -> None:
+        failed = self.verify_sdpa_ragged(
+            elements=12, offsets=(0, 4, 12), lengths=(2, 3)
+        )
+
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("file has 48 bytes but graph expects 40 bytes", failed.stderr)
+        self.assertIn("ragged elementSpace=10", failed.stderr)
+
+    def test_ragged_tensor_must_have_rank_4(self) -> None:
+        failed = self.verify_sdpa_ragged(
+            elements=16,
+            offsets=(0, 4, 12),
+            lengths=(2, 3),
+            dims=(2, 4, 8),
+            strides=(32, 8, 1),
+        )
+
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("ragged tensors must have rank 4", failed.stderr)
+        self.assertNotIn("Traceback", failed.stderr)
+
+    def test_ragged_offset_tensor_must_hold_exactly_b_plus_one_values(self) -> None:
+        failed = self.verify_sdpa_ragged(
+            elements=10, offsets=(0, 4, 12, 12), lengths=(2, 3)
+        )
+
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("must have shape [B + 1, 1, 1, 1]", failed.stderr)
+
+    def test_ragged_seq_len_tensor_must_hold_exactly_b_values(self) -> None:
+        failed = self.verify_sdpa_ragged(
+            elements=10, offsets=(0, 4, 12), lengths=(2, 3, 1)
+        )
+
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("must have shape [B, 1, 1, 1]", failed.stderr)
+
+    def test_ragged_multiplier_scales_the_origins(self) -> None:
+        # Token offsets 5, 0 with multiplier 2 are the element origins 10, 0 (L9m).
+        passed = self.verify_sdpa_ragged(
+            elements=14, offsets=(5, 0, 7), lengths=(2, 3), multiplier=2
+        )
+
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+
+    def test_ragged_lengths_come_from_the_roles_seq_len(self) -> None:
+        # K takes seq_len_kv. With only seq_len_q named, K has no lengths, so its
+        # blocks (2 and 4 rows, clipped to S_max = 4) size it: elementSpace 12.
+        offsets = (0, 4, 12)
+        role = {"role_field": "k_tensor_uid"}
+        with_kv = self.verify_sdpa_ragged(
+            elements=10,
+            offsets=offsets,
+            lengths=(2, 3),
+            length_field="seq_len_kv_tensor_uid",
+            **role,
+        )
+        with_q_only = self.verify_sdpa_ragged(
+            elements=12,
+            offsets=offsets,
+            lengths=(2, 3),
+            length_field="seq_len_q_tensor_uid",
+            **role,
+        )
+
+        self.assertEqual(with_kv.returncode, 0, with_kv.stderr)
+        self.assertEqual(with_q_only.returncode, 0, with_q_only.stderr)
+
+    def test_ragged_length_uid_roles_per_node(self) -> None:
+        q_roles = {
+            "SdpaAttributes": [
+                ("inputs", "q_tensor_uid"),
+                ("outputs", "o_tensor_uid"),
+                ("outputs", "stats_tensor_uid"),
+                ("outputs", "max_tensor_uid"),
+                ("outputs", "sum_exp_tensor_uid"),
+            ],
+            "SdpaBackwardAttributes": [
+                ("inputs", "q_tensor_uid"),
+                ("inputs", "o_tensor_uid"),
+                ("inputs", "do_tensor_uid"),
+                ("outputs", "dq_tensor_uid"),
+                ("inputs", "stats_tensor_uid"),
+            ],
+        }
+        kv_roles = {
+            "SdpaAttributes": [
+                ("inputs", "k_tensor_uid"),
+                ("inputs", "v_tensor_uid"),
+            ],
+            "SdpaBackwardAttributes": [
+                ("inputs", "k_tensor_uid"),
+                ("inputs", "v_tensor_uid"),
+                ("outputs", "dk_tensor_uid"),
+                ("outputs", "dv_tensor_uid"),
+            ],
+        }
+        for node_type in q_roles:
+            with self.subTest(node_type=node_type):
+                node = {
+                    "type": node_type,
+                    "inputs": {
+                        "seq_len_q_tensor_uid": 100,
+                        "seq_len_kv_tensor_uid": 101,
+                    },
+                    "outputs": {},
+                }
+                expected = {}
+                for uid, (section, field) in enumerate(
+                    q_roles[node_type] + kv_roles[node_type]
+                ):
+                    node[section][field] = uid
+                    is_q = (section, field) in q_roles[node_type]
+                    expected[uid] = 100 if is_q else 101
+                self.assertEqual(
+                    verify_golden_bundles.extract_ragged_length_uids([node]), expected
+                )
+                del node["inputs"]["seq_len_kv_tensor_uid"]
+                self.assertEqual(
+                    set(verify_golden_bundles.extract_ragged_length_uids([node])),
+                    {uid for uid, length in expected.items() if length == 100},
+                )
+
+    def test_ragged_tensor_bound_to_two_seq_len_tensors_is_an_error(self) -> None:
+        node = {
+            "type": "SdpaAttributes",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 1,
+                "seq_len_q_tensor_uid": 100,
+                "seq_len_kv_tensor_uid": 101,
+            },
+            "outputs": {},
+        }
+        with self.assertRaisesRegex(ValueError, "two seq_len tensors"):
+            verify_golden_bundles.extract_ragged_length_uids([node])
+        node["inputs"]["seq_len_kv_tensor_uid"] = 100
+        self.assertEqual(
+            verify_golden_bundles.extract_ragged_length_uids([node]), {1: 100}
+        )
+
+    CONFLICTING_SEQ_LEN_INPUTS = {
+        "q_tensor_uid": 0,
+        "k_tensor_uid": 0,
+        "seq_len_q_tensor_uid": 20,
+        "seq_len_kv_tensor_uid": 21,
+    }
+
+    def test_graph_bundle_with_conflicting_seq_len_binding_reports_error(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            graph_path = self.write_sdpa_ragged_bundle(
+                Path(tmpdir), elements=14, offsets=(0, 4, 8), lengths=(2, 3)
+            )
+            graph = json.loads(graph_path.read_text())
+            graph["nodes"][0]["inputs"] = dict(self.CONFLICTING_SEQ_LEN_INPUTS)
+            graph_path.write_text(json.dumps(graph))
+
+            result = verify_golden_bundles.VerificationResult()
+            verify_golden_bundles.validate_graph_bundle(
+                graph_path, result, "Smoke", False
+            )
+
+            messages = [d.message for d in result.diagnostics if d.severity == "error"]
+            self.assertEqual(len(messages), 1, messages)
+            self.assertIn("invalid ragged seq_len binding", messages[0])
+            self.assertIn("two seq_len tensors", messages[0])
+
+    def test_sweep_bundle_with_conflicting_seq_len_binding_reports_error(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            bundle_dir = Path(tmpdir) / "Smoke" / "Sdpa" / "Ragged"
+            bundle_dir.mkdir(parents=True)
+            template_path = bundle_dir / "graph.template.json"
+            template_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {
+                                "type": "SdpaAttributes",
+                                "inputs": dict(self.CONFLICTING_SEQ_LEN_INPUTS),
+                                "outputs": {"o_tensor_uid": 1},
+                            }
+                        ],
+                        "tensors": [{"uid": 0}],
+                    }
+                )
+            )
+            sweep_path = bundle_dir / "sweep.json"
+            sweep_path.write_text(json.dumps({"version": 1, "cases": []}))
+
+            result = verify_golden_bundles.VerificationResult()
+            verify_golden_bundles.validate_sweep_bundle(
+                template_path, sweep_path, result, "Smoke", False
+            )
+
+            messages = [d.message for d in result.diagnostics if d.severity == "error"]
+            self.assertEqual(len(messages), 1, messages)
+            self.assertIn("invalid ragged seq_len binding", messages[0])
+            self.assertIn("two seq_len tensors", messages[0])
+
+    def test_ragged_layout_violations_name_the_violated_rule(self) -> None:
+        cases = (
+            ("overlap rule", {"offsets": (0, 4, 8), "lengths": (3, 3)}),
+            (
+                "sorted-stride rule",
+                {
+                    "dims": (2, 2, 4, 2),
+                    "strides": (16, 8, 2, 1),
+                    "offsets": (0, 4, 10),
+                    "lengths": (2, 3),
+                },
+            ),
+            ("whole-token origin rule", {"offsets": (1, 4, 10), "lengths": (2, 3)}),
+            ("length range rule", {"offsets": (0, 4, 10), "lengths": (2, 5)}),
+            (
+                "negative-stride rule",
+                {"strides": (8, 2, -2, 1), "offsets": (0, 4, 10), "lengths": (2, 3)},
+            ),
+            ("monotonic rule", {"offsets": (0, 8, 4), "lengths": None}),
+        )
+        for rule, bundle in cases:
+            with self.subTest(rule=rule):
+                failed = self.verify_sdpa_ragged(elements=10, **bundle)
+
+                self.assertEqual(failed.returncode, 1)
+                self.assertIn(rule, failed.stderr)
+
+    def test_ragged_broadcast_head_axis_is_exempt_from_the_stride_rule(self) -> None:
+        # L12: H has stride 0, so the 4 logical rows of 2 heads share 10 elements.
+        passed = self.verify_sdpa_ragged(
+            elements=10,
+            dims=(2, 2, 3, 2),
+            strides=(0, 0, 2, 1),
+            offsets=(0, 4, 10),
+            lengths=None,
+        )
+
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+
+
+class TestRaggedElementSpace(unittest.TestCase):
+    """ragged_element_space and the offset/seq_len reader, called directly."""
+
+    DIMS = [2, 1, 4, 2]
+    STRIDES = [8, 2, 2, 1]
+
+    def space(self, offsets, lengths, dims=None, strides=None, multiplier=1) -> int:
+        return verify_golden_bundles.ragged_element_space(
+            dims or self.DIMS, strides or self.STRIDES, multiplier, offsets, lengths
+        )
+
+    def test_offset_derived_length_is_clamped_to_s_max(self) -> None:
+        # Without seq_len, the first block spans 6 rows but S_max is 4: rows 0..3
+        # are live, so elementSpace = 1 + 3 * 2 + 1.
+        self.assertEqual(self.space([0, 12, 12], None), 8)
+
+    def test_tensor_with_no_rows_has_no_elements(self) -> None:
+        self.assertEqual(self.space([0, 0, 0], [0, 0]), 0)
+        self.assertEqual(self.space([6, 6, 6], None), 0)
+
+    def test_sorted_stride_rule_accepts_a_stride_equal_to_the_span(self) -> None:
+        # Rows 0..4 of stride 2 span 10 elements: the head stride may be 10, not 9.
+        dims = [2, 2, 4, 2]
+        self.assertEqual(
+            self.space([0, 4, 10], [2, 3], dims, [20, 10, 2, 1]), 1 + 4 * 2 + 10 + 1
+        )
+        with self.assertRaisesRegex(ValueError, "sorted-stride rule"):
+            self.space([0, 4, 10], [2, 3], dims, [20, 9, 2, 1])
+
+    def test_negative_length_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "length range rule"):
+            self.space([0, 4, 10], [-1, 2])
+
+    def test_negative_origin_is_rejected(self) -> None:
+        # -2 is a whole number of 2-element tokens, so only the sign is wrong.
+        with self.assertRaisesRegex(ValueError, "whole-token origin rule"):
+            self.space([-2, 4, 10], [2, 3])
+
+    def test_zero_extent_non_sequence_axis_has_no_elements(self) -> None:
+        # Blocks hold rows, but a zero-extent head or feature axis leaves no element.
+        self.assertEqual(
+            self.space([0, 4, 10], [2, 3], dims=[2, 0, 4, 2]),
+            0,
+        )
+        self.assertEqual(
+            self.space([0, 4, 10], [2, 3], dims=[2, 1, 4, 0]),
+            0,
+        )
+
+    def test_zero_extent_axis_is_empty_whatever_the_other_strides(self) -> None:
+        # Head and sequence strides that would alias are never checked on an empty
+        # tensor.
+        self.assertEqual(
+            self.space([0, 4, 10], [3, 3], dims=[2, 0, 4, 2], strides=[8, 2, 1, 1]), 0
+        )
+
+    def test_batch_axis_stride_is_unused_so_negative_is_accepted(self) -> None:
+        self.assertEqual(
+            self.space([0, 4, 10], [2, 3], strides=[-8, 2, 2, 1]),
+            self.space([0, 4, 10], [2, 3]),
+        )
+
+    def test_zero_sequence_stride_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "negative-stride rule"):
+            self.space([0, 4, 10], [2, 3], strides=[8, 2, 0, 1])
+
+    def read_aux(
+        self,
+        dims,
+        strides,
+        data_type="int32",
+        values=(0, 4, 10),
+        raw=None,
+        count=3,
+        count_label="B + 1",
+    ):
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "offsets.bin"
+            path.write_bytes(raw if raw is not None else struct.pack("<3i", *values))
+            result = verify_golden_bundles.VerificationResult()
+            read = verify_golden_bundles.read_ragged_tensor_values(
+                10,
+                0,
+                "ragged_offset_tensor_uid",
+                count,
+                count_label,
+                {10: {"dims": dims, "strides": strides, "data_type": data_type}},
+                lambda uid: path,
+                False,
+                True,
+                result,
+            )
+            return read, [diagnostic.message for diagnostic in result.diagnostics]
+
+    def test_aux_tensor_reads_when_well_formed(self) -> None:
+        read, messages = self.read_aux([3, 1, 1, 1], [1, 1, 1, 1])
+        self.assertEqual((read, messages), ([0, 4, 10], []))
+
+    def test_aux_tensor_must_be_rank_4(self) -> None:
+        read, messages = self.read_aux([3, 1, 1], [1, 1, 1])
+        self.assertIsNone(read)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("must be rank 4", messages[0])
+
+    def test_aux_tensor_must_have_the_batch_axis_hold_the_values(self) -> None:
+        # Right element count and rank, but the values lie on the head axis: the
+        # batch-stride read would run past the file.
+        for dims in ([1, 3, 1, 1], [3, 1, 1, 2], [4, 1, 1, 1]):
+            read, messages = self.read_aux(dims, [3, 1, 1, 1])
+            self.assertIsNone(read, dims)
+            self.assertEqual(len(messages), 1, dims)
+            self.assertIn("must have shape [B + 1, 1, 1, 1]", messages[0])
+
+    def test_seq_len_aux_must_have_shape_b(self) -> None:
+        read, messages = self.read_aux(
+            [3, 1, 1, 1], [1, 1, 1, 1], count=2, count_label="B"
+        )
+        self.assertIsNone(read)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("must have shape [B, 1, 1, 1]", messages[0])
+
+    def test_aux_tensor_batch_stride_must_be_positive(self) -> None:
+        read, messages = self.read_aux([3, 1, 1, 1], [0, 1, 1, 1])
+        self.assertIsNone(read)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("positive batch stride", messages[0])
+
+    def test_aux_tensor_data_type_must_be_integer(self) -> None:
+        read, messages = self.read_aux([3, 1, 1, 1], [1, 1, 1, 1], data_type="float")
+        self.assertIsNone(read)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("expected int32 or int64", messages[0])
 
 
 class TestDeriveAdvisory(unittest.TestCase):

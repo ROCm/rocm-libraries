@@ -18,7 +18,7 @@ import random
 
 import pytest
 
-from rocke.core.ir import F16, I32, I64, IRBuilder, Value
+from rocke.core.ir import F16, F32, I32, I64, IRBuilder, Value
 from rocke.helpers.tiling.tensor_transforms import emit_accesses, emit_bound_check
 from rocke.helpers.tiling.tensor_transforms.emit import (
     _emit_bound_check,
@@ -34,11 +34,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     UniformPart,
     _required_checks,
 )
-from rocke.helpers.tiling.tensor_transforms.walk import (
-    runtime_value_of,
-    split_coordinate,
-)
-from rocke.tests.gpu import current_device_arch
+from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
 
 from ._harness import (
     WAVE,
@@ -81,7 +77,7 @@ def test_a_proven_access_emits_no_compare_and_a_required_check_exactly_one():
     b = builder()
     graph, tensor = identity_graph((100, 64)), RuntimeTensor((100, 64), (64, 1), F16)
     tid = b.thread_id_x()
-    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 16)), lo=0, hi=100)
+    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 16)), ge=0, lt=100)
     row = b.add(origin, b.div(tid, _c(b, 4)))
     col = b.mul(b.mod(tid, _c(b, 4)), _c(b, 16))
     edge, inner = emit_accesses(
@@ -157,7 +153,7 @@ def test_a_tile_origin_proven_by_the_guard_marker_emits_no_compare():
     b = builder()
     tile = 16
     m = runtime_length(b, "M", multiple_of=tile)
-    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, tile)), lo=0, hi_value=m.value)
+    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, tile)), ge=0, lt=m)
     row = b.add(origin, b.mod(b.thread_id_x(), _c(b, tile)))
     tensor = RuntimeTensor((m, 64), (64, 1), F16)
     (access,) = emit_accesses(b, identity_graph((m, 64)), tensor, [(row, 0)])
@@ -176,14 +172,14 @@ def test_a_value_is_checked_before_its_marker_and_proven_after_it():
     assert emit_bound_check(b, origin, 0, 1024) is not None
     compares = count(b, "arith.cmp")
     assert compares == 1
-    marked = b._assume_range(origin, lo=0, hi=1024)
+    marked = b._assume_range(origin, ge=0, lt=1024)
     assert emit_bound_check(b, marked, 0, 1024) is None
     assert count(b, "arith.cmp") == compares
 
 
 def _origin_with_lane(b: IRBuilder, m, upper):
     """A hand-split coordinate ``origin + lane``: the origin's range is ``[0, upper)``."""
-    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 16)), lo=0, hi_value=m.value)
+    origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 16)), ge=0, lt=m)
     lane = b.mod(b.thread_id_x(), _c(b, 16))
     return AffineCoord(
         0,
@@ -282,7 +278,7 @@ def test_a_lower_only_check_is_one_subtract_and_one_compare_never_the_single_com
         b = builder()
         u = b.param("u", I32)
         if not unbounded:
-            u = b._assume_range(u, lo=-(1 << 20), hi=1 << 20)
+            u = b._assume_range(u, ge=-(1 << 20), lt=1 << 20)
         valid = emit_bound_check(b, u, 0, None)
         assert valid.op.operands[0] is not u
         assert (count(b, "arith.sext") > 0) == unbounded
@@ -317,6 +313,24 @@ def test_checking_nothing_or_an_empty_range_or_a_non_value_raises_before_emittin
     assert len(ops(b)) == before + 1  # only the test's own sext
 
 
+def test_an_end_that_is_not_an_i32_value_raises_before_emitting():
+    """A runtime end is compared in i32: an i64 or f32 Value given as an end is refused at the
+    door, naming the value and its type, before any IR is emitted for the check."""
+    b = builder()
+    wide = b.param("wide", I64, ge=1, le=1000)
+    real = b.param("real", F32)
+    x = b.block_id_x()
+    before = len(ops(b))
+    for end in (wide, real):
+        with raises(
+            TypeError,
+            f"bound check of '{x.name}': an end is an int, an i32 Value or None, got Value "
+            f"{end.name} of type {end.type.name}",
+        ):
+            emit_bound_check(b, x, 0, end)
+    assert len(ops(b)) == before
+
+
 def _rebase_cases(b: IRBuilder, lane: Value):
     """``c - lane`` (``c = 40``) and ``smin(lane - 3, 10)``: per-lane values whose walked range
     starts below 0, with their Python value per lane."""
@@ -334,7 +348,7 @@ def test_a_per_lane_value_starting_below_zero_is_checked_exactly_after_its_rebas
         for value, truth in _rebase_cases(b, lane):
             for lo in (-2, 0, 5):
                 valid = emit_bound_check(b, value, lo, hi)
-                leaves = [(hi.value.op.operands[0], 12)] if hi_runtime else []
+                leaves = [(hi, 12)] if hi_runtime else []
                 for t in range(WAVE):
                     expected = lo <= truth(t) < 12
                     assert _host(valid, (lane, t), *leaves) == expected, (lo, t)
@@ -385,9 +399,7 @@ def test_eight_accesses_against_a_runtime_bound_compare_once_per_folded_bound(wi
     if wide:
         origin = b.param("origin", I32)
     else:
-        origin = b._assume_range(
-            b.mul(b.block_id_x(), _c(b, 64)), lo=0, hi_value=m.value
-        )
+        origin = b._assume_range(b.mul(b.block_id_x(), _c(b, 64)), ge=0, lt=m)
     row = b.add(origin, b.div(tid, _c(b, 8)))
     col = b.mul(b.mod(tid, _c(b, 8)), _c(b, 8))
     accesses = [(b.add(row, _c(b, 8 * i)) if i else row, col) for i in range(8)]
@@ -421,11 +433,10 @@ def _paths_agree_values(hi: int) -> list[int]:
     return sorted(values)
 
 
-def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
+def test_gpu_the_single_compare_and_the_fold_agree_on_every_value(any_gpu: str):
     """One kernel computes, for one wave-uniform value per workgroup, both the single compare
     and the forced fold, for int upper ends 1, 2, 1024 and 2^31 - 1 and a runtime length; the
     two answers are equal and equal ``0 <= u < hi`` on every value."""
-    current_device_arch()
     import numpy as np
 
     int_ends = (1, 2, 1024, I32_MAX)
@@ -443,6 +454,7 @@ def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
     array = np.array(values, dtype=np.int64)
     for m in (1, 1024, I32_MAX):
         stored = run_lanes(
+            any_gpu,
             build,
             scalars={"M": m},
             buffers={"values": array},
@@ -455,8 +467,7 @@ def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
             assert (stored[:, 2 * j + 1] == expected).all(), (m, hi)
 
 
-def test_gpu_unbounded_and_single_compare_checks_are_exact_on_edge_values():
-    current_device_arch()
+def test_gpu_unbounded_and_single_compare_checks_are_exact_on_edge_values(any_gpu: str):
     import numpy as np
 
     values = np.array(EDGE_VALUES, dtype=np.int64)
@@ -472,6 +483,7 @@ def test_gpu_unbounded_and_single_compare_checks_are_exact_on_edge_values():
 
     for m in (1023, 1024):
         stored = run_lanes(
+            any_gpu,
             build,
             scalars={"M": m},
             buffers={"values": values},
@@ -488,11 +500,12 @@ SIDE_VALUES = (I32_MIN, -1, 0, 1, I32_MAX)
 
 @pytest.mark.parametrize("extent", [1, 4, 64])
 @pytest.mark.parametrize("wide", [True, False])
-def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(extent, wide):
+def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(
+    extent, wide, any_gpu: str
+):
     """``lo <= s + lane`` with no upper end, ``s`` and ``lo`` at the extremes of their stated
     ranges (the full i32 range for the 64-bit fold, a narrower one for the 32-bit fold), every
     lane of ``[0, extent)``."""
-    current_device_arch()
     import numpy as np
 
     limit = 1 << 31 if wide else 1 << 29
@@ -506,13 +519,13 @@ def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(extent, w
         s = b.readfirstlane(b.global_load(b.get_param("s"), blk, I32))
         lo_raw = b.readfirstlane(b.global_load(b.get_param("lo"), blk, I32))
         if not wide:
-            s = b._assume_range(s, lo=-limit, hi=limit)
-        lo_end = runtime_value_of(b._assume_range(lo_raw, lo=-limit, hi=limit))
+            s = b._assume_range(s, ge=-limit, lt=limit)
+        lo_end = b._assume_range(lo_raw, ge=-limit, lt=limit)
         lane = b.land(b.thread_id_x(), _c(b, extent - 1))
         return [emit_bound_check(b, b.add(s, lane), lo_end, None)]
 
     stored = run_lanes(
-        build, buffers={"s": s_values, "lo": lo_values}, n_blocks=len(pairs)
+        any_gpu, build, buffers={"s": s_values, "lo": lo_values}, n_blocks=len(pairs)
     )
     lanes = np.arange(WAVE) & (extent - 1)
     expected = (s_values[:, None] + lanes[None, :]) >= lo_values[:, None]
@@ -525,16 +538,15 @@ def _uniform(b: IRBuilder, name: str) -> Value:
 
 
 def _stated(b: IRBuilder, value: Value, lo: int, hi: int):
-    """``value`` behind a marker stating ``lo <= value < hi``, as its ``RuntimeValue``."""
-    return runtime_value_of(b._assume_range(value, lo=lo, hi=hi))
+    """``value`` behind a marker stating ``lo <= value < hi``: a runtime end with stated facts."""
+    return b._assume_range(value, ge=lo, lt=hi)
 
 
-def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
+def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact(any_gpu: str):
     """``lo <= s + lane < hi`` with both ends runtime values, through ``emit_bound_check`` and
     through ``_required_checks`` + ``_emit_bound_check`` with a two-sided ``AxisBound``: exact for
     every lane, and an empty (``hi == lo``) or inverted (``hi < lo``) window accepts nothing,
     including a window wider than 2^31."""
-    current_device_arch()
     import numpy as np
 
     cases = []
@@ -567,6 +579,7 @@ def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
         ]
 
     stored = run_lanes(
+        any_gpu,
         build,
         buffers={"s": s_values, "lo": lo_values, "hi": hi_values},
         n_blocks=len(cases),
@@ -579,13 +592,12 @@ def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
 
 
 @pytest.mark.parametrize("wide", [False, True])
-def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
+def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide, any_gpu: str):
     """Accesses ``s + lane + c`` for several constants ``c`` against ``[0, L)`` (``L`` a runtime
     length): with ``s`` unbounded the ends are pre-clamped in 64 bits once and finished per
     constant in 32 bits, and ``lo - s`` / ``L - s`` reach -2^31, 2^31 - 1, 2^31 and beyond; with
     ``s`` and ``L`` stated inside 2^29 the fold is 32-bit, exact at the edges of those ranges.
     """
-    current_device_arch()
     import numpy as np
 
     from rocke.helpers.tiling.tensor_transforms import emit_access_validity
@@ -600,7 +612,7 @@ def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
     def build(b):
         s = _uniform(b, "s")
         if not wide:
-            s = b._assume_range(s, lo=-limit, hi=limit)
+            s = b._assume_range(s, ge=-limit, lt=limit)
         length = _stated(b, _uniform(b, "L"), 1, limit)
         x = b.add(s, b.land(b.thread_id_x(), _c(b, 31)))
         tensor = RuntimeTensor((length,), (1,), F16)
@@ -610,7 +622,7 @@ def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
         return list(valid)
 
     stored = run_lanes(
-        build, buffers={"s": s_values, "L": l_values}, n_blocks=len(cases)
+        any_gpu, build, buffers={"s": s_values, "L": l_values}, n_blocks=len(cases)
     )
     lanes = np.arange(WAVE) & 31
     for j, c in enumerate(constants):
@@ -619,8 +631,7 @@ def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
         assert (stored[:, :, j] == expected).all(), c
 
 
-def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
-    current_device_arch()
+def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes(any_gpu: str):
     import numpy as np
 
     extremes = (I32_MIN, I32_MIN + 1, -1, 0, 1, 4096, I32_MAX)
@@ -639,6 +650,7 @@ def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
         return [_emit_bound_check(b, coord, 0, 4096)]
 
     stored = run_lanes(
+        any_gpu,
         build,
         buffers={"begin": begin_values, "length": length_values},
         n_blocks=len(cases),
@@ -648,8 +660,9 @@ def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
     assert (stored[:, 0] == ((total >= 0) & (total < 4096))).all()
 
 
-def test_gpu_a_per_lane_value_starting_below_zero_is_checked_exactly_on_every_lane():
-    current_device_arch()
+def test_gpu_a_per_lane_value_starting_below_zero_is_checked_exactly_on_every_lane(
+    any_gpu: str,
+):
     import numpy as np
 
     ends = ((-2, 12), (0, 12), (5, 40), (0, None))
@@ -664,7 +677,7 @@ def test_gpu_a_per_lane_value_starting_below_zero_is_checked_exactly_on_every_la
             out.append(emit_bound_check(b, value, 0, m))
         return out
 
-    stored = run_lanes(build, scalars={"M": 12})
+    stored = run_lanes(any_gpu, build, scalars={"M": 12})
     t = np.arange(WAVE)
     slot = 0
     for truth in (40 - t, np.minimum(t - 3, 10)):

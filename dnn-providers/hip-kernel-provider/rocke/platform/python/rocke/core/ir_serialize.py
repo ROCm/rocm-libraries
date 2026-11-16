@@ -22,8 +22,10 @@ Standard library only.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
+from .intexpr import relation_error, relation_json, renamed_relation
 from .ir import (
     KernelDef,
     Op,
@@ -37,7 +39,9 @@ from .ir import (
     _first_reused_loop_name,
     _reused_loop_name_message,
     _scf_for_value_names,
+    _untyped_loop_value_message,
 )
+from .param_facts import FACT_WORDS
 
 FORMAT_NAME = "ckdsl.ir"
 FORMAT_VERSION = "v1"
@@ -422,8 +426,9 @@ def parse(text: str) -> KernelDef:
         if ln == "}":
             break
         p = _parse_param(ln)
+        p.declared_before = tuple(params)
         params.append(p)
-        v = Value(name=f"%{p.name}", type=p.type)
+        v = Value(name=f"%{p.name}", type=p.type, param=p)
         values[v.name] = v
 
     body = _parse_region(src, values)
@@ -615,15 +620,6 @@ def _loop_value_type(name: str, type_attr: object) -> Type:
     return _parse_type(type_attr)
 
 
-def _untyped_loop_value_message(name: str) -> str:
-    """The refusal for an ``scf.for`` induction variable or carried value named
-    ``name`` whose type attr is not a type name."""
-    return (
-        f"scf.for: the loop value '{name}' has no type name; its iv_type attr or "
-        "iter_args entry must name its type"
-    )
-
-
 def _refuse_reused_loop_names(loop: Op, values: dict[str, Value]) -> None:
     """Refuse the names the ``scf.for`` ``loop`` gives its values (see
     :func:`~rocke.core.ir._scf_for_value_names`) when one is taken (see
@@ -774,10 +770,31 @@ def canonicalize(kernel: KernelDef) -> str:
     def rregion(region: Region) -> Region:
         return Region(label=region.label, ops=[rop(o) for o in region.ops])
 
+    def rparam_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+        # A relation names parameters: rename its leaves by walking its tree.
+        out = dict(attrs)
+        for word in FACT_WORDS:
+            value = out.get(word)
+            if not isinstance(value, str):
+                continue
+            try:
+                tree = json.loads(value)
+            except ValueError:
+                continue
+            if relation_error(tree) is None:
+                out[word] = relation_json(
+                    renamed_relation(
+                        tree, lambda name: rename.get(f"%{name}", f"%{name}")[1:]
+                    )
+                )
+        return out
+
     norm = KernelDef(
         name=kernel.name,
         params=[
-            Param(name=rename[f"%{p.name}"][1:], type=p.type, attrs=p.attrs)
+            Param(
+                name=rename[f"%{p.name}"][1:], type=p.type, attrs=rparam_attrs(p.attrs)
+            )
             for p in kernel.params
         ],
         body=rregion(kernel.body),

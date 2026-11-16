@@ -446,3 +446,47 @@ TEST(TestGpuConvolutionFwdPlanBuilder, UnregisteredSignatureThrows)
 
     EXPECT_THROW(registry.getPlanBuilder(unregisteredKey), std::runtime_error);
 }
+
+TEST(TestGpuConvolutionFwdPlanBuilder, IsNotApplicableForConvolutionMode)
+{
+    constexpr int64_t X_UID = 10;
+    constexpr int64_t W_UID = 11;
+    constexpr int64_t Y_UID = 12;
+
+    const std::vector<int64_t> xDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
+
+    auto graphBuilder = createConvFwdGraph(X_UID,
+                                           W_UID,
+                                           Y_UID,
+                                           xDims,
+                                           wDims,
+                                           yDims,
+                                           generateStrides(xDims),
+                                           generateStrides(wDims),
+                                           generateStrides(yDims),
+                                           {0, 0},
+                                           {1, 1},
+                                           {1, 1},
+                                           DataType::FLOAT);
+
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const GpuConvolutionFwdPlanBuilder<DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::FLOAT>
+        patient;
+
+    EXPECT_TRUE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+
+    // The kernels are cross-correlation only, so true convolution must be rejected.
+    auto* attributes = const_cast<ConvolutionFwdAttributes*>(
+        graphWrap.getNode(0).attributes_as_ConvolutionFwdAttributes());
+    ASSERT_NE(attributes, nullptr);
+    ASSERT_TRUE(attributes->mutate_conv_mode(ConvMode::CONVOLUTION));
+
+    EXPECT_FALSE(patient.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
+}

@@ -211,27 +211,16 @@ TYPED_TEST(host_conversion, round_trip_of_wide_and_tall_matrices)
         }
     }
 
-    {
-        SCOPED_TRACE("wide");
-        expect_round_trip(Format{rocalution::DIA, 1}, matrices[0].second);
-    }
-
     // DIA stores max(n, m) entries per diagonal, which SetDataPtrDIA, LeaveDataPtrDIA
     // and the accelerator rely on. The matrices have 3 diagonals.
-    KNOWN_BUG("csr_to_dia sizes the values by the smaller dimension, and a tall matrix writes "
-              "past them, which can end the process");
-    expect_in_child([&] {
-        for(const auto& matrix : matrices)
-        {
-            SCOPED_TRACE(matrix.first);
-            auto A
-                = make_matrix(Backend::Host, Format{rocalution::DIA, 1}, *matrix.second.host_csr());
-            ASSERT_NE(A, nullptr);
-            EXPECT_EQ(A->GetNnz(), 3 * std::max(matrix.second.n, matrix.second.m));
-        }
-        SCOPED_TRACE("tall");
-        expect_round_trip(Format{rocalution::DIA, 1}, matrices[1].second);
-    });
+    for(const auto& matrix : matrices)
+    {
+        SCOPED_TRACE(matrix.first);
+        auto A = make_matrix(Backend::Host, Format{rocalution::DIA, 1}, *matrix.second.host_csr());
+        ASSERT_IN_LOOP(A != nullptr);
+        EXPECT_EQ(A->GetNnz(), 3 * std::max(matrix.second.n, matrix.second.m));
+        expect_round_trip(Format{rocalution::DIA, 1}, matrix.second);
+    }
 }
 
 TYPED_TEST(host_conversion, conversion_from_the_same_format_copies_the_matrix)
@@ -328,6 +317,29 @@ TEST(host_conversion, bcsr_requires_dimensions_divisible_by_the_block_dimension)
     EXPECT_FALSE(
         rocalution::csr_to_bcsr(descriptor().OpenMP_threads, A.nnz(), A.n, A.m, csr_view(A), &dst));
     EXPECT_EQ(dst.row_offset, nullptr);
+}
+
+// DIA stores max(n, m) values per diagonal, as on the accelerator, so a 2 x 12 or 12 x 2 matrix
+// that holds only its main diagonal would hold 6 times as many values as it has entries
+TEST(host_conversion, dia_rejects_non_square_matrices_by_the_larger_dimension)
+{
+    for(const auto& size : std::vector<std::pair<int, int>>{{2, 12}, {12, 2}})
+    {
+        SCOPED_TRACE(std::to_string(size.first) + " x " + std::to_string(size.second));
+        Csr<double> A(size.first, size.second);
+        for(int i = 0; i < A.n; ++i)
+        {
+            if(i < A.m)
+            {
+                A.add(i, 1.0);
+            }
+            A.end_row();
+        }
+
+        std::unique_ptr<BaseMatrix<double>> out;
+        EXPECT_FALSE(
+            try_make_matrix(Backend::Host, Format{rocalution::DIA, 1}, *A.host_csr(), &out));
+    }
 }
 
 TYPED_TEST(host_conversion, coo_to_csr_sorts_the_columns_of_each_row)

@@ -40,6 +40,10 @@ table EngineDetails {
     // load-time admission can reach. See develop-plugins.rst, "Engine names".
     name: string;
     candidate_page: EngineCandidatePage;
+
+    // Absent means the provider did not state its numerical notes. An explicit list,
+    // even an empty one, is the provider's claim. Values are hipdnnBackendNumericalNote_t.
+    numerical_notes: [int32];
 }
 
 root_type EngineDetails;

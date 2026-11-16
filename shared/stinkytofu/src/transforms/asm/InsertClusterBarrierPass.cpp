@@ -299,8 +299,33 @@ StinkyInstruction* firstRealInstAfter(StinkyInstruction* anchor) {
     return nullptr;
 }
 
+/// Lift a cluster-signal insertion point above the `s_wait_dscnt` run right in
+/// front of \p anchor. StinkyWaitCntInsertionPass parked those drains for the
+/// instruction at \p anchor, not for the signal, so the signal goes first and
+/// the drain stays next to its consumer. Only `s_wait_dscnt` is stepped over:
+/// it neither reads nor writes SCC, so the gate's `s_cmp` keeps the SCC state
+/// the anchor was chosen for, and stopping at anything else (a label included)
+/// keeps the signal on the same side of every branch target and barrier.
+IRBase* hoistSignalAboveLeadingDsCntWaits(IRBase* anchor) {
+    if (anchor == nullptr) return anchor;
+    auto* anchorInst = dyn_cast<StinkyInstruction>(anchor);
+    if (anchorInst == nullptr || anchorInst->getParent() == nullptr) return anchor;
+    BasicBlock* parent = anchorInst->getParent();
+    IRBase* hoisted = anchor;
+    auto it = BasicBlock::iterator(anchorInst);
+    while (it != parent->begin()) {
+        --it;
+        auto* prev = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (prev == nullptr || prev->getUnifiedOpcode() != GFX::s_wait_dscnt) break;
+        hoisted = prev;
+    }
+    return hoisted;
+}
+
+/// The signal goes above the `s_wait_dscnt` run in front of \p anchor.
 void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                           GfxArchID archId) {
+    anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     const std::string labelName = kSkipLabelPrefix + makeRandomHash();
 
     const HwInstDesc* cmpDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
@@ -333,11 +358,13 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
 }
 
 /// `s_barrier_signal -3` alone. Used when the wave-0 check already happened at
-/// the loop entrance, so this site must not clobber SCC again.
+/// the loop entrance, so this site must not clobber SCC again. The signal goes
+/// above the `s_wait_dscnt` run in front of \p anchor.
 void insertBareClusterBarrierSignalBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                           GfxArchID archId) {
     const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
     assert(signalDesc && "Cluster-barrier signal opcode is not supported on this architecture");
+    anchor = hoistSignalAboveLeadingDsCntWaits(anchor);
     StinkyInstruction* signalInst = irBuilder.create(signalDesc, anchor);
     signalInst->addSrcReg(StinkyRegister(kClusterBarrierId));
     signalInst->addModifier<CommentData>(CommentData{"cluster_barrier signal"});

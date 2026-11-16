@@ -48,6 +48,7 @@ TIER="${1:-all}"
 # for every bundle to regenerate the same data.
 SCALE_D128="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(128)))')"
 SCALE_D192="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(192)))')"
+SCALE_D256="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(256)))')"
 
 # DVC remote that hipDNN SDPA golden bundles live on. Each generated bundle's
 # .tensors.dvc pointer is written with a per-output `remote:` key set to this, so
@@ -59,10 +60,13 @@ DVC_REMOTE="golden-data"
 # or less where possible. A backward bundle carries eight IO-dtype tensors (Q, K,
 # V, O, dO and the three gradients) plus FP32 stats, against the forward bundle's
 # four, so the shapes here are deliberately smaller than the SdpaFwd driver's:
-# B=1, H=1, S=256 holds a hd128 bundle at ~512 KiB and a hd192 one at ~640 KiB.
+# B=1, H=1, S=256 holds a hd128 bundle at ~512 KiB, a hd192 one at ~640 KiB, a
+# hd128v64 one at ~384 KiB and a hd256v64 one at ~640 KiB.
 # Raising any of B, H, S or D_qk pushes a bundle past the warning threshold.
 SHAPE_HD128=(--q-dims 1 1 256 128 --v-dims 1 1 256 128 --attn-scale "$SCALE_D128")
 SHAPE_HD192=(--q-dims 1 1 256 192 --v-dims 1 1 256 128 --attn-scale "$SCALE_D192")
+SHAPE_HD128V64=(--q-dims 1 1 256 128 --v-dims 1 1 256 64 --attn-scale "$SCALE_D128")
+SHAPE_HD256V64=(--q-dims 1 1 256 256 --v-dims 1 1 256 64 --attn-scale "$SCALE_D256")
 
 # Order the payloads of a bundle deterministically. Glob expansion sorts by the
 # ambient collation, which puts tensor12 before tensor1 in some locales and after
@@ -228,6 +232,18 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
         generate_pair quick "bhsd/$DTYPE/hd192_causal_batch" Small \
             --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
             "${SHAPE_HD192[@]}"
+
+        # D_qk > D_v = 64: the padded split rows serve 128/64 and 256/64.
+        generate_pair quick "bhsd/$DTYPE/hd128v64_nomask_batch" Small \
+            --dtype "$DTYPE" "${SHAPE_HD128V64[@]}"
+        generate_pair quick "bhsd/$DTYPE/hd128v64_causal_batch" Small \
+            --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
+            "${SHAPE_HD128V64[@]}"
+        generate_pair quick "bhsd/$DTYPE/hd256v64_nomask_batch" Small \
+            --dtype "$DTYPE" "${SHAPE_HD256V64[@]}"
+        generate_pair quick "bhsd/$DTYPE/hd256v64_causal_batch" Small \
+            --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
+            "${SHAPE_HD256V64[@]}"
     done
 
     echo ""
@@ -306,6 +322,127 @@ if [[ "${GENERATE_DISCRIMINATING:-0}" == "1" ]]; then
     generate_pair quick "$T/neq_gqa_dropout_causal_br" Small "${NEQ_GQA[@]}" \
         --dropout-p 0.2 --right-bound 0 --diagonal-alignment bottom_right \
         --min 0 --max 1
+
+    echo ""
+fi
+
+# --- Ragged bundles ---
+#
+# Ragged cases (cuDNN ragged operands, one INT32 offset tensor and multiplier per
+# tensor) are template sweeps whose graph.template.json this script writes first:
+#   Ragged   every operand ragged, Stats packed with its own offsets
+#   RaggedQ  Q, O, dO, dQ and Stats ragged; K, V, dK and dV dense (padded)
+# They live under Golden/<name>; the forward pairs stay in <name>_fwd_pair.
+# Each case carries golden data from PyTorch with an FP64 autograd cross-check of
+# the storage it writes. Layout words in a case id:
+#   compact   blocks equal the sequence lengths
+#   gapped    blocks longer than the lengths (and a non-empty block for a
+#             zero-length sequence)
+#   indep     dQ, dK, dV, O, dO and Stats laid out independently of Q, K and V
+#   tokenmul  token-start offsets with multiplier = each tensor's sequence stride
+# Gap rows of a ragged output are not iterated: the reference and the comparison visit
+# [origin, origin + length) per batch. The golden tensor holds NaN there, which is what
+# the harness's sentinel fill leaves. Stats "ht" is head-major [H, T].
+#
+# Regenerate with:  GENERATE_RAGGED=1 bash generate_golden_data.sh none
+write_template() {
+    local topology="$1" kind="$2" scale="$3"
+    mkdir -p "$GOLDEN_ROOT/quick/SdpaBackward/$topology"
+    python3 "$GENERATOR" --write-template "$GOLDEN_ROOT/quick/SdpaBackward/$topology" \
+        --template-kind "$kind" --attn-scale "$scale"
+}
+
+if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
+    echo "=== Generating ragged bundles ==="
+
+    RSCALE="0.125"
+    write_template Golden/Ragged ragged_qkv "$RSCALE"
+    write_template Golden/RaggedQ ragged_q "$RSCALE"
+
+    # Sq != Skv: Q 64 rows, K/V 96 rows; per-side lengths include a zero-length
+    # sequence. Sq == Skv: both 64 rows. Blocks never exceed the row count.
+    MHA_NEQ_D64=(--q-dims 3 2 64 64 --v-dims 3 2 96 64)
+    MHA_NEQ_D128=(--q-dims 3 2 64 128 --v-dims 3 2 96 128)
+    MHA_EQ_D64=(--q-dims 3 2 64 64 --v-dims 3 2 64 64)
+    GQA_NEQ_D64=(--q-dims 3 4 64 64 --v-dims 3 2 96 64)
+    GQA_EQ_D128=(--q-dims 3 4 64 128 --v-dims 3 2 64 128)
+    GQA_NEQ_D128=(--q-dims 3 4 64 128 --v-dims 3 2 96 128)
+    H1_NEQ_D64=(--q-dims 3 1 64 64 --v-dims 3 1 96 64)
+    GQA2_NEQ_D64=(--q-dims 3 2 64 64 --v-dims 3 1 96 64)
+    GQA2_EQ_D128=(--q-dims 3 2 64 128 --v-dims 3 1 64 128)
+    H1_EQ_D128=(--q-dims 3 1 64 128 --v-dims 3 1 64 128)
+    LENS_NEQ=(--seq-lens-q 17 0 64 --seq-lens-kv 96 0 33)
+    LENS_EQ=(--seq-lens-q 17 0 64 --seq-lens-kv 33 0 64)
+    TL=(--right-bound 0 --diagonal-alignment top_left)
+    COMMON=(--attn-scale "$RSCALE" --ragged-sides qkv)
+    GAP_NEQ=(--ragged-blocks q=24,3,64 --ragged-blocks o=24,3,64
+             --ragged-blocks do=24,3,64 --ragged-blocks dq=24,3,64
+             --ragged-blocks stats=24,3,64
+             --ragged-blocks k=96,2,40 --ragged-blocks v=96,2,40
+             --ragged-blocks dk=96,2,40 --ragged-blocks dv=96,2,40)
+    GAP_EQ=(--ragged-blocks q=24,3,64 --ragged-blocks o=24,3,64
+            --ragged-blocks do=24,3,64 --ragged-blocks dq=24,3,64
+            --ragged-blocks stats=24,3,64
+            --ragged-blocks k=40,2,64 --ragged-blocks v=40,2,64
+            --ragged-blocks dk=40,2,64 --ragged-blocks dv=40,2,64)
+    # Every tensor has its own offsets; the gradients, O, dO and Stats differ from
+    # the inputs they pair with.
+    INDEP_NEQ=(--ragged-blocks q=17,0,64 --ragged-blocks o=20,1,64
+               --ragged-blocks do=17,5,64 --ragged-blocks dq=30,0,64
+               --ragged-blocks stats=22,4,64
+               --ragged-blocks k=96,0,33 --ragged-blocks v=96,3,40
+               --ragged-blocks dk=96,2,33 --ragged-blocks dv=96,0,60)
+
+    generate_sweep_case quick Ragged compact_fp16_mha_d64_nomask_sq_eq_skv_th \
+        --dtype fp16 "${MHA_EQ_D64[@]}" "${LENS_EQ[@]}" "${COMMON[@]}"
+    generate_sweep_case quick Ragged compact_bf16_mha_d128_causal_tl_sq_ne_skv_th \
+        --dtype bf16 "${MHA_NEQ_D128[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}"
+    generate_sweep_case quick Ragged gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_th \
+        --dtype fp16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        "${GAP_NEQ[@]}"
+    generate_sweep_case quick Ragged gapped_bf16_gqa_d128_nomask_sq_eq_skv_th \
+        --dtype bf16 "${GQA_EQ_D128[@]}" "${LENS_EQ[@]}" "${COMMON[@]}" "${GAP_EQ[@]}"
+    generate_sweep_case quick Ragged indep_fp16_mha_d128_causal_tl_sq_ne_skv_th \
+        --dtype fp16 "${MHA_NEQ_D128[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        "${INDEP_NEQ[@]}"
+    generate_sweep_case quick Ragged indep_bf16_gqa_d64_nomask_sq_ne_skv_th \
+        --dtype bf16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" \
+        "${INDEP_NEQ[@]}"
+    generate_sweep_case quick Ragged compact_fp16_h1_d64_causal_tl_sq_ne_skv_ht \
+        --dtype fp16 "${H1_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged gapped_bf16_h1_d128_nomask_sq_eq_skv_ht \
+        --dtype bf16 "${H1_EQ_D128[@]}" "${LENS_EQ[@]}" "${COMMON[@]}" "${GAP_EQ[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged tokenmul_fp16_gqa_d64_causal_tl_sq_ne_skv_th \
+        --dtype fp16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        --ragged-units tokens
+    # Stats [H, T] with H_q > 1. The two GQA2 cases stay within the CPU reference's
+    # backward cost cap (Q elements x Skv <= 4 Mi MACs); the H_q = 4 cases exceed it
+    # and are validated by the GPU reference.
+    generate_sweep_case quick Ragged compact_fp16_gqa2_d64_causal_tl_sq_ne_skv_ht \
+        --dtype fp16 "${GQA2_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged gapped_bf16_gqa2_d128_nomask_sq_eq_skv_ht \
+        --dtype bf16 "${GQA2_EQ_D128[@]}" "${LENS_EQ[@]}" "${COMMON[@]}" "${GAP_EQ[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_ht \
+        --dtype fp16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        "${GAP_NEQ[@]}" --stats-layout ht
+    generate_sweep_case quick Ragged indep_bf16_gqa_d64_nomask_sq_ne_skv_ht \
+        --dtype bf16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" \
+        "${INDEP_NEQ[@]}" --stats-layout ht
+
+    # Q ragged, K/V dense: the dense K/V side keeps its padded rows, which the
+    # engine must leave zero in dK and dV.
+    QCOMMON=(--attn-scale "$RSCALE" --ragged-sides q)
+    GAPQ=(--ragged-blocks q=24,3,64 --ragged-blocks o=24,3,64
+          --ragged-blocks do=24,3,64 --ragged-blocks dq=24,3,64
+          --ragged-blocks stats=24,3,64)
+    generate_sweep_case quick RaggedQ qgapped_fp16_mha_d64_nomask_sq_ne_skv_th \
+        --dtype fp16 "${MHA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${QCOMMON[@]}" "${GAPQ[@]}"
+    generate_sweep_case quick RaggedQ qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th \
+        --dtype bf16 "${GQA_NEQ_D128[@]}" "${LENS_NEQ[@]}" "${QCOMMON[@]}" "${TL[@]}"
 
     echo ""
 fi

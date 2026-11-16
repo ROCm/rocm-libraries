@@ -13,5 +13,8 @@
   "knobs": [
     "block_m",
     "block_n"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

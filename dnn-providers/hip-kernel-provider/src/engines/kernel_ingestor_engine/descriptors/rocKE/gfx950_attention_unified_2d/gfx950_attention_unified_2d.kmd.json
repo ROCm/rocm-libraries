@@ -66,6 +66,11 @@
       "name": "use_transposed_qk_32x32",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "emit_lse",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

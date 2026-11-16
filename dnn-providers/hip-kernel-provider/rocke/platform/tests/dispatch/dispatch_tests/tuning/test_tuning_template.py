@@ -33,8 +33,15 @@ from rocke.dispatch.tuning import (
     values,
 )
 from rocke.dispatch.tuning.testing import TuningContractError, assert_tuning_contract
+from rocke.tests.arch_marks import arch_specific
 
 ABI = "rocke-toy/v1"
+
+# The toy family names gfx950 as a fixed label. The tuning mechanics under test
+# do not depend on the arch, so one arch is enough.
+_toy_arch = arch_specific(
+    ("gfx950",), reason="toy family fixture: the arch is a fixed label, not behavior"
+)
 
 
 # -------------------------------------------------------------- the request
@@ -207,6 +214,7 @@ def _kid(req, candidate, spec) -> KernelId:
     return make_kernel_id(req, candidate, spec, op="toy")
 
 
+@_toy_arch
 class TestToyFamily(unittest.TestCase):
     def test_every_candidate_keeps_the_contract(self):
         for candidate in _registry().candidates():
@@ -273,6 +281,7 @@ class TestToyFamily(unittest.TestCase):
         self.assertEqual(len(hashes), len(results))
 
 
+@_toy_arch
 class TestStalePins(unittest.TestCase):
     def test_a_pin_that_no_longer_resolves_raises_and_never_falls_back(self):
         registry = _registry()
@@ -342,6 +351,7 @@ class TestStalePins(unittest.TestCase):
         self.assertIn("algorithm='toy_tuned'", why)
 
 
+@_toy_arch
 class TestPinToSpec(unittest.TestCase):
     def test_an_untuned_spec_clears_a_stale_pin(self):
         candidate = _registry().get("toy_gfx950_tile64")
@@ -356,6 +366,7 @@ class TestPinToSpec(unittest.TestCase):
             pin_to_spec(ToyRequest(m=8), candidate, bad)
 
 
+@_toy_arch
 class TestSampleCount(unittest.TestCase):
     def test_a_negative_sample_is_refused(self):
         self.assertEqual(sample_count("full", 0), 0)
@@ -380,6 +391,7 @@ class _LenientSpace(ToySpace):
         return True
 
 
+@_toy_arch
 class TestFullWalk(unittest.TestCase):
     def test_the_full_walk_yields_each_config_once(self):
         space = _LenientSpace(
@@ -410,6 +422,7 @@ class _NoOuterSpace(ToySpace):
         return KnobSpace.stem_prefix(self)
 
 
+@_toy_arch
 class TestOuterKnob(unittest.TestCase):
     def test_the_outer_knob_is_optional(self):
         candidate = _registry(_NoOuterSpace).get("toy_gfx950_tile64")
@@ -435,6 +448,46 @@ class TestOuterKnob(unittest.TestCase):
         self.assertIn("takes int", why)
 
 
+class _OuterInertSpace(ToySpace):
+    """A drop rule that reads the outer knob: at the base's two waves per EU
+    the kernel unrolls by 4 anyway, so ``unroll=4`` restates it there only."""
+
+    outer_dependent_knobs = frozenset({"unroll"})
+
+    def inert(self, base, kernel):
+        inert = dict(super().inert(base, kernel))
+        if kernel.unroll == 4 and kernel.waves_per_eu == 2:
+            inert["unroll"] = "the policy at two waves per EU"
+        return inert
+
+
+class TestOuterDependentDrops(unittest.TestCase):
+    def test_a_knob_dropped_at_one_outer_value_is_listed_at_the_others(self):
+        candidate = _registry(_OuterInertSpace).get("toy_gfx950_tile64")
+        assert_tuning_contract(candidate, [ToyRequest(m=1024)])
+        space = _OuterInertSpace(
+            abi=ABI,
+            arch="gfx950",
+            path="toy",
+            variant_id="tile64",
+            candidate_name="toy_gfx950_tile64",
+        )
+        base = ToyKernel(m=1024, tile=64)
+        for level, outers in (("production", {4}), ("full", {1, 3, 4})):
+            specs = list(space.stream(base, level))
+            ids = [s.tuning_id for s in specs]
+            self.assertEqual(len(ids), len(set(ids)), level)
+            unrolled = {s.kernel.waves_per_eu for s in specs if s.kernel.unroll == 4}
+            self.assertEqual(unrolled, outers, level)
+            # Where it is dropped, the knob set is its unroll-less twin.
+            at_two = {s.tuning_id for s in specs if s.kernel.waves_per_eu == 2}
+            restated = space.canonicalize(base, {"unroll": 4, "waves_per_eu": 2})[0]
+            self.assertIn(restated.tuning_id, at_two, level)
+            self.assertEqual(restated.knobs, ())
+        pinned = space.canonicalize(base, {"unroll": 4, "waves_per_eu": 3})[0]
+        self.assertEqual(dict(pinned.knobs), {"unroll": 4, "waves_per_eu": 3})
+
+
 class _IgnoresKnobs(ToySpace):
     """A broken space: pinned knobs are silently ignored."""
 
@@ -442,6 +495,7 @@ class _IgnoresKnobs(ToySpace):
         return super().canonicalize(base, {})
 
 
+@_toy_arch
 class TestTheKitCatchesBrokenSpaces(unittest.TestCase):
     def test_ignoring_pinned_knobs_is_caught(self):
         candidate = _registry(_IgnoresKnobs).get("toy_gfx950_tile64")
@@ -471,6 +525,7 @@ def _routed_registry(seen=None) -> CandidateRegistry:
     return registry
 
 
+@_toy_arch
 class TestRouteAuto(unittest.TestCase):
     def test_a_routed_candidate_answers_auto_with_its_default(self):
         registry = _routed_registry()

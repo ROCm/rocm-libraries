@@ -780,28 +780,15 @@ _CODEGEN_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "characterization", "_codegen"
 )
 
-_LOGIC_ROOT = os.path.normpath(
-    os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        *([".."] * 4),
-        "library",
-        "src",
-        "amd_detail",
-        "rocblaslt",
-        "src",
-        "Tensile",
-        "Logic",
-        "asm_full",
-    )
+_FIXTURE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "logic_yaml", "staggeru"
 )
 
-# Shipped tuning logic known to contain solutions with SupportCustomStaggerU:
-# False and a non-zero StaggerU.  Two files rather than one so a retune that
-# drops the shape from either still leaves the check with something to assert.
+# Verbatim copies of shipped gfx950_id75a3 Equality logic that holds solutions
+# with SupportCustomStaggerU: False and a non-zero StaggerU.  They are copies so
+# a retune of the shipped corpus cannot change what this test exercises.
 COMPILED_IN_STAGGERU_LOGIC = (
-    "gfx950/gfx950_id75a3/Equality/"
     "gfx950_Cijk_Ailk_Bjlk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml",
-    "gfx950/gfx950_id75a3/Equality/"
     "gfx950_Cijk_Alik_Bljk_F8B8SS_BH_BiasS_HAS_SAB_SAV_UserArgs.yaml",
 )
 
@@ -864,9 +851,7 @@ def test_generated_kernels_read_stagger_from_the_packed_argument(rel, tmp_path):
     from somewhere the clamp cannot reach.  If the generator ever learns to bake
     a literal StaggerU into a wrap site, this fails and the clause has to widen
     again."""
-    logic = os.path.join(_LOGIC_ROOT, rel)
-    if not os.path.exists(logic):
-        pytest.skip(f"tuning logic tree not present: {rel}")
+    logic = os.path.join(_FIXTURE_DIR, rel)
     if not os.path.isdir(_CODEGEN_DIR):
         pytest.skip("the code generation harness is not present")
     if _CODEGEN_DIR not in sys.path:
