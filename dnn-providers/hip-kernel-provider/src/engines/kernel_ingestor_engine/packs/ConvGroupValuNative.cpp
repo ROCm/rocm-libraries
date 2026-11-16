@@ -153,11 +153,16 @@ bool kernelMatches(const MatchContext& context,
     return resolve(context, kernel).has_value();
 }
 
-const std::vector<KernelArgument>& kernelSignature()
+/// The prepare kernel's argument; the main kernel's, with a ConvEpiArgs after it when an epilogue
+/// is fused.
+const std::vector<KernelArgument>& kernelSignature(bool fused = false)
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(ConvGroupValuArgs)), 0, ""}};
-    return s_signature;
+    static const std::vector<KernelArgument> s_fused{
+        {"by_value", static_cast<uint32_t>(sizeof(ConvGroupValuArgs)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return fused ? s_fused : s_signature;
 }
 
 class PreparedConvGroupValu : public IngestorPreparedDispatch
@@ -248,6 +253,10 @@ public:
         options.add("GV_VBY", plan.vby);
         options.add("GV_RAGGED", plan.ragged ? 1 : 0);
         options.add("GV_COLMASK", plan.colmask ? 1 : 0);
+        // The fused epilogue (one compile serves both entry points; only the main kernel takes
+        // it). Fusion off adds no option.
+        const auto& epilogue = resolved->problem.base.epilogue;
+        conv_epilogue::addEpilogueDefines(options, epilogue);
 
         struct Launch
         {
@@ -267,8 +276,13 @@ public:
         {
             KernelDefinition entry = kernel;
             entry.source.entryPoint = launch.entry;
-            auto code = buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, entry, options, kernelSignature());
+            const bool main = kernels.size() == 1;
+            auto code = buildIngestorKernelCode(_kernelCompiler,
+                                                _kpackLoader,
+                                                context,
+                                                entry,
+                                                options,
+                                                kernelSignature(main && !epilogue.empty()));
             code.setBlockSize(launch.threads, 1, 1);
             code.setGridSize(launch.gridX, launch.gridY, 1);
             kernels.push_back(std::move(code));
@@ -305,7 +319,17 @@ public:
         args.wt = static_cast<float*>(workspace);
         const auto stream = handle.getStream();
         dispatch.kernel(0, stream).launch(stream, args);
-        dispatch.kernel(1, stream).launch(stream, args);
+        const auto& epilogue = resolved.problem.base.epilogue;
+        if(epilogue.empty())
+        {
+            dispatch.kernel(1, stream).launch(stream, args);
+        }
+        else
+        {
+            const ConvEpiArgs epiArgs
+                = conv_epilogue::epilogueArgs(epilogue, deviceBuffers, numDeviceBuffers);
+            dispatch.kernel(1, stream).launch(stream, args, epiArgs);
+        }
     }
 
 private:

@@ -5,11 +5,18 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hiprtc.h>
+
+#include "compilation/KernelCompileOptions.hpp"
+#include "kernel_includes.hpp"
+#include "kernel_sources.hpp"
 
 #include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -348,6 +355,267 @@ TEST(TestConvDepthwiseValuComputeType, ServesCudnnsComputeTypesPerElementType)
             [direction](const ConvShape& s) { return parse(s, direction).has_value(); });
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues: forward only, and only when the engines ask for it.
+// ---------------------------------------------------------------------------
+
+/// A backward-data depthwise convolution whose dx is the virtual head of a relu, field for field.
+flatbuffers::FlatBufferBuilder backwardFusedGraph(const ConvShape& shape)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    auto spec = specFor(shape, ConvDirection::BACKWARD_DATA);
+    const TensorSpec written = spec.x;
+    spec.x.isVirtual = true;
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
+        serializeTensor(builder, spec.xUid, spec.x),
+        serializeTensor(builder, spec.wUid, spec.w),
+        serializeTensor(builder, spec.yUid, spec.y),
+        serializeTensor(builder, 100, written)};
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.push_back(data_objects::CreateNodeDirect(
+        builder,
+        "conv",
+        data_objects::DataType::FLOAT,
+        data_objects::NodeAttributes::ConvolutionBwdAttributes,
+        data_objects::CreateConvolutionBwdAttributesDirect(builder,
+                                                           spec.yUid,
+                                                           spec.wUid,
+                                                           spec.xUid,
+                                                           &spec.prePadding,
+                                                           &spec.postPadding,
+                                                           &spec.stride,
+                                                           &spec.dilation,
+                                                           spec.mode)
+            .Union()));
+    nodes.push_back(data_objects::CreateNodeDirect(
+        builder,
+        "relu",
+        data_objects::DataType::FLOAT,
+        data_objects::NodeAttributes::PointwiseAttributes,
+        data_objects::CreatePointwiseAttributes(builder,
+                                                data_objects::PointwiseMode::RELU_FWD,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                spec.xUid,
+                                                ::flatbuffers::nullopt,
+                                                ::flatbuffers::nullopt,
+                                                100)
+            .Union()));
+    builder.Finish(data_objects::CreateGraphDirect(builder,
+                                                   "dw_bwd_fused",
+                                                   data_objects::DataType::UNSET,
+                                                   data_objects::DataType::UNSET,
+                                                   data_objects::DataType::UNSET,
+                                                   &tensors,
+                                                   &nodes));
+    return builder;
+}
+
+TEST(TestConvDepthwiseValuProblemFusion, ForwardTakesTheEpilogueOnlyWhenAsked)
+{
+    namespace epi = conv_epilogue_test;
+    for(const bool channelsLast : {true, false})
+    {
+        const auto spec = epi::fusedSpecFor(depthwise(6, channelsLast),
+                                            {epi::bias(), epi::relu()},
+                                            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        const GraphFixture fixture(epi::buildFusedGraph(spec));
+        const auto fused = parseDepthwiseValuProblem(
+            fixture.context(), ConvDirection::FORWARD, conv_naive::Fusion::EPILOGUE);
+        ASSERT_TRUE(fused.has_value());
+        EXPECT_EQ(conv_epilogue::patternOf(fused->base.epilogue), "add.k.FLOAT|relu");
+        // The kernels write the chain's output.
+        EXPECT_EQ(fused->outUid, epi::outputUid(2));
+        EXPECT_FALSE(
+            parseDepthwiseValuProblem(fixture.context(), ConvDirection::FORWARD).has_value());
+    }
+}
+
+TEST(TestConvDepthwiseValuProblemFusion, BackwardDataDeclinesAFusedGraph)
+{
+    for(const bool channelsLast : {true, false})
+    {
+        const auto shape = depthwise(6, channelsLast);
+        ASSERT_TRUE(parse(shape, ConvDirection::BACKWARD_DATA).has_value());
+        const GraphFixture fixture(backwardFusedGraph(shape));
+        EXPECT_FALSE(parseDepthwiseValuProblem(fixture.context(),
+                                               ConvDirection::BACKWARD_DATA,
+                                               conv_naive::Fusion::EPILOGUE)
+                         .has_value());
+        EXPECT_FALSE(
+            parseDepthwiseValuProblem(fixture.context(), ConvDirection::BACKWARD_DATA).has_value());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The compiler workaround in ConvDepthwiseEpilogue.h: fused fp16 VALU configs that fail
+// instruction selection without the barrier ("Cannot select: f32 = Constant<-1>") compile
+// through HIPRTC. Compile only: no device is used.
+// ---------------------------------------------------------------------------
+
+struct FusedCompileCase
+{
+    std::string name;
+    std::string arch;
+    /// The config's CONV_DW_* defines beyond the element type, as the pack sets them.
+    std::vector<std::pair<std::string, std::string>> defines;
+    std::vector<conv_epilogue_test::Step> steps;
+};
+
+std::vector<FusedCompileCase> fusedCompileCases()
+{
+    namespace epi = conv_epilogue_test;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+    const std::vector<epi::Step> geluTanh{epi::unary(PointwiseMode::GELU_APPROX_TANH_FWD)};
+    epi::Step scale = epi::scale();
+    scale.operand = epi::OperandKind::RUNTIME;
+    epi::Step shift = epi::bias();
+    shift.operand = epi::OperandKind::CONSTANT;
+    const std::vector<epi::Step> scaleBiasSilu{scale, shift, epi::unary(PointwiseMode::SWISH_FWD)};
+    const std::vector<epi::Step> biasRelu{
+        epi::bias(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF), epi::relu()};
+    // Each case failed to compile without the barrier on that arch.
+    return {
+        {"MicrotileGeluTanh",
+         "gfx90a",
+         {{"VARIANT", "1"}, {"LAYOUT", "0"}, {"KH", "3"}, {"KW", "3"}, {"TH", "4"}, {"TW", "4"}},
+         geluTanh},
+        {"LdsChannelsFirstGeluTanh",
+         "gfx90a",
+         {{"VARIANT", "3"},
+          {"LAYOUT", "1"},
+          {"KH", "3"},
+          {"KW", "3"},
+          {"BH", "16"},
+          {"BW", "64"},
+          {"BK", "1"},
+          {"RH", "2"},
+          {"RW", "4"}},
+         geluTanh},
+        {"RowtileGeluTanh",
+         "gfx90a",
+         {{"VARIANT", "6"},
+          {"LAYOUT", "0"},
+          {"KH", "3"},
+          {"KW", "3"},
+          {"TH", "4"},
+          {"TW", "4"},
+          {"STRIDE", "1"},
+          {"VEC", "1"}},
+         geluTanh},
+        {"FusedScaleBiasSilu",
+         "gfx942",
+         {{"VARIANT", "2"},
+          {"LAYOUT", "0"},
+          {"KH", "5"},
+          {"KW", "5"},
+          {"BH", "8"},
+          {"BW", "8"},
+          {"BK", "32"},
+          {"RH", "2"},
+          {"RW", "2"}},
+         scaleBiasSilu},
+        {"LdsScaleBiasSilu",
+         "gfx950",
+         {{"VARIANT", "3"},
+          {"LAYOUT", "0"},
+          {"KH", "9"},
+          {"KW", "9"},
+          {"BH", "8"},
+          {"BW", "8"},
+          {"BK", "16"},
+          {"RH", "2"},
+          {"RW", "2"}},
+         scaleBiasSilu},
+        {"LdsChannelsFirstBiasRelu",
+         "gfx942",
+         {{"VARIANT", "3"},
+          {"LAYOUT", "1"},
+          {"KH", "7"},
+          {"KW", "7"},
+          {"BH", "8"},
+          {"BW", "8"},
+          {"BK", "8"},
+          {"RH", "2"},
+          {"RW", "2"}},
+         biasRelu},
+    };
+}
+
+class TestConvDepthwiseValuFusedCompile : public ::testing::TestWithParam<FusedCompileCase>
+{
+};
+
+TEST_P(TestConvDepthwiseValuFusedCompile, CompilesThroughHiprtc)
+{
+    const auto& param = GetParam();
+    // The epilogue's generated code, from a fused graph of the menu chain.
+    const auto spec = conv_epilogue_test::fusedSpecFor(
+        depthwise(8), param.steps, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const GraphFixture fixture(conv_epilogue_test::buildFusedGraph(spec));
+    const auto problem = parseDepthwiseValuProblem(
+        fixture.context(), ConvDirection::FORWARD, conv_naive::Fusion::EPILOGUE);
+    ASSERT_TRUE(problem.has_value());
+
+    hip_kernel_provider::compilation::KernelCompileOptions options(param.arch);
+    options.add("CONV_DW_TYPE", std::string("_Float16"));
+    options.add("CONV_DW_NDIMS", std::string("2"));
+    options.add("CONV_DW_FLIP", std::string("0"));
+    for(const auto& [name, value] : param.defines)
+    {
+        options.add("CONV_DW_" + name, value);
+    }
+    conv_epilogue::addEpilogueDefines(options, problem->base.epilogue);
+    const std::vector<std::string> optionStrings = options;
+    std::vector<const char*> optionPointers;
+    optionPointers.reserve(optionStrings.size());
+    for(const auto& option : optionStrings)
+    {
+        optionPointers.push_back(option.c_str());
+    }
+
+    const std::string source(hip_plugin::getKernelSrc("kernels/ConvDepthwiseValu.cpp"));
+    ASSERT_FALSE(source.empty());
+    std::vector<std::string_view> includeTexts;
+    std::vector<const char*> includeNames;
+    hip_plugin::getKernelIncList(includeTexts, includeNames);
+    const std::vector<std::string> includeStrings(includeTexts.begin(), includeTexts.end());
+    std::vector<const char*> includePointers;
+    includePointers.reserve(includeStrings.size());
+    for(const auto& text : includeStrings)
+    {
+        includePointers.push_back(text.c_str());
+    }
+
+    hiprtcProgram program = nullptr;
+    ASSERT_EQ(hiprtcCreateProgram(&program,
+                                  source.c_str(),
+                                  "ConvDepthwiseValu.cpp",
+                                  static_cast<int>(includePointers.size()),
+                                  includePointers.data(),
+                                  includeNames.data()),
+              HIPRTC_SUCCESS);
+    const auto result = hiprtcCompileProgram(
+        program, static_cast<int>(optionPointers.size()), optionPointers.data());
+    std::string log;
+    size_t logSize = 0;
+    if(hiprtcGetProgramLogSize(program, &logSize) == HIPRTC_SUCCESS && logSize > 1)
+    {
+        log.resize(logSize);
+        static_cast<void>(hiprtcGetProgramLog(program, log.data()));
+    }
+    hiprtcDestroyProgram(&program);
+    EXPECT_EQ(result, HIPRTC_SUCCESS) << log;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestConvDepthwiseValuFusedCompile,
+                         ::testing::ValuesIn(fusedCompileCases()),
+                         [](const auto& info) { return info.param.name; });
 
 } // namespace
 

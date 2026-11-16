@@ -64,9 +64,11 @@ struct FftProblem
     }
 };
 
-/// The problem @p context's graph describes in @p direction, or nullopt.
+/// The problem @p context's graph describes in @p direction, or nullopt. With @p fusion EPILOGUE a
+/// forward graph may carry a pointwise epilogue (base.epilogue), applied by the passes that write y.
 std::optional<FftProblem> parseFftProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                                          conv_naive::ConvDirection direction);
+                                          conv_naive::ConvDirection direction,
+                                          conv_naive::Fusion fusion = conv_naive::Fusion::NONE);
 
 /// A catalog config, from its metadata: the transform size th x tw (th 1 for a 1-D transform),
 /// tiles a transform block (pb) and its threads (tb), and the product tile's output channels (gn).

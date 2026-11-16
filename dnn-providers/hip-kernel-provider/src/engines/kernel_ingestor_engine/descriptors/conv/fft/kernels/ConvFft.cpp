@@ -20,6 +20,8 @@
 //   CONV_FFT_TB   threads of a transform block (at least one a row pair: PB TH / 2, or PB / 2)
 //   CONV_FFT_GN   output channels of a product block tile (16, 32 or 64; 256 threads)
 //   CONV_FFT_TM   tiles a product thread (4, or 8 with 64 output channels; default 4)
+// A fused forward build (CONV_EPI 1, ConvEpilogue.h) applies the epilogue in the passes that write
+// y, ConvFftOutput and ConvFftDepthwise, which then take ConvEpiArgs as a second argument.
 
 #include "ConvFftCore.h"
 
@@ -45,9 +47,10 @@ extern "C" __global__ void __launch_bounds__(256) ConvFftProduct(ConvFftArgs a)
     fftProduct<CONV_FFT_GN, CONV_FFT_TM>(a);
 }
 
-extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftOutput(ConvFftArgs a)
+extern "C" __global__ void __launch_bounds__(CONV_FFT_TB)
+    ConvFftOutput(ConvFftArgs a CONV_EPI_PARAM)
 {
-    fftOutputInverse<CONV_FFT_T, CONV_FFT_TH, CONV_FFT_TW, CONV_FFT_PB>(a);
+    fftOutputInverse<CONV_FFT_T, CONV_FFT_TH, CONV_FFT_TW, CONV_FFT_PB>(a CONV_EPI_ARG);
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvFftWgrad(ConvFftArgs a)
@@ -60,9 +63,10 @@ extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftWgradOut(ConvFf
     fftWgradInverse<CONV_FFT_T, CONV_FFT_TH, CONV_FFT_TW, CONV_FFT_PB>(a);
 }
 
-extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftDepthwise(ConvFftArgs a)
+extern "C" __global__ void __launch_bounds__(CONV_FFT_TB)
+    ConvFftDepthwise(ConvFftArgs a CONV_EPI_PARAM)
 {
-    fftDepthwise<CONV_FFT_T, CONV_FFT_TH, CONV_FFT_TW, CONV_FFT_PB>(a);
+    fftDepthwise<CONV_FFT_T, CONV_FFT_TH, CONV_FFT_TW, CONV_FFT_PB>(a CONV_EPI_ARG);
 }
 
 // The depthwise backward-weights kernel holds two spectra a tile; a config whose two spectra

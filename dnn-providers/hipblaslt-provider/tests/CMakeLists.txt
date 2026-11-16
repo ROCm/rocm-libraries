@@ -31,6 +31,8 @@ add_executable(
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestConvRepackLaunch.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestGpuRepackKernels.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestGpuConvGemm.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestConvEpilogueFormulation.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/TestGpuConvEpilogue.cpp>
 )
 
 # The hipBLASLt engine's own tests, and the plugin API cases that drive it.

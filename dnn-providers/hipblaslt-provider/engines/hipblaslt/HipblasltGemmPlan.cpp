@@ -14,6 +14,7 @@
 
 #include "HipblasltUtils.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/ConvEpilogueFormulation.hpp"
 #include "common/GemmFormulation.hpp"
 
 namespace hipblaslt_plugin
@@ -26,6 +27,53 @@ namespace
 constexpr size_t MAX_WORKSPACE_BYTES = static_cast<size_t>(128) * 1024 * 1024;
 
 constexpr float ALPHA = 1.0f;
+
+static_assert(NATIVE_EPILOGUE_RELU == HIPBLASLT_EPILOGUE_RELU
+                  && NATIVE_EPILOGUE_BIAS == HIPBLASLT_EPILOGUE_BIAS
+                  && NATIVE_EPILOGUE_RELU_BIAS == HIPBLASLT_EPILOGUE_RELU_BIAS
+                  && NATIVE_EPILOGUE_GELU == HIPBLASLT_EPILOGUE_GELU
+                  && NATIVE_EPILOGUE_GELU_BIAS == HIPBLASLT_EPILOGUE_GELU_BIAS
+                  && NATIVE_EPILOGUE_SIGMOID == HIPBLASLT_EPILOGUE_SIGMOID
+                  && NATIVE_EPILOGUE_SWISH == HIPBLASLT_EPILOGUE_SWISH_EXT
+                  && NATIVE_EPILOGUE_SWISH_BIAS == HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT
+                  && NATIVE_EPILOGUE_CLAMP == HIPBLASLT_EPILOGUE_CLAMP_EXT
+                  && NATIVE_EPILOGUE_CLAMP_BIAS == HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT,
+              "the formulation's native epilogue values are hipBLASLt's");
+
+/// Sets @p epilogue on @p desc. The bias pointer is a placeholder until execution: hipBLASLt
+/// wants one set for its algorithm search.
+void setNativeEpilogue(const HipblasltMatmulDesc& desc, const NativeEpilogue& epilogue)
+{
+    const auto mode = static_cast<hipblasLtEpilogue_t>(epilogue.mode);
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        desc.matmulDesc(), HIPBLASLT_MATMUL_DESC_EPILOGUE, &mode, sizeof(mode)));
+    if(epilogue.mode == NATIVE_EPILOGUE_CLAMP || epilogue.mode == NATIVE_EPILOGUE_CLAMP_BIAS)
+    {
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(desc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
+                                            &epilogue.act0,
+                                            sizeof(epilogue.act0)));
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(desc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+                                            &epilogue.act1,
+                                            sizeof(epilogue.act1)));
+    }
+    if(epilogue.biasUid.has_value())
+    {
+        const hipDataType biasType
+            = hipblaslt_utils::tensorDataTypeToHipDataType(epilogue.biasType);
+        THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+            desc.matmulDesc(), HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &biasType, sizeof(biasType)));
+        const void* placeholder = reinterpret_cast<const void*>(0x1);
+        THROW_ON_HIPBLASLT_FAILURE(
+            hipblasLtMatmulDescSetAttribute(desc.matmulDesc(),
+                                            HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                            static_cast<const void*>(&placeholder),
+                                            sizeof(placeholder)));
+    }
+}
 
 /// A column-major layout for @p operand, @p rows x @p cols as stored, batched like the call.
 HipblasltMatrixLayout
@@ -65,6 +113,10 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
 
     for(auto& call : fitLibraryLimits(calls))
     {
+        // A fused epilogue applies once, to the whole result: never to a part of a split call.
+        PLUGIN_THROW_IF_FALSE(!(call.epilogue.has_value() && call.accumulate),
+                              HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                              "a native epilogue on an accumulating GEMM");
         // Stored shapes: op(a) is m x k, op(b) is k x n.
         PreparedCall prepared{call,
                               {},
@@ -97,6 +149,10 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
                                                 call.transposeB ? HIPBLAS_OP_T : HIPBLAS_OP_N,
                                                 computeType,
                                                 HIP_R_32F);
+            if(call.epilogue.has_value())
+            {
+                setNativeEpilogue(prepared.desc, *call.epilogue);
+            }
             returned = 0;
             const auto status = hipblasLtMatmulAlgoGetHeuristic(handle.hipblasltHandle,
                                                                 prepared.desc.matmulDesc(),
@@ -147,6 +203,17 @@ void HipblasltGemmPlan::execute(const HipdnnEnginePluginHandle& handle,
             = hipdnn_plugin_sdk::findDeviceBuffer(call.d.uid, deviceBuffers, numDeviceBuffers);
         void* output = operandAddress(d.ptr, call.d);
         const float beta = call.accumulate ? 1.0f : 0.0f;
+        if(call.epilogue.has_value() && call.epilogue->biasUid.has_value())
+        {
+            const void* bias = hipdnn_plugin_sdk::findDeviceBuffer(
+                                   *call.epilogue->biasUid, deviceBuffers, numDeviceBuffers)
+                                   .ptr;
+            THROW_ON_HIPBLASLT_FAILURE(
+                hipblasLtMatmulDescSetAttribute(prepared.desc.matmulDesc(),
+                                                HIPBLASLT_MATMUL_DESC_BIAS_POINTER,
+                                                static_cast<const void*>(&bias),
+                                                sizeof(bias)));
+        }
 
         // c is d: read only when accumulating.
         THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmul(handle.hipblasltHandle,

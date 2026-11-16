@@ -148,14 +148,15 @@ int Config::kpl() const
 }
 
 std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
-                                                ConvDirection direction)
+                                                ConvDirection direction,
+                                                conv_naive::Fusion fusion)
 {
     if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA)
     {
         return std::nullopt;
     }
     const bool backward = direction == ConvDirection::BACKWARD_DATA;
-    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    auto base = conv_naive::parseConvNaiveProblem(context, direction, fusion);
     if(!base.has_value())
     {
         return std::nullopt;
@@ -456,7 +457,8 @@ constexpr std::string_view FLOPS_TOKEN = "conv_smallc.flops";
 /// The graph's tokens in @p direction: x, w and y in forward roles (x is dx backward).
 std::optional<BoundTokens> graphMatchesIn(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_smallc::parseSmallcProblem(context, direction);
+    const auto problem
+        = conv_smallc::parseSmallcProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value())
     {
         return std::nullopt;
@@ -524,8 +526,10 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
         return std::nullopt;
     }
     // The config's direction is the graph's: the parse refuses a graph of the other one.
-    auto problem = conv_smallc::parseSmallcProblem(
-        context, direction == "BWD" ? ConvDirection::BACKWARD_DATA : ConvDirection::FORWARD);
+    auto problem = conv_smallc::parseSmallcProblem(context,
+                                                   direction == "BWD" ? ConvDirection::BACKWARD_DATA
+                                                                      : ConvDirection::FORWARD,
+                                                   conv_naive::Fusion::EPILOGUE);
     if(!problem.has_value() || *dtype != data_objects::EnumNameDataType(problem->base.dataType)
        || !conv_igemm::atomRunsOn(config->atom, context.deviceProperties.gcnArchName)
        || !shipsTo(config->archs, context.deviceProperties.gcnArchName)
@@ -551,6 +555,15 @@ bool kernelMatches(const MatchContext& context,
                    const KernelDefinition& kernel)
 {
     return admitted(context, kernel).has_value();
+}
+
+/// The convolution's arguments with a fused epilogue: SmallcArgs, then ConvEpiArgs.
+const std::vector<KernelArgument>& fusedConvSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(SmallcArgs)), 0, ""},
+        {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
+    return s_signature;
 }
 
 template <class Args>
@@ -676,15 +689,23 @@ public:
         {
             options.add("CONV_SMALLC_EP", std::to_string(config.ep));
         }
-        auto conv = buildIngestorKernelCode(
-            _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<SmallcArgs>());
-        conv.setBlockSize(static_cast<unsigned int>(config.blockThreads()), 1, 1);
-        conv.setGridSize(run->plan.grid[0], run->plan.grid[1], 1);
-
+        // The weight pre-pass compiles exactly as unfused; the convolution carries the epilogue.
         KernelDefinition aux = kernel;
         aux.source.entryPoint = std::string(FORMAT_ENTRY_POINT);
         auto format = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, aux, options, signatureOf<SmallcFormatArgs>());
+        const auto& epilogue = run->problem.base.epilogue;
+        conv_epilogue::addEpilogueDefines(options, epilogue);
+        auto conv = buildIngestorKernelCode(_kernelCompiler,
+                                            _kpackLoader,
+                                            context,
+                                            kernel,
+                                            options,
+                                            epilogue.empty() ? signatureOf<SmallcArgs>()
+                                                             : fusedConvSignature());
+        conv.setBlockSize(static_cast<unsigned int>(config.blockThreads()), 1, 1);
+        conv.setGridSize(run->plan.grid[0], run->plan.grid[1], 1);
+
         format.setBlockSize(AUX_BLOCK, 1, 1);
         format.setGridSize(
             static_cast<unsigned int>(std::clamp<long long>(
@@ -746,7 +767,16 @@ public:
         args.x = backward ? y : x;
         args.w = workspace;
         args.y = backward ? x : y;
-        dispatch.conv(stream).launch(stream, args);
+        if(run.problem.base.epilogue.empty())
+        {
+            dispatch.conv(stream).launch(stream, args);
+        }
+        else
+        {
+            const ConvEpiArgs epiArgs = conv_epilogue::epilogueArgs(
+                run.problem.base.epilogue, deviceBuffers, numDeviceBuffers);
+            dispatch.conv(stream).launch(stream, args, epiArgs);
+        }
     }
 
 private:

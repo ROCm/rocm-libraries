@@ -70,9 +70,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradGemm(K5GemmArgs g)
     k5Gemm<CONV_WINO_T, CONV_WINO_GEMM_BM, CONV_WINO_GEMM_BN, CONV_WINO_GEMM_BK>(g);
 }
 
-extern "C" __global__ void __launch_bounds__(256) ConvWinogradOutput(K5Args a)
+extern "C" __global__ void __launch_bounds__(256) ConvWinogradOutput(K5Args a CONV_EPI_PARAM)
 {
-    k5OutputTransform<CONV_WINO_T, CONV_WINO_M, CONV_WINO_LAYOUT>(a);
+    k5OutputTransform<CONV_WINO_T, CONV_WINO_M, CONV_WINO_LAYOUT>(a CONV_EPI_ARG);
 }
 
 #elif CONV_WINO_VARIANT == 1
@@ -108,7 +108,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradFusedFilter(K5Args
 #endif
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) CONV_WINO_FUSED_WPE
-    ConvWinogradFused(K5Args a)
+    ConvWinogradFused(K5Args a CONV_EPI_PARAM)
 {
     k5FusedConv2<CONV_WINO_T,
                  CONV_WINO_M,
@@ -119,7 +119,7 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) CONV_WINO
                  CONV_WINO_TM,
                  CONV_WINO_TN,
                  false,
-                 CONV_WINO_PFD>(a);
+                 CONV_WINO_PFD>(a CONV_EPI_ARG);
 }
 
 #elif CONV_WINO_VARIANT == 2
@@ -129,9 +129,10 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args 
     k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR>(a);
 }
 
-extern "C" __global__ void __launch_bounds__(32 * CONV_WINO_WAVES) ConvWinogradWmma(K5Args a)
+extern "C" __global__ void __launch_bounds__(32 * CONV_WINO_WAVES)
+    ConvWinogradWmma(K5Args a CONV_EPI_PARAM)
 {
-    k5WmmaConv<CONV_WINO_T, CONV_WINO_GFX12 != 0, CONV_WINO_BK, CONV_WINO_WAVES>(a);
+    k5WmmaConv<CONV_WINO_T, CONV_WINO_GFX12 != 0, CONV_WINO_BK, CONV_WINO_WAVES>(a CONV_EPI_ARG);
 }
 
 #elif CONV_WINO_VARIANT == 3
@@ -145,14 +146,14 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args 
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_WREG_CFG::THREADS))
-    ConvWinogradWreg(K5Args a)
+    ConvWinogradWreg(K5Args a CONV_EPI_PARAM)
 {
     k5WregConv<CONV_WINO_T,
                CONV_WINO_GFX12 != 0,
                CONV_WINO_BK,
                CONV_WINO_TG,
                CONV_WINO_F16MATH != 0,
-               CONV_WINO_BINS>(a);
+               CONV_WINO_BINS>(a CONV_EPI_ARG);
 }
 
 #elif CONV_WINO_VARIANT == 4
@@ -164,9 +165,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradFusedFilter(K5Args
     k5FusedFilterTransform<CONV_WINO_T, 2, K5_NCHW, CONV_WINO_DIR, CONV_WINO_DOT2>(a);
 }
 
-extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
+extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a CONV_EPI_PARAM)
 {
-    k5SregConv<CONV_WINO_T, CONV_WINO_BK, CONV_WINO_F16MATH != 0>(a);
+    k5SregConv<CONV_WINO_T, CONV_WINO_BK, CONV_WINO_F16MATH != 0>(a CONV_EPI_ARG);
 }
 
 #elif CONV_WINO_VARIANT == 5
@@ -203,7 +204,8 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args 
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
-    __attribute__((amdgpu_waves_per_eu(CONV_WINO_COOP_CFG::WPE))) ConvWinogradCoop(K5Args a)
+    __attribute__((amdgpu_waves_per_eu(CONV_WINO_COOP_CFG::WPE)))
+    ConvWinogradCoop(K5Args a CONV_EPI_PARAM)
 {
     k5CoopConvA<CONV_WINO_T,
                 CONV_WINO_COOP_ATOM,
@@ -214,7 +216,7 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
                 CONV_WINO_M,
                 CONV_WINO_DIR,
                 CONV_WINO_PF,
-                CONV_WINO_TW>(a);
+                CONV_WINO_TW>(a CONV_EPI_ARG);
 }
 
 #elif CONV_WINO_VARIANT == 6

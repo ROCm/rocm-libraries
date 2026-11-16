@@ -95,11 +95,13 @@ IgemmProblem withoutOutputStaging(const IgemmProblem& problem);
  * Everything parseConvNaiveProblem gates, plus: every extent, padding, stride, dilation and
  * channel count within 32 bits, and grid dimensions within the launch limits for the smallest
  * tile. Any operand layout is served: those that are not what the kernels read are staged
- * through the workspace.
+ * through the workspace. With @p fusion EPILOGUE a forward graph may carry a pointwise epilogue
+ * (base.epilogue), which the kernels apply before their single rounding.
  */
 std::optional<IgemmProblem>
     parseIgemmProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                      conv_naive::ConvDirection direction);
+                      conv_naive::ConvDirection direction,
+                      conv_naive::Fusion fusion = conv_naive::Fusion::NONE);
 
 /// One matrix-core atom (or "fma") of the catalog: the kernel template's name, the waves'
 /// width, and whether the device runs it.

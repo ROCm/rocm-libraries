@@ -13,6 +13,8 @@
 //   CONV_SMALLC_DD, _DH, _DW     dilation
 //   CONV_SMALLC_FM, _FN, _WM, _WQ, _WN   tile (ConvSmallcCore.h)
 //   CONV_SMALLC_EP       epilogue (MMA kernel): 0 through LDS slots, 1 from registers (default 0)
+// A fused forward build (CONV_EPI 1, ConvEpilogue.h) applies the pointwise epilogue at every
+// store, before any LDS slot, and takes ConvEpiArgs as a second argument.
 
 #include "ConvIgemmCore.h"
 #include "ConvSmallcCore.h"
@@ -30,7 +32,8 @@
     (CONV_SMALLC_WM * CONV_SMALLC_WQ * CONV_SMALLC_WN * CONV_SMALLC_ATOM::WAVE)
 #endif
 
-extern "C" __global__ void __launch_bounds__(CONV_SMALLC_BLOCK) ConvSmallc(SmallcArgs a)
+extern "C" __global__ void __launch_bounds__(CONV_SMALLC_BLOCK)
+    ConvSmallc(SmallcArgs a CONV_EPI_PARAM)
 {
 #if CONV_SMALLC_FMA
     smallcConvFma<CONV_SMALLC_T,
@@ -49,7 +52,7 @@ extern "C" __global__ void __launch_bounds__(CONV_SMALLC_BLOCK) ConvSmallc(Small
                   CONV_SMALLC_FN,
                   CONV_SMALLC_WM,
                   CONV_SMALLC_WQ,
-                  CONV_SMALLC_WN>(a);
+                  CONV_SMALLC_WN>(a CONV_EPI_ARG);
 #else
     smallcConv<CONV_SMALLC_T,
                CONV_SMALLC_ATOM,
@@ -69,7 +72,7 @@ extern "C" __global__ void __launch_bounds__(CONV_SMALLC_BLOCK) ConvSmallc(Small
                CONV_SMALLC_WM,
                CONV_SMALLC_WQ,
                CONV_SMALLC_WN,
-               CONV_SMALLC_EP>(a);
+               CONV_SMALLC_EP>(a CONV_EPI_ARG);
 #endif
 }
 

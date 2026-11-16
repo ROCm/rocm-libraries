@@ -52,7 +52,10 @@ ConvFields commonFields(const Attributes& attributes)
 
 std::optional<ConvFields> convFields(const IGraph& graph, ConvDirection direction)
 {
-    if(graph.nodeCount() != 1 || graph.getGraph().is_override_shape_enabled())
+    // One node, or a forward convolution followed by its pointwise epilogue.
+    const size_t nodes = graph.nodeCount();
+    if(nodes < 1 || (nodes > 1 && direction != ConvDirection::FORWARD)
+       || graph.getGraph().is_override_shape_enabled())
     {
         return std::nullopt;
     }
@@ -217,10 +220,34 @@ std::optional<int64_t> outputExtent(
 
 std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection direction)
 {
-    const auto fields = convFields(graph, direction);
+    auto fields = convFields(graph, direction);
     if(!fields.has_value())
     {
         return std::nullopt;
+    }
+
+    // A fused graph: the convolution's y is the virtual head of the pointwise chain, and the
+    // plan writes the chain's output in its place.
+    hipdnn_plugin_sdk::conv_epilogue::ConvEpilogue epilogue;
+    if(graph.nodeCount() > 1)
+    {
+        const auto& tensors = graph.getTensorMap();
+        const auto convY = tensors.find(fields->y);
+        if(convY == tensors.end() || convY->second == nullptr || convY->second->dims() == nullptr)
+        {
+            return std::nullopt;
+        }
+        const std::vector<int64_t> convDims(convY->second->dims()->begin(),
+                                            convY->second->dims()->end());
+        auto parsed
+            = hipdnn_plugin_sdk::conv_epilogue::parseConvEpilogue(graph, fields->y, convDims);
+        if(!parsed.has_value() || parsed->empty())
+        {
+            return std::nullopt;
+        }
+        epilogue = std::move(*parsed);
+        fields->y = epilogue.outputUid;
+        fields->written = epilogue.outputUid;
     }
 
     if(fields->mode != data_objects::ConvMode::CROSS_CORRELATION
@@ -231,6 +258,13 @@ std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection d
     if(fields->x == fields->w || fields->x == fields->y || fields->w == fields->y)
     {
         return std::nullopt;
+    }
+    for(const auto& operand : epilogue.operands)
+    {
+        if(operand.uid == fields->x || operand.uid == fields->w || operand.uid == fields->y)
+        {
+            return std::nullopt;
+        }
     }
 
     auto xType = data_objects::DataType::UNSET;
@@ -326,6 +360,7 @@ std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection d
     problem.x = *x;
     problem.w = *w;
     problem.y = *y;
+    problem.epilogue = std::move(epilogue);
     return problem;
 }
 

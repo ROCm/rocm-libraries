@@ -27,6 +27,8 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDeterminismTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvEpilogueTiming.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvSmallcProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -511,6 +513,151 @@ TEST(TestConvSmallcCatalog, BackwardConfigsAreUnitStride)
         EXPECT_EQ(config->sd * config->sh * config->sw, 1);
         EXPECT_EQ(kernel.getStringMetadata("direction"), "BWD");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Fused pointwise epilogues (forward): every store path (LDS-slot epilogue, register epilogue,
+// FMA vector and scalar stores) applies the chain before its single rounding. Each distinct atom
+// and epilogue mode among the admitted configs runs once.
+// ---------------------------------------------------------------------------
+
+using conv_epilogue_test::Specials;
+using conv_epilogue_test::Step;
+using FusedChain = std::pair<std::string, std::vector<Step>>;
+
+std::vector<DeviceCase> fusedShapes()
+{
+    std::vector<DeviceCase> shapes;
+    for(const auto& c : deviceCases())
+    {
+        if(c.name == "Nchw7x7S2" || c.name == "Nhwc7x7S2" || c.name == "Nhwc3x3S1C4K40"
+           || c.name == "Nchw3x3S1C4" || c.name == "Ncdhw3x3x3S2" || c.name == "Nhwc4x4S4")
+        {
+            shapes.push_back(c);
+        }
+    }
+    return shapes;
+}
+
+template <typename T>
+void runFused(const ConvShape& shape, const std::vector<Step>& steps, Specials specials)
+{
+    const auto runner = conv_epilogue_test::catalogRunner(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), {"atom", "ep"});
+    const auto tolerance = [](int64_t reduction) { return 2e-6 * static_cast<double>(reduction); };
+    EXPECT_GE(conv_epilogue_test::checkFusedCase<T>(shape, steps, runner, specials, tolerance), 1)
+        << "no catalog config serves this fused case";
+}
+
+class TestGpuConvSmallcFused : public ::testing::TestWithParam<std::tuple<DeviceCase, FusedChain>>
+{
+};
+
+TEST_P(TestGpuConvSmallcFused, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvSmallcFused, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+TEST_P(TestGpuConvSmallcFused, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<BFloat16>(
+        std::get<0>(GetParam()).shape, std::get<1>(GetParam()).second, Specials::NONE);
+}
+
+std::vector<FusedChain> fusedChainsAllShapes()
+{
+    const auto menu = conv_epilogue_test::menuChains();
+    return {menu[0], menu[6]}; // bias + relu, bias + swish
+}
+
+INSTANTIATE_TEST_SUITE_P(Shapes,
+                         TestGpuConvSmallcFused,
+                         ::testing::Combine(::testing::ValuesIn(fusedShapes()),
+                                            ::testing::ValuesIn(fusedChainsAllShapes())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Menu,
+                         TestGpuConvSmallcFused,
+                         ::testing::Combine(::testing::Values(fusedShapes()[0], fusedShapes()[2]),
+                                            ::testing::ValuesIn(conv_epilogue_test::menuChains())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + std::get<1>(info.param).first;
+                         });
+
+class TestGpuConvSmallcFusedSpecials : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvSmallcFusedSpecials, NanAndInfinityOperands)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<float>(GetParam().shape,
+                    {conv_epilogue_test::bias(), conv_epilogue_test::relu()},
+                    Specials::NAN_INF);
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF),
+         conv_epilogue_test::unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD)},
+        Specials::NAN_INF);
+}
+
+TEST_P(TestGpuConvSmallcFusedSpecials, ClipBoundaries)
+{
+    SKIP_IF_NO_DEVICES();
+    runFused<Half>(
+        GetParam().shape,
+        {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu(-0.5F, 0.5F)},
+        Specials::CLIP_BOUNDARY);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvSmallcFusedSpecials,
+                         ::testing::ValuesIn(fusedShapes()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestConvSmallcFused, BackwardDataDeclinesFusedGraphs)
+{
+    // A fused graph is forward: the backward-data graph match refuses it, and every backward
+    // config's kernel match refuses it under the forward match's tokens.
+    for(const auto* arch : {"gfx950", "gfx942", "gfx90a", "gfx1201", "gfx1101"})
+    {
+        auto shape = fusedShapes()[0].shape;
+        shape.dataType = DataType::HALF;
+        const GraphFixture fixture(
+            conv_epilogue_test::buildFusedGraph(conv_epilogue_test::fusedSpecFor(
+                shape, {conv_epilogue_test::bias(DataType::HALF), conv_epilogue_test::relu()})),
+            gfx950Properties(arch));
+        const auto bound = matchesGraph(packFor(ConvDirection::FORWARD), fixture.context());
+        ASSERT_TRUE(bound.has_value()) << arch;
+        EXPECT_FALSE(
+            matchesGraph(packFor(ConvDirection::BACKWARD_DATA), fixture.context()).has_value());
+        for(const auto& kernel : catalog(ConvDirection::BACKWARD_DATA))
+        {
+            EXPECT_FALSE(matchesKernel(
+                packFor(ConvDirection::BACKWARD_DATA), fixture.context(), kernel, *bound))
+                << arch << " " << kernel.name;
+        }
+    }
+}
+
+// Opt-in: each config's time with and without a fused bias + relu (shapes in $SMALLC_EPI_TIMING).
+TEST(TestGpuConvSmallcFusedTiming, BareAgainstFused)
+{
+    SKIP_IF_NO_DEVICES();
+    conv_epilogue_timing::timeFusedAgainstBare(
+        packFor(ConvDirection::FORWARD), catalog(ConvDirection::FORWARD), "SMALLC_EPI_TIMING");
 }
 
 } // namespace
