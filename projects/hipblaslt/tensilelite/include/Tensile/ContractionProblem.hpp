@@ -34,6 +34,7 @@
 
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/TensorDescriptor.hpp>
@@ -1369,14 +1370,26 @@ namespace TensileLite
             m_swizzleTensorB = swizzle;
         }
 
-        bool fusedGemmA2A() const
+        // MXScaleFormat id of the host scale layout (see Contractions.py).
+        // 0 for every layout the host does not tell apart.
+        int mxScaleFormat() const
         {
-            return m_fusedGemmA2A;
+            return m_mxScaleFormat;
         }
 
-        void setFusedGemmA2A(bool fusedGemmA2A)
+        void setMXScaleFormat(int format)
         {
-            m_fusedGemmA2A = fusedGemmA2A;
+            m_mxScaleFormat = format;
+        }
+
+        FusedA2A fusedA2A() const
+        {
+            return m_fusedA2A;
+        }
+
+        void setFusedA2A(FusedA2A mode)
+        {
+            m_fusedA2A = mode;
         }
 
         int64_t fusedA2AExtent() const
@@ -1389,17 +1402,20 @@ namespace TensileLite
             m_fusedA2AExtent = extent;
         }
 
-        // recv[W][N][AM/W] in D's type.
+        // [W][N][extent/W]: recv in D's type for GemmA2A, gathered in B's type for A2AGemm.
         void setA2ABuf()
         {
             const size_t world  = m_world;
-            const size_t nShard = m_fusedA2AExtent / world;
             const size_t tokens = freeSizeB(0);
+            const bool   gather = m_fusedA2A == FusedA2A::A2AGemm;
+            const size_t shard  = m_fusedA2AExtent / world;
             m_tensors[ContractionProblemGemm::TENSOR::A2A_BUF]
                 = {"a2aBuf",
-                   m_tensors[ContractionProblemGemm::TENSOR::D].dataType(),
-                   {nShard, tokens, world},
-                   {1, nShard, nShard * tokens}};
+                   m_tensors[gather ? ContractionProblemGemm::TENSOR::B
+                                    : ContractionProblemGemm::TENSOR::D]
+                       .dataType(),
+                   {shard, tokens, world},
+                   {1, shard, shard * tokens}};
         }
 
         size_t mxBlockA() const
@@ -1722,7 +1738,8 @@ namespace TensileLite
         bool             m_outputAmaxD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
-        bool             m_fusedGemmA2A            = false;
+        int              m_mxScaleFormat           = 0;
+        FusedA2A         m_fusedA2A                = FusedA2A::Disabled;
         int64_t          m_fusedA2AExtent          = 0;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
