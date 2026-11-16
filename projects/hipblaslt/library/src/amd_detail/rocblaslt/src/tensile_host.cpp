@@ -8063,6 +8063,17 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     *returnAlgoCount = 0;
     if(layoutRuledOut)
         *layoutRuledOut = false;
+    // The client chip-id test sets this so a default (rocRoller-on) build
+    // launches the checked-in kernel instead of the JIT. Unset, the branch
+    // below is unchanged.
+    if(rocRollerCapturesForcedForTest() && useRocRoller(handle, prob))
+        return getRocRollerSelectedSolutions(handle,
+                                             prob,
+                                             requestedAlgoCount,
+                                             heuristicResultsArray,
+                                             maxWorkSpaceBytes,
+                                             returnAlgoCount,
+                                             layoutRuledOut);
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(handle,

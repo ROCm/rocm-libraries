@@ -11,7 +11,16 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <vector>
+
+// Set by the client test that launches a checked-in rocRoller kernel. Default
+// builds leave it unset, so a rocRoller build still refuses those kernels.
+inline bool rocRollerCapturesForcedForTest()
+{
+    const char* value = std::getenv("HIPBLASLT_TEST_CHECKED_IN_ROCROLLER");
+    return value && value[0] == '1' && value[1] == '\0';
+}
 
 // The checked-in rocRoller kernels require AMDGPU::rocRollerCaptures (their
 // RocRollerCaptures hardware predicate). A build with rocRoller serves those
@@ -21,7 +30,9 @@ template <typename Gpu>
 void allowRocRollerCaptures(Gpu& gpu)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    static_cast<void>(gpu);
+    // A rocRoller build serves these problems through the JIT. The client test
+    // that has to launch the checked-in assembly sets the env for that call.
+    gpu.rocRollerCaptures = rocRollerCapturesForcedForTest();
 #else
     gpu.rocRollerCaptures = true;
 #endif
