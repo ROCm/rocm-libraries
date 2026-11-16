@@ -360,7 +360,7 @@ def test_dsink_reduce_objects_are_the_reference_pins() -> None:
     if not path.is_file():
         pytest.skip(f"no sdpa_bwd_dsink_reduce gfx950 content under {CONTENT}")
     reference = _reference_rows(REFERENCE_CSV, "dsink_reduce,")
-    problems = _pin_problems([path], reference)
+    problems = _pin_problems([path], reference, _exception_pins(EXCEPTIONS_CSV))
     for record in json.loads(path.read_text(encoding="utf-8"))["instances"]:
         if reference.get(record["spec"]) not in (None, record["sha256"]):
             problems.append(
