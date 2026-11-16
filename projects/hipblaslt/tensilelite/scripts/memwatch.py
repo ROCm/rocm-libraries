@@ -19,7 +19,8 @@ Usage::
     memwatch.py [--interval 0.5] [--out summary.json] [--csv timeline.csv]
                 [--log child.log] -- python -m Tensile.TensileCreateLibrary ...
 
-Exit status is the child's exit status.
+Exit status is the child's exit status; a child killed by a signal gives
+128 + the signal number, as a shell would report.
 """
 
 import argparse
@@ -51,14 +52,24 @@ CLASSIFIERS = [
     ("sh", re.compile(r"(^|/)(ba)?sh(\x00|$)")),
 ]
 
-# Lines on the child's stdout that mark a phase boundary.
-PHASE_PATTERNS = [
-    re.compile(r"^(?P<phase>.*?): Launching \d+ threads"),
-    re.compile(r"^(?P<phase>.*?): Done\."),
-    re.compile(r"^Time to (?P<phase>[^(]+)"),
-    re.compile(r"^# Tensile Library Writer DONE"),
-    re.compile(r"^Total time"),
-]
+CLASS_NAMES = [name for name, _ in CLASSIFIERS] + ["other"]
+
+# Lines on the child's stdout that mark a phase boundary. ParallelMap2 prints
+# "<phase>: Launching N threads..." when a phase starts and "<phase>: Done."
+# when it returns; run() prints "Time to <phase> (s): ..." after a phase has
+# finished. Any line that marks a completion maps to the label "after <phase>",
+# so the memory sampled until the next start marker is attributed to work
+# that follows the completed phase, not to the phase itself.
+PHASE_START = re.compile(r"^(?P<phase>.*?): Launching \d+ threads")
+PHASE_DONE = re.compile(r"^(?P<phase>.*?): Done\.")
+PHASE_TIME = re.compile(r"^Time to (?P<phase>[^(]+)")
+PHASE_WRITER_DONE = re.compile(r"^# Tensile(Lite)? Library Writer DONE")
+PHASE_TOTAL = re.compile(r"^Total time")
+
+# Phases whose ParallelMap2 call returns a generator: "Done." is printed when
+# the generator is handed back, before any result has been consumed, so it
+# does not mark the end of the work. The phase ends at its "Time to" line.
+GENERATOR_PHASES = {"Loading Logics..."}
 
 
 def classify(cmdline: str) -> str:
@@ -163,7 +174,11 @@ class Sampler(threading.Thread):
             "uss_sum": (0, 0.0, ""),
         }
         self.per_class_peak = defaultdict(lambda: {"rss": 0, "pss": 0, "count": 0})
-        self.max_single = defaultdict(lambda: {"rss": 0, "pss": 0, "pid": 0})
+        # Largest RSS and largest PSS of any single process in a class, tracked
+        # separately: with shared pages the two need not be the same process.
+        self.max_single = defaultdict(
+            lambda: {"rss": 0, "rss_pid": 0, "pss": 0, "pss_pid": 0}
+        )
         self.main_peak = {"rss": 0, "pss": 0}
         self.phase_peaks = defaultdict(lambda: {"rss_sum": 0, "pss_sum": 0})
         self.mem_avail0 = mem_available()
@@ -202,7 +217,9 @@ class Sampler(threading.Thread):
             c["count"] += 1
             ms = self.max_single[cls]
             if rss > ms["rss"]:
-                ms["rss"], ms["pss"], ms["pid"] = rss, pss, pid
+                ms["rss"], ms["rss_pid"] = rss, pid
+            if pss > ms["pss"]:
+                ms["pss"], ms["pss_pid"] = pss, pid
             if pid == self.root_pid:
                 self.main_peak["rss"] = max(self.main_peak["rss"], rss)
                 self.main_peak["pss"] = max(self.main_peak["pss"], pss)
@@ -237,7 +254,7 @@ class Sampler(threading.Thread):
             "uss_sum": uss_sum,
             "mem_avail": avail,
         }
-        for cls in ("python-main", "loky-worker", "clang", "lld", "bundler", "other"):
+        for cls in CLASS_NAMES:
             c = by_class.get(cls)
             row[f"{cls}.rss"] = c["rss"] if c else 0
             row[f"{cls}.pss"] = c["pss"] if c else 0
@@ -322,16 +339,31 @@ class Sampler(threading.Thread):
 
 
 def phase_from_line(line: str):
-    for rx in PHASE_PATTERNS:
-        m = rx.match(line)
-        if m:
-            if "phase" in m.groupdict() and m.group("phase"):
-                phase = m.group("phase").strip()
-                if "Done." in line:
-                    return f"after {phase}"
-                return phase
-            return line.strip()[:40]
+    """The phase label a stdout line switches to, or None if it is not a marker."""
+    m = PHASE_START.match(line)
+    if m:
+        return m.group("phase").strip()
+    m = PHASE_DONE.match(line)
+    if m:
+        phase = m.group("phase").strip()
+        if phase in GENERATOR_PHASES:
+            return None
+        return f"after {phase}"
+    m = PHASE_TIME.match(line)
+    if m:
+        return f"after {m.group('phase').strip()}"
+    if PHASE_WRITER_DONE.match(line):
+        return "after library writer"
+    if PHASE_TOTAL.match(line):
+        return "done"
     return None
+
+
+def exit_status(returncode: int) -> int:
+    """Shell-style exit status for a Popen return code: 128 + signal for a signal death."""
+    if returncode < 0:
+        return 128 - returncode
+    return returncode
 
 
 def main(argv=None):
@@ -363,6 +395,10 @@ def main(argv=None):
     # Unbuffered child stdout so phase markers arrive when they are printed,
     # not when a pipe buffer happens to fill.
     env = dict(os.environ, PYTHONUNBUFFERED="1")
+    # The child leads its own process group so that a signal to memwatch can
+    # be forwarded to every descendant: signalling only the child would leave
+    # its workers and assemblers alive, holding stdout open, and the read loop
+    # below would wait for them.
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -371,13 +407,17 @@ def main(argv=None):
         errors="replace",
         bufsize=1,
         env=env,
+        start_new_session=True,
     )
     sampler = Sampler(proc.pid, args.interval, args.csv)
     sampler.start()
     t0 = time.monotonic()
 
     def forward(sig, _frame):
-        proc.send_signal(sig)
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            pass
 
     signal.signal(signal.SIGINT, forward)
     signal.signal(signal.SIGTERM, forward)
@@ -432,7 +472,7 @@ def main(argv=None):
             f"  {ph[:50]:50s} rss {v['rss_sum_GiB']:8.3f} GiB  pss {v['pss_sum_GiB']:8.3f} GiB"
         )
     print(f"summary written to {args.out}")
-    return proc.returncode
+    return exit_status(proc.returncode)
 
 
 if __name__ == "__main__":
