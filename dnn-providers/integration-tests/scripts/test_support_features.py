@@ -1249,10 +1249,23 @@ class TestSdpaExtract:
         }
         assert broadcasts == {f"broadcast:{port}"}
 
-    def test_zero_stride_on_a_size_one_dim_is_not_broadcast(self) -> None:
-        node, tensors = _sdpa(q_dims=(2, 8, 1, 128))
+    @pytest.mark.parametrize(
+        "order, expected",
+        [
+            ((0, 1, 2, 3), "layout:bhsd"),
+            ((0, 2, 1, 3), "layout:bhsd"),
+            ((0, 2, 3, 1), "layout:bsdh"),
+            ((2, 0, 1, 3), "layout:bhsd"),
+        ],
+    )
+    def test_zero_stride_on_a_size_one_dim_is_not_broadcast(
+        self, order: tuple[int, ...], expected: str
+    ) -> None:
+        node, tensors = _sdpa(q_dims=(2, 8, 1, 128), strides=_packed_strides(order))
         tensors[1]["strides"][2] = 0
-        assert not any(f.startswith("broadcast:") for f in sdpa.extract(node, tensors))
+        features = sdpa.extract(node, tensors)
+        assert expected in features
+        assert not any(f.startswith("broadcast:") for f in features)
 
     @pytest.mark.parametrize(
         "strides", [_bshd_strides, _bhsd_strides, lambda dims: [1, 2, 3, 4]]
