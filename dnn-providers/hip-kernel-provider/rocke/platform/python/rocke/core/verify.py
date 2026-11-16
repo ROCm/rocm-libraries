@@ -44,6 +44,7 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _INTEGER_ELEMENT_OPS,
     _ORPHAN_YIELD_ERROR,
     _assume_range_errors,
     param_fact_errors,
@@ -53,8 +54,8 @@ from .ir import (
     _global_ptr_to_i64_op_error,
     _int_add_wrap_error,
     _int_cmp_pred_error,
+    _integer_element_error,
     _is_flag_ptr,
-    _lshr_element_error,
     _first_reused_loop_name,
     _orphan_yield,
     _reused_loop_name_message,
@@ -122,11 +123,11 @@ _BINARY_SAME_TYPE = {
     "arith.xor",
     "arith.shl",
     "arith.lshr",
+    "vector.and",
+    "vector.or",
+    "vector.shl",
     "vector.lshr",
 }
-
-# Logical right shifts: their element type must be an integer or i1.
-_LSHR_OPS = {"arith.lshr", "vector.lshr"}
 
 # Unary same-type ops.
 _UNARY_SAME_TYPE = {
@@ -377,10 +378,10 @@ class _Verifier:
                 wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), a.type.name)
                 if wrap_error:
                     self.err(wrap_error, op)
-            if name in _LSHR_OPS:
-                lshr_error = _lshr_element_error(name, a.type)
-                if lshr_error:
-                    self.err(lshr_error, op)
+            if name in _INTEGER_ELEMENT_OPS:
+                integer_error = _integer_element_error(name, a.type)
+                if integer_error:
+                    self.err(integer_error, op)
         elif name in _UNARY_SAME_TYPE:
             if len(op.operands) != 1 or len(op.results) != 1:
                 self.err(

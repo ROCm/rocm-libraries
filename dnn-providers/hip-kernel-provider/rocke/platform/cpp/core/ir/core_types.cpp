@@ -1065,15 +1065,34 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                              cap);
 }
 
-const char* rocke_i_lshr_element_error(const char* op_name,
-                                       const rocke_type_t* operand_type,
-                                       char* buf,
-                                       size_t cap)
+bool rocke_i_is_integer_element_op(rocke_opcode_t opcode)
+{
+    switch(opcode)
+    {
+    case ROCKE_OP_ARITH_AND:
+    case ROCKE_OP_ARITH_OR:
+    case ROCKE_OP_ARITH_XOR:
+    case ROCKE_OP_ARITH_SHL:
+    case ROCKE_OP_ARITH_LSHR:
+    case ROCKE_OP_VECTOR_AND:
+    case ROCKE_OP_VECTOR_OR:
+    case ROCKE_OP_VECTOR_SHL:
+    case ROCKE_OP_VECTOR_LSHR:
+        return true;
+    default:
+        return false;
+    }
+}
+
+const char* rocke_i_integer_element_error(const char* op_name,
+                                          const rocke_type_t* operand_type,
+                                          char* buf,
+                                          size_t cap)
 {
     const rocke_type_t* element = rocke_i_elem_of(operand_type);
     const char* element_name = element && element->name ? element->name : "?";
-    /* ir._LSHR_ELEMENT_TYPES: the canonical names of the integer and predicate
-     * dtypes, matched exactly as the Python membership test does. */
+    /* ir._INTEGER_ELEMENT_TYPES: the canonical names of the integer and
+     * predicate dtypes, matched exactly as the Python membership test does. */
     const rocke_dtype_info_t* info = rocke_dtype_info(element_name);
     if(info && strcmp(info->name, element_name) == 0
        && (info->category == ROCKE_DTYPE_INTEGER || info->category == ROCKE_DTYPE_PREDICATE))
@@ -1081,6 +1100,13 @@ const char* rocke_i_lshr_element_error(const char* op_name,
     snprintf(
         buf, cap, "%s failed - element type='%s', expected an integer type", op_name, element_name);
     return buf;
+}
+
+void rocke_i_refuse_non_integer(const char* op_name, const rocke_type_t* operand_type)
+{
+    char err[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_integer_element_error(op_name, operand_type, err, sizeof err))
+        throw ckc::TypeError(err);
 }
 
 bool rocke_i_is_buffer_descriptor(const rocke_value_t* value)

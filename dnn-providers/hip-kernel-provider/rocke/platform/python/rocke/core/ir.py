@@ -457,27 +457,52 @@ def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
     return None
 
 
-# The element types a logical right shift (``arith.lshr``, ``vector.lshr``)
-# takes: the integers and ``i1``, the types LLVM's ``lshr`` is defined on.
-_LSHR_ELEMENT_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
+# The bitwise ops and shifts. LLVM defines ``and`` / ``or`` / ``xor`` / ``shl`` /
+# ``lshr`` on integers only, so their element type must be an integer or ``i1``
+# (_integer_element_error). The C++ engine's twin is
+# ``rocke_i_is_integer_element_op``.
+_INTEGER_ELEMENT_OPS = frozenset(
+    {
+        "arith.and",
+        "arith.or",
+        "arith.xor",
+        "arith.shl",
+        "arith.lshr",
+        "vector.and",
+        "vector.or",
+        "vector.shl",
+        "vector.lshr",
+    }
+)
+# The element types those ops take: the integers and ``i1``, the types LLVM's
+# integer ops are defined on.
+_INTEGER_ELEMENT_TYPES = dtype_names(DTypeCategory.INTEGER) + dtype_names(
     DTypeCategory.PREDICATE
 )
 
 
-def _lshr_element_error(op_name: str, operand_type: Type) -> str | None:
-    """The error for a logical right shift ``op_name`` (``arith.lshr`` or
-    ``vector.lshr``) of operands of ``operand_type``, or None when its element
-    type is an integer or ``i1``.
+def _integer_element_error(op_name: str, operand_type: Type) -> str | None:
+    """The error for ``op_name``, one of :data:`_INTEGER_ELEMENT_OPS`, on
+    operands of ``operand_type``, or None when its element type is an integer
+    or ``i1``.
 
-    LLVM's ``lshr`` takes integers only, so a float shift would lower to IR
-    the compiler rejects. IRBuilder refuses it when the op is built and the
-    verifier reports it for IR that did not come through IRBuilder; the C++
-    engine's ``rocke_i_lshr_element_error`` reports the same text.
+    A float operand would lower to IR the compiler rejects. IRBuilder refuses
+    it when the op is built (:func:`_refuse_non_integer`) and the verifier
+    reports it for IR that did not come through IRBuilder; the C++ engine's
+    ``rocke_i_integer_element_error`` reports the same text.
     """
     element = element_type(operand_type)
-    if element.name in _LSHR_ELEMENT_TYPES:
+    if element.name in _INTEGER_ELEMENT_TYPES:
         return None
     return f"{op_name} failed - element type={element.name!r}, expected an integer type"
+
+
+def _refuse_non_integer(op_name: str, operand_type: Type) -> None:
+    """Raise ``TypeError`` with :func:`_integer_element_error`'s text when
+    ``op_name``'s operands of ``operand_type`` are not integers or ``i1``."""
+    error = _integer_element_error(op_name, operand_type)
+    if error:
+        raise TypeError(error)
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
@@ -3288,10 +3313,14 @@ class IRBuilder:
         return self._op("math.tanh", [a], [a.type], result_name_hint="tanh").result
 
     def land(self, a: Value, b: Value) -> Value:
-        """Bit-and (used for i1 conjunction and i32 masks)."""
+        """Bit-and (used for i1 conjunction and i32 masks). Raises
+        ``TypeError`` unless ``a`` is an integer or ``i1``."""
+        _refuse_non_integer("arith.and", a.type)
         return self._op("arith.and", [a, b], [a.type], result_name_hint="and").result
 
     def lor(self, a: Value, b: Value) -> Value:
+        """Bit-or. Raises ``TypeError`` unless ``a`` is an integer or ``i1``."""
+        _refuse_non_integer("arith.or", a.type)
         return self._op("arith.or", [a, b], [a.type], result_name_hint="or").result
 
     def lnot(self, a: Value) -> Value:
@@ -3774,14 +3803,18 @@ class IRBuilder:
         return self.fmin(hi, self.fmax(lo, v))
 
     def xor(self, a: Value, b_v: Value) -> Value:
-        """Bitwise XOR. Same type for both operands."""
+        """Bitwise XOR. Same type for both operands. Raises ``TypeError``
+        unless ``a`` is an integer or ``i1``."""
+        _refuse_non_integer("arith.xor", a.type)
         return self._op("arith.xor", [a, b_v], [a.type], result_name_hint="xor").result
 
     def shl(self, a: Value, b_v: Value) -> Value:
         """Logical left shift ``a << b_v``. Lowers to LLVM ``shl``.
         AMDGPU folds constant shifts into ``v_lshlrev_b32`` with the
-        immediate baked in.
+        immediate baked in. Raises ``TypeError`` unless ``a`` is an integer or
+        ``i1``.
         """
+        _refuse_non_integer("arith.shl", a.type)
         return self._op("arith.shl", [a, b_v], [a.type], result_name_hint="shl").result
 
     def lshr(self, a: Value, b_v: Value) -> Value:
@@ -3791,9 +3824,7 @@ class IRBuilder:
         Raises ``TypeError`` unless ``a`` is an integer or ``i1`` and ``b_v``
         has the same type: LLVM's ``lshr`` takes two integers of one width.
         """
-        element_error = _lshr_element_error("arith.lshr", a.type)
-        if element_error:
-            raise TypeError(element_error)
+        _refuse_non_integer("arith.lshr", a.type)
         if b_v.type != a.type:
             raise TypeError(
                 f"arith.lshr failed - shift amount type={b_v.type.name!r}, "
@@ -4365,16 +4396,15 @@ class IRBuilder:
 
     def vector_binary(self, op_name: str, a: Value, b: Value) -> Value:
         """Lane-wise ``vector.<op_name>`` of two matching vectors. The signed ops
-        (``smax``, ``smin``) refuse an unsigned element type, and ``lshr`` one
-        that is not an integer or ``i1`` (``TypeError``)."""
+        (``smax``, ``smin``) refuse an unsigned element type, and the bitwise
+        ops and shifts (:data:`_INTEGER_ELEMENT_OPS`) one that is not an integer
+        or ``i1`` (``TypeError``)."""
         if not isinstance(a.type, VectorType) or a.type != b.type:
             raise ValueError("vector_binary expects matching vector operands")
         if op_name in ("smax", "smin"):
             _refuse_unsigned(f"vector_{op_name}", a.type)
-        if op_name == "lshr":
-            element_error = _lshr_element_error("vector.lshr", a.type)
-            if element_error:
-                raise TypeError(element_error)
+        if f"vector.{op_name}" in _INTEGER_ELEMENT_OPS:
+            _refuse_non_integer(f"vector.{op_name}", a.type)
         return self._op(
             f"vector.{op_name}", [a, b], [a.type], result_name_hint=f"v{op_name}"
         ).result

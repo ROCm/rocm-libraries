@@ -14,8 +14,11 @@ values as numpy, on negative and positive values alike.
 
 LLVM's ``lshr`` takes two integers of one width, so IRBuilder refuses a shift
 of a float and a shift amount of another type when the op is built, and the
-verifier reports both for IR written past the builder (the C++ engine's builder
-and verifier, with the same texts, are checked by test_unsigned_int_ops.cpp).
+verifier reports both for IR written past the builder. The element rule is the
+one every bitwise op and shift shares (``and``, ``or``, ``xor``, ``shl``,
+``lshr``, scalar and vector), so it is pinned here for all of them. The C++
+engine's builders and verifier, with the same texts, are checked by
+test_unsigned_int_ops.cpp.
 """
 
 from __future__ import annotations
@@ -130,11 +133,32 @@ def test_hip_shifts_through_the_unsigned_type_of_the_width(engine):
             assert re.fullmatch(case.shift_line(lane), line), (_id(case), line)
 
 
-def _shift_kernel_past_the_builder(op_name, value_type, amount_type):
-    """One ``op_name`` (``arith.lshr`` or ``vector.lshr``) of a ``value_type``
-    parameter by an ``amount_type`` parameter, written past IRBuilder (which
-    refuses both a non-integer shift and a mismatched shift amount), as
-    hand-assembled or deserialized IR can reach the verifier and the lowerings."""
+# Every op whose element type must be an integer or i1: its dotted name and the
+# IRBuilder method that builds it from two operands.
+_INTEGER_ELEMENT_BUILDERS = {
+    "arith.and": "land",
+    "arith.or": "lor",
+    "arith.xor": "xor",
+    "arith.shl": "shl",
+    "arith.lshr": "lshr",
+    "vector.and": "vector_and",
+    "vector.or": "vector_or",
+    "vector.shl": "vector_shl",
+    "vector.lshr": "vector_lshr",
+}
+
+
+def _operand_type(op_name, element):
+    """An ``element`` scalar for an ``arith`` op, two ``element`` lanes for a
+    ``vector`` op."""
+    return element if op_name.startswith("arith.") else VectorType(element, 2)
+
+
+def _kernel_past_the_builder(op_name, value_type, amount_type):
+    """One ``op_name`` (a bitwise op or shift) of a ``value_type`` parameter
+    and an ``amount_type`` parameter, written past IRBuilder (which refuses a
+    non-integer operand, and a mismatched lshr shift amount), as hand-assembled
+    or deserialized IR can reach the verifier and the lowerings."""
     b = IRBuilder(op_name.replace(".", "_") + "_past_the_builder")
     value = b.param("value", value_type)
     amount = b.param("amount", amount_type)
@@ -143,10 +167,10 @@ def _shift_kernel_past_the_builder(op_name, value_type, amount_type):
     return b.kernel
 
 
-def _f32_shift_kernel(op_name):
+def _f32_kernel(op_name):
     """One ``op_name`` of f32 values: an f32 scalar, or two f32 lanes."""
-    f32_type = F32 if op_name == "arith.lshr" else VectorType(F32, 2)
-    return _shift_kernel_past_the_builder(op_name, f32_type, f32_type)
+    f32_type = _operand_type(op_name, F32)
+    return _kernel_past_the_builder(op_name, f32_type, f32_type)
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -156,7 +180,7 @@ def test_hip_refuses_a_shift_of_a_non_integer(op_name, engine):
     to be read through: both engines refuse it with a ``TypeError`` naming
     the op and the element type."""
     assert_engine_rejects_hip(
-        _f32_shift_kernel(op_name),
+        _f32_kernel(op_name),
         "gfx942",
         engine=engine,
         error_type=TypeError,
@@ -167,20 +191,16 @@ def test_hip_refuses_a_shift_of_a_non_integer(op_name, engine):
     )
 
 
-@pytest.mark.parametrize("op_name", ["arith.lshr", "vector.lshr"])
-def test_builder_refuses_a_shift_of_a_non_integer(op_name):
-    """LLVM's ``lshr`` has no float form: IRBuilder refuses an f32 shift,
-    scalar or lane by lane, with a ``TypeError`` naming the op and the
-    element type, instead of building IR the compiler rejects."""
-    b = IRBuilder("lshr_f32")
-    if op_name == "arith.lshr":
-        value = b.param("value", F32)
-        shift = b.lshr
-    else:
-        value = b.param("value", VectorType(F32, 2))
-        shift = b.vector_lshr
+@pytest.mark.parametrize("op_name", sorted(_INTEGER_ELEMENT_BUILDERS))
+def test_builder_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
+    """LLVM's bitwise ops and shifts have no float form: IRBuilder refuses an
+    f32 operand, scalar or lane by lane, with a ``TypeError`` naming the op and
+    the element type, instead of building IR the compiler rejects."""
+    b = IRBuilder("integer_op_f32")
+    value = b.param("value", _operand_type(op_name, F32))
+    build = getattr(b, _INTEGER_ELEMENT_BUILDERS[op_name])
     with pytest.raises(TypeError) as refusal:
-        shift(value, value)
+        build(value, value)
     assert str(refusal.value) == (
         f"{op_name} failed - element type='f32', expected an integer type"
     )
@@ -200,20 +220,23 @@ def test_builder_refuses_a_shift_amount_of_another_width():
     )
 
 
-def test_builder_accepts_an_i1_shift():
-    """``i1`` is an LLVM integer, so a shift of it is built (and verifies)."""
-    b = IRBuilder("lshr_i1")
-    flag = b.param("flag", I1)
-    b.lshr(flag, flag)
+@pytest.mark.parametrize("op_name", sorted(_INTEGER_ELEMENT_BUILDERS))
+def test_builder_accepts_an_i1_bitwise_op_or_shift(op_name):
+    """``i1`` is an LLVM integer, so a bitwise op or shift of it, scalar or
+    lane by lane, is built (and verifies): ``land`` / ``lor`` of i1 are the
+    predicate conjunction and disjunction."""
+    b = IRBuilder("integer_op_i1")
+    flag = b.param("flag", _operand_type(op_name, I1))
+    getattr(b, _INTEGER_ELEMENT_BUILDERS[op_name])(flag, flag)
     b.ret()
     assert verify(b.kernel) == []
 
 
-@pytest.mark.parametrize("op_name", ["arith.lshr", "vector.lshr"])
-def test_verifier_refuses_a_shift_of_a_non_integer(op_name):
+@pytest.mark.parametrize("op_name", sorted(_INTEGER_ELEMENT_BUILDERS))
+def test_verifier_refuses_a_bitwise_op_or_shift_of_a_non_integer(op_name):
     """IR written past the builder still meets the rule: the verifier reports
-    an f32 shift with the builder's text."""
-    messages = [diagnostic.message for diagnostic in verify(_f32_shift_kernel(op_name))]
+    an f32 bitwise op or shift with the builder's text."""
+    messages = [diagnostic.message for diagnostic in verify(_f32_kernel(op_name))]
     assert messages == [
         f"{op_name} failed - element type='f32', expected an integer type"
     ]
@@ -224,14 +247,15 @@ def test_verifier_refuses_a_shift_of_a_non_integer(op_name):
     [
         ("arith.lshr", I64, I32),
         ("vector.lshr", VectorType(I32, 2), VectorType(I16, 2)),
+        ("vector.shl", VectorType(I32, 2), VectorType(I16, 2)),
+        ("vector.and", VectorType(I32, 2), VectorType(I16, 2)),
+        ("vector.or", VectorType(I32, 2), VectorType(I16, 2)),
     ],
 )
-def test_verifier_refuses_a_shift_amount_of_another_width(
-    op_name, value_type, amount_type
-):
-    """The verifier reports a shift amount whose type differs from the
-    shifted value's, scalar or lane by lane."""
-    kernel = _shift_kernel_past_the_builder(op_name, value_type, amount_type)
+def test_verifier_refuses_operands_of_different_types(op_name, value_type, amount_type):
+    """The verifier reports a bitwise op or shift whose second operand's type
+    differs from the first's, scalar or lane by lane."""
+    kernel = _kernel_past_the_builder(op_name, value_type, amount_type)
     messages = [diagnostic.message for diagnostic in verify(kernel)]
     assert messages == [
         f"{op_name}: operand types differ ({value_type.name} vs {amount_type.name})"

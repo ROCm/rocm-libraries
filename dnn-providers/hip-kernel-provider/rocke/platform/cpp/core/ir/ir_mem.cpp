@@ -900,8 +900,9 @@ void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b,
 /* ===================== vector.* element-wise family ===================== */
 
 /* IRBuilder.vector_binary: matching vector operands -> a->type. The signed
- * ops (smax, smin) refuse an unsigned element type, and lshr one that is not
- * an integer or i1 (TypeError). */
+ * ops (smax, smin) refuse an unsigned element type, and the bitwise ops and
+ * shifts (rocke_i_is_integer_element_op) one that is not an integer or i1
+ * (TypeError). */
 static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
                                             rocke_opcode_t opcode,
                                             rocke_value_t* a,
@@ -920,10 +921,8 @@ static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
         rocke_i_refuse_unsigned("vector_smax", a->type, NULL);
     if(opcode == ROCKE_OP_VECTOR_SMIN)
         rocke_i_refuse_unsigned("vector_smin", a->type, NULL);
-    char lshr_error[ROCKE_ERR_MSG_CAP];
-    if(opcode == ROCKE_OP_VECTOR_LSHR
-       && rocke_i_lshr_element_error("vector.lshr", a->type, lshr_error, sizeof lshr_error))
-        throw ckc::TypeError(lshr_error);
+    if(rocke_i_is_integer_element_op(opcode))
+        rocke_i_refuse_non_integer(rocke_opcode_name(opcode), a->type);
     ops[0] = a;
     ops[1] = c;
     return rocke_i_op1(b, opcode, ops, 2, a->type, NULL, hint);

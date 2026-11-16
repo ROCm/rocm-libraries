@@ -211,11 +211,15 @@ rocke_value_t* rocke_b_mod(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_
 
 rocke_value_t* rocke_b_land(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(rocke_i_live(b) && a)
+        rocke_i_refuse_non_integer("arith.and", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_AND, a, c, "and");
 }
 
 rocke_value_t* rocke_b_lor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(rocke_i_live(b) && a)
+        rocke_i_refuse_non_integer("arith.or", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_OR, a, c, "or");
 }
 
@@ -279,11 +283,15 @@ rocke_value_t* rocke_b_umin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value
 
 rocke_value_t* rocke_b_xor(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(rocke_i_live(b) && a)
+        rocke_i_refuse_non_integer("arith.xor", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_XOR, a, c, "xor");
 }
 
 rocke_value_t* rocke_b_shl(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
+    if(rocke_i_live(b) && a)
+        rocke_i_refuse_non_integer("arith.shl", a->type);
     return rocke_i_binop(b, ROCKE_OP_ARITH_SHL, a, c, "shl");
 }
 
@@ -296,9 +304,7 @@ rocke_value_t* rocke_b_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value
         return NULL;
     if(a && c)
     {
-        char err[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_lshr_element_error("arith.lshr", a->type, err, sizeof err))
-            throw ckc::TypeError(err);
+        rocke_i_refuse_non_integer("arith.lshr", a->type);
         if(!rocke_type_eq(a->type, c->type))
             throw ckc::TypeError(
                 ckc::format_error("arith.lshr failed - shift amount type='%s', expected the "

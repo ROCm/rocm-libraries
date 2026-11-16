@@ -584,15 +584,25 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                                    char* buf,
                                    size_t cap);
 
-/* Mirrors ir._lshr_element_error: the error for a logical right shift `op_name`
- * (arith.lshr or vector.lshr) of operands of type `operand_type`, or NULL when
- * its element type is an integer or i1 (the types LLVM's lshr is defined on).
- * A formatted message is written into `buf`, which the result then points to.
- * The builders throw it as a TypeError; the verifier reports it. */
-const char* rocke_i_lshr_element_error(const char* op_name,
-                                       const rocke_type_t* operand_type,
-                                       char* buf,
-                                       size_t cap);
+/* Mirrors ir._INTEGER_ELEMENT_OPS: whether `opcode` is a bitwise op or shift
+ * (arith.and / or / xor / shl / lshr, vector.and / or / shl / lshr), which LLVM
+ * defines on integers only. */
+bool rocke_i_is_integer_element_op(rocke_opcode_t opcode);
+
+/* Mirrors ir._integer_element_error: the error for `op_name`, one of the ops
+ * rocke_i_is_integer_element_op admits, on operands of type `operand_type`, or
+ * NULL when its element type is an integer or i1. A formatted message is
+ * written into `buf`, which the result then points to. The verifier reports
+ * it; the builders throw it through rocke_i_refuse_non_integer. */
+const char* rocke_i_integer_element_error(const char* op_name,
+                                          const rocke_type_t* operand_type,
+                                          char* buf,
+                                          size_t cap);
+
+/* Mirrors ir._refuse_non_integer: throw ckc::TypeError with
+ * rocke_i_integer_element_error's text when `operand_type`'s element is not an
+ * integer or i1. */
+void rocke_i_refuse_non_integer(const char* op_name, const rocke_type_t* operand_type);
 
 /* ------------------------------------------------------- parameter facts */
 
