@@ -236,7 +236,16 @@ struct K5CoopCfg
     static constexpr int WPE_CDNA
         = k5CoopCdnaWpe(MT, NT, KW, __is_same(T, k5_half), M == 3 && DIR == K5_FORWARD);
 #endif
-    static constexpr int WPE = A::WAVE == 64 ? WPE_CDNA : B16 ? 4 : MT * NT <= 2 ? 8 : 4;
+    // 16-bin layout: the host's grid counts on 6 waves a SIMD on the 1536-register RDNA chips
+    // (ConvWinogradNative), so on gfx11 the kernel is held to their 240 registers (one register
+    // past them leaves 5, and the grid's last blocks run a second round: gfx1101 unet c128 k64
+    // 512² backward data with 8 K waves 16.8 -> 12.3 ms); 4 elsewhere.
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1151__)
+    static constexpr int WPE_B16 = 6;
+#else
+    static constexpr int WPE_B16 = 4;
+#endif
+    static constexpr int WPE = A::WAVE == 64 ? WPE_CDNA : B16 ? WPE_B16 : MT * NT <= 2 ? 8 : 4;
     static_assert(JW % WAVES == 0 || WAVES % JW == 0, "job split");
 };
 
@@ -299,11 +308,11 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
     // V swizzle: tiles 8 apart share 64-bank rows, so tiles with bit 3 set take the other half
     // of their 8 channel-pair dwords: the transform's dword stores and the B reads then spread
     // over the banks (CDNA: 16 tiles x 4 pairs a wave, conflict cycles 3.2e8 -> 1.2e8 on gfx950
-    // unet; gfx12: unet -4%). gfx11 reads all 8 dwords of a tile in one fragment (KPL 16), which
-    // the half swap would split: not swizzled.
+    // unet; gfx12: unet -4%). gfx11 reads all 8 dwords of a tile in one fragment (KPL 16) as two
+    // 4-dword halves, so there the swap exchanges the halves' addresses (loadB below).
     auto vSwz = [](int tile) __attribute__((always_inline))
     {
-        return W::KPL <= 8 ? ((tile >> 3) & 1) << 2 : 0;
+        return ((tile >> 3) & 1) << 2;
     };
 
     // A fragment lane offset (bytes) within a U unit (k5CoopFilterTransform): the lane's KPL
@@ -745,9 +754,19 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
         // B fragment: tile n * 16 + col of bin, channels kBase.
         auto loadB = [&](const unsigned* Vs, int bin, int n) __attribute__((always_inline))
         {
-            const unsigned* p = Vs + (bin * BT + twv * 16 * NT + n * 16 + col) * 8
-                                + ((W::kBase(lane) / 2) ^ vSwz(col));
-            return W::loadB(p);
+            const unsigned* p = Vs + (bin * BT + twv * 16 * NT + n * 16 + col) * 8;
+            if constexpr(W::KPL == 16)
+            {
+                // gfx11: channel pairs 0-3 and 4-7 of the tile, at swapped halves for tiles with
+                // bit 3 set.
+                const int sw = vSwz(col);
+                const k5u4 lo = *reinterpret_cast<const k5u4*>(p + sw);
+                const k5u4 hi = *reinterpret_cast<const k5u4*>(p + (sw ^ 4));
+                return __builtin_bit_cast(frag,
+                                          k5u8{lo.x, lo.y, lo.z, lo.w, hi.x, hi.y, hi.z, hi.w});
+            }
+            else
+                return W::loadB(p + ((W::kBase(lane) / 2) ^ vSwz(col)));
         };
 
         // Prologue: chunk 0 in, transformed into buffer 0; U of chunk 0 (PF 1: but the first
