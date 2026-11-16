@@ -13,12 +13,45 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/solution_lookup_miss_for_test.hpp"
+
+extern "C" void hipblaslt_tuning_reset_for_test();
 
 namespace
 {
     constexpr int64_t kSize = 64;
+
+    // The lookup-miss hook covers the Tensile lookups only. rocRoller selection and tuning-file
+    // replay bypass them, so this keeps both off while the guard lives, and restores the
+    // caller's settings afterwards. A handle reads HIPBLASLT_USE_ROCROLLER when it is created.
+    class TensileOnlyNoTuning
+    {
+    public:
+        TensileOnlyNoTuning()
+            : m_env(std::make_unique<Env>())
+        {
+            hipblaslt_tuning_reset_for_test();
+        }
+        ~TensileOnlyNoTuning()
+        {
+            m_env.reset();
+            hipblaslt_tuning_reset_for_test();
+        }
+        TensileOnlyNoTuning(const TensileOnlyNoTuning&)            = delete;
+        TensileOnlyNoTuning& operator=(const TensileOnlyNoTuning&) = delete;
+
+    private:
+        struct Env
+        {
+            test_env::ScopedEnv rocRoller{"HIPBLASLT_USE_ROCROLLER", "0"};
+            test_env::ScopedEnv tuningMode{"HIPBLASLT_TUNING_MODE", nullptr};
+            test_env::ScopedEnv tuningCache{"HIPBLASLT_TUNING_CACHE_PATH", nullptr};
+            test_env::ScopedEnv tuningOverride{"HIPBLASLT_TUNING_OVERRIDE_FILE", nullptr};
+        };
+        std::unique_ptr<Env> m_env;
+    };
 
     // Restores normal lookups when a test ends, including on a failed assertion.
     class LookupMiss
@@ -42,6 +75,8 @@ namespace
     class NullAlgoMatmul : public ::testing::Test
     {
     protected:
+        // Constructed before SetUp creates the handle, destroyed after TearDown destroys it.
+        TensileOnlyNoTuning         isolation;
         hipblasLtHandle_t           handle = nullptr;
         hipblasLtMatmulDesc_t       desc   = nullptr;
         hipblasLtMatrixLayout_t     layout = nullptr;
