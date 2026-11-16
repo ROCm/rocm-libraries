@@ -252,10 +252,38 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
 
     // shared memory (for communication between threads in group)
     extern __shared__ double lmem[];
-    T* x = reinterpret_cast<T*>(lmem);
-    T* y = x + bdx;
-    S* sval = reinterpret_cast<S*>(y + n);
-    I* sidx = reinterpret_cast<I*>(sval + bdx);
+    T* x;
+    T* y;
+    S* sval;
+    I* sidx;
+
+    {
+        size_t const size_x = bdx * sizeof(T);
+        size_t const size_y = n * sizeof(T);
+        size_t const size_sval = bdx * sizeof(S);
+        size_t const size_sidx = bdx * sizeof(I);
+
+        // ----------------------------------------------------------
+        // extra padding to ensure array sidx is aligned to sizeof(I)
+        // when using int64_t
+        // ----------------------------------------------------------
+        size_t const size_xys = size_x + size_y + size_sval;
+        bool const is_aligned = (size_xys % sizeof(I)) == 0;
+        size_t const size_ipad = (is_aligned) ? 0 : (sizeof(I) - (size_xys % sizeof(I)));
+
+        std::byte* pfree = reinterpret_cast<std::byte*>(&(lmem[0]));
+        x = reinterpret_cast<T*>(pfree);
+        pfree += size_x;
+        y = reinterpret_cast<T*>(pfree);
+        pfree += size_y;
+        sval = reinterpret_cast<S*>(pfree);
+        pfree += size_sval;
+
+        pfree += size_ipad;
+        sidx = reinterpret_cast<I*>(pfree);
+        pfree += size_sidx;
+    }
+
     __shared__ T val;
 
     // local variables
@@ -722,7 +750,31 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
 
     if(pivot)
     {
-        size_t lmemsize = (dimx + n) * sizeof(T) + dimx * (sizeof(I) + sizeof(S));
+        auto const bdx = dimx;
+
+        size_t const size_x = bdx * sizeof(T);
+        size_t const size_y = n * sizeof(T);
+        size_t const size_sval = bdx * sizeof(S);
+        size_t const size_sidx = bdx * sizeof(I);
+
+        // ----------------------------------------------------------
+        // extra padding to ensure array sidx is aligned to sizeof(I)
+        // when using int64_t
+        // ----------------------------------------------------------
+        size_t const size_xys = size_x + size_y + size_sval;
+        bool const is_aligned = (size_xys % sizeof(I)) == 0;
+        size_t const size_ipad = (is_aligned) ? 0 : (sizeof(I) - (size_xys % sizeof(I)));
+
+        size_t lmemsize = size_x + size_y + size_sval + size_ipad + size_sidx;
+#ifndef NDEBUG
+        {
+            const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+            size_t const max_lds_size = props->sharedMemPerBlock;
+
+            size_t const size_val = sizeof(T);
+            assert((size_val + lmemsize) <= max_lds_size);
+        }
+#endif
         ROCSOLVER_LAUNCH_KERNEL((getf2_panel_kernel<T>), grid, block, lmemsize, stream, m, n, A,
                                 shiftA, lda, strideA, ipiv, shiftP, strideP, info, batch_count,
                                 offset, permut_idx, stride);
