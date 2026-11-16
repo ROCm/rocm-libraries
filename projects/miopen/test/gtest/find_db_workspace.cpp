@@ -16,6 +16,7 @@
 
 #include <miopen/any_solver.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
+#include <miopen/conv/solvers.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/conv_solution.hpp>
@@ -32,7 +33,10 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
+
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CK_PROBLEM_CACHE)
 
 namespace miopen {
 // Resolves each solution's configuration the way Immediate does (src/hip/convolutionocl.cpp).
@@ -96,6 +100,18 @@ std::size_t RunWorkspace(const miopen::ExecutionContext& ctx,
                                          : solver.GetWorkspaceSize(ctx, problem);
 }
 
+/// The layout name GetForwardOutputTensorWithLayout() takes; the tests use only these four.
+const char* LayoutName(miopenTensorLayout_t layout)
+{
+    if(layout == miopenTensorNHWC)
+        return "NHWC";
+    if(layout == miopenTensorNDHWC)
+        return "NDHWC";
+    if(layout == miopenTensorNCDHW)
+        return "NCDHW";
+    return "NCHW";
+}
+
 class FindDbWorkspaceTest
 {
 protected:
@@ -106,15 +122,22 @@ protected:
                       const std::vector<std::size_t>& x_lens,
                       const std::vector<std::size_t>& w_lens)
     {
-        conv = miopen::ConvolutionDescriptor{
-            2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
+        // 2D or 3D, from the lengths; padding, strides and dilations are 1 in every dimension.
+        const auto spatial = x_lens.size() - 2;
+        const std::vector<int> ones(spatial, 1);
+        conv             = miopen::ConvolutionDescriptor{spatial,
+                                             miopenConvolution,
+                                             miopenPaddingDefault,
+                                             ones,
+                                             ones,
+                                             ones,
+                                             std::vector<int>(spatial, 0)};
         conv.group_count = group_count;
         conv.findMode.Set(miopen::FindMode::Values::Hybrid);
 
         x_desc = miopen::TensorDescriptor{type, layout, x_lens};
         w_desc = miopen::TensorDescriptor{type, layout, w_lens};
-        y_desc = conv.GetForwardOutputTensorWithLayout(
-            x_desc, w_desc, layout == miopenTensorNHWC ? "NHWC" : "NCHW", type);
+        y_desc = conv.GetForwardOutputTensorWithLayout(x_desc, w_desc, LayoutName(layout), type);
 
         problem = direction == miopen::conv::Direction::Forward
                       ? miopen::conv::ProblemDescription{x_desc, w_desc, y_desc, conv, direction}
@@ -303,14 +326,13 @@ struct FlagProblem
     miopen::conv::Direction direction;
     miopenTensorLayout_t layout;
     int group_count;
-    std::vector<std::size_t> x_lens; // NCHW order, whatever the layout
+    std::vector<std::size_t> x_lens; // NCHW or NCDHW order, whatever the layout
     std::vector<std::size_t> w_lens;
 };
 
 std::ostream& operator<<(std::ostream& os, const FlagProblem& p)
 {
-    os << static_cast<int>(p.direction) << (p.layout == miopenTensorNHWC ? " NHWC" : " NCHW")
-       << " g" << p.group_count;
+    os << static_cast<int>(p.direction) << ' ' << LayoutName(p.layout) << " g" << p.group_count;
     const auto lens = [&](const char* name, const std::vector<std::size_t>& v) {
         os << name;
         for(const auto n : v)
@@ -379,8 +401,103 @@ std::vector<FlagProblem> FlagProblems()
         problems.push_back({direction, miopenTensorNCHW, 1, {2, 64, 14, 14}, {128, 64, 1, 1}});
         problems.push_back({direction, miopenTensorNHWC, 1, {2, 32, 28, 28}, {64, 32, 3, 3}});
         problems.push_back({direction, miopenTensorNHWC, 4, {2, 64, 28, 28}, {64, 16, 3, 3}});
+        // 3D, so the flags of the 3D solvers (the CK grouped backward-weights one sets it) are
+        // checked too; FP16 and BF16 reach the CK 3D solvers on gfx11 as well as on CDNA.
+        problems.push_back(
+            {direction, miopenTensorNDHWC, 1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}});
+        problems.push_back(
+            {direction, miopenTensorNDHWC, 4, {2, 64, 8, 14, 14}, {64, 16, 3, 3, 3}});
+        problems.push_back(
+            {direction, miopenTensorNCDHW, 1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}});
     }
     return problems;
+}
+
+struct DefaultCacheProblem
+{
+    int group_count;
+    std::vector<std::size_t> x_lens; // NCHW or NCDHW order; the layout is NHWC or NDHWC
+    std::vector<std::size_t> w_lens;
+};
+
+std::ostream& operator<<(std::ostream& os, const DefaultCacheProblem& p)
+{
+    os << 'g' << p.group_count;
+    const auto lens = [&](const char* name, const std::vector<std::size_t>& v) {
+        os << name;
+        for(const auto n : v)
+            os << '_' << n;
+    };
+    lens(" x", p.x_lens);
+    lens(" w", p.w_lens);
+    return os;
+}
+
+/// The CK backward-weights solvers take their default configuration from DefaultConfigCache on
+/// every query after the first for a problem. The configuration a cache hit returns must be the
+/// one computed without the cache, and must run with the same workspace.
+class FindDbWorkspaceDefaultCacheTest : public FindDbWorkspaceTest,
+                                        public ::testing::TestWithParam<DefaultCacheProblem>
+{
+protected:
+    void Check(miopenDataType_t type)
+    {
+        const auto& p   = GetParam();
+        const auto is3d = p.x_lens.size() == 5;
+        SetUpProblem(miopen::conv::Direction::BackwardWeights,
+                     type,
+                     is3d ? miopenTensorNDHWC : miopenTensorNHWC,
+                     p.group_count,
+                     p.x_lens,
+                     p.w_lens);
+        if(is3d)
+            CheckSolver(miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops{});
+        else
+            CheckSolver(miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops{});
+    }
+
+private:
+    template <class Solver>
+    void CheckSolver(const Solver& solver)
+    {
+        if(!solver.IsApplicable(ctx, problem))
+            GTEST_SKIP() << solver.SolverDbId() << " is not applicable";
+
+        std::optional<decltype(solver.GetDefaultPerformanceConfig(ctx, problem))> uncached;
+        {
+            ScopedEnvironment<bool> no_cache(MIOPEN_DEBUG_CK_PROBLEM_CACHE, false);
+            uncached = solver.GetDefaultPerformanceConfig(ctx, problem);
+        }
+        // Two queries with the cache on: the second is a hit whatever earlier tests cached.
+        std::ignore     = solver.GetDefaultPerformanceConfig(ctx, problem);
+        const auto hit  = solver.GetDefaultPerformanceConfig(ctx, problem);
+        const auto name = solver.SolverDbId();
+
+        ASSERT_FALSE(uncached->kernel_id.empty()) << name;
+        EXPECT_EQ(hit.kernel_id, uncached->kernel_id) << name;
+        EXPECT_EQ(hit.UseTF32(), uncached->UseTF32()) << name;
+        EXPECT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, hit)) << name;
+
+        const auto from_hit      = solver.GetSolution(ctx, problem, hit);
+        const auto from_uncached = solver.GetSolution(ctx, problem, *uncached);
+        ASSERT_TRUE(from_uncached.Succeeded()) << name;
+        ASSERT_TRUE(from_hit.Succeeded()) << name;
+        EXPECT_EQ(from_hit.workspace_sz, from_uncached.workspace_sz) << name;
+    }
+};
+
+class GPU_FindDbWorkspaceDefaultCache_FP32 : public FindDbWorkspaceDefaultCacheTest
+{
+};
+class GPU_FindDbWorkspaceDefaultCache_FP16 : public FindDbWorkspaceDefaultCacheTest
+{
+};
+
+std::vector<DefaultCacheProblem> DefaultCacheProblems()
+{
+    return {{1, {2, 64, 28, 28}, {64, 64, 3, 3}},
+            {4, {2, 64, 28, 28}, {64, 16, 3, 3}},
+            {4, {2, 64, 8, 14, 14}, {64, 16, 3, 3, 3}}};
 }
 
 } // namespace
@@ -535,3 +652,14 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindDbWorkspaceFlag_FP32, testing::ValuesIn(FlagProblems()));
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindDbWorkspaceFlag_FP16, testing::ValuesIn(FlagProblems()));
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindDbWorkspaceFlag_BFP16, testing::ValuesIn(FlagProblems()));
+
+TEST_P(GPU_FindDbWorkspaceDefaultCache_FP32, CacheHitIsUncachedDefault) { Check(miopenFloat); }
+
+TEST_P(GPU_FindDbWorkspaceDefaultCache_FP16, CacheHitIsUncachedDefault) { Check(miopenHalf); }
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_FindDbWorkspaceDefaultCache_FP32,
+                         testing::ValuesIn(DefaultCacheProblems()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_FindDbWorkspaceDefaultCache_FP16,
+                         testing::ValuesIn(DefaultCacheProblems()));
