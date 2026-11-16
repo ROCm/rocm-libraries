@@ -18,6 +18,9 @@
           ],
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       },
@@ -234,6 +237,9 @@
             "windows"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

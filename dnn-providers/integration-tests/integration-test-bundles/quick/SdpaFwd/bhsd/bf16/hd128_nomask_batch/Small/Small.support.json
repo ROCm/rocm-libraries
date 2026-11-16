@@ -3,15 +3,29 @@
     "ASM_SDPA_ENGINE": {
       "gfx942": [
         "linux"
+      ],
+      "gfx950": [
+        "linux"
       ]
     },
     "hipkernel:flydsl_sdpa_cdna": {
       "gfx942": [
         "linux"
+      ],
+      "gfx950": [
+        "linux"
       ]
     },
     "hipkernel:flydsl_sdpa_cdna_decode": {
       "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna_dualwave": {
+      "gfx950": [
         "linux"
       ]
     },
