@@ -4859,12 +4859,13 @@ void rocfft_plan_t::DetermineTempBufferUserAllocs()
     }
 
     const auto num_local = local_items.size();
-    const auto num_words = DivRoundingUp<size_t>(num_local, 64);
 
     // 1. which items complete before which, on this rank
-    // bit j of ancestors[i] is set if local item j completes before local item i starts on
+    // has_ancestor[i][j] is true if local item j completes before local item i starts on
     // this rank, knowing that items only wait for their antecedents that run on this rank
-    std::vector<std::vector<uint64_t>> ancestors(num_local, std::vector<uint64_t>(num_words));
+    // NOTE: if found too slow for multi-device plans with O(10^3) bricks, consider 64-bit
+    // words instead
+    std::vector<std::vector<bool>> has_ancestor(num_local, std::vector<bool>(num_local));
     for(auto item : MultiPlanTopologicalSort())
     {
         const auto loc_item = std::lower_bound(local_items.begin(), local_items.end(), item);
@@ -4877,13 +4878,15 @@ void rocfft_plan_t::DetermineTempBufferUserAllocs()
                 = std::lower_bound(local_items.begin(), local_items.end(), antecedent);
             if(loc_antecedent == local_items.end() || *loc_antecedent != antecedent)
                 continue;
-            const auto loc_a_idx = std::distance(local_items.begin(), loc_antecedent);
-            ancestors[loc_i_idx][loc_a_idx / 64] |= uint64_t{1} << (loc_a_idx % 64);
-            for(size_t w = 0; w < num_words; ++w)
-                ancestors[loc_i_idx][w] |= ancestors[loc_a_idx][w];
+            const auto loc_a_idx               = std::distance(local_items.begin(), loc_antecedent);
+            has_ancestor[loc_i_idx][loc_a_idx] = true;
+            for(size_t j = 0; j < num_local; ++j)
+            {
+                if(has_ancestor[loc_a_idx][j])
+                    has_ancestor[loc_i_idx][j] = true;
+            }
         }
     }
-    auto is_ancestor = [&](size_t a, size_t i) { return (ancestors[i][a / 64] >> (a % 64)) & 1; };
 
     // 2. this rank's temp buffers and the items using them
     struct BufferUse
@@ -4916,8 +4919,8 @@ void rocfft_plan_t::DetermineTempBufferUserAllocs()
         {
             for(auto j : y.users)
             {
-                x_first = x_first && is_ancestor(i, j);
-                y_first = y_first && is_ancestor(j, i);
+                x_first = x_first && has_ancestor[j][i];
+                y_first = y_first && has_ancestor[i][j];
             }
         }
         return x_first || y_first;
