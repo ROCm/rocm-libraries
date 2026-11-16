@@ -845,8 +845,10 @@ TEST(TestConvDirectKernelMatch, ChannelsFirstHaloTilesTakePackedChannelsFirstAct
     auto last = shape;
     last.channelsLast = true;
     EXPECT_FALSE(admits(f, "gfx1101", last));
-    // Input rows of whole 4-element runs: width 6 is not.
-    EXPECT_FALSE(admits(f, "gfx1101", baseShape()));
+    // Input rows of whole 2-element runs: width 15 is not.
+    auto odd = shape;
+    odd.input = {7, 15};
+    EXPECT_FALSE(admits(f, "gfx1101", odd));
     // Outputs at least 8 columns wide.
     auto narrow = shape;
     narrow.input = {7, 4};

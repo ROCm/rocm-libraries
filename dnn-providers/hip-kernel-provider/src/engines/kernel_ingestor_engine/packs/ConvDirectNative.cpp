@@ -716,10 +716,10 @@ std::optional<Plan>
     else
     {
         // Channels-first halo tiles: both activations packed channels-first, input rows of whole
-        // 4-element runs, and outputs at least 8 columns wide.
+        // 2-element runs, and outputs at least 8 columns wide.
         if(config.cf != 0
            && (!problem.in.needed || !problem.in.transpose || !problem.out.needed
-               || !problem.out.transpose || a.wi % 4 != 0 || a.wo < 8))
+               || !problem.out.transpose || a.wi % 2 != 0 || a.wo < 8))
         {
             return std::nullopt;
         }

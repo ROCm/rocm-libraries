@@ -116,7 +116,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
               CONV_DIRECT_CF ? k2CfHaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S)
                              : k2HaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S),
               CONV_DIRECT_CF,
-              4>(a CONV_EPI_ARG);
+              2>(a CONV_EPI_ARG);
 #endif
 }
 
