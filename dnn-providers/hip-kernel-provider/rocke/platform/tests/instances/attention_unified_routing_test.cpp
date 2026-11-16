@@ -194,8 +194,29 @@ static void test_canonical_arch(void)
                  "gfx1250");
     CHECK_EQ_STR(rocke_unified_attention_canonical_arch("gfx1100", out, sizeof(out)), "gfx1100");
 
-    CHECK_EQ_STR(rocke_unified_attention_canonical_arch(NULL, out, sizeof(out)), "gfx950");
-    CHECK_EQ_STR(rocke_unified_attention_canonical_arch("", out, sizeof(out)), "gfx950");
+    CHECK(rocke_unified_attention_canonical_arch(NULL, out, sizeof(out)) == NULL);
+    CHECK(rocke_unified_attention_canonical_arch("", out, sizeof(out)) == NULL);
+}
+
+/* C has no device query, so every gate needs an explicit arch. */
+static void test_gates_require_arch(void)
+{
+    rocke_unified_attention_problem_t p = rocke_unified_attention_problem_default();
+    char reason[128];
+    const char* const missing[] = {NULL, ""};
+
+    for(int i = 0; i < 2; ++i)
+    {
+        reason[0] = '\0';
+        CHECK(!rocke_unified_attention_supports_scalar(&p, missing[i], reason, sizeof(reason)));
+        CHECK_EQ_STR(reason, "arch is required");
+        reason[0] = '\0';
+        CHECK(!rocke_unified_attention_supports_tiled_2d(&p, missing[i], reason, sizeof(reason)));
+        CHECK_EQ_STR(reason, "arch is required");
+        reason[0] = '\0';
+        CHECK(!rocke_unified_attention_supports_tiled_3d(&p, missing[i], reason, sizeof(reason)));
+        CHECK_EQ_STR(reason, "arch is required");
+    }
 }
 
 static void test_supports_tiled_3d(void)
@@ -452,6 +473,7 @@ int main(void)
     test_select_2d();
     test_select_3d();
     test_canonical_arch();
+    test_gates_require_arch();
     test_supports_tiled_3d();
     test_supports_tiled_2d();
     test_supports_scalar();

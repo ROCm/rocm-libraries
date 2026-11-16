@@ -164,6 +164,8 @@ int rocke_unified_attention_problem_total_num_q_blocks_upper_bound(
     if(num_queries_per_kv <= 0)
         return -1;
     block_m = (num_queries_per_kv <= 16) ? 16 : rocke_attention_next_power_of_2(num_queries_per_kv);
+    if(block_m == 0)
+        return -1;
     block_q = block_m / num_queries_per_kv;
     return p->total_q / block_q + p->num_seqs;
 }
@@ -184,8 +186,10 @@ const char* rocke_unified_attention_problem_select_path(const rocke_unified_atte
 {
     if(rocke_unified_attention_problem_num_queries_per_kv(p) <= 0)
         return NULL;
-    int num_2d
-        = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p) * p->num_kv_heads;
+    int num_q_blocks = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p);
+    if(num_q_blocks < 0)
+        return NULL;
+    int num_2d = num_q_blocks * p->num_kv_heads;
     bool use_2d
         = rocke_attention_use_2d_kernel(p->head_size,
                                         p->sliding_window,
@@ -203,8 +207,10 @@ bool rocke_unified_attention_problem_select_2d(const rocke_unified_attention_pro
     int nqpk = rocke_unified_attention_problem_num_queries_per_kv(p);
     if(nqpk <= 0)
         return false;
-    int num_2d
-        = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p) * p->num_kv_heads;
+    int num_q_blocks = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p);
+    if(num_q_blocks < 0)
+        return false;
+    int num_2d = num_q_blocks * p->num_kv_heads;
     return rocke_attention_select_2d_config(p->block_size,
                                             p->head_size,
                                             p->sliding_window,
@@ -224,8 +230,10 @@ bool rocke_unified_attention_problem_select_3d(const rocke_unified_attention_pro
         return false;
     bool half
         = p->dtype != NULL && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0);
-    int num_2d
-        = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p) * p->num_kv_heads;
+    int num_q_blocks = rocke_unified_attention_problem_total_num_q_blocks_upper_bound(p);
+    if(num_q_blocks < 0)
+        return false;
+    int num_2d = num_q_blocks * p->num_kv_heads;
     return rocke_attention_select_3d_config(
         p->head_size,
         p->block_size,
@@ -266,7 +274,8 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
     char arch[64];
     if(p == NULL)
         return scalar_gate_fail(reason, reason_cap, "null problem");
-    rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch));
+    if(rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch)) == NULL)
+        return scalar_gate_fail(reason, reason_cap, "arch is required");
     /* The scalar kernel writes no LSE; refusing here keeps the auto tail from
      * ever launching it for an LSE request. */
     if(p->emit_lse)

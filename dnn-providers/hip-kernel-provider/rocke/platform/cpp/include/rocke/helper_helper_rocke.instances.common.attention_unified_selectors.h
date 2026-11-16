@@ -80,11 +80,6 @@ extern "C" {
 int rocke_unified_attn_num_queries_per_kv(rocke_ir_builder_t* b,
                                           const rocke_unified_attention_problem_t* p);
 
-/* Python: _resolve_attention_arch(). The launch target: the running device
- * arch, else "gfx950" (always "gfx950" until a C device query is ported). Not a
- * selection input -- the selectors below take ``arch`` explicitly. */
-const char* rocke_unified_attn_resolve_arch(void);
-
 /* ------------------------------------------------------- host selectors */
 
 /* Python: _select_2d_tile_size(problem, arch) -> int. */
@@ -281,9 +276,9 @@ bool rocke_unified_attn_enable_gfx942_flash_k_sliced_ldsseq(
 /* Python: attention_spec_builder._tiled_spec_from_problem(problem, arch) ->
  * rocke_attention_tiled_2d_spec_t. Runs the same selectors and gate predicates
  * in the same order: the gfx942 bf16 / fp16 flash builders, the gfx950 generic
- * builder, and the generic builder every other arch shares. Not ported: the
- * gfx1250 branch (returns the default spec, as does a NULL arch), the gfx950
- * D256 fast-route overrides and the softmax-interleave fields.
+ * builder (with its D256 fast-route overrides and softmax-interleave fields),
+ * and the generic builder every other arch shares. Not ported: the gfx1250
+ * branch (returns the default spec, as does a NULL arch).
  *
  * Python's attention_unified._tiled_spec_from_problem also validates the spec
  * (the spec class __post_init__) and runs _resolve_lds_budget. Callers do both

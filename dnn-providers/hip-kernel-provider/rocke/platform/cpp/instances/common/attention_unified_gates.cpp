@@ -56,8 +56,8 @@ const char* rocke_unified_attention_canonical_arch(const char* arch, char* out, 
         return NULL;
     if(arch == NULL || arch[0] == '\0')
     {
-        snprintf(out, out_cap, "%s", rocke_unified_attn_resolve_arch());
-        return out;
+        out[0] = '\0';
+        return NULL;
     }
     /* arch.strip().lower() */
     char lowered[ROCKE_ATTN_GATE_ARCH_CAP];
@@ -74,19 +74,24 @@ const char* rocke_unified_attention_canonical_arch(const char* arch, char* out, 
     return rocke_base_arch_from_target_id(lowered, out, out_cap);
 }
 
+void rocke_attn_unified_band_label(bool causal_top_left, int right_bound, char* out, size_t out_cap)
+{
+    if(out == NULL || out_cap == 0)
+        return;
+    const char* align = causal_top_left ? "top-left" : "bottom-right";
+    if(right_bound == -1)
+        snprintf(out, out_cap, "%s/unbounded", align);
+    else if(right_bound == 0)
+        snprintf(out, out_cap, "%s/causal", align);
+    else
+        snprintf(out, out_cap, "%s/right_bound=%d", align, right_bound);
+}
+
 void rocke_attn_unified_mask_label(const rocke_unified_attention_problem_t* p,
                                    char* out,
                                    size_t out_cap)
 {
-    if(out == NULL || out_cap == 0)
-        return;
-    const char* align = p->causal_top_left ? "top-left" : "bottom-right";
-    if(p->right_bound == -1)
-        snprintf(out, out_cap, "%s/unbounded", align);
-    else if(p->right_bound == 0)
-        snprintf(out, out_cap, "%s/causal", align);
-    else
-        snprintf(out, out_cap, "%s/right_bound=%d", align, p->right_bound);
+    rocke_attn_unified_band_label(p->causal_top_left, p->right_bound, out, out_cap);
 }
 
 bool rocke_attn_unified_reject_mask_semantics(const rocke_unified_attention_problem_t* p,
@@ -318,7 +323,11 @@ bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_pro
         return false;
     }
     char arch[ROCKE_ATTN_GATE_ARCH_CAP];
-    rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch));
+    if(rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch)) == NULL)
+    {
+        gate_reason(reason, reason_cap, "arch is required");
+        return false;
+    }
 
     if(reject_lse(p, arch, "tiled 2D", reason, reason_cap)
        || rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap)
@@ -365,7 +374,11 @@ bool rocke_unified_attention_supports_tiled_3d(const rocke_unified_attention_pro
         return false;
     }
     char arch[ROCKE_ATTN_GATE_ARCH_CAP];
-    rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch));
+    if(rocke_unified_attention_canonical_arch(arch_in, arch, sizeof(arch)) == NULL)
+    {
+        gate_reason(reason, reason_cap, "arch is required");
+        return false;
+    }
 
     if(reject_lse(p, arch, "3d", reason, reason_cap)
        || rocke_attn_unified_reject_mask_semantics(p, reason, reason_cap)

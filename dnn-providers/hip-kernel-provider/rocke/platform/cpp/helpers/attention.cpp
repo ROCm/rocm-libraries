@@ -278,6 +278,8 @@ rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
 
 int rocke_attention_next_power_of_2(int x)
 {
+    if(x > (1 << 30))
+        return 0;
     int p = 1;
     while(p < x)
         p <<= 1;
@@ -301,6 +303,8 @@ bool rocke_attention_select_2d_config(int block_size,
         return false;
     int block_m
         = (num_queries_per_kv <= 16) ? 16 : rocke_attention_next_power_of_2(num_queries_per_kv);
+    if(block_m == 0)
+        return false;
     int tile_size = 64;
     int max_num_stages_2d = (head_size > 128) ? 2 : 4;
     int num_stages_2d;
@@ -367,6 +371,9 @@ bool rocke_attention_select_3d_config(int head_size,
     int num_segments = target_num_prgms / num_2d_prgms;
     if(target_num_prgms > 0 && target_num_prgms % num_2d_prgms != 0)
         num_segments += 1;
+    /* Clamped before rounding up: past 128 the result is 128 either way. */
+    if(num_segments > 128)
+        num_segments = 128;
     num_segments = rocke_attention_next_power_of_2(num_segments);
     if(num_segments > 128)
         num_segments = 128;

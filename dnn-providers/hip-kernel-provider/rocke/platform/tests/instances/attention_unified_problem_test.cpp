@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/helper_rocke.helpers.attention.h"
 #include "rocke/instance_attention_unified.h"
 
 static int g_failures = 0;
@@ -143,6 +144,35 @@ static void test_selectors_use_explicit_arch(void)
     CHECK(s.use_transposed_scalar_state);
 }
 
+static void test_next_power_of_2_bound(void)
+{
+    rocke_attention_2d_config_t cfg;
+    rocke_attention_3d_config_t attn;
+    rocke_attention_3d_config_t reduce;
+    rocke_unified_attention_problem_t p = rocke_unified_attention_problem_default();
+
+    CHECK_EQ_INT(rocke_attention_next_power_of_2(0), 1);
+    CHECK_EQ_INT(rocke_attention_next_power_of_2(17), 32);
+    CHECK_EQ_INT(rocke_attention_next_power_of_2(1 << 30), 1 << 30);
+    CHECK_EQ_INT(rocke_attention_next_power_of_2((1 << 30) + 1), 0);
+    CHECK_EQ_INT(rocke_attention_next_power_of_2(0x7FFFFFFF), 0);
+
+    /* A query/KV head ratio past 2^30 has no int block_m: rejected, not a hang. */
+    p.total_q = 4;
+    p.num_seqs = 1;
+    p.num_kv_heads = 1;
+    p.num_query_heads = (1 << 30) + 1;
+    CHECK_EQ_INT(rocke_unified_attention_problem_total_num_q_blocks_upper_bound(&p), -1);
+    CHECK(rocke_unified_attention_problem_select_path(&p) == NULL);
+    CHECK(!rocke_unified_attention_problem_select_2d(&p, &cfg));
+    CHECK(!rocke_unified_attention_problem_select_3d(&p, &attn, &reduce));
+    CHECK(!rocke_attention_select_2d_config(16, 64, 0, true, 1, 64, (1 << 30) + 1, 1, &cfg));
+
+    /* A segment count past 128 still clamps to 128. */
+    CHECK(rocke_attention_select_3d_config(64, 16, 2, 4096, 0x7FFFFFFF, 1, &attn, &reduce));
+    CHECK_EQ_INT(attn.num_segments_per_seq, 128);
+}
+
 int main(void)
 {
     test_defaults();
@@ -151,6 +181,7 @@ int main(void)
     test_effective_target_ctas();
     test_one_struct_for_builders_and_selectors();
     test_selectors_use_explicit_arch();
+    test_next_power_of_2_bound();
 
     if(g_failures != 0)
     {

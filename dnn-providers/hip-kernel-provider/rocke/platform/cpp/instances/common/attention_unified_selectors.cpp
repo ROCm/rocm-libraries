@@ -31,21 +31,6 @@
 
 /* ------------------------------------------------------- arch resolution */
 
-/* Python: _resolve_attention_arch() -- the LAUNCH target: the running device
- * arch, falling back to "gfx950" when it is unavailable (CPU-only /
- * cross-compile harnesses, which is exactly this static-port context). Never a
- * selection input: every selector below takes ``arch`` explicitly, as in Python.
- *
- * TODO(port): wire a real runtime.hip_module.get_device_arch() query when the
- * C runtime surface exposes one. The Python runtime now offers get_device_arch,
- * get_device_name, and get_device_count as HIP-backed queries; mirror them under
- * matching names when this port lands. Until then this reproduces the
- * documented fallback. */
-const char* rocke_unified_attn_resolve_arch(void)
-{
-    return "gfx950";
-}
-
 /* Selection-path arch test. ``arch`` is already canonical (Python compares the
  * raw argument); NULL matches no arch, as None does in Python. */
 static bool arch_is(const char* arch, const char* want)

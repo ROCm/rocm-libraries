@@ -305,6 +305,12 @@ void rocke_attn_unified_mask_label(const rocke_unified_attention_problem_t* p,
                                    char* out,
                                    size_t out_cap);
 
+/* _mask_label over the raw band fields, for spec validators. */
+void rocke_attn_unified_band_label(bool causal_top_left,
+                                   int right_bound,
+                                   char* out,
+                                   size_t out_cap);
+
 /* _reject_mask_semantics(problem). */
 bool rocke_attn_unified_reject_mask_semantics(const rocke_unified_attention_problem_t* p,
                                               char* reason,

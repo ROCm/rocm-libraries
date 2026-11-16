@@ -98,11 +98,12 @@ extern "C" {
  * builders cannot build yet, the gate rejects it with a "... not ported to C++
  * yet" reason instead. The reason (pass/fail) is written into ``reason``
  * (capacity ``reason_cap``, truncated) when non-NULL. ``arch`` may be a
- * decorated target ID; NULL or "" means the resolved arch. */
+ * decorated target ID and is required: C has no device query to stand in for
+ * Python's default, so a NULL or "" arch is rejected. */
 
 /* _canonical_arch_for_selection(arch): strip, lowercase, drop features and
- * profiles. NULL/"" yields rocke_unified_attn_resolve_arch(). Returns ``out``,
- * or NULL on a NULL/zero-capacity ``out``. */
+ * profiles. Returns ``out``, or NULL for a NULL/"" ``arch`` or a
+ * NULL/zero-capacity ``out``. */
 const char* rocke_unified_attention_canonical_arch(const char* arch, char* out, size_t out_cap);
 
 /* supports_native_unified_attention(problem, arch) -- the scalar backend. */
@@ -112,8 +113,8 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
                                              size_t reason_cap);
 
 /* supports_native_unified_attention_tiled(problem, arch) -- the tiled 2D path.
- * Not ported yet, so rejected after Python's checks: gfx1250; off gfx942,
- * additive bias and non-default masks. */
+ * Not ported yet, so rejected after Python's checks: gfx1250, and additive
+ * bias off gfx942. */
 bool rocke_unified_attention_supports_tiled_2d(const rocke_unified_attention_problem_t* p,
                                                const char* arch,
                                                char* reason,

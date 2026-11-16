@@ -173,7 +173,8 @@ typedef struct rocke_attention_3d_config
     int waves_per_eu;
 } rocke_attention_3d_config_t;
 
-/* next_power_of_2(x): 1 for x <= 1, else the smallest power of two >= x. */
+/* next_power_of_2(x): 1 for x <= 1, else the smallest power of two >= x; 0
+ * when that does not fit an int (x > 2^30), which callers must reject. */
 int rocke_attention_next_power_of_2(int x);
 
 /* select_2d_config(...). Returns false (``out`` untouched) when
