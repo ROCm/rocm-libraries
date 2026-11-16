@@ -27,6 +27,7 @@
 // the spmat printer. Round trips compare what the public getters return with what was
 // passed in; the constructors are checked with one invalid argument at a time.
 
+#include "rocsparse_spmat_descr.hpp"
 #include "unit_test_device_conv_common.hpp"
 #include "unit_test_host_utils.hpp"
 
@@ -1378,5 +1379,22 @@ namespace
         nnz = -1;
         EXPECT_EQ(rocsparse_spmat_get_nnz(c, &nnz), st_ok);
         EXPECT_EQ(nnz, fit * 4);
+    }
+
+    // dense2bell_nnz_template writes ell_cols through &mat_B->ell_cols and does not
+    // check it against the descriptor. The analysis buffer is one int64_t per row, so
+    // this test writes the field the same way instead of running dense_to_sparse.
+    TEST_F(ConvDescr, BellNnzAfterWidthUpdate)
+    {
+        Spmat d;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &d, int64_t(1) << 62, 1, dir_r, 1, 0, nullptr, nullptr, i32, base0, f32),
+                  st_ok);
+        d.get()->ell_cols = 16;
+
+        int64_t nnz = 717;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_size);
+        EXPECT_EQ(nnz, 717);
+        EXPECT_EQ(rocsparse_bell_set_pointers(d, nullptr, nullptr), st_size);
     }
 } // namespace

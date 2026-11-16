@@ -4265,16 +4265,20 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
 
-    const int64_t brows = rocsparse::ceil_div(descr->rows, descr->block_dim);
+    ROCSPARSE_CHECKARG(0,
+                       descr,
+                       rocsparse::size_product_overflows(descr->rows, descr->ell_cols),
+                       rocsparse_status_invalid_size);
+
+    const int64_t brows  = rocsparse::ceil_div(descr->rows, descr->block_dim);
+    const int64_t values = descr->rows * descr->ell_cols;
 
     ROCSPARSE_CHECKARG(1,
                        bell_col_ind,
                        brows * descr->ell_cols / descr->block_dim > 0 && bell_col_ind == nullptr,
                        rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(2,
-                       bell_val,
-                       descr->rows * descr->ell_cols > 0 && bell_val == nullptr,
-                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(
+        2, bell_val, values > 0 && bell_val == nullptr, rocsparse_status_invalid_pointer);
 
     descr->col_data = bell_col_ind;
     descr->val_data = bell_val;
@@ -4476,8 +4480,10 @@ try
     {
     case rocsparse_format_bell:
     {
-        // rows and ell_cols are set only by the constructors, which reject a product
-        // that does not fit in int64_t. ell_cols counts scalar columns.
+        ROCSPARSE_CHECKARG(0,
+                           descr,
+                           rocsparse::size_product_overflows(descr->rows, descr->ell_cols),
+                           rocsparse_status_invalid_size);
         nnz[0] = descr->rows * descr->ell_cols;
         break;
     }

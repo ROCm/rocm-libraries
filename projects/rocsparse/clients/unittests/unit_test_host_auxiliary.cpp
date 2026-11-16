@@ -1632,7 +1632,7 @@ TEST(AuxiliaryBranchBell, const_get_and_nnz)
     const int64_t          block_dim = 2;
     const int64_t          ell_cols  = 2;
     device_vector<int32_t> ell_col{std::vector<int32_t>(4, 0)};
-    device_vector<float>   ell_val{std::vector<float>(4 * block_dim * block_dim, 1.0f)};
+    device_vector<float>   ell_val{std::vector<float>(4 * ell_cols, 1.0f)};
     ASSERT_TRUE(ell_col.ptr && ell_val.ptr);
 
     rocsparse_spmat_descr A = nullptr;
