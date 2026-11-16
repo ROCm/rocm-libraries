@@ -334,7 +334,7 @@ TEST(HostUnitRocRollerKernelSelect, smoke_FourGiBOperandExceedsTheBuffer)
 TEST(HostUnitRocRollerKernelSelect, smoke_KernelFieldsReadTheSolution)
 {
     TensileLite::ContractionSolution solution;
-    solution.customKernel.macrotile     = dim3(64, 32, 128);
+    solution.customKernel.macrotile     = decltype(solution.customKernel.macrotile)(64, 32, 128);
     solution.customKernel.unroll        = 4;
     solution.customKernel.workspaceType = TensileLite::CustomWorkspaceType::RocRollerStreamK;
     solution.customKernel.args.push_back(
