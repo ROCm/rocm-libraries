@@ -819,7 +819,7 @@ using attention_dense::AttentionDenseAbi;
 using attention_dense::AttentionDenseArch;
 
 /// A hook the descriptors below carry: isConsistent() reads whether one is set, never calls it.
-std::optional<bool> unreachedHook(const hipdnn_plugin_sdk::ingestor::KernelDefinition&)
+std::optional<bool> unreachedHook(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
 {
     return std::nullopt;
 }
