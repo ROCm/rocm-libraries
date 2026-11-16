@@ -2087,13 +2087,17 @@ def _gfx125_qr_tdm_serves(hdim_pair):
 # (F_pp_slice_prefetch) keeps every K/V slice's reads a whole slice ahead of its WMMAs,
 # and that (F_pp_v_before_softmax) reads V's first slice before the softmax; pairs left
 # out keep both off. Each is on only where its VGPRs leave the tile's occupancy alone:
-# both cost d128's 128-row tile a wave per SIMD (d128 causal 512 x 5252 keys: -2%), V
-# before the softmax costs it d96's 128-row tile and the masked d32/d64 64-row tiles.
+# V before the softmax spills d96's 128-row tile, and both cost d256/d512's 64-row tiles
+# waves (d512 +25%, d256 +6%). d128's 128-row tile, at two waves per SIMD with the row
+# max on every tile, keeps them (416 VGPRs).
 # Gains on gfx1250, 32 x 16 heads: slice prefetch d160 512 x 4096 keys +25%, d96 128 x
-# 1024 dense +22%, d32 +25%, d64 128 x 1024 dense +22%; V before the softmax +1..9%.
+# 1024 dense +22%, d32 +25%, d64 128 x 1024 dense +22%; V before the softmax +1..9%;
+# d128 (8 x 16 heads, bf16) 4096^2 causal -4%, dense -3%, its 64-row tile 256 x 768
+# -10..14%, windows -5..6%.
 GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE = {
     (32, 32): (64, 128),
     (64, 64): (128, 128),
+    (128, 128): (64, 128),
     (96, 96): (64, 0),
     (160, 160): (128, 128),
     (192, 128): (64, 128),
