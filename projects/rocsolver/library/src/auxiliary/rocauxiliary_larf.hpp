@@ -241,7 +241,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X) larf_right_kernel_xs(const I m,
     T* xs = reinterpret_cast<T*>(smem);
     T* sdata = xs + n;
 
-    I ngrp = (m / (NB_X)) * NB_X;
+    I ngrp = (n / (NB_X)) * NB_X;
 
     //
     // GEMV
@@ -318,7 +318,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X) larf_right_kernel_axs(const I m,
     T* as = xs + n;
     T* sdata = as + n;
 
-    I ngrp = (m / (NB_X)) * NB_X;
+    I ngrp = (n / (NB_X)) * NB_X;
 
     //
     // GEMV
