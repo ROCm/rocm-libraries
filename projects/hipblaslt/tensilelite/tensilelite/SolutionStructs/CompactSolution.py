@@ -340,20 +340,6 @@ def hydrateSolution(solution):
     return solution
 
 
-def kernelFileBase(splitGSU: bool, kernel) -> str:
-    """getKernelFileBase without hydrating a CompactSolution."""
-    if isinstance(kernel, CompactSolution):
-        return kernel.baseName
-    return getKernelFileBase(splitGSU, kernel)
-
-
-def kernelDedupeKey(splitGSU: bool, kernel) -> str:
-    """getKeyNoInternalArgs without hydrating a CompactSolution."""
-    if isinstance(kernel, CompactSolution):
-        return kernel.dedupeKey()
-    return getKeyNoInternalArgs(kernel, splitGSU)
-
-
 def compactLibrarySolutions(library, splitGSU: bool, helperNameCallables) -> None:
     """Replace every originalSolution under a MasterSolutionLibrary with a CompactSolution."""
     for sol in library.solutions.values():

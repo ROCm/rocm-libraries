@@ -18,11 +18,10 @@ from tensilelite.SolutionStructs.CompactSolution import (
     CompactSolution,
     compactLibrarySolutions,
     hydrateSolution,
-    kernelDedupeKey,
-    kernelFileBase,
 )
 from tensilelite.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
 from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.create_library.run import _dedupeKey, _fileBase
 
 _LOGIC_YAML = (
     Path(__file__).parent
@@ -92,14 +91,14 @@ def test_names_and_keys_match_the_naming_helpers(parsed):
     kernel = real.getKernels()[0]
     assert str(compact) == str(real)
     assert compact.baseName == getKernelFileBase(False, kernel)
-    assert kernelFileBase(False, compact) == kernelFileBase(False, real)
+    assert _fileBase(False, compact) == _fileBase(False, real)
     assert compact.dedupeKey() == getKeyNoInternalArgs(kernel, False)
-    assert kernelDedupeKey(False, compact) == kernelDedupeKey(False, real)
+    assert _dedupeKey(compact, False) == _dedupeKey(real, False)
     # codeObjectFile is assigned by the parent after compaction and is part of the key.
     compact["codeObjectFile"] = "lib_z"
     real._state["codeObjectFile"] = "lib_z"
-    assert kernelDedupeKey(False, compact) == getKeyNoInternalArgs(kernel, False)
-    assert kernelDedupeKey(False, compact).endswith(
+    assert _dedupeKey(compact, False) == getKeyNoInternalArgs(kernel, False)
+    assert _dedupeKey(compact, False).endswith(
         "lib_z" + str(real._state.get("DeviceNames", ""))
     )
     assert compact.helperNames == [(t, c(real)) for t, c in kernelObjectNameCallables()]
