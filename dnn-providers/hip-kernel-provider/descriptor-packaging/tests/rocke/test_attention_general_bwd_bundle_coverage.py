@@ -40,10 +40,12 @@ ARCHES = ("gfx942", "gfx950")
 FULL_CUS = {"gfx942": 304, "gfx950": 256}
 
 # Lowering details a bundle graph may legitimately draw: graphs that are malformed as
-# hipDNN graphs, which the shared bundles carry to exercise other engines' refusals.
+# hipDNN graphs, which the shared bundles carry to exercise other engines' refusals, and
+# the rank-3 Stats probe (REG-08), a layout this engine does not read.
 MALFORMED = (
     re.compile(r"causal_mask and causal_mask_bottom_right are mutually exclusive"),
     re.compile(r"^\w+ dims \(.*\), want [(\[]"),
+    re.compile(r"^lse \(uid \d+\) dims \(\d+, \d+, \d+\) / strides \(.*\) not rank 4$"),
 )
 
 

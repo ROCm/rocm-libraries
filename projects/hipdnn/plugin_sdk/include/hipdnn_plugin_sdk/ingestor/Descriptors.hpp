@@ -266,7 +266,7 @@ inline bool operator!=(const UhdScore& lhs, const UhdScore& rhs)
 /// A semantic dependency, independent of the descriptor file-format version.
 struct DescriptorDependency
 {
-    DescriptorId id;
+    DescriptorId id{};
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
@@ -330,7 +330,7 @@ inline bool operator!=(const HeuristicProvenance& lhs, const HeuristicProvenance
 /// compare equal.
 struct HeuristicDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     UhdAdapter adapter = UhdAdapter::STATIC_ORDER;
 
@@ -464,7 +464,7 @@ inline bool operator!=(const SlotDescriptor& lhs, const SlotDescriptor& rhs)
 /// fills after parsing.
 struct EngineDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     /// The default catalog ranker for the `default` arch key (see DescriptorSet::heuristic).
     /// nullopt when the engine ships no UHD; selection then falls back to the
@@ -480,8 +480,6 @@ struct EngineDescriptor
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::map<std::string, std::vector<DescriptorId>> predictEngine;
     std::map<std::string, std::vector<DescriptorId>> predictApplicableKernels;
-    /// Zero for a slotted engine, whose slots carry the KMDs. Value-initialized so per-arch
-    /// copies of one slotted UED compare equal.
     DescriptorId metadataSchemaId{};
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
@@ -553,7 +551,7 @@ enum class MatchScope
 /// UMD: one applicability check, shared by id across packs.
 struct MatchDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     MatchScope scope = MatchScope::GRAPH;
     std::string matchSymbol; ///< Resolved through NativeRegistry.
@@ -574,7 +572,7 @@ inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
 /// UDD: how to invoke a kernel, shared by every kernel in a pack.
 struct DispatchDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::string dispatchSymbol; ///< Resolved through NativeRegistry.
 };
@@ -792,7 +790,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
 /// numerically across the integer and floating-point alternatives (`1` equals `1.0`).
 struct KernelDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     KernelSource source;
     /// RFC 0017 §15.1: the launches of a multi-launch kernel, keyed by launch name, in place
@@ -896,11 +894,11 @@ bool allLaunchSources(const Kernel& kernel, Predicate predicate)
 /// a vector of child kernels.
 struct KernelDescriptorPack
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::vector<DescriptorId> matcherIds;
-    DescriptorId engineId;
-    DescriptorId dispatchId;
+    DescriptorId engineId{};
+    DescriptorId dispatchId{};
     /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent. A concrete
     /// entry is matched exactly against the device's base target id; a generic entry
     /// matches by membership in the generic target table. Part of the pack's catalog identity

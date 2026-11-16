@@ -22,8 +22,6 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 
-#include <algorithm>
-#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -33,7 +31,6 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
 
 #define DEBUG_TYPE "StinkyMergeBarrierPass"
@@ -41,10 +38,14 @@
 // StinkyMergeBarrierPass
 // ======================
 // Runs immediately after StinkyDAGSchedulerPass. Within loop bodies it looks
-// for two (or more) barrier groups that Layer 2 identified as a directional
-// overlapping pair and the scheduler placed with no matrix instruction between
-// them. It fuses them into a single group carrying the union of their memory
-// tokens, dropping the redundant second signal/wait pair.
+// for two barrier groups that Layer 2 identified as a directional overlapping
+// pair and the scheduler placed with no matrix instruction between them. It
+// moves only G2's s_barrier_signal to immediately after G1's s_barrier_wait.
+// G2's s_barrier_wait stays where it is. Neither group's memory tokens change.
+//
+// Both workgroup groups use barrier id -1, and only one signal of that id may
+// be in flight. Placing G2's signal after G1's wait closes that id first.
+// A signal that is already the next instruction after G1's wait is left alone.
 //
 // A legal "barrier group" is exactly one adjacent s_barrier_signal /
 // s_barrier_wait pair that shares the same non-empty LDS token set, e.g.:
@@ -52,16 +53,14 @@
 //   s_barrier_wait   -1   // token 0
 // Anything else (lone signal/wait, signal/.../wait with filler between, mismatched
 // tokens) is ignored. Two consecutive legal groups G1 (tokens T1) and G2 (tokens
-// T2) may merge only when Layer2BarrierOverlapAnalysis contains G1 -> G2,
+// T2) are candidates only when Layer2BarrierOverlapAnalysis contains G1 -> G2,
 // T1 ≠ T2, and no matrix instruction is issued between them. Issuing a WMMA
 // occupies the WMMA queue long enough to hide the later barrier, so cycle
-// distance is not a merge gate.
+// distance is not a gate.
 //
-// The merge never moves ordinary instructions: it unions G2's tokens into G1
-// and drops G2. G1 stays where it is, so a producer or consumer of T1 may sit
-// between the groups. G2 is the barrier that moves earlier. A producer or
-// consumer of T2 between the groups would end up on the wrong side of it, and
-// another barrier between them would too, so those pairs are left unmerged.
+// Ordinary instructions are not moved. A producer or consumer of T2 between
+// the groups would be crossed by the moved signal, and another barrier
+// between them would too, so those pairs are left untouched.
 
 namespace {
 using namespace stinkytofu;
@@ -76,40 +75,14 @@ struct BarrierGroup {
 
 using Layer2OverlapResult = Layer2BarrierOverlapAnalysis::Result;
 
-bool containsBarrier(const BarrierGroup& group, const StinkyInstruction* barrier) {
-    return std::find(group.barriers.begin(), group.barriers.end(), barrier) != group.barriers.end();
-}
-
-// Layer 2 records a directional after->before relation. The merge candidate
-// must preserve that direction in final program order.
+// Layer 2 records a directional after->before relation. The candidate must
+// preserve that direction in final program order.
 bool isLayer2OverlapPair(const BarrierGroup& earlier, const BarrierGroup& later,
                          const Layer2OverlapResult& overlaps) {
     for (StinkyInstruction* barrierAfter : earlier.barriers)
         for (StinkyInstruction* barrierBefore : later.barriers)
             if (overlaps.contains(barrierAfter, barrierBefore)) return true;
     return false;
-}
-
-// A successful merge makes \p surviving and \p removed one logical barrier group.
-// Redirect the removed group's scheduler-approved incoming/outgoing relations to
-// that logical survivor. This intentionally derives only the transitive chain
-// eligibility needed after an approved merge; it does not authorize an unrelated
-// pair that was absent from the scheduler's validated relation graph.
-void transferLayer2OverlapPairs(Layer2OverlapResult& overlaps, const BarrierGroup& surviving,
-                                const BarrierGroup& removed) {
-    std::vector<Layer2BarrierOverlapAnalysis::BarrierPair> additions;
-    for (const auto& [barrierAfter, barrierBefore] : overlaps.pairs()) {
-        const bool afterRemoved = containsBarrier(removed, barrierAfter);
-        const bool beforeRemoved = containsBarrier(removed, barrierBefore);
-        if (afterRemoved && !beforeRemoved)
-            for (StinkyInstruction* survivor : surviving.barriers)
-                additions.emplace_back(survivor, barrierBefore);
-        if (beforeRemoved && !afterRemoved)
-            for (StinkyInstruction* survivor : surviving.barriers)
-                additions.emplace_back(barrierAfter, survivor);
-    }
-    for (const auto& [barrierAfter, barrierBefore] : additions)
-        overlaps.record(barrierAfter, barrierBefore);
 }
 
 // LDS memory-token ids attached to a barrier (from the pseudo LDS registers
@@ -157,74 +130,26 @@ std::vector<BarrierGroup> collectBarrierGroups(BasicBlock& bb) {
     return groups;
 }
 
-// Add \p tokenId as an LDS pseudo register to \p regs if not already present.
-void addUniqueLds(std::vector<StinkyRegister>& regs, uint32_t tokenId, bool /*isDest*/) {
-    for (const StinkyRegister& r : regs)
-        if (r.isRegister() && r.reg.type == RegType::LDS && r.reg.idx == tokenId) return;
-    regs.push_back(StinkyRegister(RegType::LDS, tokenId, 1));
-}
-
-// Fold \p extraTokens into a barrier's MemTokenData modifier and LDS pseudo
-// src/dest registers (deduplicated), so the merged barrier guards both groups.
-void addTokensToBarrier(StinkyInstruction* barrier, const std::unordered_set<uint32_t>& extra) {
-    // MemTokenData modifier.
-    if (auto* mt = barrier->getModifier<MemTokenData>()) {
-        for (uint32_t t : extra) {
-            if (std::find(mt->tokens.begin(), mt->tokens.end(), static_cast<int>(t)) ==
-                mt->tokens.end())
-                mt->tokens.push_back(static_cast<int>(t));
-        }
-    }
-
-    // LDS pseudo registers (barriers carry each token on both src and dest).
-    std::vector<StinkyRegister> srcs = barrier->getSrcRegs();
-    std::vector<StinkyRegister> dsts = barrier->getDestRegs();
-    for (uint32_t t : extra) {
-        addUniqueLds(srcs, t, /*isDest=*/false);
-        addUniqueLds(dsts, t, /*isDest=*/true);
-    }
-    barrier->setSrcRegs(srcs);
-    barrier->setDestRegs(dsts);
-}
-
-// Overwrite barrier comment with merged-token summary:
-// "merged barrier, sync LDS0, sync LDS1, ..."
-void setMergedBarrierComment(StinkyInstruction* barrier,
-                             const std::unordered_set<uint32_t>& mergedTokens) {
-    std::vector<uint32_t> sortedTokens(mergedTokens.begin(), mergedTokens.end());
-    std::sort(sortedTokens.begin(), sortedTokens.end());
-
-    std::string comment = "merged barrier";
-    for (uint32_t token : sortedTokens) {
-        comment += ", sync LDS";
-        comment += std::to_string(token);
-    }
-
-    if (auto* c = barrier->getModifier<CommentData>()) {
-        c->comment = comment;
-    } else {
-        barrier->addModifier<CommentData>(CommentData{comment});
-    }
-}
-
-// Attempt to merge the two consecutive groups g1 (earlier) and g2 (later) inside
-// \p bb. Returns true on success (IR mutated).
+// Move g2's signal to just after g1's wait. Tokens and g2's wait stay put.
+// Returns true when the IR changed.
 bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2,
                   Layer2OverlapResult& overlaps) {
     if (!isLayer2OverlapPair(g1, g2, overlaps)) return false;
 
-    // Only distinct token sets are merge candidates. Same-token consecutive
-    // legal groups are successive syncs of one token and must both remain.
+    // Only distinct token sets are candidates. Same-token consecutive legal
+    // groups are successive syncs of one token and must both remain.
     if (g1.tokens == g2.tokens) return false;
 
-    // G1 stays put and absorbs G2's tokens; G2 is the barrier that moves
-    // earlier. An instruction between the groups may touch G1's tokens. It
-    // must not touch G2's tokens, and another barrier must not sit between
-    // them: either one would be crossed by folding G2 back onto G1.
-    // A matrix instruction between them also blocks the merge. Issuing one
-    // WMMA, including scaled WMMA, fills the WMMA queue for long enough to
-    // hide G2, so the groups stay separate no matter how few cycles the
-    // modeled latency reports.
+    StinkyInstruction* laterSignal = g2.barriers.front();
+    if (laterSignal == nullptr || !isBarrierSignal(*laterSignal)) return false;
+    // Already as early as the shared barrier id allows.
+    if (std::next(g1.lastIt).getNodePtr() == laterSignal) return false;
+
+    // The signal moves earlier across whatever sits between the groups. An
+    // instruction there may touch G1's tokens. It must not touch G2's tokens,
+    // and another barrier must not sit between them. A matrix instruction
+    // between them also blocks the hoist: one WMMA, including scaled WMMA,
+    // fills the WMMA queue long enough to hide G2.
     for (auto it = std::next(g1.lastIt); it != g2.firstIt; ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
@@ -233,23 +158,13 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
         if (touchesTokens(*inst, g2.tokens)) return false;
     }
 
-    std::unordered_set<uint32_t> mergedTokens = g1.tokens;
-    mergedTokens.insert(g2.tokens.begin(), g2.tokens.end());
-
-    // Safe: fold g2's tokens into every barrier of g1, then drop g2's redundant
-    // signal/wait pair. No instruction is moved.
-    for (StinkyInstruction* barrier : g1.barriers) {
-        addTokensToBarrier(barrier, g2.tokens);
-        setMergedBarrierComment(barrier, mergedTokens);
-    }
-    transferLayer2OverlapPairs(overlaps, g1, g2);
-    for (StinkyInstruction* barrier : g2.barriers) barrier->erase();
-
+    bb.removeIR(laterSignal);
+    bb.insertIR(std::next(g1.lastIt), laterSignal);
     return true;
 }
 
-// Repeatedly merge mergeable adjacent barrier-group pairs in \p bb until a fixed
-// point. Chained close groups collapse into one multi-token group.
+// Hoist every eligible later signal. A hoisted signal is no longer adjacent to
+// its wait, so that group is not a candidate again.
 void mergeBarriersInBlock(BasicBlock& bb, Layer2OverlapResult& overlaps) {
     bool changed = true;
     while (changed) {

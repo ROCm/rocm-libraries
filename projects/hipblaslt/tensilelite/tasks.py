@@ -12,13 +12,6 @@ import sys
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
-# Ensure the TensileLite package (shipped next to this file) is importable when
-# invoke runs from the tensilelite root, regardless of cwd/sys.path state.
-if str(_TASKS_DIR) not in sys.path:
-    sys.path.insert(0, str(_TASKS_DIR))
-
-from tensilelite.RocisaStatus import _rocisa_install_status
-
 # Architecture detection, steppings included, lives in the packaged TensileLite tree
 # (invoke-free) so CI test artifacts can exercise it directly; these @task
 # wrappers only expose it on the invoke command line.
@@ -79,44 +72,33 @@ def get_gpu_arch(c):
         print(cmake_gpu_target(detected))
 
 
-
 @task(
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "static": "Build rocisa's source StinkyTofu dependency static instead of shared.",
-        "rebuild_on_import": "Deprecated compatibility default: rebuild editable rocisa on its first import. Pass --no-rebuild-on-import to disable it.",
         "stinkytofu": "Install the standalone stinkytofu Python binding (provides `import stinkytofu` for the logical-IR tooling). One of auto|on|off (default auto: install when a gfx1250 GPU is detected).",
         "rebuild_stinkytofu": "Force a fresh rebuild+reinstall of the stinkytofu binding even if it is already installed.",
     }
 )
-def rocisa(c, rocisa_dir=None, static=False, rebuild_on_import=True,
+def rocisa(c, rocisa_dir=None, static=False,
            stinkytofu="auto", rebuild_stinkytofu=False):
-    """Install rocisa as an editable pip package.
+    """Install rocisa editably for source development.
 
-    Not required before `invoke build-client` — the client build includes
-    rocisa. Run this task to make rocisa importable system-wide (outside the
-    build directory), or after changes to rocisa's pyproject.toml or CMakeLists.txt.
+    This is a separate rocisa developer workflow for generator commands and
+    compound development tasks. ``invoke build-client`` does not invoke it.
+    Rerun it after changing rocisa's C++ sources, pyproject.toml, or
+    CMakeLists.txt; importing rocisa never starts a native build.
 
     Pass --static to build its source StinkyTofu dependency static — useful for
     exercising the static-plugin path covered by
     rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
-
-    Rebuild-on-import remains enabled by default for compatibility, but is
-    deprecated because an ordinary import should not perform a native build.
-    Pass --no-rebuild-on-import to opt out before the default changes in a
-    future release.
 
     On gfx1250 this also builds and installs the standalone stinkytofu Python
     binding, which provides `import stinkytofu` for the logical-IR tooling
     (control with --stinkytofu=auto|on|off). `import rocisa` itself is always
     the native backend.
     """
-    _pip_install_rocisa(
-        c,
-        rocisa_dir,
-        shared=not static,
-        rebuild_on_import=rebuild_on_import,
-    )
+    _pip_install_rocisa(c, rocisa_dir, shared=not static)
     if _want_stinkytofu(stinkytofu):
         _pip_install_stinkytofu(c, force=rebuild_stinkytofu)
 
@@ -133,16 +115,8 @@ def _load_stinkytofu_tasks():
     )
 
 
-def _pip_install_rocisa(c, rocisa_dir=None, shared=True, rebuild_on_import=True):
-    """Editable-install rocisa via scikit-build-core.
-
-    Factored out of the `rocisa` task so `build_client` can reuse it to keep
-    the editable install fresh.
-
-    rebuild_on_import=True preserves the deprecated compatibility behavior of
-    rebuilding on a first import. Explicit build-task rebuilds pass false: they
-    have already refreshed the extension and do not need another import build.
-    """
+def _pip_install_rocisa(c, rocisa_dir=None, shared=True):
+    """Editable-install rocisa via scikit-build-core."""
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
     rocm = _detect_rocm()
 
@@ -155,14 +129,6 @@ def _pip_install_rocisa(c, rocisa_dir=None, shared=True, rebuild_on_import=True)
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
-    env["SKBUILD_EDITABLE_REBUILD"] = "true" if rebuild_on_import else "false"
-    if rebuild_on_import:
-        print(
-            "warning: rocisa rebuild-on-import is deprecated; use "
-            "'invoke rocisa --no-rebuild-on-import' to opt out before the "
-            "default changes in a future release.",
-            file=sys.stderr,
-        )
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
     c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
 
@@ -171,8 +137,8 @@ def _want_stinkytofu(stinkytofu, targets=None):
     """Resolve the tri-state ``--stinkytofu`` option (auto/on/off) to a bool.
 
     ``auto`` installs the standalone stinkytofu binding when gfx1250 is present
-    -- among ``targets`` when given (build_client's GPU targets) or otherwise
-    the detected GPU (the rocisa task). ``on``/``off`` force the decision.
+    -- among ``targets`` when given, otherwise on the detected GPU.
+    ``on``/``off`` force the decision.
     """
     val = str(stinkytofu).strip().lower()
     if val in ("on", "true", "yes", "1"):
@@ -182,7 +148,7 @@ def _want_stinkytofu(stinkytofu, targets=None):
     if val in ("auto", "none", ""):
         arch = targets if targets is not None else (detect_gpu_arch() or "")
         return "gfx1250" in arch
-    raise Exit(f"Invalid --stinkytofu={stinkytofu!r}; use auto, on, or off", code=1)
+    raise Exit(f"Invalid stinkytofu mode {stinkytofu!r}; use auto, on, or off", code=1)
 
 
 def _pip_install_stinkytofu(c, force=False):
@@ -236,39 +202,22 @@ def _pip_install_stinkytofu(c, force=False):
     c.run(f"pip install {force_flag}{shlex.quote(str(src))}", env=env)
 
 
-def _maybe_rebuild_rocisa(c, rocisa_dir=None):
-    """Refresh the editable rocisa so `import rocisa` picks up C++ edits.
+@task(
+    help={
+        "mode": "One of auto|on|off (default auto: install when gfx1250 is among --gpu-targets, or is the detected GPU when no targets are given).",
+        "gpu_targets": "GPU targets the following client build and tests use; consulted by --mode=auto.",
+        "rebuild": "Force a fresh rebuild+reinstall of the binding even if it is already installed.",
+    }
+)
+def install_stinkytofu(c, mode="auto", gpu_targets=None, rebuild=False):
+    """Install the standalone stinkytofu Python binding for logical-IR tooling.
 
-    Only acts when rocisa is installed editable (pip install -e). When
-    non-editable (e.g. tox), does nothing.
-
-    Degrades to a warning — never a hard failure — when the build backend
-    (scikit-build-core / nanobind) is unavailable.
+    ``invoke build-client`` only builds the C++ client and does not provision
+    Python packages. Environments that use the logical-IR tooling run this
+    task separately; kernel generation itself uses native rocisa.
     """
-    import importlib.util
-
-    if _rocisa_install_status() != "editable":
-        return
-
-    missing = [m for m in ("scikit_build_core", "nanobind") if importlib.util.find_spec(m) is None]
-    if missing:
-        print(
-            "warning: editable rocisa is installed but its build backend is "
-            f"unavailable ({', '.join(missing)}); skipping rocisa rebuild. If you "
-            "changed rocisa C++ sources, run 'invoke rocisa' where the build deps exist.",
-            file=sys.stderr,
-        )
-        return
-
-    try:
-        print("Rebuilding editable rocisa to pick up any C++ source changes...")
-        _pip_install_rocisa(c, rocisa_dir, rebuild_on_import=False)
-    except Exception as e:
-        print(
-            f"warning: rocisa rebuild failed ({e}); continuing with the client build. "
-            "Run 'invoke rocisa' manually to refresh the bindings.",
-            file=sys.stderr,
-        )
+    if _want_stinkytofu(mode, targets=gpu_targets):
+        _pip_install_stinkytofu(c, force=rebuild)
 
 
 @task(
@@ -283,9 +232,6 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
-        "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
-        "stinkytofu": "Install the standalone stinkytofu Python binding (provides `import stinkytofu` for the logical-IR tooling). One of auto|on|off (default auto: install when gfx1250 is among the GPU targets).",
-        "rebuild_stinkytofu": "Force a fresh rebuild+reinstall of the stinkytofu binding even if it is already installed.",
         "enable_asan": "Enable AddressSanitizer.",
         "enable_tsan": "Enable ThreadSanitizer.",
         "enable_sdma": "Build the GPU-initiated SDMA transport path; needs hsakmt and hsa-runtime64.",
@@ -303,19 +249,17 @@ def build_client(
     export_compile_commands=False,
     enable_rocprof=False,
     cxx_flags_release=None,
-    rebuild_rocisa=True,
-    stinkytofu="auto",
-    rebuild_stinkytofu=False,
     enable_asan=False,
     enable_tsan=False,
     enable_sdma=False,
 ):
     """Build the tensilelite-client C++ executable.
 
+    This task only configures and builds the client. It does not install or
+    refresh Python packages: provision rocisa with ``invoke rocisa`` and the
+    optional logical-IR binding with ``invoke install-stinkytofu``.
+
     To run Tensile after building, use: tensilelite/bin/Tensile <args>
-    CMake builds rocisa in the client build directory. When rocisa is
-    installed editable, the bindings are refreshed to pick up C++ edits
-    (disable with --no-rebuild-rocisa).
     """
 
     if enable_asan and enable_tsan:
@@ -340,15 +284,6 @@ def build_client(
                 raise Exit(f"Error: compiler not found at {compiler}", code=1)
             except subprocess.SubprocessError as e:
                 raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
-
-    if rebuild_rocisa:
-        _maybe_rebuild_rocisa(c)
-
-    # Optionally install the standalone stinkytofu binding (`import stinkytofu`)
-    # for the logical-IR tooling. Kernel generation itself uses native rocisa and
-    # does not require this binding.
-    if _want_stinkytofu(stinkytofu, targets=gpu_targets):
-        _pip_install_stinkytofu(c, force=rebuild_stinkytofu)
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {shlex.quote(build_dir)}")
