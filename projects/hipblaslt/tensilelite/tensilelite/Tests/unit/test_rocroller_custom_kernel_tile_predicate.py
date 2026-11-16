@@ -16,7 +16,10 @@ makes the kernels unreachable, which is the opposite failure.
 
 import pytest
 
+from tensilelite.Common.Utilities import state
 from tensilelite.Contractions import ProblemPredicate
+from tensilelite.LibraryIO import read, write
+from tensilelite.Properties import Property
 
 
 M_TAG = "Free0SizeMultiple"
@@ -129,6 +132,25 @@ def test_a_unit_tile_emits_nothing():
     assert M_TAG not in tags and K_TAG not in tags
 
 
+def test_a_macrotile_of_the_wrong_length_names_the_kernel():
+    """Anything but [MacroTile0, MacroTile1, DepthU] used to skip both guards
+    and still publish the kernel."""
+    name = "RR_GEMM_TN_FP8_FP8_Float_Float_Float_WGT_256x128x128_UR_2"
+    with pytest.raises(ValueError, match=name) as caught:
+        _by_tag(_state(name=name, macrotile=(256, 128)))
+    assert "[256, 128]" in str(caught.value)
+
+
+def test_a_three_element_macrotile_still_emits_m_and_k():
+    tags = _by_tag(_state(macrotile=(64, 32, 128)))
+    assert len(tags.get(M_TAG, [])) == 1
+    assert len(tags.get(K_TAG, [])) == 1
+    assert tags[M_TAG][0].value == 64
+    assert tags[M_TAG][0].index == 0
+    assert tags[K_TAG][0].value == 128
+    assert tags[K_TAG][0].index == -1
+
+
 # -- batch and buffer-addressing limits -----------------------------------
 
 BATCH_TAG = "BatchSizeEqual"
@@ -166,3 +188,25 @@ def test_batch_and_buffer_limits_are_rocroller_only(name):
     """Other kernel families handle batching and large tensors themselves."""
     tags = _by_tag(_state(name=name))
     assert BATCH_TAG not in tags and BUFFER_TAG not in tags
+
+
+def test_buffer_addressing_limit_check_round_trips_yaml_and_msgpack(tmp_path):
+    """LibraryIO writes both library formats. Reading the document back must
+    still carry the predicate the kernel declared. The C++ msgpack codec,
+    which instantiates it, is MessagePackWritingTest."""
+    limit = next(p for p in ProblemPredicate.CompoundPredicates(
+        _state(), _ProblemTypeStub()) if p.tag == BUFFER_TAG)
+    library = {
+        "solutions": [{
+            "kernelName": _state()["CustomKernel"]["name"],
+            "problemPredicate": state(limit),
+        }],
+    }
+    for fmt, suffix in (("yaml", ".yaml"), ("msgpack", ".dat.zlib")):
+        base = tmp_path / fmt / "library"
+        base.parent.mkdir()
+        write(str(base), library, format=fmt)
+        loaded = read(str(base) + suffix)
+        restored = Property.FromOriginalState(
+            loaded["solutions"][0]["problemPredicate"])
+        assert restored.tag == BUFFER_TAG
