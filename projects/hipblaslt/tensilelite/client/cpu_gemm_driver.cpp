@@ -484,8 +484,8 @@ int runGemm(size_t         m,
             size_t         k,
             bool           transA,
             bool           transB,
-            float          alpha,
-            float          beta,
+            double         alpha,
+            double         beta,
             bool           validate,
             bool           injectValidationFailure,
             bool           tryFastPath,
@@ -1142,8 +1142,8 @@ int main(int argc, char* argv[])
         "K", po::value<size_t>()->default_value(128), "Matrix K dimension")(
         "transA", po::value<bool>()->default_value(false), "Transpose A")(
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
-        "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
-        "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
+        "alpha", po::value<double>()->default_value(1.0), "Alpha scalar")(
+        "beta", po::value<double>()->default_value(0.0), "Beta scalar")(
         "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4, i8)")(
         "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
         "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
@@ -1187,8 +1187,8 @@ int main(int argc, char* argv[])
     size_t      k                = vm["K"].as<size_t>();
     bool        transA           = vm["transA"].as<bool>();
     bool        transB           = vm["transB"].as<bool>();
-    float       alpha            = vm["alpha"].as<float>();
-    float       beta             = vm["beta"].as<float>();
+    double      alpha            = vm["alpha"].as<double>();
+    double      beta             = vm["beta"].as<double>();
     std::string typeStr          = vm["type"].as<std::string>();
     std::string typeAStr         = vm["typeA"].as<std::string>();
     std::string typeBStr         = vm["typeB"].as<std::string>();
@@ -1289,8 +1289,8 @@ int main(int argc, char* argv[])
 
     if(typeAlphaStr == "i32")
     {
-        auto isInt32Value = [](float v) {
-            return std::nearbyint(v) == v && v >= -2147483648.0f && v < 2147483648.0f;
+        auto isInt32Value = [](double v) {
+            return std::nearbyint(v) == v && v >= -2147483648.0 && v < 2147483648.0;
         };
         if(!isInt32Value(alpha) || !isInt32Value(beta))
         {

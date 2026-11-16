@@ -815,6 +815,11 @@ foreach(CASE
     )
 endforeach()
 
+# A valid int32 scalar that cannot be represented in float must survive CLI parsing.
+add_cpu_gemm_test(slow_I8_I32_I32_Int32BetaBoundary
+    ARGS -M 1 -N 1 -K 0 --type i8 --typeCD i32 --typeAlpha i32 --alpha 0 --beta 2147483647 --validate
+)
+
 if(COMMAND apply_ctest_category_labels)
     apply_ctest_category_labels(
         "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_test_categories.yaml"
