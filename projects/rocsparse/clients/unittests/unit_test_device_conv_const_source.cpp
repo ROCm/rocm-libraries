@@ -170,8 +170,7 @@ namespace
     struct Run
     {
         StageStatus st;
-        int64_t     nnz        = -1;
-        int64_t     nnz_device = -1;
+        int64_t     nnz = -1;
     };
 
     StageStatus sparse_to_sparse(rocsparse_handle             handle,
@@ -208,8 +207,8 @@ namespace
         return st;
     }
 
-    // Analysis, rocsparse_extract_nnz in host and in device pointer mode, then the target
-    // arrays are attached and the compute stage runs.
+    // Analysis, then rocsparse_extract_nnz, then the target arrays are attached and the
+    // compute stage runs.
     Run extract_stages(rocsparse_handle            handle,
                        rocsparse_const_spmat_descr source,
                        rocsparse_spmat_descr       target,
@@ -236,15 +235,9 @@ namespace
         if(st.analysis != st_ok || st.sync_a != hipSuccess)
             return run;
 
+        // rocsparse_extract_nnz writes a host scalar; it does not read the pointer mode.
         EXPECT_EQ(rocsparse_extract_nnz(handle, descr, &run.nnz), st_ok);
         EXPECT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
-        {
-            PointerModeScope pm(handle, rocsparse_pointer_mode_device);
-            DevBuf<int64_t>  dev(std::vector<int64_t>{-1});
-            EXPECT_EQ(rocsparse_extract_nnz(handle, descr, dev), st_ok);
-            EXPECT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
-            run.nnz_device = dev.read(1)[0];
-        }
 
         EXPECT_EQ(
             (csc ? rocsparse_csc_set_pointers : rocsparse_csr_set_pointers)(target, ptr, ind, val),
@@ -381,10 +374,8 @@ namespace
         expect_same_status(label, mut.st, cst.st);
         if(!healthy(mut.st) || !healthy(cst.st))
             return;
-        EXPECT_EQ(mut.nnz, want_nnz) << "mutable host-mode nnz";
-        EXPECT_EQ(cst.nnz, want_nnz) << "const host-mode nnz";
-        EXPECT_EQ(mut.nnz_device, want_nnz) << "mutable device-mode nnz";
-        EXPECT_EQ(cst.nnz_device, want_nnz) << "const device-mode nnz";
+        EXPECT_EQ(mut.nnz, want_nnz) << "mutable nnz";
+        EXPECT_EQ(cst.nnz, want_nnz) << "const nnz";
         expect_written(mut_ptr, want_ptr, "mutable ptr");
         expect_written(cst_ptr, want_ptr, "const ptr");
         expect_written(mut_ind, want_ind, "mutable ind");
@@ -940,7 +931,7 @@ namespace
                                         shift<J>({0, 2, 1, 0, 2}, base),
                                         numbered_vector<T>(5),
                                         label + " 3x3");
-                // Three of the four 2x2 blocks hold entries; two blocks are partly filled.
+                // Three of the four 2x2 blocks hold entries; the upper-right one is partly filled.
                 run_csr_to_bsr<P, J, T>(handle,
                                         dir,
                                         base,
@@ -1066,6 +1057,8 @@ namespace
         EXPECT_EQ(cst.compute, mut.compute);
     }
 
+    // The target is created with no value array, so the outer datatype guard never
+    // runs and only the inner check is tested.
     TEST_F(ConvConstSource, Csr2BsrDatatypeMismatch)
     {
         DevBuf<int32_t> ptr(std::vector<int32_t>{0, 1, 1});
