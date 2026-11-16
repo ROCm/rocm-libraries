@@ -275,8 +275,8 @@ SdpaBwdParams makeArgsParams(const char* arch,
 {
     SdpaBwdParams p{};
     p.batchSize = 2U;
-    p.numHeadsQ = 3U;
-    p.numHeadsKv = 3U;
+    p.numHeadsQ = 8U;
+    p.numHeadsKv = 2U;
     p.seqLenQ = 200U;
     p.seqLenKv = 300U;
     p.headDimQk = headDimQk;
@@ -368,10 +368,10 @@ void expectDqdkdvSharedArgs(const fmha_bwd_dqdkdv_args& dqdkdv, const BwdBuffers
     EXPECT_EQ(dqdkdv.ptr_d, &b.d);
     EXPECT_EQ(dqdkdv.scalar, K_ARGS_SCALE);
     EXPECT_EQ(dqdkdv.log2e, 1.44269504089F);
-    EXPECT_EQ(dqdkdv.ratio, 1U);
+    EXPECT_EQ(dqdkdv.ratio, 4U);
     EXPECT_EQ(dqdkdv.seqlen_q, 200U);
     EXPECT_EQ(dqdkdv.seqlen_k, 300U);
-    EXPECT_EQ(dqdkdv.nhead_q, 3U);
+    EXPECT_EQ(dqdkdv.nhead_q, 8U);
     EXPECT_EQ(dqdkdv.Hs_q, 204U);
     EXPECT_EQ(dqdkdv.BAs_q, 206U);
     EXPECT_EQ(dqdkdv.Seqs_q, 202U);
@@ -442,7 +442,7 @@ TEST(TestSdpaBwdArgsBuilder, Gfx942A32WindowArgs)
     // FP32 dq_acc [B = 2, H = 3, 200, 128]
     expectPostSharedArgs(args.post, b, 128U);
     EXPECT_EQ(args.post.Hs_dq_acc, 102400U);
-    EXPECT_EQ(args.post.BAs_dq_acc, 307200U);
+    EXPECT_EQ(args.post.BAs_dq_acc, 819200U);
     EXPECT_EQ(args.post.Seqs_dq_acc, 512U);
 }
 
@@ -472,7 +472,7 @@ TEST(TestSdpaBwdArgsBuilder, Gfx950A32WindowArgs)
     // FP32 dq_acc [B = 2, H = 3, 200, 128]
     expectPostSharedArgs(args.post, b, 128U);
     EXPECT_EQ(args.post.Hs_dq_acc, 102400U);
-    EXPECT_EQ(args.post.BAs_dq_acc, 307200U);
+    EXPECT_EQ(args.post.BAs_dq_acc, 819200U);
     EXPECT_EQ(args.post.Seqs_dq_acc, 512U);
 }
 
@@ -518,6 +518,6 @@ TEST(TestSdpaBwdArgsBuilder, Gfx950A16DqShuffleArgs)
     // 2-byte dq_acc [B = 2, H = 3, 208, 192]
     expectPostSharedArgs(args.post, b, 192U);
     EXPECT_EQ(args.post.Hs_dq_acc, 79872U);
-    EXPECT_EQ(args.post.BAs_dq_acc, 239616U);
+    EXPECT_EQ(args.post.BAs_dq_acc, 638976U);
     EXPECT_EQ(args.post.Seqs_dq_acc, 384U);
 }
