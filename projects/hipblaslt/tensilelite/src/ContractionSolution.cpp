@@ -2256,8 +2256,11 @@ namespace TensileLite
 
     // True if no A/B leading dimension aliases, but at least one would alias if it were
     // packed, i.e. the caller padded the stride. Solutions are tuned on packed strides.
+    // TT is excluded: measured mixed (-6% to +4%) where every other layout gains or is flat.
     static bool callerPaddedAwayAliasing(ContractionProblemGemm const& problem)
     {
+        if(problem.transA() && problem.transB())
+            return false;
         bool padded = false;
         for(auto const* t : {&problem.a(), &problem.b()})
         {

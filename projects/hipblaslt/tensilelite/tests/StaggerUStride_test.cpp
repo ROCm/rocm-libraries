@@ -35,11 +35,11 @@ namespace
     }
 
     // Float GEMM, n = 256. TN: packed lda = ldb = k. NN: packed lda = m, ldb = k.
-    ContractionProblemGemm
-        makeProblem(size_t k, size_t lda, size_t ldb, bool transA = true, size_t m = 256)
+    ContractionProblemGemm makeProblem(
+        size_t k, size_t lda, size_t ldb, bool transA = true, size_t m = 256, bool transB = false)
     {
         auto problem
-            = ContractionProblemGemm::GEMM(transA, false, m, 256, k, lda, ldb, m, 1.0, false, 1);
+            = ContractionProblemGemm::GEMM(transA, transB, m, 256, k, lda, ldb, m, 1.0, false, 1);
         problem.setParams().setUniformSummationOrder(0);
         return problem;
     }
@@ -78,6 +78,12 @@ TEST(StaggerUStrideTest, PaddingUnaliasedPackedStrideKeepsTunedMapping)
 {
     // 500 floats = 2000 B is not aliased when packed, so padding changes nothing.
     EXPECT_EQ(mappingFor(makeProblem(500, 516, 516)), kTunedMapping);
+}
+
+TEST(StaggerUStrideTest, TTLayoutKeepsTunedMapping)
+{
+    // TT: packed lda = k = 512 floats = 2048 B, padded; ldb = n = 256 is packed.
+    EXPECT_EQ(mappingFor(makeProblem(512, 528, 256, true, 256, true)), kTunedMapping);
 }
 
 TEST(StaggerUStrideTest, RuleLimitedToGfx1151AndStaggeredSolutions)
