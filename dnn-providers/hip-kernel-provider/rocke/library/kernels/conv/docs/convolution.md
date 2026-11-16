@@ -11,7 +11,8 @@ This page covers:
   `library/kernels/common/conv_direct_wgrad_gather.py`,
   `library/kernels/common/conv_direct_dw_wgrad_mfma.py`,
   `library/kernels/common/conv_direct_grouped_wgrad_mfma.py` (direct wgrad)
-- `library/kernels/common/conv_direct_fwd_pp_mfma.py` (gfx950 direct forward)
+- `library/kernels/common/conv_direct_fwd_pp_mfma.py` (gfx950 ping-pong direct forward)
+- `library/kernels/common/conv_direct_fwd_flex_mfma.py` (gfx950 flattened-pixel direct forward)
 - `library/kernels/common/img2col.py`
 
 Pooling (`platform/python/rocke/instances/common/pooling.py`) is a platform
@@ -1626,6 +1627,46 @@ is offered where at least half of its padded tile grid is real work. The C++
 twin covers every knob; the byte-identity gate is
 `library/tests/parity/conv_direct_fwd_pp_mfma_emit.{c,py}`, the GPU numeric
 test `library/tests/test_direct_fwd_pp_mfma.py`.
+
+## Direct Forward on MFMA with Flattened Pixels (gfx950)
+
+`library/kernels/common/conv_direct_fwd_flex_mfma.py`, spec `FwdFlexMfmaSpec`,
+builder `build_fwd_flex_mfma` (C++ twin `instance_conv_direct_fwd_flex_mfma.h`).
+A dense (`groups == 1`) forward for gfx950 (wave64, `mfma_f32_16x16x32`) that
+handles any filter, stride, dilation and padding. The arch gate reads
+`ArchTarget` capabilities (wave64, 16-byte `buffer_load ... lds`,
+`mfma_f32_16x16x32`), which of the known targets only gfx950 has.
+
+A workgroup of 8 waves owns a tile of 256 flattened output pixels (N x Ho x Wo)
+and `bk` (128 or 256) output channels. The reduction is over taps x 64-channel
+chunks in a persistent grid of up to 256 blocks:
+
+- the im2col mapping is a per-lane pixel base (tile constant) plus a scalar
+  tap offset; taps whose window falls entirely in padding are skipped (a
+  32-bit valid-tap bitmap per pixel, one bit per tap);
+- every operand byte is staged with `buffer_load ... lds` (16 bytes per lane),
+  never through VGPRs; the LDS granule XOR swizzle is applied on the global
+  side; two static stages avoid cross-stage alias ambiguity for the
+  `waitcnt` pass;
+- the 8 waves form two ping-pong groups of 4 (each owning half the pixel
+  tile); group 0 issues the next DMA after the barrier, group 1 issues at
+  its MFMA phase start, so every DMA has a full step to land;
+- the `permlane32_swap` epilogue reorders the per-lane MFMA results so that
+  consecutive channels are contiguous in memory without an LDS round-trip;
+- `split_c > 1` slices the channel reduction into `split_c` pieces and
+  writes fp32 partial sums to a workspace that `direct_split_reduce` folds
+  into the output.
+
+Runtime (kernargs, the direct-conv block): batch, extents and both channel
+counts. Build-time: the filter, padding, stride, dilation, `bk`, `split_c`
+and dtype. Constraints: `groups == 1`, `C` a multiple of 64, `K` a multiple
+of 8, stride and dilation both at least 1, at most 32 taps, every extent at
+least 1, the input image, output image, weight tensor and workspace slab
+(when `split_c > 1`) each at most `INT32_MAX` bytes. The AOT grid is
+`FWD_FLEX_LAYERS` times `FWD_FLEX_KNOBS` (`kernels/conv/direct_aot_jobs.py`,
+variant `direct_fwd_flex_mfma`). The C++ twin covers every knob; the
+byte-identity gate is `library/tests/parity/conv_direct_fwd_flex_mfma_emit.{c,py}`,
+the GPU numeric test `library/tests/test_direct_fwd_flex_mfma.py`.
 
 ## Winograd Forward (gfx1250)
 
