@@ -13,8 +13,9 @@
  * tests/core/test_global_access_alignment.py and the HIP refusals of
  * tests/core/test_mma_io.py and tests/core/test_tf32.py, whose C++ halves
  * otherwise run only where the pybind engine is built. The scalar global loads
- * and stores read their `align` through the same rule; without one they keep
- * their own claims.
+ * and stores check a given `align` with the same rule when they are built and
+ * read it with that rule when they are lowered; with `align` 0 they record
+ * their own default, as the Python builders do when it is omitted.
  */
 
 #include "rocke/error.hpp"
@@ -457,6 +458,221 @@ int test_the_global_vector_builders_refuse_an_invalid_align()
     return 0;
 }
 
+/* The last scalar global load or store recorded in `b`'s kernel body. */
+const rocke_op_t* last_scalar_access(const rocke_ir_builder_t* b)
+{
+    const rocke_region_t* body = b->kernel->body;
+    for(int i = body->num_ops - 1; i >= 0; --i)
+    {
+        switch(body->ops[i]->opcode)
+        {
+        case ROCKE_OP_MEMREF_GLOBAL_LOAD:
+        case ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED:
+        case ROCKE_OP_MEMREF_GLOBAL_STORE:
+        case ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED:
+            return body->ops[i];
+        default:
+            break;
+        }
+    }
+    return nullptr;
+}
+
+/* Builds one access of `elem` values through a scalar global builder with
+ * `align`, on a ptr<elem> parameter `ptr` at index `idx`. */
+using ScalarAccess = void (*)(rocke_ir_builder_t*,
+                              rocke_value_t* ptr,
+                              rocke_value_t* idx,
+                              const rocke_type_t* elem,
+                              int align);
+
+/* A scalar global builder, the op it records, the element type it moves, and
+ * the `align` it records for `align` 0 (the Python builder's default when
+ * `align` is omitted). */
+struct ScalarBuilderCase
+{
+    const char* name;
+    ScalarAccess build;
+    rocke_opcode_t opcode;
+    const rocke_type_t* elem;
+    int64_t unannotated;
+};
+
+/* Every scalar global builder of the C API. */
+const ScalarBuilderCase* scalar_builder_cases(size_t* count)
+{
+    static const ScalarBuilderCase cases[] = {
+        {"rocke_b_global_load",
+         [](rocke_ir_builder_t* b,
+            rocke_value_t* p,
+            rocke_value_t* i,
+            const rocke_type_t* e,
+            int a) { (void)rocke_b_global_load(b, p, i, e, a); },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_f32(),
+         1},
+        {"rocke_b_global_load_f16",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_f16(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD,
+         rocke_f16(),
+         2},
+        {"rocke_b_global_load_f32",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_f32(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_f32(),
+         4},
+        {"rocke_b_global_load_i32",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_i32(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_i32(),
+         4},
+        {"rocke_b_global_load_i64",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_i64(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_i64(),
+         8},
+        {"rocke_b_global_load_bf16",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_bf16(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_bf16(),
+         2},
+        {"rocke_b_global_load_f64",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_f64(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_f64(),
+         8},
+        {"rocke_b_global_load_i8",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_i8(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_i8(),
+         1},
+        {"rocke_b_global_load_i16",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_i16(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_i16(),
+         2},
+        {"rocke_b_global_load_bf8e5m2",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_bf8e5m2(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_bf8e5m2(),
+         1},
+        {"rocke_b_global_load_fp8e4m3",
+         [](rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* i, const rocke_type_t*, int a) {
+             (void)rocke_b_global_load_fp8e4m3(b, p, i, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_fp8e4m3(),
+         1},
+        {"rocke_b_masked_global_load",
+         [](rocke_ir_builder_t* b,
+            rocke_value_t* p,
+            rocke_value_t* i,
+            const rocke_type_t* e,
+            int a) {
+             rocke_value_t* mask = rocke_b_param(b, "mask", rocke_i1(), NULL);
+             rocke_value_t* other = rocke_b_param(b, "other", e, NULL);
+             (void)rocke_b_masked_global_load(b, p, i, mask, other, e, a);
+         },
+         ROCKE_OP_MEMREF_GLOBAL_LOAD_TYPED,
+         rocke_f32(),
+         1},
+        {"rocke_b_global_store",
+         [](rocke_ir_builder_t* b,
+            rocke_value_t* p,
+            rocke_value_t* i,
+            const rocke_type_t* e,
+            int a) { rocke_b_global_store(b, p, i, rocke_b_param(b, "v", e, NULL), a); },
+         ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED,
+         rocke_f32(),
+         1},
+    };
+    *count = sizeof(cases) / sizeof(cases[0]);
+    return cases;
+}
+
+/* With `align` 0 each scalar builder records its own default, the value the
+ * Python builder records when `align` is omitted; a given power of two is
+ * recorded as given. */
+int test_a_scalar_global_builder_records_its_default_or_the_given_align()
+{
+    size_t count = 0;
+    const ScalarBuilderCase* cases = scalar_builder_cases(&count);
+    for(size_t c = 0; c < count; ++c)
+    {
+        const ScalarBuilderCase& builder = cases[c];
+        for(const int align : {0, 8})
+        {
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "scalar_global_align") == ROCKE_OK);
+            rocke_value_t* p
+                = rocke_b_param(&b, "p", rocke_ptr_type(&b, builder.elem, "global"), NULL);
+            builder.build(&b, p, rocke_b_const_i32(&b, 0), builder.elem, align);
+            CHECK(rocke_ir_builder_status(&b) == ROCKE_OK);
+            const rocke_op_t* access = last_scalar_access(&b);
+            CHECK(access != nullptr && access->opcode == builder.opcode);
+            CHECK(recorded_align(access) == (align == 0 ? builder.unannotated : align));
+            rocke_ir_builder_free(&b);
+        }
+    }
+    return 0;
+}
+
+/* A negative `align`, or one that is not a power of two, is refused when the
+ * op is built with ROCKE_ERR_VALUE and the Python builder's text, instead of
+ * being read as the default or recorded. */
+int test_a_scalar_global_builder_refuses_an_invalid_align()
+{
+    size_t count = 0;
+    const ScalarBuilderCase* cases = scalar_builder_cases(&count);
+    for(size_t c = 0; c < count; ++c)
+    {
+        const ScalarBuilderCase& builder = cases[c];
+        for(const int align : {-1, 3})
+        {
+            const std::string refusal = std::string(rocke_opcode_name(builder.opcode))
+                                        + " failed - align=" + std::to_string(align)
+                                        + ", expected a positive power of two";
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "scalar_global_bad_align") == ROCKE_OK);
+            rocke_value_t* p
+                = rocke_b_param(&b, "p", rocke_ptr_type(&b, builder.elem, "global"), NULL);
+            bool refused = false;
+            try
+            {
+                builder.build(&b, p, rocke_b_const_i32(&b, 0), builder.elem, align);
+            }
+            catch(const ckc::Error& error)
+            {
+                refused = error.code() == ROCKE_ERR_VALUE && error.message() == refusal;
+            }
+            if(!refused)
+                std::fprintf(stderr, "%s align=%d was not refused\n", builder.name, align);
+            CHECK(refused);
+            CHECK(last_scalar_access(&b) == nullptr);
+            rocke_ir_builder_free(&b);
+        }
+    }
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -469,7 +685,9 @@ int main()
        || test_an_llvm_scalar_global_access_without_align_keeps_its_claim()
        || test_an_llvm_scalar_global_access_refuses_an_invalid_align()
        || test_the_global_vector_builders_default_to_the_natural_alignment()
-       || test_the_global_vector_builders_refuse_an_invalid_align())
+       || test_the_global_vector_builders_refuse_an_invalid_align()
+       || test_a_scalar_global_builder_records_its_default_or_the_given_align()
+       || test_a_scalar_global_builder_refuses_an_invalid_align())
     {
         std::fprintf(stderr, "global access alignment contract failed\n");
         return 1;

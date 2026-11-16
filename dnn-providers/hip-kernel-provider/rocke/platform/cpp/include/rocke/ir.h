@@ -1133,11 +1133,18 @@ rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
                                      int rank,
                                      const char* name_hint,
                                      int exclusive);
+/* Scalar global loads and stores. `align` is the alignment, in bytes, the
+ * caller guarantees for the accessed element: 0 records the op's default (1
+ * for rocke_b_global_load and rocke_b_global_store, 2 for
+ * rocke_b_global_load_f16, the element width for the typed wrappers); a
+ * negative `align` or one that is not a power of two is refused with
+ * ROCKE_ERR_VALUE and the Python engine's text (see the error model above).
+ * rocke_b_masked_global_load passes its `align` to rocke_b_global_load. */
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
                                    rocke_value_t* ptr,
                                    rocke_value_t* idx,
                                    const rocke_type_t* dtype,
-                                   int align /* <=0 => 1 */);
+                                   int align /* 0 => 1 */);
 rocke_value_t* rocke_b_global_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* ptr,
                                        rocke_value_t* idx,
