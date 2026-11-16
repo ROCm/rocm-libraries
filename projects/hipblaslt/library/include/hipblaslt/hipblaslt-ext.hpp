@@ -1173,8 +1173,10 @@ namespace hipblaslt_ext
      *
      *  Handle, stream, workspace, pointer and event number ``i`` all belong to partition
      * ``i``. Each handle must be created with its partition's device current, and each stream
-     * must belong to the same device as its handle. The streams must belong to different
-     * devices.
+     * must belong to the same device as its handle. In SPX mode, where every partition is on
+     * the same device, the streams share that device and the result is still correct; the
+     * partitions are then just run one after another or concurrently on one device, with no
+     * speed benefit.
      *
      *  Calls follow the order of Gemm: setProblem, algoGetHeuristic (or isAlgoSupported),
      * initialize, then run. Call setProblem again to change a pointer.
@@ -1320,7 +1322,7 @@ namespace hipblaslt_ext
         *  streams       One stream per partition.
         *
         *  \retval HIPBLAS_STATUS_INVALID_VALUE If a vector size is not the partition count, or
-        * two streams belong to the same device.
+        * a stream is not on the device of its partition's handle.
         */
         HIPBLASLT_EXPORT hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t&   algo,
                                                     const std::vector<void*>&      workspaces,

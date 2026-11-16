@@ -453,7 +453,38 @@ TEST(pre_checkin_partitioned_gemm_ext, UserArgsAreNotSupportedYet)
               HIPBLAS_STATUS_INVALID_VALUE);
 }
 
-TEST(pre_checkin_partitioned_gemm_ext, RejectsStreamsOnTheSameDevice)
+TEST(pre_checkin_partitioned_gemm_ext, TwoPartitionsOnOneDeviceMatchGemm)
+{
+    // SPX mode: both partitions are on the same device, so their streams share it. Speed does
+    // not matter there, the result must still be right.
+    for(SplitDim dim : {SplitDim::N, SplitDim::M})
+    {
+        auto              parts = onDeviceZero(2);
+        auto              gemm  = makeGemm(parts);
+        Operands          op;
+        ReplicatedBuffers buffers(parts, op);
+        ASSERT_EQ(setReplicated(gemm, dim, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
+
+        GemmPreference pref;
+        pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+        gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+        ASSERT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_SUCCESS);
+        if(heuristic.empty())
+            GTEST_SKIP() << "no algorithm for the test problem on this device";
+
+        ASSERT_EQ(gemm.initialize(heuristic[0].algo, parts.workspaces(), true, parts.streams),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(gemm.run(parts.streams), HIPBLAS_STATUS_SUCCESS);
+        parts.sync();
+
+        auto ref = referenceGemm(op, parts.rawHandles()[0], 0);
+        ASSERT_FALSE(ref.empty());
+        expectSlicesMatch(gemm, parts, buffers, ref, dim);
+    }
+}
+
+TEST(pre_checkin_partitioned_gemm_ext, RejectsWrongStreamAndWorkspaceCounts)
 {
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
@@ -469,15 +500,38 @@ TEST(pre_checkin_partitioned_gemm_ext, RejectsStreamsOnTheSameDevice)
     if(heuristic.empty())
         GTEST_SKIP() << "no algorithm for the test problem on this device";
 
-    // Both partitions' streams are on device 0.
-    EXPECT_EQ(gemm.initialize(heuristic[0].algo, parts.workspaces(), true, parts.streams),
-              HIPBLAS_STATUS_INVALID_VALUE);
-    EXPECT_EQ(gemm.run(parts.streams), HIPBLAS_STATUS_INVALID_VALUE);
-
-    // Wrong number of streams or workspaces.
     EXPECT_EQ(gemm.run({parts.streams[0]}), HIPBLAS_STATUS_INVALID_VALUE);
     EXPECT_EQ(gemm.initialize(heuristic[0].algo, {parts.workspaces()[0]}, true, parts.streams),
               HIPBLAS_STATUS_INVALID_VALUE);
+}
+
+TEST(partitioned_gemm_ext_streams_multi_gpu, RejectsAStreamOnAnotherDeviceThanItsHandle)
+{
+    int deviceCount = 0;
+    ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
+    if(deviceCount < 2)
+        GTEST_SKIP() << "needs 2 devices, found " << deviceCount;
+
+    Partitions        parts({0, 1});
+    auto              gemm = makeGemm(parts);
+    Operands          op;
+    ReplicatedBuffers buffers(parts, op);
+    ASSERT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
+
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_SUCCESS);
+    if(heuristic.empty())
+        GTEST_SKIP() << "no algorithm for the test problem on this device";
+
+    // Stream i belongs to handle i's device; swapped, a kernel of one device would be launched
+    // on the other device's stream.
+    std::vector<hipStream_t> swapped = {parts.streams[1], parts.streams[0]};
+    EXPECT_EQ(gemm.initialize(heuristic[0].algo, parts.workspaces(), true, swapped),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_EQ(gemm.run(swapped), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
 // One partition is a plain GEMM: it must match Gemm exactly.

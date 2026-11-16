@@ -216,7 +216,7 @@ namespace hipblaslt_ext
         }
 
         // Checks that every per-partition vector has one entry per partition (or is empty when
-        // `allowEmpty`), and that the streams belong to different devices.
+        // `allowEmpty`).
         template <typename V>
         bool sized(V const& v, bool allowEmpty = false) const
         {
@@ -227,15 +227,14 @@ namespace hipblaslt_ext
         {
             if(!sized(streams))
                 return HIPBLAS_STATUS_INVALID_VALUE;
-            std::set<int> seen;
             for(size_t i = 0; i < streams.size(); i++)
             {
                 int device = -1;
                 if(hipStreamGetDevice(streams[i], &device) != hipSuccess)
                     return HIPBLAS_STATUS_INVALID_VALUE;
-                if(!seen.insert(device).second)
-                    return HIPBLAS_STATUS_INVALID_VALUE;
                 // Stream i runs partition i, whose kernels are loaded for its handle's device.
+                // In SPX mode every partition is on the same device, so the streams may share
+                // a device (and even be one stream, which only serializes the partitions).
                 if(device != devices[i])
                 {
                     log_error(__func__,
