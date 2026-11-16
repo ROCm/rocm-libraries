@@ -21,12 +21,13 @@ Checks performed:
 * **Arity / result counts** — per-opcode operand and result counts where the
   builder guarantees them (binary arith, ``cf.return``, ``scf.yield``, etc.).
 * **Region well-formedness** — ``scf.for`` / ``scf.if`` each hold exactly one
-  region (``_scf_for_region_error`` / ``_scf_if_region_error``); loop-carried
-  values are typed; the kernel body ends in a terminator; every ``scf.yield``
-  is directly in an ``scf.for`` body or a branch of an ``scf.if_else`` with
-  results; a loop's carried-value counts agree, its ``iter_args`` metadata
-  describes them and its results share their types, and its body yields them
-  once, at its end, with their types (``_scf_for_error``).
+  region (``_scf_for_region_error`` / ``_scf_if_region_error``), and an
+  ``scf.if`` has exactly one condition (``_scf_if_condition_error``);
+  loop-carried values are typed; the kernel body ends in a terminator; every
+  ``scf.yield`` is directly in an ``scf.for`` body or a branch of an
+  ``scf.if_else`` with results; a loop's carried-value counts agree, its
+  ``iter_args`` metadata describes them and its results share their types, and
+  its body yields them once, at its end, with their types (``_scf_for_error``).
 * **Attr maps** — required keys present per opcode; enum-valued attrs legal.
 * **Vector / smem / addrspace sanity** — vector widths > 0, smem shapes
   positive, pointer address spaces from the known set.
@@ -63,6 +64,7 @@ from .ir import (
     _scf_for_error,
     _scf_for_region_error,
     _scf_for_value_names,
+    _scf_if_condition_error,
     _scf_if_region_error,
     _smem_store_vN_op_error,
     _smem_vN_f32_op_error,
@@ -618,8 +620,9 @@ class _Verifier:
     # ---- scf.if ----
 
     def _check_scf_if(self, op: Op, scope: Dict[str, Value]) -> None:
-        if len(op.operands) != 1:
-            self.err("scf.if expects exactly 1 condition operand", op)
+        condition_error = _scf_if_condition_error(op)
+        if condition_error is not None:
+            self.err(condition_error, op)
         elif op.operands[0].type.name != "i1":
             self.err(f"scf.if condition must be i1, got {op.operands[0].type.name}", op)
         region_error = _scf_if_region_error(op)

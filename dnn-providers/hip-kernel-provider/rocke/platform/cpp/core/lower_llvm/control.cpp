@@ -2433,8 +2433,8 @@ static void _op_tile_exec_or(rocke_lower_t* L, const rocke_op_t* op)
  *     for i, line in enumerate(cur.lines):
  *         cur.lines[i] = line.replace("%IF_END", f"%{end_blk.label}")
  *
- * The scf.if holds exactly one region, its then region
- * (rocke_i_scf_if_region_error), checked before it is read; there is no else
+ * The scf.if has exactly one condition and one region, its then region
+ * (rocke_i_scf_if_error), checked before either is read; there is no else
  * region. */
 static void _op_scf_if(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -2442,14 +2442,10 @@ static void _op_scf_if(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    char region_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_scf_if_region_error(op, region_error, sizeof region_error))
+    char if_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_if_error(op, if_error, sizeof if_error))
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", region_error);
-        return;
-    }
-    if(op->num_operands < 1)
-    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", if_error);
         return;
     }
     const rocke_value_t* cond = op->operands[0];

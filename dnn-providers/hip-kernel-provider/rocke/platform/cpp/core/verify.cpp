@@ -850,9 +850,10 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
 
 static void check_scf_if(verifier_t* v, const rocke_op_t* op)
 {
-    if(op->num_operands != 1)
+    char condition_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_if_condition_error(op, condition_error, sizeof condition_error))
     {
-        v_errf(v, op, "scf.if expects exactly 1 condition operand");
+        v_errf(v, op, "%s", condition_error);
     }
     else if(strcmp(tn(op->operands[0]->type), "i1") != 0)
     {
