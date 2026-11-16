@@ -80,6 +80,8 @@ stores. The weight pre-pass compiles as unfused, and an unfused graph's kernels 
 The chain is compiled in as generated code that depends on the pattern only; operand pointers and
 values are a second kernel argument. The backward-data configs decline fused graphs.
 
+**Known cost.** A fused graph this engine wins takes longer than the bare convolution's best time by, geomean with a bias first: MI325X (channels-last) relu 1.08x, gelu 1.46x, silu 1.23x; gfx950 (both layouts) relu 1.06x, gelu 1.25x, silu 1.11x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.65x on MI325X and 1.34x on gfx950 (usage-weighted; the conv README's fusion table).
+
 ## Numerical precision
 
 - fp32 accumulation (fp16/bf16 products exact in fp32 on the 16x16 atoms, fp32 on the 16x16x4 atom or FMA); the whole reduction runs inside one block in a fixed order; one rounding at the store. No split, no atomics. The device suite relaunches every config and compares bits.

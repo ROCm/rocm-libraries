@@ -100,6 +100,29 @@ that apply the chain claim the graph under their own engine id, with no added ca
   engines by the convolution's summation order. On MI325X, an fp32-output fused kernel with the
   few-ulp form takes, against the fast form (geomean per family over the fused timing shapes,
   worst case in brackets): gelu 1.01-1.12x (1.26), silu 1.00-1.03x (1.26).
+- **Against a separate pointwise pass.** Time of the best bare convolution plus the chain as its
+  own one-pass kernel, over the fused graph's best time (above 1: fusion faster), per family of
+  the engine that wins the fused graph; 114 real-model shapes per layout, chains bias, bias + relu,
+  bias + gelu and bias + silu, all three data types, autotuned. Weighted by the shapes' calls per
+  model run; losses are graphs below 0.98x.
+
+  | Family | MI325X, channels-last: weighted (losses / graphs) | gfx950, both layouts: weighted (losses / graphs) |
+  |---|---|---|
+  | IGEMM | 1.01x (4 / 187) | 1.05x (20 / 253) |
+  | DIRECT | 1.06x (1 / 35) | 1.08x (5 / 90) |
+  | WINOGRAD | - | 1.18x (0 / 15) |
+  | SMALLC | 1.65x (0 / 35) | 1.34x (0 / 141) |
+  | GROUP | 1.33x (0 / 13) | 1.44x (0 / 21) |
+  | DEPTHWISE (VALU, ROWS, MFMA) | 1.55x (0 / 49) | 1.60x (0 / 100) |
+  | NAIVE | 1.52x (0 / 6) | 1.54x (0 / 11) |
+  | explicit GEMM (hipBLASLt, rocBLAS) | 1.10x (29 / 131) | 1.02x (87 / 281) |
+
+  Fusion wins wherever the convolution's output traffic matters (depthwise, small-C, grouped,
+  every small and mid-size layer) and is about even on large compute-bound layers. The losses are
+  1x1 and patchify layers whose bare convolution a BLAS GEMM wins by a wide margin: fused, the
+  explicit-GEMM engines write an fp32 result and run a pass over it, and the in-kernel engines
+  are slower than the BLAS GEMM, so the BLAS GEMM followed by a separate pass over the 16-bit
+  output is faster (down to 0.84x on MI325X, 0.60x on gfx950).
 - **Mechanism.** `ConvEpilogue.h` is the hook every fusing kernel calls before its single
   rounding. The pack generates the chain's code into the HIPRTC options (`CONV_EPI` and three
   generated macros) and passes `ConvEpiArgs` as the kernel's second argument: operand pointers

@@ -100,6 +100,8 @@ block: stage A (gathered) and B (filter) tiles in LDS -> MMA/FMA over the k-step
 The per-channel operands load once per output column a thread owns; columns past K load
 nothing. Backward data takes no epilogue.
 
+**Known cost.** A fused graph this engine wins takes longer than the bare convolution's best time by, geomean with a bias first: MI325X (channels-last) relu 1.10x, gelu 1.19x, silu 1.14x; gfx950 (both layouts) relu 1.14x, gelu 1.24x, silu 1.16x. The exp2-based activations cost the most where the epilogue is a large share of the kernel. Against the convolution plus the pointwise chain as a separate one-pass kernel, the fused graph is faster by 1.01x on MI325X and 1.05x on gfx950 (usage-weighted; the conv README's fusion table). Its losses are 1x1 layers whose bare convolution a BLAS GEMM wins (down to 0.60x on gfx950, channels-first 1x1 with a 384x384 image): the fused graph has no faster form there than the BLAS GEMM followed by a separate pass.
+
 ## Strengths and weaknesses
 
 Measured with autotune (fresh cache), our engines only, against MIOpen in search mode, on a 1,998-shape subset (31 models) of an internal real-model corpus; gfx942 is MI325X. Counted over the graphs where K1 is our autotuned best; W/L = faster / slower by more than 5%; factor = call-weighted MIOpen time / K1 time.
