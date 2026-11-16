@@ -454,8 +454,8 @@ batch when `seq_len_q/kv` are set).
   no API change. The frontend and the references already accept the form on develop; this entry records what it
   means and which engines serve it.
 - **cuDNN:** frontend 1.24 requires both seq_len tensors with `padding_mask` (SEM-008), ragged operands included
-  (`node/sdpa_support_surface.h`). cuDNN 9.25 / frontend 1.25 spell the same form `cu_seq_len_q` (cumulative query
-  offsets) + `seq_len_kv`. The hipDNN frontend accepts `cu_seq_len_q`, but every engine and reference declines
+  (`node/sdpa_support_surface.h`). cuDNN 9.25 (cudnn-frontend from v1.27.0; v1.25.0 and v1.26.0 reject the mixed form) spells the same
+  form `cu_seq_len_q` (cumulative query offsets) + `seq_len_kv`. The hipDNN frontend accepts `cu_seq_len_q`, but every engine and reference declines
   it (see `KNOWN_DIVERGENCES.md`, "SDPA cumulative sequence lengths"), so the cuDNN spelling does not run yet;
   the hipDNN spelling below does.
 - **PyTorch / AOTriton:** varlen attention packs Q through `cu_seqlens_q` and K/V through `cu_seqlens_k`; `seqused_k`
