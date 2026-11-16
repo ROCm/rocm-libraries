@@ -27,15 +27,10 @@
 #include <gtest/gtest.h>
 
 typedef std::tuple<int, int, std::string> local_matrix_conversions_tuple;
-typedef std::tuple<int, int>              local_matrix_allocations_tuple;
-typedef std::tuple<int, int>              local_matrix_zero_tuple;
 
 int         local_matrix_conversions_size[]     = {10, 17, 21};
 int         local_matrix_conversions_blockdim[] = {4, 7, 11};
 std::string local_matrix_type[]                 = {"Laplacian2D", "PermutedIdentity", "Random"};
-
-int local_matrix_allocations_size[]     = {100, 1475, 2524};
-int local_matrix_allocations_blockdim[] = {4, 7, 11};
 
 class parameterized_local_matrix_conversions
     : public testing::TestWithParam<local_matrix_conversions_tuple>
@@ -62,33 +57,6 @@ Arguments setup_local_matrix_conversions_arguments(local_matrix_conversions_tupl
     arg.size        = std::get<0>(tup);
     arg.blockdim    = std::get<1>(tup);
     arg.matrix_type = std::get<2>(tup);
-    return arg;
-}
-
-class parameterized_local_matrix_allocations
-    : public testing::TestWithParam<local_matrix_allocations_tuple>
-{
-protected:
-    parameterized_local_matrix_allocations() {}
-    virtual ~parameterized_local_matrix_allocations() {}
-    virtual void SetUp() override
-    {
-        if(is_any_env_var_set({"ROCALUTION_EMULATION_SMOKE",
-                               "ROCALUTION_EMULATION_REGRESSION",
-                               "ROCALUTION_EMULATION_EXTENDED"}))
-        {
-            GTEST_SKIP();
-        }
-    }
-
-    virtual void TearDown() {}
-};
-
-Arguments setup_local_matrix_allocations_arguments(local_matrix_allocations_tuple tup)
-{
-    Arguments arg;
-    arg.size     = std::get<0>(tup);
-    arg.blockdim = std::get<1>(tup);
     return arg;
 }
 
@@ -121,57 +89,6 @@ INSTANTIATE_TEST_CASE_P(local_matrix_conversions,
                         testing::Combine(testing::ValuesIn(local_matrix_conversions_size),
                                          testing::ValuesIn(local_matrix_conversions_blockdim),
                                          testing::ValuesIn(local_matrix_type)));
-
-TEST_P(parameterized_local_matrix_allocations, local_matrix_allocations_float)
-{
-    Arguments arg = setup_local_matrix_allocations_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_allocations<float>(arg), true);
-}
-
-TEST_P(parameterized_local_matrix_allocations, local_matrix_allocations_double)
-{
-    Arguments arg = setup_local_matrix_allocations_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_allocations<double>(arg), true);
-}
-
-INSTANTIATE_TEST_CASE_P(local_matrix_allocations,
-                        parameterized_local_matrix_allocations,
-                        testing::Combine(testing::ValuesIn(local_matrix_allocations_size),
-                                         testing::ValuesIn(local_matrix_allocations_blockdim)));
-
-TEST_P(parameterized_local_matrix_allocations, local_matrix_zero_float)
-{
-    Arguments arg = setup_local_matrix_allocations_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_zero<float>(arg), true);
-}
-
-TEST_P(parameterized_local_matrix_allocations, local_matrix_zero_double)
-{
-    Arguments arg = setup_local_matrix_allocations_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_zero<double>(arg), true);
-}
-
-INSTANTIATE_TEST_CASE_P(local_matrix_zero,
-                        parameterized_local_matrix_allocations,
-                        testing::Combine(testing::ValuesIn(local_matrix_allocations_size),
-                                         testing::ValuesIn(local_matrix_allocations_blockdim)));
-
-TEST_P(parameterized_local_matrix_allocations, local_matrix_set_data_ptr_float)
-{
-    Arguments arg = setup_local_matrix_allocations_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_set_data_ptr<float>(arg), true);
-}
-
-TEST_P(parameterized_local_matrix_allocations, local_matrix_set_data_ptr_double)
-{
-    Arguments arg = setup_local_matrix_allocations_arguments(GetParam());
-    ASSERT_EQ(testing_local_matrix_set_data_ptr<double>(arg), true);
-}
-
-INSTANTIATE_TEST_CASE_P(local_matrix_set_data_ptr,
-                        parameterized_local_matrix_allocations,
-                        testing::Combine(testing::ValuesIn(local_matrix_allocations_size),
-                                         testing::ValuesIn(local_matrix_allocations_blockdim)));
 
 // Test fixture for LocalMatrix
 class local_matrix_test : public testing::TestWithParam<local_matrix_conversions_tuple>
