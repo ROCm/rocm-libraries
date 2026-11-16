@@ -988,6 +988,10 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     return problem;
 }
 
+// C++ linkage, matching tensile_host.cpp. A declaration inside the extern "C"
+// block below would ask the loader for a different symbol.
+bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -3251,7 +3255,6 @@ rocblaslt_status
         // A rocRoller-routed problem keeps the checked-in walk's pick. A tuning
         // file would put a Tensile-ranked kernel in front of it.
 #ifndef HIPBLASLT_USE_ROCROLLER
-        bool useRocRoller(rocblaslt_handle, const RocblasltContractionProblem&);
         const bool routedToRocRoller = useRocRoller(handle, prob);
 #else
         const bool routedToRocRoller = false;
