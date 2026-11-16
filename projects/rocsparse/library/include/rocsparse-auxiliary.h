@@ -3024,8 +3024,8 @@ rocsparse_status rocsparse_spmat_get_nnz(rocsparse_const_spmat_descr descr, int6
  *  \brief Set the number of non-zeros in the sparse matrix descriptor.
  *
  *  \note In the case of a sparse matrix with the format \ref rocsparse_format_bsr, \p nnz is the number of blocks.
- *  \note In the case of a sparse matrix with the format \ref rocsparse_format_ell, the operation will return an error.
- *  \note In the case of a sparse matrix with the format \ref rocsparse_format_bell, the operation will return an error.
+ *  \note In the case of a sparse matrix with the format \ref rocsparse_format_ell or \ref rocsparse_format_bell,
+ *  the operation returns \ref rocsparse_status_invalid_value.
  *
  *  @param[in]
  *  descr       the pointer to the sparse matrix descriptor.
@@ -3035,6 +3035,8 @@ rocsparse_status rocsparse_spmat_get_nnz(rocsparse_const_spmat_descr descr, int6
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
  *  \retval rocsparse_status_invalid_size if \p nnz is invalid.
+ *  \retval rocsparse_status_invalid_value if the format of \p descr is \ref rocsparse_format_ell or
+ *          \ref rocsparse_format_bell.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmat_set_nnz(rocsparse_spmat_descr descr, int64_t nnz);
@@ -3048,8 +3050,7 @@ rocsparse_status rocsparse_spmat_set_nnz(rocsparse_spmat_descr descr, int64_t nn
  *  batch_count batch_count of the sparse matrix.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p batch_count is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmat_get_strided_batch(rocsparse_const_spmat_descr descr,
@@ -3065,7 +3066,7 @@ rocsparse_status rocsparse_spmat_get_strided_batch(rocsparse_const_spmat_descr d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
+ *  \retval rocsparse_status_invalid_value if \p batch_count is not positive.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmat_set_strided_batch(rocsparse_spmat_descr descr,
@@ -3098,7 +3099,7 @@ rocsparse_status rocsparse_spmat_set_strided_batch(rocsparse_spmat_descr descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_value if \p batch_count is not positive or \p batch_stride is negative.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_coo_set_strided_batch(rocsparse_spmat_descr descr,
@@ -3119,7 +3120,8 @@ rocsparse_status rocsparse_coo_set_strided_batch(rocsparse_spmat_descr descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count, \p offsets_batch_stride, or \p columns_values_batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_value if \p batch_count is not positive, or if \p offsets_batch_stride or
+ *          \p columns_values_batch_stride is negative.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_csr_set_strided_batch(rocsparse_spmat_descr descr,
@@ -3141,7 +3143,8 @@ rocsparse_status rocsparse_csr_set_strided_batch(rocsparse_spmat_descr descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count, \p offsets_batch_stride, or \p rows_values_batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_value if \p batch_count is not positive, or if \p offsets_batch_stride or
+ *          \p rows_values_batch_stride is negative.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_csc_set_strided_batch(rocsparse_spmat_descr descr,
@@ -3162,7 +3165,7 @@ rocsparse_status rocsparse_csc_set_strided_batch(rocsparse_spmat_descr descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_value if \p batch_count is not positive or \p batch_stride is negative.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_ell_set_strided_batch(rocsparse_spmat_descr descr,
@@ -3537,8 +3540,7 @@ rocsparse_status rocsparse_dnmat_set_values(rocsparse_dnmat_descr descr, void* v
  *  batch_stride the batch stride in the dense matrix.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr, \p batch_count, or \p batch_stride is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr descr,
@@ -3557,7 +3559,7 @@ rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
+ *  \retval rocsparse_status_invalid_value if \p batch_count is not positive or \p batch_stride is negative.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
@@ -3575,8 +3577,7 @@ rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
  *  batch_stride the batch stride in the dense vector.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr, \p batch_count, or \p batch_stride is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr descr,
@@ -3595,7 +3596,7 @@ rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
+ *  \retval rocsparse_status_invalid_value if \p batch_count is not positive.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,

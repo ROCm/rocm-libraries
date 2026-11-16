@@ -105,9 +105,10 @@ DESCRIPTOR_VERSION = "1.0"
 #
 # * RMSNorm reads a runtime pass-by-value epsilon: K_PASS_BY_VALUE_MIN_API_VERSION, 1.2.0.
 # * The SDPA engines read and gate every field the schema has added through
-#   K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION, 1.4.0, which is K_MAX_SUPPORTED_API_VERSION:
+#   K_CU_SEQ_LEN_MIN_API_VERSION, 1.6.0, which is K_MAX_SUPPORTED_API_VERSION:
 #   overridable shapes (1.1.0, declined), runtime pass-by-value tensors (1.2.0), ragged
-#   tensors and declared alignments (1.3.0), ragged offset multipliers (1.4.0). COVERAGE.md's
+#   tensors and declared alignments (1.3.0), ragged offset multipliers (1.4.0), cumulative
+#   sequence lengths (1.6.0, declined; 1.5.0 added no graph field). COVERAGE.md's
 #   "Graph schema" lists the gate for each; TestFlydslSdpaObjects pins the claim against the
 #   SDK's maximum, so an SDK that adds a version fails it until those fields are reviewed.
 SDPA_OPS = (
@@ -119,15 +120,19 @@ SDPA_OPS = (
     "sdpa_aiw",
 )
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
-SDPA_SDK_VERSION = "1.4.0"
+SDPA_SDK_VERSION = "1.6.0"
+# The backward engines stay at the schema that introduced the last field they read (ragged
+# offset multipliers, K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION): cumulative sequence lengths
+# exist on the forward node only, so a backward graph never carries them.
+SDPA_BWD_SDK_VERSION = "1.4.0"
 SDK_VERSION_BY_OP: dict[str, str] = {
     "rmsnorm": PASS_BY_VALUE_SDK_VERSION,
     **{op: SDPA_SDK_VERSION for op in SDPA_OPS},
     # The backward engines read ragged tensors (1.3.0), non-default tensor alignment (1.3.0)
     # and ragged offset multipliers (1.4.0) straight from the graph, so they declare the
     # schema that introduced the last of them.
-    "sdpa_bwd_split": SDPA_SDK_VERSION,
-    "sdpa_bwd_merged": SDPA_SDK_VERSION,
+    "sdpa_bwd_split": SDPA_BWD_SDK_VERSION,
+    "sdpa_bwd_merged": SDPA_BWD_SDK_VERSION,
 }
 # Ops whose engines carry `supports_graph_capture` (capture-safe with default settings,
 # benchmarking off). Capture and graph replay are bit-exact on gfx950 (CDNA ops), on
