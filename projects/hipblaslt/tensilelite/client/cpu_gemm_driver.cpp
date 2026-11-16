@@ -104,6 +104,22 @@ namespace
     //                    call throws. The sum is then converted to AccumT once,
     //                    before alpha.
     //
+    // Int8 oracle pseudocode (TypeAlpha = AccumT; TypeCD = C/D storage type):
+    //   dot64 = sum_k(int64_t(A[i,k]) * int64_t(B[k,j]));
+    //   require_int32_range(dot64);
+    //   dot = TypeAlpha(dot64);
+    //   value = effectiveAlpha * dot;         // alpha/scales as above
+    //   value = value + beta * TypeAlpha(C[i,j]);
+    //   if (bias) value = value + bias[i];
+    //   value = activation(value);
+    //   D[i,j] = SaturateCast<TypeCD>(value);   // storage conversion below
+    //
+    // I8_I8_I32 and I8_I32_I32 use TypeAlpha = int32_t. I8_I32_S,
+    // I8_I8_S, I8_H_S and I8_B_S use TypeAlpha = float. The int64_t dot
+    // product lets the oracle detect overflow before the TypeAlpha cast.
+    // The current float-alpha slow reference instead accumulates in float
+    // (#15764); #15765 supplies the separate integer-reduction fix.
+    //
     // An int32_t epilogue is computed in int64_t and every intermediate is
     // checked against the int32_t range: the reference computes it in int32_t,
     // where overflow is undefined, so a test that overflows throws instead of
