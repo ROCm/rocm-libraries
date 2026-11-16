@@ -190,9 +190,11 @@ struct Arguments
     int32_t fast_check_repeat;
     int32_t fast_check_inject;
     int8_t  requires_streamk;
-    // The kernel the first returned solution must run ('' = any). A case that names one fails,
-    // rather than skips, when requires_streamk finds no Stream-K kernel.
-    char expected_kernel[128];
+    // Kernel names the first solutions must contain, separated by newlines.
+    // One name is the whole kernel name. Empty means the case does not care.
+    // A case that names one fails, rather than skips, when requires_streamk
+    // finds no Stream-K kernel.
+    char expected_kernel[256];
     // Self-test of the checks of D across solutions: the position in the solution list of a
     // solution that is never launched, which the allclose check must report (-1 = none)
     int32_t skip_launch_solution;
@@ -261,9 +263,6 @@ struct Arguments
 
     bool flush;
     int  tensile_solution_selection_method;
-    // Kernel names the first solutions must contain, separated by newlines.
-    // Empty means the case does not care which kernel ran.
-    char expected_kernel[256];
 
     /*************************************************************************
      *                     End Of Arguments                                  *
@@ -402,8 +401,7 @@ struct Arguments
     OPER(print_solution_found) SEP   \
     OPER(print_kernel_info) SEP      \
     OPER(flush) SEP                  \
-    OPER(tensile_solution_selection_method) SEP \
-    OPER(expected_kernel) SEP
+    OPER(tensile_solution_selection_method) SEP
 
     // clang-format on
 

@@ -6402,9 +6402,10 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
     }
 
-    // A correct result does not show that the intended kernel ran: another tile passes the
-    // norm check too.
-    if(arg.expected_kernel[0])
+    // A single name is the whole kernel name. Another tile passes the norm
+    // check too, so the launched name must be that name. A newline-separated
+    // list was matched above.
+    if(arg.expected_kernel[0] && std::string(arg.expected_kernel).find('\n') == std::string::npos)
     {
         const std::string name
             = hipblaslt_ext::getKernelNameFromAlgo(handle, heuristicResult[0].algo);
