@@ -239,6 +239,7 @@ class TestForceGenerateKernel:
             "MacroTile1": 128,
             "DepthU": 32,
             "NumThreads": 256,
+            "ClusterDim": [1, 1],
         }
 
     def test_overflowing_kernel_is_rejected_by_default(self):

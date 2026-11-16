@@ -93,6 +93,7 @@ namespace TensileLite
                 iot::mapOptional(io, "macrotile", s.macrotile);
                 iot::mapOptional(io, "threads", s.threads);
                 iot::mapOptional(io, "grid", s.grid);
+                iot::mapOptional(io, "clusterDim", s.clusterDim);
                 iot::mapOptional(io, "workspaceType", s.workspaceType);
                 iot::mapOptional(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);

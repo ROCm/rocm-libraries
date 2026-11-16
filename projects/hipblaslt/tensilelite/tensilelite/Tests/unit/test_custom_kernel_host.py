@@ -321,6 +321,14 @@ def test_custom_kernel_state_carries_uniform_summation_order():
     assert CustomKernel.FromOriginalState({**base, "uniformSummationOrder": True}).uniformSummationOrder is True
 
 
+def test_custom_kernel_state_carries_cluster_dim():
+    base = {"name": "k", "args": [], "macrotile": [16, 16, 16], "threads": [64, 1, 1],
+            "grid": ["One", "One", "One"]}
+    assert "clusterDim" in CustomKernel.StateKeys
+    assert CustomKernel.FromOriginalState(base).clusterDim == [1, 1]
+    assert CustomKernel.FromOriginalState({**base, "clusterDim": [2, 1]}).clusterDim == [2, 1]
+
+
 def test_uso_capability_assignment_survives_missing_custom_kernel_name():
     # The merge-time KeyError was state["CustomKernelName"] inside
     # assignDerivedParameters. Drive the same assignment the derivation uses.
