@@ -188,14 +188,16 @@ class TestRegtPrefetch(unittest.TestCase):
 
         intr = r"call void @llvm\.amdgcn\.s\.barrier\(\)"
         plain, three = ll(0), ll(3)
-        # Prologue + two per tile.
-        self.assertEqual(len(re.findall(intr, three)), 3)
         self.assertIn("llvm.amdgcn.sched.barrier", three)
         self.assertNotIn("llvm.amdgcn.sched.barrier", plain)
         # The in-loop barriers are LDS-only -- the full drain is asked for in
         # front of the prologue's barrier only.
         full = "call void @llvm.amdgcn.s.waitcnt(i32 7)"
         self.assertEqual(three.count(full), 1)
+        # ... as the split-barrier inline asm (lds_barrier_keep_vmem): one
+        # intrinsic barrier left (the prologue's), two asm ones in the loop.
+        self.assertEqual(len(re.findall(intr, three)), 1)
+        self.assertEqual(len(re.findall(r"s_barrier_signal -1", three)), 2)
         # The loads of the plain loop, plus the prologue's.
         loads = r"call <\d+ x i32> @llvm\.amdgcn\.raw\.ptr\.buffer\.load"
         self.assertEqual(

@@ -98,6 +98,7 @@ from rocke.core.ir import (
     Value,
     VectorType,
 )
+from rocke.helpers.asm import lds_barrier_keep_vmem
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
@@ -622,8 +623,9 @@ class WgradConvSpec:
     # they are in flight; only then is the prefetched tile transposed and
     # stored (store_lds), so the global latency hides behind the MMAs.
     #   0 -- off (the plain load / barrier / MMA / barrier loop).
-    #   3 -- the two in-loop barriers emitted LDS-only, so they leave the
-    #        prefetch in flight, the prefetch pinned ahead of the MMAs with
+    #   3 -- the two in-loop barriers emitted LDS-only (rocke.helpers.asm.
+    #        lds_barrier_keep_vmem, since sync_lds_only still drains the loads
+    #        on gfx12 RDNA), the prefetch pinned ahead of the MMAs with
     #        sched_barrier (the machine scheduler otherwise sinks the loads
     #        behind most of them), and the reads of a partially loading tile
     #        in their own branch (RegTransposeTileLoader guard).
@@ -4159,9 +4161,12 @@ def build_implicit_gemm_conv_wgrad(
             new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_accs))
             # ... and the transposes of the prefetched tile behind them.
             b.sched_barrier(0)
-            b.sync_lds_only()
+            # sync_lds_only would still drain the prefetch on gfx12 RDNA, where
+            # the wait-count pass waits for every counter in front of an
+            # s_barrier it emits; the helper emits the barrier itself there.
+            lds_barrier_keep_vmem(b, arch)
             _store(_st)
-            b.sync_lds_only()
+            lds_barrier_keep_vmem(b, arch)
             b.scf_yield(*new_accs)
         final_accs = list(for_op_rp.results)
     elif spec.prefetch_global_regs:

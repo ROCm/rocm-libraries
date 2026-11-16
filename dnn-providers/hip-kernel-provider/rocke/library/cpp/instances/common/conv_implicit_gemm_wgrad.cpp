@@ -37,6 +37,7 @@
 #include <cstring> /* strcmp, memset, memcpy */
 
 #include "rocke/error_boundary.hpp"
+#include "rocke/helper_helpers.asm.h" /* rocke_lds_barrier_keep_vmem */
 #include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_* */
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
@@ -5048,9 +5049,12 @@ static void wgrad_emit_kloop_regt_prefetch(rocke_conv_build_ctx_t* ctx)
         rocke_conv_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, for_op.iter_vars, num_accs, new_accs);
         rocke_b_sched_barrier(b, 0);
-        rocke_b_sync_lds_only(b);
+        /* sync_lds_only would still drain the prefetch on gfx12 RDNA, where
+         * the wait-count pass waits for every counter in front of an s_barrier
+         * it emits; the helper emits the barrier itself there. */
+        rocke_lds_barrier_keep_vmem(b, ctx->arch);
         wgrad_rtp_store(ctx, t);
-        rocke_b_sync_lds_only(b);
+        rocke_lds_barrier_keep_vmem(b, ctx->arch);
         rocke_b_scf_yield(b, new_accs, num_accs);
     }
     rocke_b_region_leave(b);
