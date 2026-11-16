@@ -127,6 +127,12 @@ double ulpOf(double r, int mantissa, int minExp)
     return std::ldexp(1.0, std::max(e - 1, minExp) - mantissa);
 }
 
+/// Whether swish's gate underflows at @p x (silu at beta 1, swish at 1.702).
+bool gateUnderflows(int f, float x)
+{
+    return (f == 1 && x < -87.0F) || (f == 2 && 1.702F * x < -87.0F);
+}
+
 /// The few-ulp form's bound for function @p f at input @p x (0: not checked there).
 double preciseBound(int f, float x)
 {
@@ -315,7 +321,9 @@ TEST_F(TestGpuConvEpilogueActivations, BothFormsWithinTheirBounds)
                     }
                 }
                 const double err = std::fabs(static_cast<double>(got) - r);
-                if(std::fabs(r) < 0x1p-122)
+                // Below 2^-122, or where swish's gate e^(beta x) underflows (beta x < -87), the
+                // result may flush to zero: a magnitude under 1e-36 either way.
+                if(std::fabs(r) < 0x1p-122 || gateUnderflows(f, x[i]))
                 {
                     EXPECT_LT(err, 2e-36) << name << " form " << form << " x " << x[i];
                     continue;

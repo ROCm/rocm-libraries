@@ -97,8 +97,9 @@ that apply the chain claim the graph under their own engine id, with no added ca
   silu(-inf) and gelu(-inf) 0, silu(inf) and gelu(inf) inf, tanh(+-inf) +-1, elu(-0) +0, as
   PyTorch. The explicit-GEMM engines' epilogue pass applies the same functions under the same
   rule, so a fused graph's activation is the same on every engine; results differ between
-  engines by the convolution's summation order. The fp32 form costs fused kernels more than the
-  fast one: FP32_COST.
+  engines by the convolution's summation order. On MI325X, an fp32-output fused kernel with the
+  few-ulp form takes, against the fast form (geomean per family over the fused timing shapes,
+  worst case in brackets): gelu 1.01-1.12x (1.26), silu 1.00-1.03x (1.26).
 - **Mechanism.** `ConvEpilogue.h` is the hook every fusing kernel calls before its single
   rounding. The pack generates the chain's code into the HIPRTC options (`CONV_EPI` and three
   generated macros) and passes `ConvEpiArgs` as the kernel's second argument: operand pointers
