@@ -97,65 +97,47 @@ __device__ inline float convEpiGated(float v, float gate)
 
 // The activations below are built from the hardware exp2, log2 and reciprocal (v_exp_f32,
 // v_log_f32, v_rcp_f32: 1 ulp each) rather than the library's expf/erfcf/expm1f/log1pf and IEEE
-// division, which cost them 25-130 instructions an element. Not fast math: NaN stays NaN, the
-// infinities keep their limits and signed zeros their sign. Each states its error in fp32 ulp of
-// the result before the output rounding: the worst case over every fp32 input, against a double
-// reference, for results of magnitude 2^-122 and up. Below that a result may flush to zero where
-// an intermediate underflows (an absolute error under 2e-36).
+// division, which cost them 25-130 instructions an element. Not fast math: NaN stays NaN and the
+// infinities keep their limits. Each states its worst-case error in fp32 ulp of the result before
+// the output rounding: over every fp32 input, against a double reference, for results of
+// magnitude 2^-122 and up, overall and for |x| <= 8 (the same on gfx942 and gfx950, bit for bit).
+// exp2 of v log2(e) carries the rounding of the product, a relative error of about |v| 2^-24 in
+// e^v, which reaches the result where it is a tail value. Every error stays under 1.3% of the fp32
+// pointwise tolerance (1e-5 + 1e-5 |reference|). Results below 2^-122 in magnitude may flush to
+// zero where an intermediate underflows (an absolute error under 2e-36).
 //
 // They stay free of branches: a branch in the per-element epilogue splits the unrolled store code
 // of the tile kernels into blocks, and their register allocation then grows by up to the tile's
 // outputs (measured on the depthwise tiles: 49 to 215 VGPRs). Where a select chooses between v and
 // an expensive value, the value passes an empty asm so the compiler does not turn the select into
 // a branch around it.
-constexpr float CONV_EPI_LOG2E = 1.44269502162933349609375f; // log2(e), its float
-constexpr float CONV_EPI_LOG2E_LO = 1.925963033500011e-8f; // and the rest
-constexpr float CONV_EPI_LN2 = 0.69314718055994531f;
+constexpr float CONV_EPI_LOG2E = 1.44269504088896341f;
 
-/// e^(hi + lo) for |lo| far below 1: exp2(hi log2 e), corrected by the rounding of that product
-/// and by lo to first order, so the result keeps 2 ulp at any magnitude. 0 at -inf, inf at +inf,
-/// NaN for NaN.
-__device__ inline float convEpiExp2Parts(float hi, float lo)
-{
-    const float y = hi * CONV_EPI_LOG2E;
-    const float r = fmaf(hi, CONV_EPI_LOG2E, -y) + fmaf(hi, CONV_EPI_LOG2E_LO, lo * CONV_EPI_LOG2E);
-    const float e = __builtin_amdgcn_exp2f(y);
-    // Past +-128 the result is inf, 0 or subnormal (flushed), and r may be NaN (inf - inf).
-    return fabsf(y) < 128.0f ? fmaf(e, r * CONV_EPI_LN2, e) : e;
-}
-
-/// e^v.
+/// e^v from the hardware exp2: 0 at -inf, inf at +inf, NaN for NaN.
 __device__ inline float convEpiExp(float v)
 {
-    return convEpiExp2Parts(v, 0.0f);
+    return __builtin_amdgcn_exp2f(CONV_EPI_LOG2E * v);
 }
 
-/// 1 / (1 + e^-v); sigmoid(-inf) = rcp(inf) = 0. Error: 3.6 ulp.
+/// 1 / (1 + e^-v); sigmoid(-inf) = rcp(inf) = 0. Error: 64 ulp (near -84), 9.0 for |x| <= 8.
 __device__ inline float convEpiSigmoid(float v)
 {
     return __builtin_amdgcn_rcpf(1.0f + convEpiExp(-v));
 }
 
-/// x * sigmoid(beta x): swish, silu at beta 1. Error: 3.2 ulp at beta 1; another beta adds the
-/// rounding of beta x, relative |beta x| 2^-24 where the gate is a tail value (13 ulp for
-/// |x| <= 8 at beta 1.702). Below -88 / beta the gate underflows and the result (magnitude under
-/// 1e-36) flushes to zero.
+/// x * sigmoid(beta x): swish, silu at beta 1. Error: 8.9 ulp for |x| <= 8 and 63 above -80 at
+/// beta 1, 20 for |x| <= 8 at beta 1.702 (the rounding of beta x adds to the gate's). Below
+/// -88 / beta the gate underflows and the result (magnitude under 1e-36) flushes to zero.
 __device__ inline float convEpiSwish(float v, float beta)
 {
     return convEpiGated(v, convEpiSigmoid(beta * v));
 }
 
-/// erfc(a / sqrt 2) for a >= 0: the Chebyshev fit of Numerical Recipes' erfcc (fractional error
-/// 1.2e-7 in exact arithmetic), t e^(-z^2 + P(t)) with z = a / sqrt 2 and t = 1 / (1 + z / 2). z and
-/// z^2 are kept to twice the float precision, so the tail's exponent loses nothing to their
-/// rounding. 0 at +inf, NaN for NaN.
-__device__ inline float convEpiErfcScaled(float a)
+/// erfc(z) for z >= 0 (the Chebyshev fit of Numerical Recipes' erfcc, fractional error 1.2e-7 in
+/// exact arithmetic): t e^(-z^2 + P(t)), t = 1 / (1 + z / 2). 0 at +inf, NaN for NaN.
+__device__ inline float convEpiErfcPos(float z)
 {
-    constexpr float RSQRT2 = 0.707106769084930419921875f; // 1 / sqrt 2, its float
-    constexpr float RSQRT2_LO = 1.2101617485882343e-8f; // and the rest
-    const float zh = a * RSQRT2;
-    const float zl = fmaf(a, RSQRT2, -zh) + a * RSQRT2_LO;
-    const float t = __builtin_amdgcn_rcpf(fmaf(0.5f, zh, 1.0f));
+    const float t = __builtin_amdgcn_rcpf(fmaf(0.5f, z, 1.0f));
     float p = 0.17087277f;
     p = fmaf(p, t, -0.82215223f);
     p = fmaf(p, t, 1.48851587f);
@@ -166,16 +148,16 @@ __device__ inline float convEpiErfcScaled(float a)
     p = fmaf(p, t, 0.37409196f);
     p = fmaf(p, t, 1.00002368f);
     p = fmaf(p, t, -1.26551223f);
-    const float h = zh * zh;
-    const float l = fmaf(zh, zh, -h) + 2.0f * zh * zl;
-    return t * convEpiExp2Parts(-h, -l) * __builtin_amdgcn_exp2f(p * CONV_EPI_LOG2E);
+    return t * convEpiExp(fmaf(-z, z, p));
 }
 
 /// GELU with the exact normal CDF, x 0.5 erfc(-x / sqrt 2), relative in the negative tail: the
-/// gate is 0.5 erfc(|x| / sqrt 2) at or below 0 and 1 minus it above. Error: 8.8 ulp.
+/// gate is 0.5 erfc(|x| / sqrt 2) at or below 0 and 1 minus it above. Error: 310 ulp (near
+/// -12.5, where GELU is -1e-34), 119 for |x| <= 8: the rounding of z and of the exponent, relative
+/// about (z^2 + 8) 2^-23 in the negative tail.
 __device__ inline float convEpiGelu(float v)
 {
-    const float half = 0.5f * convEpiErfcScaled(fabsf(v));
+    const float half = 0.5f * convEpiErfcPos(fabsf(v) * 0.70710678118654752f);
     return convEpiGated(v, v <= 0.0f ? half : 1.0f - half);
 }
 
@@ -197,10 +179,9 @@ __device__ inline float convEpiTanh(float v)
 }
 
 /// GELU with the tanh approximation (PyTorch's approximate="tanh"): its gate 0.5 (1 + tanh u) is
-/// sigmoid(2u), which keeps the negative tail's relative accuracy. Error: in the negative tail the
-/// rounding of u carries a relative error of about |4u| 2^-24 into the gate, as in any fp32
-/// evaluation of the formula: 94 ulp for |x| <= 8 (at -7.7, where the result is -5e-19), 184 ulp
-/// at -9.95.
+/// sigmoid(2u), which keeps the negative tail's relative accuracy. Error: 230 ulp (near -9.8), 134
+/// for |x| <= 8: the rounding of u and of sigmoid's exponent, relative about |6u| 2^-24 in the
+/// negative tail.
 __device__ inline float convEpiGeluTanh(float v)
 {
     const float inner = 0.79788456080286536f * fmaf(0.044715f * v, v * v, v);
@@ -228,13 +209,13 @@ __device__ inline float convEpiElu(float v, float alpha)
 __device__ inline float convEpiLog1pUnit(float e)
 {
     const float u = 1.0f + e;
-    const float l = __builtin_amdgcn_logf(u) * CONV_EPI_LN2;
+    const float l = __builtin_amdgcn_logf(u) * 0.69314718055994531f;
     return u == 1.0f ? e : l * (e * __builtin_amdgcn_rcpf(u - 1.0f));
 }
 
 /// Softplus as PyTorch computes it, log(1 + e^(beta v)) / beta, and v itself where beta v > 20;
-/// as max(beta v, 0) + log(1 + e^-|beta v|), so the exponential never overflows. Error: 4.9 ulp
-/// at beta 1 and 2; another beta adds the rounding of beta v.
+/// as max(beta v, 0) + log(1 + e^-|beta v|), so the exponential never overflows. Error: 63 ulp
+/// (near beta v = -84), 11 for |x| <= 8 at beta 1, 16 at beta 2.
 __device__ inline float convEpiSoftplus(float v, float beta)
 {
     const float bv = beta * v;

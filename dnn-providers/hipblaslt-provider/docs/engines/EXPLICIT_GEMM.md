@@ -71,7 +71,7 @@ Every engine but the RPR siblings (backward weights only) also claims a forward 
 - **Values at execution.** Operand pointers and pass-by-value scalars are bound at execution, so a plan serves the graph's values whatever they are.
 - **Workspace.** The extra pass adds y's size in fp32 to the workspace, above the repack cap.
 - **Runnable layout.** A fused plan runs on the first column layout whose GEMMs the backend can run. The default comes first, then staged channels-last, channels-last and channels-first.
-- **Deterministic hipBLASLt declines.** The deterministic hipBLASLt engines give the library no workspace, so they decline a fused graph when no layout's fp32-output GEMM has a workspace-free algorithm. This happens for some small-n, long-k channels-first fp16 layers. The deterministic rocBLAS engine serves those graphs.
+- **Shorter reductions.** The deterministic hipBLASLt engines give the library no workspace, and for some small-n, long-k fp16 layers no layout's fp32-output GEMM has a workspace-free algorithm. The plan then cuts each such GEMM's reduction into 2, 4, 8 or 16 consecutive parts, each after the first adding to the fp32 result in order (`splitFp32OutputReductions`): the same sum, rounded once by the epilogue pass, and still deterministic. A fused graph is declined only if none of those runs.
 - **Backward directions.** Backward data and backward weights with pointwise nodes are declined.
 
 ## Implementation design

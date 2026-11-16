@@ -68,6 +68,32 @@ that apply the chain claim the graph under their own engine id, with no added ca
 - **Numerics.** The chain runs in fp32 on the convolution's accumulator and the kernel rounds once
   to the output type, whatever type the graph declares for its intermediates. relu and clamp
   propagate NaN; gates that saturate to 0 (silu, gelu at -inf) give 0. No fast-math.
+- **Activation accuracy.** The activations are built from the hardware exp2, log2 and reciprocal,
+  in one implementation (`ConvEpilogue.h`) that every engine of this provider compiles. Worst
+  case over every fp32 input against a double reference, in fp32 ulp of the result before the
+  output rounding (results of magnitude 2^-122 and up; bit-identical on gfx942 and gfx950):
+
+  | Activation | ulp, \|x\| <= 8 | ulp, all inputs |
+  |---|---|---|
+  | sigmoid | 9.0 | 64 |
+  | silu (swish, beta 1) | 8.9 | 63 above -80; flushes below -88 |
+  | swish, beta 1.702 | 20 | flushes below -52 |
+  | gelu | 119 | 310 |
+  | gelu-tanh | 134 | 230 |
+  | tanh | 1.6 | 1.6 |
+  | elu | 1.8 | 1.8 |
+  | softplus (beta 1, 2) | 11, 16 | 63 |
+
+  The larger errors sit in the negative tails, where the result is a small value: exp2 of
+  `v log2(e)` carries the rounding of that product, and gelu and gelu-tanh also the rounding of
+  their fp32 argument. Every error stays under 1.3% of the fp32 pointwise tolerance
+  (`1e-5 + 1e-5 |reference|`), and under 0.1 ulp of a 16-bit output. Results below 2^-122 in
+  magnitude may flush to zero where an intermediate underflows (an absolute error under 2e-36;
+  silu and swish below `-88 / beta`, as the math library's form). NaN gives NaN; sigmoid(+-inf)
+  is 1 and 0, silu(-inf) and gelu(-inf) 0, silu(inf) and gelu(inf) inf, tanh(+-inf) +-1, as
+  PyTorch. Every engine of this provider applies these same functions; results differ between
+  engines by the convolution's summation order, and the explicit-GEMM engines' epilogue pass uses
+  the math library's functions (within the same tolerance).
 - **Mechanism.** `ConvEpilogue.h` is the hook every fusing kernel calls before its single
   rounding. The pack generates the chain's code into the HIPRTC options (`CONV_EPI` and three
   generated macros) and passes `ConvEpiArgs` as the kernel's second argument: operand pointers
