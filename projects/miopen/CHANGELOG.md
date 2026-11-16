@@ -71,6 +71,18 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   held by a skipped evaluation is now released by a background thread as soon as its kernel
   finishes, rather than from a later kernel launch, so it is also released in workloads that only
   replay a captured graph.
+* [Conv] Fixed `miopenConvolutionForwardGetWorkSpaceSize` and its backward variants reporting no
+  GEMM workspace for dilated convolutions. Find, given the reported size, dropped `GemmFwdRest`,
+  so a dilated fp32 Conv1d on RDNA ran on the naive solver and failed with "No suitable algorithm
+  was found" when the naive solver was disabled (#14965). Dilated GEMM workspace is now reported
+  when GEMM is the only alternative to the naive solvers and the workspace fits in 85% of the
+  device memory free at query time. Where another solver applies, it stays unreported, so Find
+  does not also benchmark GEMM; larger requests stay unreported to avoid the out-of-memory
+  failures that caused #6974. The memory limit also applies when a find-db record names a GEMM
+  solver for a dilated problem (that workspace used to be reported whatever its size), and to the
+  workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
+  return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
+  workspace is reported.
 
 ### Added
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
@@ -92,6 +104,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
   files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
   from the build tree without an install.
+* [Conv] The bundled AI heuristic models (`*.tn.model` and `*.ktn.model`) are now Keras 3 exports
+  for frugally-deep v0.21.0 or newer (fixes ROCm/rocm-libraries#889). Builds against
+  frugally-deep 0.15.x instead install temporary Keras 2 copies of the same models. Configuring
+  against frugally-deep 0.16 to 0.20 is an error because those versions can load neither set.
 * [Conv] The `ConvHipConv` config version is now `v0.5`, so user perf-db records written with
   hipconv v0.4 are rejected and those layers run the default config until re-tuned.
 * [Conv] `ConvHipConv` fp16 and bf16 backward weights now write dW directly in the weight type for
