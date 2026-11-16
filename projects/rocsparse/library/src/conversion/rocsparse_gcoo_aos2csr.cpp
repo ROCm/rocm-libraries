@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -72,7 +72,7 @@ rocsparse_status rocsparse::gcoo_aos2csr(rocsparse_handle     handle,
                                                   target_row_data,
                                                   source_idx_base));
 
-    if(source_val_data != nullptr)
+    if(source_val_data != nullptr && target_val_data != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
             handle, nnz, target_data_type, target_val_data, source_data_type, source_val_data));

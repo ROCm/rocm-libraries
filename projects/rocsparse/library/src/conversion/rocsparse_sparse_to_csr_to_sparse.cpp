@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,38 @@
 #include "rocsparse_sparse_to_csr_to_sparse.hpp"
 #include "rocsparse_internal_spmat_print.hpp"
 #include "rocsparse_utility.hpp"
+
+#include <cstdint>
+#include <limits>
+
+namespace rocsparse
+{
+    // a * b for non-negative counts, or invalid_size when the product does not fit in int64_t.
+    static rocsparse_status counted_product(int64_t a, int64_t b, int64_t& product)
+    {
+        if(a < 0 || b < 0 || (a != 0 && b > std::numeric_limits<int64_t>::max() / a))
+        {
+            return rocsparse_status_invalid_size;
+        }
+        product = a * b;
+        return rocsparse_status_success;
+    }
+
+    // count * width, or invalid_size when the product does not fit in size_t.
+    static rocsparse_status counted_bytes(int64_t count, size_t width, size_t& bytes)
+    {
+        if(count < 0)
+        {
+            return rocsparse_status_invalid_size;
+        }
+        if(width != 0 && static_cast<uint64_t>(count) > std::numeric_limits<size_t>::max() / width)
+        {
+            return rocsparse_status_invalid_size;
+        }
+        bytes = static_cast<size_t>(count) * width;
+        return rocsparse_status_success;
+    }
+}
 
 rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle                 handle_,
                                                     rocsparse_sparse_to_sparse_descr descr_,
@@ -87,9 +119,15 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         {
             row_type = source_->row_type;
             col_type = source_->col_type;
-            csr_m    = source_->rows * source_->block_dim;
-            csr_n    = source_->cols * source_->block_dim;
-            csr_nnz  = source_->nnz * source_->block_dim * source_->block_dim;
+            int64_t block_size{};
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::counted_product(source_->rows, source_->block_dim, csr_m));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::counted_product(source_->cols, source_->block_dim, csr_n));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::counted_product(source_->block_dim, source_->block_dim, block_size));
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::counted_product(source_->nnz, block_size, csr_nnz));
             break;
         }
         case rocsparse_format_ell:
@@ -155,21 +193,30 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         void* TEMP_row__ = nullptr;
         void* TEMP_col__ = nullptr;
         void* TEMP_val__ = nullptr;
-        if(csr_m > 0)
-        {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_row__, rocsparse::indextype_sizeof(row_type) * (csr_m + 1)));
-        }
+        // Checked before any allocation. col_type is the index type stored on the
+        // intermediate CSR and can be wider than the source column type.
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size,
+                                  csr_m == std::numeric_limits<int64_t>::max());
+        size_t row_bytes = 0;
+        size_t col_bytes = 0;
+        size_t val_bytes = 0;
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::counted_bytes(csr_m + 1, rocsparse::indextype_sizeof(row_type), row_bytes));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::counted_bytes(csr_nnz, rocsparse::indextype_sizeof(col_type), col_bytes));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
+            csr_nnz, rocsparse::datatype_sizeof(source_->data_type), val_bytes));
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
                                   (csr_nnz > std::numeric_limits<int32_t>::max()
                                    && (row_type == rocsparse_indextype_i32)));
-
+        if(csr_m > 0)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_row__, row_bytes));
+        }
         if(csr_nnz > 0)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_col__, rocsparse::indextype_sizeof(source_->col_type) * csr_nnz));
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_val__, rocsparse::datatype_sizeof(source_->data_type) * csr_nnz));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_col__, col_bytes));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_val__, val_bytes));
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_csr_descr(&intermediate,
                                                              csr_m,
@@ -235,15 +282,17 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         {
         case rocsparse_format_ell:
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_col__,
-                rocsparse::indextype_sizeof(intermediate->col_type) * intermediate->nnz));
+            size_t col_bytes = 0;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
+                intermediate->nnz, rocsparse::indextype_sizeof(intermediate->col_type), col_bytes));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_col__, col_bytes));
             //
             // MUST BE CONDITIONAL
             //
-            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(
-                &TEMP_val__,
-                rocsparse::datatype_sizeof(intermediate->data_type) * intermediate->nnz));
+            size_t val_bytes = 0;
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
+                intermediate->nnz, rocsparse::datatype_sizeof(intermediate->data_type), val_bytes));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&TEMP_val__, val_bytes));
             rocsparse_csr_set_pointers(intermediate, TEMP_row__, TEMP_col__, TEMP_val__);
             break;
         }

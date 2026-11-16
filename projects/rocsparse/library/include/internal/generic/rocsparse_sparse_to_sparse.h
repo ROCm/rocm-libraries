@@ -50,6 +50,9 @@ extern "C" {
 *  buffer_size_in_bytes  size in bytes of the \p buffer
 *
 *  \note
+*  The \ref rocsparse_format_bell and \ref rocsparse_format_sell formats are not supported.
+*
+*  \note
 *  This routine does not support batched computation.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
@@ -57,6 +60,9 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
 *               pointer is invalid.
+*  \retval      rocsparse_status_not_implemented if the conversion between the formats of \p source
+*               and \p target is not supported, for example when either uses
+*               \ref rocsparse_format_bell or \ref rocsparse_format_sell.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle                 handle,
@@ -98,6 +104,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_not_implemented if the conversion between the formats of \p source
+*               and \p target is not supported, for example when either uses
+*               \ref rocsparse_format_bell or \ref rocsparse_format_sell.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
 *  \snippet example_rocsparse_sparse_to_sparse.cpp doc example

@@ -848,6 +848,11 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle     handle_,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    if(nitems_ == 0)
+    {
+        return rocsparse_status_success;
+    }
+
     if((source_indextype_ == target_indextype_) && (target_indexbase_ == source_indexbase_))
     {
         if(target_ != source_)
@@ -894,6 +899,11 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle    handle_,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    if(nitems_ == 0)
+    {
+        return rocsparse_status_success;
+    }
+
     if((source_indextype_ == target_indextype_) && (target_inc_ == 1 && source_inc_ == 1))
     {
         if(target_ != source_)
@@ -938,6 +948,11 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle    handle_,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    if(nitems_ == 0)
+    {
+        return rocsparse_status_success;
+    }
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
         handle_, nitems_, target_indextype_, target_, 1, source_indextype_, source_, 1));
     return rocsparse_status_success;
@@ -961,6 +976,11 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
                                           const void*        source_)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    if(nitems_ == 0)
+    {
+        return rocsparse_status_success;
+    }
 
     if(source_datatype_ == target_datatype_)
     {
