@@ -107,6 +107,41 @@ namespace hipblaslt_ext
             return attr.type == hipMemoryTypeDevice ? attr.device : -1;
         }
 
+        // Whether kernels on device `from` can access memory on device `to`. Capability only: it is
+        // the caller's job to enable peer access. HIPBLASLT_PARTITIONED_FORCE_NO_PEER=1 makes two
+        // different devices unreachable, so the no-peer-access paths can be tested on a machine that
+        // has it.
+        bool canReach(int from, int to)
+        {
+            if(from == to)
+                return true;
+            const char* force = std::getenv("HIPBLASLT_PARTITIONED_FORCE_NO_PEER");
+            if(force != nullptr && force[0] == '1')
+                return false;
+            int ok = 0;
+            if(hipDeviceCanAccessPeer(&ok, from, to) != hipSuccess)
+            {
+                static_cast<void>(hipGetLastError());
+                return false;
+            }
+            return ok != 0;
+        }
+
+        // "dddd:bb:dd" of a device: its PCI domain, bus and device without the function. The
+        // partitions of one GPU (DPX, ...) share it and differ in the function.
+        std::string gpuOf(int device)
+        {
+            char id[64] = {};
+            if(hipDeviceGetPCIBusId(id, sizeof(id), device) != hipSuccess)
+            {
+                static_cast<void>(hipGetLastError());
+                return "";
+            }
+            std::string bdf(id);
+            const auto  dot = bdf.rfind('.');
+            return dot == std::string::npos ? bdf : bdf.substr(0, dot);
+        }
+
         // Copy sets to partitions: allowed[j][p] says copy set j may go to partition p. Fills
         // `owner` (copy set j -> partition) with an assignment that keeps every copy set allowed,
         // trying the given order first. Returns false when there is none.
@@ -340,6 +375,33 @@ namespace hipblaslt_ext
         for(size_t b : bytes)
             if(b == 0)
                 return HIPBLAS_STATUS_NOT_SUPPORTED;
+
+        // Where the partitions are, for HIPBLASLT_LOG_MASK=4.
+        {
+            const std::set<int> distinct(s.devices.begin(), s.devices.end());
+            if(distinct.size() == 1)
+                log_hints(__func__,
+                          "PartitionedGemm: all",
+                          parts,
+                          "partitions are on device",
+                          s.devices[0],
+                          "(SPX mode): the result is correct, but there is no speed benefit");
+            else
+            {
+                std::set<std::string> gpus;
+                for(int device : s.devices)
+                    gpus.insert(gpuOf(device));
+                if(gpus.size() == 1 && !gpus.begin()->empty())
+                    log_hints(__func__,
+                              "PartitionedGemm: the partitions are",
+                              parts,
+                              "partitions of one GPU");
+                else
+                    log_hints(__func__,
+                              "PartitionedGemm: the partitions are on different GPUs: the slices"
+                              " that are not local travel over the interconnect");
+            }
+        }
 
         // One GemmInputs per partition. A PartitionedGemm runs a plain GEMM, so every pointer
         // beyond A, B, C, D, alpha and beta must be null.
@@ -598,6 +660,51 @@ namespace hipblaslt_ext
                 if(p == nullptr)
                     return HIPBLAS_STATUS_INVALID_VALUE;
                 ptr[t] = advance(p, elems[t], bytes[t]);
+            }
+
+            // Partition i reads A, B and C and writes D (and the peer D) from device
+            // s.devices[i]. Memory on another device must be reachable from it: without peer
+            // access the kernel would fault.
+            {
+                const int64_t mi0 = dim == SplitDim::M ? size[i] : m;
+                const int64_t ni0 = dim == SplitDim::N ? size[i] : n;
+                const int64_t bi0 = dim == SplitDim::Batch ? size[i] : batch_count;
+                const int64_t rows[4]
+                    = {s.opA == HIPBLAS_OP_N ? mi0 : k, s.opB == HIPBLAS_OP_N ? k : ni0, mi0, mi0};
+                const int64_t cols[4]
+                    = {s.opA == HIPBLAS_OP_N ? k : mi0, s.opB == HIPBLAS_OP_N ? ni0 : k, ni0, ni0};
+                const char* names[4] = {"A", "B", "C", "D"};
+                const void* peer
+                    = inputs.storePeerD ? advance(dPointers[1 - i], elems[3], bytes[3]) : nullptr;
+                for(int t = 0; t < 5; t++)
+                {
+                    const void* base = t < 4 ? ptr[t] : peer;
+                    if(base == nullptr)
+                        continue;
+                    const int     mat  = t < 4 ? t : 3;
+                    const int64_t last = leading[mat] * (cols[mat] - 1) + rows[mat] - 1
+                                         + (bi0 - 1) * std::abs(strides[mat]);
+                    for(int64_t at : {int64_t(0), last / 2, last})
+                    {
+                        const int where = pageDevice(advance(base, at, bytes[mat]));
+                        if(where >= 0 && !canReach(s.devices[i], where))
+                        {
+                            log_error(__func__,
+                                      "PartitionedGemm: partition",
+                                      i,
+                                      "runs on device",
+                                      s.devices[i],
+                                      "but its",
+                                      t < 4 ? names[mat] : "peer D",
+                                      "is on device",
+                                      where,
+                                      "and there is no peer access between them. Put a copy on the"
+                                      " partition's device, or use devices that can reach each"
+                                      " other (the partitions of one GPU).");
+                            return HIPBLAS_STATUS_INVALID_VALUE;
+                        }
+                    }
+                }
             }
 
             GemmInputs slice;

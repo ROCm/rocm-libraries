@@ -1227,6 +1227,10 @@ namespace hipblaslt_ext
         * are and gives every partition the slice that is on its device (see
         * PartitionedGemm::getSlice).
         *
+        *  With ``HIPBLASLT_LOG_MASK=4`` setProblem logs where the partitions are: all on one
+        * device (SPX mode, correct but no speed benefit), the partitions of one GPU (DPX or
+        * another partition mode, found from the PCI function of the devices), or different GPUs.
+        *
         *  With ``storePeerD`` every partition also stores its slice into the D of the other
         * partition, so that both Ds are complete once the run has finished (the partitions are
         * joined, see run()). It needs exactly 2 partitions and a replicated D (two different
@@ -1237,7 +1241,10 @@ namespace hipblaslt_ext
         * reads D after the run (including under graph capture) is up to the caller.
         *
         *  \retval HIPBLAS_STATUS_SUCCESS           If the problem was set on every partition.
-        *  \retval HIPBLAS_STATUS_INVALID_VALUE     If `inputs` does not hold one GemmInputs
+        *  \retval HIPBLAS_STATUS_INVALID_VALUE     If a partition would use memory on another
+        * device that it has no peer access to (``hipDeviceCanAccessPeer``; with ``storePeerD`` the
+        * two partitions need it both ways), with an error log. The library does not enable peer
+        * access, which is up to the caller. Also if `inputs` does not hold one GemmInputs
         * per partition, a required pointer is null, a size is not positive, or the split dimension is smaller than the
         * number of partitions.
         *  \retval HIPBLAS_STATUS_NOT_SUPPORTED     If the types or operations are not
