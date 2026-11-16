@@ -23,6 +23,58 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::resample;
 
+namespace
+{
+
+// A 1x1 pooling window with stride 1, so dx has the dims of dy: [1, 1, height, width].
+flatbuffers::FlatBufferBuilder createResampleBwdGraphWithGradientSize(int64_t height, int64_t width)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {1, 1, height, width};
+    const std::vector<int64_t> strides = {height * width, height * width, width, 1};
+    const std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> unit = {1, 1};
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
+        tensorAttributes;
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "dy", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "dx", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &strides, &dims));
+
+    auto resampleAttr = hipdnn_flatbuffers_sdk::data_objects::CreateResampleBwdAttributesDirect(
+        builder,
+        1,
+        2,
+        ::flatbuffers::nullopt,
+        &padding,
+        &padding,
+        &unit,
+        &unit,
+        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING,
+        hipdnn_flatbuffers_sdk::data_objects::PaddingMode::ZERO_PAD);
+
+    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
+    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "resample_bwd",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleBwdAttributes,
+        resampleAttr.Union()));
+
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
+        builder,
+        "test",
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &tensorAttributes,
+        &nodes));
+    return builder;
+}
+
+} // namespace
+
 class TestResampleBwdPlanBuilder : public ::testing::Test
 {
 protected:
@@ -76,6 +128,26 @@ TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueWithoutOptionalAttribu
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// 16777215 * 256 = 2^32 - 256 dx elements is 2^24 - 1 blocks of 256 threads.
+TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsTrueForGradientAtThreadLimit)
+{
+    auto builder = createResampleBwdGraphWithGradientSize(16777215, 256);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// 401 * 10710641 = 2^32 - 255 dx elements needs 2^24 blocks, which is 2^32 threads.
+TEST_F(TestResampleBwdPlanBuilder, IsApplicableReturnsFalseForGradientOverThreadLimit)
+{
+    auto builder = createResampleBwdGraphWithGradientSize(401, 10710641);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 // ============================================================================

@@ -7,10 +7,12 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
+#include <vector>
 
 #include "LayernormPlanBuilder.hpp"
 #include "compilation/IKernelCompiler.hpp"
 #include "device/IDevicePropertyProvider.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
@@ -60,6 +62,44 @@ size_t getMaxBwdWorkspaceSize(const Handle& handle,
               ? 2 * static_cast<size_t>(outerSize) * static_cast<size_t>(stride)
               : 0;
     return 4 * (sizeFromParallel + sizeFromFallbackMeanRstd);
+}
+
+std::vector<KernelLaunchShape>
+    getLaunchShapes(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
+    const auto& node = opGraph.getNode(0);
+    const auto& tensorMap = opGraph.getTensorMap();
+
+    if(const auto* fwdAttr = node.attributes_as_LayernormAttributes())
+    {
+        const auto meanAttr
+            = fwdAttr->mean_tensor_uid().has_value()
+                  ? std::make_optional(tensorMap.at(fwdAttr->mean_tensor_uid().value()))
+                  : std::nullopt;
+        const ProblemDescription problem(tensorMap.at(fwdAttr->x_tensor_uid()),
+                                         tensorMap.at(fwdAttr->scale_tensor_uid()),
+                                         meanAttr,
+                                         Direction::FORWARD);
+        return LayernormFwdPlan::launchShapes(problem.outerSize(), problem.stride());
+    }
+
+    const auto* bwdAttr = node.attributes_as_LayernormBackwardAttributes();
+    const auto meanAttr = bwdAttr->mean_tensor_uid().has_value()
+                              ? std::make_optional(tensorMap.at(bwdAttr->mean_tensor_uid().value()))
+                              : std::nullopt;
+    const ProblemDescription problem(tensorMap.at(bwdAttr->x_tensor_uid()),
+                                     tensorMap.at(bwdAttr->scale_tensor_uid()),
+                                     meanAttr,
+                                     Direction::BACKWARD);
+    // Parallel mode needs innerSize <= 4 * localSize * multiProcessorCount and sizes its reduction
+    // to that bound, so its launches stay far below 2^32 threads. Only the main kernel and the
+    // non-parallel scale/bias kernel can reach the limit.
+    return LayernormBwdPlan::launchShapes(problem.outerSize(),
+                                          problem.innerSize(),
+                                          problem.stride(),
+                                          LayernormBwdParams::MAX_LOCAL_SIZE,
+                                          /*isParallel=*/false,
+                                          /*parallelSize=*/0);
 }
 
 } // namespace
@@ -130,6 +170,26 @@ bool LayernormPlanBuilder::isApplicable(
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                                "Unexpected node attribute type");
+            }
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(e.what());
+            return false;
+        }
+
+        try
+        {
+            for(const auto& shape : getLaunchShapes(opGraph))
+            {
+                if(!launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock))
+                {
+                    HIPDNN_PLUGIN_LOG_INFO("Layernorm plan builder declines kernel "
+                                           << shape.kernelName << ": " << shape.blocks
+                                           << " blocks of " << shape.threadsPerBlock
+                                           << " threads reach the 2^32 thread limit");
+                    return false;
+                }
             }
         }
         catch(const std::exception& e)

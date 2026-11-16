@@ -127,6 +127,52 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidBpropGraph)
 }
 
 // ============================================================================
+// isApplicable - launch thread limit
+// ============================================================================
+
+// Layernorm launches outerSize * stride blocks of 1024 threads, which must stay below 2^32
+// threads, so the largest accepted outer size is 2^22 - 1.
+TEST_F(TestLayernormPlanBuilder, IsApplicableFpropAcceptsOuterSizeBelowThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
+                                                                              {4194303, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsApplicableFpropDeclinesOuterSizeAtThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({4, 1, 1, 1},
+                                                                              {4194304, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsApplicableBpropAcceptsOuterSizeBelowThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
+                                                                            {4194303, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsApplicableBpropDeclinesOuterSizeAtThreadLimit)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph({4, 1, 1, 1},
+                                                                            {4194304, 4, 1, 1});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+// ============================================================================
 // isApplicable - invalid graphs
 // ============================================================================
 
