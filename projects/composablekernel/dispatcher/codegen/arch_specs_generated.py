@@ -5,7 +5,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-11-18T10:33:40.045309
+Generated at: 2026-11-18T11:53:02.492989
 
 To update this file:
 1. Edit arch_specs.json
@@ -33,18 +33,57 @@ ARCH_FAMILY_MAP: Dict[str, str] = {
 }
 
 # Element size in bytes for each data type
-ELEMENT_SIZE_MAP: Dict[str, float] = {'fp16': 2, 'bf16': 2, 'fp32': 4, 'fp64': 8, 'fp8': 1, 'bf8': 1, 'int8': 1, 'int4': 0.5, 'pk_fp4': 0.5, 'int32': 4}
+ELEMENT_SIZE_MAP: Dict[str, float] = {
+    "fp16": 2,
+    "bf16": 2,
+    "fp32": 4,
+    "fp64": 8,
+    "fp8": 1,
+    "bf8": 1,
+    "int8": 1,
+    "int4": 0.5,
+    "pk_fp4": 0.5,
+    "int32": 4,
+}
 
 # Supported warp configurations per architecture [warp_m, warp_n, warp_k]
 WARP_SUPPORTED_COMBINATIONS: Dict[str, List[List[int]]] = {
     "gfx908": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
-    "gfx942": [[1, 1, 1], [1, 2, 1], [1, 4, 1], [2, 1, 1], [2, 1, 2], [2, 2, 1], [4, 1, 1]],
-    "gfx950": [[1, 1, 1], [1, 2, 1], [1, 4, 1], [2, 1, 1], [2, 1, 2], [2, 2, 1], [4, 1, 1], [8, 2, 1], [4, 4, 1]],
+    "gfx942": [
+        [1, 1, 1],
+        [1, 2, 1],
+        [1, 4, 1],
+        [2, 1, 1],
+        [2, 1, 2],
+        [2, 2, 1],
+        [4, 1, 1],
+    ],
+    "gfx950": [
+        [1, 1, 1],
+        [1, 2, 1],
+        [1, 4, 1],
+        [2, 1, 1],
+        [2, 1, 2],
+        [2, 2, 1],
+        [4, 1, 1],
+        [8, 2, 1],
+        [4, 4, 1],
+    ],
     "gfx1100": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1200": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
-    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
+    "gfx1250": [
+        [2, 4, 1],
+        [1, 8, 1],
+        [8, 1, 1],
+        [4, 2, 1],
+        [2, 1, 1],
+        [1, 2, 2],
+        [4, 1, 1],
+        [1, 4, 1],
+        [2, 2, 1],
+    ],
 }
 
 # Pipeline-specific extra warp configurations: pipeline -> arch -> [[warp_m, warp_n, warp_k], ...]
@@ -57,23 +96,69 @@ PIPELINE_EXTRA_WARP_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
 # Supported warp tile combinations: arch -> dtype_key -> [[warp_tile_m, n, k], ...]
 WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
     "gfx908": {
-        "fp32_fp32_fp32": [[16, 16, 4], [16, 16, 8], [16, 16, 16], [32, 32, 4], [32, 32, 8]],
+        "fp32_fp32_fp32": [
+            [16, 16, 4],
+            [16, 16, 8],
+            [16, 16, 16],
+            [32, 32, 4],
+            [32, 32, 8],
+        ],
         "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32]],
         "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32]],
         "int8_int8_int32": [[32, 32, 16], [16, 16, 32]],
     },
     "gfx90a": {
-        "fp32_fp32_fp32": [[16, 16, 4], [16, 16, 8], [16, 16, 16], [32, 32, 4], [32, 32, 8]],
-        "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [4, 64, 16], [64, 4, 16]],
-        "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [4, 64, 16], [64, 4, 16]],
+        "fp32_fp32_fp32": [
+            [16, 16, 4],
+            [16, 16, 8],
+            [16, 16, 16],
+            [32, 32, 4],
+            [32, 32, 8],
+        ],
+        "fp16_fp16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [4, 64, 16],
+            [64, 4, 16],
+        ],
+        "bf16_bf16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [4, 64, 16],
+            [64, 4, 16],
+        ],
         "fp8_fp8_fp32": [[32, 32, 16], [32, 32, 32]],
         "bf8_bf8_fp32": [[32, 32, 16], [32, 32, 32]],
         "int8_int8_int32": [[32, 32, 16], [16, 16, 32]],
     },
     "gfx942": {
-        "fp32_fp32_fp32": [[16, 16, 4], [16, 16, 8], [16, 16, 16], [32, 32, 4], [32, 32, 8]],
-        "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [4, 64, 16], [64, 4, 16]],
-        "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [4, 64, 16], [64, 4, 16]],
+        "fp32_fp32_fp32": [
+            [16, 16, 4],
+            [16, 16, 8],
+            [16, 16, 16],
+            [32, 32, 4],
+            [32, 32, 8],
+        ],
+        "fp16_fp16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [4, 64, 16],
+            [64, 4, 16],
+        ],
+        "bf16_bf16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [4, 64, 16],
+            [64, 4, 16],
+        ],
         "fp8_fp8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 32], [16, 16, 64]],
         "fp8_bf8_fp32": [[32, 32, 16], [16, 16, 32], [32, 32, 32]],
         "bf8_fp8_fp32": [[32, 32, 16]],
@@ -81,13 +166,53 @@ WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]]] = {
         "int8_int8_int32": [[32, 32, 16], [16, 16, 32]],
     },
     "gfx950": {
-        "fp32_fp32_fp32": [[16, 16, 4], [16, 16, 8], [16, 16, 16], [32, 32, 4], [32, 32, 8]],
-        "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [4, 64, 16], [64, 4, 16]],
-        "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [4, 64, 16], [64, 4, 16]],
-        "fp8_fp8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 32], [16, 16, 64], [16, 16, 128], [32, 32, 64]],
-        "fp8_bf8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 32], [16, 16, 128], [32, 32, 64]],
+        "fp32_fp32_fp32": [
+            [16, 16, 4],
+            [16, 16, 8],
+            [16, 16, 16],
+            [32, 32, 4],
+            [32, 32, 8],
+        ],
+        "fp16_fp16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [4, 64, 16],
+            [64, 4, 16],
+        ],
+        "bf16_bf16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [4, 64, 16],
+            [64, 4, 16],
+        ],
+        "fp8_fp8_fp32": [
+            [32, 32, 16],
+            [32, 32, 32],
+            [16, 16, 32],
+            [16, 16, 64],
+            [16, 16, 128],
+            [32, 32, 64],
+        ],
+        "fp8_bf8_fp32": [
+            [32, 32, 16],
+            [32, 32, 32],
+            [16, 16, 32],
+            [16, 16, 128],
+            [32, 32, 64],
+        ],
         "bf8_fp8_fp32": [[32, 32, 16], [16, 16, 128], [32, 32, 64]],
-        "bf8_bf8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 32], [16, 16, 64], [16, 16, 128], [32, 32, 64]],
+        "bf8_bf8_fp32": [
+            [32, 32, 16],
+            [32, 32, 32],
+            [16, 16, 32],
+            [16, 16, 64],
+            [16, 16, 128],
+            [32, 32, 64],
+        ],
         "int8_int8_int32": [[32, 32, 16], [16, 16, 32]],
         "pk_fp4_pk_fp4_fp32": [[16, 16, 128]],
     },
@@ -133,28 +258,88 @@ PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS: Dict[str, Dict[str, List[List[int]]
         "bf8_bf8_fp32": [[16, 16, 64]],
     },
     "gfx90a": {
-        "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
-        "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
+        "fp16_fp16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [64, 4, 16],
+        ],
+        "bf16_bf16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [64, 4, 16],
+        ],
         "fp8_fp8_fp32": [[32, 32, 16], [32, 32, 32]],
         "bf8_bf8_fp32": [[32, 32, 16], [32, 32, 32]],
     },
     "gfx942": {
-        "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
-        "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16]],
+        "fp16_fp16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [64, 4, 16],
+        ],
+        "bf16_bf16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [64, 4, 16],
+        ],
         "fp8_fp8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 32], [16, 16, 64]],
         "bf8_bf8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 64], [16, 16, 32]],
         "int8_int8_int32": [[16, 16, 32], [32, 32, 16]],
     },
     "gfx950": {
-        "fp16_fp16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16], [32, 32, 32], [16, 16, 64]],
-        "bf16_bf16_fp32": [[32, 32, 8], [16, 16, 16], [32, 32, 16], [16, 16, 32], [64, 4, 16], [32, 32, 32], [16, 16, 64]],
-        "fp8_fp8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 32], [16, 16, 64], [16, 16, 128], [32, 32, 64]],
-        "bf8_bf8_fp32": [[32, 32, 16], [32, 32, 32], [16, 16, 64], [16, 16, 32], [16, 16, 128], [32, 32, 64]],
+        "fp16_fp16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [64, 4, 16],
+            [32, 32, 32],
+            [16, 16, 64],
+        ],
+        "bf16_bf16_fp32": [
+            [32, 32, 8],
+            [16, 16, 16],
+            [32, 32, 16],
+            [16, 16, 32],
+            [64, 4, 16],
+            [32, 32, 32],
+            [16, 16, 64],
+        ],
+        "fp8_fp8_fp32": [
+            [32, 32, 16],
+            [32, 32, 32],
+            [16, 16, 32],
+            [16, 16, 64],
+            [16, 16, 128],
+            [32, 32, 64],
+        ],
+        "bf8_bf8_fp32": [
+            [32, 32, 16],
+            [32, 32, 32],
+            [16, 16, 64],
+            [16, 16, 32],
+            [16, 16, 128],
+            [32, 32, 64],
+        ],
     },
 }
 
 # Preshuffle-supported pipelines
-PRESHUFFLE_PIPELINES: List[str] = ['preshufflev2', 'preshuffle_tdm', 'comp_tdm', 'comp_tdm_v2', 'comp_async']
+PRESHUFFLE_PIPELINES: List[str] = [
+    "preshufflev2",
+    "preshuffle_tdm",
+    "comp_tdm",
+    "comp_tdm_v2",
+    "comp_async",
+]
 
 # LDS staging budget in bytes: arch -> pipeline -> bytes.
 # Resolved from each architecture's lds_capacity_kb in arch_specs.json.
@@ -320,8 +505,10 @@ LDS_TOTAL_CAPACITY_BY_ARCH: Dict[str, int] = {
 
 # Smallest budget shipped, handed to architectures we do not recognise.
 _SMALLEST_LDS_BUDGET: Dict[str, int] = LDS_CAPACITY_LIMITS_BY_ARCH[
-    min(LDS_CAPACITY_LIMITS_BY_ARCH,
-        key=lambda a: LDS_CAPACITY_LIMITS_BY_ARCH[a]["default"])
+    min(
+        LDS_CAPACITY_LIMITS_BY_ARCH,
+        key=lambda a: LDS_CAPACITY_LIMITS_BY_ARCH[a]["default"],
+    )
 ]
 _SMALLEST_LDS_CAPACITY: int = min(LDS_TOTAL_CAPACITY_BY_ARCH.values())
 
@@ -389,6 +576,7 @@ DTYPE_COMBINATIONS: Dict[str, Dict[str, str]] = {
 # Helper Functions
 # =============================================================================
 
+
 def get_supported_archs() -> List[str]:
     """Get list of all supported GPU architectures."""
     return list(ARCH_FAMILY_MAP.keys())
@@ -426,7 +614,9 @@ LDS_PIPELINE_BUDGET_ALIASES: Dict[str, str] = {
 }
 
 
-def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False) -> int:
+def get_lds_limit(
+    gpu_arch: str, pipeline: str, double_smem_buffer: bool = False
+) -> int:
     """Get the LDS staging budget in bytes for an architecture and pipeline.
 
     double_smem_buffer covers the pipelines that stage two LDS buffers by
@@ -455,7 +645,11 @@ def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False
 
 def is_trait_combo_unsupported(pipeline: str, epilogue: str, scheduler: str) -> bool:
     """Check if a trait combination is unsupported."""
-    return (pipeline.lower(), epilogue.lower(), scheduler.lower()) in TRAIT_UNSUPPORTED_COMBINATIONS
+    return (
+        pipeline.lower(),
+        epilogue.lower(),
+        scheduler.lower(),
+    ) in TRAIT_UNSUPPORTED_COMBINATIONS
 
 
 def get_dtype_info(dtype_a: str, dtype_b: str) -> Dict[str, str]:

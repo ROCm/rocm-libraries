@@ -24,9 +24,10 @@ import json
 import argparse
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional
 
 from codegen_common import CommonTypeMappings
 
@@ -399,6 +400,7 @@ def get_valid_dtype_combos() -> List[str]:
 '''
 
     output_path.write_text(content)
+    _ruff_format_in_place(output_path)
     print(f"Generated: {output_path}")
 
 
@@ -731,6 +733,45 @@ def _clang_format_in_place(path: Path):
             print(f"Warning: {tool} failed on {path}: {exc.stderr.decode().strip()}")
             return
     print(f"Warning: clang-format not found; {path.name} may need formatting.")
+
+
+def find_ruff() -> Optional[List[str]]:
+    """Return the command that runs ruff, or None if it is not installed."""
+    exe = shutil.which("ruff")
+    if exe is not None:
+        return [exe]
+    probe = subprocess.run(
+        [sys.executable, "-m", "ruff", "--version"], capture_output=True
+    )
+    if probe.returncode == 0:
+        return [sys.executable, "-m", "ruff"]
+    return None
+
+
+def _ruff_format_in_place(path: Path):
+    """Format the generated module so it satisfies the repository's ruff-format hook.
+
+    CK's pre-commit runs ruff-format (v0.14.0) on Python files. Without this
+    step the hook rewrites the committed module and it no longer matches what
+    this generator emits. '--isolated' ignores any configuration file, which
+    matches the hook (CK has no ruff configuration) and keeps the output the
+    same wherever the module is written.
+
+    Best effort: if ruff is unavailable the module is still valid Python, it
+    just needs formatting before it can be committed.
+    """
+    ruff = find_ruff()
+    if ruff is None:
+        print(f"Warning: ruff not found; {path.name} may need formatting.")
+        return
+    try:
+        subprocess.run(
+            [*ruff, "format", "--isolated", "--quiet", str(path)],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        print(f"Warning: ruff failed on {path}: {exc.stderr.decode().strip()}")
 
 
 def main():
