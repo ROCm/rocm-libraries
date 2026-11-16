@@ -28,12 +28,14 @@
 // passed in; the constructors are checked with one invalid argument at a time.
 
 #include "unit_test_device_conv_common.hpp"
+#include "unit_test_host_utils.hpp"
 
 #include "rocsparse_internal_spmat_print.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <sstream>
@@ -1210,5 +1212,180 @@ namespace
         std::ostringstream os;
         EXPECT_REJECTED(rocsparse::internal_spmat_print(os, nullptr, true, true));
         EXPECT_TRUE(os.str().empty());
+    }
+} // namespace
+
+namespace
+{
+    constexpr int64_t k_max = std::numeric_limits<int64_t>::max();
+
+    // Non-null and never dereferenced. The size checks run before any array is read, so
+    // sizes far beyond device memory need no allocation.
+    int   g_dummy_storage = 0;
+    void* g_dummy         = &g_dummy_storage;
+
+    template <typename F>
+    void in_both_debug_modes(F&& f)
+    {
+        const rocsparse_ut::debug_state_guard restore;
+        rocsparse_disable_debug_arguments();
+        f();
+        rocsparse_enable_debug_arguments();
+        rocsparse_disable_debug_arguments_verbose();
+        f();
+    }
+
+    void expect_ell(int64_t          rows,
+                    int64_t          cols,
+                    int64_t          width,
+                    void*            arrays,
+                    rocsparse_status want,
+                    int64_t          want_nnz = 0)
+    {
+        SCOPED_TRACE("rows " + std::to_string(rows) + " cols " + std::to_string(cols) + " width "
+                     + std::to_string(width));
+        Spmat d;
+        ASSERT_EQ(
+            rocsparse_create_ell_descr(&d, rows, cols, arrays, arrays, width, i32, base0, f32),
+            want);
+        if(want != st_ok)
+        {
+            EXPECT_EQ(d.get(), nullptr);
+            return;
+        }
+        int64_t r = -1, c = -1, nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_size(d, &r, &c, &nnz), st_ok);
+        EXPECT_EQ(std::make_tuple(r, c, nnz), std::make_tuple(rows, cols, want_nnz));
+        nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_ok);
+        EXPECT_EQ(nnz, want_nnz);
+    }
+
+    // Both blocked ELL constructors, which share their size checks.
+    void expect_bell(int64_t          rows,
+                     int64_t          cols,
+                     int64_t          block_dim,
+                     int64_t          ell_cols,
+                     void*            col_ind,
+                     void*            val,
+                     rocsparse_status want)
+    {
+        SCOPED_TRACE("rows " + std::to_string(rows) + " cols " + std::to_string(cols)
+                     + " block_dim " + std::to_string(block_dim) + " ell_cols "
+                     + std::to_string(ell_cols));
+        Spmat d;
+        EXPECT_EQ(rocsparse_create_bell_descr(
+                      &d, rows, cols, dir_r, block_dim, ell_cols, col_ind, val, i32, base0, f32),
+                  want);
+        ConstSpmat c;
+        EXPECT_EQ(rocsparse_create_const_bell_descr(&c,
+                                                    rows,
+                                                    cols,
+                                                    dir_c,
+                                                    block_dim,
+                                                    ell_cols,
+                                                    col_ind,
+                                                    val,
+                                                    i32,
+                                                    base1,
+                                                    rocsparse_datatype_f64_r),
+                  want);
+        if(want != st_ok)
+        {
+            EXPECT_EQ(d.get(), nullptr);
+            EXPECT_EQ(c.get(), nullptr);
+        }
+    }
+
+    // rows * ell_width must fit in int64_t, and a product that does not is rejected before
+    // the null-pointer checks.
+    TEST_F(ConvDescr, EllSizeOverflow)
+    {
+        in_both_debug_modes([] {
+            const int64_t fit = k_max / 4;
+            for(void* arrays : {static_cast<void*>(nullptr), g_dummy})
+            {
+                expect_ell(int64_t(1) << 61, 4, 4, arrays, st_size);
+                expect_ell(int64_t(1) << 62, 4, 4, arrays, st_size);
+                expect_ell(fit + 1, 4, 4, arrays, st_size);
+            }
+            expect_ell(fit, 4, 4, g_dummy, st_ok, fit * 4);
+            expect_ell(k_max, 1, 1, g_dummy, st_ok, k_max);
+            expect_ell(k_max / 2 + 1, 2, 2, nullptr, st_size);
+
+            expect_ell(-1, 4, 2, g_dummy, st_size);
+            expect_ell(4, 4, -1, g_dummy, st_size);
+            expect_ell(3, 4, 5, g_dummy, st_size);
+            expect_ell(3, 4, 2, nullptr, st_ptr);
+
+            expect_ell(int64_t(1) << 62, 0, 0, nullptr, st_ok, 0);
+            expect_ell(0, 4, 4, nullptr, st_ok, 0);
+            expect_ell(3, 4, 2, g_dummy, st_ok, 6);
+        });
+    }
+
+    // rows * ell_cols must fit in int64_t. The block-row count must not be computed as
+    // rows + ell_block_dim - 1, which overflows for rows near the int64_t maximum.
+    TEST_F(ConvDescr, BellSizeOverflow)
+    {
+        in_both_debug_modes([] {
+            const int64_t fit = k_max / 4;
+            expect_bell(int64_t(1) << 61, 4, 1, 4, nullptr, nullptr, st_size);
+            expect_bell(int64_t(1) << 62, 4, 1, 4, g_dummy, g_dummy, st_size);
+            expect_bell(fit + 1, 4, 1, 4, nullptr, nullptr, st_size);
+            expect_bell(fit, 4, 1, 4, g_dummy, g_dummy, st_ok);
+
+            expect_bell(k_max, 1, 2, 1, nullptr, g_dummy, st_ptr);
+            expect_bell(k_max, 1, 2, 1, g_dummy, nullptr, st_ptr);
+            expect_bell(k_max, 1, 2, 1, g_dummy, g_dummy, st_ok);
+
+            Spmat d;
+            ASSERT_EQ(rocsparse_create_bell_descr(
+                          &d, k_max, 1, dir_r, 2, 1, g_dummy, g_dummy, i32, base0, f32),
+                      st_ok);
+            EXPECT_EQ(rocsparse_bell_set_pointers(d, nullptr, g_dummy), st_ptr);
+            EXPECT_EQ(rocsparse_bell_set_pointers(d, g_dummy, nullptr), st_ptr);
+            EXPECT_EQ(rocsparse_bell_set_pointers(d, g_dummy, g_dummy), st_ok);
+
+            expect_bell(4, 4, 0, 2, g_dummy, g_dummy, st_size);
+            expect_bell(-1, 4, 2, 2, g_dummy, g_dummy, st_size);
+            expect_bell(4, 4, 2, 2, nullptr, nullptr, st_ptr);
+        });
+
+        Spmat small;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &small, 4, 4, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        int64_t nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(small, &nnz), st_ok);
+        EXPECT_EQ(nnz, 2 * 4 * 2 * 2);
+
+        // rows * ell_cols fits, but the count get_nnz reports also multiplies by
+        // block_dim squared and does not. nnz is left unchanged.
+        Spmat wide;
+        ASSERT_EQ(rocsparse_create_bell_descr(&wide,
+                                              int64_t(1) << 40,
+                                              int64_t(1) << 10,
+                                              dir_r,
+                                              int64_t(1) << 10,
+                                              int64_t(1) << 10,
+                                              g_dummy,
+                                              g_dummy,
+                                              i32,
+                                              base0,
+                                              f32),
+                  st_ok);
+        nnz = 717;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(wide, &nnz), st_size);
+        EXPECT_EQ(nnz, 717);
+
+        const int64_t fit = k_max / 4;
+        ConstSpmat    c;
+        ASSERT_EQ(rocsparse_create_const_bell_descr(
+                      &c, fit, 4, dir_r, 1, 4, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(c, &nnz), st_ok);
+        EXPECT_EQ(nnz, fit * 4);
     }
 } // namespace

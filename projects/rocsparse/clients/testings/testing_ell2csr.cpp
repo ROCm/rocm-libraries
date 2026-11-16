@@ -190,7 +190,9 @@ void testing_ell2csr(const Arguments& arg)
     device_vector<rocsparse_int> dell_col_ind(ell_nnz);
     device_vector<T>             dell_val(ell_nnz);
 
-    if(!dcsr_row_ptr || !dell_col_ind || !dell_val)
+    // A zero-size device_vector has a null pointer, which is not an allocation failure.
+    if(dcsr_row_ptr.memcheck() != hipSuccess || dell_col_ind.memcheck() != hipSuccess
+       || dell_val.memcheck() != hipSuccess)
     {
         CHECK_HIP_ERROR(hipErrorOutOfMemory);
         return;
@@ -212,7 +214,7 @@ void testing_ell2csr(const Arguments& arg)
         device_vector<rocsparse_int> dcsr_col_ind(csr_nnz);
         device_vector<T>             dcsr_val(csr_nnz);
 
-        if(!dcsr_col_ind || !dcsr_val)
+        if(dcsr_col_ind.memcheck() != hipSuccess || dcsr_val.memcheck() != hipSuccess)
         {
             CHECK_HIP_ERROR(hipErrorOutOfMemory);
             return;
@@ -278,7 +280,7 @@ void testing_ell2csr(const Arguments& arg)
             device_vector<rocsparse_int> dcsr_col_ind(csr_nnz);
             device_vector<T>             dcsr_val(csr_nnz);
 
-            if(!dcsr_col_ind || !dcsr_val)
+            if(dcsr_col_ind.memcheck() != hipSuccess || dcsr_val.memcheck() != hipSuccess)
             {
                 CHECK_HIP_ERROR(hipErrorOutOfMemory);
                 return;
@@ -308,7 +310,7 @@ void testing_ell2csr(const Arguments& arg)
             device_vector<rocsparse_int> dcsr_col_ind(csr_nnz);
             device_vector<T>             dcsr_val(csr_nnz);
 
-            if(!dcsr_col_ind || !dcsr_val)
+            if(dcsr_col_ind.memcheck() != hipSuccess || dcsr_val.memcheck() != hipSuccess)
             {
                 CHECK_HIP_ERROR(hipErrorOutOfMemory);
                 return;

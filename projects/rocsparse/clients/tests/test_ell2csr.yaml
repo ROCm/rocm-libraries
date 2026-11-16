@@ -41,6 +41,16 @@ Tests:
   baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
+- name: ell2csr
+  category: quick
+  function: ell2csr
+  precision: *single_precision
+  M: [3]
+  N: [2, 0]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_zero]
+
 - name: ell2csr_file
   category: quick
   function: ell2csr

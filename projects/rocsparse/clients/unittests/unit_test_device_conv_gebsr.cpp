@@ -1212,9 +1212,15 @@ namespace
     TEST_F(ConvGebsr, Ell2CsrEmpty)
     {
         MatDescr      ell_descr;
-        DevBuf<I>     d_eind(16), d_ind(8);
-        DevBuf<float> d_eval(16), d_val(8);
-        for(const auto& c : {std::array<I, 4>{0, 4, 2, 0}, {4, 0, 2, 1}, {4, 4, 0, 0}})
+        DevBuf<I>     d_eind(16);
+        DevBuf<float> d_eval(16);
+        for(const auto& c : {std::array<I, 4>{0, 4, 2, 0},
+                             {0, 0, 0, 1},
+                             {4, 0, 2, 1},
+                             {4, 0, 0, 0},
+                             {4, 0, 0, 1},
+                             {4, 4, 0, 0},
+                             {4, 4, 0, 1}})
         {
             for(bool device_mode : {false, true})
             {
@@ -1237,6 +1243,8 @@ namespace
                 std::vector<I> want(8, 77);
                 std::fill(want.begin(), want.begin() + c[0] + 1, c[3]);
                 EXPECT_EQ(d_ptr.read(8), want);
+                DevBuf<I>     d_ind(std::vector<I>(8, 77));
+                DevBuf<float> d_val(std::vector<float>(8, 77.0f));
                 EXPECT_EQ(rocsparse_sell2csr(handle,
                                              c[0],
                                              c[1],
@@ -1249,6 +1257,10 @@ namespace
                                              d_ptr,
                                              d_ind),
                           st_ok);
+                EXPECT_EQ(hipStreamSynchronize(handle->stream), hipSuccess);
+                EXPECT_EQ(d_ptr.read(8), want);
+                EXPECT_EQ(d_ind.read(8), std::vector<I>(8, 77));
+                EXPECT_EQ(d_val.read(8), std::vector<float>(8, 77.0f));
             }
         }
     }
