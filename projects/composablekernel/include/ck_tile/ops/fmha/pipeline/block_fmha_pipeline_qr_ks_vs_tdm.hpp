@@ -1167,7 +1167,8 @@ struct BlockFmhaPipelineQRKSVSTdm
             gemm_0(s_acc, q_tile, k_tile);
     }
 
-    // Single V, double K LDS buffer path.
+    // Single V, double K LDS buffer path. BlockFmhaFwdSplitKVPipelineQRKSVSTdm
+    // copies this mainloop; its header lists what must stay in sync.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,

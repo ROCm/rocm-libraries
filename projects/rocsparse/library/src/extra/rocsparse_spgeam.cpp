@@ -81,6 +81,15 @@ rocsparse_status
 
     if(this->csr_row_ptr_C != nullptr)
     {
+        // A C with no rows may have a null row pointer.
+        if(csr_row_ptr_C == nullptr)
+        {
+            if(m == 0)
+            {
+                return rocsparse_status_success;
+            }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
+        }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
                                                            m + 1,
                                                            csr_row_ptr_C_indextype,
