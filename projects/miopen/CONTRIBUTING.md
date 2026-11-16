@@ -115,13 +115,6 @@ All PRs must pass the CI in order to be considered for merger.
 Reviewers may choose to defer their review until the CI testing
 has passed.
 
-Component CI does not run the MIOpen build matrix for changes limited to
-Markdown and reStructuredText files under `projects/miopen` (other than
-`LICENSE.md`); see
-[Component CI](../../docs/continuous-integration.md#component-ci).
-Component CI does not build the documentation, so check documentation changes
-with a local Sphinx build or a `/docs-preview` comment on the PR.
-
 ## The Review
 During the review, reviewers will look over the changes and make
 suggestions or requests for changes.

@@ -48,7 +48,7 @@ For workflow dispatch triggers, TheRock CI will run builds and tests for whichev
 
 Component CI runs extra checks for selected components on pull requests, pushes to `develop` and `release/therock-*`, and workflow dispatches. It is implemented by [`component-ci.yml`](../.github/workflows/component-ci.yml), whose Configure CI job runs [`component_ci.py`](../.github/scripts/component_ci.py) to decide which component workflows run:
 - A component runs when a changed file matches one of its path patterns. Both sides of a rename count.
-- A component can exclude files that its checks never read. MIOpen excludes Markdown and reStructuredText files under `projects/miopen`, except `LICENSE.md`, so a documentation-only change does not run its build matrix.
+- A component can exclude files that its checks never read.
 - A change to the Component CI workflow, `component_ci.py`, or the `ci-env` action runs every component, as does a workflow dispatch.
 
 The required `Component CI Summary` check passes when every selected component succeeds and fails when Configure CI or a selected component fails. Components that are not selected are skipped and do not fail it.
