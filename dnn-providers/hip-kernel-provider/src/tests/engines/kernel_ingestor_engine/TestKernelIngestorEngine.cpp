@@ -650,6 +650,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
         "hipkernel.gfx942_attention_unified3d.dispatch",
+
 #ifdef HIPDNN_ENGINE_FLYDSL
         // FlyDSL's packs, compiled in whenever the production root has FlyDSL content.
         "hipkernel.flydsl_rmsnorm.dispatch",
@@ -670,6 +671,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx950_attention_unified_2d.dispatch",
         "hipkernel.gfx950_attention_unified_3d.dispatch",
+        "hipkernel.gfx942_attention_unified_2d.dispatch",
         "hipkernel.gfx950_conv_fwd_aot.dispatch",
         "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
