@@ -667,10 +667,10 @@ namespace
     template <typename T, typename I>
     int run_case(rocsparse_handle handle, fmt f, const config& c, int base, int32_t block_dim)
     {
-        SCOPED_TRACE(::testing::Message() << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans
-                                          << " device=" << c.device << " v2=" << c.v2
-                                          << " base=" << base << " i64=" << (sizeof(I) == 8)
-                                          << " block_dim=" << block_dim);
+        SCOPED_TRACE(::testing::Message()
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans
+                     << " device=" << c.device << " v2=" << c.v2 << " base=" << base
+                     << " i64=" << (sizeof(I) == 8) << " block_dim=" << block_dim);
 
         int                  refused = 0;
         const bool           refuses = c.v2 && v2_refuses(f, c, block_dim);
@@ -843,8 +843,8 @@ namespace
     int sweep_index(rocsparse_handle handle, fmt f, bool v2)
     {
         int refused = 0;
-        for(const int32_t block_dim : (f == fmt::bsr) ? std::vector<int32_t>{1, 4}
-                                                      : std::vector<int32_t>{1})
+        for(const int32_t block_dim :
+            (f == fmt::bsr) ? std::vector<int32_t>{1, 4} : std::vector<int32_t>{1})
             for(const int base : {0, 1})
                 for(const bool device : {false, true})
                     for(const auto& at : cases_of<T>(f))
@@ -868,7 +868,8 @@ namespace
         int refused = sweep_index<T, int32_t>(handle, f, v2);
         if(!::testing::Test::HasFailure())
             refused += sweep_index<T, int64_t>(handle, f, v2);
-        if(v2 && (f == fmt::csr || f == fmt::csc || f == fmt::bsr) && !::testing::Test::HasFailure())
+        if(v2 && (f == fmt::csr || f == fmt::csc || f == fmt::bsr)
+           && !::testing::Test::HasFailure())
         {
             EXPECT_GT(refused, 0) << "no v2 compute stage was refused after set_pointers";
         }
@@ -965,8 +966,8 @@ namespace
     template <typename T>
     void same_pointers_new_contents(rocsparse_handle handle, fmt f, const config& c)
     {
-        SCOPED_TRACE(::testing::Message() << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans
-                                          << " v2=" << c.v2);
+        SCOPED_TRACE(::testing::Message()
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans << " v2=" << c.v2);
 
         const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
         device_problem<T, int32_t> d(sc.p2);
@@ -1069,8 +1070,8 @@ namespace
     // another stream is being captured.
     TEST_F(L2SetPointers, set_pointers_during_stream_capture)
     {
-        using T = double;
-        using I = int32_t;
+        using T                 = double;
+        using I                 = int32_t;
         const scenario<T, I> sc = make_scenario<T, I>(fmt::csr, 0);
         device_problem<T, I> d1(sc.p1), d2(sc.p2);
 

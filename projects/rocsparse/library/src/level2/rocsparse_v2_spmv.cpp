@@ -866,6 +866,10 @@ namespace rocsparse
                 rocsparse_coomv_alg coomv_alg;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmv_alg2coomv_alg(alg, coomv_alg)));
 
+                const rocsparse_coomv_info coomv_info
+                    = mat->info->is_spmv_info_current(mat->pattern_stamp)
+                          ? mat->info->get_coomv_info()
+                          : nullptr;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv(handle,
                                                             operation,
                                                             coomv_alg,
@@ -881,9 +885,7 @@ namespace rocsparse
                                                             const_row_data,
                                                             col_type,
                                                             const_col_data,
-                                                            mat->info->is_spmv_info_current(mat->pattern_stamp)
-                                                                ? mat->info->get_coomv_info()
-                                                                : nullptr,
+                                                            coomv_info,
                                                             x_data_type,
                                                             x_const_values,
                                                             compute_datatype,

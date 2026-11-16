@@ -50,7 +50,7 @@ namespace
             CHECK_HIP_ERROR(hipMalloc(&ptr, n * sizeof(T)));
             CHECK_HIP_ERROR(hipMemcpy(ptr, host.data(), n * sizeof(T), hipMemcpyHostToDevice));
         }
-        device_array(const device_array&) = delete;
+        device_array(const device_array&)            = delete;
         device_array& operator=(const device_array&) = delete;
         ~device_array()
         {
@@ -118,16 +118,16 @@ namespace
         const std::vector<double> a3{0, 5, -1, 6, 0, 0};
         const bool                trans = op != HIPSPARSE_OPERATION_NON_TRANSPOSE;
 
-        const compressed h1(a1, m, n, by_column), h2(a2, m, n, by_column),
-            h3(a3, m, n, by_column);
+        const compressed h1(a1, m, n, by_column), h2(a2, m, n, by_column), h3(a3, m, n, by_column);
         ASSERT_EQ(h1.val.size(), h2.val.size());
         ASSERT_EQ(h2.val.size(), h3.val.size());
 
-        const std::vector<double> x  = trans ? std::vector<double>{5, 7, -2}
-                                             : std::vector<double>{5, 7};
-        const std::vector<double> y0 = trans ? std::vector<double>{1, 2} : std::vector<double>{1, 2, 3};
-        const double              alpha = 2.0;
-        const double              beta  = 3.0;
+        const std::vector<double> x
+            = trans ? std::vector<double>{5, 7, -2} : std::vector<double>{5, 7};
+        const std::vector<double> y0
+            = trans ? std::vector<double>{1, 2} : std::vector<double>{1, 2, 3};
+        const double alpha = 2.0;
+        const double beta  = 3.0;
 
         device_array<int32_t> p1(h1.ptr), i1(h1.ind), p2(h2.ptr), i2(h2.ind);
         device_array<double>  v1(h1.val), v2(h2.val), v3(h3.val), dx(x), dy(y0);
@@ -135,7 +135,7 @@ namespace
         hipsparseHandle_t handle = nullptr;
         ASSERT_EQ(hipsparseCreate(&handle), HIPSPARSE_STATUS_SUCCESS);
 
-        hipsparseSpMatDescr_t mat    = nullptr;
+        hipsparseSpMatDescr_t   mat    = nullptr;
         const hipsparseStatus_t create = by_column ? hipsparseCreateCsc(&mat,
                                                                         m,
                                                                         n,
@@ -163,7 +163,8 @@ namespace
         hipsparseDnVecDescr_t vx = nullptr;
         hipsparseDnVecDescr_t vy = nullptr;
         ASSERT_EQ(hipsparseCreateDnVec(&vx, x.size(), dx.ptr, HIP_R_64F), HIPSPARSE_STATUS_SUCCESS);
-        ASSERT_EQ(hipsparseCreateDnVec(&vy, y0.size(), dy.ptr, HIP_R_64F), HIPSPARSE_STATUS_SUCCESS);
+        ASSERT_EQ(hipsparseCreateDnVec(&vy, y0.size(), dy.ptr, HIP_R_64F),
+                  HIPSPARSE_STATUS_SUCCESS);
 
         void*  buffer = nullptr;
         size_t bytes  = 0;

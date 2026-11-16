@@ -1152,7 +1152,8 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 csrColInd,
                                           void*                 csrValues)
 {
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(to_rocsparse_spmat_descr(spMatDescr), csrRowOffsets, csrColInd, csrValues));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(
+        to_rocsparse_spmat_descr(spMatDescr), csrRowOffsets, csrColInd, csrValues));
     spMatDescr->get_hip_spmv_descr()->discard_entries();
     return HIPSPARSE_STATUS_SUCCESS;
 }
@@ -1238,7 +1239,8 @@ hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cscRowInd,
                                           void*                 cscValues)
 {
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csc_set_pointers(to_rocsparse_spmat_descr(spMatDescr), cscColOffsets, cscRowInd, cscValues));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_csc_set_pointers(
+        to_rocsparse_spmat_descr(spMatDescr), cscColOffsets, cscRowInd, cscValues));
     spMatDescr->get_hip_spmv_descr()->discard_entries();
     return HIPSPARSE_STATUS_SUCCESS;
 }
@@ -1248,7 +1250,8 @@ hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cooColInd,
                                           void*                 cooValues)
 {
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_coo_set_pointers(to_rocsparse_spmat_descr(spMatDescr), cooRowInd, cooColInd, cooValues));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_coo_set_pointers(
+        to_rocsparse_spmat_descr(spMatDescr), cooRowInd, cooColInd, cooValues));
     spMatDescr->get_hip_spmv_descr()->discard_entries();
     return HIPSPARSE_STATUS_SUCCESS;
 }
