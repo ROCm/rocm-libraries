@@ -2245,19 +2245,20 @@ namespace TensileLite
         return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK);
     }
 
-    // A leading dimension that is a multiple of this many bytes starts every row on the
-    // same DRAM channels.
-    constexpr size_t kStaggerAliasBytes = 2048;
+    // Per target: a leading dimension that is a multiple of this many bytes starts every
+    // row on the same DRAM channels. Targets not listed never adjust the stagger.
+    static const std::unordered_map<AMDGPU::Processor, size_t> kStaggerAliasBytes
+        = {{AMDGPU::Processor::gfx1151, 2048}};
 
-    static bool ldAliasesChannels(size_t ld, float bpe)
+    static bool ldAliasesChannels(size_t ld, float bpe, size_t aliasBytes)
     {
-        return static_cast<size_t>(ld * bpe) % kStaggerAliasBytes == 0;
+        return static_cast<size_t>(ld * bpe) % aliasBytes == 0;
     }
 
     // True if no A/B leading dimension aliases, but at least one would alias if it were
     // packed, i.e. the caller padded the stride. Solutions are tuned on packed strides.
     // TT is excluded: measured mixed (-6% to +4%) where every other layout gains or is flat.
-    static bool callerPaddedAwayAliasing(ContractionProblemGemm const& problem)
+    static bool callerPaddedAwayAliasing(ContractionProblemGemm const& problem, size_t aliasBytes)
     {
         if(problem.transA() && problem.transB())
             return false;
@@ -2268,9 +2269,9 @@ namespace TensileLite
                 continue;
             size_t ld     = t->strides()[1];
             size_t packed = t->sizes()[0];
-            if(ldAliasesChannels(ld, t->elementBytes()))
+            if(ldAliasesChannels(ld, t->elementBytes(), aliasBytes))
                 return false;
-            padded |= ld != packed && ldAliasesChannels(packed, t->elementBytes());
+            padded |= ld != packed && ldAliasesChannels(packed, t->elementBytes(), aliasBytes);
         }
         return padded;
     }
@@ -2354,8 +2355,9 @@ namespace TensileLite
 
             // The tuned stagger spreads aliased rows over DRAM channels. With the aliasing
             // padded away it only breaks L2 sharing, so start all workgroups in phase.
-            if(pAMDGPU->processor == AMDGPU::Processor::gfx1151 && defaultStaggerU != 0
-               && callerPaddedAwayAliasing(problem))
+            auto aliasBytes = kStaggerAliasBytes.find(pAMDGPU->processor);
+            if(aliasBytes != kStaggerAliasBytes.end() && defaultStaggerU != 0
+               && callerPaddedAwayAliasing(problem, aliasBytes->second))
                 defaultStaggerUMapping = StaggerUMapping::InPhase;
         }
 
