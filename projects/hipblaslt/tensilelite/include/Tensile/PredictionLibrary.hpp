@@ -28,13 +28,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <limits>
 #include <iostream>
-#include <mutex>
 #include <set>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
-#include <Tensile/ParamScorer.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
@@ -62,72 +62,6 @@ namespace TensileLite
         origami::nn::library_models_t nn_models;
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
-
-        // Param scorer (see ParamScorer.hpp): bound once per library.
-        // paramPosOfRow[row] = solution_list position; empty when no model
-        // belongs to this library. indexOrder = solution_list positions by
-        // ascending libraryLogicIndex (the fallback walk on param-only arches).
-        mutable std::once_flag            paramBindOnce;
-        mutable ParamScorer::Model const* paramModel = nullptr;
-        mutable std::vector<int>          paramPosOfRow;
-        mutable std::vector<size_t>       indexOrder;
-
-        bool bindParamModel() const
-        {
-            std::call_once(paramBindOnce, [&]() {
-                std::vector<ParamScorer::SolutionInfo> infos;
-                infos.reserve(solution_list.size());
-                for(auto const& entry : solution_list)
-                {
-                    auto const&               sol = *entry.second;
-                    ParamScorer::SolutionInfo info;
-                    info.libraryLogicIndex = sol.libraryLogicIndex;
-                    info.name              = sol.name();
-                    info.mt0               = sol.sizeMapping.macroTile.x;
-                    info.mt1               = sol.sizeMapping.macroTile.y;
-                    info.depthU            = sol.sizeMapping.depthU;
-                    info.mi0               = sol.sizeMapping.matrixInstruction[0];
-                    info.mi1               = sol.sizeMapping.matrixInstruction[1];
-                    info.wg0               = sol.sizeMapping.workGroupSize.x;
-                    info.wg1               = sol.sizeMapping.workGroupSize.y;
-                    info.wg2               = sol.sizeMapping.workGroupSize.z;
-                    info.wgm               = sol.sizeMapping.workGroupMapping;
-                    info.ldsb              = sol.sizeMapping.OneLDSBuffer ? 1 : 0;
-                    info.pgr               = sol.sizeMapping.PrefetchGlobalRead;
-                    infos.push_back(std::move(info));
-                }
-                indexOrder.resize(solution_list.size());
-                for(size_t pos = 0; pos < indexOrder.size(); ++pos)
-                    indexOrder[pos] = pos;
-                std::stable_sort(indexOrder.begin(), indexOrder.end(), [&](size_t a, size_t b) {
-                    return solution_list[a].second->libraryLogicIndex
-                           < solution_list[b].second->libraryLogicIndex;
-                });
-
-                ParamScorer::Model const* model = ParamScorer::modelFor(infos);
-                std::vector<int>          rowOfPos;
-                if(model)
-                    rowOfPos = ParamScorer::bindLibrary(*model, infos);
-                if(!rowOfPos.empty())
-                {
-                    std::vector<int> posOfRow(rowOfPos.size(), -1);
-                    for(size_t pos = 0; pos < rowOfPos.size(); ++pos)
-                        posOfRow[rowOfPos[pos]] = static_cast<int>(pos);
-                    paramPosOfRow.swap(posOfRow);
-                    paramModel = model;
-                }
-                else if(ParamScorer::paramOnly())
-                {
-                    std::cerr << "[TENSILE_PARAM] Prediction library (" << infos.size()
-                              << " solutions"
-                              << (infos.empty() ? ""
-                                                : ", first '" + infos[0].name.substr(0, 60) + "...'")
-                              << "): " << (model ? "model INACTIVE" : "no param model")
-                              << ": index-order fallback (no Origami)" << std::endl;
-                }
-            });
-            return paramModel != nullptr;
-        }
 
         static std::string Type()
         {
@@ -242,21 +176,20 @@ namespace TensileLite
 
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
-            // Param walk / param-only arch: the walk IS the selector (no other library
-            // answers for this type), so it applies the full softwarePredicate, task
-            // predicates (WorkspaceCheck, LaunchLimits) included, like the Matching
-            // libraries: the next-best kernel must be a kernel this call can run.
-            const bool paramBound  = bindParamModel();
-            const bool strictWalk  = paramBound || ParamScorer::paramOnly();
+            // An origami::nn param model ranks this row (bound at deserialization). Its walk is the
+            // type's only selection, so it applies the full softwarePredicate (task predicates
+            // included) like the Matching libraries: the next-best kernel must be one this call
+            // can run.
+            const bool paramModel = nn_models.param >= 0;
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
-                // With uniform summation order off (and no param walk), the filter
-                // stays hardwarePredicate && problemPredicate. The extra conjuncts in
+                // With uniform summation order off (and no param model), the filter stays
+                // hardwarePredicate && problemPredicate. The extra conjuncts in
                 // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
                 // real filters, so they stay behind the check.
-                const bool swMatch = (problem.getParams().uniformSummationOrder() != 0 || strictWalk)
+                const bool swMatch = (problem.getParams().uniformSummationOrder() != 0 || paramModel)
                                          ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
                                                              task,
                                                              hardware,
@@ -281,7 +214,8 @@ namespace TensileLite
                 }
             };
 
-            auto makeOrigamiProblem = [&]() {
+            if(pAMDGPU && pAMDGPU->analyticalHardware)
+            {
                 auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
 
                 if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
@@ -301,115 +235,43 @@ namespace TensileLite
                     .a_mx_block_size = 0, // MX Data types come from rocroller
                     .b_mx_block_size = 0, // MX Data types come from rocroller
                 };
-                return origami_problem;
-            };
 
-            if(paramBound)
-            {
-                // Param-scorer order (model rows -> solution_list positions).
-                std::vector<double> scores;
-                auto rows = ParamScorer::rankRows(*paramModel, m, n, k, batch, &scores);
-                std::vector<size_t> order;
-                order.reserve(rows.size());
-                for(int row : rows)
-                    order.push_back(static_cast<size_t>(paramPosOfRow[row]));
-
-                // Optional: rerank the top k by Origami; the rest keep param order.
-                const int topk     = ParamScorer::topK(*paramModel);
-                size_t    reranked = 0;
-                if(topk > 1 && pAMDGPU && pAMDGPU->analyticalHardware)
-                {
-                    const size_t kk = std::min(static_cast<size_t>(topk), order.size());
-                    std::vector<origami::config_t> subset;
-                    subset.reserve(kk);
-                    for(size_t i = 0; i < kk; ++i)
-                        if(order[i] < origami_config_list.size())
-                            subset.push_back(origami_config_list[order[i]]);
-                    if(!subset.empty())
-                    {
-                        auto ranked = origami::rank_configs(
-                            makeOrigamiProblem(), *(pAMDGPU->analyticalHardware), subset);
-                        std::vector<char>   used(solution_list.size(), 0);
-                        std::vector<size_t> head;
-                        head.reserve(order.size());
-                        for(const auto& r : ranked)
-                        {
-                            if(r.config.index < solution_list.size() && !used[r.config.index])
-                            {
-                                head.push_back(r.config.index);
-                                used[r.config.index] = 1;
-                            }
-                        }
-                        reranked = head.size();
-                        // Top-k members Origami rejected, then the rest, in param order.
-                        for(size_t pos : order)
-                        {
-                            if(!used[pos])
-                            {
-                                head.push_back(pos);
-                                used[pos] = 1;
-                            }
-                        }
-                        order.swap(head);
-                    }
-                }
-
-                for(size_t pos : order)
-                {
-                    considerSolution(solution_list[pos].second);
-                    if(rv.size() == numSolutions)
-                    {
-                        break;
-                    }
-                }
-
-                if(ParamScorer::debug())
-                {
-                    std::cerr << "[TENSILE_PARAM] m=" << m << " n=" << n << " k=" << k
-                              << " b=" << batch << " topk=" << topk << " reranked=" << reranked
-                              << " chosen=";
-                    if(rv.empty())
-                        std::cerr << "none";
-                    else
-                        std::cerr << rv[0]->libraryLogicIndex;
-                    std::cerr << " | param top5:";
-                    for(size_t i = 0; i < std::min<size_t>(5, rows.size()); ++i)
-                        std::cerr << " " << rows[i] << ":" << scores[rows[i]];
-                    std::cerr << " | walk head:";
-                    for(size_t i = 0; i < std::min<size_t>(5, order.size()); ++i)
-                        std::cerr << " " << solution_list[order[i]].second->libraryLogicIndex;
-                    std::cerr << std::endl;
-                }
-            }
-            else if(ParamScorer::paramOnly())
-            {
-                // Param-only arch, no model for this library: catalog order, never Origami.
-                for(size_t pos : indexOrder)
-                {
-                    considerSolution(solution_list[pos].second);
-                    if(rv.size() == numSolutions)
-                    {
-                        break;
-                    }
-                }
-            }
-            else if(pAMDGPU && pAMDGPU->analyticalHardware)
-            {
                 origami::rank_options_t rank_options;
                 rank_options.library_models = &nn_models;
-                auto prediction_result      = origami::rank_configs(makeOrigamiProblem(),
-                                                               *(pAMDGPU->analyticalHardware),
-                                                               origami_config_list,
-                                                               rank_options);
-
-                for(const auto& r : prediction_result)
+                if(paramModel)
                 {
-                    if(r.config.index >= solution_list.size())
+                    // The param model ranks every candidate; Origami's analytical ranking is the
+                    // fallback if it cannot.
+                    rank_options.inference     = origami::inference_mode_t::nn_fallback;
+                    rank_options.nn_backend    = origami::nn_backend_t::param;
+                    rank_options.nn.min_scored = numSolutions < 0
+                                                     ? std::numeric_limits<std::size_t>::max()
+                                                     : static_cast<std::size_t>(numSolutions);
+                }
+                auto prediction_result = origami::rank_configs(
+                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
+
+                // With a param model, candidates it could not score (NaN latency) are walked only
+                // if no scored candidate passes; the analytical order is walked as is.
+                for(int pass = 0; pass < (paramModel ? 2 : 1); ++pass)
+                {
+                    for(const auto& r : prediction_result)
                     {
-                        continue;
+                        if(r.config.index >= solution_list.size())
+                        {
+                            continue;
+                        }
+                        if(paramModel && std::isnan(r.latency) != (pass == 1))
+                        {
+                            continue;
+                        }
+                        considerSolution(solution_list[r.config.index].second);
+                        if(rv.size() == numSolutions)
+                        {
+                            break;
+                        }
                     }
-                    considerSolution(solution_list[r.config.index].second);
-                    if(rv.size() == numSolutions)
+                    if(!rv.empty())
                     {
                         break;
                     }

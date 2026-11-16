@@ -32,7 +32,10 @@
 
 #include <Tensile/Debug.hpp>
 #include <tensilelitehost/export.h>
+#include <cstdlib>
 #include <iostream>
+
+#include <origami/nn/nn.hpp>
 
 namespace TensileLite
 {
@@ -63,6 +66,46 @@ namespace TensileLite
                 if(slashPos == std::string::npos)
                     return ".";
                 return path.substr(0, slashPos);
+            }
+
+            /// The origami::nn param_v1 model of this row's logic file (origami_nn_index next to it),
+            /// bound only if the model was trained for this problem type: every solution name starts
+            /// with the model's problem key (minus the "<arch>_" prefix). HIPBLASLT_ORIGAMI_PARAM=0
+            /// disables it; ORIGAMI_NN_DIAG=1 reports the binding.
+            static origami::nn::model_handle_t loadParamModel(Library const&      lib,
+                                                              std::string const& filename)
+            {
+                char const* off = std::getenv("HIPBLASLT_ORIGAMI_PARAM");
+                if(off && std::string(off) == "0")
+                    return origami::nn::invalid_handle;
+                auto const stem   = logic_stem_from_path(filename);
+                auto const handle = origami::nn::load_model_by_index(
+                    stem, origami::nn::backend_id_t::param_v1, directory_from_path(filename));
+                if(handle < 0)
+                    return origami::nn::invalid_handle;
+
+                std::string prefix = origami::nn::param_problem_key(handle);
+                if(prefix.rfind("gfx", 0) == 0 && prefix.find('_') != std::string::npos)
+                    prefix = prefix.substr(prefix.find('_') + 1);
+                prefix += "_";
+                for(auto const& entry : lib.solution_list)
+                {
+                    auto const name = entry.second->name();
+                    if(name.rfind(prefix, 0) != 0)
+                    {
+                        std::cerr << "[origami::nn] param model for " << stem
+                                  << " refused: solution '" << name.substr(0, 80)
+                                  << "' is not of the model's problem type '" << prefix << "'"
+                                  << std::endl;
+                        return origami::nn::invalid_handle;
+                    }
+                }
+                char const* diag = std::getenv("ORIGAMI_NN_DIAG");
+                if(diag && *diag && std::string(diag) != "0")
+                    std::cerr << "[origami::nn] param model ACTIVE for " << stem << " ("
+                              << lib.solution_list.size() << " solutions, problem type '" << prefix
+                              << "')" << std::endl;
+                return handle;
             }
 
             static void mapping(IO& io, Library& lib)
@@ -167,6 +210,7 @@ namespace TensileLite
                                                               solution->sizeMapping.clusterDim.y,
                                                               solution->sizeMapping.clusterDim.z},
                                 .backend                   = origami::tensile_params_t{
+                                    .global_split_u       = solution->sizeMapping.globalSplitU,
                                     .local_split_u        = solution->sizeMapping.LocalSplitU,
                                     .direct_to_vgpr_a     = solution->sizeMapping.DirectToVgprA,
                                     .direct_to_vgpr_b     = solution->sizeMapping.DirectToVgprB,
@@ -184,6 +228,11 @@ namespace TensileLite
                                     .unroll_major_lds_b   = solution->sizeMapping.UnrollMajorLDSB,
                                     .lds_transpose_read_a = solution->sizeMapping.enableLDSTrA,
                                     .lds_transpose_read_b = solution->sizeMapping.enableLDSTrB,
+                                    .stagger_u            = static_cast<int>(solution->sizeMapping.staggerU),
+                                    .stagger_u_mapping
+                                    = static_cast<int>(solution->sizeMapping.staggerUMapping),
+                                    .stagger_stride_shift
+                                    = static_cast<int>(solution->sizeMapping.staggerStrideShift),
                                 },
                             };
 
@@ -192,6 +241,9 @@ namespace TensileLite
                     }
                     // Once per library load. rank_configs reads the flags.
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
+
+                    if(ctx != nullptr)
+                        lib.nn_models.param = loadParamModel(lib, ctx->filename);
                 }
             }
             const static bool flow = false;

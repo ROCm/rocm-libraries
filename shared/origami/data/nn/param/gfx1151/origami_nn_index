@@ -1,0 +1,3 @@
+# gfx1151 parameter-predictor models (param_v1): distilled HHS TN / NN kernel selectors.
+TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1151	param	param_tn_v1.msgpack
+TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_Ailk_Bljk_Cijk_Dijk_gfx1151	param	param_nn_v1.msgpack
