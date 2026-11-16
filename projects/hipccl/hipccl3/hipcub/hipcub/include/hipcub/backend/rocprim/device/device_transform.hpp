@@ -39,6 +39,9 @@
 #include <rocprim/iterator/counting_iterator.hpp>
 #include <rocprim/iterator/discard_iterator.hpp>
 #include <rocprim/iterator/zip_iterator.hpp>
+#include <rocprim/types/tuple.hpp>
+
+#include _HIPCUB_STD_INCLUDE(tuple)
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -85,6 +88,59 @@ struct constant_generator
         return value;
     }
 };
+
+/// \brief Converts libhipcxx's hip::std::tuple to rocprim's tuple type.
+///
+/// Note: necessary because when invoking rocPRIM's n-ary transform APIs with libhipcxx's tuple 
+/// as input iterator the overrocPRIM's overload resolution
+/// will not result as expected, as rocPRIM accepts rocprim::tuple instead of hip::std::tuple.
+template<typename... Ts, std::size_t... Is>
+_CCCL_HOST_DEVICE
+auto convert_to_rocprim_tuple(_HIPCUB_STD::tuple<Ts...> t,
+                              std::index_sequence<Is...>) -> rocprim::tuple<Ts...>
+{
+    return rocprim::tuple<Ts...>{_HIPCUB_STD::get<Is>(t)...};
+}
+
+/// \brief When invoking rocPRIM's n-ary APIs from hipCUB, we must make sure that the return type
+/// of the transform operation is rocprim::tuple, because that's what rocPRIM expects.
+template<typename Function>
+class rocprim_function
+{
+public:
+    rocprim_function() = default;
+
+    _CCCL_HOST_DEVICE
+    rocprim_function(Function func)
+        : func(_HIPCUB_STD::move(func))
+    {}
+
+    template<typename... InputTs>
+    _CCCL_HOST_DEVICE
+    inline decltype(auto) operator()(InputTs&&... ts) const
+    {
+        return impl(func(_HIPCUB_STD::forward<InputTs>(ts)...));
+    }
+
+private:
+    mutable Function func;
+
+    template<typename T>
+    _CCCL_HOST_DEVICE
+    inline decltype(auto) impl(T t) const
+    {
+        return t;
+    }
+
+    template<typename... OutputTs>
+    _CCCL_HOST_DEVICE
+    inline decltype(auto) impl(_HIPCUB_STD::tuple<OutputTs...>&& t) const
+    {
+        return convert_to_rocprim_tuple(_HIPCUB_STD::move(t),
+                                        std::index_sequence_for<OutputTs...>{});
+    }
+};
+
 } // namespace detail
 
 struct DeviceTransform
@@ -102,17 +158,22 @@ struct DeviceTransform
                                 TransformOp                                     transform_op,
                                 EnvT                                            env = {})
     {
-        return detail::legacy_invoke(env,
-                                     [&](auto stream)
-                                     {
-                                         return ::rocprim::transform(
-                                             inputs,
-                                             outputs,
-                                             num_items,
-                                             transform_op,
-                                             stream,
-                                             HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
-                                     });
+        return detail::legacy_invoke(
+            env,
+            [&](auto stream)
+            {
+                return ::rocprim::transform(
+                    detail::convert_to_rocprim_tuple(
+                        inputs,
+                        std::index_sequence_for<RandomAccessIteratorsIn...>{}),
+                    detail::convert_to_rocprim_tuple(
+                        outputs,
+                        std::index_sequence_for<RandomAccessIteratorsOut...>{}),
+                    num_items,
+                    detail::rocprim_function<TransformOp>(transform_op),
+                    stream,
+                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+            });
     }
 
     // Support Env types that are convertible to hipStream_t but not copyable
@@ -127,12 +188,16 @@ struct DeviceTransform
                                 TransformOp                                     transform_op,
                                 hipStream_t                                     stream)
     {
-        return ::rocprim::transform(inputs,
-                                    outputs,
-                                    num_items,
-                                    transform_op,
-                                    stream,
-                                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+        return ::rocprim::transform(
+            detail::convert_to_rocprim_tuple(inputs,
+                                             std::index_sequence_for<RandomAccessIteratorsIn...>{}),
+            detail::convert_to_rocprim_tuple(
+                outputs,
+                std::index_sequence_for<RandomAccessIteratorsOut...>{}),
+            num_items,
+            detail::rocprim_function<TransformOp>(transform_op),
+            stream,
+            HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -148,12 +213,16 @@ struct DeviceTransform
                                 TransformOp                                     transform_op,
                                 hipStream_t                                     stream = nullptr)
     {
-        return ::rocprim::transform(inputs,
-                                    outputs,
-                                    num_items,
-                                    transform_op,
-                                    stream,
-                                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+        return ::rocprim::transform(
+            detail::convert_to_rocprim_tuple(inputs,
+                                             std::index_sequence_for<RandomAccessIteratorsIn...>{}),
+            detail::convert_to_rocprim_tuple(
+                outputs,
+                std::index_sequence_for<RandomAccessIteratorsOut...>{}),
+            num_items,
+            detail::rocprim_function<TransformOp>(transform_op),
+            stream,
+            HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename... RandomAccessIteratorsIn,

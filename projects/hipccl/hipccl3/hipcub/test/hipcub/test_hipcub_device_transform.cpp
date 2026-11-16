@@ -23,7 +23,6 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/device/device_transform.hpp"
-#include "hipcub/tuple.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -31,6 +30,7 @@
 
 #include _HIPCUB_LIBCXX_INCLUDE(devices)
 #include _HIPCUB_LIBCXX_INCLUDE(stream)
+#include _HIPCUB_STD_INCLUDE(tuple)
 
 #include <cstdint>
 #include <type_traits>
@@ -787,7 +787,7 @@ struct binary_to_ternary_transform
     _CCCL_HOST_DEVICE
     auto operator()(T a, T b) const
     {
-        return hipcub::tuple<U, U, U>{a + b, a * b, -a};
+        return _HIPCUB_STD::tuple<U, U, U>{a + b, a * b, -a};
     }
 };
 
@@ -861,8 +861,8 @@ TYPED_TEST(HipcubDeviceTransformTests, BinaryToTernaryTransform)
 
             // Run
             HIP_CHECK(hipcub::DeviceTransform::Transform(
-                test_utils::make_tuple(d_input1, d_input2),
-                test_utils::make_tuple(d_output1, d_output2, d_output3),
+                _HIPCUB_STD::make_tuple(d_input1, d_input2),
+                _HIPCUB_STD::make_tuple(d_output1, d_output2, d_output3),
                 size,
                 binary_to_ternary_transform<input_type, output_type>{},
                 stream));
