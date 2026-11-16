@@ -211,13 +211,7 @@ protected:
             }
         });
 
-        // Build the graph; skip if no engine supports this configuration
-        // (e.g. causal mask + stats is not yet supported by the ASM kernels).
         auto buildResult = graph->build(this->_handle);
-        if(buildResult.code == ErrorCode::GRAPH_NOT_SUPPORTED)
-        {
-            GTEST_SKIP() << "No engine supports this graph: " << buildResult.err_msg;
-        }
         ASSERT_EQ(buildResult.code, ErrorCode::OK) << buildResult.err_msg;
 
         this->verifyBuiltGraph(context, 0);
@@ -508,18 +502,29 @@ std::vector<GraphTestCase> getGraphTestCasesByPrecision(bool fp8)
     return cases;
 }
 
-// Stats (LSE) output is not supported for ragged tensors, nor with causal masks on the
-// current ASM kernels (SdpaFwdPlanBuilder::isApplicable declines both), so only
-// batch-mode NO_MASK kernels are paired with stats.
+// Stats (LSE) output is not supported for ragged tensors (SdpaFwdPlanBuilder::isApplicable
+// declines it), so every batch-mode kernel is paired with stats. The causal rows run at
+// S_q > S_kv with bottom-right alignment, so their first S_q - S_kv query rows see no key
+// and their LSE is -inf. Each causal row also runs a top-left causal mask at S_q == S_kv,
+// which the engine serves with the same bottom-right kernel.
 std::vector<GraphTestCase> getBatchModeStatsTestCases()
 {
     std::vector<GraphTestCase> cases;
     for(const auto& [key, config] : cfg_fmha_fwd)
     {
-        if(config.mode == hip_kernel_provider_common::BatchMode::BATCH
-           && static_cast<plan_utils::MaskType>(config.mask) == plan_utils::MaskType::NO_MASK)
+        if(config.mode != hip_kernel_provider_common::BatchMode::BATCH)
         {
-            cases.push_back(configToTestCase(config, /*withStats=*/true));
+            continue;
+        }
+        cases.push_back(configToTestCase(config, /*withStats=*/true));
+        if(static_cast<plan_utils::MaskType>(config.mask)
+           == plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL)
+        {
+            auto topLeftConfig = config;
+            topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+            auto topLeft = configToTestCase(topLeftConfig, /*withStats=*/true);
+            topLeft.seqKv = topLeft.seqQ;
+            cases.push_back(topLeft);
         }
     }
     return cases;
