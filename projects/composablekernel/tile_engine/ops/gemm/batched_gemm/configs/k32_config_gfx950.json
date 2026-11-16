@@ -1,0 +1,108 @@
+{
+    "_comment": [
+        "gfx950 batched, tile_k 32 (default_config.json starts at 64) for problems with",
+        "a K of 32 or 40: 64..256 M/N blocks, warp tile 16x16x32,",
+        "waves 1x4x1/2x2x1/4x1x1. pad_m/n/k false and true: an unpadded kernel for the problems it divides and padded ones at native vector widths for the rest.",
+        "Use next to default_config.json (kernel names that both list dedupe). Usage: python batched_gemm_full_benchmark.py batched_gemm/configs/default_config.json batched_gemm/configs/k32_config_gfx950.json --arch gfx950 --dtype bf16 --layout rcr"
+    ],
+    "tile_config": {
+        "tile_m": {
+            "values": [
+                64,
+                128,
+                256
+            ]
+        },
+        "tile_n": {
+            "values": [
+                64,
+                128,
+                256
+            ]
+        },
+        "tile_k": {
+            "values": [
+                32
+            ]
+        },
+        "warp_m": {
+            "values": [
+                1,
+                2,
+                4
+            ]
+        },
+        "warp_n": {
+            "values": [
+                1,
+                2,
+                4
+            ]
+        },
+        "warp_k": {
+            "values": [
+                1
+            ]
+        },
+        "warp_tile_m": {
+            "values": [
+                16
+            ]
+        },
+        "warp_tile_n": {
+            "values": [
+                16
+            ]
+        },
+        "warp_tile_k": {
+            "values": [
+                32
+            ]
+        }
+    },
+    "trait_config": {
+        "pipeline": {
+            "values": [
+                "compv3",
+                "compv4",
+                "mem"
+            ]
+        },
+        "scheduler": {
+            "values": [
+                "intrawave",
+                "interwave"
+            ]
+        },
+        "epilogue": {
+            "values": [
+                "cshuffle",
+                "default"
+            ]
+        },
+        "pad_m": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "pad_n": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "pad_k": {
+            "values": [
+                false,
+                true
+            ]
+        },
+        "persistent": {
+            "values": [
+                false
+            ]
+        }
+    },
+    "k_block_per_cu": 1
+}
