@@ -1065,6 +1065,24 @@ const char* rocke_i_cmp_pred_error(const rocke_attr_map_t* attrs,
                              cap);
 }
 
+const char* rocke_i_lshr_element_error(const char* op_name,
+                                       const rocke_type_t* operand_type,
+                                       char* buf,
+                                       size_t cap)
+{
+    const rocke_type_t* element = rocke_i_elem_of(operand_type);
+    const char* element_name = element && element->name ? element->name : "?";
+    /* ir._LSHR_ELEMENT_TYPES: the canonical names of the integer and predicate
+     * dtypes, matched exactly as the Python membership test does. */
+    const rocke_dtype_info_t* info = rocke_dtype_info(element_name);
+    if(info && strcmp(info->name, element_name) == 0
+       && (info->category == ROCKE_DTYPE_INTEGER || info->category == ROCKE_DTYPE_PREDICATE))
+        return NULL;
+    snprintf(
+        buf, cap, "%s failed - element type='%s', expected an integer type", op_name, element_name);
+    return buf;
+}
+
 bool rocke_i_is_buffer_descriptor(const rocke_value_t* value)
 {
     return value && value->op && value->op->opcode == ROCKE_OP_TILE_BUFFER_RSRC;
