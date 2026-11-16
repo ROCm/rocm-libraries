@@ -167,6 +167,30 @@ void linear_matrix_scramble(DirectionVectorType* directions, uint32_t dim, Engin
     }
 }
 
+template<typename DirectionVectorType>
+bool write_matrix_with_lms(std::ostream&                binary_out,
+                           DirectionVectorType*         directions,
+                           const std::filesystem::path& binary_path)
+{
+    constexpr bool is_u32 = std::is_same_v<DirectionVectorType, uint32_t>;
+    constexpr bool is_u64 = std::is_same_v<DirectionVectorType, uint64_t>;
+    static_assert(is_u32 || is_u64);
+    auto seed = is_u32 ? SOBOL32_LMS_SEED : SOBOL64_LMS_SEED;
+    // Use a distinct seed that is different from the digital shift
+    // so the LMS matrix is generated from a separate stream
+    std::mt19937 gen(seed);
+    rocrand_tools::linear_matrix_scramble(directions, rocrand_tools::SOBOL_DIM, gen);
+
+    auto n = is_u32 ? SOBOL32_N : SOBOL64_N;
+    binary_out.write(reinterpret_cast<const char*>(directions), n * sizeof(directions[0]));
+    if(!binary_out)
+    {
+        std::cerr << "Error: could not write binary file: " << binary_path << std::endl;
+        return false;
+    }
+    return true;
+}
+
 } // namespace rocrand_tools
 
 #endif

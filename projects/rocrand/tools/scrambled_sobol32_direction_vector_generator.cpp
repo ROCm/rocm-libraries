@@ -102,16 +102,8 @@ int main(int argc, char const* argv[])
         return -1;
     }
 
-    // To avoid a correlation between the two halves of the scramble, do not use
-    // default-seeded std::mt19937 because scrambled_sobol32_constants_generator already uses it
-    std::mt19937 gen(rocrand_tools::SOBOL32_LMS_SEED);
-    rocrand_tools::linear_matrix_scramble(directions_32.data(), rocrand_tools::SOBOL_DIM, gen);
-
-    binary_out.write(reinterpret_cast<const char*>(directions_32.data()),
-                     rocrand_tools::SOBOL32_N * sizeof(directions_32[0]));
-    if(!binary_out)
+    if(!rocrand_tools::write_matrix_with_lms(binary_out, directions_32.data(), binary_path))
     {
-        std::cerr << "Error: could not write binary file: " << binary_path << std::endl;
         return -1;
     }
 
