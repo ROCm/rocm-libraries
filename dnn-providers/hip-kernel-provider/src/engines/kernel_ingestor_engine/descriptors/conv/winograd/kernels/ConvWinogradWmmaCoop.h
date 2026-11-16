@@ -220,7 +220,15 @@ struct K5CoopMfma
 // bins of 16 x MT out channels by 16 x NT tiles, so a tile's 16 Winograd-domain values per out
 // channel sit in one lane and the output transform runs in registers: no Z round trip through
 // LDS and no epilogue barrier. KW K waves x TW tile waves; BT = 16 x NT x TW.
-template <class T, class A, int MT, int NT, int KW, int M = 2, int TW = 0, int DIR = K5_FORWARD>
+template <class T,
+          class A,
+          int MT,
+          int NT,
+          int KW,
+          int M = 2,
+          int TW = 0,
+          int DIR = K5_FORWARD,
+          int SB = 0>
 struct K5CoopCfg
 {
     static constexpr bool B16 = TW > 0;
@@ -231,6 +239,9 @@ struct K5CoopCfg
     static constexpr int BK = 16 * MT * KW, BT = 16 * NT * (B16 ? TW : 1),
                          WAVES = B16 ? KW * TW : 4 * KW, THREADS = A::WAVE * WAVES;
     static constexpr int VB = 16 * BT * 16; // halves per V buffer: [bin][tile][16 channels]
+    // V buffers: 2 (the next chunk is transformed while the current one is read), or 1 (SB: half
+    // the LDS for more resident blocks, one more barrier per chunk).
+    static constexpr int NVB = SB ? 1 : 2;
     // (tile, channel pair) jobs per chunk: BT x 8; a lane takes one, 16 lanes per channel pair.
     static constexpr int JW = BT * 8 / A::WAVE; // waves of jobs per chunk
     static constexpr int JT = JW > WAVES ? JW / WAVES : 1; // jobs per thread
@@ -241,10 +252,12 @@ struct K5CoopCfg
     // BT stride puts on one bank; BT + 4 spreads them over the 64 banks -- where that does not
     // grow the block's LDS past the V buffers (64 KiB parts). Z holds M values per bin row.
     static constexpr int ZS
-        = A::WAVE == 64 && 4 * M * 16 * KWP * (BT + 4) * 4 <= 2 * VB * 2 ? BT + 4 : BT;
+        = A::WAVE == 64 && 4 * M * 16 * KWP * (BT + 4) * 4 <= NVB * VB * 2 ? BT + 4 : BT;
     static constexpr int ZB = 4 * M * 16 * KWP * ZS; // floats per epilogue pass
-    static constexpr int LDSB = B16 || 2 * VB * 2 > ZB * 4 ? 2 * VB * 2 : ZB * 4; // bytes
-    static_assert(B16 || LDSB == k5CoopLdsBytes(NT, KW, M, A::WAVE == 64), "host LDS model");
+    static constexpr int LDSB = B16 || NVB * VB * 2 > ZB * 4 ? NVB* VB * 2 : ZB * 4; // bytes
+    static_assert(B16 || LDSB == k5CoopLdsBytes(NT, KW, M, A::WAVE == 64, SB != 0),
+                  "host LDS model");
+    static_assert(SB == 0 || (A::WAVE == 64 && !B16), "single V buffer: CDNA transform rows");
     // RDNA: waves per SIMD the kernel is built for (VGPR budget 1536 / WPE): the loop is
     // latency-bound, so the single-tile configs hold 8 (192 VGPRs); 2 x 2 tiles need the
     // registers. CDNA: k5CoopCdnaWpe, which the host's persistent grid counts on (a grid past
@@ -282,10 +295,11 @@ template <class T,
           int M = 2,
           int DIR = K5_FORWARD,
           int PF = 0,
-          int TW = 0>
+          int TW = 0,
+          int SB = 0>
 __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_EPI_FN_PARAM)
 {
-    typedef K5CoopCfg<T, W, MT, NT, KW, M, TW, DIR> C;
+    typedef K5CoopCfg<T, W, MT, NT, KW, M, TW, DIR, SB> C;
     constexpr bool B16 = C::B16;
     constexpr int NB = C::NB, NBU = C::NBU;
     static_assert(!B16 || M == 2, "16-bin layout: F(2,3)");
@@ -811,8 +825,8 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
             const unsigned* p = Vs + (bin * BT + twv * 16 * NT + n * 16 + col) * 8;
             if constexpr(W::KPL == 16)
             {
-                // gfx11: channel pairs 0-3 and 4-7 of the tile, at swapped halves for tiles with
-                // bit 3 set.
+                // gfx11: channel pairs 0-3 and 4-7 of the tile, at swapped halves where the
+                // tile's swizzle bit (vSwz) is set.
                 const int sw = vSwz(col);
                 const k5u4 lo = *reinterpret_cast<const k5u4*>(p + sw);
                 const k5u4 hi = *reinterpret_cast<const k5u4*>(p + (sw ^ 4));
@@ -871,7 +885,7 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
             }
             loadIn(nx);
             K5_SCHED_BARRIER();
-            const unsigned* Vs = Vd + P * (VB / 2);
+            const unsigned* Vs = Vd + (SB ? 0 : P) * (VB / 2);
 #pragma unroll
             for(int b = 0; b < NB; ++b)
             {
@@ -893,7 +907,11 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a CONV_
                 K5_SCHED_BARRIER();
             }
             if(ch + 1 < nCh)
-                transform(1 - P, false);
+            {
+                if constexpr(SB != 0)
+                    k5cLdsBarrier(); // every wave is done reading the single buffer
+                transform(SB != 0 ? 0 : 1 - P, false);
+            }
             k5cLdsBarrier();
         };
         int ch0 = 0;

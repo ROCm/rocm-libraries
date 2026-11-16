@@ -504,7 +504,7 @@ struct ConfigFields
     int64_t llc = 0;
     int64_t gemmBm = 128, gemmBn = 64, gemmBk = 8;
     int64_t bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0, waves = 0;
-    int64_t bins = 0, f16math = 0, pf = 0;
+    int64_t bins = 0, f16math = 0, pf = 0, sb = 0;
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
@@ -530,7 +530,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"waves", f.waves},
                        {"bins", f.bins},
                        {"f16math", f.f16math},
-                       {"pf", f.pf}};
+                       {"pf", f.pf},
+                       {"sb", f.sb}};
     return kernel;
 }
 
@@ -880,6 +881,7 @@ TEST(TestConvWinogradKernelMatch, CooperativeSixteenBinLayoutOnRdnaForStrideOne)
          }},
         {"WavesNotKwTimesTw", [](ConfigFields& f) { f.waves = 8; }},
         {"Prefetch", [](ConfigFields& f) { f.pf = 1; }},
+        {"SingleBuffer", [](ConfigFields& f) { f.sb = 1; }},
         {"Llc", [](ConfigFields& f) { f.llc = 1; }},
     };
     for(const auto& [name, edit] : cases)
@@ -917,6 +919,37 @@ TEST(TestConvWinogradKernelMatch, CooperativeMfmaOnCdnaFromGfx908AndBFloat16From
     EXPECT_TRUE(admits(f32, "gfx950", strideTwo(), "HALF"));
     EXPECT_TRUE(admits(f32, "gfx908", strideTwo(), "HALF"));
     EXPECT_FALSE(admits(f32, "gfx942", baseShape(), "HALF"));
+}
+
+TEST(TestConvWinogradKernelMatch, CooperativePerChipConfigsRunOnTheirChipAndSingleBufferOnlyOnCdna)
+{
+    auto mi300 = coop("gfx942", 1);
+    mi300.pf = 1;
+    EXPECT_TRUE(admits(mi300, "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(mi300, "gfx940", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx950", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx90a", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx908", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi300, "gfx1201", baseShape(), "HALF"));
+    auto mi355 = coop("gfx950", 1);
+    mi355.pf = 1;
+    EXPECT_TRUE(admits(mi355, "gfx950", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi355, "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(mi355, "gfx90a", baseShape(), "HALF"));
+    // One transformed-input buffer (sb 1): the CDNA transform-row layout only.
+    auto single = mi300;
+    single.sb = 1;
+    EXPECT_TRUE(admits(single, "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    auto rdna = coop("gfx12", 1);
+    rdna.sb = 1;
+    EXPECT_FALSE(conv_winograd::configOf(kernelOf(rdna, "HALF")).has_value());
+    auto two = single;
+    two.sb = 2;
+    EXPECT_FALSE(conv_winograd::configOf(kernelOf(two, "HALF")).has_value());
+    // Read by the cooperative variant only.
+    auto fusedSingle = fused();
+    fusedSingle.sb = 1;
+    EXPECT_FALSE(conv_winograd::configOf(kernelOf(fusedSingle, "FLOAT")).has_value());
 }
 
 TEST(TestConvWinogradKernelMatch, RegisterValuOnlyOnWave64Gfx9AndNotForBFloat16)
@@ -1314,19 +1347,21 @@ TEST(TestConvWinogradPlan, CooperativeCdnaGridIsWhatTheUnitsHold)
     const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
     const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
     ASSERT_TRUE(problem.has_value());
-    const auto gridOn = [&](int64_t bk, int64_t bt, int64_t waves, const char* arch) {
-        auto device = countedDevice(32);
-        device.gcnArchName = arch;
-        auto fields = coop("gfx9", 1);
-        fields.bk = bk;
-        fields.bt = bt;
-        fields.waves = waves;
-        const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
-        EXPECT_TRUE(config.has_value());
-        const auto plan = conv_winograd::planFor(*problem, *config, device);
-        EXPECT_TRUE(plan.has_value());
-        return plan ? plan->mainBlocks : 0U;
-    };
+    const auto gridOn
+        = [&](int64_t bk, int64_t bt, int64_t waves, const char* arch, int64_t sb = 0) {
+              auto device = countedDevice(32);
+              device.gcnArchName = arch;
+              auto fields = coop(sb != 0 ? "gfx942" : "gfx9", 1);
+              fields.bk = bk;
+              fields.bt = bt;
+              fields.waves = waves;
+              fields.sb = sb;
+              const auto config = conv_winograd::configOf(kernelOf(fields, "HALF"));
+              EXPECT_TRUE(config.has_value());
+              const auto plan = conv_winograd::planFor(*problem, *config, device);
+              EXPECT_TRUE(plan.has_value());
+              return plan ? plan->mainBlocks : 0U;
+          };
     // 2 x 2 tiles, 4 waves (k5CoopCdnaWpe: 168 registers, 3 waves a SIMD), 32 KiB of LDS:
     // 3 blocks a CU on gfx950 (160 KiB of LDS), 2 on the 64 KiB parts; gfx908 keeps its
     // register bound (4) and takes the LDS one.
@@ -1340,6 +1375,9 @@ TEST(TestConvWinogradPlan, CooperativeCdnaGridIsWhatTheUnitsHold)
     EXPECT_EQ(gridOn(16, 64, 4, "gfx942"), 32U);
     // 16 waves (4 a SIMD): one block.
     EXPECT_EQ(gridOn(64, 64, 16, "gfx950"), 32U);
+    // One transformed-input buffer: 16 KiB of LDS for 2 x 2 tiles, so the registers (3 a SIMD)
+    // bound it on the 64 KiB parts too.
+    EXPECT_EQ(gridOn(32, 32, 4, "gfx942", 1), 32U * 3);
 }
 
 TEST(TestConvWinogradPlan, CooperativeOrdersTileBlocksFirstForALargeTransformedFilter)
