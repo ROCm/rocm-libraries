@@ -830,6 +830,14 @@ class ProblemPredicate(Properties.Predicate):
                     rv += [cls('Free0SizeMultiple', index=0, value=tileM)]
                 if depthU and depthU > 1:
                     rv += [cls('BoundSizeMultiple', index=-1, value=depthU)]
+            else:
+                # A macrotile that is not [M, N, K] used to skip both guards
+                # and still publish the kernel. Name it: one logic file
+                # predicates every custom kernel in the same pass.
+                raise ValueError(
+                    "custom kernel {!r} has macrotile {!r}; expected 3 elements "
+                    "[MacroTile0, MacroTile1, DepthU]".format(
+                        customKernel.get('name', ''), macroTile))
 
             # The kernels are 2-D. They carry no batch strides and never read
             # workgroup_id_z, but their grid is [TilesX, TilesY, Batch], so every
