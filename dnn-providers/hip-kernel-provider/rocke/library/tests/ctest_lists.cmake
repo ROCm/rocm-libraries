@@ -102,7 +102,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # per-test pytest-timeout and its cumulative CTest TIMEOUT, the dgrad twin above gets
 # the same shared budget only because its own sample is smaller.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest "
+       "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} "
        "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
        "-v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
