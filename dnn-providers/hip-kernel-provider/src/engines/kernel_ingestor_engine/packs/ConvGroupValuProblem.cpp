@@ -134,7 +134,8 @@ std::optional<GvProblem> parseGvProblem(const MatchContext& context, ConvDirecti
     {
         return std::nullopt;
     }
-    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    // Forward may carry a fused pointwise epilogue; backward data never does.
+    auto base = conv_naive::parseConvNaiveProblem(context, direction, conv_naive::Fusion::EPILOGUE);
     if(!base.has_value())
     {
         return std::nullopt;

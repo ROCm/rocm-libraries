@@ -54,9 +54,10 @@ bool isPow2(int value)
 
 } // namespace
 
-std::optional<FftProblem> parseFftProblem(const MatchContext& context, ConvDirection direction)
+std::optional<FftProblem>
+    parseFftProblem(const MatchContext& context, ConvDirection direction, conv_naive::Fusion fusion)
 {
-    auto base = conv_naive::parseConvNaiveProblem(context, direction);
+    auto base = conv_naive::parseConvNaiveProblem(context, direction, fusion);
     if(!base.has_value())
     {
         return std::nullopt;

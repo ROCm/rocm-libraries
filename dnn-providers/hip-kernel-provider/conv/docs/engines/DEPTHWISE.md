@@ -154,6 +154,16 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
 - inf/NaN parity: Hankel configs are masked to match the reference, and a dedicated test puts an inf in x where some taps never pair with dy. The VALU `tile`/`vtile` wrw variants and dy-side padding are not yet covered by a parity test (open item). The floors and VALU forward cores only multiply real taps.
 - No reduced-precision siblings: there is no TF32 or three-bf16 form, and fp32 stays on VALU.
 
+## Fusion
+- `VALU_FWD`, `ROWS_FWD` and `MFMA_FWD` claim a forward depthwise convolution followed by a chain of pointwise nodes (the conv engines' epilogue menu: scale, bias, relu / clipped relu / clamp / leaky relu, gelu, gelu-tanh, swish/silu, sigmoid, tanh, elu, abs, softplus; per-channel, device-scalar and pass-by-value operands) under their own engine ids. The backward engines decline fused graphs.
+- Mechanism: the generated epilogue runs on each fp32 result before the single rounding to the output type, at every forward store:
+  - `VALU`: the W-strip and channels-first floors (2-D and 3-D), microtile, fused halo, LDS tiles (2-D, 3-D, channels-first plane tiles) and rowtile;
+  - `ROWS`: the plane tile and the band;
+  - `MFMA`: the channel-diagonal core before it rounds into the LDS output row (the row copy stays a bitwise copy), and the channel-pair core.
+- Every thread owns fixed channels, so a store site loads its channels' operands once (`ConvDepthwiseEpilogue.h`). With fusion off the macros expand to nothing and the kernels compile to the same instructions as a build without the hook.
+- 16-bit rowtile configs pass the accumulator through an empty `asm` before the epilogue: without it, instruction selection fails for some chains (gelu-tanh, bias + relu) in the current compiler.
+- No config is added: the epilogue is part of a config's compile, so a fused pattern compiles once per config and serves every graph of that pattern.
+
 ## Comparison with MIOpen
 - **`ConvHipConv` (hipconv):** gfx950-centred MFMA depthwise (1-D Toeplitz on 16x16x32, sparse on wide filters) and the Hankel 4x4x4 wgrad.
   - `MFMA` adopts the one-hot channel-diagonal idea but applies it to 2-D rows with an accumulator ring, plus a separate channels-first Toeplitz core. It also brings the sparse atom to gfx94x.
@@ -193,4 +203,5 @@ C[s][r] += sum_k A[s][k] B[k][r]          (= dw[c][r][s] over this row and step)
   - Covered: odd and narrow extents, folds that do not divide the batch, asymmetric padding, single-pixel and k x k-to-1-pixel geometries, true convolution and strided cases.
   - Each config is relaunched for a bitwise-repeat check.
   - Extra cases: `rowtile` fp16 bit-exactness (mutation-checked) and fp16 past 2 GiB; Hankel inf parity (fp16, bf16); the wrw multiplier; and wrw planned for one dispatch unit, where the `bpc` 1 configs run one partition and write dw in the partial kernel.
+- Fusion: `TestGpuConvDepthwise{Valu,Rows,Mfma}Fused*` run every forward variant (both layouts, 1-D/2-D/3-D, strides, channels and planes off the tiles) fused with the menu chains in each dtype, plus NaN/infinity operands and clip boundaries, against the CPU convolution followed by the chain in double. `TestConvDepthwiseValuProblemFusion` checks that forward takes the epilogue only when the engine asks for it and that backward data declines a fused graph.
 - Integration: the conv coverage census (`IntegrationConvCoverageCensus`) records, in its checked-in coverage map, which engine serves each census graph. The depthwise engines serve about 200 of those rows, mostly `VALU_FWD`/`VALU_BWD`, `VALU_WRW` and `ROWS_FWD`.

@@ -9,6 +9,7 @@
 
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/conv/RepackProgram.hpp"
@@ -84,6 +85,34 @@ void ConvRepackPlan::execute(const HipdnnEnginePluginHandle& handle,
                 = hipdnn_plugin_sdk::findDeviceBuffer(step.srcUid, buffers.data(), count);
             const auto dst
                 = hipdnn_plugin_sdk::findDeviceBuffer(step.dstUid, buffers.data(), count);
+            if(std::holds_alternative<StridedCastEpilogueArgs>(step.args)
+               && _steps.epilogue != nullptr)
+            {
+                // The fused epilogue's operand pointers and runtime values, known only now.
+                RepackStep fused = step;
+                auto& epilogue = std::get<StridedCastEpilogueArgs>(fused.args).epilogue;
+                const auto& source = *_steps.epilogue;
+                for(size_t i = 0; i < source.operands.size() && i < CONV_REPACK_EPI_OPERANDS; ++i)
+                {
+                    epilogue.operand[i] = hipdnn_plugin_sdk::findDeviceBuffer(
+                                              source.operands[i].uid, buffers.data(), count)
+                                              .ptr;
+                }
+                for(size_t i = 0; i < source.scalars.size() && i < CONV_REPACK_EPI_SCALARS; ++i)
+                {
+                    if(source.scalars[i].runtime.has_value())
+                    {
+                        epilogue.scalar[i] = static_cast<float>(
+                            hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
+                                *source.scalars[i].runtime, buffers.data(), count)));
+                    }
+                }
+                program.launch(fused,
+                               static_cast<const char*>(src.ptr) + step.srcByteOffset,
+                               static_cast<char*>(dst.ptr) + step.dstByteOffset,
+                               handle.getStream());
+                continue;
+            }
             program.launch(step,
                            static_cast<const char*>(src.ptr) + step.srcByteOffset,
                            static_cast<char*>(dst.ptr) + step.dstByteOffset,
